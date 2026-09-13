@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  drone-sim:
+    image: eclipse-temurin:17-jre
+    volumes:
+      - ./drone-sim/target:/app
+    command: java -jar aerofleet-drone-sim-0.1.0-SNAPSHOT.jar --port 14540
+    network_mode: host   # MAVLink UDP 广播需要；Linux 专用，Windows 下直接跑 jar 更简单
+
+  cloud-backend:
+    image: eclipse-temurin:17-jre
+    volumes:
+      - ./cloud-backend/target:/app
+    command: java -jar aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+    ports:
+      - "8080:8080"
+      - "14550:14550/udp"
+    depends_on:
+      - drone-sim
+
+  gcs-web:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./gcs-web:/app
+    command: sh -c "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - cloud-backend

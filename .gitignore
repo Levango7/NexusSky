@@ -1,0 +1,10 @@
+target/
+node_modules/
+dist/
+*.log
+.tmp-mav/
+.idea/
+*.iml
+.vscode/
+flight-logs/
+docs/设计文档.md~
