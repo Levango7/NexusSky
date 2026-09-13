@@ -1,21 +1,24 @@
 version: "3.8"
 
+# Linux 专用编排（D4 修正版）：
+# - MAVLink UDP 发现/路由依赖同网段广播语义 -> 全员 host 网络（Windows/Mac
+#   Docker Desktop 的 host 支持不完整，直接跑 start-all.cmd / .sh 更简单）
+# - host 模式下 ports: 映射无效且误导，已移除；端口即进程真实监听端口
+# - 前置：先 mvn -DskipTests package（三个模块 jar 挂载进容器）
 services:
   drone-sim:
     image: eclipse-temurin:17-jre
     volumes:
       - ./drone-sim/target:/app
     command: java -jar aerofleet-drone-sim-0.1.0-SNAPSHOT.jar --port 14540
-    network_mode: host   # MAVLink UDP 广播需要；Linux 专用，Windows 下直接跑 jar 更简单
+    network_mode: host
 
   cloud-backend:
     image: eclipse-temurin:17-jre
     volumes:
       - ./cloud-backend/target:/app
     command: java -jar aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
-    ports:
-      - "8080:8080"
-      - "14550:14550/udp"
+    network_mode: host
     depends_on:
       - drone-sim
 
@@ -24,8 +27,9 @@ services:
     working_dir: /app
     volumes:
       - ./gcs-web:/app
+    # 骨架阶段用 dev server（vite 代理 /api /ws 到同 host 的 8080）；
+    # 生产化时应改为多阶段构建产物 + 静态托管，见 README「docker-compose 边界」
     command: sh -c "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
-    ports:
-      - "5173:5173"
+    network_mode: host
     depends_on:
       - cloud-backend

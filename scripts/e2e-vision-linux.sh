@@ -67,20 +67,37 @@ n=$(jqget "$cap" 'len(d["detections"])')
 maxerr=$(jqget "$cap" 'max([x["truthErrorM"] for x in d["detections"]] or [99])')
 awk -v e="$maxerr" 'BEGIN{exit !(e<2)}'; check "定位误差 < 2m (max=$maxerr m)" "$?"
 
-# ---- 4. 环绕闭环 ----
-step '环绕 orbit -> 逐站拍照 -> 航迹'
-orb=$(curl -s --max-time 300 -X POST -H 'Content-Type: application/json' \
+# ---- 4. 环绕闭环（D1 起异步 job：POST 202 + 轮询）----
+step '环绕 orbit（异步 job）-> 逐站拍照 -> 航迹'
+sub=$(curl -s --max-time 15 -X POST -H 'Content-Type: application/json' \
   -d '{"lat":22.5916,"lon":113.9345,"radiusM":25,"altM":60,"photos":4}' \
   "$BASE/vision/drones/9/orbit")
-taken=$(jqget "$orb" 'd["photosTaken"]')
-[ "$taken" = "4" ]; check "环绕完成 (photosTaken=$taken/4)" "$?"
-stations=$(jqget "$orb" 'sum(1 for s in d["shots"] if len(s["detections"])>=1)')
-[ "$stations" = "4" ]; check "每站都有检出 (>=1 的站数=$stations)" "$?"
-omax=$(jqget "$orb" 'max([x["truthErrorM"] for s in d["shots"] for x in s["detections"]] or [99])')
-awk -v e="$omax" 'BEGIN{exit !(e<3)}'; check "全环定位误差 < 3m (max=$omax m)" "$?"
-for s in $(seq 0 3); do
-  echo "   station[$s] dets=$(jqget "$orb" "len(d['shots'][$s]['detections'])") r/p/y=$(jqget "$orb" "d['shots'][$s].get('droneRollDeg'),d['shots'][$s].get('dronePitchDeg'),d['shots'][$s].get('droneYawDeg')")"
+jobid=$(jqget "$sub" 'd["jobId"]')
+[ -n "$jobid" ] && [ "$jobid" != "None" ]; check "环绕任务受理 (jobId=$jobid)" "$?"
+
+# 同机重复提交应拒绝（409 语义：error body 或 HTTP 409）
+dup=$(curl -s --max-time 15 -X POST -H 'Content-Type: application/json' \
+  -d '{"lat":22.5916,"lon":113.9345,"radiusM":25,"altM":60,"photos":4}' \
+  "$BASE/vision/drones/9/orbit")
+dupst=$(jqget "$dup" 'd.get("status","")')
+[ "$dupst" = "error" ]; check '进行中重复提交被拒绝 (409)' "$?"
+
+# 轮询到终态，最长 300s
+orb='{}'
+for i in $(seq 1 60); do
+  sleep 5
+  orb=$(curl -s "$BASE/vision/jobs/$jobid")
+  st=$(jqget "$orb" 'd["state"]')
+  case "$st" in DONE|FAILED|TIMEOUT) break ;; esac
 done
+state=$(jqget "$orb" 'd["state"]')
+taken=$(jqget "$orb" 'd["photosTaken"]')
+[ "$state" = "DONE" ] && [ "$taken" = "4" ]; check "环绕终态 DONE (state=$state photosTaken=$taken/4)" "$?"
+shotsExpr='d.get("result",{}).get("shots",[])'
+stations=$(jqget "$orb" "sum(1 for s in $shotsExpr if len(s['detections'])>=1)")
+[ "$stations" = "4" ]; check "每站都有检出 (>=1 的站数=$stations)" "$?"
+omax=$(jqget "$orb" "max([x['truthErrorM'] for s in $shotsExpr for x in s['detections']] or [99])")
+awk -v e="$omax" 'BEGIN{exit !(e<3)}'; check "全环定位误差 < 3m (max=$omax m)" "$?"
 
 # ---- 5. 航迹 ----
 step '航迹查询 tracks'

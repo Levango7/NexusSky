@@ -1,10 +1,12 @@
 package io.aerofleet.cloud.api;
 
 import io.aerofleet.cloud.vision.CaptureService;
+import io.aerofleet.cloud.vision.OrbitJobManager;
 import io.aerofleet.cloud.vision.OrbitService;
 import io.aerofleet.cloud.vision.TargetTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,11 +28,14 @@ public class VisionController {
 
     private final CaptureService capture;
     private final OrbitService orbit;
+    private final OrbitJobManager orbitJobs;
     private final TargetTracker tracker;
 
-    public VisionController(CaptureService capture, OrbitService orbit, TargetTracker tracker) {
+    public VisionController(CaptureService capture, OrbitService orbit,
+                            OrbitJobManager orbitJobs, TargetTracker tracker) {
         this.capture = capture;
         this.orbit = orbit;
+        this.orbitJobs = orbitJobs;
         this.tracker = tracker;
     }
 
@@ -50,27 +55,45 @@ public class VisionController {
     }
 
     /**
-     * Fly an auto-redirect orbit: upload a circular mission around
-     * (lat,lon), arm + start, take a photo at every arc waypoint, geolocate
-     * each shot, and feed the tracker. Returns shots + track snapshot.
-     * Body: {"lat":22.5912,"lon":113.935,"radiusM":50,"altM":60,"photos":4}
+     * Start an auto-redirect orbit ASYNC (D1): returns 202 + jobId instantly;
+     * the 2-minute flight runs on the orbit pool. Poll
+     * GET /vision/jobs/{jobId} for per-station progress and the final result.
+     * Body: {"lat":22.5912,"lon":113.935,"radiusM":25,"altM":60,"photos":4}.
+     * One in-flight job per drone: a repeat POST while running -> 409.
      */
     @PostMapping("/drones/{sysid}/orbit")
-    public Map<String, Object> orbit(@PathVariable("sysid") int sysid,
-                                     @RequestBody Map<String, Object> body) {
+    public ResponseEntity<Map<String, Object>> orbit(@PathVariable("sysid") int sysid,
+                                                     @RequestBody Map<String, Object> body) {
         double lat = num(body, "lat");
         double lon = num(body, "lon");
-        double radiusM = num(body, "radiusM", 50);
+        double radiusM = num(body, "radiusM", 25);
         double altM = num(body, "altM", 60);
         int photos = (int) num(body, "photos", 4);
         try {
-            return orbit.orbitAndTrack(sysid, lat, lon, radiusM, altM, photos);
+            OrbitJobManager.OrbitJob job = orbitJobs.submit(sysid, lat, lon, radiusM, altM, photos);
+            return ResponseEntity.accepted().body(Map.of(
+                    "jobId", job.id,
+                    "state", job.state.name(),
+                    "photosRequested", job.photosRequested,
+                    "sysid", sysid));
         } catch (IllegalArgumentException e) {
-            return Map.of("status", "error", "result", e.getMessage());
-        } catch (Exception e) {
-            log.warn("orbit failed for sysid={}: {}", sysid, e.getMessage());
-            return Map.of("status", "error", "result", e.getMessage());
+            return ResponseEntity.badRequest().body(
+                    Map.of("status", "error", "result", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(
+                    Map.of("status", "error", "result", e.getMessage()));
         }
+    }
+
+    /** Poll an orbit job: state, per-station progress, final result. */
+    @GetMapping("/jobs/{jobId}")
+    public ResponseEntity<Map<String, Object>> job(@PathVariable("jobId") String jobId) {
+        OrbitJobManager.OrbitJob j = orbitJobs.get(jobId);
+        if (j == null) {
+            return ResponseEntity.status(404).body(
+                    Map.of("status", "error", "result", "unknown job " + jobId));
+        }
+        return ResponseEntity.ok(orbitJobs.viewOf(j));
     }
 
     /** Current tracks of one drone (id, state, hits, last seen, prediction). */

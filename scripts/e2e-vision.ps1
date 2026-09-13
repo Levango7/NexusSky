@@ -1,4 +1,4 @@
-# AeroFleet 视觉链路回归测试（Batch A5）
+﻿# AeroFleet 视觉链路回归测试（Batch A5）
 # 前置：cloud-backend(8080/14550) 已运行（start-all.cmd）；JAVA_HOME 指向 JDK17
 #       （无 JAVA_HOME 时 fallback 到 PATH 上的 java，需自行保证 >= 17）。
 # 本脚本自行启动一台带真值 HTTP(18080) 的模拟器（MAVLink 14542），
@@ -11,6 +11,24 @@
 $ErrorActionPreference = 'Stop'
 $Base = 'http://localhost:8080/api/v1'
 $Fail = 0
+
+# ---- Java 版本自检（e2e 共用守卫）：JDK8 会静默杀掉 sim（class 61 vs 52）----
+function Assert-Java17([string]$JavaExe) {
+    # EAP=Stop + 原生命令 stderr 在 PS5.1 会被当作终止错误：探测前临时降级
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $raw = & $JavaExe -version 2>&1
+    $ErrorActionPreference = $prev
+    $v = (@($raw) | ForEach-Object { "$_" } | Select-Object -First 1)
+    if ($v -notmatch '"(\d+)(\.(\d+))?') { return }   # 解析不出就交给运行时报错
+    $major = [int]$Matches[1]; if (-not $Matches[3]) { $minor = 0 } else { $minor = [int]$Matches[3] }
+    $ok = if ($major -eq 1) { $minor -ge 17 } else { $major -ge 17 }   # 1.8 -> 8
+    if (-not $ok) {
+        Write-Host "需要 Java >= 17，当前: $v" -ForegroundColor Red
+        Write-Host '设置 $env:JAVA_HOME 指向 JDK17（或 $env:AF_JAVA 指向 java.exe）后重跑' -ForegroundColor Red
+        exit 1
+    }
+}
 
 function Step($m) { Write-Host "== $m" -ForegroundColor Cyan }
 function Check($desc, $ok) {
@@ -26,6 +44,7 @@ catch { Write-Host '后端未运行（先 start-all.cmd），中止' -Foreground
 Step '启动视觉模拟器 (sysid=9, mavlink=14542, truth=18080)'
 $jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar'
 if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
+Assert-Java17 $java
 # 环绕中心: home 北 100m = lat 22.5916；目标 A 在中心，B 东 30m (lon+30/102790)
 # spec 语法: 目标间 ';'，字段间 ':'，坐标对内 ','（speed/heading/turn 可选）
 # FOV 90°@60m: 水平 ±60m / 竖直 ±33.75m -> 环绕半径 30m 时目标均在画内
@@ -85,23 +104,45 @@ try {
     $maxErr = ($cap.detections | Measure-Object -Property truthErrorM -Maximum).Maximum
     Check "定位误差 < 2m (max=$maxErr m)" ($maxErr -ne $null -and $maxErr -lt 2)
 
-    # ---- 4. 环绕闭环 ----
-    Step '环绕 orbit -> 逐站拍照 -> 航迹'
+    # ---- 4. 环绕闭环（D1 起为异步 job：POST 202 + 轮询）----
+    Step '环绕 orbit（异步 job）-> 逐站拍照 -> 航迹'
     # 环绕中心即目标 A 所在 (22.5916, 113.9345)；半径 25m，高度 60m。
     # 竖直半幅 33.75m：25m + wobble 偏移 1.8m << 33.75m，站站目标入画。
     # 环点航点带 2.5s hold（OrbitService 内置），等姿态从减速前倾恢复到水平。
-    $orb = Invoke-RestMethod -Method Post -Uri "$Base/vision/drones/9/orbit" -Body (
+    $submitted = Invoke-RestMethod -Method Post -Uri "$Base/vision/drones/9/orbit" -Body (
         @{ lat = 22.5916; lon = 113.9345; radiusM = 25; altM = 60; photos = 4 } | ConvertTo-Json
-    ) -ContentType 'application/json' -TimeoutSec 300
-    Check "环绕完成 (photosTaken=$($orb.photosTaken)/4)" ($orb.photosTaken -eq 4)
-    foreach ($s in $orb.shots) {
+    ) -ContentType 'application/json' -TimeoutSec 15
+    $jobId = $submitted.jobId
+    Check "环绕任务受理 (jobId=$jobId state=$($submitted.state))" ($null -ne $jobId)
+
+    # 同机重复提交应拒绝（409 语义：error body）
+    try {
+        $dup = Invoke-RestMethod -Method Post -Uri "$Base/vision/drones/9/orbit" -Body (
+            @{ lat = 22.5916; lon = 113.9345; radiusM = 25; altM = 60; photos = 4 } | ConvertTo-Json
+        ) -ContentType 'application/json' -TimeoutSec 15
+        $dupRejected = ($dup.status -eq 'error')
+    } catch { $dupRejected = $true }   # 409 也可能以 HTTP 异常形态冒出
+    Check '进行中重复提交被拒绝 (409)' $dupRejected
+
+    # 轮询到终态（DONE/FAILED/TIMEOUT），最长 5 分钟
+    $orb = $null
+    $deadline = (Get-Date).AddSeconds(300)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep 5
+        $j = Invoke-RestMethod "$Base/vision/jobs/$jobId" -TimeoutSec 10
+        if ($j.state -eq 'DONE' -or $j.state -eq 'FAILED' -or $j.state -eq 'TIMEOUT') { $orb = $j; break }
+    }
+    if ($null -eq $orb) { $orb = $j }   # 超窗：取最后一次快照诊断
+    Check "环绕终态 DONE (state=$($orb.state) photosTaken=$($orb.photosTaken)/$($orb.photosRequested))" ($orb.state -eq 'DONE' -and $orb.photosTaken -eq 4)
+    $shots = @($orb.result.shots)
+    foreach ($s in $shots) {
         Write-Host ("   station frame={0} lat={1:F7} lon={2:F7} alt={3:F1} r/p/y={4:F1}/{5:F1}/{6:F1} dets={7}" -f `
             $s.frameSeq, $s.shotLat, $s.shotLon, $s.altM, $s.droneRollDeg, $s.dronePitchDeg, $s.droneYawDeg, $s.detections.Count)
     }
-    $hitShots = @($orb.shots | Where-Object { $_.detections.Count -ge 1 })
+    $hitShots = @($shots | Where-Object { $_.detections.Count -ge 1 })
     Check "每站都有检出 (>=1 的站数=$($hitShots.Count))" ($hitShots.Count -eq 4)
     $orbMaxErr = 0.0
-    foreach ($s in $orb.shots) {
+    foreach ($s in $shots) {
         foreach ($d in $s.detections) {
             if ($d.truthErrorM -gt $orbMaxErr) { $orbMaxErr = $d.truthErrorM }
         }

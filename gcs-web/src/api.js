@@ -45,6 +45,32 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ x, y, z, r }),
     }),
+
+  // ---- Vision pipeline (batch A / D1-D2) ----
+
+  // One-shot capture -> geolocate -> truth score (synchronous, ~5s)
+  triggerCapture: (sysid) =>
+    jsonFetch(`${BASE}/vision/drones/${sysid}/capture`, { method: 'POST' }),
+
+  // Start an async orbit; returns { jobId } immediately (202)
+  startOrbit: (sysid, { lat, lon, radiusM = 25, altM = 60, photos = 4 }) =>
+    jsonFetch(`${BASE}/vision/drones/${sysid}/orbit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lon, radiusM, altM, photos }),
+    }),
+
+  // Poll an orbit job: state / per-station progress / final result
+  getOrbitJob: (jobId) => jsonFetch(`${BASE}/vision/jobs/${jobId}`),
+
+  // Target tracks of a drone (id, state, hits, lastSeen, predicted)
+  getTracks: (sysid) => jsonFetch(`${BASE}/vision/drones/${sysid}/tracks`),
+
+  // Flight log query (day defaults to today server-side)
+  getFlightLog: (query = {}) => {
+    const qs = new URLSearchParams(query).toString()
+    return jsonFetch(`${BASE}/flightlog${qs ? '?' + qs : ''}`)
+  },
 }
 
 export const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${

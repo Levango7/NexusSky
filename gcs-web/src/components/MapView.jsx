@@ -24,7 +24,7 @@ const MAP_STYLE = {
 
 const DRONE_HOME = { lat: 22.5907, lon: 113.9345 }
 
-export default function MapView({ telemetry, track, missionDraft, onMapClick, selected }) {
+export default function MapView({ telemetry, track, missionDraft, onMapClick, selected, orbitOverlay }) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
   const markerRef = useRef(null)
@@ -111,6 +111,21 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
           'circle-color': '#00e5a0',
         },
       })
+      // Orbit ring (D2): the active auto-redirect circle around a target
+      map.addSource('orbit-ring', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+      map.addLayer({
+        id: 'orbit-ring',
+        type: 'line',
+        source: 'orbit-ring',
+        paint: {
+          'line-color': '#ff6ec7',
+          'line-width': 2,
+          'line-dasharray': [2, 2],
+        },
+      })
     })
 
     return () => {
@@ -171,6 +186,34 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
       }
     }
   }, [track])
+
+  // 环绕圈重绘（D2：视觉面板提交任务时传入 center/radius）
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map) return
+    if (map.isStyleLoaded?.() && map.getSource('orbit-ring')) {
+      const features = []
+      if (orbitOverlay?.center && orbitOverlay.radiusM > 0) {
+        // 64 段折线近似圆（MapLibre 无原生 circle geometry）
+        const pts = []
+        const { lat, lon } = orbitOverlay.center
+        for (let i = 0; i <= 64; i++) {
+          const a = (i / 64) * 2 * Math.PI
+          const dLat = (orbitOverlay.radiusM * Math.cos(a)) / 111320
+          const dLon = (orbitOverlay.radiusM * Math.sin(a)) / (111320 * Math.cos((lat * Math.PI) / 180))
+          pts.push([lon + dLon, lat + dLat])
+        }
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: pts },
+        })
+      }
+      map.getSource('orbit-ring').setData({
+        type: 'FeatureCollection',
+        features,
+      })
+    }
+  }, [orbitOverlay])
 
   return <div ref={mapRef} className="map-view" />
 }

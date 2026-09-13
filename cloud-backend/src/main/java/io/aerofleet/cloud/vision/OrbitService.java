@@ -67,12 +67,13 @@ public class OrbitService {
 
     /**
      * Fly a circle around (lat, lon) at {@code altM}, shooting
-     * {@code photos} photos evenly around the arc. Synchronous: returns
-     * when the last photo is located (mission flight time is minutes-scale,
-     * e2e and offline use only).
+     * {@code photos} photos evenly around the arc. Called from an
+     * {@link OrbitJobManager} worker thread; each completed station is pushed
+     * into {@code progressOut} so polling clients see per-station increments.
      */
     public Map<String, Object> orbitAndTrack(int sysid, double lat, double lon,
-                                             double radiusM, double altM, int photos) throws Exception {
+                                             double radiusM, double altM, int photos,
+                                             List<Map<String, Object>> progressOut) throws Exception {
         if (radiusM <= 0 || radiusM > 500) {
             throw new IllegalArgumentException("radiusM must be in (0, 500]");
         }
@@ -111,7 +112,11 @@ public class OrbitService {
                 if (shotReports.size() >= photos) {
                     break;
                 }
-                shotReports.add(locateAndFeed(sysid, s));
+                Map<String, Object> rep = locateAndFeed(sysid, s);
+                shotReports.add(rep);
+                if (progressOut != null) {
+                    progressOut.add(rep);
+                }
                 before = Math.max(before, s.path("frameSeq").asLong());
             }
         }

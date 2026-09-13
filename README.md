@@ -47,6 +47,23 @@ npm run dev
 > 注意：**后端必须与模拟器同机启动**（骨架阶段 UDP 走 `127.0.0.1`，模拟器像 PX4 真机
 > 一样等待 GCS 先发心跳才开始通信，后端已内置 QGroundControl 式主动握手）。
 
+## docker-compose 边界（Linux，如实声明）
+
+`docker-compose.yml` 三个服务**全员 host 网络**（MAVLink UDP 的发现/路由依赖同网段语义，
+bridge 网络下 backend 发往 `127.0.0.1:14540` 的探测包出不了容器——这是审查发现的实际缺陷，
+已修正）。host 模式下 `ports:` 无效，已删除。**本仓沙箱环境无法运行 Docker daemon
+（named pipe 被策略拒绝），compose 仅经过配置审查，未做 `docker compose up` 实测**；
+CI 也没有 docker runner。在有 Docker 的 Linux 机器上验证：
+
+```bash
+mvn -DskipTests package
+docker compose up -d
+bash scripts/e2e-smoke.sh   # 复用既有冒烟（需要宿主 python3/curl）
+```
+
+前置：宿主已装 JDK17/Maven 打包（jar 是挂载不是构建进镜像）；前端用 dev server
+（生产化应改多阶段构建，见 compose 注释）。
+
 ## 冒烟测试
 
 模拟器与后端启动后：

@@ -1,4 +1,4 @@
-﻿# AeroFleet 故障注入回归测试（PowerShell 版）
+# AeroFleet 故障注入回归测试（PowerShell 版）
 # 前置：cloud-backend(8080/14550) 已运行。
 # 本脚本自行启动一台带故障脚本的模拟器（端口 14541，避开正常模拟器），
 # 验证三个故障的反应链：
@@ -10,6 +10,24 @@
 $ErrorActionPreference = 'Stop'
 $Base = 'http://localhost:8080/api/v1'
 $Fail = 0
+
+# ---- Java 版本自检（e2e 共用守卫）：JDK8 会静默杀掉 sim（class 61 vs 52）----
+function Assert-Java17([string]$JavaExe) {
+    # EAP=Stop + 原生命令 stderr 在 PS5.1 会被当作终止错误：探测前临时降级
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $raw = & $JavaExe -version 2>&1
+    $ErrorActionPreference = $prev
+    $v = (@($raw) | ForEach-Object { "$_" } | Select-Object -First 1)
+    if ($v -notmatch '"(\d+)(\.(\d+))?') { return }   # 解析不出就交给运行时报错
+    $major = [int]$Matches[1]; if (-not $Matches[3]) { $minor = 0 } else { $minor = [int]$Matches[3] }
+    $ok = if ($major -eq 1) { $minor -ge 17 } else { $major -ge 17 }   # 1.8 -> 8
+    if (-not $ok) {
+        Write-Host "需要 Java >= 17，当前: $v" -ForegroundColor Red
+        Write-Host '设置 $env:JAVA_HOME 指向 JDK17（或 $env:AF_JAVA 指向 java.exe）后重跑' -ForegroundColor Red
+        exit 1
+    }
+}
 
 function Step($m) { Write-Host "== $m" -ForegroundColor Cyan }
 function Check($desc, $ok) {
@@ -25,6 +43,7 @@ catch { Write-Host '后端未运行（先 start-all.cmd），中止' -Foreground
 Step '启动故障模拟器 (sysid=7, port=14541)'
 $jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar'
 if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
+Assert-Java17 $java
 $sim = Start-Process -FilePath $java -ArgumentList @(
     '-jar', $jar, '--port', '14541', '--sysid', '7', '--name', 'AF-FAULT-01',
     '--scenario', 'gps-loss:8:10,battery-fault:40,link-loss:60:20'

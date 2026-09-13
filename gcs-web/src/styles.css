@@ -358,3 +358,38 @@ body {
   color: var(--dim); font-size: 13px; text-align: center; line-height: 2;
   background: var(--bg);
 }
+
+/* ---------- 视觉闭环面板（D2） ---------- */
+.vision-panel { display: flex; flex-direction: column; gap: 10px; }
+.vision-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vision-cap-result { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vision-form { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.vision-form label { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--dim-2); }
+.vision-form label:nth-child(1) { grid-column: span 2; flex-direction: row; align-items: center; gap: 4px; }
+.vision-form input {
+  width: 100%; padding: 4px 6px; font-size: 11px;
+  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 4px; color: var(--text);
+  font-family: var(--mono, monospace);
+}
+.vision-form .btn { grid-column: span 2; }
+.vision-job { border: 1px solid var(--line-2); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+.vision-job-head { display: flex; align-items: center; gap: 8px; }
+.vision-station { font-size: 10px; color: var(--dim); }
+.vision-summary { font-size: 11px; color: var(--ok, #00e5a0); }
+.vision-err { font-size: 11px; }
+.vision-tracks { display: flex; flex-direction: column; gap: 5px; }
+.vision-tracks-head { display: flex; align-items: center; justify-content: space-between; }
+.vision-tracks-head h4 { margin: 0; font-size: 11px; color: var(--dim); }
+.vision-track { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; }
+.badge {
+  padding: 1px 7px; border-radius: 8px; font-size: 9px; letter-spacing: .5px;
+  border: 1px solid var(--line-2); color: var(--dim);
+}
+.badge.st-running, .badge.st-started { color: #4fc3ff; border-color: #4fc3ff55; }
+.badge.st-done, .badge.st-active { color: #00e5a0; border-color: #00e5a055; }
+.badge.st-failed, .badge.st-lost, .badge.st-timeout { color: #ff6e6e; border-color: #ff6e6e55; }
+.badge.small, .chip.small { font-size: 9px; padding: 0 5px; }
+.ok-text { color: var(--ok, #00e5a0); font-size: 11px; }
+.bad-text { color: #ff6e6e; font-size: 11px; }
+.small { font-size: 10px; }
+.dim { color: var(--dim); }

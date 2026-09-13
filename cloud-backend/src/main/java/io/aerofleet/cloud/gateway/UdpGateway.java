@@ -38,8 +38,8 @@ public class UdpGateway {
     private final TelemetryIngestService ingest;
     private final PendingAcks pendings;
 
-    /** sysid -> last seen source address (learned from inbound HEARTBEATs). */
-    private final ConcurrentHashMap<Integer, SocketAddress> droneRoutes = new ConcurrentHashMap<>();
+    /** sysid routes with aging (D3): see {@link RouteTable}. */
+    private final RouteTable droneRoutes = new RouteTable();
 
     public UdpGateway(@Value("${aerofleet.udp-port:14550}") int udpPort,
                       @Value("${aerofleet.drone-host:127.0.0.1}") String droneHost,
@@ -75,12 +75,25 @@ public class UdpGateway {
     /** Frame + source address entry: ingest, and remember the sysid route. */
     private void onFrame(MavlinkFrame frame, SocketAddress source) {
         if (frame.getSystemId() > 0 && frame.getSystemId() != GCS_SYSID) {
-            SocketAddress prev = droneRoutes.put(frame.getSystemId(), source);
+            SocketAddress prev = droneRoutes.get(frame.getSystemId());
+            droneRoutes.learn(frame.getSystemId(), source);
             if (prev == null || !prev.equals(source)) {
                 log.debug("Route sysid={} -> {}", frame.getSystemId(), source);
             }
         }
         ingest.handle(frame);
+    }
+
+    /**
+     * Route aging (D3): drop routes silent for 5 min - a replaced/rebound
+     * drone otherwise leaves a stale address that silently eats commands.
+     * Runs every 60 s.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
+    public void pruneStaleRoutes() {
+        for (Integer sysid : droneRoutes.prune()) {
+            log.info("pruning stale route sysid={} (silent >5min)", sysid);
+        }
     }
 
     public int getLocalPort() {
@@ -139,7 +152,7 @@ public class UdpGateway {
             return;
         }
         MavlinkFrame hb = gcsHeartbeat(hbSeq.getAndIncrement() & 0xFF);
-        for (SocketAddress addr : droneRoutes.values()) {
+        for (SocketAddress addr : droneRoutes.addresses()) {
             try {
                 transport.send(hb, addr);
             } catch (IOException e) {

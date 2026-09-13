@@ -5,6 +5,7 @@ import TelemetryPanel from './components/TelemetryPanel.jsx'
 import MissionPlanner from './components/MissionPlanner.jsx'
 import AlertFeed from './components/AlertFeed.jsx'
 import Joystick from './components/Joystick.jsx'
+import VisionPanel from './components/VisionPanel.jsx'
 import { api, wsUrl } from './api.js'
 
 function haversine(a, b) {
@@ -31,6 +32,7 @@ export default function App() {
   const [track, setTrack] = useState([])
   const [alerts, setAlerts] = useState([])
   const [missionDraft, setMissionDraft] = useState([])
+  const [orbitOverlay, setOrbitOverlay] = useState(null)   // {center, radiusM} for the map ring
   const [wsState, setWsState] = useState('connecting')
   const [apiOk, setApiOk] = useState(false)
   const [now, setNow] = useState(Date.now())
@@ -179,6 +181,7 @@ export default function App() {
             track={track}
             missionDraft={missionDraft}
             selected={selected}
+            orbitOverlay={orbitOverlay}
             onMapClick={({ lat, lon }) => {
               // Shift+click on the map appends a waypoint to the draft
               setMissionDraft((prev) => [
@@ -218,6 +221,13 @@ export default function App() {
 
         <aside className="rail right">
           <Joystick drone={selected} />
+          <VisionPanel
+            drone={selected}
+            onOrbitActive={(active, overlay) => {
+              // Draw the orbit ring while a job runs; clear it on completion
+              setOrbitOverlay(active ? overlay : null)
+            }}
+          />
           <TelemetryPanel
             drone={selected}
             telemetry={telemetry}
