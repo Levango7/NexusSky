@@ -124,6 +124,10 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
             </div>
             <div className="mini-cell"><label>航点</label><b>{t.missionSeq != null && t.missionTotal != null ? `${t.missionSeq}/${t.missionTotal}` : '--'}</b></div>
             <div className="mini-cell"><label>油门</label><b>{t.throttle != null ? t.throttle : '--'}</b></div>
+            <div className="mini-cell">
+              <label>链路</label>
+              <SignalBars dbm={t.rssiDbm} />
+            </div>
           </div>
         </div>
 
@@ -163,4 +167,18 @@ function batteryClass(b) {
   if (b <= 20) return 'batt-crit'
   if (b <= 40) return 'batt-warn'
   return 'batt-ok'
+}
+
+// 信号条（E1）：-50 dBm 满格 -> -100 dBm 断，4 格量化
+function SignalBars({ dbm }) {
+  if (dbm == null || Number.isNaN(dbm)) return <b className="dim">--</b>
+  const bars = dbm >= -60 ? 4 : dbm >= -75 ? 3 : dbm >= -88 ? 2 : dbm >= -98 ? 1 : 0
+  const color = bars >= 3 ? 'bars-ok' : bars === 2 ? 'bars-warn' : bars <= 1 ? 'bars-crit' : ''
+  return (
+    <span className={`signal-bars ${color}`} title={`${dbm.toFixed(0)} dBm`}>
+      {[1, 2, 3, 4].map((i) => (
+        <i key={i} className={i <= bars ? 'on' : ''} />
+      ))}
+    </span>
+  )
 }

@@ -60,6 +60,8 @@ public abstract class MavlinkMessage {
                 return CameraImageCaptured.decode(frame);
             case CameraFovStatus.ID:
                 return CameraFovStatus.decode(frame);
+            case RadioStatus.ID:
+                return RadioStatus.decode(frame);
             case MissionItemInt.ID:
                 return MissionItemInt.decode(frame);
             case CommandLong.ID:

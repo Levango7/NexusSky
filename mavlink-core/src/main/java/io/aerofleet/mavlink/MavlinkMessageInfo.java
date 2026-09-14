@@ -47,6 +47,8 @@ public final class MavlinkMessageInfo {
         INFOS.put(77,  new Info(10, 143));   // COMMAND_ACK
         INFOS.put(242, new Info(60, 104));   // HOME_POSITION
         INFOS.put(253, new Info(54, 83));    // STATUSTEXT
+        INFOS.put(109, new Info(9, 88));     // RADIO_STATUS (crc_extra computed
+                                            // per official message_checksum)
     }
 
     private MavlinkMessageInfo() {

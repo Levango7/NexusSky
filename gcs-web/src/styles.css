@@ -359,6 +359,18 @@ body {
   background: var(--bg);
 }
 
+/* 信号条（E1） */
+.signal-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; }
+.signal-bars i { width: 4px; background: #2d3850; border-radius: 1px; transition: height .2s; }
+.signal-bars i:nth-child(1) { height: 6px; }
+.signal-bars i:nth-child(2) { height: 9px; }
+.signal-bars i:nth-child(3) { height: 12px; }
+.signal-bars i:nth-child(4) { height: 15px; }
+.signal-bars.bars-ok i.on { background: #00e5a0; }
+.signal-bars.bars-warn i.on { background: #ffd166; }
+.signal-bars.bars-crit i.on { background: #ff6e6e; }
+.mini-cell b.dim { color: var(--dim); }
+
 /* ---------- 视觉闭环面板（D2） ---------- */
 .vision-panel { display: flex; flex-direction: column; gap: 10px; }
 .vision-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

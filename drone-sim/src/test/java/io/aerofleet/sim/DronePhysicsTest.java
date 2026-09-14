@@ -113,4 +113,48 @@ class DronePhysicsTest {
         }
         return d;
     }
+
+    // ---- E4: mode-weighted energy model ----
+
+    @Test
+    void hoverCostsMoreThanCruise() {
+        // Two drones, same wall-clock: one hovers in place, one cruises away.
+        DronePhysics hover = new DronePhysics(22.5907, 113.9345, 0, 8.0);
+        hover.setTarget(0, 0, 10);          // climb then hold at 10 m
+        DronePhysics cruise = new DronePhysics(22.5907, 113.9345, 0, 8.0);
+        cruise.setTarget(200, 0, 10);       // climb then cruise 200 m
+        // Give both time to climb and settle (10 s), then run 20 s more.
+        run(hover, 20 * 10);
+        run(cruise, 20 * 10);
+        double hoverBefore = hover.drainSeconds();
+        double cruiseBefore = cruise.drainSeconds();
+        run(hover, 20 * 20);
+        run(cruise, 20 * 20);
+        double hoverDrain = hover.drainSeconds() - hoverBefore;
+        double cruiseDrain = cruise.drainSeconds() - cruiseBefore;
+        assertTrue(hoverDrain > cruiseDrain + 1.0,
+                "hover must drain faster: " + hoverDrain + " vs " + cruiseDrain);
+    }
+
+    @Test
+    void photoDrainsEnergy() {
+        DronePhysics p = new DronePhysics(22.5907, 113.9345, 0, 8.0);
+        double before = p.drainSeconds();
+        p.drainForPhoto();
+        assertEquals(DronePhysics.PHOTO_ENERGY_SEC, p.drainSeconds() - before, 1e-9);
+    }
+
+    @Test
+    void batteryPctNeverRises() {
+        DronePhysics p = new DronePhysics(22.5907, 113.9345, 0, 8.0);
+        p.setTarget(100, 0, 20);
+        int prev = p.batteryRemainingPct();
+        assertEquals(100, prev);
+        for (int i = 0; i < 20 * 60; i++) {
+            p.tick(DT);
+            int now = p.batteryRemainingPct();
+            assertTrue(now <= prev, "battery % must be monotonic non-increasing");
+            prev = now;
+        }
+    }
 }

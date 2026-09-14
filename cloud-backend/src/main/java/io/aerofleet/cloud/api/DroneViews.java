@@ -66,6 +66,8 @@ public final class DroneViews {
         m.put("satellites", s.satellites);
         m.put("eph", s.eph);
         m.put("gpsHealthy", s.gpsHealthy);
+        m.put("rssiDbm", clean(s.rssiDbm));
+        m.put("remRssiDbm", clean(s.remRssiDbm));
         m.put("missionSeq", s.missionSeq);
         m.put("missionTotal", s.missionTotal);
         m.put("missionState", s.missionState);
@@ -88,6 +90,7 @@ public final class DroneViews {
         m.put("mode", s.mode);
         m.put("battery", s.battery);
         m.put("online", s.online);
+        m.put("rssiDbm", clean(s.rssiDbm));
         return m;
     }
 

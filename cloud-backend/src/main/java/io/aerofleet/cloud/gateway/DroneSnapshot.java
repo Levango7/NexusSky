@@ -52,6 +52,12 @@ public final class DroneSnapshot {
     /** Derived: 3D fix with enough satellites; false during gps-loss scenarios. */
     public volatile boolean gpsHealthy = true;
 
+    // --- link quality (RADIO_STATUS, E1) ---
+    /** Downlink RSSI [dBm]; NaN before the first RADIO_STATUS. */
+    public volatile double rssiDbm = Double.NaN;
+    /** Uplink RSSI [dBm] (remrssi); NaN when not reported. */
+    public volatile double remRssiDbm = Double.NaN;
+
     // --- mission progress (MISSION_CURRENT) ---
     public volatile int missionSeq = -1;
     public volatile int missionTotal = -1;

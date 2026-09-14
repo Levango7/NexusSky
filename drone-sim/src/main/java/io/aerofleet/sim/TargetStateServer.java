@@ -29,14 +29,23 @@ public final class TargetStateServer {
     private final TargetSimulator targets;
     private final long bootMs = System.currentTimeMillis();
     private final Supplier<List<CameraModel.Shot>> shotSource;
+    /** Live RSSI sample (E1: link geometry debug/e2e assertions). */
+    private final Supplier<Double> rssiSource;
     private HttpServer server;
     private final int port;
 
     public TargetStateServer(TargetSimulator targets, int port,
                              Supplier<List<CameraModel.Shot>> shotSource) {
+        this(targets, port, shotSource, () -> 0.0);
+    }
+
+    public TargetStateServer(TargetSimulator targets, int port,
+                             Supplier<List<CameraModel.Shot>> shotSource,
+                             Supplier<Double> rssiSource) {
         this.targets = targets;
         this.port = port;
         this.shotSource = shotSource;
+        this.rssiSource = rssiSource;
     }
 
     public void start() throws IOException {
@@ -44,11 +53,13 @@ public final class TargetStateServer {
         server.setExecutor(Executors.newSingleThreadExecutor());
         server.createContext("/targets", ex -> respond(ex, targets.snapshotJson()));
         server.createContext("/camera/shots", ex -> respond(ex, shotsJson()));
+        server.createContext("/radio", ex -> respond(ex,
+                String.format("{\"rssiDbm\":%.1f}", rssiSource.get())));
         server.createContext("/health", ex -> respond(ex,
                 "{\"ok\":true,\"uptimeSec\":" + (System.currentTimeMillis() - bootMs) / 1000 + "}"));
         server.start();
         SimLog.info("ground-truth HTTP on 127.0.0.1:" + port
-                + " (/targets /camera/shots /health)");
+                + " (/targets /camera/shots /radio /health)");
     }
 
     public void stop() {

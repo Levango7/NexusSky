@@ -16,6 +16,7 @@ import io.aerofleet.mavlink.messages.MissionCurrent;
 import io.aerofleet.mavlink.messages.MissionItemInt;
 import io.aerofleet.mavlink.messages.MissionRequestInt;
 import io.aerofleet.mavlink.messages.Statustext;
+import io.aerofleet.mavlink.messages.RadioStatus;
 import io.aerofleet.mavlink.messages.SysStatus;
 import io.aerofleet.mavlink.messages.SystemTimeMsg;
 import io.aerofleet.mavlink.messages.VfrHud;
@@ -54,6 +55,8 @@ public final class VirtualDrone implements AutoCloseable {
     private final FailsafeController failsafe;
     /** Analytic terrain (flat world when --terrain absent). */
     private final TerrainModel terrain;
+    /** RF link geometry (E1): RSSI vs distance + terrain occlusion. */
+    private final RadioEnvironment radio;
     /** Geofence polygon + ceiling (disabled when --fence absent). */
     private final GeoFence fence;
     /** Synthetic ground-target world (empty when --targets absent). */
@@ -89,6 +92,9 @@ public final class VirtualDrone implements AutoCloseable {
                 ? FailsafeController.defaults() : new FailsafeController(false, 0, 0);
         this.terrain = TerrainModel.parse(config.terrain);
         this.fence = GeoFence.parse(config.fence);
+        // RF link geometry (E1): GCS mast at home, 1.5 m antenna. RSSI is
+        // range-correct and terrain-shadowed; reported via RADIO_STATUS.
+        this.radio = new RadioEnvironment(this.terrain, 0, 0, 1.5);
         this.groundTargets = TargetSimulator.parse(config.lat, config.lon, config.targets);
         this.truthPort = config.httpPort;
         if (config.httpPort > 0) {
@@ -98,7 +104,8 @@ public final class VirtualDrone implements AutoCloseable {
                         synchronized (this) {
                             return new java.util.ArrayList<>(shots);
                         }
-                    });
+                    },
+                    this::currentRssiDbm);
             try {
                 this.truthServer.start();
             } catch (java.io.IOException e) {
@@ -362,6 +369,8 @@ public final class VirtualDrone implements AutoCloseable {
         CameraModel.Shot shot = camera.capture(physics.north(), physics.east(),
                 physics.alt(), physics.rollRad(), physics.pitchRad(), physics.yawRad(),
                 groundTargets, config.lat, config.lon);
+        // E4: a photo costs energy (camera + gimbal + storage load).
+        physics.drainForPhoto();
         // Debug line kept: one line per shot is cheap and this chain (sim pose
         // -> projection -> detected targets) is the one thing e2e cannot
         // inspect any other way.
@@ -912,6 +921,7 @@ public final class VirtualDrone implements AutoCloseable {
             sendSysStatus();
             sendGpsRawInt();
             sendSystemTime();
+            sendRadioStatus();
         }
         // 5 Hz: every 4 ticks
         if (tickCount % 4 == 0) {
@@ -950,6 +960,52 @@ public final class VirtualDrone implements AutoCloseable {
         int load = state.flying() ? 600 : 350;
         send(new SysStatus(0, 0, 0, load, (int) (voltage * 1000),
                 state.armed() ? 180 : 0, pct));
+    }
+
+    // ------------------------------------------------------------------
+    // RADIO_STATUS (E1): link quality as geometry sees it
+    // ------------------------------------------------------------------
+
+    /** RSSI below this for this long -> one low-link WARNING (throttled). */
+    private static final double LINK_WARN_DBM = -90.0;
+    private static final long LINK_WARN_SUSTAIN_MS = 5_000;
+    private static final long LINK_WARN_THROTTLE_MS = 60_000;
+    /** Last RSSI sample [dBm] and low-link state for the warning logic. */
+    private double lastRssiDbm = 0;
+    private long lowLinkSinceMs;
+    private long lastLinkWarnMs;
+
+    /**
+     * 1 Hz link report: the radio module's view of the downlink. rssi is
+     * SiK-style raw (2x dB), remrssi mirrors it (symmetric link at this
+     * abstraction), txbuf is free (UDP has no real buffer pressure), noise
+     * is a quiet channel. Also drives the low-link warning: sustained
+     * -90 dBm for 5 s emits one WARNING, re-armed after 60 s.
+     */
+    private void sendRadioStatus() throws IOException {
+        double dbm = radio.rssiDbm(physics.north(), physics.east(), physics.alt());
+        lastRssiDbm = dbm;
+        long now = System.currentTimeMillis();
+        if (dbm < LINK_WARN_DBM) {
+            if (lowLinkSinceMs == 0) {
+                lowLinkSinceMs = now;
+            } else if (now - lowLinkSinceMs > LINK_WARN_SUSTAIN_MS
+                    && now - lastLinkWarnMs > LINK_WARN_THROTTLE_MS) {
+                lastLinkWarnMs = now;
+                SimLog.warn(String.format("link quality poor: %.0f dBm", dbm));
+                pushStatus(MavEnums.MAV_SEVERITY_WARNING,
+                        String.format("Link quality poor: %.0f dBm - check range/terrain", dbm));
+            }
+        } else {
+            lowLinkSinceMs = 0;
+        }
+        int raw = RadioEnvironment.toSikUnits(dbm);
+        send(new RadioStatus(raw, raw, 100, 20, 20, 0, 0));
+    }
+
+    /** Truth HTTP exposes the same RSSI for e2e assertions (debug aid). */
+    public double currentRssiDbm() {
+        return lastRssiDbm;
     }
 
     private void sendGlobalPosition() throws IOException {

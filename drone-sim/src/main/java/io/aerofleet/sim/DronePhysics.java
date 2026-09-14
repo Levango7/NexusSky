@@ -42,6 +42,15 @@ public final class DronePhysics {
     private final long bootMillis;
     private long lastTickMs;
     private double airborneSeconds;
+    /** Mode-weighted energy seconds (E4): hover/climb cost more, drift drains battery via batteryVoltage(). */
+    private double drainSeconds;
+
+    /** Energy multipliers: cruise=1.0 baseline, hover/climb above, descent below. */
+    private static final double HOVER_DRAIN = 1.3;
+    private static final double CLIMB_DRAIN = 1.5;
+    private static final double DESCENT_DRAIN = 0.6;
+    /** Energy cost of one photo: camera + gimbal + storage load, in cruise-seconds. */
+    public static final double PHOTO_ENERGY_SEC = 5.0;
 
     /** Vertical speed used while climbing/descending to a target (m/s). */
     private static final double VERT_SPEED = 2.0;
@@ -196,9 +205,12 @@ public final class DronePhysics {
             vz = 0;
         }
 
-        // Battery drains only while off the ground.
+        // Battery drains only while off the ground, at a mode-weighted rate
+        // (E4): hovering costs more than cruise (no translational lift),
+        // climbing costs the most, descent is cheap (partial autorotation).
         if (alt > 0.05 || groundSpeed > 0.1 || vz != 0) {
             airborneSeconds += dt;
+            drainSeconds += dt * drainFactor();
         }
 
         // Derived speeds from displacement difference.
@@ -231,7 +243,25 @@ public final class DronePhysics {
     private double velN;
     private double velE;
 
-    /** Gravity, used for tilt/turn kinematics. */
+    /** Mode-dependent power draw multiplier (E4). */
+    private double drainFactor() {
+        if (vz > 0.5) {
+            return CLIMB_DRAIN;      // climbing is the most expensive regime
+        }
+        if (vz < -0.5) {
+            return DESCENT_DRAIN;    // descending is cheap
+        }
+        if (groundSpeed < 0.5) {
+            return HOVER_DRAIN;      // hover > cruise: no translational lift
+        }
+        return 1.0;                  // cruise baseline
+    }
+
+    /** Energy-seconds consumed by a photo (camera/gimbal/storage load). */
+    public void drainForPhoto() {
+        drainSeconds += PHOTO_ENERGY_SEC;
+    }
+
     private static final double G = 9.81;
     /** Max horizontal acceleration (m/s^2): sporty multirotor ballpark. */
     private static final double ACCEL_MAX = 3.0;
@@ -455,15 +485,20 @@ public final class DronePhysics {
         return airborneSeconds;
     }
 
-    /** Battery voltage 15.8V -> 14.0V linear over flight time. */
+    /** Battery voltage 15.8V -> 14.0V linear over mode-weighted flight time (E4). */
     public double batteryVoltage() {
-        double f = Math.min(1.0, airborneSeconds / BATTERY_SECONDS);
+        double f = Math.min(1.0, drainSeconds / BATTERY_SECONDS);
         return VOLT_FULL - (VOLT_FULL - VOLT_EMPTY) * f;
     }
 
-    /** Battery remaining percentage consistent with the voltage model. */
+    /** Battery remaining percentage consistent with the weighted voltage model. */
     public int batteryRemainingPct() {
-        double f = Math.min(1.0, airborneSeconds / BATTERY_SECONDS);
+        double f = Math.min(1.0, drainSeconds / BATTERY_SECONDS);
         return (int) Math.round(100.0 * (1.0 - f));
+    }
+
+    /** Mode-weighted energy seconds (E4 test hook). */
+    public double drainSeconds() {
+        return drainSeconds;
     }
 }

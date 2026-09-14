@@ -15,6 +15,7 @@ import io.aerofleet.mavlink.messages.MissionCurrent;
 import io.aerofleet.mavlink.messages.MissionItemInt;
 import io.aerofleet.mavlink.messages.MissionRequest;
 import io.aerofleet.mavlink.messages.MissionRequestInt;
+import io.aerofleet.mavlink.messages.RadioStatus;
 import io.aerofleet.mavlink.messages.Statustext;
 import io.aerofleet.mavlink.messages.SysStatus;
 import io.aerofleet.mavlink.messages.VfrHud;
@@ -62,6 +63,7 @@ public class TelemetryIngestService {
                 case VfrHud.ID -> onVfrHud(sysid, (VfrHud) msg);
                 case MissionCurrent.ID -> onMissionCurrent(sysid, (MissionCurrent) msg);
                 case Statustext.ID -> onStatustext(sysid, (Statustext) msg);
+                case RadioStatus.ID -> onRadioStatus(sysid, (RadioStatus) msg);
                 case CommandAck.ID -> pendings.offer(CommandAck.ID, msg, sysid);
                 case MissionRequestInt.ID -> pendings.offer(MissionRequestInt.ID, msg, sysid);
                 case MissionRequest.ID -> pendings.offer(MissionRequest.ID, msg, sysid);
@@ -115,6 +117,20 @@ public class TelemetryIngestService {
         s.current = st.currentBattery;
         s.battery = st.batteryRemaining;
         s.load = st.load;
+    }
+
+    /**
+     * RADIO_STATUS (E1): SiK raw rssi (~2x dB) -> dBm, mirrored remrssi
+     * means a symmetric link. Drives the signal bar and link-quality alert.
+     */
+    private void onRadioStatus(int sysid, RadioStatus rs) {
+        DroneSnapshot s = registry.registerIfAbsent(sysid);
+        if (rs.rssi != RadioStatus.INVALID) {
+            s.rssiDbm = RadioEnvironmentDbm.fromSik(rs.rssi);
+        }
+        if (rs.remrssi != RadioStatus.INVALID) {
+            s.remRssiDbm = RadioEnvironmentDbm.fromSik(rs.remrssi);
+        }
     }
 
     private void onGps(int sysid, GpsRawInt g) {
