@@ -26,10 +26,12 @@ import java.util.Map;
  *   3. geolocate targets   (GeolocationSolver inverts the pinhole chain)
  *   4. score against truth (sim /targets gives the ground truth positions)
  *
- * The "detector" is the projection itself in this scaffold: whatever the
- * camera saw (projected into the frame) is detected; the solver then answers
- * WHERE it is on the ground. Swapping in a real CV detector later means
- * replacing step 2's target list with model output - steps 3/4 are unchanged.
+ * The "detector" has two sources (batch E2):
+ *   - "truth": the projection itself (what the camera saw in the frame),
+ *     the original scaffold;
+ *   - "pixels": a REAL JPEG rendered by the sim, fed through BlobDetector
+ *     (pure-JDK blob finder) so the chain runs on pixels, not metadata.
+ * Both feed the same solver + truth-scoring steps.
  */
 @Service
 public class CaptureService {
@@ -40,6 +42,9 @@ public class CaptureService {
     private static final int IMAGE_W = 1920;
     private static final int IMAGE_H = 1080;
     private static final double HFOV_DEG = 90;
+    /** Rendered JPEG resolution (matches ShotImageWriter's uniform 1/3 scale). */
+    private static final int JPEG_W = 640;
+    private static final int JPEG_H = 360;
     /** Sim home - must match the sim's --lat/--lon (defaults agree). */
     private static final double HOME_LAT = 22.5907;
     private static final double HOME_LON = 113.9345;
@@ -48,22 +53,28 @@ public class CaptureService {
     private final DroneCommandService commands;
     private final DeviceRegistry registry;
     private final GeolocationSolver solver;
+    private final BlobDetector detector = new BlobDetector();
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2)).build();
 
     /** Ground-truth HTTP base of the drone-sim instance (properties-configurable). */
     private final String simTruthBase;
+    /** "truth" (projection oracle) or "pixels" (real JPEG -> blob detect). */
+    private final String source;
 
     public CaptureService(DroneCommandService commands,
                           DeviceRegistry registry,
                           GeolocationSolver solver,
                           @Value("${aerofleet.sim-truth-base:http://127.0.0.1:18080}")
-                          String simTruthBase) {
+                          String simTruthBase,
+                          @Value("${aerofleet.vision.source:truth}")
+                          String source) {
         this.commands = commands;
         this.registry = registry;
         this.solver = solver;
         this.simTruthBase = simTruthBase;
+        this.source = source;
     }
 
     /**
@@ -72,6 +83,16 @@ public class CaptureService {
      * compared against ground truth (error in meters).
      */
     public Map<String, Object> captureAndLocate(int sysid) throws Exception {
+        return captureAndLocate(sysid, null);
+    }
+
+    /**
+     * Full capture->locate->score pipeline for one drone.
+     * Returns the shot metadata with every detected target geolocated and
+     * compared against ground truth (error in meters). When
+     * {@code sourceOverride} is "pixels", runs the E2 JPEG->blob pipeline.
+     */
+    public Map<String, Object> captureAndLocate(int sysid, String sourceOverride) throws Exception {
         long before = latestFrameSeq();
 
         // 1. Trigger the camera (MAV_CMD 2000). The ACK path proves the
@@ -92,34 +113,29 @@ public class CaptureService {
 
         // 3. Geolocate every detected target.
         double[] camNe = latLonToNe(shot.path("lat").asDouble(), shot.path("lon").asDouble());
-        List<Map<String, Object>> detections = new ArrayList<>();
-        for (JsonNode t : shot.path("targets")) {
-            GeolocationSolver.Result r = solver.solve(
-                    t.path("u").asDouble(), t.path("v").asDouble(),
-                    IMAGE_W, IMAGE_H, HFOV_DEG,
-                    HOME_LAT, HOME_LON,
-                    camNe[0], camNe[1],
-                    shot.path("altM").asDouble(),
-                    shot.path("droneRollDeg").asDouble(),
-                    shot.path("dronePitchDeg").asDouble(),
-                    shot.path("droneYawDeg").asDouble(),
-                    shot.path("gimbalPitchDeg").asDouble(),
-                    shot.path("gimbalYawDeg").asDouble());
-            if (r == null) {
-                continue;
-            }
-            Map<String, Object> d = new HashMap<>();
-            d.put("kind", t.path("kind").asText());
-            d.put("pixel", Map.of("u", t.path("u").asDouble(), "v", t.path("v").asDouble()));
-            d.put("lat", r.lat);
-            d.put("lon", r.lon);
-            d.put("groundRangeM", Math.round(r.groundRangeM * 10) / 10.0);
+        double alt = shot.path("altM").asDouble();
+        double roll = shot.path("droneRollDeg").asDouble();
+        double pitch = shot.path("dronePitchDeg").asDouble();
+        double yaw = shot.path("droneYawDeg").asDouble();
+        double gpitch = shot.path("gimbalPitchDeg").asDouble();
+        double gyaw = shot.path("gimbalYawDeg").asDouble();
 
-            // 4. Score against truth: find the same target id in /targets.
-            double errM = truthErrorM(t.path("id").asInt(), r.lat, r.lon);
-            d.put("id", t.path("id").asInt());
-            d.put("truthErrorM", Math.round(errM * 10) / 10.0);
-            detections.add(d);
+        List<Map<String, Object>> detections = new ArrayList<>();
+        String effSource = sourceOverride != null ? sourceOverride : source;
+        if ("pixels".equalsIgnoreCase(effSource)) {
+            detections = detectFromPixels(shot, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+        } else {
+            for (JsonNode t : shot.path("targets")) {
+                Map<String, Object> d = locateTarget(
+                        t.path("u").asDouble(), t.path("v").asDouble(),
+                        t.path("kind").asText(), IMAGE_W, IMAGE_H,
+                        camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+                // truth mode knows the target id directly
+                double errM = truthErrorM(t.path("id").asInt(), (double) d.get("lat"), (double) d.get("lon"));
+                d.put("id", t.path("id").asInt());
+                d.put("truthErrorM", Math.round(errM * 10) / 10.0);
+                detections.add(d);
+            }
         }
 
         Map<String, Object> out = new HashMap<>();
@@ -135,6 +151,62 @@ public class CaptureService {
     }
 
     // ---- helpers ----
+
+    /**
+     * Pixels pipeline: pull the rendered JPEG, find blobs, geolocate each
+     * centroid. Scores against the NEAREST truth target (a detector has no id).
+     */
+    private List<Map<String, Object>> detectFromPixels(JsonNode shot, double[] camNe,
+                                                        double alt, double roll, double pitch,
+                                                        double yaw, double gpitch, double gyaw) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        long frameSeq = shot.path("frameSeq").asLong();
+        try {
+            HttpResponse<byte[]> imgResp = http.send(
+                    HttpRequest.newBuilder(URI.create(
+                            simTruthBase + "/camera/shots/" + frameSeq + ".jpg")).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            if (imgResp.statusCode() != 200) {
+                log.warn("jpeg fetch {} -> {}", frameSeq, imgResp.statusCode());
+                return out;
+            }
+            List<BlobDetector.Box> boxes = detector.detect(imgResp.body());
+            for (BlobDetector.Box b : boxes) {
+                Map<String, Object> d = locateTarget(b.u, b.v, "blob", JPEG_W, JPEG_H,
+                        camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+                if (d == null) {
+                    continue;
+                }
+                // Detector has no id: score against nearest truth target.
+                double errM = nearestTruthErrorM((double) d.get("lat"), (double) d.get("lon"));
+                d.put("id", -1);
+                d.put("truthErrorM", Math.round(errM * 10) / 10.0);
+                out.add(d);
+            }
+        } catch (Exception e) {
+            log.warn("pixel pipeline failed for frame {}: {}", frameSeq, e.getMessage());
+        }
+        return out;
+    }
+
+    /** One pixel/truth detection -> geolocated view (null when unsolvable). */
+    private Map<String, Object> locateTarget(double u, double v, String kind,
+                                             int imgW, int imgH, double[] camNe,
+                                             double alt, double roll, double pitch,
+                                             double yaw, double gpitch, double gyaw) {
+        GeolocationSolver.Result r = solver.solve(u, v, imgW, imgH, HFOV_DEG,
+                HOME_LAT, HOME_LON, camNe[0], camNe[1], alt, roll, pitch, yaw, gpitch, gyaw);
+        if (r == null) {
+            return null;
+        }
+        Map<String, Object> d = new HashMap<>();
+        d.put("kind", kind);
+        d.put("pixel", Map.of("u", u, "v", v));
+        d.put("lat", r.lat);
+        d.put("lon", r.lon);
+        d.put("groundRangeM", Math.round(r.groundRangeM * 10) / 10.0);
+        return d;
+    }
 
     private double[] latLonToNe(double lat, double lon) {
         return new double[]{
@@ -180,6 +252,22 @@ public class CaptureService {
             log.debug("truth fetch failed: {}", e.getMessage());
         }
         return -1; // truth unavailable
+    }
+
+    /** Distance to the NEAREST truth target (pixel detector has no target id). */
+    private double nearestTruthErrorM(double lat, double lon) {
+        double best = Double.MAX_VALUE;
+        try {
+            for (JsonNode t : getJson(simTruthBase + "/targets")) {
+                double dn = (lat - t.path("lat").asDouble()) * M_PER_DEG_LAT;
+                double de = (lon - t.path("lon").asDouble()) * M_PER_DEG_LAT
+                        * Math.cos(Math.toRadians(HOME_LAT));
+                best = Math.min(best, Math.hypot(dn, de));
+            }
+        } catch (Exception e) {
+            log.debug("truth fetch failed: {}", e.getMessage());
+        }
+        return best == Double.MAX_VALUE ? -1 : best;
     }
 
     private JsonNode getJson(String url) throws Exception {

@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
@@ -43,11 +44,15 @@ public class VisionController {
      * Trigger a photo on the drone, then geolocate every detected target
      * (pixel -> ground lat/lon) and score the result against the simulated
      * ground truth. Requires the drone-sim truth HTTP (--http-port).
+     * ?source=pixels runs the E2 pixel pipeline (real JPEG -> blob detect);
+     * default = the configured aerofleet.vision.source.
      */
     @PostMapping("/drones/{sysid}/capture")
-    public Map<String, Object> captureAndLocate(@PathVariable("sysid") int sysid) {
+    public Map<String, Object> captureAndLocate(@PathVariable("sysid") int sysid,
+                                                @RequestParam(value = "source", required = false)
+                                                String source) {
         try {
-            return capture.captureAndLocate(sysid);
+            return capture.captureAndLocate(sysid, source);
         } catch (Exception e) {
             log.warn("vision pipeline failed for sysid={}: {}", sysid, e.getMessage());
             return Map.of("status", "error", "result", e.getMessage());

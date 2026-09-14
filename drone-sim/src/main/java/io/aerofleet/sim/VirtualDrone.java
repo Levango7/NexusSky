@@ -68,6 +68,9 @@ public final class VirtualDrone implements AutoCloseable {
     /** Recent shot metadata ring (served over the truth HTTP). */
     private final java.util.ArrayDeque<CameraModel.Shot> shots = new java.util.ArrayDeque<>();
     private static final int MAX_SHOTS = 50;
+    /** Rendered JPEG bytes per frameSeq (E2: real image payload). */
+    private final java.util.Map<Long, byte[]> shotJpegs = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int MAX_JPEGS = 50;
     /** Set once when the GPS-loss event fires, cleared on recovery. */
     private boolean gpsLossAnnounced = false;
     /** Epoch ms of the last received GCS packet (drives the datalink failsafe). */
@@ -105,7 +108,8 @@ public final class VirtualDrone implements AutoCloseable {
                             return new java.util.ArrayList<>(shots);
                         }
                     },
-                    this::currentRssiDbm);
+                    this::currentRssiDbm,
+                    shotJpegs::get);
             try {
                 this.truthServer.start();
             } catch (java.io.IOException e) {
@@ -387,6 +391,12 @@ public final class VirtualDrone implements AutoCloseable {
         shots.add(shot);
         while (shots.size() > MAX_SHOTS) {
             shots.removeFirst();
+        }
+        // E2: render the shot to a real JPEG so the detector can eat pixels.
+        byte[] jpeg = ShotImageWriter.render(shot);
+        shotJpegs.put(shot.frameSeq, jpeg);
+        while (shotJpegs.size() > MAX_JPEGS) {
+            shotJpegs.keySet().stream().min(Long::compareTo).ifPresent(shotJpegs::remove);
         }
         broadcastImageCaptured(shot);
         SimLog.info("IMAGE captured: frame " + shot.frameSeq + ", "
