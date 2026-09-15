@@ -58,6 +58,24 @@ public final class DroneSnapshot {
     /** Uplink RSSI [dBm] (remrssi); NaN when not reported. */
     public volatile double remRssiDbm = Double.NaN;
 
+    // --- M0b 环境气象状态（ENVIRONMENT_STATUS, FR-24）---
+    /** 环境温度 °C；NaN before the first ENVIRONMENT_STATUS。 */
+    public volatile double envTemperature = Double.NaN;
+    /** 环境湿度 %。 */
+    public volatile double envHumidity = Double.NaN;
+    /** 环境风速 m/s。 */
+    public volatile double envWindSpeed = Double.NaN;
+    /** 风向 deg。 */
+    public volatile double envWindDirection = Double.NaN;
+    /** 阵风 m/s。 */
+    public volatile double envGust = Double.NaN;
+    /** 天气枚举 code（0=CLEAR,1=CLOUDY,2=RAIN,3=SNOW,4=FOG）。 */
+    public volatile int envWeather = 0;
+    /** 能见度 m。 */
+    public volatile int envVisibility = 10000;
+    /** 降雨率 mm/h。 */
+    public volatile int envRainRate = 0;
+
     // --- mission progress (MISSION_CURRENT) ---
     public volatile int missionSeq = -1;
     public volatile int missionTotal = -1;

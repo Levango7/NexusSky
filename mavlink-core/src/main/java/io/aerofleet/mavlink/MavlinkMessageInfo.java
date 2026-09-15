@@ -49,6 +49,30 @@ public final class MavlinkMessageInfo {
         INFOS.put(253, new Info(54, 83));    // STATUSTEXT
         INFOS.put(109, new Info(9, 88));     // RADIO_STATUS (crc_extra computed
                                             // per official message_checksum)
+        INFOS.put(420, new Info(18, 233));   // LED_CONTROL_MSG (自定义扩展)
+        // ---- NexusSky 自定义扩展消息（M0b 环境气象）----
+        INFOS.put(422, new Info(13, 36086));  // ENVIRONMENT_STATUS (crc_extra computed
+                                              // per official message_checksum)
+        INFOS.put(421, new Info(46, 25705));  // ENVIRONMENT_ALERT (crc_extra computed
+                                              // per official message_checksum)
+        // ---- NexusSky 自定义扩展消息（M2 喷洒物流，msgId 423-426，FR-26~FR-29）----
+        INFOS.put(423, new Info(12, 58864));  // SPRAY_STATUS (crc_extra computed
+                                              // per MavlinkCrc on msg name + fields)
+        INFOS.put(424, new Info(6, 52077));   // SPRAY_COMMAND
+        INFOS.put(425, new Info(7, 46389));   // GRIPPER_COMMAND
+        INFOS.put(426, new Info(10, 9268));   // PAYLOAD_STATUS
+        // ---- NexusSky 自定义扩展消息（M3 感知成像增强，msgId 430-434）----
+        INFOS.put(430, new Info(20, 201));   // OBSTACLE_REPORT
+        INFOS.put(431, new Info(24, 202));   // MULTISPECTRAL_DATA
+        INFOS.put(432, new Info(24, 203));   // THERMAL_DATA
+        INFOS.put(433, new Info(20, 204));   // DEPTH_DATA
+        INFOS.put(434, new Info(20, 205));   // VISION_DETECTION
+        // ---- NexusSky 自定义扩展消息（M4 硬件抽象，msgId 437-441）----
+        INFOS.put(437, new Info(20, 211));   // RADAR_SCAN
+        INFOS.put(438, new Info(28, 212));   // RADAR_TARGET
+        INFOS.put(439, new Info(24, 213));   // ROTOR_TELEMETRY
+        INFOS.put(440, new Info(20, 214));   // LIDAR_DATA
+        INFOS.put(441, new Info(41, 215));   // IMU_DATA
     }
 
     private MavlinkMessageInfo() {

@@ -22,6 +22,15 @@ public final class DroneSimMain {
                 + " port=" + config.port + " bind=" + config.bindIp
                 + " lat=" + config.lat + " lon=" + config.lon
                 + " speed=" + config.speed + "m/s scenario=" + config.scenario);
+        // M0b 环境气象配置打印（FR-01/03/05，DFX 4.4 配置可追溯）
+        if (config.envEnabled) {
+            System.out.println("[sim] env: scenario=" + config.envScenario
+                    + " seed=" + config.envSeed
+                    + " windMax=" + config.envWindMax + "m/s"
+                    + " tempRange=" + config.envTempRange[0] + ":" + config.envTempRange[1] + "C");
+        } else {
+            System.out.println("[sim] env: disabled (no --env flag)");
+        }
 
         try (VirtualDrone drone = new VirtualDrone(config)) {
             drone.start();

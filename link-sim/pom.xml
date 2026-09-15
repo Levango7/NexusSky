@@ -19,6 +19,11 @@
       <groupId>io.aerofleet</groupId>
       <artifactId>aerofleet-mavlink-core</artifactId>
     </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>

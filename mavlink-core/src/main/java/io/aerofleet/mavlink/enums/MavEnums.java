@@ -47,6 +47,8 @@ public final class MavEnums {
     public static final int MAV_CMD_DO_SET_HOME = 179;
     public static final int MAV_CMD_DO_REPOSITION = 192;
     public static final int MAV_CMD_DO_SET_MODE = 176;
+    /** MAV_CMD_DO_CHANGE_SPEED: param2=speed (m/s), -1=restore default. */
+    public static final int MAV_CMD_DO_CHANGE_SPEED = 178;
     /** MAV_CMD_IMAGE_START_CAPTURE (camera protocol): take N photos. */
     public static final int MAV_CMD_IMAGE_START_CAPTURE = 2000;
     /** MAV_CMD_REQUEST_CAMERA_INFORMATION (camera protocol v2). */

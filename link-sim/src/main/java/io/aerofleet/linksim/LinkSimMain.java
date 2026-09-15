@@ -1,5 +1,7 @@
 package io.aerofleet.linksim;
 
+import io.aerofleet.mavlink.MavlinkFrame;
+
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -24,10 +26,23 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class LinkSimMain {
 
     public static void main(String[] args) throws Exception {
+        // 预扫描 --relay：命中走中继路径，否则原点对点路径逐行不变（FR-01, DFX 4.5）
+        if (containsFlag(args, "--relay")) {
+            RelayConfig cfg = RelayConfig.parse(args); // 内部校验失败 exit(1)
+            System.out.println("[mesh-relay] mode=relay gcs-port=" + cfg.gcsPort
+                    + " relay-port=" + cfg.relayPort
+                    + " uplink=" + cfg.uplink.name
+                    + " downlink=" + cfg.downlink.name);
+            System.out.println("[mesh-relay] gcsAddr=unlearned droneAddr=unlearned");
+            new RelayNode(cfg).run();
+            return;
+        }
+        // === 以下原点对点路径完全不变（FR 4.5 兼容性）===
         String profileName = "lte";
         int proxyPort = 14600;
         int dronePort = 14540;
         String droneIp = "127.0.0.1";
+        boolean envCoupled = false;  // M0b 雨衰叠加开关（FR-15）
 
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
@@ -45,6 +60,8 @@ public final class LinkSimMain {
             } else if (a.equals("--help")) {
                 usage();
                 return;
+            } else if (a.equals("--env-coupled")) {
+                envCoupled = true;
             }
         }
 
@@ -66,8 +83,11 @@ public final class LinkSimMain {
                         : ""));
         System.out.println("[link-sim] proxy=" + proxyPort
                 + " -> drone=" + droneIp + ":" + dronePort);
+        if (envCoupled) {
+            System.out.println("[link-sim] env-coupled: ON (rain attenuation overlay enabled)");
+        }
 
-        new LinkSimMain(profile, proxyPort, new InetSocketAddress(droneIp, dronePort)).run();
+        new LinkSimMain(profile, proxyPort, new InetSocketAddress(droneIp, dronePort), envCoupled).run();
     }
 
     private static void usage() {
@@ -76,6 +96,17 @@ public final class LinkSimMain {
         System.out.println("[link-sim]   --port      proxy bind port (default 14600)");
         System.out.println("[link-sim]   --drone-ip  drone side address (default 127.0.0.1)");
         System.out.println("[link-sim]   --drone-port drone side port (default 14540)");
+        System.out.println("[link-sim]   --env-coupled  enable rain attenuation overlay (M0b)");
+        // 追加 relay 模式参数说明（FR-01, DFX 4.4 配置可追溯）
+        RelayConfig.usage();
+    }
+
+    /** 预扫描命令行是否含指定 flag（用于 --relay 模式分流，不消费参数）。 */
+    private static boolean containsFlag(String[] args, String flag) {
+        for (String a : args) {
+            if (a.equals(flag)) return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------
@@ -83,6 +114,8 @@ public final class LinkSimMain {
     private final LinkProfile profile;
     private final int proxyPort;
     private final InetSocketAddress droneAddr;
+    /** M0b 雨衰叠加开关（FR-15）。 */
+    private final boolean envCoupled;
     /** GCS/云端侧学到的对端（谁往 proxy 发过包，转发目标就是它）。 */
     private volatile InetSocketAddress gcsAddr;
     /** 延迟调度：到期任务按时间出队发送。 */
@@ -101,23 +134,31 @@ public final class LinkSimMain {
         }
     }
 
-    private LinkSimMain(LinkProfile profile, int proxyPort, InetSocketAddress droneAddr) {
+    private LinkSimMain(LinkProfile profile, int proxyPort, InetSocketAddress droneAddr,
+                         boolean envCoupled) {
         this.profile = profile;
         this.proxyPort = proxyPort;
         this.droneAddr = droneAddr;
+        this.envCoupled = envCoupled;
     }
 
     private void run() throws Exception {
         // 上下行独立损伤：上行 = GCS -> drone（命令，小包）；下行 = drone -> GCS（遥测大头）
-        ImpairmentEngine uplink = profile.engine();
-        ImpairmentEngine downlink = profile.engine();
+        ImpairmentEngine uplinkBase = profile.engine();
+        ImpairmentEngine downlinkBase = profile.engine();
+        // M0b 雨衰叠加（FR-15）：envCoupled 时用 EnvAwareImpairmentEngine 包装
+        EnvAwareImpairmentEngine uplink = envCoupled
+                ? new EnvAwareImpairmentEngine(uplinkBase, profile.delayMs) : null;
+        EnvAwareImpairmentEngine downlink = envCoupled
+                ? new EnvAwareImpairmentEngine(downlinkBase, profile.delayMs) : null;
 
         try (DatagramSocket socket = new DatagramSocket(new InetSocketAddress(proxyPort))) {
             Thread pump = new Thread(() -> wirePump(socket), "link-wire");
             pump.setDaemon(true);
             pump.start();
 
-            Thread stats = new Thread(() -> statsLoop(uplink, downlink), "link-stats");
+            Thread stats = new Thread(() -> statsLoop(uplinkBase, downlinkBase, uplink, downlink),
+                    "link-stats");
             stats.setDaemon(true);
             stats.start();
 
@@ -134,7 +175,11 @@ public final class LinkSimMain {
                 if (fromDrone) {
                     // 下行：drone -> gcs（转发给已学到的 GCS 对端）
                     if (gcsAddr == null) continue;
-                    long delay = downlink.verdict(data.length);
+                    // M0b 雨衰叠加：envCoupled 时从 ENVIRONMENT_STATUS 帧更新环境状态
+                    if (envCoupled) {
+                        updateEnvFromFrame(data, downlink);
+                    }
+                    long delay = envCoupled ? downlink.verdict(data.length) : downlinkBase.verdict(data.length);
                     if (delay >= 0) {
                         wire.add(new ScheduledPacket(System.currentTimeMillis() + delay,
                                 seq.incrementAndGet(), data, gcsAddr, false));
@@ -142,7 +187,7 @@ public final class LinkSimMain {
                 } else {
                     // 上行：gcs -> drone；同时学习 GCS 对端地址
                     gcsAddr = from;
-                    long delay = uplink.verdict(data.length);
+                    long delay = envCoupled ? uplink.verdict(data.length) : uplinkBase.verdict(data.length);
                     if (delay >= 0) {
                         wire.add(new ScheduledPacket(System.currentTimeMillis() + delay,
                                 seq.incrementAndGet(), data, droneAddr, true));
@@ -175,7 +220,8 @@ public final class LinkSimMain {
         }
     }
 
-    private void statsLoop(ImpairmentEngine up, ImpairmentEngine down) {
+    private void statsLoop(ImpairmentEngine up, ImpairmentEngine down,
+                           EnvAwareImpairmentEngine upEnv, EnvAwareImpairmentEngine downEnv) {
         while (true) {
             try {
                 Thread.sleep(10_000);
@@ -184,6 +230,36 @@ public final class LinkSimMain {
             }
             System.out.println("[link-sim] up(gcs->drone)   " + up.stats());
             System.out.println("[link-sim] down(drone->gcs) " + down.stats());
+            if (upEnv != null) {
+                System.out.println("[link-sim] up rain   " + upEnv.rainStats());
+                System.out.println("[link-sim] down rain " + downEnv.rainStats());
+            }
         }
+    }
+
+    /**
+     * M0b 雨衰叠加：从 ENVIRONMENT_STATUS（msgId=422）帧松耦合读取 weather + rainRate，
+     * 更新下行 EnvAwareImpairmentEngine 环境状态。
+     * <p>
+     * MAVLink v2 帧布局：STX(1) | LEN(1) | INC(1) | COMPAT(1) | SEQ(1) | SID(1) | CID(1) | MSGID(3B LE) | PAYLOAD | CRC(2)。
+     * ENVIRONMENT_STATUS payload：偏移1=weather(u8)，偏移2=rainRate(u8)。
+     * 非环境帧静默跳过（松耦合，不依赖完整 MAVLink 解析）。
+     */
+    private static void updateEnvFromFrame(byte[] data, EnvAwareImpairmentEngine downlink) {
+        // 最小帧长度：STX + LEN + INC + COMPAT + SEQ + SID + CID + MSGID(3) + PAYLOAD(13) + CRC(2) = 25
+        if (data.length < 25 || data[0] != MavlinkFrame.STX_V2) {
+            return;
+        }
+        int msgId = (data[7] & 0xFF) | ((data[8] & 0xFF) << 8) | ((data[9] & 0xFF) << 16);
+        if (msgId != 422) {  // ENVIRONMENT_STATUS.ID
+            return;
+        }
+        int payloadLen = data[1] & 0xFF;
+        if (payloadLen < 3) {
+            return;
+        }
+        int weather = data[10 + 1] & 0xFF;   // payload 偏移 1 = weather
+        int rainRate = data[10 + 2] & 0xFF;  // payload 偏移 2 = rainRate
+        downlink.updateEnvironment(weather, rainRate);
     }
 }

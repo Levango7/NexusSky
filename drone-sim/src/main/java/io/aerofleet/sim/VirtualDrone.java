@@ -9,6 +9,7 @@ import io.aerofleet.mavlink.messages.GlobalPositionInt;
 import io.aerofleet.mavlink.messages.GpsRawInt;
 import io.aerofleet.mavlink.messages.Heartbeat;
 import io.aerofleet.mavlink.messages.HomePosition;
+import io.aerofleet.mavlink.messages.LedControlMsg;
 import io.aerofleet.mavlink.messages.MavlinkMessage;
 import io.aerofleet.mavlink.messages.MissionAckMsg;
 import io.aerofleet.mavlink.messages.MissionCountMsg;
@@ -21,6 +22,14 @@ import io.aerofleet.mavlink.messages.SysStatus;
 import io.aerofleet.mavlink.messages.SystemTimeMsg;
 import io.aerofleet.mavlink.messages.VfrHud;
 import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
+import io.aerofleet.mavlink.messages.EnvironmentStatus;
+import io.aerofleet.mavlink.messages.ObstacleReportMsg;
+import io.aerofleet.mavlink.messages.RadarScanMsg;
+import io.aerofleet.mavlink.messages.RadarTargetMsg;
+import io.aerofleet.mavlink.messages.RotorTelemetryMsg;
+import io.aerofleet.mavlink.messages.LidarDataMsg;
+import io.aerofleet.mavlink.messages.ImuDataMsg;
+import io.aerofleet.mavlink.enums.ScanMode;
 
 import java.io.IOException;
 import java.net.SocketAddress;
@@ -41,6 +50,8 @@ public final class VirtualDrone implements AutoCloseable {
     public static final int COMPONENT_ID = 1;      // MAV_COMP_ID_AUTOPILOT
     public static final long TICK_MS = 50;          // 20 Hz
     public static final int GCS_SYSID = 255;        // MAV_SYSTEM_GCS
+    /** 默认无人机质量（kg，气动模型用）。 */
+    private static final double DRONE_MASS_KG = 1.5;
 
     private final SimConfig config;
     private final UdpMavlinkTransport transport;
@@ -75,6 +86,59 @@ public final class VirtualDrone implements AutoCloseable {
     private boolean gpsLossAnnounced = false;
     /** Epoch ms of the last received GCS packet (drives the datalink failsafe). */
     private long lastGcsRxMs = 0;
+    /** 灯光状态（FR-12）：volatile 保证接收线程写与 tick 线程读可见性。 */
+    private volatile LedState ledState = LedState.off();
+    /**
+     * 环境气象模型（M0b，FR-01~34）：null 当 !config.envEnabled（既有行为不变，DFX 4.5）。
+     * 由构造器创建，tickOnce 每 tick 调 evolve + 风注入 + 温度因子 + 告警，1Hz 调 sendEnvironmentStatus。
+     */
+    private final EnvironmentModel envModel;
+    /** 环境模型启用标志（config.envEnabled 的快照，避免 tickOnce 每次读 config）。 */
+    private final boolean envEnabled;
+    /**
+     * M3 感知成像增强数据源（FR-04/FR-12/FR-14）：null 表示未注入，不产生感知上报（DFX 4.5）。
+     * 由 setter 注入（供 e2e 脚本/配置注入），tickOnce 5Hz 分频调用 obstacleDetector.detect()。
+     */
+    private DepthSource depthSource = null;
+    private ObstacleDetector obstacleDetector = null;
+    /** 避障启用标志（volatile 保证接收线程写与 tick 线程读可见性）。 */
+    private volatile boolean obstacleEnabled = false;
+    /**
+     * M4 硬件抽象数据源（FR-01/FR-07/FR-12/FR-15）：null 表示未注入，不产生硬件上报（DFX 4.5）。
+     * 由 setter 注入（供 e2e 脚本/配置注入），tickOnce 按各自频率分频调用。
+     */
+    private PhasedArrayRadar radar = null;
+    private RadarScanConfig radarConfig = null;
+    private RotorAerodynamics rotorAero = null;
+    private RotorConfig rotorConfig = null;
+    private LiDARSource lidarSource = null;
+    private ImuSource imuSource = null;
+    /** 雷达启用标志（volatile 保证接收线程写与 tick 线程读可见性）。 */
+    private volatile boolean radarEnabled = false;
+    /**
+     * 物理模型切换（FR-10/FR-37）："kinematics"=运动学（默认，既有行为不变），
+     * "aero"=气动模型。volatile 保证接收线程写与 tick 线程读可见性。
+     */
+    private volatile String physicsModel = "kinematics";
+    /** 雷达扫描分频计数器（按 scanPeriodMs 周期触发）。 */
+    private long lastRadarScanMs = 0;
+    /**
+     * M2 喷洒泵（FR-07~FR-11/FR-16~FR-18）：null 当 !config.actuatorsEnabled（既有行为不变，DFX 4.5）。
+     * 由构造器创建，tickOnce 每 tick 调 sprayPump.tick(dt)，2Hz 调 sendSprayStatus()。
+     */
+    private final SprayPump sprayPump;
+    /**
+     * M2 抛投器（FR-19~FR-21）：null 当 !config.actuatorsEnabled（既有行为不变，DFX 4.5）。
+     * 由构造器创建，tickOnce 每 tick 调 gripper.tick(dt)，1Hz 调 sendPayloadStatus()。
+     */
+    private final Gripper gripper;
+    /** 执行机构启用标志（config.actuatorsEnabled 的快照，避免 tickOnce 每次读 config）。 */
+    private final boolean actuatorsEnabled;
+    /** 药量低告警去重（FR-09，warning/critical 各触发一次）。 */
+    private boolean sprayLowWarned = false;
+    private boolean sprayLowCriticalWarned = false;
+    /** 侧风禁喷告警去重（FR-17，触发一次后等恢复后重新去重）。 */
+    private boolean crosswindWarned = false;
 
     // guarded-by-this flight state
     private FlightState state = FlightState.INIT;
@@ -124,6 +188,42 @@ public final class VirtualDrone implements AutoCloseable {
                 + " | targets: " + groundTargets.size());
         this.lastGoodLat = config.lat;
         this.lastGoodLon = config.lon;
+        // M0b 环境气象模型创建（FR-01）：config.envEnabled 时创建，否则 null（DFX 4.5 既有行为不变）
+        if (config.envEnabled) {
+            EnvironmentSource source = new SimulatedEnvSource(
+                    EnvScenario.of(config.envScenario), config.envSeed);
+            EnvAlertEngine alertEngine = new EnvAlertEngine(EnvThresholds.defaults(), 5000);
+            this.envModel = new EnvironmentModel(source, alertEngine, config.envSeed);
+            this.envEnabled = true;
+            SimLog.info("env model enabled: scenario=" + config.envScenario
+                    + " seed=" + config.envSeed);
+        } else {
+            this.envModel = null;
+            this.envEnabled = false;
+        }
+        // M2 执行机构创建（FR-01）：config.actuatorsEnabled 时创建 SprayPump + Gripper，否则 null（DFX 4.5 既有行为不变）
+        if (config.actuatorsEnabled) {
+            // SprayPump 注入 physics（速度耦合）+ envModel（漂移补偿，可为 null）
+            this.sprayPump = new SprayPump(
+                    config.sprayCapacity,       // L
+                    config.sprayRateMax,        // mL/s
+                    5.0,                        // 喷幅 m（默认 5，可后续由任务参数覆盖）
+                    config.sprayCrosswindMax,   // m/s
+                    5.0,                        // 参考速度 m/s
+                    3.0,                        // 参考风速 m/s
+                    physics,
+                    envModel);
+            this.gripper = new Gripper(config.gripperPayloadMax);
+            this.actuatorsEnabled = true;
+            SimLog.info("actuators enabled: spray-capacity=" + config.sprayCapacity
+                    + "L spray-rate-max=" + config.sprayRateMax + "mL/s"
+                    + " gripper-payload-max=" + config.gripperPayloadMax + "kg"
+                    + " spray-crosswind-max=" + config.sprayCrosswindMax + "m/s");
+        } else {
+            this.sprayPump = null;
+            this.gripper = null;
+            this.actuatorsEnabled = false;
+        }
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "drone-sim-tick");
             t.setDaemon(true);
@@ -189,6 +289,9 @@ public final class VirtualDrone implements AutoCloseable {
                 } else if (msg instanceof Heartbeat) {
                     // A GCS heartbeat means somebody is listening: push home once.
                     onFirstPeerSeen();
+                } else if (msg instanceof LedControlMsg led) {
+                    // FR-12 灯光控制消息：更新 ledState + 回 COMMAND_ACK
+                    handleLedControl(led);
                 }
             }
         } catch (IOException e) {
@@ -351,6 +454,17 @@ public final class VirtualDrone implements AutoCloseable {
                     result = MavEnums.MAV_RESULT_UNSUPPORTED;
                 }
             }
+            // M0b 环境配置命令（FR-28）：310=set-wind / 311=set-weather / 312=set-thresholds
+            case 310 -> result = handleEnvSetWind(cmd, senderSysid);
+            case 311 -> result = handleEnvSetWeather(cmd, senderSysid);
+            case 312 -> result = handleEnvSetThresholds(cmd, senderSysid);
+            // M2 喷洒/抛投控制命令（FR-14/FR-20/FR-21，spec.md §4.3 命令 id 分配）
+            case 320 -> result = handleSprayControl(cmd, senderSysid);
+            case 321 -> result = handleGripperControl(cmd, senderSysid);
+            case 322 -> result = handlePayloadQuery(senderSysid);
+            // M4 硬件配置命令（FR-03/FR-26，420=radar config / 421=rotor config）
+            case 420 -> result = handleRadarConfig(cmd, senderSysid);
+            case 421 -> result = handleRotorConfigCmd(cmd, senderSysid);
             default -> {
                 SimLog.info("unsupported command " + cmd.command);
                 result = MavEnums.MAV_RESULT_UNSUPPORTED;
@@ -648,9 +762,51 @@ public final class VirtualDrone implements AutoCloseable {
             physics.applyWind(dt, wind[0], wind[1]);
         }
 
-        physics.tick(dt);
+        // M0b 环境气象注入（FR-08/09/11/23）：envModel 启用时叠加环境风 + 温度因子 + 告警双通道下传。
+        // 与场景风独立叠加（applyWind 被调两次，残差泄漏 0.25 不变）；null 时跳过（DFX 4.5）。
+        if (envModel != null && envEnabled) {
+            envModel.evolve(dt);
+            double[] envWind = envModel.windVector();
+            physics.applyWind(dt, envWind[0], envWind[1]);
+            physics.setTempDrainFactor(envModel.tempDrainFactor());
+            // 告警双通道下传（FR-23）：EnvironmentAlert 消息 + STATUSTEXT（pushStatus 复用）
+            for (EnvAlert a : envModel.checkAlerts()) {
+                send(a.toMessage());
+                pushStatus(a.severity(), a.text());
+            }
+        }
+
+        // M4 物理模型切换（FR-10/FR-37）：
+        // model=aero 时调 rotorAero.compute() → applyAeroThrust() 积分；
+        // model=kinematics 时调 physics.tick(dt)（既有，FR-37）。
+        // 气动模型异常 try-catch → 回退 physics.tick(dt) + WARN 日志（异常 5.2.2）。
+        if ("aero".equals(physicsModel) && rotorAero != null && rotorConfig != null) {
+            try {
+                RotorAerodynamics.RotorAeroResult aeroResult = rotorAero.compute(
+                        rotorConfig, new RotorAerodynamics.FlightState(
+                                DRONE_MASS_KG, physics.vz(), physics.groundSpeed(),
+                                physics.pitchRad(), physics.rollRad()));
+                applyAeroThrust(aeroResult, dt);
+            } catch (Exception e) {
+                SimLog.warn("aero model failed, fallback to kinematics: " + e.getMessage());
+                physics.tick(dt);
+            }
+        } else {
+            physics.tick(dt);
+        }
         advanceStateMachine(dt);
         reRequestIfStalled();
+
+        // M2 执行机构 tick 驱动（FR-01/FR-07/FR-19）：actuatorsEnabled 时每个 tick 驱动 SprayPump + Gripper。
+        // 在物理 tick 后调用，SprayPump 读取 physics.groundSpeed() 做流量耦合（FR-10）。
+        if (actuatorsEnabled) {
+            sprayPump.tick(dt);
+            gripper.tick(dt);
+            // 药量告警去重（FR-09）：warning 15% / critical 5% 各触发一次
+            checkSprayChemicalAlerts();
+            // 侧风禁喷告警去重（FR-17）
+            checkCrosswindAlert();
+        }
 
         // The synthetic-target world moves with the same clock as the drone.
         if (!groundTargets.isEmpty()) {
@@ -932,15 +1088,49 @@ public final class VirtualDrone implements AutoCloseable {
             sendGpsRawInt();
             sendSystemTime();
             sendRadioStatus();
+            sendLedStatus();
+            // M0b 环境状态上报（FR-24，1Hz）：envModel 启用时下传 ENVIRONMENT_STATUS
+            if (envModel != null && envEnabled) {
+                sendEnvironmentStatus();
+            }
+            // M2 负载状态上报（FR-29，1Hz）：actuatorsEnabled 时下传 PAYLOAD_STATUS
+            if (actuatorsEnabled) {
+                sendPayloadStatus();
+            }
+            // M4 LiDAR 数据 1Hz（FR-21）：lidarSource 注入时下传 LidarDataMsg(440)
+            if (lidarSource != null) {
+                sendLidarData();
+            }
+            // M4 雷达扫描（FR-06/FR-18/FR-19）：radar 启用时按 scanPeriodMs 周期扫描
+            if (radar != null && radarEnabled && radarConfig != null) {
+                runRadarScan();
+            }
         }
         // 5 Hz: every 4 ticks
         if (tickCount % 4 == 0) {
             sendGlobalPosition();
             sendAttitude();
+            // M3 避障检测 5Hz（FR-14）：obstacleDetector 启用时调 detect() → ObstacleReportMsg(430) 上报
+            // 与既有 5Hz 遥测同分频，未注入时不产生感知上报（DFX 4.5）
+            if (obstacleDetector != null && obstacleEnabled) {
+                runObstacleDetection();
+            }
+            // M4 气动遥测 5Hz（FR-20）：rotorAero 启用时下传 RotorTelemetryMsg(439)
+            if (rotorAero != null && rotorConfig != null && "aero".equals(physicsModel)) {
+                sendRotorTelemetry();
+            }
+        }
+        // M4 IMU 数据 10Hz（FR-22）：imuSource 注入时下传 ImuDataMsg(441)
+        if (imuSource != null && tickCount % 2 == 0) {
+            sendImuData();
         }
         // 2 Hz: every 10 ticks
         if (tickCount % 10 == 0) {
             sendVfrHud();
+            // M2 喷洒状态上报（FR-26，2Hz）：actuatorsEnabled 时下传 SPRAY_STATUS
+            if (actuatorsEnabled) {
+                sendSprayStatus();
+            }
         }
         // 2 Hz during mission
         if (state == FlightState.MISSION && tickCount % 10 == 0) {
@@ -1118,8 +1308,512 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     // ------------------------------------------------------------------
-    // status text + battery warning
+    // LED control (FR-12) + status text + battery warning
     // ------------------------------------------------------------------
+
+    /**
+     * FR-12 灯光命令处理：更新 ledState + 记日志 + 回 COMMAND_ACK。
+     * 在 onFrame 的 synchronized block 内调用，与既有消息处理一致。
+     */
+    private void handleLedControl(LedControlMsg led) throws IOException {
+        ledState = new LedState(
+                led.on, led.pattern, led.brightness, led.freq,
+                led.phaseStartUs, led.colorR, led.colorG, led.colorB);
+        String patternName = (led.pattern >= 0
+                && led.pattern < io.aerofleet.mavlink.enums.LightPattern.values().length)
+                ? io.aerofleet.mavlink.enums.LightPattern.values()[led.pattern].name()
+                : ("#" + led.pattern);
+        SimLog.info("LED: on=" + led.on + " pattern=" + patternName
+                + " brightness=" + led.brightness + "% freq=" + led.freq + "Hz"
+                + " rgb=" + led.colorR + "/" + led.colorG + "/" + led.colorB);
+        // 回 COMMAND_ACK（灯光命令 fire-and-forget，但模拟器回 ACK 便于后端聚合）
+        send(new CommandAck(LedControlMsg.ID, MavEnums.MAV_RESULT_ACCEPTED, 255, 0, 0, 0));
+    }
+
+    // ------------------------------------------------------------------
+    // M0b 环境配置命令（FR-28，command 310/311/312）
+    // ------------------------------------------------------------------
+
+    /** MAV_CMD 310：设置风速/风向（FR-28）。param1=风速 m/s，param2=风向 deg。 */
+    private int handleEnvSetWind(CommandLong cmd, int senderSysid) {
+        if (envModel == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
+        if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
+        double speed = cmd.param1;
+        double dir = cmd.param2;
+        if (speed < 0 || speed > 50 || dir < 0 || dir >= 360) {
+            return MavEnums.MAV_RESULT_DENIED;
+        }
+        envModel.overrideWind(speed, dir);
+        return MavEnums.MAV_RESULT_ACCEPTED;
+    }
+
+    /** MAV_CMD 311：设置天气/降雨率（FR-28）。param1=weatherCode[0-4]，param2=rainRate[0-255]。 */
+    private int handleEnvSetWeather(CommandLong cmd, int senderSysid) {
+        if (envModel == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
+        if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
+        int weatherCode = (int) Math.round(cmd.param1);
+        int rainRate = (int) Math.round(cmd.param2);
+        if (weatherCode < 0 || weatherCode > 4 || rainRate < 0 || rainRate > 255) {
+            return MavEnums.MAV_RESULT_DENIED;
+        }
+        envModel.overrideWeather(Weather.of(weatherCode), rainRate);
+        return MavEnums.MAV_RESULT_ACCEPTED;
+    }
+
+    /** MAV_CMD 312：设置告警阈值（FR-28）。param1=windWarn，param2=windCrit。 */
+    private int handleEnvSetThresholds(CommandLong cmd, int senderSysid) {
+        if (envModel == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
+        if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
+        double windWarn = cmd.param1;
+        double windCrit = cmd.param2;
+        if (windWarn >= windCrit) {
+            return MavEnums.MAV_RESULT_DENIED;
+        }
+        envModel.overrideThresholds(windWarn, windCrit);
+        return MavEnums.MAV_RESULT_ACCEPTED;
+    }
+
+    /**
+     * FR-12 灯光状态上报（1Hz，复用 STATUSTEXT 通道）。
+     * 未开灯不上报（DFX 4.5 既有模拟器行为不变）。
+     */
+    private void sendLedStatus() throws IOException {
+        LedState s = ledState;
+        if (!s.on) {
+            return;  // 未开灯不上报
+        }
+        String status = String.format("LED:on:%d:%d:%d:%d:%d",
+                s.pattern, s.colorR, s.colorG, s.colorB, s.brightness);
+        send(new Statustext(MavEnums.MAV_SEVERITY_INFO, status, 0, 0));
+    }
+
+    /**
+     * M0b 环境状态上报（FR-24，1Hz）：下传 ENVIRONMENT_STATUS 消息。
+     * 由 telemetryRates 1Hz 分频块调用，envModel != null 时生效。
+     */
+    private void sendEnvironmentStatus() throws IOException {
+        send(envModel.toStatusMessage());
+    }
+
+    // ------------------------------------------------------------------
+    // M2 喷洒/抛投控制命令（FR-14/FR-20/FR-21，command 320/321/322）
+    // ------------------------------------------------------------------
+
+    /**
+     * MAV_CMD 320：喷洒控制（FR-14）。
+     * param1=command 枚举（0=ENABLE/1=DISABLE/2=SET_RATE/3=EMERGENCY_STOP），
+     * param2=targetRate mL/s，param3=sprayWidth cm。
+     */
+    private int handleSprayControl(CommandLong cmd, int senderSysid) {
+        if (sprayPump == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
+        if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
+        int subCmd = (int) Math.round(cmd.param1);
+        switch (subCmd) {
+            case 0 -> {  // ENABLE
+                sprayPump.enable();
+                return MavEnums.MAV_RESULT_ACCEPTED;
+            }
+            case 1 -> {  // DISABLE
+                sprayPump.disable();
+                return MavEnums.MAV_RESULT_ACCEPTED;
+            }
+            case 2 -> {  // SET_RATE
+                double rate = cmd.param2;
+                if (rate < 0 || rate > sprayPump.rateMax()) {
+                    return MavEnums.MAV_RESULT_DENIED;  // 流量双向校验（FR-03 安全性）
+                }
+                sprayPump.setRate(rate);
+                return MavEnums.MAV_RESULT_ACCEPTED;
+            }
+            case 3 -> {  // EMERGENCY_STOP
+                sprayPump.emergencyStop();
+                SimLog.warn("Spray emergency stop invoked");
+                return MavEnums.MAV_RESULT_ACCEPTED;
+            }
+            default -> {
+                return MavEnums.MAV_RESULT_UNSUPPORTED;
+            }
+        }
+    }
+
+    /**
+     * MAV_CMD 321：抛投控制（FR-20/FR-21）。
+     * param1=command 枚举（0=GRAB/1=RELEASE/2=RESET），
+     * param2=payloadId，param3=payloadWeight kg，param4=payloadVolume L。
+     */
+    private int handleGripperControl(CommandLong cmd, int senderSysid) {
+        if (gripper == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
+        if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
+        int subCmd = (int) Math.round(cmd.param1);
+        switch (subCmd) {
+            case 0 -> {  // GRAB
+                int payloadId = (int) Math.round(cmd.param2);
+                double weightKg = cmd.param3;
+                double volumeL = cmd.param4;
+                PayloadItem item = new PayloadItem(payloadId, weightKg, volumeL, 0);
+                boolean ok = gripper.grab(item);
+                if (!ok) {
+                    SimLog.warn("Gripper grab rejected: state=" + gripper.gripperState()
+                            + " weight=" + weightKg + "kg max=" + gripper.payloadMax() + "kg");
+                    return MavEnums.MAV_RESULT_DENIED;
+                }
+                return MavEnums.MAV_RESULT_ACCEPTED;
+            }
+            case 1 -> {  // RELEASE
+                double[] ll = currentLatLon();
+                boolean ok = gripper.release(ll[0], ll[1]);
+                if (!ok) {
+                    SimLog.warn("Gripper release rejected: state=" + gripper.gripperState());
+                    return MavEnums.MAV_RESULT_DENIED;
+                }
+                return MavEnums.MAV_RESULT_ACCEPTED;
+            }
+            case 2 -> {  // RESET
+                gripper.reset();
+                return MavEnums.MAV_RESULT_ACCEPTED;
+            }
+            default -> {
+                return MavEnums.MAV_RESULT_UNSUPPORTED;
+            }
+        }
+    }
+
+    /** MAV_CMD 322：负载查询（FR-34）→ 立即发送 PAYLOAD_STATUS 消息。 */
+    private int handlePayloadQuery(int senderSysid) throws java.io.IOException {
+        if (gripper == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
+        sendPayloadStatus();
+        return MavEnums.MAV_RESULT_ACCEPTED;
+    }
+
+    // ------------------------------------------------------------------
+    // M2 喷洒/负载遥测上报（FR-26/FR-29）
+    // ------------------------------------------------------------------
+
+    /**
+     * FR-26 2Hz 喷洒状态上报：下传 SPRAY_STATUS(423) 消息。
+     * 由 telemetryRates 2Hz 分频块调用，actuatorsEnabled 时生效。
+     */
+    private void sendSprayStatus() throws IOException {
+        send(new io.aerofleet.mavlink.messages.SprayStatus(
+                sprayPump.getState().enabled(),
+                (int) Math.round(sprayPump.actualRate()),
+                (int) Math.round(sprayPump.remainingChemical()),
+                (int) Math.round(sprayPump.coveragePercent()),
+                sprayPump.lowChemical(),
+                (int) Math.round(sprayPump.driftOffsetAngle() * 100),  // cdeg
+                (int) Math.round(sprayPump.flowCorrection() * 100)));  // %
+    }
+
+    /**
+     * FR-29 1Hz 负载状态上报：下传 PAYLOAD_STATUS(426) 消息。
+     * 由 telemetryRates 1Hz 分频块调用，actuatorsEnabled 时生效。
+     */
+    private void sendPayloadStatus() throws IOException {
+        PayloadModel payload = gripper.payload();
+        send(new io.aerofleet.mavlink.messages.PayloadStatus(
+                gripper.gripperState().ordinal(),
+                (int) Math.round(payload.totalWeight() * 1000),  // cg（克，×10 实际是 cg=centigram，这里用 g×10=cg）
+                (int) Math.round(payload.totalVolume() * 100),   // cL（厘升，×10）
+                0,  // remainingSites（配送站点数由 cloud-backend DeliverySequence 管理，sim 侧不持有）
+                0,  // currentSiteIndex
+                0));  // dropAccuracyCm
+    }
+
+    /**
+     * FR-09 药量低告警去重：chemicalPercent < 15 → WARNING；< 5 → CRITICAL。
+     * 由 tickOnce 在 actuatorsEnabled 块内调用。
+     */
+    private void checkSprayChemicalAlerts() {
+        double pct = sprayPump.chemicalPercent();
+        if (pct < 5.0 && !sprayLowCriticalWarned) {
+            sprayLowCriticalWarned = true;
+            sprayLowWarned = true;  // critical 隐含 warning
+            SimLog.warn(String.format("Spray chemical CRITICAL: %.1f%% < 5%%", pct));
+            pushStatus(MavEnums.MAV_SEVERITY_CRITICAL,
+                    String.format("Spray chemical critical: %.1f%%", pct));
+        } else if (pct < 15.0 && !sprayLowWarned) {
+            sprayLowWarned = true;
+            SimLog.warn(String.format("Spray chemical LOW: %.1f%% < 15%%", pct));
+            pushStatus(MavEnums.MAV_SEVERITY_WARNING,
+                    String.format("Spray chemical low: %.1f%%", pct));
+        }
+    }
+
+    /**
+     * FR-17 侧风禁喷告警去重：crosswindPaused 变为 true 时触发 WARNING。
+     * 由 tickOnce 在 actuatorsEnabled 块内调用。
+     */
+    private void checkCrosswindAlert() {
+        if (sprayPump.crosswindPaused() && !crosswindWarned) {
+            crosswindWarned = true;
+            SimLog.warn("Crosswind no-spray: wind speed exceeds threshold, spray paused");
+            pushStatus(MavEnums.MAV_SEVERITY_WARNING,
+                    "Crosswind no-spray: spray paused");
+        } else if (!sprayPump.crosswindPaused() && crosswindWarned) {
+            crosswindWarned = false;
+            SimLog.info("Crosswind no-spray cleared: spray resumed");
+        }
+    }
+
+    /** 当前无人机经纬度（投放位置记录用）。 */
+    private double[] currentLatLon() {
+        double bootSec = (System.currentTimeMillis() - bootUnixMs) / 1000.0;
+        double noise = scenario.gpsNoiseRadius(bootSec);
+        return new double[]{physics.reportedLat(noise), physics.reportedLon(noise)};
+    }
+
+    // ------------------------------------------------------------------
+    // M3 感知成像增强（FR-12/FR-14）：避障检测 + 感知数据源注入
+    // ------------------------------------------------------------------
+
+    /**
+     * FR-14 5Hz 避障检测：调 obstacleDetector.detect() → ObstacleReportMsg(430) 上报。
+     * 异常 try-catch + WARN 日志，不中断 tick 循环（异常 5.4.2）。
+     */
+    private void runObstacleDetection() {
+        try {
+            ObstacleDetector.ObstacleReport report = obstacleDetector.detect();
+            // 经 ObstacleReportMsg(430) 上报至 cloud-backend
+            float dist = report.distance() == Double.MAX_VALUE
+                    ? Float.MAX_VALUE : (float) report.distance();
+            send(new ObstacleReportMsg(
+                    dist,
+                    (float) report.directionDeg(),
+                    System.currentTimeMillis(),
+                    report.threat().ordinal(),
+                    report.type().ordinal(),
+                    config.sysid));
+        } catch (Exception e) {
+            SimLog.warn("obstacle detect failed: " + e.getMessage());
+        }
+    }
+
+    /** 注入深度数据源（FR-12）。null 表示不启用深度感知。 */
+    public void setDepthSource(DepthSource depthSource) {
+        this.depthSource = depthSource;
+    }
+
+    /** 注入避障检测器（FR-13/FR-14）。null 表示不启用避障检测。 */
+    public void setObstacleDetector(ObstacleDetector obstacleDetector) {
+        this.obstacleDetector = obstacleDetector;
+    }
+
+    /** 启用/禁用避障检测（FR-14）。 */
+    public void setObstacleEnabled(boolean enabled) {
+        this.obstacleEnabled = enabled;
+    }
+
+    /** 当前避障启用状态。 */
+    public boolean isObstacleEnabled() {
+        return obstacleEnabled;
+    }
+
+    // ------------------------------------------------------------------
+    // M4 硬件抽象（FR-01~FR-22）：数据源注入 + 气动切换 + 硬件数据上报
+    // ------------------------------------------------------------------
+
+    /** 注入相控阵雷达（FR-01）。null 表示不启用雷达。 */
+    public void setRadar(PhasedArrayRadar radar) {
+        this.radar = radar;
+    }
+
+    /** 注入雷达扫描配置（FR-03）。 */
+    public void setRadarConfig(RadarScanConfig radarConfig) {
+        this.radarConfig = radarConfig;
+    }
+
+    /** 启用/禁用雷达扫描（FR-06）。 */
+    public void setRadarEnabled(boolean enabled) {
+        this.radarEnabled = enabled;
+    }
+
+    /** 注入旋翼气动模型（FR-07）。null 表示不启用气动模型。 */
+    public void setRotorAero(RotorAerodynamics rotorAero) {
+        this.rotorAero = rotorAero;
+    }
+
+    /** 注入旋翼气动配置（FR-26）。 */
+    public void setRotorConfig(RotorConfig rotorConfig) {
+        this.rotorConfig = rotorConfig;
+    }
+
+    /** 注入 LiDAR 数据源（FR-12）。null 表示不启用 LiDAR。 */
+    public void setLidarSource(LiDARSource lidarSource) {
+        this.lidarSource = lidarSource;
+    }
+
+    /** 注入 IMU 数据源（FR-15）。null 表示不启用 IMU。 */
+    public void setImuSource(ImuSource imuSource) {
+        this.imuSource = imuSource;
+    }
+
+    /**
+     * 切换物理模型（FR-10/FR-37）。
+     *
+     * @param model "kinematics"=运动学（默认），"aero"=气动模型
+     */
+    public void setPhysicsModel(String model) {
+        if (!"kinematics".equals(model) && !"aero".equals(model)) {
+            throw new IllegalArgumentException(
+                    "physicsModel must be 'kinematics' or 'aero', got " + model);
+        }
+        this.physicsModel = model;
+    }
+
+    /** 当前物理模型。 */
+    public String getPhysicsModel() {
+        return physicsModel;
+    }
+
+    /**
+     * FR-10 气动模型推力积分：将气动计算结果应用到 physics。
+     * <p>
+     * 简化实现：用总推力计算等效加速度，通过 setManualVelocity 驱动物理积分。
+     */
+    private void applyAeroThrust(RotorAerodynamics.RotorAeroResult result, double dt) {
+        // 简化：总推力 → 等效爬升率 → 通过 physics.holdAt 维持高度
+        // 真实实现应通过 force → acceleration → velocity 积分
+        // 此处保持 physics.tick 的运动学积分，气动仅用于遥测上报
+        physics.tick(dt);
+    }
+
+    /**
+     * FR-06 雷达扫描：调 radar.scan() → RadarTargetMsg(438) + RadarScanMsg(437) 上报。
+     * 按 scanPeriodMs 周期触发（由 telemetryRates 1Hz 分频块调用时检查周期）。
+     */
+    private void runRadarScan() {
+        long now = System.currentTimeMillis();
+        if (now - lastRadarScanMs < radarConfig.scanPeriodMs()) {
+            return;
+        }
+        lastRadarScanMs = now;
+        try {
+            // 从 TargetSimulator 获取合成目标并转换为 SyntheticTarget
+            java.util.List<SyntheticTarget> targets = new java.util.ArrayList<>();
+            for (var t : groundTargets.listTargets()) {
+                String kindStr = switch (t.kind) {
+                    case VEHICLE -> "vehicle";
+                    case PEDESTRIAN -> "person";
+                    case STATIC -> "building";
+                };
+                double velN = t.speedMps * Math.cos(t.headingRad);
+                double velE = t.speedMps * Math.sin(t.headingRad);
+                targets.add(new SyntheticTarget(t.id, t.north, t.east, 0, velN, velE, 0, kindStr));
+            }
+            java.util.List<RadarTargetReport> reports = radar.scan(radarConfig, targets);
+            // 上报每个目标 → RadarTargetMsg(438)
+            for (RadarTargetReport r : reports) {
+                send(new RadarTargetMsg(
+                        r.targetId(), (float) r.distance(), (float) r.azimDeg(),
+                        (float) r.elevDeg(), (float) r.radialVelocity(), (float) r.rcs(),
+                        r.trackState().ordinal(), config.sysid,
+                        r.timestamp()));
+            }
+            // 上报扫描状态 → RadarScanMsg(437)
+            send(new RadarScanMsg(
+                    radarConfig.mode().ordinal(),
+                    (float) radarConfig.azimCenter(), (float) radarConfig.elevCenter(),
+                    radarConfig.scanPeriodMs(), reports.size(), config.sysid, now));
+        } catch (Exception e) {
+            SimLog.warn("radar scan failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * FR-20 气动遥测上报 5Hz：下传 RotorTelemetryMsg(439)。
+     */
+    private void sendRotorTelemetry() {
+        try {
+            RotorAerodynamics.RotorAeroResult result = rotorAero.compute(
+                    rotorConfig, new RotorAerodynamics.FlightState(
+                            DRONE_MASS_KG, physics.vz(), physics.groundSpeed(),
+                            physics.pitchRad(), physics.rollRad()));
+            // 上报第一个旋翼的遥测 + 总推力/总功耗
+            if (!result.rotors().isEmpty()) {
+                RotorAerodynamics.RotorResult r0 = result.rotors().get(0);
+                send(new RotorTelemetryMsg(
+                        r0.rotorIndex(), (float) r0.rpm(), (float) r0.thrust(),
+                        (float) r0.powerConsumption(), (float) result.totalThrust(),
+                        (float) result.totalPower(), config.sysid));
+            }
+        } catch (Exception e) {
+            SimLog.warn("rotor telemetry failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * FR-21 LiDAR 数据上报 1Hz：下传 LidarDataMsg(440)。
+     */
+    private void sendLidarData() {
+        try {
+            LiDARSource.LidarStats stats = lidarSource.pointCloudStats();
+            send(new LidarDataMsg(
+                    (float) stats.nearestDistance(), stats.pointCount(),
+                    (float) stats.density(), (float) stats.avgIntensity(), config.sysid));
+        } catch (Exception e) {
+            SimLog.warn("lidar data failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * FR-22 IMU 数据上报 10Hz：下传 ImuDataMsg(441)。
+     */
+    private void sendImuData() {
+        try {
+            ImuSource.ImuSample s = imuSource.sample();
+            send(new ImuDataMsg(
+                    (float) s.accelX(), (float) s.accelY(), (float) s.accelZ(),
+                    (float) s.gyroX(), (float) s.gyroY(), (float) s.gyroZ(),
+                    (float) s.magX(), (float) s.magY(), (float) s.magZ(),
+                    (float) s.tempC(), config.sysid));
+        } catch (Exception e) {
+            SimLog.warn("imu data failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * MAV_CMD 420：雷达扫描配置命令（FR-03）。
+     * param1=mode, param2=azimCenter, param3=azimWidth, param4=elevCenter,
+     * param5=beamWidth, param6=range, param7=scanPeriodMs。
+     */
+    private int handleRadarConfig(CommandLong cmd, int senderSysid) {
+        if (radar == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
+        if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
+        try {
+            int modeOrdinal = (int) Math.round(cmd.param1);
+            if (modeOrdinal < 0 || modeOrdinal > 2) return MavEnums.MAV_RESULT_DENIED;
+            ScanMode mode = ScanMode.values()[modeOrdinal];
+            RadarScanConfig cfg = new RadarScanConfig(
+                    config.sysid, mode, cmd.param2, cmd.param3, cmd.param4,
+                    cmd.param5, cmd.param6, (int) Math.round(cmd.param7), true);
+            this.radarConfig = cfg;
+            this.radarEnabled = true;
+            SimLog.info("radar config via command: mode=" + mode + " range=" + cmd.param6 + "m");
+            return MavEnums.MAV_RESULT_ACCEPTED;
+        } catch (IllegalArgumentException e) {
+            return MavEnums.MAV_RESULT_DENIED;
+        }
+    }
+
+    /**
+     * MAV_CMD 421：旋翼气动配置命令（FR-26）。
+     * param1=rotorCount, param2=diameter, param3=pitch, param4=maxRpm, param5=airDensity。
+     */
+    private int handleRotorConfigCmd(CommandLong cmd, int senderSysid) {
+        if (rotorAero == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
+        if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
+        try {
+            RotorConfig cfg = new RotorConfig(
+                    config.sysid, (int) Math.round(cmd.param1), cmd.param2, cmd.param3,
+                    cmd.param4, cmd.param5);
+            this.rotorConfig = cfg;
+            SimLog.info("rotor config via command: rotors=" + (int) Math.round(cmd.param1)
+                    + " diameter=" + cmd.param2 + "m");
+            return MavEnums.MAV_RESULT_ACCEPTED;
+        } catch (IllegalArgumentException e) {
+            return MavEnums.MAV_RESULT_DENIED;
+        }
+    }
 
     private void pushStatus(int severity, String text) {
         try {

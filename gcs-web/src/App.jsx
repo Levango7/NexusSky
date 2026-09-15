@@ -6,6 +6,7 @@ import MissionPlanner from './components/MissionPlanner.jsx'
 import AlertFeed from './components/AlertFeed.jsx'
 import Joystick from './components/Joystick.jsx'
 import VisionPanel from './components/VisionPanel.jsx'
+import FormationPanel from './components/FormationPanel.jsx'
 import { api, wsUrl } from './api.js'
 
 function haversine(a, b) {
@@ -36,6 +37,8 @@ export default function App() {
   const [wsState, setWsState] = useState('connecting')
   const [apiOk, setApiOk] = useState(false)
   const [now, setNow] = useState(Date.now())
+  const [view, setView] = useState('control')               // 'control' | 'formation'
+  const [formations, setFormations] = useState([])          // 编队列表（WebSocket 推送）
   const wsRef = useRef(null)
 
   const selected = drones.find((d) => d.sysid === selectedSysid)
@@ -118,6 +121,20 @@ export default function App() {
           }
         } else if (msg.type === 'alert') {
           setAlerts((prev) => [{ ...msg.data, ts: Date.now(), sysid: msg.sysid }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'formation') {
+          // 编队状态推送（FormationPusher 1Hz）：data 为单编队或编队数组
+          setFormations((prev) => {
+            const data = msg.data
+            if (Array.isArray(data)) return data
+            if (!data || data.formationId == null) return prev
+            const idx = prev.findIndex((f) => f.formationId === data.formationId)
+            if (idx >= 0) {
+              const next = [...prev]
+              next[idx] = data
+              return next
+            }
+            return [...prev, data]
+          })
         }
       }
     }
@@ -146,6 +163,22 @@ export default function App() {
         </div>
 
         <div className="topbar-center">
+          <div className="view-tabs" style={{ display: 'inline-flex', gap: 4, marginRight: 6 }}>
+            <button
+              className={`btn ${view === 'control' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('control')}
+            >
+              操控
+            </button>
+            <button
+              className={`btn ${view === 'formation' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('formation')}
+            >
+              编队
+            </button>
+          </div>
           <span className="chip mono">{new Date(now).toLocaleTimeString('zh-CN', { hour12: false })}</span>
           <span className="chip">
             机队 <b className="mono">{onlineCount}</b>
@@ -164,6 +197,11 @@ export default function App() {
         </div>
       </header>
 
+      {view === 'formation' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <FormationPanel formations={formations} drones={drones} />
+        </div>
+      ) : (
       <div className="gcs-body">
         <aside className="rail left">
           <DroneList drones={drones} selectedSysid={selectedSysid} onSelect={setSelectedSysid} />
@@ -239,6 +277,7 @@ export default function App() {
           <AlertFeed alerts={alerts} />
         </aside>
       </div>
+      )}
     </div>
   )
 }

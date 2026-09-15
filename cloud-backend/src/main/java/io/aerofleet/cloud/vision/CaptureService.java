@@ -60,8 +60,12 @@ public class CaptureService {
 
     /** Ground-truth HTTP base of the drone-sim instance (properties-configurable). */
     private final String simTruthBase;
-    /** "truth" (projection oracle) or "pixels" (real JPEG -> blob detect). */
+    /** "truth" (projection oracle) / "vision-source" (SimulatedVisionSource) / "pixels" (JPEG→blob). */
     private final String source;
+    /** M3 VisionSource 抽象层（FR-03）：source=vision-source 时使用，null 表示走既有 truth/pixels 路径。 */
+    private final VisionSource visionSource;
+    /** 投影简化降级实例（异常 5.1.2：VisionSource 异常时回退）。 */
+    private final ProjectionVisionSource fallback = new ProjectionVisionSource();
 
     public CaptureService(DroneCommandService commands,
                           DeviceRegistry registry,
@@ -75,6 +79,13 @@ public class CaptureService {
         this.solver = solver;
         this.simTruthBase = simTruthBase;
         this.source = source;
+        // FR-03 投影简化切换：truth→ProjectionVisionSource / vision-source→SimulatedVisionSource / pixels→null
+        this.visionSource = switch (source) {
+            case "truth" -> new ProjectionVisionSource();        // 投影简化（默认，既有行为）
+            case "vision-source" -> new SimulatedVisionSource(); // 模拟检测（合成置信度）
+            case "pixels" -> null;                               // 既有 BlobDetector 路径
+            default -> new ProjectionVisionSource();             // 未知值默认投影简化
+        };
     }
 
     /**
@@ -124,6 +135,9 @@ public class CaptureService {
         String effSource = sourceOverride != null ? sourceOverride : source;
         if ("pixels".equalsIgnoreCase(effSource)) {
             detections = detectFromPixels(shot, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+        } else if ("vision-source".equalsIgnoreCase(effSource)) {
+            // FR-03 source=vision-source 分支：委托 VisionSource.detect() → 经 locateTarget 定位
+            detections = detectFromVisionSource(shot, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
         } else {
             for (JsonNode t : shot.path("targets")) {
                 Map<String, Object> d = locateTarget(
@@ -187,6 +201,76 @@ public class CaptureService {
             log.warn("pixel pipeline failed for frame {}: {}", frameSeq, e.getMessage());
         }
         return out;
+    }
+
+    /**
+     * FR-03 source=vision-source 分支：委托 VisionSource.detect() → 经 locateTarget 定位。
+     * <p>
+     * VisionSource 异常时回退 ProjectionVisionSource + WARN 日志（异常 5.1.2）。
+     * 定位与评分步骤复用既有 GeolocationSolver（FR-37 既有感知链路不变）。
+     */
+    private List<Map<String, Object>> detectFromVisionSource(JsonNode shot, double[] camNe,
+                                                             double alt, double roll, double pitch,
+                                                             double yaw, double gpitch, double gyaw) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        // 构造 CameraShot + CameraPose
+        CameraShot camShot = toCameraShot(shot);
+        CameraPose pose = new CameraPose(roll, pitch, yaw, gpitch, gyaw);
+        // 调 VisionSource.detect()，异常降级到 ProjectionVisionSource（异常 5.1.2）
+        List<VisionDetection> detections;
+        try {
+            detections = visionSource != null
+                    ? visionSource.detect(camShot, pose)
+                    : fallback.detect(camShot, pose);
+        } catch (Exception e) {
+            log.warn("VisionSource.detect failed, falling back to ProjectionVisionSource: {}",
+                    e.getMessage());
+            detections = fallback.detect(camShot, pose);
+        }
+        // 经 locateTarget 定位（既有 GeolocationSolver）+ 附加 confidence/trackId
+        for (VisionDetection d : detections) {
+            Map<String, Object> loc = locateTarget(d.u(), d.v(), d.kind(),
+                    IMAGE_W, IMAGE_H, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+            if (loc == null) {
+                continue;
+            }
+            loc.put("confidence", d.confidence());
+            loc.put("trackId", d.trackId());
+            // 评分：基于 trackId（若关联真值 id）或最近真值
+            double errM = d.trackId() >= 0
+                    ? truthErrorM(d.trackId(), (double) loc.get("lat"), (double) loc.get("lon"))
+                    : nearestTruthErrorM((double) loc.get("lat"), (double) loc.get("lon"));
+            loc.put("id", d.trackId());
+            loc.put("truthErrorM", Math.round(errM * 10) / 10.0);
+            out.add(loc);
+        }
+        return out;
+    }
+
+    /** 从 drone-sim 真值 HTTP 的 Shot JSON 构造 CameraShot（适配层）。 */
+    private CameraShot toCameraShot(JsonNode shot) {
+        List<CameraShot.ProjectedTarget> targets = new ArrayList<>();
+        for (JsonNode t : shot.path("targets")) {
+            targets.add(new CameraShot.ProjectedTarget(
+                    t.path("id").asInt(),
+                    t.path("kind").asText("unknown"),
+                    t.path("u").asDouble(),
+                    t.path("v").asDouble(),
+                    t.path("lat").asDouble(),
+                    t.path("lon").asDouble()));
+        }
+        return new CameraShot(
+                shot.path("frameSeq").asLong(),
+                System.currentTimeMillis(),
+                shot.path("lat").asDouble(),
+                shot.path("lon").asDouble(),
+                shot.path("altM").asDouble(),
+                shot.path("droneRollDeg").asDouble(),
+                shot.path("dronePitchDeg").asDouble(),
+                shot.path("droneYawDeg").asDouble(),
+                shot.path("gimbalPitchDeg").asDouble(),
+                shot.path("gimbalYawDeg").asDouble(),
+                targets);
     }
 
     /** One pixel/truth detection -> geolocated view (null when unsolvable). */

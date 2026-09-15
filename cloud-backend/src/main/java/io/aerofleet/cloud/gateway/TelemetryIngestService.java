@@ -1,13 +1,18 @@
 package io.aerofleet.cloud.gateway;
 
+import io.aerofleet.cloud.api.HardwareDataController;
 import io.aerofleet.cloud.telemetry.AlertBus;
 import io.aerofleet.cloud.telemetry.PendingAcks;
+import io.aerofleet.cloud.vision.RadarController;
+import io.aerofleet.cloud.vision.RotorController;
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.messages.Attitude;
 import io.aerofleet.mavlink.messages.CommandAck;
 import io.aerofleet.mavlink.messages.GlobalPositionInt;
 import io.aerofleet.mavlink.messages.GpsRawInt;
 import io.aerofleet.mavlink.messages.Heartbeat;
+import io.aerofleet.mavlink.messages.ImuDataMsg;
+import io.aerofleet.mavlink.messages.LidarDataMsg;
 import io.aerofleet.mavlink.messages.MavlinkMessage;
 import io.aerofleet.mavlink.messages.MissionAckMsg;
 import io.aerofleet.mavlink.messages.MissionCountMsg;
@@ -15,13 +20,19 @@ import io.aerofleet.mavlink.messages.MissionCurrent;
 import io.aerofleet.mavlink.messages.MissionItemInt;
 import io.aerofleet.mavlink.messages.MissionRequest;
 import io.aerofleet.mavlink.messages.MissionRequestInt;
+import io.aerofleet.mavlink.messages.RadarScanMsg;
+import io.aerofleet.mavlink.messages.RadarTargetMsg;
 import io.aerofleet.mavlink.messages.RadioStatus;
+import io.aerofleet.mavlink.messages.RotorTelemetryMsg;
 import io.aerofleet.mavlink.messages.Statustext;
 import io.aerofleet.mavlink.messages.SysStatus;
 import io.aerofleet.mavlink.messages.VfrHud;
+import io.aerofleet.mavlink.messages.EnvironmentAlert;
+import io.aerofleet.mavlink.messages.EnvironmentStatus;
 import io.aerofleet.mavlink.enums.MavEnums;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import static io.aerofleet.mavlink.enums.MavEnums.MAV_MODE_FLAG_SAFETY_ARMED;
@@ -39,11 +50,19 @@ public class TelemetryIngestService {
     private final DeviceRegistry registry;
     private final PendingAcks pendings;
     private final AlertBus alerts;
+    private final RadarController radarController;
+    private final RotorController rotorController;
+    private final HardwareDataController hardwareDataController;
 
-    public TelemetryIngestService(DeviceRegistry registry, PendingAcks pendings, AlertBus alerts) {
+    public TelemetryIngestService(DeviceRegistry registry, PendingAcks pendings, AlertBus alerts,
+                                  @Lazy RadarController radarController, @Lazy RotorController rotorController,
+                                  @Lazy HardwareDataController hardwareDataController) {
         this.registry = registry;
         this.pendings = pendings;
         this.alerts = alerts;
+        this.radarController = radarController;
+        this.rotorController = rotorController;
+        this.hardwareDataController = hardwareDataController;
     }
 
     /** Called by the UDP transport for every CRC-valid frame. Never throws. */
@@ -71,6 +90,16 @@ public class TelemetryIngestService {
                 // Mission-download direction: the drone replying to our pull.
                 case MissionCountMsg.ID -> pendings.offer(MissionCountMsg.ID, msg, sysid);
                 case MissionItemInt.ID -> pendings.offer(MissionItemInt.ID, msg, sysid);
+                // M0b 环境气象消息（FR-23/24）：环境告警接入 AlertBus，环境状态更新视图
+                case EnvironmentAlert.ID -> onEnvironmentAlert(sysid, (EnvironmentAlert) msg);
+                case EnvironmentStatus.ID -> onEnvironmentStatus(sysid, (EnvironmentStatus) msg);
+                // M4 硬件抽象遥测路由（msgId 437-441，FR-18~FR-22）：
+                // 解码后分发至对应 controller 回调，驱动雷达状态/目标缓存、旋翼遥测、LiDAR/IMU 缓存。
+                case RadarScanMsg.ID -> radarController.onRadarScan((RadarScanMsg) msg);
+                case RadarTargetMsg.ID -> radarController.onRadarTarget((RadarTargetMsg) msg);
+                case RotorTelemetryMsg.ID -> rotorController.onRotorTelemetry((RotorTelemetryMsg) msg);
+                case LidarDataMsg.ID -> hardwareDataController.onLidarData((LidarDataMsg) msg);
+                case ImuDataMsg.ID -> hardwareDataController.onImuData((ImuDataMsg) msg);
                 default -> { /* SYSTEM_TIME / HOME_POSITION etc.: not needed yet */ }
             }
         } catch (RuntimeException e) {
@@ -205,5 +234,33 @@ public class TelemetryIngestService {
         s.alerts.add(entry);
         alerts.publish(sysid, entry);
         log.info("STATUSTEXT sysid={} sev={} text={}", sysid, t.severity, t.text);
+    }
+
+    /**
+     * M0b 环境告警接入（FR-23）：结构化告警直接发布到 AlertBus，
+     * 不依赖 STATUSTEXT 映射（EnvironmentAlert 已含 type/severity/value/threshold/text）。
+     */
+    private void onEnvironmentAlert(int sysid, EnvironmentAlert msg) {
+        DroneSnapshot s = registry.registerIfAbsent(sysid);
+        AlertEntry entry = new AlertEntry(msg.severity, msg.text, System.currentTimeMillis());
+        s.alerts.add(entry);
+        alerts.publish(sysid, entry);
+        log.info("ENV_ALERT sysid={} type={} sev={} text={}", sysid, msg.alertType, msg.severity, msg.text);
+    }
+
+    /**
+     * M0b 环境状态视图更新（FR-24）：更新 DroneSnapshot 环境字段。
+     * 单位还原：temperature c°C→°C / windSpeed cm/s→m/s / windDirection cdeg→deg / gust cm/s→m/s。
+     */
+    private void onEnvironmentStatus(int sysid, EnvironmentStatus msg) {
+        DroneSnapshot s = registry.registerIfAbsent(sysid);
+        s.envTemperature = msg.temperature / 100.0;
+        s.envHumidity = msg.humidity;
+        s.envWindSpeed = msg.windSpeed / 100.0;
+        s.envWindDirection = msg.windDirection / 100.0;
+        s.envGust = msg.gust / 100.0;
+        s.envWeather = msg.weather;
+        s.envVisibility = msg.visibility;
+        s.envRainRate = msg.rainRate;
     }
 }

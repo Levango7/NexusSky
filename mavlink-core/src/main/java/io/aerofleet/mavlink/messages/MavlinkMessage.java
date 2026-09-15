@@ -72,6 +72,44 @@ public abstract class MavlinkMessage {
                 return HomePosition.decode(frame);
             case Statustext.ID:
                 return Statustext.decode(frame);
+            case LedControlMsg.ID:
+                return LedControlMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M0b 环境气象）----
+            case EnvironmentStatus.ID:
+                return EnvironmentStatus.decode(frame);
+            case EnvironmentAlert.ID:
+                return EnvironmentAlert.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M2 喷洒物流，msgId 423-426，FR-26~FR-29）----
+            case SprayStatus.ID:
+                return SprayStatus.decode(frame);
+            case SprayCommand.ID:
+                return SprayCommand.decode(frame);
+            case GripperCommand.ID:
+                return GripperCommand.decode(frame);
+            case PayloadStatus.ID:
+                return PayloadStatus.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M3 感知成像增强，msgId 430-434）----
+            case ObstacleReportMsg.ID:
+                return ObstacleReportMsg.decode(frame);
+            case MultispectralDataMsg.ID:
+                return MultispectralDataMsg.decode(frame);
+            case ThermalDataMsg.ID:
+                return ThermalDataMsg.decode(frame);
+            case DepthDataMsg.ID:
+                return DepthDataMsg.decode(frame);
+            case VisionDetectionMsg.ID:
+                return VisionDetectionMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M4 硬件抽象，msgId 437-441）----
+            case RadarScanMsg.ID:
+                return RadarScanMsg.decode(frame);
+            case RadarTargetMsg.ID:
+                return RadarTargetMsg.decode(frame);
+            case RotorTelemetryMsg.ID:
+                return RotorTelemetryMsg.decode(frame);
+            case LidarDataMsg.ID:
+                return LidarDataMsg.decode(frame);
+            case ImuDataMsg.ID:
+                return ImuDataMsg.decode(frame);
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }

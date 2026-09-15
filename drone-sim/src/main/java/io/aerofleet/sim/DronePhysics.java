@@ -44,6 +44,12 @@ public final class DronePhysics {
     private double airborneSeconds;
     /** Mode-weighted energy seconds (E4): hover/climb cost more, drift drains battery via batteryVoltage(). */
     private double drainSeconds;
+    /**
+     * 温度影响电池能耗的乘性因子（FR-11，M0b 环境气象）。
+     * 默认 1.0（常温行为不变，DFX 4.5）；由 {@link EnvironmentModel#tempDrainFactor()} 注入。
+     * T < 5°C → 1.3（低温电池内阻增大）；T > 40°C → 1.15（高温散热负荷）；常温 → 1.0。
+     */
+    private double tempDrainFactor = 1.0;
 
     /** Energy multipliers: cruise=1.0 baseline, hover/climb above, descent below. */
     private static final double HOVER_DRAIN = 1.3;
@@ -210,7 +216,7 @@ public final class DronePhysics {
         // climbing costs the most, descent is cheap (partial autorotation).
         if (alt > 0.05 || groundSpeed > 0.1 || vz != 0) {
             airborneSeconds += dt;
-            drainSeconds += dt * drainFactor();
+            drainSeconds += dt * drainFactor() * tempDrainFactor;
         }
 
         // Derived speeds from displacement difference.
@@ -260,6 +266,16 @@ public final class DronePhysics {
     /** Energy-seconds consumed by a photo (camera/gimbal/storage load). */
     public void drainForPhoto() {
         drainSeconds += PHOTO_ENERGY_SEC;
+    }
+
+    /**
+     * 设置温度影响电池能耗的乘性因子（FR-11，M0b 环境气象）。
+     * 由 {@link EnvironmentModel#tempDrainFactor()} 在 tick 前注入；默认 1.0 常温不变（FR-13/DFX 4.5）。
+     *
+     * @param factor 温度因子（1.0=常温基线，>1=能耗增加）
+     */
+    public void setTempDrainFactor(double factor) {
+        this.tempDrainFactor = factor;
     }
 
     private static final double G = 9.81;

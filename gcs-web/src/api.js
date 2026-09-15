@@ -71,6 +71,53 @@ export const api = {
     const qs = new URLSearchParams(query).toString()
     return jsonFetch(`${BASE}/flightlog${qs ? '?' + qs : ''}`)
   },
+
+  // ---- Formation (编队表演 M1) ----
+  // 创建编队：members=sysid 数组 + 队形参数 + 参考点经纬高
+  createFormation: (payload) =>
+    jsonFetch(`${BASE}/formation/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 查询单个编队状态
+  getFormation: (id) => jsonFetch(`${BASE}/formation/${id}`),
+
+  // 编队命令（TAKEOFF/RTL/DISSOLVE 等；alt 仅 TAKEOFF 用）
+  commandFormation: (id, type, alt) =>
+    jsonFetch(`${BASE}/formation/${id}/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, alt }),
+    }),
+
+  // 队形平滑变换：newShape + 插值步数
+  transitionFormation: (id, newShape, steps) =>
+    jsonFetch(`${BASE}/formation/${id}/transition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newShape, steps }),
+    }),
+
+  // 灯光控制：on/pattern/color/brightness/freq/sync
+  lightsFormation: (id, payload) =>
+    jsonFetch(`${BASE}/formation/${id}/lights`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 查询编队灯光状态
+  getLights: (id) => jsonFetch(`${BASE}/formation/${id}/lights`),
+
+  // 移除单机并重整队形
+  removeMember: (id, sysid) =>
+    jsonFetch(`${BASE}/formation/${id}/members/${sysid}`, { method: 'DELETE' }),
+
+  // 解散编队（在飞成员 RTL 后置 DISSOLVED）
+  dissolveFormation: (id) =>
+    jsonFetch(`${BASE}/formation/${id}/dissolve`, { method: 'POST' }),
 }
 
 export const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${
