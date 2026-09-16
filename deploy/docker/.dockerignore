@@ -1,0 +1,29 @@
+# NexusSky Docker 构建上下文忽略清单
+# 减小上下文体积、避免缓存失效与敏感文件入镜像
+
+# Git / CI
+.git
+.github
+.codeartsdoer
+
+# 构建产物（容器内重新构建）
+**/target
+gcs-web/node_modules
+gcs-web/dist
+
+# 日志与飞行记录
+flight-logs
+**/*.log
+
+# IDE
+.idea
+.vscode
+**/*.iml
+
+# 本部署目录自身无需进上下文（Dockerfile 由 -f 指定）
+deploy
+
+# 文档
+docs
+README.md
+ROADMAP.md

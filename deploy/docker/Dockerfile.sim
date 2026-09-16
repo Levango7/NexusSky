@@ -1,0 +1,37 @@
+# NexusSky drone-sim 模拟器镜像（多阶段构建）
+# 构建：docker build -f deploy/docker/Dockerfile.sim -t nexussky/drone-sim:0.1.0 .
+# 上下文应为项目根目录。
+#
+# drone-sim 是 maven-shade 打包的可执行 jar（mainClass: io.aerofleet.sim.DroneSimMain）。
+# 与 cloud-backend 通过 UDP MAVLink 通信（cloud-backend 主动发现 drone-sim 的 HEARTBEAT），
+# 无需 --cloud-host/--cloud-port 参数；运行时仅指定 --sysid 与 --port 即可。
+
+# ===== 阶段 1：Maven 构建 =====
+FROM eclipse-temurin:17-jdk AS builder
+WORKDIR /build
+
+COPY pom.xml ./
+COPY mavlink-core/pom.xml ./mavlink-core/pom.xml
+COPY drone-sim/pom.xml ./drone-sim/pom.xml
+COPY link-sim/pom.xml ./link-sim/pom.xml
+
+COPY mavlink-core/src ./mavlink-core/src
+COPY drone-sim/src ./drone-sim/src
+COPY link-sim/src ./link-sim/src
+
+# drone-sim 依赖 mavlink-core；link-sim 不被 drone-sim 依赖，但 -am 会按需构建
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -q -pl drone-sim -am package -DskipTests
+
+# ===== 阶段 2：JRE 运行时 =====
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+
+COPY --from=builder /build/drone-sim/target/*.jar app.jar
+
+# UDP MAVLink 端口（默认 14540，与 cloud-backend 的 aerofleet.drone-port 对齐）
+EXPOSE 14540/udp
+
+ENV JAVA_OPTS="-XX:+UseG1GC -XX:MaxRAMPercentage=75"
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

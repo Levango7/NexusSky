@@ -1,0 +1,77 @@
+# NexusSky Ingress
+# 路由规则：
+#   /    -> gcs-web      （前端静态 + SPA）
+#   /api -> cloud-backend（REST API）
+#   /ws  -> cloud-backend（WebSocket，需 annotation 保持升级连接）
+#   /actuator -> cloud-backend（健康/指标，生产可加访问控制）
+# 用法：kubectl apply -f deploy/k8s/ingress.yaml -n nexussky
+# 前置：集群需安装 Ingress Controller（nginx-ingress / traefik 等）
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexussky-ingress
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+  annotations:
+    # nginx-ingress：WebSocket 自动升级
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # 透传 Upgrade/Connection 头以支持 WebSocket
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: nexussky.local
+      http:
+        paths:
+          # REST API
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: 8080
+          # OpenAPI 文档
+          - path: /v3/api-docs
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: 8080
+          - path: /swagger-ui
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: 8080
+          # Actuator（健康/指标）
+          - path: /actuator
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: 8080
+          # WebSocket 实时遥测
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: 8080
+          # 前端静态（兜底）
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gcs-web
+                port:
+                  number: 80

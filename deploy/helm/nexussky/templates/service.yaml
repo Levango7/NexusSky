@@ -1,0 +1,67 @@
+# NexusSky Services：cloud-backend + drone-sim + gcs-web
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloud-backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: cloud-backend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: cloud-backend
+  ports:
+    - name: http
+      port: {{ .Values.cloudBackend.port }}
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: drone-sim
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: drone-sim
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: drone-sim
+  ports:
+    - name: mavlink
+      port: {{ .Values.droneSim.port }}
+      targetPort: mavlink
+      protocol: UDP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gcs-web
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: gcs-web
+spec:
+  type: {{ .Values.gcsWeb.serviceType }}
+  selector:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: gcs-web
+  ports:
+    - name: http
+      port: {{ .Values.gcsWeb.port }}
+      targetPort: http
+      {{- if and (eq .Values.gcsWeb.serviceType "NodePort") .Values.gcsWeb.nodePort }}
+      nodePort: {{ .Values.gcsWeb.nodePort }}
+      {{- end }}
+      protocol: TCP

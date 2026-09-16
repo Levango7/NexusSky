@@ -405,3 +405,214 @@ body {
 .bad-text { color: #ff6e6e; font-size: 11px; }
 .small { font-size: 10px; }
 .dim { color: var(--dim); }
+/* ============ 实时遥测曲线（TelemetryCharts） ============ */
+.tcharts-panel .panel-body { padding-bottom: 12px; }
+.tcharts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.tchart-card {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px 6px;
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
+}
+.tchart-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
+}
+.tchart-title { font-size: 10px; color: var(--dim); letter-spacing: 1.5px; text-transform: uppercase; }
+.tchart-val { font-size: 14px; font-weight: 600; }
+.tchart-unit { font-size: 9.5px; color: var(--dim); margin-left: 3px; font-weight: 400; }
+.tchart-svg {
+  width: 100%; height: 56px; display: block;
+  filter: drop-shadow(0 0 4px rgba(0, 212, 255, .12));
+}
+.compass-card { grid-column: span 2; align-items: center; }
+.compass-svg {
+  width: 120px; height: 120px; display: block;
+  filter: drop-shadow(0 0 6px rgba(0, 212, 255, .18));
+}
+
+/* ============ 仪表盘汇总面板（DashboardPanel） ============ */
+.dashboard-panel .panel-body { padding: 0 14px 14px; }
+
+.db-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.db-sum-cell {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: center;
+}
+.db-sum-cell label {
+  display: block; font-size: 9.5px; color: var(--dim);
+  letter-spacing: 1.2px; margin-bottom: 3px; text-transform: uppercase;
+}
+.db-sum-cell b { font-family: var(--mono); font-size: 17px; font-weight: 600; }
+
+.db-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.db-card {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color .15s, transform .1s, box-shadow .2s;
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 0;
+}
+.db-card:hover {
+  border-color: rgba(0, 212, 255, .5);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .35), 0 0 0 1px rgba(0, 212, 255, .2);
+}
+.db-card:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.db-card.online { border-left: 3px solid var(--ok); }
+.db-card.offline { border-left: 3px solid var(--dim-2); opacity: .82; }
+
+.db-card-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.db-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+}
+.db-dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.db-dot.off { background: var(--dim-2); }
+.db-name { font-weight: 700; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-sysid { font-size: 10.5px; color: var(--dim); }
+.db-mode { font-size: 10px; padding: 2px 8px; }
+
+.db-card-body { display: flex; flex-direction: column; gap: 5px; }
+.db-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px;
+}
+.db-row label { font-size: 10px; color: var(--dim); letter-spacing: .8px; width: 36px; flex: none; }
+.db-row b { font-weight: 600; }
+
+.db-batt-bar {
+  flex: 1; height: 6px; border-radius: 3px;
+  background: var(--line); overflow: hidden;
+}
+.db-batt-fill { height: 100%; border-radius: 3px; transition: width .3s ease, background .3s; }
+
+.db-hdg { display: inline-flex; align-items: center; gap: 4px; }
+.db-gps { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
+.db-gps.ok { color: var(--ok); }
+.db-gps.bad { color: var(--crit); }
+.db-gps .dotp { width: 6px; height: 6px; }
+
+/* ============ 移动端响应式适配（@media max-width: 768px） ============ */
+@media (max-width: 768px) {
+  /* 顶栏：垂直排列，view-tabs 横向滚动 */
+  .topbar {
+    height: auto;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .topbar-center {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+  .topbar-right { justify-content: center; }
+  .brand { justify-content: center; }
+  .view-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+    flex-wrap: nowrap !important;
+    padding-bottom: 4px;
+  }
+  .view-tabs::-webkit-scrollbar { height: 4px; }
+  .view-tabs::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 2px; }
+  /* 触摸友好：按钮最小 44px 触摸目标 */
+  .view-tabs .btn {
+    min-height: 36px;
+    padding: 8px 14px !important;
+    font-size: 12px !important;
+    white-space: nowrap;
+  }
+  .btn { min-height: 44px; }
+
+  /* 主体：单列布局，隐藏左右侧栏（可由 JS 改为抽屉，此处默认隐藏） */
+  .gcs-body {
+    flex-direction: column;
+  }
+  .rail.left, .rail.right {
+    display: none;
+  }
+  .rail.left.mobile-open, .rail.right.mobile-open {
+    display: flex;
+    position: fixed;
+    top: 0; bottom: 0;
+    width: 86%;
+    max-width: 320px;
+    z-index: 30;
+    box-shadow: 0 0 24px rgba(0, 0, 0, .6);
+  }
+  .rail.left.mobile-open { left: 0; border-right: 1px solid var(--line); }
+  .rail.right.mobile-open { right: 0; border-left: 1px solid var(--line); }
+
+  /* stage 占满宽度 */
+  .stage { width: 100%; flex: 1 1 auto; min-height: 50vh; }
+  .stage-strip { flex-wrap: wrap; gap: 6px; font-size: 11px; }
+  .stage-strip span + span { border-left: none; padding-left: 6px; }
+
+  /* 卡片网格：手机 1 列 */
+  .db-grid {
+    grid-template-columns: 1fr;
+  }
+  .db-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* 遥测曲线：手机单列 */
+  .tcharts-grid {
+    grid-template-columns: 1fr;
+  }
+  .compass-card { grid-column: span 1; }
+
+  /* HUD 网格在窄屏下 2 列 */
+  .hud-hero { grid-template-columns: repeat(2, 1fr); }
+
+  /* 命令网格 2 列 */
+  .cmd-grid { grid-template-columns: 1fr 1fr; }
+  .cmd-grid .btn.tall { grid-column: span 2; }
+
+  /* body 不再隐藏溢出（允许纵向滚动） */
+  body { overflow: auto; }
+  html, body, #root { height: auto; min-height: 100%; }
+  .gcs-root { height: auto; min-height: 100vh; }
+}
+
+/* 平板断点：2 列卡片网格 */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .db-grid { grid-template-columns: repeat(2, 1fr); }
+  .rail.left, .rail.right { width: 260px; }
+}
+
+/* 触摸设备：增大点击区域 */
+@media (hover: none) and (pointer: coarse) {
+  .btn, .drone-item, .db-card { min-height: 44px; }
+  .drone-item { padding: 12px; }
+  .db-card { padding: 12px 14px; }
+}

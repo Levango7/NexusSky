@@ -1,0 +1,14 @@
+apiVersion: v2
+name: nexussky
+description: NexusSky UAS Flight Control System - 无人机飞控系统（cloud-backend + drone-sim + gcs-web）
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - uas
+  - drone
+  - mavlink
+  - flight-control
+  - nexussky
+maintainers:
+  - name: NexusSky Team

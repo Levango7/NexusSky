@@ -1,0 +1,154 @@
+# NexusSky Deployments：cloud-backend + drone-sim + gcs-web
+# 健康检查端点统一 /actuator/health（cloud-backend）
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloud-backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: cloud-backend
+spec:
+  replicas: {{ .Values.cloudBackend.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: cloud-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexussky
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: cloud-backend
+    spec:
+      containers:
+        - name: cloud-backend
+          image: "{{ .Values.imageRegistry }}{{ .Values.cloudBackend.image }}:{{ .Values.imageTag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.cloudBackend.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: nexussky-config
+            - secretRef:
+                name: nexussky-secret
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.cloudBackend.healthPath }}
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.cloudBackend.healthPath }}
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: {{ .Values.cloudBackend.healthPath }}
+              port: http
+            periodSeconds: 10
+            failureThreshold: 12
+          resources:
+            {{- toYaml .Values.cloudBackend.resources | nindent 12 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drone-sim
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: drone-sim
+spec:
+  replicas: {{ .Values.droneSim.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: drone-sim
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexussky
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: drone-sim
+    spec:
+      containers:
+        - name: drone-sim
+          image: "{{ .Values.imageRegistry }}{{ .Values.droneSim.image }}:{{ .Values.imageTag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["java", "-jar", "app.jar", "--sysid={{ .Values.droneSim.sysid }}", "--port={{ .Values.droneSim.port }}"]
+          ports:
+            - name: mavlink
+              containerPort: {{ .Values.droneSim.port }}
+              protocol: UDP
+          resources:
+            {{- toYaml .Values.droneSim.resources | nindent 12 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcs-web
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: gcs-web
+spec:
+  replicas: {{ .Values.gcsWeb.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: gcs-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexussky
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: gcs-web
+    spec:
+      containers:
+        - name: gcs-web
+          image: "{{ .Values.imageRegistry }}{{ .Values.gcsWeb.image }}:{{ .Values.imageTag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.gcsWeb.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.gcsWeb.resources | nindent 12 }}

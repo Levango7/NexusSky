@@ -1,0 +1,19 @@
+NexusSky 已部署！
+
+{{- if .Values.ingress.enabled }}
+前端访问：http://{{ .Values.ingress.host }}
+{{- else if eq .Values.gcsWeb.serviceType "NodePort" }}
+前端访问：http://<任意 Node IP>:{{ .Values.gcsWeb.nodePort }}
+{{- end }}
+
+后端 API：http://{{ .Values.ingress.host }}/api
+Swagger UI：http://{{ .Values.ingress.host }}/swagger-ui.html
+健康检查：http://{{ .Values.ingress.host }}/actuator/health
+
+验证：
+  kubectl -n {{ .Values.namespace }} get pods
+  kubectl -n {{ .Values.namespace }} rollout status deployment/cloud-backend
+
+⚠️ 安全提醒：
+  - 若 security.jwtSecret 仍为占位符，请立即用 --set security.jwtSecret=... 覆盖
+  - 若 database.password 仍为占位符，请立即用 --set database.password=... 覆盖

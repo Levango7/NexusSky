@@ -1,0 +1,30 @@
+# NexusSky gcs-web 前端镜像（多阶段构建）
+# 构建：docker build -f deploy/docker/Dockerfile.web -t nexussky/gcs-web:0.1.0 .
+# 上下文应为项目根目录。
+#
+# Vite 构建产物默认输出到 gcs-web/dist，由 Nginx 提供静态服务 + API/WS 反代。
+
+# ===== 阶段 1：Node 构建 =====
+FROM node:20-alpine AS builder
+WORKDIR /build
+
+# 先拷 lockfile 利用层缓存
+COPY gcs-web/package.json gcs-web/package-lock.json* ./
+
+# npm ci 要求 lockfile 存在且与 package.json 一致；否则回退 npm install
+RUN npm ci || npm install
+
+COPY gcs-web ./
+RUN npm run build
+
+# ===== 阶段 2：Nginx 运行时 =====
+FROM nginx:alpine
+# 移除默认配置，使用项目自带 nginx.conf（反代 + SPA fallback）
+RUN rm -f /etc/nginx/conf.d/default.conf
+COPY --from=builder /build/dist /usr/share/nginx/html
+COPY deploy/docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+    CMD wget -qO- http://localhost/ >/dev/null || exit 1

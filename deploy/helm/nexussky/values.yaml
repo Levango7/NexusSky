@@ -1,0 +1,81 @@
+# NexusSky Helm Chart 可配置参数
+# 用法：helm install nexussky deploy/helm/nexussky -n nexussky --create-namespace
+# 覆盖：helm install nexussky deploy/helm/nexussky -f my-values.yaml
+
+# 全局镜像仓库与 tag（不硬编码，便于 CI 注入）
+imageRegistry: ""
+imageTag: "0.1.0"
+imagePullPolicy: IfNotPresent
+
+# 命名空间
+namespace: nexussky
+
+# ---- cloud-backend ----
+cloudBackend:
+  replicaCount: 1
+  image: nexussky/cloud-backend
+  port: 8080
+  springProfile: prod
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  # 健康检查端点（统一 /actuator/health）
+  healthPath: /actuator/health
+
+# ---- drone-sim ----
+droneSim:
+  replicaCount: 1
+  image: nexussky/drone-sim
+  port: 14540
+  sysid: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---- gcs-web ----
+gcsWeb:
+  replicaCount: 1
+  image: nexussky/gcs-web
+  port: 80
+  serviceType: NodePort
+  nodePort: 30080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ---- 安全配置 ----
+security:
+  devMode: "false"
+  # JWT 密钥：生产必须覆盖（至少 32 字符）
+  jwtSecret: "REPLACE_WITH_STRONG_JWT_SECRET_AT_LEAST_32_CHARS"
+  jwtExpiry: "3600"
+  allowedOrigins: "http://nexussky.local,http://localhost:3000"
+  users: "admin:admin"
+
+# ---- 数据库（默认 H2 内存库，生产替换） ----
+database:
+  url: "jdbc:h2:mem:aerofleet"
+  driver: "org.h2.Driver"
+  username: "sa"
+  password: "REPLACE_WITH_DB_PASSWORD"
+  ddlAuto: "update"
+
+# ---- Ingress ----
+ingress:
+  enabled: true
+  className: nginx
+  host: nexussky.local
+  # WebSocket 长连接超时（秒）
+  wsTimeout: "3600"

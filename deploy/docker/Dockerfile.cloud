@@ -1,0 +1,51 @@
+# NexusSky cloud-backend 镜像（多阶段构建）
+# 构建：docker build -f deploy/docker/Dockerfile.cloud -t nexussky/cloud-backend:0.1.0 .
+# 上下文应为项目根目录（docker-compose.yml 已配置 context: ../..）
+#
+# 健康检查端点：/actuator/health
+# 来源：cloud-backend/src/main/resources/application.properties
+#   management.endpoints.web.exposure.include=health,info,metrics,prometheus
+# 所有 docker-compose / k8s probe / helm probe 统一引用该端点。
+
+# ===== 阶段 1：Maven 构建 =====
+FROM eclipse-temurin:17-jdk AS builder
+WORKDIR /build
+
+# 先拷 pom 与子模块 pom，利用层缓存加速依赖解析
+COPY pom.xml ./
+COPY mavlink-core/pom.xml ./mavlink-core/pom.xml
+COPY drone-sim/pom.xml ./drone-sim/pom.xml
+COPY link-sim/pom.xml ./link-sim/pom.xml
+COPY cloud-backend/pom.xml ./cloud-backend/pom.xml
+
+# 源码
+COPY mavlink-core/src ./mavlink-core/src
+COPY drone-sim/src ./drone-sim/src
+COPY link-sim/src ./link-sim/src
+COPY cloud-backend/src ./cloud-backend/src
+
+# -am 同时构建依赖模块（mavlink-core）；BuildKit 缓存挂载加速重复构建
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -q -pl cloud-backend -am package -DskipTests
+
+# ===== 阶段 2：JRE 运行时 =====
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+
+# curl 用于容器内 healthcheck（docker-compose 用 curl 探活）
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/cloud-backend/target/*.jar app.jar
+
+EXPOSE 8080
+
+# G1GC + 容器感知内存上限（75% RAM 留给堆，余给 metaspace/直接内存）
+ENV JAVA_OPTS="-XX:+UseG1GC -XX:MaxRAMPercentage=75"
+ENV SPRING_PROFILES_ACTIVE=default
+
+# spring-boot-starter-actuator 已在 cloud-backend/pom.xml 中，/actuator/health 默认可用
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
+    CMD curl -fsS http://localhost:8080/actuator/health || exit 1
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

@@ -1,0 +1,19 @@
+# NexusSky ConfigMap（非敏感配置）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexussky-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  SPRING_PROFILES_ACTIVE: {{ .Values.cloudBackend.springProfile | quote }}
+  AEROFLEET_SECURITY_DEV_MODE: {{ .Values.security.devMode | quote }}
+  AEROFLEET_SECURITY_ALLOWED_ORIGINS: {{ .Values.security.allowedOrigins | quote }}
+  AEROFLEET_SECURITY_JWT_EXPIRY: {{ .Values.security.jwtExpiry | quote }}
+  AEROFLEET_SECURITY_USERS: {{ .Values.security.users | quote }}
+  SPRING_DATASOURCE_URL: {{ .Values.database.url | quote }}
+  SPRING_DATASOURCE_DRIVER_CLASS_NAME: {{ .Values.database.driver | quote }}
+  SPRING_JPA_HIBERNATE_DDL_AUTO: {{ .Values.database.ddlAuto | quote }}
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"

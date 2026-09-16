@@ -1,0 +1,65 @@
+# NexusSky 生产容器化编排（多阶段构建镜像）
+# 用法：docker compose -f deploy/docker/docker-compose.yml up --build
+#
+# 与项目根 docker-compose.yml 的区别：
+#   - 根 compose 用 host 网络 + 挂载 jar（开发快迭代）
+#   - 本 compose 用多阶段构建镜像 + 桥接网络（生产可移植，K8s 前置验证）
+#
+# 健康检查端点统一为 /actuator/health
+# 来源：cloud-backend application.properties + 经验库
+#   2026-09-13-spring-boot-actuator-health-endpoint-smoke-test-mismatch
+#   2026-09-14-health-endpoint-unify-by-tech-stack
+
+version: "3.8"
+
+services:
+  # ===== 云端后端：Spring Boot REST + WebSocket + MAVLink 网关 =====
+  cloud-backend:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.cloud
+    image: nexussky/cloud-backend:0.1.0
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      # 关闭开发模式，启用 JWT 认证（application.properties: aerofleet.security.dev-mode）
+      - AEROFLEET_SECURITY_DEV_MODE=false
+      # 生产 JWT 密钥（至少 32 字符；正式环境应通过 Secret 注入，此处仅示例）
+      - AEROFLEET_SECURITY_JWT_SECRET=change-this-jwt-secret-in-production-min-32-chars
+      # CORS 允许前端来源
+      - AEROFLEET_SECURITY_ALLOWED_ORIGINS=http://localhost:3000
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    restart: unless-stopped
+
+  # ===== 无人机模拟器：MAVLink over UDP =====
+  # drone-sim 通过 UDP HEARTBEAT 被 cloud-backend 发现，无需 HTTP 连后端。
+  # --sysid 指定 MAVLink 系统 ID；--port 指定 UDP 绑定端口（默认 14540）。
+  drone-sim:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.sim
+    image: nexussky/drone-sim:0.1.0
+    command: ["java", "-jar", "app.jar", "--sysid=1", "--port=14540"]
+    depends_on:
+      cloud-backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===== Web 地面站：Nginx 静态 + 反代 =====
+  gcs-web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.web
+    image: nexussky/gcs-web:0.1.0
+    ports:
+      - "3000:80"
+    depends_on:
+      cloud-backend:
+        condition: service_healthy
+    restart: unless-stopped

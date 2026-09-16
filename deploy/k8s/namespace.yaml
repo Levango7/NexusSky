@@ -1,0 +1,9 @@
+# NexusSky Kubernetes 命名空间
+# 用法：kubectl apply -f deploy/k8s/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/part-of: nexussky

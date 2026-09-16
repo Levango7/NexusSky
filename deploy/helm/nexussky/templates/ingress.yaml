@@ -1,0 +1,65 @@
+{{- if .Values.ingress.enabled }}
+# NexusSky Ingress：/ -> gcs-web, /api + /ws + /actuator -> cloud-backend
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexussky-ingress
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.wsTimeout | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.wsTimeout | quote }}
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: {{ .Values.cloudBackend.port }}
+          - path: /v3/api-docs
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: {{ .Values.cloudBackend.port }}
+          - path: /swagger-ui
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: {{ .Values.cloudBackend.port }}
+          - path: /actuator
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: {{ .Values.cloudBackend.port }}
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: cloud-backend
+                port:
+                  number: {{ .Values.cloudBackend.port }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gcs-web
+                port:
+                  number: {{ .Values.gcsWeb.port }}
+{{- end }}

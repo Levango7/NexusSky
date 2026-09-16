@@ -14,6 +14,8 @@ import SatLinkPanel from './components/SatLinkPanel.jsx'
 import TerrainMapPanel from './components/TerrainMapPanel.jsx'
 import CellTowerPanel from './components/CellTowerPanel.jsx'
 import EmergencyOrchPanel from './components/EmergencyOrchPanel.jsx'
+import TelemetryCharts from './components/TelemetryCharts.jsx'
+import DashboardPanel from './components/DashboardPanel.jsx'
 import { api, wsUrl } from './api.js'
 
 function haversine(a, b) {
@@ -44,12 +46,13 @@ export default function App() {
   const [wsState, setWsState] = useState('connecting')
   const [apiOk, setApiOk] = useState(false)
   const [now, setNow] = useState(Date.now())
-  const [view, setView] = useState('control')               // 'control' | 'formation' | 'spray' | 'hardware' | 'mesh' | 'celltower'
+  const [view, setView] = useState('control')               // 'control' | 'dashboard' | 'formation' | 'spray' | 'hardware' | 'mesh' | 'celltower'
   const [formations, setFormations] = useState([])          // 编队列表（WebSocket 推送）
   const [meshTopology, setMeshTopology] = useState(null)    // mesh 拓扑（WebSocket 推送）
   const [satLinkData, setSatLinkData] = useState(null)      // sat-link 数据（WebSocket 推送）
   const [terrainData, setTerrainData] = useState(null)      // terrain 数据（WebSocket 推送）
   const [cellTowerData, setCellTowerData] = useState(null)  // celltower 数据（WebSocket 推送）
+  const [telemetryHistory, setTelemetryHistory] = useState([]) // 遥测历史数据点（最近 120 个）
   const wsRef = useRef(null)
 
   const selected = drones.find((d) => d.sysid === selectedSysid)
@@ -130,6 +133,21 @@ export default function App() {
           if (msg.sysid === selectedSysid) {
             setTelemetry((prev) => ({ ...(prev || {}), ...msg.data, sysid: msg.sysid }))
           }
+          // 追加遥测历史数据点（保留最近 120 个）
+          const d = msg.data || {}
+          setTelemetryHistory((prev) => {
+            const point = {
+              ts: Date.now(),
+              sysid: msg.sysid,
+              voltage: d.voltage,
+              battery: d.battery,
+              relativeAlt: d.relativeAlt,
+              groundspeed: d.groundspeed,
+              heading: d.heading,
+            }
+            const next = [...prev, point]
+            return next.length > 120 ? next.slice(next.length - 120) : next
+          })
         } else if (msg.type === 'alert') {
           setAlerts((prev) => [{ ...msg.data, ts: Date.now(), sysid: msg.sysid }, ...prev.slice(0, 49)])
         } else if (msg.type === 'formation') {
@@ -187,6 +205,13 @@ export default function App() {
 
         <div className="topbar-center">
           <div className="view-tabs" style={{ display: 'inline-flex', gap: 4, marginRight: 6 }}>
+            <button
+              className={`btn ${view === 'dashboard' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('dashboard')}
+            >
+              仪表盘
+            </button>
             <button
               className={`btn ${view === 'control' ? 'primary' : ''}`}
               style={{ padding: '4px 12px', fontSize: 11 }}
@@ -269,7 +294,17 @@ export default function App() {
         </div>
       </header>
 
-      {view === 'formation' ? (
+      {view === 'dashboard' ? (
+        <div className="gcs-body" style={{ display: 'block', overflow: 'auto' }}>
+          <DashboardPanel
+            drones={drones}
+            onSelect={(sysid) => {
+              setSelectedSysid(sysid)
+              setView('control')
+            }}
+          />
+        </div>
+      ) : view === 'formation' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <FormationPanel formations={formations} drones={drones} />
         </div>
@@ -374,6 +409,7 @@ export default function App() {
               return api.sendCommand(selectedSysid, type, alt)
             }}
           />
+          <TelemetryCharts telemetry={telemetry} history={telemetryHistory} />
           <AlertFeed alerts={alerts} />
         </aside>
       </div>

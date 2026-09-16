@@ -1,0 +1,63 @@
+# NexusSky drone-sim Deployment + Service
+# 无人机模拟器：MAVLink over UDP，通过 HEARTBEAT 被 cloud-backend 发现
+# 可扩展 replicas 模拟多机集群（每副本需不同 --sysid，见注释）
+# 用法：kubectl apply -f deploy/k8s/drone-sim.yaml -n nexussky
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drone-sim
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: drone-sim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/component: drone-sim
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexussky
+        app.kubernetes.io/component: drone-sim
+    spec:
+      containers:
+        - name: drone-sim
+          image: nexussky/drone-sim:0.1.0
+          imagePullPolicy: IfNotPresent
+          # drone-sim 不支持 --cloud-host；通过 UDP 被 cloud-backend 发现
+          # 多副本时需用 StatefulSet + 不同 --sysid，此处单副本用 --sysid=1
+          command: ["java", "-jar", "app.jar", "--sysid=1", "--port=14540"]
+          ports:
+            - name: mavlink
+              containerPort: 14540
+              protocol: UDP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: drone-sim
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: drone-sim
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: drone-sim
+  ports:
+    - name: mavlink
+      port: 14540
+      targetPort: mavlink
+      protocol: UDP
