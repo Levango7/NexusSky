@@ -95,6 +95,19 @@ public final class MavlinkMessageInfo {
         INFOS[465] = new Info(25, 249);   // EMERGENCY_MISSION_PLAN
         INFOS[466] = new Info(24, 250);   // COVERAGE_OPTIMIZATION
         INFOS[467] = new Info(50, 251);   // EMERGENCY_PRIORITY
+        // ---- NexusSky 自定义扩展消息（M10 多机协同任务分配，msgId 468-470）----
+        INFOS[468] = new Info(18, 252);   // TASK_ASSIGNMENT
+        INFOS[469] = new Info(12, 253);   // CONFLICT_ALERT
+        INFOS[470] = new Info(11, 254);   // TASK_STATUS
+        // ---- NexusSky 自定义扩展消息（M11 自主决策，msgId 471-472）----
+        INFOS[471] = new Info(15, 255);   // DECISION_EVENT
+        INFOS[472] = new Info(20, 256);   // ADAPTIVE_PATH
+        // ---- NexusSky 自定义扩展消息（M12 边缘计算与传感器融合，msgId 473-474）----
+        INFOS[473] = new Info(13, 257);   // EDGE_TASK_STATUS
+        INFOS[474] = new Info(24, 258);   // SENSOR_FUSION_DATA
+        // ---- NexusSky 自定义扩展消息（M13 数字孪生与轨迹预测，msgId 475-476）----
+        INFOS[475] = new Info(28, 259);   // TWIN_STATE_SYNC
+        INFOS[476] = new Info(20, 260);   // PREDICTION_RESULT
     }
 
     private MavlinkMessageInfo() {

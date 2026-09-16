@@ -48,7 +48,20 @@ import io.aerofleet.mavlink.messages.EnvironmentStatus;
 import io.aerofleet.mavlink.messages.EmergencyMissionPlanMsg;
 import io.aerofleet.mavlink.messages.CoverageOptimizationMsg;
 import io.aerofleet.mavlink.messages.EmergencyPriorityMsg;
+import io.aerofleet.mavlink.messages.TaskAssignmentMsg;
+import io.aerofleet.mavlink.messages.ConflictAlertMsg;
+import io.aerofleet.mavlink.messages.TaskStatusMsg;
+import io.aerofleet.mavlink.messages.DecisionEventMsg;
+import io.aerofleet.mavlink.messages.AdaptivePathMsg;
+import io.aerofleet.mavlink.messages.EdgeTaskStatusMsg;
+import io.aerofleet.mavlink.messages.SensorFusionDataMsg;
+import io.aerofleet.mavlink.messages.TwinStateSyncMsg;
+import io.aerofleet.mavlink.messages.PredictionResultMsg;
 import io.aerofleet.mavlink.enums.MavEnums;
+import io.aerofleet.cloud.api.TelemetryWebSocketHandler;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
@@ -77,6 +90,8 @@ public class TelemetryIngestService {
     private final TerrainMapService terrainMapService;
     private final CellTowerTopologyService cellTowerTopologyService;
     private final EmergencyOrchService emergencyOrchService;
+    private final TelemetryWebSocketHandler wsHandler;
+    private final ObjectMapper objectMapper;
 
     public TelemetryIngestService(DeviceRegistry registry, PendingAcks pendings, AlertBus alerts,
                                   @Lazy RadarController radarController, @Lazy RotorController rotorController,
@@ -85,7 +100,9 @@ public class TelemetryIngestService {
                                   @Lazy SatLinkMonitorService satLinkMonitorService,
                                   @Lazy TerrainMapService terrainMapService,
                                   @Lazy CellTowerTopologyService cellTowerTopologyService,
-                                  @Lazy EmergencyOrchService emergencyOrchService) {
+                                  @Lazy EmergencyOrchService emergencyOrchService,
+                                  @Lazy TelemetryWebSocketHandler wsHandler,
+                                  ObjectMapper objectMapper) {
         this.registry = registry;
         this.pendings = pendings;
         this.alerts = alerts;
@@ -97,6 +114,8 @@ public class TelemetryIngestService {
         this.terrainMapService = terrainMapService;
         this.cellTowerTopologyService = cellTowerTopologyService;
         this.emergencyOrchService = emergencyOrchService;
+        this.wsHandler = wsHandler;
+        this.objectMapper = objectMapper;
     }
 
     /** Called by the UDP transport for every CRC-valid frame. Never throws. */
@@ -158,6 +177,16 @@ public class TelemetryIngestService {
                 case EmergencyMissionPlanMsg.ID -> onEmergencyMissionPlan(sysid, (EmergencyMissionPlanMsg) msg);
                 case CoverageOptimizationMsg.ID -> onCoverageOptimization(sysid, (CoverageOptimizationMsg) msg);
                 case EmergencyPriorityMsg.ID -> onEmergencyPriority(sysid, (EmergencyPriorityMsg) msg);
+                // M10-M13 自定义扩展消息路由（msgId 468-476）：解码后转发至 WebSocket 供前端实时展示。
+                case TaskAssignmentMsg.ID -> forwardToWs(sysid, "task-assignment", msg);
+                case ConflictAlertMsg.ID -> forwardToWs(sysid, "conflict-alert", msg);
+                case TaskStatusMsg.ID -> forwardToWs(sysid, "task-status", msg);
+                case DecisionEventMsg.ID -> forwardToWs(sysid, "decision-event", msg);
+                case AdaptivePathMsg.ID -> forwardToWs(sysid, "adaptive-path", msg);
+                case EdgeTaskStatusMsg.ID -> forwardToWs(sysid, "edge-task-status", msg);
+                case SensorFusionDataMsg.ID -> forwardToWs(sysid, "sensor-fusion", msg);
+                case TwinStateSyncMsg.ID -> forwardToWs(sysid, "twin-state-sync", msg);
+                case PredictionResultMsg.ID -> forwardToWs(sysid, "prediction-result", msg);
                 default -> { /* SYSTEM_TIME / HOME_POSITION etc.: not needed yet */ }
             }
         } catch (RuntimeException e) {
@@ -369,5 +398,30 @@ public class TelemetryIngestService {
                 msg.preemptedTaskId, msg.reason);
         log.debug("EMERGENCY_PRIORITY sysid={} planId={} task={} pri={} action={}",
                 sysid, msg.planId, msg.taskId, msg.priority, msg.action);
+    }
+
+    /**
+     * M10-M13 自定义扩展消息 WebSocket 转发（msgId 468-476）。
+     * <p>
+     * 将解码后的消息以 JSON 帧广播到所有连接的 /ws/telemetry 客户端，供前端实时展示。
+     * 无 WS 连接时降级为日志输出，不阻塞 UDP 接收循环。
+     * <p>
+     * 帧格式：{"type":"&lt;type&gt;","sysid":N,"data":&lt;msg&gt;,"timestamp":T}
+     */
+    private void forwardToWs(int sysid, String type, MavlinkMessage msg) {
+        if (wsHandler == null || wsHandler.connectionCount() == 0) {
+            log.debug("WS forward (no clients): sysid={} type={}", sysid, type);
+            return;
+        }
+        try {
+            Map<String, Object> frame = new LinkedHashMap<>();
+            frame.put("type", type);
+            frame.put("sysid", sysid);
+            frame.put("data", msg);
+            frame.put("timestamp", System.currentTimeMillis());
+            wsHandler.broadcast(objectMapper.writeValueAsString(frame), objectMapper);
+        } catch (Exception e) {
+            log.warn("WS forward failed: sysid={} type={}: {}", sysid, type, e.getMessage());
+        }
     }
 }

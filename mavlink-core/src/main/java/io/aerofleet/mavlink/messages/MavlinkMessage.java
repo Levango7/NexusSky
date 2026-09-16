@@ -151,6 +151,28 @@ public abstract class MavlinkMessage {
                 return CoverageOptimizationMsg.decode(frame);
             case EmergencyPriorityMsg.ID:
                 return EmergencyPriorityMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M10 多机协同任务分配，msgId 468-470）----
+            case TaskAssignmentMsg.ID:
+                return TaskAssignmentMsg.decode(frame);
+            case ConflictAlertMsg.ID:
+                return ConflictAlertMsg.decode(frame);
+            case TaskStatusMsg.ID:
+                return TaskStatusMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M11 自主决策，msgId 471-472）----
+            case DecisionEventMsg.ID:
+                return DecisionEventMsg.decode(frame);
+            case AdaptivePathMsg.ID:
+                return AdaptivePathMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M12 边缘计算与传感器融合，msgId 473-474）----
+            case EdgeTaskStatusMsg.ID:
+                return EdgeTaskStatusMsg.decode(frame);
+            case SensorFusionDataMsg.ID:
+                return SensorFusionDataMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M13 数字孪生与轨迹预测，msgId 475-476）----
+            case TwinStateSyncMsg.ID:
+                return TwinStateSyncMsg.decode(frame);
+            case PredictionResultMsg.ID:
+                return PredictionResultMsg.decode(frame);
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }
