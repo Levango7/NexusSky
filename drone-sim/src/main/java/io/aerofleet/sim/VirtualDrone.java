@@ -103,6 +103,12 @@ public final class VirtualDrone implements AutoCloseable {
     /** 环境模型启用标志（config.envEnabled 的快照，避免 tickOnce 每次读 config）。 */
     private final boolean envEnabled;
     /**
+     * P2-2: 复用的风向量数组，避免 tickOnce 每 tick 分配 new double[2]。
+     * tickOnce 在 synchronized(this) 内由 tick 线程独占访问，无需额外同步。
+     */
+    private final double[] reusableScenarioWind = new double[2];
+    private final double[] reusableEnvWind = new double[2];
+    /**
      * M3 感知成像增强数据源（FR-04/FR-12/FR-14）：null 表示未注入，不产生感知上报（DFX 4.5）。
      * 由 setter 注入（供 e2e 脚本/配置注入），tickOnce 5Hz 分频调用 obstacleDetector.detect()。
      */
@@ -908,22 +914,25 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     private void tickOnce() throws IOException {
+        // P1-opt: 缓存一次时间戳，避免同一 tick 内多次 JNI 调用 System.currentTimeMillis()。
+        long nowMs = System.currentTimeMillis();
         double dt = TICK_MS / 1000.0;
-        double bootSec = (System.currentTimeMillis() - bootUnixMs) / 1000.0;
+        double bootSec = (nowMs - bootUnixMs) / 1000.0;
 
         // Fault injection: wind pushes the vehicle; link loss silences ALL
         // outbound MAVLink (telemetry black-hole, exactly like a lost radio).
-        double[] wind = scenario.windVector(bootSec);
-        if (wind[0] != 0 || wind[1] != 0) {
-            physics.applyWind(dt, wind[0], wind[1]);
+        // P2-2: 写入复用数组，避免每 tick 分配 new double[2]。
+        scenario.windVector(bootSec, reusableScenarioWind);
+        if (reusableScenarioWind[0] != 0 || reusableScenarioWind[1] != 0) {
+            physics.applyWind(dt, reusableScenarioWind[0], reusableScenarioWind[1]);
         }
 
         // M0b 环境气象注入（FR-08/09/11/23）：envModel 启用时叠加环境风 + 温度因子 + 告警双通道下传。
         // 与场景风独立叠加（applyWind 被调两次，残差泄漏 0.25 不变）；null 时跳过（DFX 4.5）。
         if (envModel != null && envEnabled) {
             envModel.evolve(dt);
-            double[] envWind = envModel.windVector();
-            physics.applyWind(dt, envWind[0], envWind[1]);
+            envModel.windVector(reusableEnvWind);
+            physics.applyWind(dt, reusableEnvWind[0], reusableEnvWind[1]);
             physics.setTempDrainFactor(envModel.tempDrainFactor());
             // 告警双通道下传（FR-23）：EnvironmentAlert 消息 + STATUSTEXT（pushStatus 复用）
             for (EnvAlert a : envModel.checkAlerts()) {
@@ -1014,14 +1023,14 @@ public final class VirtualDrone implements AutoCloseable {
                     (int) Math.round(physics.lon() * 1e7),
                     (int) Math.round(physics.alt() * 1000),
                     physics.batteryRemainingPct());
-            meshRouter.tick(System.currentTimeMillis());
+            meshRouter.tick(nowMs);
         }
 
         // M7 sat-relay 引擎 tick 驱动（FR-5.1 周期驱动）：
         // satRelayEnabled 时每个 tick 调 satRelayEngine.tick()，更新地面点位置供可见性计算。
         if (satRelayEnabled) {
             satRelayEngine.updateGroundPosition(physics.lat(), physics.lon());
-            satRelayEngine.tick(System.currentTimeMillis());
+            satRelayEngine.tick(nowMs);
         }
 
         // M6 移动基站载荷 tick 驱动（FR-CT-01 / FR-NFR-PERF-04）：
@@ -1033,9 +1042,9 @@ public final class VirtualDrone implements AutoCloseable {
                         (int) Math.round(physics.lat() * 1e7),
                         (int) Math.round(physics.lon() * 1e7),
                         (int) Math.round(physics.alt() * 1000));
-                cellTower.tick(System.currentTimeMillis());
+                cellTower.tick(nowMs);
                 // 1Hz 状态广播
-                long nowMs = System.currentTimeMillis();
+
                 if (nowMs - lastCellTowerStatusMs >= 1000) {
                     lastCellTowerStatusMs = nowMs;
                     sendCellTowerStatus();
@@ -1068,7 +1077,7 @@ public final class VirtualDrone implements AutoCloseable {
         // M9 应急任务编排引擎 tick 驱动（FR-01 周期驱动）：
         // orchEngine 启用时每个 tick 调 orchEngine.tick()，驱动持续服务阶段超时检查。
         if (orchEngine != null) {
-            orchEngine.tick(System.currentTimeMillis());
+            orchEngine.tick(nowMs);
         }
     }
 

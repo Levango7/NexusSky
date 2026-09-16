@@ -59,6 +59,14 @@ public class CoverageOptimizer {
     private int currentScenarioType;
 
     /**
+     * Haversine 距离缓存（optimize 作用域内有效）。
+     * <p>
+     * key 由量化后的 (lat1, lon1, lat2, lon2) 四元组通过质数乘法 hash 组合而成，
+     * 量化精度约 1m。每次 optimize 调用前清空，避免跨调用污染。
+     */
+    private final java.util.Map<Long, Double> distanceCache = new java.util.HashMap<>();
+
+    /**
      * 构造覆盖优化器。
      *
      * @param stepM           贪心网格步长（m），必须 &gt; 0
@@ -111,6 +119,9 @@ public class CoverageOptimizer {
 
         this.currentScenarioType = scenarioType;
 
+        // 清空距离缓存，避免跨 optimize 调用污染
+        distanceCache.clear();
+
         // 1. 贪心部署
         List<DroneDeployment> greedy = greedyDeploy(centerLat, centerLon, radius, drones);
 
@@ -162,12 +173,23 @@ public class CoverageOptimizer {
                     continue;
                 }
                 double[] pos = candidates.get(i);
+                double cosLatI = Math.cos(Math.toRadians(pos[0]));
+                double rThreshold = r * 1.5;
+                double rThresholdSq = rThreshold * rThreshold;
                 int gain = 0;
                 for (int j = 0; j < n; j++) {
                     if (covered[j]) {
                         continue;
                     }
-                    if (haversineM(pos[0], pos[1], candidates.get(j)[0], candidates.get(j)[1]) <= r) {
+                    double[] cj = candidates.get(j);
+                    // 快速平面距离估算（用于早期淘汰）
+                    double dLatM = (cj[0] - pos[0]) * M_PER_DEGREE_LAT;
+                    double dLonM = (cj[1] - pos[1]) * M_PER_DEGREE_LAT * cosLatI;
+                    double approxDistSq = dLatM * dLatM + dLonM * dLonM;
+                    if (approxDistSq > rThresholdSq) {
+                        continue;
+                    }
+                    if (haversineMeters(pos[0], pos[1], cj[0], cj[1]) <= r) {
                         gain++;
                     }
                 }
@@ -180,8 +202,22 @@ public class CoverageOptimizer {
             if (bestIdx >= 0) {
                 occupied[bestIdx] = true;
                 double[] pos = candidates.get(bestIdx);
+                double cosLatBest = Math.cos(Math.toRadians(pos[0]));
+                double rThreshold2 = r * 1.5;
+                double rThresholdSq2 = rThreshold2 * rThreshold2;
                 for (int j = 0; j < n; j++) {
-                    if (!covered[j] && haversineM(pos[0], pos[1], candidates.get(j)[0], candidates.get(j)[1]) <= r) {
+                    if (covered[j]) {
+                        continue;
+                    }
+                    double[] cj = candidates.get(j);
+                    // 快速平面距离估算（用于早期淘汰）
+                    double dLatM = (cj[0] - pos[0]) * M_PER_DEGREE_LAT;
+                    double dLonM = (cj[1] - pos[1]) * M_PER_DEGREE_LAT * cosLatBest;
+                    double approxDistSq = dLatM * dLatM + dLonM * dLonM;
+                    if (approxDistSq > rThresholdSq2) {
+                        continue;
+                    }
+                    if (haversineMeters(pos[0], pos[1], cj[0], cj[1]) <= r) {
                         covered[j] = true;
                     }
                 }
@@ -303,7 +339,7 @@ public class CoverageOptimizer {
                     if (component[j] != mainComp) {
                         continue;
                     }
-                    double dist = haversineM(result.get(i).targetLat, result.get(i).targetLon,
+                    double dist = haversineMeters(result.get(i).targetLat, result.get(i).targetLon,
                             result.get(j).targetLat, result.get(j).targetLon);
                     if (dist < minDist) {
                         minDist = dist;
@@ -359,7 +395,7 @@ public class CoverageOptimizer {
         for (double[] sample : samples) {
             for (DroneDeployment d : deployments) {
                 double r = coverageRadiusM(d.cellType, d.txPower);
-                if (r > 0 && haversineM(d.targetLat, d.targetLon, sample[0], sample[1]) <= r) {
+                if (r > 0 && haversineMeters(d.targetLat, d.targetLon, sample[0], sample[1]) <= r) {
                     covered++;
                     break;
                 }
@@ -398,6 +434,42 @@ public class CoverageOptimizer {
             connectedPairs += size * (size - 1) / 2;
         }
         return 100.0 * connectedPairs / totalPairs;
+    }
+
+    /**
+     * 带缓存的 Haversine 距离计算（m）。
+     * <p>
+     * 将坐标量化到约 1m 精度后组合成 long key，缓存距离结果。
+     * 在 optimize 一次调用内，同一对（量化后相同的）坐标只计算一次 Haversine，
+     * 后续命中缓存直接返回。key 采用质数乘法 hash 混淆，碰撞概率极低。
+     *
+     * @param lat1Deg 点1 纬度（度）
+     * @param lon1Deg 点1 经度（度）
+     * @param lat2Deg 点2 纬度（度）
+     * @param lon2Deg 点2 经度（度）
+     * @return 两点间球面距离（m）
+     */
+    private double haversineMeters(double lat1Deg, double lon1Deg, double lat2Deg, double lon2Deg) {
+        // 量化到 ~1m 精度，用质数乘法 hash 组合成 long key
+        long key = (long)(lat1Deg * 1000) * 73856093L
+                 ^ (long)(lon1Deg * 1000) * 19349663L
+                 ^ (long)(lat2Deg * 1000) * 83492791L
+                 ^ (long)(lon2Deg * 1000) * 1299689L;
+        Double cached = distanceCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+
+        double lat1 = Math.toRadians(lat1Deg);
+        double lat2 = Math.toRadians(lat2Deg);
+        double dLat = lat2 - lat1;
+        double dLon = Math.toRadians(lon2Deg - lon1Deg);
+        double a = Math.sin(dLat / 2.0) * Math.sin(dLat / 2.0)
+                + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2.0) * Math.sin(dLon / 2.0);
+        double c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+        double dist = EARTH_RADIUS_M * c;
+        distanceCache.put(key, dist);
+        return dist;
     }
 
     /**
@@ -465,7 +537,7 @@ public class CoverageOptimizer {
             for (int j = -n; j <= n; j++) {
                 double lat = centerLat + i * latStep;
                 double lon = centerLon + j * lonStep;
-                if (haversineM(centerLat, centerLon, lat, lon) <= radius) {
+                if (haversineMeters(centerLat, centerLon, lat, lon) <= radius) {
                     points.add(new double[]{lat, lon});
                 }
             }
@@ -553,7 +625,7 @@ public class CoverageOptimizer {
             if (component[j] != -1) {
                 continue;
             }
-            double dist = haversineM(deployments.get(node).targetLat, deployments.get(node).targetLon,
+            double dist = haversineMeters(deployments.get(node).targetLat, deployments.get(node).targetLon,
                     deployments.get(j).targetLat, deployments.get(j).targetLon);
             if (dist <= meshRangeM) {
                 dfs(j, comp, deployments, component);

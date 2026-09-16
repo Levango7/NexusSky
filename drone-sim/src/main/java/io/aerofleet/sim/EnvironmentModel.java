@@ -64,12 +64,20 @@ final class EnvironmentModel {
      * @return [windNorthTotal, windEastTotal] m/s
      */
     double[] windVector() {
+        double[] out = new double[2];
+        windVector(out);
+        return out;
+    }
+
+    /**
+     * P2-2: 写入预分配数组，避免每 tick 分配 new double[2]。
+     * 语义与 {@link #windVector()} 完全一致，结果写入 out[0]/out[1]。
+     */
+    void windVector(double[] out) {
         EnvironmentState s = current;
         double gustDirRad = rng.nextDouble() * 2 * Math.PI;
-        return new double[]{
-                s.windNorth() + s.gustNorth(gustDirRad),
-                s.windEast() + s.gustEast(gustDirRad)
-        };
+        out[0] = s.windNorth() + s.gustNorth(gustDirRad);
+        out[1] = s.windEast() + s.gustEast(gustDirRad);
     }
 
     /**

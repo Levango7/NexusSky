@@ -1,8 +1,5 @@
 package io.aerofleet.mavlink;
 
-import java.util.HashMap;
-import java.util.Map;
-
 /**
  * 常量表：各消息的长度与 CRC_EXTRA（对齐 MAVLink 官方 c_library_v2/common.xml 生成值）。
  * LEN 用官方定义的“完整长度”，消息发送按完整长度填满 payload；未知长度按 MIN_LEN 解析。
@@ -19,99 +16,101 @@ public final class MavlinkMessageInfo {
         }
     }
 
-    private static final Map<Integer, Info> INFOS = new HashMap<>();
+    // 数组直接索引替代 HashMap：msgId 范围 0-467，512 为 2 的幂预留扩展空间，
+    // 消除 hash 计算与 Integer 装箱开销。
+    private static final Info[] INFOS = new Info[512];
 
     static {
         // msgId -> (LEN, CRC_EXTRA)，数值提取自官方头文件（2026-09 版本）
-        INFOS.put(0,   new Info(9, 50));      // HEARTBEAT
-        INFOS.put(1,   new Info(43, 124));    // SYS_STATUS
-        INFOS.put(2,   new Info(12, 137));   // SYSTEM_TIME
-        INFOS.put(24,  new Info(52, 24));    // GPS_RAW_INT
-        INFOS.put(30,  new Info(28, 39));    // ATTITUDE
-        INFOS.put(33,  new Info(28, 104));   // GLOBAL_POSITION_INT
-        INFOS.put(74,  new Info(20, 20));    // VFR_HUD
-        INFOS.put(42,  new Info(18, 28));    // MISSION_CURRENT
-        INFOS.put(43,  new Info(5, 230));   // MISSION_REQUEST (PX4 legacy)
-        INFOS.put(44,  new Info(9, 221));    // MISSION_COUNT
-        INFOS.put(47,  new Info(8, 153));    // MISSION_ACK
-        INFOS.put(51,  new Info(5, 196));    // MISSION_REQUEST_INT
-        INFOS.put(69,  new Info(26, 243));  // MANUAL_CONTROL
-        INFOS.put(73,  new Info(38, 38));    // MISSION_ITEM_INT
-        INFOS.put(259, new Info(237, 92)); // CAMERA_INFORMATION (min 235)
-        INFOS.put(260, new Info(14, 146)); // CAMERA_SETTINGS (min 5)
-        INFOS.put(262, new Info(23, 12));   // CAMERA_CAPTURE_STATUS (min 18)
-        INFOS.put(263, new Info(255, 133)); // CAMERA_IMAGE_CAPTURED
-        INFOS.put(271, new Info(53, 22));   // CAMERA_FOV_STATUS (min 52)
-        INFOS.put(143, new Info(4, 132));   // MISSION_REQUEST_LIST
-        INFOS.put(76,  new Info(33, 152));   // COMMAND_LONG
-        INFOS.put(77,  new Info(10, 143));   // COMMAND_ACK
-        INFOS.put(242, new Info(60, 104));   // HOME_POSITION
-        INFOS.put(253, new Info(54, 83));    // STATUSTEXT
-        INFOS.put(109, new Info(9, 88));     // RADIO_STATUS (crc_extra computed
+        INFOS[0]   = new Info(9, 50);      // HEARTBEAT
+        INFOS[1]   = new Info(43, 124);    // SYS_STATUS
+        INFOS[2]   = new Info(12, 137);   // SYSTEM_TIME
+        INFOS[24]  = new Info(52, 24);    // GPS_RAW_INT
+        INFOS[30]  = new Info(28, 39);    // ATTITUDE
+        INFOS[33]  = new Info(28, 104);   // GLOBAL_POSITION_INT
+        INFOS[74]  = new Info(20, 20);    // VFR_HUD
+        INFOS[42]  = new Info(18, 28);    // MISSION_CURRENT
+        INFOS[43]  = new Info(5, 230);   // MISSION_REQUEST (PX4 legacy)
+        INFOS[44]  = new Info(9, 221);    // MISSION_COUNT
+        INFOS[47]  = new Info(8, 153);    // MISSION_ACK
+        INFOS[51]  = new Info(5, 196);    // MISSION_REQUEST_INT
+        INFOS[69]  = new Info(26, 243);  // MANUAL_CONTROL
+        INFOS[73]  = new Info(38, 38);    // MISSION_ITEM_INT
+        INFOS[259] = new Info(237, 92); // CAMERA_INFORMATION (min 235)
+        INFOS[260] = new Info(14, 146); // CAMERA_SETTINGS (min 5)
+        INFOS[262] = new Info(23, 12);   // CAMERA_CAPTURE_STATUS (min 18)
+        INFOS[263] = new Info(255, 133); // CAMERA_IMAGE_CAPTURED
+        INFOS[271] = new Info(53, 22);   // CAMERA_FOV_STATUS (min 52)
+        INFOS[143] = new Info(4, 132);   // MISSION_REQUEST_LIST
+        INFOS[76]  = new Info(33, 152);   // COMMAND_LONG
+        INFOS[77]  = new Info(10, 143);   // COMMAND_ACK
+        INFOS[242] = new Info(60, 104);   // HOME_POSITION
+        INFOS[253] = new Info(54, 83);    // STATUSTEXT
+        INFOS[109] = new Info(9, 88);     // RADIO_STATUS (crc_extra computed
                                             // per official message_checksum)
-        INFOS.put(420, new Info(18, 233));   // LED_CONTROL_MSG (自定义扩展)
+        INFOS[420] = new Info(18, 233);   // LED_CONTROL_MSG (自定义扩展)
         // ---- NexusSky 自定义扩展消息（M0b 环境气象）----
-        INFOS.put(422, new Info(13, 36086));  // ENVIRONMENT_STATUS (crc_extra computed
+        INFOS[422] = new Info(13, 36086);  // ENVIRONMENT_STATUS (crc_extra computed
                                               // per official message_checksum)
-        INFOS.put(421, new Info(46, 25705));  // ENVIRONMENT_ALERT (crc_extra computed
+        INFOS[421] = new Info(46, 25705);  // ENVIRONMENT_ALERT (crc_extra computed
                                               // per official message_checksum)
         // ---- NexusSky 自定义扩展消息（M2 喷洒物流，msgId 423-426，FR-26~FR-29）----
-        INFOS.put(423, new Info(12, 58864));  // SPRAY_STATUS (crc_extra computed
+        INFOS[423] = new Info(12, 58864);  // SPRAY_STATUS (crc_extra computed
                                               // per MavlinkCrc on msg name + fields)
-        INFOS.put(424, new Info(6, 52077));   // SPRAY_COMMAND
-        INFOS.put(425, new Info(7, 46389));   // GRIPPER_COMMAND
-        INFOS.put(426, new Info(10, 9268));   // PAYLOAD_STATUS
+        INFOS[424] = new Info(6, 52077);   // SPRAY_COMMAND
+        INFOS[425] = new Info(7, 46389);   // GRIPPER_COMMAND
+        INFOS[426] = new Info(10, 9268);   // PAYLOAD_STATUS
         // ---- NexusSky 自定义扩展消息（M3 感知成像增强，msgId 430-434）----
-        INFOS.put(430, new Info(20, 201));   // OBSTACLE_REPORT
-        INFOS.put(431, new Info(24, 202));   // MULTISPECTRAL_DATA
-        INFOS.put(432, new Info(24, 203));   // THERMAL_DATA
-        INFOS.put(433, new Info(20, 204));   // DEPTH_DATA
-        INFOS.put(434, new Info(20, 205));   // VISION_DETECTION
+        INFOS[430] = new Info(20, 201);   // OBSTACLE_REPORT
+        INFOS[431] = new Info(24, 202);   // MULTISPECTRAL_DATA
+        INFOS[432] = new Info(24, 203);   // THERMAL_DATA
+        INFOS[433] = new Info(20, 204);   // DEPTH_DATA
+        INFOS[434] = new Info(20, 205);   // VISION_DETECTION
         // ---- NexusSky 自定义扩展消息（M4 硬件抽象，msgId 437-441）----
-        INFOS.put(437, new Info(20, 211));   // RADAR_SCAN
-        INFOS.put(438, new Info(28, 212));   // RADAR_TARGET
-        INFOS.put(439, new Info(24, 213));   // ROTOR_TELEMETRY
-        INFOS.put(440, new Info(20, 214));   // LIDAR_DATA
-        INFOS.put(441, new Info(41, 215));   // IMU_DATA
+        INFOS[437] = new Info(20, 211);   // RADAR_SCAN
+        INFOS[438] = new Info(28, 212);   // RADAR_TARGET
+        INFOS[439] = new Info(24, 213);   // ROTOR_TELEMETRY
+        INFOS[440] = new Info(20, 214);   // LIDAR_DATA
+        INFOS[441] = new Info(41, 215);   // IMU_DATA
         // ---- NexusSky 自定义扩展消息（M5 应急 mesh 自愈组网，msgId 450-454）----
-        INFOS.put(450, new Info(24, 233));   // MESH_HEARTBEAT
-        INFOS.put(451, new Info(12, 234));   // MESH_ROUTE_REQUEST
-        INFOS.put(452, new Info(10, 235));   // MESH_ROUTE_REPLY
-        INFOS.put(453, new Info(4, 236));    // MESH_ROUTE_ERROR
-        INFOS.put(454, new Info(-1, 237));   // MESH_NEIGHBOR_TABLE (可变长度，LEN=-1)
+        INFOS[450] = new Info(24, 233);   // MESH_HEARTBEAT
+        INFOS[451] = new Info(12, 234);   // MESH_ROUTE_REQUEST
+        INFOS[452] = new Info(10, 235);   // MESH_ROUTE_REPLY
+        INFOS[453] = new Info(4, 236);    // MESH_ROUTE_ERROR
+        INFOS[454] = new Info(-1, 237);   // MESH_NEIGHBOR_TABLE (可变长度，LEN=-1)
         // ---- NexusSky 自定义扩展消息（M6 移动基站载荷抽象，msgId 455-458）----
-        INFOS.put(455, new Info(15, 245));   // CELL_TOWER_STATUS
-        INFOS.put(456, new Info(7, 246));    // CELL_TOWER_CONFIG
-        INFOS.put(457, new Info(5, 247));    // CELL_HANDOVER
-        INFOS.put(458, new Info(12, 248));   // GROUND_TERMINAL_REGISTER
+        INFOS[455] = new Info(15, 245);   // CELL_TOWER_STATUS
+        INFOS[456] = new Info(7, 246);    // CELL_TOWER_CONFIG
+        INFOS[457] = new Info(5, 247);    // CELL_HANDOVER
+        INFOS[458] = new Info(12, 248);   // GROUND_TERMINAL_REGISTER
         // ---- NexusSky 自定义扩展消息（M7 星-空-地多层级中继，msgId 459-461）----
-        INFOS.put(459, new Info(24, 238));   // SAT_LINK_STATUS
-        INFOS.put(460, new Info(16, 239));   // SAT_PASS_SCHEDULE
-        INFOS.put(461, new Info(34, 240));   // HIERARCHICAL_ROUTE_DECISION
+        INFOS[459] = new Info(24, 238);   // SAT_LINK_STATUS
+        INFOS[460] = new Info(16, 239);   // SAT_PASS_SCHEDULE
+        INFOS[461] = new Info(34, 240);   // HIERARCHICAL_ROUTE_DECISION
         // ---- NexusSky 自定义扩展消息（M8 复杂地形适配，msgId 462-464）----
-        INFOS.put(462, new Info(-1, 242));   // TERRAIN_TYPE_MAP (可变长度，LEN=-1)
-        INFOS.put(463, new Info(-1, 243));   // TERRAIN_UPDATE (可变长度，LEN=-1)
-        INFOS.put(464, new Info(-1, 244));   // FLIGHT_RESTRICTION (可变长度，LEN=-1)
+        INFOS[462] = new Info(-1, 242);   // TERRAIN_TYPE_MAP (可变长度，LEN=-1)
+        INFOS[463] = new Info(-1, 243);   // TERRAIN_UPDATE (可变长度，LEN=-1)
+        INFOS[464] = new Info(-1, 244);   // FLIGHT_RESTRICTION (可变长度，LEN=-1)
         // ---- NexusSky 自定义扩展消息（M9 应急任务编排，msgId 465-467）----
-        INFOS.put(465, new Info(25, 249));   // EMERGENCY_MISSION_PLAN
-        INFOS.put(466, new Info(24, 250));   // COVERAGE_OPTIMIZATION
-        INFOS.put(467, new Info(50, 251));   // EMERGENCY_PRIORITY
+        INFOS[465] = new Info(25, 249);   // EMERGENCY_MISSION_PLAN
+        INFOS[466] = new Info(24, 250);   // COVERAGE_OPTIMIZATION
+        INFOS[467] = new Info(50, 251);   // EMERGENCY_PRIORITY
     }
 
     private MavlinkMessageInfo() {
     }
 
     public static boolean isKnown(int msgId) {
-        return INFOS.containsKey(msgId);
+        return msgId >= 0 && msgId < INFOS.length && INFOS[msgId] != null;
     }
 
     public static int lengthOf(int msgId) {
-        Info info = INFOS.get(msgId);
+        Info info = (msgId >= 0 && msgId < INFOS.length) ? INFOS[msgId] : null;
         return info != null ? info.length : -1;
     }
 
     public static int crcExtraOf(int msgId) {
-        Info info = INFOS.get(msgId);
+        Info info = (msgId >= 0 && msgId < INFOS.length) ? INFOS[msgId] : null;
         if (info == null) {
             throw new MavlinkException("Unknown messageId " + msgId + ", no CRC_EXTRA available");
         }

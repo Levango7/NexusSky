@@ -156,13 +156,26 @@ public final class ScenarioController {
 
     /** Wind vector (north, east m/s) while a WIND event is active, else (0,0). */
     public double[] windVector(double bootSec) {
+        double[] out = new double[2];
+        windVector(bootSec, out);
+        return out;
+    }
+
+    /**
+     * P2-2: 写入预分配数组，避免每 tick 分配 new double[2]。
+     * 语义与 {@link #windVector(double)} 完全一致，结果写入 out[0]/out[1]。
+     */
+    public void windVector(double bootSec, double[] out) {
         Event e = find(Kind.WIND, bootSec);
         if (e == null) {
-            return new double[]{0, 0};
+            out[0] = 0;
+            out[1] = 0;
+            return;
         }
         // Fixed pseudo-random direction per boot so flights are reproducible.
         double dirRad = ThreadLocalRandom.current().nextDouble(Math.PI * 2);
-        return new double[]{Math.cos(dirRad) * e.param, Math.sin(dirRad) * e.param};
+        out[0] = Math.cos(dirRad) * e.param;
+        out[1] = Math.sin(dirRad) * e.param;
     }
 
     public boolean gpsNoisy(double bootSec) {

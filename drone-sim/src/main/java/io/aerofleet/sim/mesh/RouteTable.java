@@ -86,10 +86,17 @@ public final class RouteTable {
             for (int i = 0; i < existing.size(); i++) {
                 RouteEntry r = existing.get(i);
                 if (r.nextHop == nextHop) {
-                    List<RouteEntry> list = new ArrayList<>(existing);
                     // 新项继承主备标志：若 isPrimary 或原项是 primary
                     boolean primary = isPrimary || r.isPrimary;
-                    list.set(i, newEntry.withPrimary(primary));
+                    RouteEntry updated = newEntry.withPrimary(primary);
+                    if (existing.size() == 1) {
+                        // P1-3: 单元素优化，避免 ArrayList 复制构造
+                        List<RouteEntry> list = new ArrayList<>(1);
+                        list.add(updated);
+                        return list;
+                    }
+                    List<RouteEntry> list = new ArrayList<>(existing);
+                    list.set(i, updated);
                     // 若新 metric 更小且 primary，确保降级其他项
                     if (primary && newEntry.metric < r.metric) {
                         for (int j = 0; j < list.size(); j++) {
@@ -102,7 +109,14 @@ public final class RouteTable {
                 }
             }
             // 新 nextHop：若 isPrimary 且已有主路径，比较 metric
-            List<RouteEntry> list = new ArrayList<>(existing);
+            // P1-3: 单元素时避免 ArrayList 复制构造
+            List<RouteEntry> list;
+            if (existing.size() == 1) {
+                list = new ArrayList<>(2);
+                list.add(existing.get(0));
+            } else {
+                list = new ArrayList<>(existing);
+            }
             if (isPrimary) {
                 RouteEntry currentPrimary = null;
                 for (RouteEntry r : list) {
@@ -153,12 +167,24 @@ public final class RouteTable {
      */
     public void removeByNextHop(int nextHop) {
         for (var e : table.entrySet()) {
-            table.compute(e.getKey(), (k, existing) -> {
-                if (existing == null || existing.isEmpty()) {
+            List<RouteEntry> existing = e.getValue();
+            // P1-3: 快速检查是否有匹配的 nextHop，无则跳过 compute
+            boolean hasMatch = false;
+            for (RouteEntry r : existing) {
+                if (r.nextHop == nextHop) {
+                    hasMatch = true;
+                    break;
+                }
+            }
+            if (!hasMatch) {
+                continue;
+            }
+            table.compute(e.getKey(), (k, vals) -> {
+                if (vals == null || vals.isEmpty()) {
                     return null;
                 }
-                List<RouteEntry> kept = new ArrayList<>();
-                for (RouteEntry r : existing) {
+                List<RouteEntry> kept = new ArrayList<>(vals.size());
+                for (RouteEntry r : vals) {
                     if (r.nextHop != nextHop) {
                         kept.add(r);
                     }
@@ -192,29 +218,25 @@ public final class RouteTable {
      * @return true 若提升成功
      */
     public boolean promoteBackup(int targetSysId) {
-        List<RouteEntry> routes = table.get(targetSysId);
-        if (routes == null || routes.isEmpty()) {
-            return false;
-        }
-        // 查找备份（非 primary 且未过期）
         long now = System.currentTimeMillis();
-        RouteEntry bestBackup = null;
-        for (RouteEntry r : routes) {
-            if (!r.isPrimary && !r.isExpired(now)) {
-                if (bestBackup == null || r.metric < bestBackup.metric) {
-                    bestBackup = r;
+        final boolean[] success = {false};
+        // P1-3: 将查找 bestBackup + 替换合并到一次 compute 中，避免两次遍历
+        table.computeIfPresent(targetSysId, (k, existing) -> {
+            RouteEntry bestBackup = null;
+            for (RouteEntry r : existing) {
+                if (!r.isPrimary && !r.isExpired(now)) {
+                    if (bestBackup == null || r.metric < bestBackup.metric) {
+                        bestBackup = r;
+                    }
                 }
             }
-        }
-        if (bestBackup == null) {
-            return false;
-        }
-        // 原子替换：原主降为备份，最佳备份提升为主
-        final RouteEntry backup = bestBackup;
-        table.compute(targetSysId, (k, existing) -> {
-            List<RouteEntry> list = new ArrayList<>();
+            if (bestBackup == null) {
+                return existing; // 不修改
+            }
+            success[0] = true;
+            List<RouteEntry> list = new ArrayList<>(existing.size());
             for (RouteEntry r : existing) {
-                if (r.nextHop == backup.nextHop) {
+                if (r.nextHop == bestBackup.nextHop) {
                     list.add(r.withPrimary(true));
                 } else if (r.isPrimary) {
                     list.add(r.withPrimary(false));
@@ -224,7 +246,7 @@ public final class RouteTable {
             }
             return list;
         });
-        return true;
+        return success[0];
     }
 
     /**
@@ -233,8 +255,20 @@ public final class RouteTable {
     public List<RouteEntry> cleanupExpired(long nowMs) {
         List<RouteEntry> removed = new ArrayList<>();
         for (var e : table.entrySet()) {
-            List<RouteEntry> kept = new ArrayList<>();
-            for (RouteEntry r : e.getValue()) {
+            List<RouteEntry> existing = e.getValue();
+            // P1-3: 快速检查是否有过期项，无则跳过整个 entry
+            boolean hasExpired = false;
+            for (RouteEntry r : existing) {
+                if (r.isExpired(nowMs)) {
+                    hasExpired = true;
+                    break;
+                }
+            }
+            if (!hasExpired) {
+                continue;
+            }
+            List<RouteEntry> kept = new ArrayList<>(existing.size());
+            for (RouteEntry r : existing) {
                 if (r.isExpired(nowMs)) {
                     removed.add(r);
                 } else {
@@ -243,7 +277,7 @@ public final class RouteTable {
             }
             if (kept.isEmpty()) {
                 table.remove(e.getKey());
-            } else if (kept.size() != e.getValue().size()) {
+            } else {
                 table.put(e.getKey(), kept);
             }
         }
