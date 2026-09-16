@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AeroFleet Cloud Backend — Logback 配置
+
+  Profile 路由：
+    - dev / default : 人类可读控制台格式（开发与测试默认）
+    - prod          : JSON 结构化控制台格式（生产环境，便于 ELK/Loki 采集）
+
+  说明：prod 的 JSON 输出使用 PatternLayoutEncoder 实现，不引入
+  logstash-logback-encoder 依赖。%msg 中的双引号与换行符未做转义，
+  若日志文本含这些字符会破坏 JSON 结构；如需严格 JSON，请添加
+  net.logstash.logback:logstash-logback-encoder 依赖并切换到
+  LogstashEncoder。
+-->
+<configuration>
+
+    <!-- ============================================================= -->
+    <!-- 开发环境：人类可读格式                                         -->
+    <!-- ============================================================= -->
+    <springProfile name="dev">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <!-- ============================================================= -->
+    <!-- 生产环境：JSON 结构化日志                                      -->
+    <!-- ============================================================= -->
+    <springProfile name="prod">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>{"timestamp":"%d{ISO8601}","level":"%level","thread":"%thread","logger":"%logger","msg":"%msg"}%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+
+    <!-- ============================================================= -->
+    <!-- 默认（未指定 profile 时）：与 dev 相同的人类可读格式           -->
+    <!-- ============================================================= -->
+    <springProfile name="default">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+</configuration>

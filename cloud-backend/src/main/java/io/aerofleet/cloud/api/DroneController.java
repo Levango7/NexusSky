@@ -24,8 +24,8 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 
 /**
- * Fleet REST API. TODO: no auth at scaffold stage - add token/session
- * checks before exposing beyond localhost.
+ * Fleet REST API. 认证由 {@link io.aerofleet.cloud.security.SecurityConfig}
+ * 统一处理：开发模式放行所有请求，生产模式要求 JWT 认证。
  */
 @RestController
 @RequestMapping("/api/v1/drones")
