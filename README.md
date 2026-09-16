@@ -22,7 +22,7 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/16 种消息编解码/UDP 传输，M0a–M4 扩展消息 420–441），**87 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/16 种消息编解码/UDP 传输，M0a–M9 扩展消息 420–467），**185 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API、WebSocket 推送 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流 | 不需要换 |
@@ -317,10 +317,10 @@ ARM → startMission → 逐站拍照 → 逐站逆解算定位 → 喂跟踪器
 - 每台无人机独立命名空间；e2e 中环绕 4 站对同一静态目标连续命中
   形成 hits=4 单航迹，交叉目标不串扰。
 
-## 能力扩展（M0a–M4）
+## 能力扩展（M0a–M9）
 
-六个里程碑在骨架之上叠加了组网、环境、编队、喷洒、成像与硬件抽象能力，
-均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按 420–441 段连续分配。
+十一个里程碑在骨架之上叠加了组网、环境、编队、喷洒、成像、硬件抽象与灾害应急通讯组网能力，
+均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按 420–467 段连续分配。
 
 ### M0a — Mesh 组网落地
 
@@ -366,7 +366,47 @@ MAVLink 消息 437–441（`RadarScan`/`RadarTarget`/`RotorTelemetry`/`LidarData
 融合 LiDAR 数据。REST `/api/v1/radar/*`、`/api/v1/rotor/*`、`/api/v1/lidar/*`、
 `/api/v1/imu/*`，WebSocket 以 1Hz 推送硬件数据。
 
-### MAVLink 消息 ID 分配（420–441 段）
+### M5 — 应急 Mesh 自愈组网
+
+AODV-lite 多跳动态路由（`MeshRouter`/`RouteTable`/`NeighborTable`/`RreqCache`），
+支持路由发现、自愈重构、链路质量评估。MAVLink 消息 450–454（MeshHeartbeat/
+RouteRequest/RouteReply/RouteError/NeighborTable），`link-sim` 新增 `MultiHopRelayConfig`
+多跳中继配置。REST `/api/v1/mesh/*`，前端 `MeshTopologyPanel.jsx` 可视化拓扑。
+
+### M6 — 移动基站载荷抽象
+
+无人机搭载 LTE/WiFi/LoRa 基站载荷（`CellTowerFactory`/`CoverageArea`/`HandoverManager`），
+支持覆盖区计算、终端接入管理、越区切换。MAVLink 消息 455–458（CellTowerStatus/
+Config/Handover/GroundTerminalRegister），REST `/api/v1/celltowers/*`，
+前端 `CellTowerPanel.jsx` 可视化基站拓扑。
+
+### M7 — 星-空-地多层级中继
+
+LEO 卫星 + HAPS 高空平台 + Mesh 三层级中继（`HierarchicalRouter`/`LeoConstellation`/
+`HapsRelayNode`），支持卫星过境窗口预测、层级路由决策、链路切换。MAVLink 消息 459–461
+（SatLinkStatus/SatPassSchedule/HierarchicalRouteDecision），REST `/api/v1/satlink/*`，
+前端 `SatLinkPanel.jsx` 可视化中继链路。
+
+### M8 — 复杂地形适配
+
+山地/森林/沼泽/城市等地形分类与 RF 衰减建模（`TerrainGrid`/`TerrainClassifier`/
+`EnhancedRadioEnvironment`/`FlightConstraintChecker`），支持地形变化监测、
+飞行约束检查、覆盖范围地形衰减。MAVLink 消息 462–464（TerrainTypeMap/
+TerrainUpdate/FlightRestriction），REST `/api/v1/terrain/*`，
+前端 `TerrainMapPanel.jsx` 可视化地形地图。
+
+### M9 — 应急任务编排（全流程闭环）
+
+将 M5–M8 能力编排为完整应急响应工作流：灾区测绘 → 覆盖规划 → 组网部署 →
+持续服务 → 自愈重构。编排引擎（`OrchestrationEngine`）驱动五阶段状态机，
+覆盖优化算法（`CoverageOptimizer`）贪心+局部优化部署方案，动态重构器
+（`DynamicReconfigurator`）处理无人机损毁/电量不足，优先级调度器
+（`PriorityScheduler`）四级抢占式调度（搜救>指挥>测绘>常规），场景预设
+（`ScenarioPresetFactory`）支持地震/泥石流/火灾一键启动。MAVLink 消息 465–467
+（EmergencyMissionPlan/CoverageOptimization/EmergencyPriority），
+REST `/api/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进度。
+
+### MAVLink 消息 ID 分配（420–467 段）
 
 | 范围 | 里程碑 | 消息 |
 |---|---|---|
@@ -375,6 +415,11 @@ MAVLink 消息 437–441（`RadarScan`/`RadarTarget`/`RotorTelemetry`/`LidarData
 | 423–426 | M2 | SprayStatus, SprayCommand, GripperCommand, PayloadStatus |
 | 430–434 | M3 | ObstacleReport, MultispectralData, ThermalData, DepthData, VisionDetection |
 | 437–441 | M4 | RadarScan, RadarTarget, RotorTelemetry, LidarData, ImuData |
+| 450–454 | M5 | MeshHeartbeat, MeshRouteRequest, MeshRouteReply, MeshRouteError, MeshNeighborTable |
+| 455–458 | M6 | CellTowerStatus, CellTowerConfig, CellHandover, GroundTerminalRegister |
+| 459–461 | M7 | SatLinkStatus, SatPassSchedule, HierarchicalRouteDecision |
+| 462–464 | M8 | TerrainTypeMap, TerrainUpdate, FlightRestriction |
+| 465–467 | M9 | EmergencyMissionPlan, CoverageOptimization, EmergencyPriority |
 
 ## 飞行日志（flightlog，JSONL 落盘）
 

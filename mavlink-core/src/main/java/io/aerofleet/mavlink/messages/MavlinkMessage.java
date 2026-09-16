@@ -110,6 +110,47 @@ public abstract class MavlinkMessage {
                 return LidarDataMsg.decode(frame);
             case ImuDataMsg.ID:
                 return ImuDataMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M5 应急 mesh 自愈组网，msgId 450-454）----
+            case MeshHeartbeatMsg.ID:
+                return MeshHeartbeatMsg.decode(frame);
+            case MeshRouteRequestMsg.ID:
+                return MeshRouteRequestMsg.decode(frame);
+            case MeshRouteReplyMsg.ID:
+                return MeshRouteReplyMsg.decode(frame);
+            case MeshRouteErrorMsg.ID:
+                return MeshRouteErrorMsg.decode(frame);
+            case MeshNeighborTableMsg.ID:
+                return MeshNeighborTableMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M6 移动基站载荷抽象，msgId 455-458）----
+            case CellTowerStatusMsg.ID:
+                return CellTowerStatusMsg.decode(frame);
+            case CellTowerConfigMsg.ID:
+                return CellTowerConfigMsg.decode(frame);
+            case CellHandoverMsg.ID:
+                return CellHandoverMsg.decode(frame);
+            case GroundTerminalRegisterMsg.ID:
+                return GroundTerminalRegisterMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M7 星-空-地多层级中继，msgId 459-461）----
+            case SatLinkStatusMsg.ID:
+                return SatLinkStatusMsg.decode(frame);
+            case SatPassScheduleMsg.ID:
+                return SatPassScheduleMsg.decode(frame);
+            case HierarchicalRouteDecisionMsg.ID:
+                return HierarchicalRouteDecisionMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M8 复杂地形适配，msgId 462-464）----
+            case TerrainTypeMapMsg.ID:
+                return TerrainTypeMapMsg.decode(frame);
+            case TerrainUpdateMsg.ID:
+                return TerrainUpdateMsg.decode(frame);
+            case FlightRestrictionMsg.ID:
+                return FlightRestrictionMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M9 应急任务编排，msgId 465-467）----
+            case EmergencyMissionPlanMsg.ID:
+                return EmergencyMissionPlanMsg.decode(frame);
+            case CoverageOptimizationMsg.ID:
+                return CoverageOptimizationMsg.decode(frame);
+            case EmergencyPriorityMsg.ID:
+                return EmergencyPriorityMsg.decode(frame);
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }

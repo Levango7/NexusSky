@@ -1,5 +1,9 @@
 package io.aerofleet.sim;
 
+import io.aerofleet.sim.mesh.MeshRouterConfig;
+import io.aerofleet.sim.orch.OrchestrationConfig;
+import io.aerofleet.sim.satrelay.SatRelayConfig;
+
 /**
  * Command line configuration for the virtual drone simulator.
  * Parsed from simple --key=value / --key value style arguments.
@@ -48,6 +52,27 @@ public final class SimConfig {
     public final double gripperPayloadMax;
     /** 侧风禁喷阈值 m/s（--spray-crosswind-max，默认 6）。 */
     public final double sprayCrosswindMax;
+    // ---- M5 应急 mesh 自愈组网参数（FR-01~30）----
+    /** mesh 路由引擎启用开关（--mesh）。false 时 VirtualDrone.meshRouter=null，既有行为不变（DFX 4.5）。 */
+    public final boolean meshEnabled;
+    /** mesh 路由引擎配置（meshEnabled=true 时由 MeshRouterConfig.parse 解析，否则 defaults）。 */
+    public final MeshRouterConfig meshRouterConfig;
+    // ---- M7 星-空-地多层级中继参数（FR-5.1~5.5）----
+    /** sat-relay 引擎启用开关（--sat-relay）。false 时 VirtualDrone.satRelayEngine=null，既有行为不变（DFX 4.5）。 */
+    public final boolean satRelayEnabled;
+    /** sat-relay 引擎配置（satRelayEnabled=true 时由 SatRelayConfig.parse 解析，否则 defaults）。 */
+    public final SatRelayConfig satRelayConfig;
+    // ---- M8 复杂地形适配参数（FR-01~33）----
+    /** 地形适配启用开关（--terrain-adapt）。false 时 VirtualDrone.terrainAdapt 相关对象=null，既有行为不变（DFX 4.5）。 */
+    public final boolean terrainAdaptEnabled;
+    /** 地形网格分辨率 m（--terrain-grid-resolution，默认 100）。 */
+    public final double terrainGridResolution;
+    // ---- M6 移动基站载荷抽象参数（FR-CT-01~06）----
+    /** 基站载荷配置（--celltower 开关 + 子参数）。null 或 enabled=false 时 VirtualDrone.cellTower=null，既有行为不变（DFX 4.5）。 */
+    public final io.aerofleet.sim.celltower.CellTowerSimConfig cellTowerConfig;
+    // ---- M9 应急任务编排参数（FR-01~33）----
+    /** 应急任务编排配置（--orch 开关 + 子参数）。enabled=false 时 VirtualDrone.orchEngine=null，既有行为不变（DFX 4.5）。 */
+    public final OrchestrationConfig orchConfig;
 
     private SimConfig(int port, int sysid, double lat, double lon, double speed,
                       String name, String scenario, String bindIp, boolean failsafe,
@@ -56,7 +81,12 @@ public final class SimConfig {
                       double envWindMax, double[] envTempRange,
                       boolean actuatorsEnabled, double sprayCapacity,
                       double sprayRateMax, double gripperPayloadMax,
-                      double sprayCrosswindMax) {
+                      double sprayCrosswindMax,
+                       boolean meshEnabled, MeshRouterConfig meshRouterConfig,
+                        boolean satRelayEnabled, SatRelayConfig satRelayConfig,
+                         boolean terrainAdaptEnabled, double terrainGridResolution,
+                         io.aerofleet.sim.celltower.CellTowerSimConfig cellTowerConfig,
+                         OrchestrationConfig orchConfig) {
         this.port = port;
         this.sysid = sysid;
         this.lat = lat;
@@ -80,6 +110,14 @@ public final class SimConfig {
         this.sprayRateMax = sprayRateMax;
         this.gripperPayloadMax = gripperPayloadMax;
         this.sprayCrosswindMax = sprayCrosswindMax;
+        this.meshEnabled = meshEnabled;
+        this.meshRouterConfig = meshRouterConfig;
+        this.satRelayEnabled = satRelayEnabled;
+        this.satRelayConfig = satRelayConfig;
+        this.terrainAdaptEnabled = terrainAdaptEnabled;
+        this.terrainGridResolution = terrainGridResolution;
+        this.cellTowerConfig = cellTowerConfig;
+        this.orchConfig = orchConfig;
     }
 
     /** Defaults: Shenzhen University Town area, 8 m/s cruise, port 14540, sysid 1. */
@@ -87,7 +125,12 @@ public final class SimConfig {
         return new SimConfig(14540, 1, 22.5907, 113.9345, 8.0, "AF-SIM-01",
                 "none", "0.0.0.0", true, "flat", "off", "none", 0,
                 false, "calm", 0, 50, new double[]{-40, 55},
-                false, 20.0, 2000.0, 10.0, 6.0);
+                false, 20.0, 2000.0, 10.0, 6.0,
+                false, MeshRouterConfig.defaults(),
+                false, SatRelayConfig.defaults(),
+                false, 100.0,
+                io.aerofleet.sim.celltower.CellTowerSimConfig.defaults(),
+                OrchestrationConfig.defaults());
     }
 
     /**
@@ -120,6 +163,27 @@ public final class SimConfig {
         double sprayRateMax = 2000.0;
         double gripperPayloadMax = 10.0;
         double sprayCrosswindMax = 6.0;
+        // M5 mesh 路由参数默认值（FR-01）
+        boolean meshEnabled = false;
+        // mesh 子参数先收集，构造期统一解析
+        java.util.List<String> meshArgs = new java.util.ArrayList<>();
+        // M7 sat-relay 路由参数默认值（FR-5.1）
+        boolean satRelayEnabled = false;
+        // sat-relay 子参数先收集，构造期统一解析
+        java.util.List<String> satRelayArgs = new java.util.ArrayList<>();
+        // M8 地形适配参数默认值（FR-01）
+        boolean terrainAdaptEnabled = false;
+        double terrainGridResolution = 100.0;
+        // M6 移动基站载荷参数默认值（FR-CT-01）
+        boolean celltowerEnabled = false;
+        String cellTypeStr = "LTE";
+        int cellTxPower = 20;
+        int cellMaxTerminals = 200;
+        int cellFreq = 1;
+        double cellSignalThreshold = -80.0;
+        double cellHandoverThreshold = -80.0;
+        double cellLoadBalanceThreshold = 0.8;
+        long cellHeartbeatTimeoutMs = 30_000L;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -134,6 +198,16 @@ public final class SimConfig {
                 value = args[++i];
             } else {
                 SimLog.warn("Ignoring unknown argument: " + arg);
+                continue;
+            }
+            // M5 mesh 子参数收集（除 --mesh 开关外，其余 mesh-* 参数透传给 MeshRouterConfig.parse）
+            if (key.startsWith("mesh-") || key.equals("cloud-backend")) {
+                meshArgs.add("--" + key + "=" + value);
+                continue;
+            }
+            // M7 sat-relay 子参数收集（除 --sat-relay 开关外，其余 sat-* 参数透传给 SatRelayConfig.parse）
+            if (key.startsWith("sat-") && !key.equals("sat-relay")) {
+                satRelayArgs.add("--" + key + "=" + value);
                 continue;
             }
             try {
@@ -172,6 +246,23 @@ public final class SimConfig {
                     case "spray-rate-max" -> sprayRateMax = Double.parseDouble(value);
                     case "gripper-payload-max" -> gripperPayloadMax = Double.parseDouble(value);
                     case "spray-crosswind-max" -> sprayCrosswindMax = Double.parseDouble(value);
+                    // M5 mesh 路由参数（FR-01，DFX 4.4 配置可追溯）
+                    case "mesh" -> meshEnabled = true;
+                    // M7 sat-relay 路由参数（FR-5.1，DFX 4.4 配置可追溯）
+                    case "sat-relay" -> satRelayEnabled = true;
+                    // M8 地形适配参数（FR-01，DFX 4.4 配置可追溯）
+                    case "terrain-adapt" -> terrainAdaptEnabled = true;
+                    case "terrain-grid-resolution" -> terrainGridResolution = Double.parseDouble(value);
+                    // M6 移动基站载荷参数（FR-CT-01，DFX 4.4 配置可追溯）
+                    case "celltower" -> celltowerEnabled = true;
+                    case "cell-type" -> cellTypeStr = value;
+                    case "cell-tx-power" -> cellTxPower = Integer.parseInt(value);
+                    case "cell-max-terminals" -> cellMaxTerminals = Integer.parseInt(value);
+                    case "cell-freq" -> cellFreq = Integer.parseInt(value);
+                    case "cell-signal-threshold" -> cellSignalThreshold = Double.parseDouble(value);
+                    case "cell-handover-threshold" -> cellHandoverThreshold = Double.parseDouble(value);
+                    case "cell-load-balance-threshold" -> cellLoadBalanceThreshold = Double.parseDouble(value);
+                    case "cell-heartbeat-timeout-ms" -> cellHeartbeatTimeoutMs = Long.parseLong(value);
                     default -> {
                         SimLog.warn("Unknown option --" + key);
                         printUsage();
@@ -202,11 +293,27 @@ public final class SimConfig {
             SimLog.warn("gripper-payload-max must be positive, using default 10.0 kg");
             gripperPayloadMax = 10.0;
         }
+        // M5 mesh 配置解析（meshEnabled=true 时解析子参数，否则 defaults）
+        MeshRouterConfig meshRouterConfig = meshEnabled
+                ? MeshRouterConfig.parse(meshArgs.toArray(new String[0]))
+                : MeshRouterConfig.defaults();
+        // M7 sat-relay 配置解析（satRelayEnabled=true 时解析子参数，否则 defaults）
+        SatRelayConfig satRelayConfig = satRelayEnabled
+                ? SatRelayConfig.parse(satRelayArgs.toArray(new String[0]))
+                : SatRelayConfig.defaults();
         return new SimConfig(port, sysid, lat, lon, speed, name, scenario, bindIp,
                 failsafe, terrain, fence, targets, httpPort,
                 envEnabled, envScenario, envSeed, envWindMax, envTempRange,
                 actuatorsEnabled, sprayCapacity, sprayRateMax, gripperPayloadMax,
-                sprayCrosswindMax);
+                sprayCrosswindMax,
+                meshEnabled, meshRouterConfig,
+                satRelayEnabled, satRelayConfig,
+                terrainAdaptEnabled, terrainGridResolution,
+                io.aerofleet.sim.celltower.CellTowerSimConfig.of(
+                        celltowerEnabled, cellTypeStr, cellTxPower, cellMaxTerminals, cellFreq,
+                        cellSignalThreshold, cellHandoverThreshold,
+                        cellLoadBalanceThreshold, cellHeartbeatTimeoutMs),
+                OrchestrationConfig.defaults());
     }
 
     public static void printUsage() {
@@ -244,5 +351,40 @@ public final class SimConfig {
         System.out.println("[sim]   --spray-rate-max       max spray rate mL/s (default 2000)");
         System.out.println("[sim]   --gripper-payload-max  max gripper payload kg (default 10)");
         System.out.println("[sim]   --spray-crosswind-max  crosswind no-spray threshold m/s (default 6)");
+        // M5 mesh 路由参数说明（FR-01，DFX 4.4 配置可追溯）
+        System.out.println("[sim]   --mesh                  enable mesh routing engine (default off)");
+        System.out.println("[sim]   --mesh-hello-ms         HELLO broadcast interval ms (default 1000)");
+        System.out.println("[sim]   --mesh-neighbor-timeout-ms  neighbor timeout ms (default 5000)");
+        System.out.println("[sim]   --mesh-route-lifetime-ms    route lifetime ms (default 10000)");
+        System.out.println("[sim]   --mesh-max-hops         max hops (default 15)");
+        System.out.println("[sim]   --mesh-metric-w1        metric weight W1 hopCount (default 1.0)");
+        System.out.println("[sim]   --mesh-metric-w2        metric weight W2 RSSI (default 0.5)");
+        System.out.println("[sim]   --mesh-metric-w3        metric weight W3 delay (default 0.1)");
+        System.out.println("[sim]   --mesh-reeval-threshold metric reeval threshold (default 0.5)");
+        System.out.println("[sim]   --mesh-report-ms        topology report interval ms (default 2000)");
+        System.out.println("[sim]   --mesh-group            mesh multicast group host:port (default 239.0.0.1:14550)");
+        System.out.println("[sim]   --cloud-backend         cloud backend host:port for topology reports");
+        // M7 sat-relay 参数说明（FR-5.1，DFX 4.4 配置可追溯）
+        System.out.println("[sim]   --sat-relay                  enable sat-relay multi-layer engine (default off)");
+        System.out.println("[sim]   --sat-elevation-threshold    visibility elevation threshold deg (default 10)");
+        System.out.println("[sim]   --sat-hysteresis-ms          degradation hysteresis threshold ms (default 5000)");
+        System.out.println("[sim]   --sat-strategy               routing strategy NEAR_FIRST/DELAY_OPTIMAL/BANDWIDTH_OPTIMAL/RELIABILITY_OPTIMAL");
+        System.out.println("[sim]   --sat-constellation-size     LEO constellation size 10-100 (default 24)");
+        System.out.println("[sim]   --sat-orbit-altitude         orbit altitude km 300-1200 (default 550)");
+        System.out.println("[sim]   --sat-inclination            orbit inclination deg 0-180 (default 53)");
+        System.out.println("[sim]   --sat-window-scan-step-ms    visibility window scan step ms (default 60000)");
+        System.out.println("[sim]   --sat-link-report-ms         sat link status report interval ms (default 2000)");
+        System.out.println("[sim]   --sat-pass-horizon-ms        pass schedule horizon ms (default 86400000)");
+        // M6 移动基站载荷参数说明（FR-CT-01，DFX 4.4 配置可追溯）
+        System.out.println("[sim]   --celltower                     enable cell tower payload (default off)");
+        System.out.println("[sim]   --cell-type                     LTE/WIFI/LORA (default LTE)");
+        System.out.println("[sim]   --cell-tx-power                 tx power dBm (default 20)");
+        System.out.println("[sim]   --cell-max-terminals            max concurrent terminals (default 200)");
+        System.out.println("[sim]   --cell-freq                     frequency channel (default 1)");
+        System.out.println("[sim]   --cell-signal-threshold         access signal threshold dBm (default -80)");
+        System.out.println("[sim]   --cell-handover-threshold       handover threshold dBm (default -80)");
+        System.out.println("[sim]   --cell-load-balance-threshold   load balance threshold (default 0.8)");
+        System.out.println("[sim]   --cell-heartbeat-timeout-ms     heartbeat timeout ms (default 30000)");
     }
 }
+

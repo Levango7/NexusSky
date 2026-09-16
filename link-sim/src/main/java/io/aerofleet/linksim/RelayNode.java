@@ -9,15 +9,14 @@ import java.util.Arrays;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
 
-// === hopCount 扩展点（FR-21）：一跳静态中继不处理跳数 ===
-// MAVLink 标准帧无 TTL/hopCount 字段。本里程碑仅一跳固定拓扑，无环。
-// 若未来支持多跳：需在此引入帧级 hopCount 字段（应用层扩展），
-// 转发前递减并在 <=0 时丢弃，以防止多跳环路。
-// 当前明确不实现运行时跳数处理（FR-18/19）。
-// 预留占位常量，多跳扩展后启用为帧级字段并接入判决逻辑。
+// === hopCount 扩展点（FR-21 → FR-06~08a M5 启用）===
+// MAVLink 标准帧无 TTL/hopCount 字段。M5 多跳中继在帧 payload 尾部追加 1 字节 hopCount。
+// multiHopEnabled=true 时：解析尾部 hopCount，递减后转发；耗尽(<=0)或越界(>15)丢弃。
+// multiHopEnabled=false 时：完全保持 M0a 一跳透明转发语义（DFX 5.5.1）。
+// HOP_COUNT_DISABLED = -1：旧帧兼容标记，收到未携带 hopCount 的 M0a 旧帧时按 MAX_HOPS=15 处理。
 
 /**
- * 一跳静态中继运行时（FR-05~17）。
+ * 一跳静态中继运行时（FR-05~17）+ M5 多跳中继扩展（FR-06~08a）。
  *
  * <p>持双 {@link DatagramSocket}（面向 GCS/后端 + 面向远端飞机）与双独立
  * {@link ImpairmentEngine}（上下行异构链路），实现 learn-once 地址学习、
@@ -31,14 +30,19 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code relay-stats}（daemon）：10s 周期输出上下行统计</li>
  * </ul>
  *
- * <p>透明性：全程不解析/不修改 MAVLink 帧字节，仅按 {@link DatagramPacket#getLength()} 判决。
+ * <p>透明性：multiHopEnabled=false 时全程不解析/不修改 MAVLink 帧字节，仅按
+ * {@link DatagramPacket#getLength()} 判决（M0a 退化兼容，DFX 5.5.1）。
+ * multiHopEnabled=true 时在帧尾部追加/解析 1 字节 hopCount（FR-06/07/08）。
  */
 final class RelayNode {
 
-    /** hopCount 扩展点占位（FR-21）：一跳静态中继不启用跳数守卫。多跳扩展后改为帧级字段。 */
+    /** hopCount 扩展点占位（FR-21）：M0a 旧帧兼容标记，收到未携带 hopCount 的旧帧时按 MAX_HOPS=15 处理。 */
     static final int HOP_COUNT_DISABLED = -1;
+    /** M5 最大跳数（FR-08）。 */
+    static final int MAX_HOPS = 15;
 
     private final RelayConfig cfg;
+    private final MultiHopRelayConfig multiHopCfg;
     private final DatagramSocket gcsSocket;     // 面向 GCS/后端
     private final DatagramSocket relaySocket;   // 面向远端飞机
     private final ImpairmentEngine uplink;      // 上行独立引擎（GCS -> 飞机）
@@ -49,13 +53,13 @@ final class RelayNode {
     private final AtomicLong seq = new AtomicLong();
 
     /**
-     * 生产构造器：绑定双 socket + 从 cfg 画像创建双独立 engine。
+     * 生产构造器：绑定双 socket + 从 cfg 画像创建双独立 engine + 默认多跳配置（禁用）。
      *
      * <p>绑定失败（端口占用）捕获 {@link BindException} 打印失败端口并 {@code exit(1)}
      * （FR 5.1.3-2）。
      */
     RelayNode(RelayConfig cfg) throws IOException {
-        this(cfg, cfg.uplink.engine(), cfg.downlink.engine());
+        this(cfg, cfg.uplink.engine(), cfg.downlink.engine(), MultiHopRelayConfig.defaults());
     }
 
     /**
@@ -63,7 +67,16 @@ final class RelayNode {
      */
     RelayNode(RelayConfig cfg, ImpairmentEngine uplink, ImpairmentEngine downlink)
             throws IOException {
+        this(cfg, uplink, downlink, MultiHopRelayConfig.defaults());
+    }
+
+    /**
+     * 全参数构造器：注入多跳配置（M5）。
+     */
+    RelayNode(RelayConfig cfg, ImpairmentEngine uplink, ImpairmentEngine downlink,
+              MultiHopRelayConfig multiHopCfg) throws IOException {
         this.cfg = cfg;
+        this.multiHopCfg = multiHopCfg;
         this.uplink = uplink;
         this.downlink = downlink;
         this.gcsSocket = bindSocket(cfg.gcsPort, "gcs-port");
@@ -108,6 +121,8 @@ final class RelayNode {
      * {@code droneAddr==null} 时 {@code continue}（FR-11 上行等待期）→
      * {@code uplink.verdict(len)}，{@code delay<0} 丢弃（FR-08），否则入队
      * {@code (to=droneAddr, toDrone=true)}。
+     * <p>multiHopEnabled=true 时：解析帧尾部 1 字节 hopCount（无尾部则 MAX_HOPS=15 兼容降级），
+     * hopCount > MAX_HOPS 丢弃（FR-08），hopCount <= 0 丢弃（FR-07），递减后入队。
      */
     private void uplinkLoop() {
         byte[] buf = new byte[2048];
@@ -127,8 +142,16 @@ final class RelayNode {
                 // FR-14 上行独立引擎判决
                 long delay = uplink.verdict(data.length);
                 if (delay < 0) continue; // FR-08 丢弃
+                // M5 多跳 hopCount 处理（FR-06/07/08）
+                int hopCount = HOP_COUNT_DISABLED;
+                if (multiHopCfg.multiHopEnabled) {
+                    hopCount = extractHopCount(data);
+                    if (hopCount > MAX_HOPS) continue;  // FR-08 越界丢弃
+                    if (hopCount <= 0) continue;        // FR-07 耗尽丢弃
+                    hopCount--;                          // FR-06 递减
+                }
                 wire.add(new ScheduledPacket(System.currentTimeMillis() + delay,
-                        seq.incrementAndGet(), data, cfg.droneAddr, true));
+                        seq.incrementAndGet(), data, cfg.droneAddr, true, hopCount));
             } catch (IOException e) {
                 // 接收异常：真实链路偶发，不中断循环
             }
@@ -142,6 +165,7 @@ final class RelayNode {
      * {@code gcsAddr==null} 时 {@code continue}（对端未学习静默丢弃，FR 5.2.3-1）→
      * {@code downlink.verdict(len)}，{@code delay<0} 丢弃，否则入队
      * {@code (to=gcsAddr, toDrone=false)}。
+     * <p>multiHopEnabled=true 时：同 uplinkLoop 的 hopCount 处理。
      */
     private void downlinkLoop() throws IOException {
         byte[] buf = new byte[2048];
@@ -160,8 +184,54 @@ final class RelayNode {
             // FR-14 下行独立引擎判决
             long delay = downlink.verdict(data.length);
             if (delay < 0) continue; // FR-08 丢弃
+            // M5 多跳 hopCount 处理（FR-06/07/08）
+            int hopCount = HOP_COUNT_DISABLED;
+            if (multiHopCfg.multiHopEnabled) {
+                hopCount = extractHopCount(data);
+                if (hopCount > MAX_HOPS) continue;  // FR-08 越界丢弃
+                if (hopCount <= 0) continue;        // FR-07 耗尽丢弃
+                hopCount--;                          // FR-06 递减
+            }
             wire.add(new ScheduledPacket(System.currentTimeMillis() + delay,
-                    seq.incrementAndGet(), data, cfg.gcsAddr, false));
+                    seq.incrementAndGet(), data, cfg.gcsAddr, false, hopCount));
+        }
+    }
+
+    /**
+     * 从帧 payload 尾部提取 hopCount（M5 多跳扩展）。
+     * <p>无尾部（M0a 旧帧）则返回 MAX_HOPS=15 兼容降级（FR-08a）。
+     */
+    private static int extractHopCount(byte[] data) {
+        // MAVLink v2 帧尾部 2 字节 CRC，hopCount 追加在 CRC 之后
+        // 简化：若数据长度 > 12（最小帧头+CRC），取最后一字节作为 hopCount
+        if (data.length < 13) {
+            return MAX_HOPS;  // FR-08a 旧帧兼容
+        }
+        return data[data.length - 1] & 0xFF;
+    }
+
+    /**
+     * 将 hopCount 写回帧尾部（M5 多跳扩展）。
+     * <p>
+     * P1-fix(Major 3+4):
+     * <ul>
+     *   <li>帧已有 hopCount 尾部（data.length >= 13）→ 原地更新最后一字节，避免每跳 +1 字节导致帧持续增长。</li>
+     *   <li>帧无尾部（data.length < 13，M0a 旧帧）→ 追加 1 字节。</li>
+     *   <li>hopCount == 0 时仍保留尾部字节（值为 0），接收方 extractHopCount 返回 0，
+     *       hopCount <= 0 丢弃，避免已耗尽帧被重新当作新帧开始 15 跳转发。</li>
+     * </ul>
+     */
+    private static byte[] writeHopCount(byte[] data, int hopCount) {
+        if (data.length >= 13) {
+            // 帧已有 hopCount 尾部：原地更新最后一字节，避免帧持续增长
+            byte[] out = Arrays.copyOf(data, data.length);
+            out[out.length - 1] = (byte) hopCount;
+            return out;
+        } else {
+            // 帧无尾部（M0a 旧帧）：追加 1 字节 hopCount（含 hopCount==0 也保留尾部）
+            byte[] out = Arrays.copyOf(data, data.length + 1);
+            out[out.length - 1] = (byte) hopCount;
+            return out;
         }
     }
 
@@ -169,7 +239,10 @@ final class RelayNode {
      * 单发送线程（daemon）：统一延迟投递到双 socket（design.md §2.1.3.3）。
      *
      * <p>沿用现有 {@code LinkSimMain.wirePump} 的"睡到最早到期时间"轮询模式，
-     * 扩展为按 {@code toDrone} 选 socket。透明转发：不篡改字节。
+     * 扩展为按 {@code toDrone} 选 socket。
+     * <p>multiHopEnabled=false 时透明转发：不篡改字节（M0a 退化兼容，DFX 5.5.1）。
+     * <p>multiHopEnabled=true 时：hopCount > 0 则将 hopCount 写回帧尾部转发，
+     * hopCount == 0 则剥离尾部转发最后一跳。
      * {@code IOException} 丢弃该包不中断循环（FR 5.2.3-2）。
      */
     private void wirePump() {
@@ -186,7 +259,12 @@ final class RelayNode {
                     }
                 }
                 DatagramSocket out = p.toDrone ? relaySocket : gcsSocket; // 选 socket
-                out.send(new DatagramPacket(p.data, p.data.length, p.to)); // 透明转发，字节不变
+                byte[] sendData = p.data;
+                // M5 多跳：hopCount 写回帧尾部
+                if (multiHopCfg.multiHopEnabled && p.hopCount != HOP_COUNT_DISABLED) {
+                    sendData = writeHopCount(p.data, p.hopCount);
+                }
+                out.send(new DatagramPacket(sendData, sendData.length, p.to));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
@@ -211,9 +289,10 @@ final class RelayNode {
         }
     }
 
-    /** 带方向的待发数据包：按到期时间再按入队顺序排序。 */
+    /** 带方向的待发数据包：按到期时间再按入队顺序排序。hopCount 为 HOP_COUNT_DISABLED 表示 M0a 旧帧。 */
     private record ScheduledPacket(long dueAtMs, long order, byte[] data,
-                                   InetSocketAddress to, boolean toDrone) implements
+                                   InetSocketAddress to, boolean toDrone,
+                                   int hopCount) implements
             Comparable<ScheduledPacket> {
         @Override
         public int compareTo(ScheduledPacket o) {

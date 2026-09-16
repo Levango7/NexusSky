@@ -1,19 +1,30 @@
 package io.aerofleet.cloud.gateway;
 
+import io.aerofleet.cloud.api.CellTowerTopologyService;
+import io.aerofleet.cloud.api.EmergencyOrchService;
 import io.aerofleet.cloud.api.HardwareDataController;
+import io.aerofleet.cloud.api.MeshTopologyService;
+import io.aerofleet.cloud.api.SatLinkMonitorService;
+import io.aerofleet.cloud.api.TerrainMapService;
 import io.aerofleet.cloud.telemetry.AlertBus;
 import io.aerofleet.cloud.telemetry.PendingAcks;
 import io.aerofleet.cloud.vision.RadarController;
 import io.aerofleet.cloud.vision.RotorController;
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.messages.Attitude;
+import io.aerofleet.mavlink.messages.CellHandoverMsg;
+import io.aerofleet.mavlink.messages.CellTowerStatusMsg;
 import io.aerofleet.mavlink.messages.CommandAck;
+import io.aerofleet.mavlink.messages.FlightRestrictionMsg;
 import io.aerofleet.mavlink.messages.GlobalPositionInt;
 import io.aerofleet.mavlink.messages.GpsRawInt;
+import io.aerofleet.mavlink.messages.GroundTerminalRegisterMsg;
 import io.aerofleet.mavlink.messages.Heartbeat;
 import io.aerofleet.mavlink.messages.ImuDataMsg;
 import io.aerofleet.mavlink.messages.LidarDataMsg;
 import io.aerofleet.mavlink.messages.MavlinkMessage;
+import io.aerofleet.mavlink.messages.MeshHeartbeatMsg;
+import io.aerofleet.mavlink.messages.MeshNeighborTableMsg;
 import io.aerofleet.mavlink.messages.MissionAckMsg;
 import io.aerofleet.mavlink.messages.MissionCountMsg;
 import io.aerofleet.mavlink.messages.MissionCurrent;
@@ -24,11 +35,19 @@ import io.aerofleet.mavlink.messages.RadarScanMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
 import io.aerofleet.mavlink.messages.RadioStatus;
 import io.aerofleet.mavlink.messages.RotorTelemetryMsg;
+import io.aerofleet.mavlink.messages.SatLinkStatusMsg;
+import io.aerofleet.mavlink.messages.SatPassScheduleMsg;
+import io.aerofleet.mavlink.messages.HierarchicalRouteDecisionMsg;
 import io.aerofleet.mavlink.messages.Statustext;
 import io.aerofleet.mavlink.messages.SysStatus;
+import io.aerofleet.mavlink.messages.TerrainTypeMapMsg;
+import io.aerofleet.mavlink.messages.TerrainUpdateMsg;
 import io.aerofleet.mavlink.messages.VfrHud;
 import io.aerofleet.mavlink.messages.EnvironmentAlert;
 import io.aerofleet.mavlink.messages.EnvironmentStatus;
+import io.aerofleet.mavlink.messages.EmergencyMissionPlanMsg;
+import io.aerofleet.mavlink.messages.CoverageOptimizationMsg;
+import io.aerofleet.mavlink.messages.EmergencyPriorityMsg;
 import io.aerofleet.mavlink.enums.MavEnums;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,16 +72,31 @@ public class TelemetryIngestService {
     private final RadarController radarController;
     private final RotorController rotorController;
     private final HardwareDataController hardwareDataController;
+    private final MeshTopologyService meshTopologyService;
+    private final SatLinkMonitorService satLinkMonitorService;
+    private final TerrainMapService terrainMapService;
+    private final CellTowerTopologyService cellTowerTopologyService;
+    private final EmergencyOrchService emergencyOrchService;
 
     public TelemetryIngestService(DeviceRegistry registry, PendingAcks pendings, AlertBus alerts,
                                   @Lazy RadarController radarController, @Lazy RotorController rotorController,
-                                  @Lazy HardwareDataController hardwareDataController) {
+                                  @Lazy HardwareDataController hardwareDataController,
+                                  @Lazy MeshTopologyService meshTopologyService,
+                                  @Lazy SatLinkMonitorService satLinkMonitorService,
+                                  @Lazy TerrainMapService terrainMapService,
+                                  @Lazy CellTowerTopologyService cellTowerTopologyService,
+                                  @Lazy EmergencyOrchService emergencyOrchService) {
         this.registry = registry;
         this.pendings = pendings;
         this.alerts = alerts;
         this.radarController = radarController;
         this.rotorController = rotorController;
         this.hardwareDataController = hardwareDataController;
+        this.meshTopologyService = meshTopologyService;
+        this.satLinkMonitorService = satLinkMonitorService;
+        this.terrainMapService = terrainMapService;
+        this.cellTowerTopologyService = cellTowerTopologyService;
+        this.emergencyOrchService = emergencyOrchService;
     }
 
     /** Called by the UDP transport for every CRC-valid frame. Never throws. */
@@ -100,6 +134,30 @@ public class TelemetryIngestService {
                 case RotorTelemetryMsg.ID -> rotorController.onRotorTelemetry((RotorTelemetryMsg) msg);
                 case LidarDataMsg.ID -> hardwareDataController.onLidarData((LidarDataMsg) msg);
                 case ImuDataMsg.ID -> hardwareDataController.onImuData((ImuDataMsg) msg);
+                // M5 mesh 拓扑上报路由（msgId 450/454，FR-27）：
+                // MeshHeartbeat → 更新节点在线状态；MeshNeighborTable → 更新拓扑快照。
+                case MeshHeartbeatMsg.ID -> onMeshHeartbeat(sysid, (MeshHeartbeatMsg) msg);
+                case MeshNeighborTableMsg.ID -> meshTopologyService.onNeighborTable(sysid, (MeshNeighborTableMsg) msg);
+                // M7 sat-relay 消息路由（msgId 459-461，FR-5.4/5.3）：
+                // SatLinkStatus → 链路状态快照；SatPassSchedule → 过境计划；HierarchicalRouteDecision → 路由决策历史。
+                case SatLinkStatusMsg.ID -> satLinkMonitorService.onSatLinkStatus(sysid, (SatLinkStatusMsg) msg);
+                case SatPassScheduleMsg.ID -> satLinkMonitorService.onSatPassSchedule(sysid, (SatPassScheduleMsg) msg);
+                case HierarchicalRouteDecisionMsg.ID -> satLinkMonitorService.onHierarchicalRouteDecision(sysid, (HierarchicalRouteDecisionMsg) msg);
+                // M8 复杂地形适配消息路由（msgId 462-464，FR-31）：
+                // TerrainTypeMap → 地形图快照；TerrainUpdate → 变更历史；FlightRestriction → 限制区列表。
+                case TerrainTypeMapMsg.ID -> terrainMapService.onTerrainTypeMap(sysid, (TerrainTypeMapMsg) msg);
+                case TerrainUpdateMsg.ID -> terrainMapService.onTerrainUpdate(sysid, (TerrainUpdateMsg) msg);
+                case FlightRestrictionMsg.ID -> terrainMapService.onFlightRestriction(sysid, (FlightRestrictionMsg) msg);
+                // M6 移动基站载荷消息路由（msgId 455-458，FR-MSG-02/04/05）：
+                // CellTowerStatus → 基站状态快照；GroundTerminalRegister → 终端注册；CellHandover → 漫游切换。
+                case CellTowerStatusMsg.ID -> cellTowerTopologyService.onCellTowerStatus(sysid, (CellTowerStatusMsg) msg);
+                case GroundTerminalRegisterMsg.ID -> cellTowerTopologyService.onTerminalRegister(sysid, (GroundTerminalRegisterMsg) msg);
+                case CellHandoverMsg.ID -> cellTowerTopologyService.onHandover(sysid, (CellHandoverMsg) msg);
+                // M9 应急任务编排消息路由（msgId 465-467，FR-30）：
+                // EmergencyMissionPlan → 计划状态更新；CoverageOptimization → 覆盖部署方案；EmergencyPriority → 优先级调度事件。
+                case EmergencyMissionPlanMsg.ID -> onEmergencyMissionPlan(sysid, (EmergencyMissionPlanMsg) msg);
+                case CoverageOptimizationMsg.ID -> onCoverageOptimization(sysid, (CoverageOptimizationMsg) msg);
+                case EmergencyPriorityMsg.ID -> onEmergencyPriority(sysid, (EmergencyPriorityMsg) msg);
                 default -> { /* SYSTEM_TIME / HOME_POSITION etc.: not needed yet */ }
             }
         } catch (RuntimeException e) {
@@ -262,5 +320,54 @@ public class TelemetryIngestService {
         s.envWeather = msg.weather;
         s.envVisibility = msg.visibility;
         s.envRainRate = msg.rainRate;
+    }
+
+    /**
+     * M5 mesh 心跳处理（FR-27）：更新节点在线状态与位置/电量/邻居数。
+     */
+    private void onMeshHeartbeat(int sysid, MeshHeartbeatMsg msg) {
+        DroneSnapshot s = registry.registerIfAbsent(sysid);
+        s.lastHeartbeatMs = System.currentTimeMillis();
+        if (!s.online) {
+            s.online = true;
+            log.info("Mesh node online: sysid={}", sysid);
+        }
+        log.debug("MESH_HEARTBEAT sysid={} neighbors={} battery={}%", sysid, msg.neighborCount, msg.batteryPercent);
+    }
+
+    /**
+     * M9 应急任务编排：EMERGENCY_MISSION_PLAN (465) 处理（FR-30）。
+     * 转发至 {@link EmergencyOrchService} 更新计划阶段/状态/覆盖/连通率。
+     */
+    private void onEmergencyMissionPlan(int sysid, EmergencyMissionPlanMsg msg) {
+        emergencyOrchService.onEmergencyMissionPlan(
+                msg.planId, msg.scenarioType, msg.phase, msg.phaseStatus,
+                msg.droneCount, msg.coverageRate, msg.connectRate, msg.priority);
+        log.debug("EMERGENCY_MISSION_PLAN sysid={} planId={} phase={} status={}",
+                sysid, msg.planId, msg.phase, msg.phaseStatus);
+    }
+
+    /**
+     * M9 应急任务编排：COVERAGE_OPTIMIZATION (466) 处理（FR-30）。
+     * 转发至 {@link EmergencyOrchService} 记录单架无人机覆盖部署方案。
+     */
+    private void onCoverageOptimization(int sysid, CoverageOptimizationMsg msg) {
+        emergencyOrchService.onCoverageOptimization(
+                msg.planId, msg.droneId, msg.cellType, msg.relayRole,
+                msg.txPower, msg.expectedCoverage, msg.batteryBudget);
+        log.debug("COVERAGE_OPTIMIZATION sysid={} planId={} drone={} cell={} cov={}%",
+                sysid, msg.planId, msg.droneId, msg.cellType, msg.expectedCoverage);
+    }
+
+    /**
+     * M9 应急任务编排：EMERGENCY_PRIORITY (467) 处理（FR-30）。
+     * 转发至 {@link EmergencyOrchService} 记录优先级调度事件。
+     */
+    private void onEmergencyPriority(int sysid, EmergencyPriorityMsg msg) {
+        emergencyOrchService.onEmergencyPriority(
+                msg.planId, msg.taskId, msg.priority, msg.action,
+                msg.preemptedTaskId, msg.reason);
+        log.debug("EMERGENCY_PRIORITY sysid={} planId={} task={} pri={} action={}",
+                sysid, msg.planId, msg.taskId, msg.priority, msg.action);
     }
 }

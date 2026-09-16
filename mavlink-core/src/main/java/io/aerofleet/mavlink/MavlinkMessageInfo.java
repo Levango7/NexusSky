@@ -73,6 +73,29 @@ public final class MavlinkMessageInfo {
         INFOS.put(439, new Info(24, 213));   // ROTOR_TELEMETRY
         INFOS.put(440, new Info(20, 214));   // LIDAR_DATA
         INFOS.put(441, new Info(41, 215));   // IMU_DATA
+        // ---- NexusSky 自定义扩展消息（M5 应急 mesh 自愈组网，msgId 450-454）----
+        INFOS.put(450, new Info(24, 233));   // MESH_HEARTBEAT
+        INFOS.put(451, new Info(12, 234));   // MESH_ROUTE_REQUEST
+        INFOS.put(452, new Info(10, 235));   // MESH_ROUTE_REPLY
+        INFOS.put(453, new Info(4, 236));    // MESH_ROUTE_ERROR
+        INFOS.put(454, new Info(-1, 237));   // MESH_NEIGHBOR_TABLE (可变长度，LEN=-1)
+        // ---- NexusSky 自定义扩展消息（M6 移动基站载荷抽象，msgId 455-458）----
+        INFOS.put(455, new Info(15, 245));   // CELL_TOWER_STATUS
+        INFOS.put(456, new Info(7, 246));    // CELL_TOWER_CONFIG
+        INFOS.put(457, new Info(5, 247));    // CELL_HANDOVER
+        INFOS.put(458, new Info(12, 248));   // GROUND_TERMINAL_REGISTER
+        // ---- NexusSky 自定义扩展消息（M7 星-空-地多层级中继，msgId 459-461）----
+        INFOS.put(459, new Info(24, 238));   // SAT_LINK_STATUS
+        INFOS.put(460, new Info(16, 239));   // SAT_PASS_SCHEDULE
+        INFOS.put(461, new Info(34, 240));   // HIERARCHICAL_ROUTE_DECISION
+        // ---- NexusSky 自定义扩展消息（M8 复杂地形适配，msgId 462-464）----
+        INFOS.put(462, new Info(-1, 242));   // TERRAIN_TYPE_MAP (可变长度，LEN=-1)
+        INFOS.put(463, new Info(-1, 243));   // TERRAIN_UPDATE (可变长度，LEN=-1)
+        INFOS.put(464, new Info(-1, 244));   // FLIGHT_RESTRICTION (可变长度，LEN=-1)
+        // ---- NexusSky 自定义扩展消息（M9 应急任务编排，msgId 465-467）----
+        INFOS.put(465, new Info(25, 249));   // EMERGENCY_MISSION_PLAN
+        INFOS.put(466, new Info(24, 250));   // COVERAGE_OPTIMIZATION
+        INFOS.put(467, new Info(50, 251));   // EMERGENCY_PRIORITY
     }
 
     private MavlinkMessageInfo() {

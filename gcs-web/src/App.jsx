@@ -9,6 +9,11 @@ import VisionPanel from './components/VisionPanel.jsx'
 import FormationPanel from './components/FormationPanel.jsx'
 import SprayPanel from './components/SprayPanel.jsx'
 import HardwarePanel from './components/HardwarePanel.jsx'
+import MeshTopologyPanel from './components/MeshTopologyPanel.jsx'
+import SatLinkPanel from './components/SatLinkPanel.jsx'
+import TerrainMapPanel from './components/TerrainMapPanel.jsx'
+import CellTowerPanel from './components/CellTowerPanel.jsx'
+import EmergencyOrchPanel from './components/EmergencyOrchPanel.jsx'
 import { api, wsUrl } from './api.js'
 
 function haversine(a, b) {
@@ -39,8 +44,12 @@ export default function App() {
   const [wsState, setWsState] = useState('connecting')
   const [apiOk, setApiOk] = useState(false)
   const [now, setNow] = useState(Date.now())
-  const [view, setView] = useState('control')               // 'control' | 'formation'
+  const [view, setView] = useState('control')               // 'control' | 'formation' | 'spray' | 'hardware' | 'mesh' | 'celltower'
   const [formations, setFormations] = useState([])          // 编队列表（WebSocket 推送）
+  const [meshTopology, setMeshTopology] = useState(null)    // mesh 拓扑（WebSocket 推送）
+  const [satLinkData, setSatLinkData] = useState(null)      // sat-link 数据（WebSocket 推送）
+  const [terrainData, setTerrainData] = useState(null)      // terrain 数据（WebSocket 推送）
+  const [cellTowerData, setCellTowerData] = useState(null)  // celltower 数据（WebSocket 推送）
   const wsRef = useRef(null)
 
   const selected = drones.find((d) => d.sysid === selectedSysid)
@@ -137,6 +146,18 @@ export default function App() {
             }
             return [...prev, data]
           })
+        } else if (msg.type === 'mesh-topology') {
+          // mesh 拓扑变化推送（MeshTopologyPusher 2Hz）
+          setMeshTopology(msg)
+        } else if (msg.type === 'sat-link') {
+          // 星-空-地中继数据推送（SatLinkPusher 2Hz）
+          setSatLinkData(msg)
+        } else if (msg.type === 'terrain-update' || msg.type === 'terrain-restriction') {
+          // 地形变更/限制区推送（TerrainPusher 2Hz，M8 FR-31）
+          setTerrainData(msg)
+        } else if (msg.type === 'celltower-topology') {
+          // 基站拓扑变化推送（CellTowerPusher 2Hz，M6）
+          setCellTowerData(msg)
         }
       }
     }
@@ -194,6 +215,41 @@ export default function App() {
             >
               硬件
             </button>
+            <button
+              className={`btn ${view === 'mesh' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('mesh')}
+            >
+              Mesh
+            </button>
+            <button
+              className={`btn ${view === 'celltower' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('celltower')}
+            >
+              基站
+            </button>
+            <button
+              className={`btn ${view === 'satlink' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('satlink')}
+            >
+              星地中继
+            </button>
+            <button
+              className={`btn ${view === 'terrain' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('terrain')}
+            >
+              地形
+            </button>
+            <button
+              className={`btn ${view === 'emergency' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('emergency')}
+            >
+              应急编排
+            </button>
           </div>
           <span className="chip mono">{new Date(now).toLocaleTimeString('zh-CN', { hour12: false })}</span>
           <span className="chip">
@@ -224,6 +280,26 @@ export default function App() {
       ) : view === 'hardware' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <HardwarePanel drones={drones} />
+        </div>
+      ) : view === 'mesh' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <MeshTopologyPanel meshTopology={meshTopology} />
+        </div>
+      ) : view === 'celltower' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <CellTowerPanel cellTowerData={cellTowerData} />
+        </div>
+      ) : view === 'satlink' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <SatLinkPanel satLinkData={satLinkData} />
+        </div>
+      ) : view === 'terrain' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <TerrainMapPanel terrainData={terrainData} />
+        </div>
+      ) : view === 'emergency' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <EmergencyOrchPanel />
         </div>
       ) : (
       <div className="gcs-body">

@@ -29,7 +29,14 @@ import io.aerofleet.mavlink.messages.RadarTargetMsg;
 import io.aerofleet.mavlink.messages.RotorTelemetryMsg;
 import io.aerofleet.mavlink.messages.LidarDataMsg;
 import io.aerofleet.mavlink.messages.ImuDataMsg;
+import io.aerofleet.mavlink.messages.MeshHeartbeatMsg;
+import io.aerofleet.mavlink.messages.MeshRouteRequestMsg;
+import io.aerofleet.mavlink.messages.MeshRouteReplyMsg;
+import io.aerofleet.mavlink.messages.MeshRouteErrorMsg;
 import io.aerofleet.mavlink.enums.ScanMode;
+import io.aerofleet.sim.mesh.MeshRouter;
+import io.aerofleet.sim.orch.OrchestrationEngine;
+import io.aerofleet.sim.satrelay.SatRelayEngine;
 
 import java.io.IOException;
 import java.net.SocketAddress;
@@ -146,6 +153,45 @@ public final class VirtualDrone implements AutoCloseable {
     private boolean sprayLowCriticalWarned = false;
     /** 侧风禁喷告警去重（FR-17，触发一次后等恢复后重新去重）。 */
     private boolean crosswindWarned = false;
+    /**
+     * M5 应急 mesh 路由引擎（FR-01~30）：null 当 !config.meshEnabled（既有行为不变，DFX 4.5）。
+     * 由构造器创建，tickOnce 每 tick 调 meshRouter.tick()，在 onFrame 中分发 mesh 消息。
+     */
+    private final MeshRouter meshRouter;
+    /** mesh 路由启用标志（config.meshEnabled 的快照，避免 tickOnce 每次读 config）。 */
+    private final boolean meshEnabled;
+    /**
+     * M7 星-空-地多层级中继引擎（FR-5.1~5.5）：null 当 !config.satRelayEnabled（既有行为不变，DFX 4.5）。
+     * 由构造器创建，tickOnce 每 tick 调 satRelayEngine.tick()，产出 459/460/461 消息。
+     */
+    private final SatRelayEngine satRelayEngine;
+    /** sat-relay 引擎启用标志（config.satRelayEnabled 的快照，避免 tickOnce 每次读 config）。 */
+    private final boolean satRelayEnabled;
+    /**
+     * M8 复杂地形适配引擎（FR-01~33）：null 当 !config.terrainAdaptEnabled（既有行为不变，DFX 4.5）。
+     * 由构造器创建，terrainGrid 可由外部建图后注入。
+     */
+    private final io.aerofleet.sim.terrain.TerrainGrid terrainGrid;
+    private final io.aerofleet.sim.terrain.EnhancedRadioEnvironment enhancedRadio;
+    private final io.aerofleet.sim.terrain.FlightConstraintChecker flightConstraintChecker;
+    private final io.aerofleet.sim.terrain.TerrainChangeMonitor terrainChangeMonitor;
+    /** 地形适配启用标志（config.terrainAdaptEnabled 的快照）。 */
+    private final boolean terrainAdaptEnabled;
+    /**
+     * M6 移动基站载荷（FR-CT-01~06）：null 当 !config.cellTowerConfig.enabled（既有行为不变，DFX 4.5）。
+     * 由构造器创建，tickOnce 每 tick 调 cellTower.tick()，1Hz 调 sendCellTowerStatus()。
+     */
+    private final io.aerofleet.sim.celltower.CellTowerPayload cellTower;
+    /** 基站载荷启用标志（config.cellTowerConfig.enabled 的快照）。 */
+    private final boolean celltowerEnabled;
+    /** 基站状态广播分频时间戳。 */
+    private volatile long lastCellTowerStatusMs = 0;
+    /**
+     * M9 应急任务编排引擎（FR-01~33）：null 当 !config.orchConfig.enabled（既有行为不变，DFX 4.5）。
+     * 由构造器创建，tickOnce 每 tick 调 orchEngine.tick() 驱动持续服务阶段。
+     * 集成接口传 null，表示 M5-M8 模块未直接连接，实际集成通过 Cloud API 和 MAVLink 消息完成。
+     */
+    private OrchestrationEngine orchEngine;
 
     // guarded-by-this flight state
     private FlightState state = FlightState.INIT;
@@ -231,6 +277,67 @@ public final class VirtualDrone implements AutoCloseable {
             this.gripper = null;
             this.actuatorsEnabled = false;
         }
+        // M5 mesh 路由引擎创建（FR-01）：config.meshEnabled 时创建，否则 null（DFX 4.5 既有行为不变）
+        if (config.meshEnabled) {
+            this.meshRouter = new MeshRouter(config.sysid, config.meshRouterConfig, transport);
+            this.meshEnabled = true;
+            SimLog.info("mesh router enabled: sysid=" + config.sysid
+                    + " config=" + config.meshRouterConfig);
+        } else {
+            this.meshRouter = null;
+            this.meshEnabled = false;
+        }
+        // M7 sat-relay 引擎创建（FR-5.1）：config.satRelayEnabled 时创建，否则 null（DFX 4.5 既有行为不变）
+        if (config.satRelayEnabled) {
+            this.satRelayEngine = new SatRelayEngine(config.sysid, config.satRelayConfig,
+                    transport, config.meshRouterConfig.cloudBackendAddress);
+            this.satRelayEnabled = true;
+            SimLog.info("sat-relay engine enabled: sysid=" + config.sysid
+                    + " config=" + config.satRelayConfig);
+        } else {
+            this.satRelayEngine = null;
+            this.satRelayEnabled = false;
+        }
+        // M8 地形适配引擎创建（FR-01）：config.terrainAdaptEnabled 时创建，否则 null（DFX 4.5 既有行为不变）
+        if (config.terrainAdaptEnabled) {
+            this.terrainAdaptEnabled = true;
+            this.terrainGrid = null;  // 由外部建图后注入
+            this.enhancedRadio = new io.aerofleet.sim.terrain.EnhancedRadioEnvironment(
+                    this.radio, null, io.aerofleet.sim.terrain.EnhancedRadioEnvironment.DEFAULT_FREQ_MHZ,
+                    config.lat, config.lon, 1.5);
+            this.flightConstraintChecker = null;  // 由外部注入限飞区后创建
+            this.terrainChangeMonitor = null;  // 由外部注入地形图后创建
+            SimLog.info("terrain adapt enabled: grid-resolution=" + config.terrainGridResolution + "m");
+        } else {
+            this.terrainAdaptEnabled = false;
+            this.terrainGrid = null;
+            this.enhancedRadio = null;
+            this.flightConstraintChecker = null;
+            this.terrainChangeMonitor = null;
+        }
+        // M6 移动基站载荷创建（FR-CT-01）：config.cellTowerConfig.enabled 时创建，否则 null（DFX 4.5 既有行为不变）
+        if (config.cellTowerConfig != null && config.cellTowerConfig.enabled) {
+            io.aerofleet.sim.celltower.CellTowerSimConfig ctCfg = config.cellTowerConfig;
+            this.cellTower = io.aerofleet.sim.celltower.CellTowerFactory.create(
+                    ctCfg.cellType, config.sysid, ctCfg.txPowerDbm, ctCfg.maxTerminals,
+                    ctCfg.frequencyChannel, this.radio, this.terrain,
+                    ctCfg.signalThresholdDbm, ctCfg.loadBalanceThreshold, ctCfg.heartbeatTimeoutMs);
+            this.celltowerEnabled = true;
+            SimLog.info("celltower enabled: sysid=" + config.sysid + " config=" + ctCfg);
+        } else {
+            this.cellTower = null;
+            this.celltowerEnabled = false;
+        }
+        // M9 应急任务编排引擎创建（FR-01）：config.orchConfig.enabled 时创建，否则 null（DFX 4.5 既有行为不变）
+        if (config.orchConfig.enabled) {
+            this.orchEngine = new OrchestrationEngine(config.orchConfig, null, null, null, null);
+            // 集成接口传 null，表示 M5-M8 模块未直接连接
+            // 实际集成通过 Cloud API 和 MAVLink 消息完成
+            SimLog.info("orchestration engine enabled: sysid=" + config.sysid
+                    + " config=" + config.orchConfig);
+        } else {
+            this.orchEngine = null;
+        }
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "drone-sim-tick");
             t.setDaemon(true);
@@ -242,11 +349,27 @@ public final class VirtualDrone implements AutoCloseable {
     /** Start the tick loop; first tick immediately marks STANDBY. */
     public synchronized void start() {
         this.state = FlightState.STANDBY;
+        // M5 mesh 路由引擎启动（FR-09）
+        if (meshEnabled) {
+            meshRouter.start();
+        }
+        // M7 sat-relay 引擎启动（FR-5.1）
+        if (satRelayEnabled) {
+            satRelayEngine.start();
+        }
         scheduler.scheduleAtFixedRate(this::tickSafe, TICK_MS, TICK_MS, TimeUnit.MILLISECONDS);
     }
 
     @Override
     public void close() {
+        // M5 mesh 路由引擎关闭（FR-22a 主动退出：发 RERR + 停 HELLO）
+        if (meshEnabled) {
+            meshRouter.close();
+        }
+        // M7 sat-relay 引擎关闭
+        if (satRelayEnabled) {
+            satRelayEngine.close();
+        }
         scheduler.shutdownNow();
         transport.close();
     }
@@ -299,6 +422,32 @@ public final class VirtualDrone implements AutoCloseable {
                 } else if (msg instanceof LedControlMsg led) {
                     // FR-12 灯光控制消息：更新 ledState + 回 COMMAND_ACK
                     handleLedControl(led);
+                }
+                // M5 mesh 路由消息分发（msgId 450-453，FR-01~22a）
+                // 注意 MeshNeighborTableMsg(454) 不在 drone-sim 内部处理（仅发送不接收）
+                if (meshEnabled) {
+                    java.net.InetSocketAddress meshSrcAddr =
+                            (java.net.InetSocketAddress) transport.getLastPeer();
+                    int meshRssi = (int) Math.round(currentRssiDbm());
+                    if (msg instanceof MeshHeartbeatMsg mhb) {
+                        meshRouter.onMeshHeartbeat(mhb, meshSrcAddr, meshRssi);
+                    } else if (msg instanceof MeshRouteRequestMsg mrq) {
+                        meshRouter.onRouteRequest(mrq, meshSrcAddr, meshRssi, frame.getSystemId());
+                    } else if (msg instanceof MeshRouteReplyMsg mrp) {
+                        meshRouter.onRouteReply(mrp, meshSrcAddr, meshRssi, frame.getSystemId());
+                    } else if (msg instanceof MeshRouteErrorMsg mer) {
+                        meshRouter.onRouteError(mer, meshSrcAddr, frame.getSystemId());
+                    }
+                }
+                // M6 移动基站载荷消息分发（msgId 456-458，FR-CT-05 / FR-TERM-06 / FR-HO-03）
+                if (celltowerEnabled) {
+                    if (msg instanceof io.aerofleet.mavlink.messages.CellTowerConfigMsg ctc) {
+                        handleCellTowerConfig(ctc, frame.getSystemId());
+                    } else if (msg instanceof io.aerofleet.mavlink.messages.GroundTerminalRegisterMsg gtr) {
+                        handleGroundTerminalRegister(gtr);
+                    } else if (msg instanceof io.aerofleet.mavlink.messages.CellHandoverMsg chm) {
+                        handleCellHandover(chm);
+                    }
                 }
             }
         } catch (IOException e) {
@@ -857,6 +1006,45 @@ public final class VirtualDrone implements AutoCloseable {
         // Manual-stick timeout: revert to position hold when sticks go quiet.
         runManualTimeout();
 
+        // M5 mesh 路由引擎 tick 驱动（FR-09/11/21 周期驱动）：
+        // meshEnabled 时每个 tick 调 meshRouter.tick()，并更新本节点位置/电量供 HELLO 组装。
+        if (meshEnabled) {
+            meshRouter.updateState(
+                    (int) Math.round(physics.lat() * 1e7),
+                    (int) Math.round(physics.lon() * 1e7),
+                    (int) Math.round(physics.alt() * 1000),
+                    physics.batteryRemainingPct());
+            meshRouter.tick(System.currentTimeMillis());
+        }
+
+        // M7 sat-relay 引擎 tick 驱动（FR-5.1 周期驱动）：
+        // satRelayEnabled 时每个 tick 调 satRelayEngine.tick()，更新地面点位置供可见性计算。
+        if (satRelayEnabled) {
+            satRelayEngine.updateGroundPosition(physics.lat(), physics.lon());
+            satRelayEngine.tick(System.currentTimeMillis());
+        }
+
+        // M6 移动基站载荷 tick 驱动（FR-CT-01 / FR-NFR-PERF-04）：
+        // celltowerEnabled 时每个 tick 调 cellTower.tick()，更新位姿，1Hz 调 sendCellTowerStatus()。
+        // 异常 try-catch 隔离，不影响 tick 主循环（FR-NFR-REL-01）。
+        if (celltowerEnabled) {
+            try {
+                cellTower.updatePosition(
+                        (int) Math.round(physics.lat() * 1e7),
+                        (int) Math.round(physics.lon() * 1e7),
+                        (int) Math.round(physics.alt() * 1000));
+                cellTower.tick(System.currentTimeMillis());
+                // 1Hz 状态广播
+                long nowMs = System.currentTimeMillis();
+                if (nowMs - lastCellTowerStatusMs >= 1000) {
+                    lastCellTowerStatusMs = nowMs;
+                    sendCellTowerStatus();
+                }
+            } catch (Exception e) {
+                SimLog.warn("celltower tick failed: " + e.getMessage());
+            }
+        }
+
         if (scenario.linkLost(bootSec)) {
             // Black-hole: skip every outbound message while the link is down.
             // Heartbeat watchdog on the cloud side must flag the drone offline.
@@ -876,6 +1064,12 @@ public final class VirtualDrone implements AutoCloseable {
             pushStatus(MavEnums.MAV_SEVERITY_NOTICE, "GPS fix restored");
         }
         checkBattery();
+
+        // M9 应急任务编排引擎 tick 驱动（FR-01 周期驱动）：
+        // orchEngine 启用时每个 tick 调 orchEngine.tick()，驱动持续服务阶段超时检查。
+        if (orchEngine != null) {
+            orchEngine.tick(System.currentTimeMillis());
+        }
     }
 
     /** True while the scenario black-holes the link (telemetry senders consult this). */
@@ -1902,5 +2096,73 @@ public final class VirtualDrone implements AutoCloseable {
 
     public UdpMavlinkTransport transport() {
         return transport;
+    }
+
+    // ------------------------------------------------------------------
+    // M6 移动基站载荷（FR-CT-01~06 / FR-TERM-01~07 / FR-HO-01~07）
+    // ------------------------------------------------------------------
+
+    /**
+     * 处理基站配置指令（FR-CT-05 制式切换）。
+     * 仅接受来自 GCS（sysid=255）的配置（FR-NFR-SEC-01）。
+     */
+    private void handleCellTowerConfig(io.aerofleet.mavlink.messages.CellTowerConfigMsg msg, int senderSysid) {
+        if (senderSysid != GCS_SYSID) {
+            SimLog.warn("celltower config rejected: unauthorized sender sysid=" + senderSysid);
+            return;
+        }
+        try {
+            cellTower.applyConfig(msg);
+        } catch (Exception e) {
+            SimLog.warn("celltower applyConfig failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 处理终端注册请求（FR-TERM-06）。
+     */
+    private void handleGroundTerminalRegister(io.aerofleet.mavlink.messages.GroundTerminalRegisterMsg msg) {
+        try {
+            io.aerofleet.sim.celltower.TerminalType type =
+                    io.aerofleet.sim.celltower.TerminalType.fromOrdinal(msg.terminalType);
+            io.aerofleet.sim.celltower.GroundTerminal terminal =
+                    io.aerofleet.sim.celltower.GroundTerminal.fromRegister(
+                            msg.terminalId, type, msg.gpsLat, msg.gpsLon, System.currentTimeMillis());
+            io.aerofleet.sim.celltower.AccessResult result = cellTower.handleRegister(terminal);
+            SimLog.info("celltower register: terminal=" + msg.terminalId
+                    + " result=" + result.success + " code=" + result.errorCode);
+        } catch (IllegalArgumentException e) {
+            SimLog.warn("celltower register rejected: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 处理漫游切换信令（FR-HO-03 目标机侧）。
+     */
+    private void handleCellHandover(io.aerofleet.mavlink.messages.CellHandoverMsg msg) {
+        // 简化处理：目标机收到后尝试注册终端
+        SimLog.info("celltower handover received: terminal=" + msg.terminalId
+                + " from=" + msg.fromSysid + " to=" + msg.toSysid);
+    }
+
+    /**
+     * 发送基站状态广播（FR-CAP-05 / FR-MSG-02）。
+     */
+    private void sendCellTowerStatus() throws IOException {
+        if (cellTower == null || cellTower.currentCoverage() == null) {
+            return;
+        }
+        io.aerofleet.sim.celltower.CoverageArea cov = cellTower.currentCoverage();
+        int utilPct = (int) Math.round(cellTower.capacityUtilization() * 100);
+        io.aerofleet.mavlink.messages.CellTowerStatusMsg status =
+                new io.aerofleet.mavlink.messages.CellTowerStatusMsg(
+                        config.sysid,
+                        cellTower.cellType().ordinalCode(),
+                        cov.centerLatE7,
+                        cov.centerLonE7,
+                        (int) cov.radiusM,
+                        cellTower.connectedTerminals(),
+                        utilPct);
+        send(status);
     }
 }
