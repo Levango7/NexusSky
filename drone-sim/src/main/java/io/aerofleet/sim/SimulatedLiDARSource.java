@@ -51,7 +51,11 @@ public class SimulatedLiDARSource implements LiDARSource {
     public double nearestDistance() {
         double nearest = Double.MAX_VALUE;
         for (SyntheticObstacle obs : obstacles) {
-            double dist = Math.hypot(obs.north() - droneNorth, obs.east() - droneEast);
+            // M4 代码审查 #5：用 3D 距离（含高度差），障碍物在地面 alt=0
+            double dn = obs.north() - droneNorth;
+            double de = obs.east() - droneEast;
+            double da = 0 - droneAlt;
+            double dist = Math.sqrt(dn * dn + de * de + da * da);
             nearest = Math.min(nearest, dist);
         }
         return nearest;

@@ -118,6 +118,61 @@ export const api = {
   // 解散编队（在飞成员 RTL 后置 DISSOLVED）
   dissolveFormation: (id) =>
     jsonFetch(`${BASE}/formation/${id}/dissolve`, { method: 'POST' }),
+
+  // ---- Spray & Delivery (喷洒物流 M2) ----
+  // 创建喷洒任务：sysid + 喷洒量 + 速率 + 航段列表
+  createSprayTask: (payload) =>
+    jsonFetch(`${BASE}/spray/task`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 查询喷洒状态：泵状态 / 剩余液量 / 喷洒速率
+  getSprayStatus: (sysid) => jsonFetch(`${BASE}/spray/status/${sysid}`),
+
+  // 夹爪控制：开/关
+  controlGripper: (sysid, open) =>
+    jsonFetch(`${BASE}/spray/gripper`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sysid, open }),
+    }),
+
+  // 物流配送序列：站点列表 + 状态
+  getDeliverySequence: (sysid) => jsonFetch(`${BASE}/delivery/sequence/${sysid}`),
+
+  // ---- Hardware Abstraction (硬件抽象 M4) ----
+  // 雷达扫描配置：扫描模式 / 方位角范围 / 周期
+  configureRadar: (payload) =>
+    jsonFetch(`${BASE}/radar/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 雷达状态：当前波束方位
+  getRadarStatus: (sysid) => jsonFetch(`${BASE}/radar/status/${sysid}`),
+
+  // 雷达检测目标列表：距离/方位/RCS/跟踪状态
+  getRadarTargets: (sysid) => jsonFetch(`${BASE}/radar/targets/${sysid}`),
+
+  // 旋翼遥测：RPM / 推力 / 扭矩 / 桨距角
+  getRotorTelemetry: (sysid) => jsonFetch(`${BASE}/rotor/telemetry/${sysid}`),
+
+  // LiDAR 数据：最近距离 / 点数
+  getLidarData: (sysid) => jsonFetch(`${BASE}/lidar/data/${sysid}`),
+
+  // IMU 数据：加速度计 / 陀螺仪 / 磁力计
+  getImuData: (sysid) => jsonFetch(`${BASE}/imu/data/${sysid}`),
+
+  // 物理模型切换：kinematics / aero
+  setPhysicsModel: (sysid, model) =>
+    jsonFetch(`${BASE}/hardware/physics-model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sysid, model }),
+    }),
 }
 
 export const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${

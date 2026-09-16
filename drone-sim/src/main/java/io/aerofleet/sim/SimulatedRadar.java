@@ -21,13 +21,19 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>TRACK_WHILE_SCAN：扇扫同时维持对已跟踪目标的波束确认</li>
  * </ul>
  * <p>
- * 线程安全：trackStates 使用 ConcurrentHashMap；beamAzim 由 tick 线程独占写。
+ * 线程安全：trackStates/missCount 使用 ConcurrentHashMap；beamAzim/lastScanMs 由 tick 线程独占写，
+ * volatile 保证 REST 查询线程读可见性（M4 代码审查 #2）。
  */
 public class SimulatedRadar implements PhasedArrayRadar {
 
     private final Map<Integer, TrackState> trackStates = new ConcurrentHashMap<>();
-    private double beamAzim = 0;
-    private long lastScanMs = 0;
+    // volatile 保证 tick 线程写与 REST 查询线程读的可见性（M4 代码审查 #2）
+    private volatile double beamAzim = 0;
+    private volatile long lastScanMs = 0;
+    /** 每个目标连续未检测到的扫描周期数（M4 代码审查 #3，COASTING→LOST 降级）。 */
+    private final Map<Integer, Integer> missCount = new ConcurrentHashMap<>();
+    /** COASTING 连续未检测到目标后转为 LOST 的阈值。 */
+    private static final int COAST_TO_LOST_MISSES = 3;
 
     @Override
     public List<RadarTargetReport> scan(RadarScanConfig config, List<SyntheticTarget> targets) {
@@ -37,9 +43,13 @@ public class SimulatedRadar implements PhasedArrayRadar {
 
         List<RadarTargetReport> out = new ArrayList<>();
         if (targets == null || targets.isEmpty()) {
-            return out;  // FR-01 空目标 → 空列表（非 null）
+            // FR-01 空目标 → 空列表（非 null）
+            // M4 代码审查 #3：本次扫描未检测到任何目标，对所有已跟踪目标降级
+            degradeUnobservedTracks(java.util.Collections.emptySet());
+            return out;
         }
 
+        java.util.Set<Integer> detectedIds = new java.util.HashSet<>();
         for (SyntheticTarget t : targets) {
             // 计算目标相对雷达的极坐标
             double dist = Math.hypot(t.north(), t.east());
@@ -74,11 +84,47 @@ public class SimulatedRadar implements PhasedArrayRadar {
                 }
                 return TrackState.TRACKING;
             });
+            // 目标被检测到，重置 miss 计数
+            missCount.remove(t.id());
+            detectedIds.add(t.id());
 
             out.add(new RadarTargetReport(t.id(), dist, azim, elev, radialVel, heading,
                     rcs, state, now));
         }
+        // M4 代码审查 #3：本次扫描未检测到的已跟踪目标降级 TRACKING→COASTING→LOST
+        degradeUnobservedTracks(detectedIds);
         return out;
+    }
+
+    /**
+     * M4 代码审查 #3：对本次扫描未检测到的已跟踪目标降级。
+     * <ul>
+     *   <li>TRACKING → COASTING（首次未检测到）</li>
+     *   <li>COASTING → LOST（连续 {@value #COAST_TO_LOST_MISSES} 次未检测到）</li>
+     * </ul>
+     *
+     * @param detectedIds 本次扫描检测到的目标 id 集合
+     */
+    private void degradeUnobservedTracks(java.util.Set<Integer> detectedIds) {
+        for (Integer id : trackStates.keySet()) {
+            if (detectedIds.contains(id)) {
+                continue;
+            }
+            TrackState prev = trackStates.get(id);
+            if (prev == null) {
+                continue;
+            }
+            if (prev == TrackState.TRACKING) {
+                trackStates.put(id, TrackState.COASTING);
+                missCount.put(id, 1);
+            } else if (prev == TrackState.COASTING) {
+                int misses = missCount.merge(id, 1, Integer::sum);
+                if (misses >= COAST_TO_LOST_MISSES) {
+                    trackStates.put(id, TrackState.LOST);
+                    missCount.remove(id);
+                }
+            }
+        }
     }
 
     @Override
@@ -161,5 +207,6 @@ public class SimulatedRadar implements PhasedArrayRadar {
     /** 重置跟踪状态（供测试/配置重置用）。 */
     public void resetTracks() {
         trackStates.clear();
+        missCount.clear();
     }
 }

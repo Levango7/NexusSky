@@ -39,6 +39,9 @@ public class SimulatedRotorAerodynamics implements RotorAerodynamics {
 
         List<RotorResult> rotors = new ArrayList<>();
         double totalPower = 0;
+        // M4 代码审查 #4：rpm 被 cap 后实际能产生的推力会小于所需推力，
+        // 需用 cap 后的 rpm 重新计算实际推力，否则上报的推力与转速不一致。
+        double totalActualThrust = 0;
         for (int i = 0; i < n; i++) {
             // FR-09 简化动量理论：T = CT × ρ × n² × D⁴ → n = sqrt(T / (CT × ρ × D⁴))
             double denom = CT * rho * Math.pow(D, 4);
@@ -46,21 +49,32 @@ public class SimulatedRotorAerodynamics implements RotorAerodynamics {
             double rpm = rps * 60;
 
             // 限制在配置的转速上限内
+            boolean rpmCapped = false;
             if (rpm > config.maxRpm()) {
                 rpm = config.maxRpm();
+                rpmCapped = true;
             }
+
+            // M4 代码审查 #4：rpm 被 cap 后用 cap 后的转速重算实际推力
+            // T_actual = CT × ρ × (rpm/60)² × D⁴
+            double actualThrust = thrustPerRotor;
+            if (rpmCapped) {
+                double cappedRps = rpm / 60.0;
+                actualThrust = denom * cappedRps * cappedRps;
+            }
+            totalActualThrust += actualThrust;
 
             // 诱导功率 P_ind = T^(3/2) / sqrt(2 × ρ × A)
             double pInd = A > 0 && rho > 0
-                    ? Math.pow(thrustPerRotor, 1.5) / Math.sqrt(2 * rho * A) : 0;
+                    ? Math.pow(actualThrust, 1.5) / Math.sqrt(2 * rho * A) : 0;
             // 轴功率（含损耗）
             double pTotal = pInd / ETA_TOTAL;
             // 桨效 η = P_ind / P_total
             double eta = pTotal > 0 ? pInd / pTotal : 0;
 
-            rotors.add(new RotorResult(i, rpm, thrustPerRotor, eta, pTotal));
+            rotors.add(new RotorResult(i, rpm, actualThrust, eta, pTotal));
             totalPower += pTotal;
         }
-        return new RotorAeroResult(rotors, totalThrustRequired, totalPower);
+        return new RotorAeroResult(rotors, totalActualThrust, totalPower);
     }
 }

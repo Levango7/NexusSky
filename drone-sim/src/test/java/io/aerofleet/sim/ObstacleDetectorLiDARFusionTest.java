@@ -45,8 +45,10 @@ class ObstacleDetectorLiDARFusionTest {
 
         assertTrue(detector.isLidarFusionEnabled());
         ObstacleDetector.ObstacleReport r = detector.detect();
-        // LiDAR 障碍在 20m → LOW（< 4×safety=40）
-        assertEquals(20.0, r.distance(), 0.01);
+        // LiDAR 障碍在 20m（水平），无人机 alt=10 → 3D 距离 = sqrt(20² + 10²) = sqrt(500) ≈ 22.36
+        // （M4 代码审查 #5：nearestDistance 改为 3D 距离）
+        // sqrt(500) < 4×safety=40 → LOW
+        assertEquals(Math.sqrt(500), r.distance(), 0.01);
         assertEquals(ThreatLevel.LOW, r.threat());
     }
 

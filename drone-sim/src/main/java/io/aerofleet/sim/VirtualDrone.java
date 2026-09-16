@@ -107,12 +107,13 @@ public final class VirtualDrone implements AutoCloseable {
      * M4 硬件抽象数据源（FR-01/FR-07/FR-12/FR-15）：null 表示未注入，不产生硬件上报（DFX 4.5）。
      * 由 setter 注入（供 e2e 脚本/配置注入），tickOnce 按各自频率分频调用。
      */
-    private PhasedArrayRadar radar = null;
-    private RadarScanConfig radarConfig = null;
-    private RotorAerodynamics rotorAero = null;
-    private RotorConfig rotorConfig = null;
-    private LiDARSource lidarSource = null;
-    private ImuSource imuSource = null;
+    // volatile 保证 setter 线程写与 tickOnce 线程读的可见性（M4 代码审查 #1）
+    private volatile PhasedArrayRadar radar = null;
+    private volatile RadarScanConfig radarConfig = null;
+    private volatile RotorAerodynamics rotorAero = null;
+    private volatile RotorConfig rotorConfig = null;
+    private volatile LiDARSource lidarSource = null;
+    private volatile ImuSource imuSource = null;
     /** 雷达启用标志（volatile 保证接收线程写与 tick 线程读可见性）。 */
     private volatile boolean radarEnabled = false;
     /**
@@ -120,6 +121,12 @@ public final class VirtualDrone implements AutoCloseable {
      * "aero"=气动模型。volatile 保证接收线程写与 tick 线程读可见性。
      */
     private volatile String physicsModel = "kinematics";
+    /**
+     * M4 代码审查 #8：最近一次气动计算结果缓存。
+     * tickOnce 物理模型切换块调 rotorAero.compute() 后存于此，
+     * sendRotorTelemetry 5Hz 复用此缓存而非重新计算。volatile 保证 tick 线程写与遥测线程读可见性。
+     */
+    private volatile RotorAerodynamics.RotorAeroResult lastAeroResult = null;
     /** 雷达扫描分频计数器（按 scanPeriodMs 周期触发）。 */
     private long lastRadarScanMs = 0;
     /**
@@ -780,15 +787,18 @@ public final class VirtualDrone implements AutoCloseable {
         // model=aero 时调 rotorAero.compute() → applyAeroThrust() 积分；
         // model=kinematics 时调 physics.tick(dt)（既有，FR-37）。
         // 气动模型异常 try-catch → 回退 physics.tick(dt) + WARN 日志（异常 5.2.2）。
+        // M4 代码审查 #8：计算结果缓存到 lastAeroResult，供 sendRotorTelemetry 5Hz 复用。
         if ("aero".equals(physicsModel) && rotorAero != null && rotorConfig != null) {
             try {
                 RotorAerodynamics.RotorAeroResult aeroResult = rotorAero.compute(
                         rotorConfig, new RotorAerodynamics.FlightState(
                                 DRONE_MASS_KG, physics.vz(), physics.groundSpeed(),
                                 physics.pitchRad(), physics.rollRad()));
+                lastAeroResult = aeroResult;
                 applyAeroThrust(aeroResult, dt);
             } catch (Exception e) {
                 SimLog.warn("aero model failed, fallback to kinematics: " + e.getMessage());
+                lastAeroResult = null;
                 physics.tick(dt);
             }
         } else {
@@ -1668,7 +1678,13 @@ public final class VirtualDrone implements AutoCloseable {
     /**
      * FR-10 气动模型推力积分：将气动计算结果应用到 physics。
      * <p>
-     * 简化实现：用总推力计算等效加速度，通过 setManualVelocity 驱动物理积分。
+     * M4 代码审查 #7：当前为设计简化阶段，气动模型仅产生遥测上报（RotorTelemetryMsg），
+     * 不影响物理积分。此处仍调用 physics.tick(dt) 维持运动学积分。
+     * 真实实现应通过 result 中的推力 → 加速度 → 速度积分，但 DronePhysics.java 不修改约束，
+     * 故气动推力暂不注入物理模型。result 参数已缓存到 lastAeroResult 供遥测复用（审查 #8）。
+     *
+     * @param result 气动计算结果（各旋翼推力/转速/功耗 + 汇总），当前仅用于缓存
+     * @param dt     时间步长（秒）
      */
     private void applyAeroThrust(RotorAerodynamics.RotorAeroResult result, double dt) {
         // 简化：总推力 → 等效爬升率 → 通过 physics.holdAt 维持高度
@@ -1721,13 +1737,16 @@ public final class VirtualDrone implements AutoCloseable {
 
     /**
      * FR-20 气动遥测上报 5Hz：下传 RotorTelemetryMsg(439)。
+     * <p>
+     * M4 代码审查 #8：复用 tickOnce 缓存的 lastAeroResult 而非重新调 rotorAero.compute()，
+     * 避免 20Hz tick + 5Hz 遥测重复计算。缓存为空时跳过本次上报。
      */
     private void sendRotorTelemetry() {
         try {
-            RotorAerodynamics.RotorAeroResult result = rotorAero.compute(
-                    rotorConfig, new RotorAerodynamics.FlightState(
-                            DRONE_MASS_KG, physics.vz(), physics.groundSpeed(),
-                            physics.pitchRad(), physics.rollRad()));
+            RotorAerodynamics.RotorAeroResult result = lastAeroResult;
+            if (result == null) {
+                return;  // 尚未计算或已回退运动学，跳过
+            }
             // 上报第一个旋翼的遥测 + 总推力/总功耗
             if (!result.rotors().isEmpty()) {
                 RotorAerodynamics.RotorResult r0 = result.rotors().get(0);

@@ -13,11 +13,11 @@ class SimulatedLiDARSourceTest {
 
     @Test
     void nearestDistanceCorrect() {
-        // 障碍物在北向 5m 处
+        // 障碍物在北向 5m 处，无人机高度 10m → 3D 距离 = sqrt(5² + 0² + 10²) = sqrt(125)
         SyntheticObstacle obs = new SyntheticObstacle(5, 0, 1);
         SimulatedLiDARSource lidar = new SimulatedLiDARSource(
                 List.of(obs), TerrainModel.flat(), 0, 0, 10);
-        assertEquals(5.0, lidar.nearestDistance(), 0.01);
+        assertEquals(Math.sqrt(125), lidar.nearestDistance(), 0.01);
     }
 
     @Test
@@ -40,6 +40,7 @@ class SimulatedLiDARSourceTest {
 
     @Test
     void pointCloudStatsCorrect() {
+        // 障碍物在北向 5m 处，无人机高度 10m → 3D 距离 = sqrt(125)（M4 代码审查 #5）
         SyntheticObstacle obs = new SyntheticObstacle(5, 0, 1);
         SimulatedLiDARSource lidar = new SimulatedLiDARSource(
                 List.of(obs), TerrainModel.flat(), 0, 0, 10);
@@ -47,6 +48,6 @@ class SimulatedLiDARSourceTest {
         assertTrue(stats.pointCount() > 0);
         assertTrue(stats.density() >= 0 && stats.density() <= 1);
         assertTrue(stats.avgIntensity() >= 0 && stats.avgIntensity() <= 1);
-        assertEquals(5.0, stats.nearestDistance(), 0.01);
+        assertEquals(Math.sqrt(125), stats.nearestDistance(), 0.01);
     }
 }

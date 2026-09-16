@@ -22,10 +22,13 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/16 种消息编解码/UDP 传输），**15 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/16 种消息编解码/UDP 传输，M0a–M4 扩展消息 420–441），**87 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API、WebSocket 推送 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流 | 不需要换 |
+
+> **M0a–M4 能力扩展**：组网/环境/编队/喷洒/成像/硬件抽象均在上述四模块内叠加，
+> 未新增顶层模块——详见下文 [能力扩展（M0a–M4）](#能力扩展m0am4) 章节。
 
 ## 快速开始（Windows）
 
@@ -314,6 +317,65 @@ ARM → startMission → 逐站拍照 → 逐站逆解算定位 → 喂跟踪器
 - 每台无人机独立命名空间；e2e 中环绕 4 站对同一静态目标连续命中
   形成 hits=4 单航迹，交叉目标不串扰。
 
+## 能力扩展（M0a–M4）
+
+六个里程碑在骨架之上叠加了组网、环境、编队、喷洒、成像与硬件抽象能力，
+均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按 420–441 段连续分配。
+
+### M0a — Mesh 组网落地
+
+`link-sim` 新增一跳静态中继（`RelayConfig`/`RelayNode`），支持多跳转发——
+命令经中继可达远端飞机，突破单跳视距限制。`scripts/e2e-mesh.ps1` 演示
+单中继两跳链路下的完整任务流。
+
+### M0b — 环境气象机制
+
+引入环境模型（温度/湿度/天气/风力）与告警引擎 `EnvAlertEngine`（温度/湿度/
+风力/能见度阈值告警），通过 `EnvironmentAlert`(421)/`EnvironmentStatus`(422)
+MAVLink 消息下发。风偏修正与雨衰叠加进入链路损伤模型；REST 端点
+`/api/v1/env/alerts` 暴露告警查询。
+
+### M1 — 编队表演
+
+`LedControlMsg`(420)+`LightPattern` 枚举驱动机载灯效；`FormationGeometry`
+提供圆形/线形/V形/菱形队形几何，`FormationService` 管理创建→变换→解散状态机，
+`FormationKeeper` 持续保持队形与位置修正。REST `/api/v1/formation/*` 下发指令，
+WebSocket 以 1Hz 推送编队状态，前端 `FormationPanel.jsx` 可视化操控；
+`scripts/e2e-formation.ps1` 端到端回归。
+
+### M2 — 喷洒物流
+
+执行器模型（`Actuator`/`SprayPump`/`Gripper`/`PayloadModel`）+ 喷洒/夹爪/载荷
+MAVLink 消息(423–426)。`SprayTaskService` 调度喷洒任务，`DeliveryService`
+编排物流配送序列；REST `/api/v1/spray/*` 与 `/api/v1/delivery/*` 对外暴露。
+
+### M3 — 成像增强
+
+`VisionSource` 统一投影/模拟视觉感知源，接入多光谱/热成像/深度多源数据
+（`Multispectral`/`Thermal`/`Depth`）。`ObstacleDetector` 做障碍检测，
+`ObstacleAvoidanceController` 按威胁等级映射避障命令（CRITICAL→悬停、HIGH→避障）。
+对应 MAVLink 消息 430–434，REST `/api/v1/obstacle/*`、`/api/v1/multispectral/*`、
+`/api/v1/thermal/*`，WebSocket 推送障碍报告，前端 `VisionPanel.jsx` 展示。
+
+### M4 — 硬件抽象
+
+引入相控阵雷达（`PhasedArrayRadar`）、旋翼气动（`RotorAerodynamics`）、
+LiDAR（`LiDARSource`）、IMU（`ImuSource`）四类硬件抽象与各自 Simulated 实现，
+MAVLink 消息 437–441（`RadarScan`/`RadarTarget`/`RotorTelemetry`/`LidarData`/`ImuData`）。
+`VirtualDrone` 集成硬件层并支持物理模型切换（运动学↔气动），`ObstacleDetector`
+融合 LiDAR 数据。REST `/api/v1/radar/*`、`/api/v1/rotor/*`、`/api/v1/lidar/*`、
+`/api/v1/imu/*`，WebSocket 以 1Hz 推送硬件数据。
+
+### MAVLink 消息 ID 分配（420–441 段）
+
+| 范围 | 里程碑 | 消息 |
+|---|---|---|
+| 420 | M1 | LedControlMsg |
+| 421–422 | M0b | EnvironmentAlert, EnvironmentStatus |
+| 423–426 | M2 | SprayStatus, SprayCommand, GripperCommand, PayloadStatus |
+| 430–434 | M3 | ObstacleReport, MultispectralData, ThermalData, DepthData, VisionDetection |
+| 437–441 | M4 | RadarScan, RadarTarget, RotorTelemetry, LidarData, ImuData |
+
 ## 飞行日志（flightlog，JSONL 落盘）
 
 `GET /api/v1/flightlog?day=2026-09-13&type=alert&sysid=1&limit=100`
@@ -382,6 +444,16 @@ aerofleet/
 ├── docker-compose.yml   Linux 下一键编排
 └── .github/workflows/   CI（单测 + 前端构建 + E2E 冒烟）
 ```
+
+## 测试规模
+
+| 模块 | 单测数 |
+|---|---|
+| `mavlink-core` | 87 |
+| `drone-sim` | 182 |
+| `link-sim` | 16 |
+| `cloud-backend` | 150 |
+| **总计** | **435（全部通过）** |
 
 ## 已知边界（骨架的诚实声明）
 

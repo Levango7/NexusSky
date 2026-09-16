@@ -51,12 +51,8 @@ public class SimulatedImuSource implements ImuSource {
 
     @Override
     public ImuSample sample() {
-        // 从 DronePhysics 获取加速度/姿态
-        // 悬停时加速度 ≈ 0（水平），但 IMU 测量的是比力（含重力），所以 accelZ ≈ G
-        double physicsAccelX = 0;  // DronePhysics 不直接暴露加速度，用 0 近似
-        double physicsAccelY = 0;
-        double physicsAccelZ = GRAVITY;  // 悬停时比力 = 重力
-
+        // 从 DronePhysics 获取姿态，推导比力（含重力）。
+        // 悬停时加速度 ≈ 0（水平），但 IMU 测量的是比力（含重力），所以 accelZ ≈ G。
         // 从姿态推导加速度（飞行中倾斜会改变比力方向）
         double roll = physics.rollRad();
         double pitch = physics.pitchRad();

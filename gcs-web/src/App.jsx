@@ -7,6 +7,8 @@ import AlertFeed from './components/AlertFeed.jsx'
 import Joystick from './components/Joystick.jsx'
 import VisionPanel from './components/VisionPanel.jsx'
 import FormationPanel from './components/FormationPanel.jsx'
+import SprayPanel from './components/SprayPanel.jsx'
+import HardwarePanel from './components/HardwarePanel.jsx'
 import { api, wsUrl } from './api.js'
 
 function haversine(a, b) {
@@ -178,6 +180,20 @@ export default function App() {
             >
               编队
             </button>
+            <button
+              className={`btn ${view === 'spray' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('spray')}
+            >
+              喷洒
+            </button>
+            <button
+              className={`btn ${view === 'hardware' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('hardware')}
+            >
+              硬件
+            </button>
           </div>
           <span className="chip mono">{new Date(now).toLocaleTimeString('zh-CN', { hour12: false })}</span>
           <span className="chip">
@@ -200,6 +216,14 @@ export default function App() {
       {view === 'formation' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <FormationPanel formations={formations} drones={drones} />
+        </div>
+      ) : view === 'spray' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <SprayPanel drones={drones} />
+        </div>
+      ) : view === 'hardware' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <HardwarePanel drones={drones} />
         </div>
       ) : (
       <div className="gcs-body">
