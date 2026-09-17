@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, useState } from 'react'
+import React, { useMemo, useRef, useEffect, useState, useId } from 'react'
 
 /**
  * 实时遥测图表组件（纯 SVG，无第三方依赖）
@@ -106,6 +106,7 @@ function extent(points, fallbackMin, fallbackMax, pad = 0.08) {
 function CurveCard({ title, unit, points, color, min, max, fallback, fmt }) {
   const W = 240
   const H = 56
+  const gradId = useId()
   const ext = extent(points, min, max)
   const linePath = useMemo(() => buildPath(points, W, H, ext.min, ext.max), [points, ext.min, ext.max])
   const areaPath = useMemo(() => buildAreaPath(points, W, H, ext.min, ext.max), [points, ext.min, ext.max])
@@ -123,7 +124,7 @@ function CurveCard({ title, unit, points, color, min, max, fallback, fmt }) {
       </div>
       <svg className="tchart-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
         <defs>
-          <linearGradient id={`grad-${title}`} x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity="0.35" />
             <stop offset="100%" stopColor={color} stopOpacity="0" />
           </linearGradient>
@@ -132,7 +133,7 @@ function CurveCard({ title, unit, points, color, min, max, fallback, fmt }) {
         {grids.map((y, i) => (
           <line key={i} x1="0" y1={y} x2={W} y2={y} stroke="#1f2738" strokeWidth="1" strokeDasharray="3 4" />
         ))}
-        {areaPath && <path d={areaPath} fill={`url(#grad-${title})`} />}
+        {areaPath && <path d={areaPath} fill={`url(#${gradId})`} />}
         {linePath && (
           <path
             d={linePath}

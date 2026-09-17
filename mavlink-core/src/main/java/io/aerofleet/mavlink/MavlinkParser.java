@@ -8,7 +8,7 @@ import java.nio.ByteBuffer;
  * CRC 覆盖范围与官方 mavlink_helpers.h::mavlink_finalize_message_buffer 完全一致：
  * 从 len 字节开始（不含 STX）：[len][incompat/compat(仅 v2)][seq][sysid][compid][msgid(1或3字节)][payload][crc_extra]。
  * v1 帧（STX=0xFE，核心头 6 字节）按 v1 的 msgid 单字节校验，成功后以 v2 语义表示。
- * v2 带签名（incompat bit0）的帧当前直接丢弃（骨架阶段不做链路签名）。
+ * v2 带签名（incompat bit0）的帧当前接受但不验证签名（骨架阶段不做链路签名验证）。
  */
 public final class MavlinkParser {
 

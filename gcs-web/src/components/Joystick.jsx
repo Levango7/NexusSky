@@ -94,9 +94,9 @@ export default function Joystick({ drone }) {
           ref={padRef}
           className={`joypad ${armed ? '' : 'disabled'}`}
           onMouseDown={engage}
-          onMouseMove={sendingRef.current ? moveStick : undefined}
+          onMouseMove={moveStick}
           onMouseUp={release}
-          onMouseLeave={sendingRef.current ? release : undefined}
+          onMouseLeave={release}
           title={armed ? '按住拖动飞行' : '需先解锁'}
         >
           <div
