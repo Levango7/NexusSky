@@ -1,6 +1,7 @@
 package io.aerofleet.sim;
 
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Virtual drone physical state and simplified kinematics.
@@ -35,11 +36,20 @@ public final class DronePhysics {
     private volatile double rollRad;
     private volatile double pitchRad;
 
-    // volatile: 命令线程写（setTarget/holdAt/clearTarget），tick 线程读
-    private volatile double targetNorth = Double.NaN;
-    private volatile double targetEast = Double.NaN;
-    private volatile double targetAlt = Double.NaN;
-    private volatile double targetSpeed = Double.NaN;
+    // AtomicReference: 命令线程写（setTarget/holdAt/clearTarget），tick 线程读
+    // 保证 4 个 target 字段的原子读写，避免 volatile 多字段写的部分更新问题。
+    private static final class TargetState {
+        final double north, east, alt, speed;
+        TargetState(double north, double east, double alt, double speed) {
+            this.north = north;
+            this.east = east;
+            this.alt = alt;
+            this.speed = speed;
+        }
+        static final TargetState NONE = new TargetState(Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+        boolean hasTarget() { return !Double.isNaN(north); }
+    }
+    private final AtomicReference<TargetState> target = new AtomicReference<>(TargetState.NONE);
 
     private final long bootMillis;
     private volatile long lastTickMs;
@@ -100,50 +110,39 @@ public final class DronePhysics {
 
     /** Fly toward the given local target at the cruise speed. */
     public void setTarget(double north, double east, double alt) {
-        this.targetNorth = north;
-        this.targetEast = east;
-        this.targetAlt = alt;
-        this.targetSpeed = cruiseSpeed;
+        target.set(new TargetState(north, east, alt, cruiseSpeed));
     }
 
     /** Same target but with an explicit speed override (e.g. RTL approach). */
     public void setTarget(double north, double east, double alt, double speed) {
-        this.targetNorth = north;
-        this.targetEast = east;
-        this.targetAlt = alt;
-        this.targetSpeed = speed;
+        target.set(new TargetState(north, east, alt, speed));
     }
 
     /** Hold position at current spot at the given altitude (hover / takeoff / land). */
     public void holdAt(double alt) {
-        this.targetNorth = north;
-        this.targetEast = east;
-        this.targetAlt = alt;
-        this.targetSpeed = 0;
+        target.set(new TargetState(north, east, alt, 0));
     }
 
     public void clearTarget() {
-        this.targetNorth = Double.NaN;
-        this.targetEast = Double.NaN;
-        this.targetAlt = Double.NaN;
-        this.targetSpeed = Double.NaN;
+        target.set(TargetState.NONE);
         // v2: no target means "stop where we are" - kill residual velocity.
         this.velN = 0;
         this.velE = 0;
     }
 
     public boolean hasTarget() {
-        return !Double.isNaN(targetNorth);
+        return target.get().hasTarget();
     }
 
     /** True when within acceptance radius of the current target. */
     public boolean targetReached() {
-        if (!hasTarget()) {
+        TargetState ts = target.get();
+        if (!ts.hasTarget()) {
             return true;
         }
-        double dn = targetNorth - north;
-        double de = targetEast - east;
-        double dz = targetAlt - alt;
+        double dn = ts.north - north;
+        double de = ts.east - east;
+        double dz = ts.alt - alt;
         return Math.hypot(dn, de) < ACCEPT_XY && Math.abs(dz) < ACCEPT_Z;
     }
 
@@ -206,13 +205,17 @@ public final class DronePhysics {
 
         if (manualActive) {
             stepManual(dt);
-        } else if (hasTarget()) {
-            stepTowardTarget(dt);
         } else {
-            velN = 0;
-            velE = 0;
-            groundSpeed = 0;
-            vz = 0;
+            // 读取一次 TargetState 快照，避免 hasTarget() 与 stepTowardTarget() 之间的 TOCTOU 竞态
+            TargetState ts = target.get();
+            if (ts.hasTarget()) {
+                stepTowardTarget(dt, ts);
+            } else {
+                velN = 0;
+                velE = 0;
+                groundSpeed = 0;
+                vz = 0;
+            }
         }
 
         // Battery drains only while off the ground, at a mode-weighted rate
@@ -337,13 +340,13 @@ public final class DronePhysics {
         groundSpeed = Math.hypot(velN, velE);
     }
 
-    private void stepTowardTarget(double dt) {
-        double dn = targetNorth - north;
-        double de = targetEast - east;
-        double dz = targetAlt - alt;
+    private void stepTowardTarget(double dt, TargetState ts) {
+        double dn = ts.north - north;
+        double de = ts.east - east;
+        double dz = ts.alt - alt;
         double distXy = Math.hypot(dn, de);
 
-        double speedCmd = Double.isNaN(targetSpeed) ? cruiseSpeed : Math.max(0, targetSpeed);
+        double speedCmd = Double.isNaN(ts.speed) ? cruiseSpeed : Math.max(0, ts.speed);
 
         if (distXy > ACCEPT_XY) {
             // ---- v2: acceleration-limited velocity steering ----
@@ -388,15 +391,15 @@ public final class DronePhysics {
             // Inside acceptance: come to a stop at the target point.
             velN = 0;
             velE = 0;
-            north = targetNorth;
-            east = targetEast;
+            north = ts.north;
+            east = ts.east;
         }
 
         if (Math.abs(dz) > 0.02) {
             double stepZ = Math.min(Math.abs(dz), VERT_SPEED * dt);
             alt += Math.signum(dz) * stepZ;
         } else {
-            alt = targetAlt;
+            alt = ts.alt;
         }
     }
 
@@ -468,7 +471,7 @@ public final class DronePhysics {
 
     /** Current target altitude (NaN when no target). */
     public double targetAlt() {
-        return targetAlt;
+        return target.get().alt;
     }
 
     public double yawRad() {

@@ -409,8 +409,9 @@ public class TaskAssignmentService {
                 taskQueue.offer(req);
                 log.info("Task {} reassigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
             } else {
-                // 无在线无人机时保留旧分配记录，不影响执行中任务的信息。
-                log.warn("Task {} cannot be reassigned: no online drone available", req.getTaskId());
+                // 无在线无人机时将任务放回队列，等待下次有无人机上线时再分配。
+                taskQueue.offer(req);
+                log.warn("Task {} cannot be reassigned: no online drone available, re-queued", req.getTaskId());
             }
         }
     }
