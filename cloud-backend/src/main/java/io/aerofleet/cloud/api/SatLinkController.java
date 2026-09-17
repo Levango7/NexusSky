@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -127,6 +129,7 @@ public class SatLinkController {
 
     /** 设置切换策略（运行时热更新，FR-4.4.2）。 */
     @PutMapping("/strategy")
+    @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> setStrategy(@RequestBody Map<String, String> body) {
         String strategy = body.get("strategy");
         if (strategy == null || strategy.isBlank()) {

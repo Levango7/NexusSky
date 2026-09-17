@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -119,6 +121,7 @@ public class TerrainController {
 
     /** FR-31 触发地形建图（指挥员权限）。 */
     @PostMapping("/build")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> buildTerrainMap(@RequestBody BuildRequest req) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("status", "accepted");

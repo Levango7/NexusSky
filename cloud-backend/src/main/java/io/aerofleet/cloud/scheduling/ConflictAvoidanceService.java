@@ -63,7 +63,7 @@ public class ConflictAvoidanceService {
         boolean vConflict = vDist < MIN_VERTICAL_SEP;
 
         if (hConflict && vConflict) {
-            double timeToConflict = estimateTimeToConflict(hDist, v1, v2);
+            double timeToConflict = estimateTimeToConflict(hDist, v1, v2, heading1, heading2);
             log.warn("Conflict detected: hDist={}m vDist={}m timeToConflict={}s", hDist, vDist, timeToConflict);
             return new ConflictResult(true, hDist, vDist, timeToConflict, "COLLISION");
         }
@@ -113,7 +113,9 @@ public class ConflictAvoidanceService {
         double stepMeters = velocity; // 1s * velocity(m/s)
         // 经纬度每米对应的度数（近似，使用当前纬度修正经度收敛）
         double latPerMeter = 1.0 / EARTH_RADIUS_M * 180.0 / Math.PI;
-        double lonPerMeter = 1.0 / (EARTH_RADIUS_M * Math.cos(Math.toRadians(lat))) * 180.0 / Math.PI;
+        // 高纬度保护：cos(lat)→0 时避免除零/数值爆炸，下限 0.01 对应约 89.4° 纬度
+        double cosLat = Math.max(0.01, Math.cos(Math.toRadians(lat)));
+        double lonPerMeter = 1.0 / (EARTH_RADIUS_M * cosLat) * 180.0 / Math.PI;
         // 北向/东向分量
         double northComponent = stepMeters * Math.cos(headingRad);
         double eastComponent = stepMeters * Math.sin(headingRad);
@@ -346,6 +348,8 @@ public class ConflictAvoidanceService {
             throw new IllegalArgumentException("radius must be non-negative");
         }
         synchronized (reservationTable) {
+            // 顺带清理已过期的预约（endTime < 新预约 startTime），避免预约表只增不减
+            purgeExpiredReservationsInternal(startTime);
             if (checkReservationConflict(sysid, lat, lon, alt, startTime, endTime, radius)) {
                 log.warn("Reservation rejected for sysid {}: conflict with existing reservation", sysid);
                 return false;
@@ -413,6 +417,28 @@ public class ConflictAvoidanceService {
         return vDist < MIN_VERTICAL_SEP;
     }
 
+    /**
+     * 清理过期的 4D 预约（endTime &lt; currentTime），避免预约表只增不减导致内存泄漏。
+     * <p>
+     * 可由外部 ScheduledExecutorService 定期调用，或在 {@link #reserveAirspace} 时顺带触发。
+     *
+     * @param currentTime 当前时间(s)，endTime 早于此值的预约将被清理
+     */
+    public void purgeExpiredReservations(double currentTime) {
+        synchronized (reservationTable) {
+            purgeExpiredReservationsInternal(currentTime);
+        }
+    }
+
+    /** 内部清理实现（调用方需已持有 reservationTable 监视器锁）。 */
+    private void purgeExpiredReservationsInternal(double currentTime) {
+        for (List<Reservation4D> reservations : reservationTable.values()) {
+            reservations.removeIf(r -> r.endTime < currentTime);
+        }
+        // 清理空列表对应的 sysid 条目
+        reservationTable.entrySet().removeIf(e -> e.getValue().isEmpty());
+    }
+
     /** 清空所有预约（测试辅助） */
     public void clearReservations() {
         reservationTable.clear();
@@ -435,8 +461,16 @@ public class ConflictAvoidanceService {
         return RE * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    private double estimateTimeToConflict(double dist, double v1, double v2) {
-        double closingRate = (v1 + v2) / 2;
+    private double estimateTimeToConflict(double dist, double v1, double v2, double heading1, double heading2) {
+        // 航向差归一化到 [0, 180]
+        double headingDiff = Math.abs(heading1 - heading2);
+        headingDiff = Math.min(headingDiff, 360.0 - headingDiff);
+        // 航向差因子：(1 - cos(headingDiff)) / 2 ∈ [0, 1]
+        // 同向(0°)：因子=0，接近率=0（同向飞行不接近）
+        // 反向(180°)：因子=1，接近率=(v1+v2)/2（对头接近最快）
+        // 垂直(90°)：因子=0.5，接近率=(v1+v2)/4
+        double headingFactor = (1.0 - Math.cos(Math.toRadians(headingDiff))) / 2.0;
+        double closingRate = (v1 + v2) / 2.0 * headingFactor;
         return closingRate > 0 ? dist / closingRate : Double.MAX_VALUE;
     }
 

@@ -55,7 +55,12 @@ export default function App() {
   const [terrainData, setTerrainData] = useState(null)      // terrain 数据（WebSocket 推送）
   const [cellTowerData, setCellTowerData] = useState(null)  // celltower 数据（WebSocket 推送）
   const [telemetryHistory, setTelemetryHistory] = useState([]) // 遥测历史数据点（最近 120 个）
+  const [mobileRail, setMobileRail] = useState(null) // 移动端侧栏抽屉：null | 'left' | 'right'
   const wsRef = useRef(null)
+  // 用 ref 跟踪 selectedSysid，使 WebSocket onmessage 能读取最新值而无需重连
+  // 经验来源：2026-09-13-yjs-multi-provider-destroy-order（effect 依赖与 ref 解耦模式）
+  const selectedSysidRef = useRef(selectedSysid)
+  selectedSysidRef.current = selectedSysid
 
   const selected = drones.find((d) => d.sysid === selectedSysid)
   const onlineCount = drones.filter((d) => d.online).length
@@ -132,7 +137,7 @@ export default function App() {
           return
         }
         if (msg.type === 'telemetry' || msg.type === 'status') {
-          if (msg.sysid === selectedSysid) {
+          if (msg.sysid === selectedSysidRef.current) {
             setTelemetry((prev) => ({ ...(prev || {}), ...msg.data, sysid: msg.sysid }))
           }
           // 追加遥测历史数据点（保留最近 120 个）
@@ -187,13 +192,14 @@ export default function App() {
       clearTimeout(retryTimer)
       ws.close()
     }
-  }, [selectedSysid])
+  }, []) // WebSocket 只连接一次，selectedSysid 变化通过 ref 读取，不重连
 
   return (
     <div className="gcs-root">
       <header className="topbar">
         <div className="brand">
-          <svg className="brand-mark" width="26" height="26" viewBox="0 0 26 26">
+          <svg className="brand-mark" width="26" height="26" viewBox="0 0 26 26" role="img" aria-label="NexusSky 标志">
+            <title>NexusSky 无人机地面站标志</title>
             <circle cx="13" cy="13" r="11.5" fill="none" stroke="#00d4ff" stroke-width="1.2" />
             <path d="M13 4 A 9 9 0 0 1 22 13 L 13 13 Z" fill="#00d4ff" opacity=".35" />
             <path d="M13 13 L 20 20" stroke="#00d4ff" stroke-width="1.4" />
@@ -300,6 +306,23 @@ export default function App() {
             <i className="dotp" />
             {wsState === 'open' ? 'LIVE' : 'RECONNECTING'}
           </span>
+          {/* 移动端侧栏切换按钮（汉堡菜单），仅在小屏显示 */}
+          <button
+            className="btn mobile-rail-toggle"
+            onClick={() => setMobileRail(mobileRail === 'left' ? null : 'left')}
+            title="机队/任务侧栏"
+            aria-label="切换机队侧栏"
+          >
+            <span className="icon">☰</span>
+          </button>
+          <button
+            className="btn mobile-rail-toggle"
+            onClick={() => setMobileRail(mobileRail === 'right' ? null : 'right')}
+            title="操控/告警侧栏"
+            aria-label="切换操控侧栏"
+          >
+            <span className="icon">⚙</span>
+          </button>
         </div>
       </header>
 
@@ -368,8 +391,10 @@ export default function App() {
         </div>
       ) : (
       <div className="gcs-body">
-        <aside className="rail left">
-          <DroneList drones={drones} selectedSysid={selectedSysid} onSelect={setSelectedSysid} />
+        {/* 移动端侧栏抽屉遮罩，点击关闭 */}
+        {mobileRail && <div className="mobile-rail-mask" onClick={() => setMobileRail(null)} />}
+        <aside className={`rail left ${mobileRail === 'left' ? 'mobile-open' : ''}`}>
+          <DroneList drones={drones} selectedSysid={selectedSysid} onSelect={(sysid) => { setSelectedSysid(sysid); setMobileRail(null) }} />
           <MissionPlanner
             drone={selected}
             missionDraft={missionDraft}
@@ -422,7 +447,7 @@ export default function App() {
           </div>
         </main>
 
-        <aside className="rail right">
+        <aside className={`rail right ${mobileRail === 'right' ? 'mobile-open' : ''}`}>
           <Joystick drone={selected} />
           <VisionPanel
             drone={selected}

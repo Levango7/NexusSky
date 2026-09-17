@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.scheduling;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -44,6 +45,13 @@ public class SchedulingController {
 
     @PostMapping("/conflicts/check")
     public ConflictAvoidanceService.ConflictResult checkConflict(@RequestBody Map<String, Number> body) {
+        // P3-fix(Minor): 缺少字段时返回 400 而非 NPE 导致的 500
+        String[] required = {"lat1", "lon1", "alt1", "v1", "h1", "lat2", "lon2", "alt2", "v2", "h2"};
+        for (String key : required) {
+            if (body.get(key) == null) {
+                throw new BadRequestException("missing required field: " + key);
+            }
+        }
         return conflictService.checkConflict(
                 body.get("lat1").doubleValue(), body.get("lon1").doubleValue(),
                 body.get("alt1").doubleValue(), body.get("v1").doubleValue(), body.get("h1").doubleValue(),

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
@@ -29,18 +29,31 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
   const mapInstance = useRef(null)
   const markerRef = useRef(null)
   const followedRef = useRef(false)
+  const [mapError, setMapError] = useState(null)
+  const [retryKey, setRetryKey] = useState(0)
   // keep the latest click handler in a ref so the map listener (bound once)
   // always calls the freshest closure
   const clickRef = useRef(null)
   clickRef.current = onMapClick
 
   useEffect(() => {
-    const map = new maplibregl.Map({
-      container: mapRef.current,
-      style: MAP_STYLE,
-      center: [DRONE_HOME.lon, DRONE_HOME.lat],
-      zoom: 15,
-      attributionControl: false,
+    let map = null
+    try {
+      map = new maplibregl.Map({
+        container: mapRef.current,
+        style: MAP_STYLE,
+        center: [DRONE_HOME.lon, DRONE_HOME.lat],
+        zoom: 15,
+        attributionControl: false,
+      })
+    } catch (e) {
+      setMapError(e.message || '地图初始化失败')
+      return
+    }
+    // 监听地图加载错误（瓦片源不可达、样式异常等）
+    map.on('error', (e) => {
+      // MapLibre 对单个瓦片错误也会触发 error 事件，仅记录首次严重错误
+      if (!mapError) setMapError(e.error?.message || '地图加载错误')
     })
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right')
     map.addControl(new maplibregl.ScaleControl(), 'bottom-left')
@@ -129,10 +142,10 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
     })
 
     return () => {
-      map.remove()
+      if (map) map.remove()
       mapInstance.current = null
     }
-  }, [])
+  }, [retryKey]) // retryKey 变化时重新初始化地图
 
   // 实时位置更新 + 任务草稿航线绘制
   useEffect(() => {
@@ -214,6 +227,30 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
       })
     }
   }, [orbitOverlay])
+
+  // 地图加载失败降级 UI：显示错误信息和重试按钮
+  if (mapError) {
+    return (
+      <div className="map-view map-error" ref={mapRef}>
+        <div>
+          <div style={{ fontSize: 28, opacity: .4, marginBottom: 8 }}>🗺️</div>
+          <b style={{ color: 'var(--crit)', display: 'block', marginBottom: 6 }}>地图加载失败</b>
+          <div style={{ fontSize: 11, color: 'var(--dim-2)', marginBottom: 14, wordBreak: 'break-word' }}>
+            {mapError}
+          </div>
+          <button
+            className="btn primary"
+            onClick={() => {
+              setMapError(null)
+              setRetryKey((k) => k + 1)
+            }}
+          >
+            ⟳ 重试
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return <div ref={mapRef} className="map-view" />
 }

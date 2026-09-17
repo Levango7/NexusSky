@@ -61,10 +61,13 @@ public class CoverageOptimizer {
     /**
      * Haversine 距离缓存（optimize 作用域内有效）。
      * <p>
-     * key 由量化后的 (lat1, lon1, lat2, lon2) 四元组通过质数乘法 hash 组合而成，
+     * key 由量化后的 (lat1, lon1, lat2, lon2) 四元组格式化为字符串，
      * 量化精度约 1m。每次 optimize 调用前清空，避免跨调用污染。
+     * <p>
+     * 使用字符串 key 而非 XOR hash 组合，彻底消除哈希碰撞风险
+     * （XOR 组合在不同坐标对间可能产生相同 key 导致返回错误距离）。
      */
-    private final java.util.Map<Long, Double> distanceCache = new java.util.HashMap<>();
+    private final java.util.Map<String, Double> distanceCache = new java.util.HashMap<>();
 
     /**
      * 构造覆盖优化器。
@@ -439,9 +442,9 @@ public class CoverageOptimizer {
     /**
      * 带缓存的 Haversine 距离计算（m）。
      * <p>
-     * 将坐标量化到约 1m 精度后组合成 long key，缓存距离结果。
+     * 将坐标量化到约 1m 精度后格式化为字符串 key，缓存距离结果。
      * 在 optimize 一次调用内，同一对（量化后相同的）坐标只计算一次 Haversine，
-     * 后续命中缓存直接返回。key 采用质数乘法 hash 混淆，碰撞概率极低。
+     * 后续命中缓存直接返回。使用字符串 key 避免 XOR hash 碰撞。
      *
      * @param lat1Deg 点1 纬度（度）
      * @param lon1Deg 点1 经度（度）
@@ -450,11 +453,8 @@ public class CoverageOptimizer {
      * @return 两点间球面距离（m）
      */
     private double haversineMeters(double lat1Deg, double lon1Deg, double lat2Deg, double lon2Deg) {
-        // 量化到 ~1m 精度，用质数乘法 hash 组合成 long key
-        long key = (long)(lat1Deg * 1000) * 73856093L
-                 ^ (long)(lon1Deg * 1000) * 19349663L
-                 ^ (long)(lat2Deg * 1000) * 83492791L
-                 ^ (long)(lon2Deg * 1000) * 1299689L;
+        // 量化到 ~1m 精度，用字符串 key 避免 XOR hash 碰撞
+        String key = String.format("%.6f,%.6f,%.6f,%.6f", lat1Deg, lon1Deg, lat2Deg, lon2Deg);
         Double cached = distanceCache.get(key);
         if (cached != null) {
             return cached;

@@ -123,7 +123,7 @@ export default function MissionPlanner({ drone, missionDraft, setMissionDraft, o
         {missionDraft.length > 0 && (
           <ol className="mission-list">
             {missionDraft.map((w, i) => (
-              <li key={i}>
+              <li key={`${w.cmd}-${w.lat}-${w.lon}`}>
                 <span className="seq-badge">{i + 1}</span>
                 <code>{w.cmd}</code>
                 <span className="coords">

@@ -367,7 +367,8 @@ public class EmergencyOrchService {
     /** 创建新计划状态 map。 */
     private Map<String, Object> newPlanMap(long planId, int scenarioType, int centerLat, int centerLon,
                                            int radius, List<Integer> droneIds, long now) {
-        Map<String, Object> plan = new LinkedHashMap<>();
+        // 使用 ConcurrentHashMap 保证多线程并发读写 plan 内部状态安全
+        Map<String, Object> plan = new ConcurrentHashMap<>();
         plan.put("planId", planId);
         plan.put("scenarioType", scenarioType);
         plan.put("status", "RUNNING");
@@ -376,7 +377,7 @@ public class EmergencyOrchService {
         plan.put("centerLat", centerLat);
         plan.put("centerLon", centerLon);
         plan.put("radius", radius);
-        plan.put("droneIds", new ArrayList<>(droneIds));
+        plan.put("droneIds", Collections.synchronizedList(new ArrayList<>(droneIds)));
         plan.put("droneCount", droneIds.size());
         plan.put("coverageRate", 0);
         plan.put("connectRate", 0);
@@ -387,7 +388,7 @@ public class EmergencyOrchService {
         // 5 个阶段，初始全部 PENDING，第 0 阶段设为 RUNNING
         List<Map<String, Object>> phases = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
-            Map<String, Object> ph = new LinkedHashMap<>();
+            Map<String, Object> ph = new ConcurrentHashMap<>();
             ph.put("phase", i);
             ph.put("status", i == 0 ? "RUNNING" : "PENDING");
             ph.put("durationMs", 0);
@@ -401,8 +402,8 @@ public class EmergencyOrchService {
         plan.put("deployments", Collections.synchronizedList(new ArrayList<>()));
         plan.put("uncoveredAreas", Collections.synchronizedList(new ArrayList<>()));
 
-        // 4 级优先级队列
-        Map<String, List<Long>> queues = new LinkedHashMap<>();
+        // 4 级优先级队列（ConcurrentHashMap 保证并发读安全）
+        Map<String, List<Long>> queues = new ConcurrentHashMap<>();
         queues.put("SEARCH_RESCUE", Collections.synchronizedList(new ArrayList<>()));
         queues.put("COMMAND", Collections.synchronizedList(new ArrayList<>()));
         queues.put("MAPPING", Collections.synchronizedList(new ArrayList<>()));

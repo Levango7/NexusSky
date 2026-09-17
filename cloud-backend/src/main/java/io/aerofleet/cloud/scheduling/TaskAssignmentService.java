@@ -332,14 +332,14 @@ public class TaskAssignmentService {
 
     /** 综合评分：能力(40%) + 电量(30%) + 距离(20%) + 优先级(10%) */
     private double scoreDrone(DroneSnapshot d, TaskRequest req) {
-        double capabilityScore = 50.0; // 基础能力分
-        double batteryScore = d.battery > 0 ? d.battery * 100 : 0;
+        double capabilityScore = 50.0; // 基础能力分（0-100）
+        double batteryScore = d.battery > 0 ? d.battery : 0; // 电量百分比 0-100，归一化到与其它因子同量级
         double distanceScore = 100.0; // 默认满分，有位置时计算距离
         if (!Double.isNaN(d.lat) && !Double.isNaN(d.lon) && d.lat != 0 && d.lon != 0) {
-            double dist = haversine(d.lat, d.lon, req.getTargetLat(), req.getTargetLon());
-            distanceScore = Math.max(0, 100 - dist / 100); // 100km 内得分线性递减
+            double dist = haversine(d.lat, d.lon, req.getTargetLat(), req.getTargetLon()); // 米
+            distanceScore = Math.max(0, 100 - dist / 1000); // 100km(100000m) 内得分线性递减
         }
-        double priorityScore = req.getPriority() * 10.0;
+        double priorityScore = req.getPriority() * 10.0; // priority 0-10 → 0-100
 
         return capabilityScore * 0.4 + batteryScore * 0.3 + distanceScore * 0.2 + priorityScore * 0.1;
     }
@@ -351,7 +351,7 @@ public class TaskAssignmentService {
         double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
                 Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
                         Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) / 1000; // km
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // 米
     }
 
     /** 查询所有分配 */
@@ -362,17 +362,49 @@ public class TaskAssignmentService {
     /** 取消任务 */
     public boolean cancelTask(String taskId) {
         AssignmentResult removed = assignments.remove(taskId);
+        if (removed != null) {
+            // 同步从任务队列移除，避免队列只增不减
+            taskQueue.removeIf(req -> req.getTaskId().equals(taskId));
+        }
         return removed != null;
+    }
+
+    /** 从任务队列取出下一个待执行任务（消费队列，避免只增不减）。 */
+    public TaskRequest pollNextTask() {
+        return taskQueue.poll();
     }
 
     /** 全量重新分配（无人机损毁后触发） */
     public void reassignAll() {
         log.info("Reassigning all tasks, count={}", assignments.size());
-        Map<String, AssignmentResult> old = new LinkedHashMap<>(assignments);
         assignments.clear();
-        for (Map.Entry<String, AssignmentResult> e : old.entrySet()) {
-            // 重新分配逻辑可在此扩展
-            log.debug("Task {} needs reassignment", e.getKey());
+        // 从队列取出所有待重分配任务
+        List<TaskRequest> pending = new ArrayList<>();
+        taskQueue.drainTo(pending);
+        // 重新分配：仅对在线无人机分配（损毁无人机已离线）
+        List<DroneSnapshot> drones = registry.all();
+        for (TaskRequest req : pending) {
+            DroneSnapshot best = null;
+            double bestScore = -1;
+            for (DroneSnapshot d : drones) {
+                if (!d.online) {
+                    continue; // 跳过离线无人机
+                }
+                double score = scoreDrone(d, req);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = d;
+                }
+            }
+            if (best != null) {
+                AssignmentResult result = new AssignmentResult(req.getTaskId(), best.sysid, bestScore,
+                        String.format("sysid=%d score=%.1f", best.sysid, bestScore), true);
+                assignments.put(req.getTaskId(), result);
+                taskQueue.offer(req);
+                log.info("Task {} reassigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
+            } else {
+                log.warn("Task {} cannot be reassigned: no online drone available", req.getTaskId());
+            }
         }
     }
 }

@@ -29,7 +29,7 @@ import org.springframework.security.web.SecurityFilterChain;
 @EnableWebSecurity
 public class SecurityConfig {
 
-    @Value("${aerofleet.security.dev-mode:true}")
+    @Value("${aerofleet.security.dev-mode:false}")
     private boolean devMode;
 
     private final JwtTokenProvider jwtTokenProvider;

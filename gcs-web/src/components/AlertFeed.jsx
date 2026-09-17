@@ -26,10 +26,12 @@ export default function AlertFeed({ alerts }) {
         )}
         <div className="alert-scroll">
           <ul className="alert-list">
-            {alerts.map((a, i) => {
+            {alerts.map((a) => {
               const meta = SEV_META[a.severity ?? 6] || SEV_META[6]
+              // 用告警唯一标识作为 key，优先 id，其次 ts+sysid 组合，避免数组索引 key
+              const key = a.id != null ? a.id : `${a.ts}-${a.sysid}`
               return (
-                <li key={i} style={{ borderLeftColor: meta.color }}>
+                <li key={key} style={{ borderLeftColor: meta.color }}>
                   <span className="sev" style={{ color: meta.color }}>[{meta.label}]</span>
                   {a.text}
                   <time>{new Date(a.ts).toLocaleTimeString('zh-CN', { hour12: false })}</time>

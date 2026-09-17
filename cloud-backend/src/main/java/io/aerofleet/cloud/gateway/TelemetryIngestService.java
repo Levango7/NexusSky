@@ -8,9 +8,11 @@ import io.aerofleet.cloud.api.SatLinkMonitorService;
 import io.aerofleet.cloud.api.TerrainMapService;
 import io.aerofleet.cloud.telemetry.AlertBus;
 import io.aerofleet.cloud.telemetry.PendingAcks;
+import io.aerofleet.cloud.vision.ObstacleAvoidanceController;
 import io.aerofleet.cloud.vision.RadarController;
 import io.aerofleet.cloud.vision.RotorController;
 import io.aerofleet.mavlink.MavlinkFrame;
+import io.aerofleet.mavlink.enums.ThreatLevel;
 import io.aerofleet.mavlink.messages.Attitude;
 import io.aerofleet.mavlink.messages.CellHandoverMsg;
 import io.aerofleet.mavlink.messages.CellTowerStatusMsg;
@@ -31,6 +33,7 @@ import io.aerofleet.mavlink.messages.MissionCurrent;
 import io.aerofleet.mavlink.messages.MissionItemInt;
 import io.aerofleet.mavlink.messages.MissionRequest;
 import io.aerofleet.mavlink.messages.MissionRequestInt;
+import io.aerofleet.mavlink.messages.ObstacleReportMsg;
 import io.aerofleet.mavlink.messages.RadarScanMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
 import io.aerofleet.mavlink.messages.RadioStatus;
@@ -43,6 +46,7 @@ import io.aerofleet.mavlink.messages.SysStatus;
 import io.aerofleet.mavlink.messages.TerrainTypeMapMsg;
 import io.aerofleet.mavlink.messages.TerrainUpdateMsg;
 import io.aerofleet.mavlink.messages.VfrHud;
+import io.aerofleet.mavlink.messages.VisionDetectionMsg;
 import io.aerofleet.mavlink.messages.EnvironmentAlert;
 import io.aerofleet.mavlink.messages.EnvironmentStatus;
 import io.aerofleet.mavlink.messages.EmergencyMissionPlanMsg;
@@ -84,6 +88,7 @@ public class TelemetryIngestService {
     private final AlertBus alerts;
     private final RadarController radarController;
     private final RotorController rotorController;
+    private final ObstacleAvoidanceController obstacleAvoidanceController;
     private final HardwareDataController hardwareDataController;
     private final MeshTopologyService meshTopologyService;
     private final SatLinkMonitorService satLinkMonitorService;
@@ -95,6 +100,7 @@ public class TelemetryIngestService {
 
     public TelemetryIngestService(DeviceRegistry registry, PendingAcks pendings, AlertBus alerts,
                                   @Lazy RadarController radarController, @Lazy RotorController rotorController,
+                                  @Lazy ObstacleAvoidanceController obstacleAvoidanceController,
                                   @Lazy HardwareDataController hardwareDataController,
                                   @Lazy MeshTopologyService meshTopologyService,
                                   @Lazy SatLinkMonitorService satLinkMonitorService,
@@ -108,6 +114,7 @@ public class TelemetryIngestService {
         this.alerts = alerts;
         this.radarController = radarController;
         this.rotorController = rotorController;
+        this.obstacleAvoidanceController = obstacleAvoidanceController;
         this.hardwareDataController = hardwareDataController;
         this.meshTopologyService = meshTopologyService;
         this.satLinkMonitorService = satLinkMonitorService;
@@ -153,6 +160,10 @@ public class TelemetryIngestService {
                 case RotorTelemetryMsg.ID -> rotorController.onRotorTelemetry((RotorTelemetryMsg) msg);
                 case LidarDataMsg.ID -> hardwareDataController.onLidarData((LidarDataMsg) msg);
                 case ImuDataMsg.ID -> hardwareDataController.onImuData((ImuDataMsg) msg);
+                // M3 感知成像增强消息路由（msgId 430/434，FR-15/FR-23）：
+                // ObstacleReport → 避障控制器（威胁→命令映射）；VisionDetection → WebSocket 实时展示。
+                case ObstacleReportMsg.ID -> onObstacleReport(sysid, (ObstacleReportMsg) msg);
+                case VisionDetectionMsg.ID -> forwardToWs(sysid, "vision-detection", msg);
                 // M5 mesh 拓扑上报路由（msgId 450/454，FR-27）：
                 // MeshHeartbeat → 更新节点在线状态；MeshNeighborTable → 更新拓扑快照。
                 case MeshHeartbeatMsg.ID -> onMeshHeartbeat(sysid, (MeshHeartbeatMsg) msg);
@@ -398,6 +409,21 @@ public class TelemetryIngestService {
                 msg.preemptedTaskId, msg.reason);
         log.debug("EMERGENCY_PRIORITY sysid={} planId={} task={} pri={} action={}",
                 sysid, msg.planId, msg.taskId, msg.priority, msg.action);
+    }
+
+    /**
+     * M3 障碍物报告路由（FR-15/FR-16）：将 ObstacleReportMsg 解码后转发至
+     * {@link ObstacleAvoidanceController}，由其按威胁等级执行避障命令下发。
+     */
+    private void onObstacleReport(int sysid, ObstacleReportMsg msg) {
+        ThreatLevel threat = msg.threat >= 0 && msg.threat < ThreatLevel.values().length
+                ? ThreatLevel.values()[msg.threat]
+                : ThreatLevel.NONE;
+        obstacleAvoidanceController.onObstacleReport(
+                msg.sysid > 0 ? msg.sysid : sysid,
+                msg.distance, msg.direction, threat);
+        log.debug("OBSTACLE_REPORT sysid={} distance={}m direction={}° threat={}",
+                sysid, msg.distance, msg.direction, threat);
     }
 
     /**

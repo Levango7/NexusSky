@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.vision.ObstacleAvoidanceController;
 import io.aerofleet.cloud.vision.ObstacleConfig;
 import io.aerofleet.cloud.vision.ObstacleStatus;
@@ -44,6 +46,7 @@ public class ObstacleController {
 
     /** FR-25 配置避障。 */
     @PostMapping("/config")
+    @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> configure(@RequestBody Map<String, Object> body) {
         try {
             int sysid = num(body, "sysid").intValue();
@@ -82,6 +85,7 @@ public class ObstacleController {
 
     /** FR-29 紧急悬停解除。 */
     @PostMapping("/{sysid}/release")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> release(@PathVariable("sysid") int sysid) {
         controller.release(sysid);
         return ResponseEntity.ok(Map.of("sysid", sysid, "released", true));

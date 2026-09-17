@@ -6,6 +6,8 @@ import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.mission.DroneCommandService;
 import io.aerofleet.cloud.mission.MissionItemRequest;
 import io.aerofleet.cloud.mission.MissionUploadResult;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import io.aerofleet.mavlink.messages.MissionItemInt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,12 +104,26 @@ public class DroneController {
      * (throttle 0..1000), fire-and-forget at ~10 Hz while a stick is held.
      */
     @PostMapping("/{sysid}/joystick")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> joystick(@PathVariable("sysid") int sysid,
                                         @RequestBody JsonNode body) {
         int x = body.path("x").asInt(0);
         int y = body.path("y").asInt(0);
         int z = body.path("z").asInt(500);
         int r = body.path("r").asInt(0);
+        // FR: joystick 轴值范围校验（MANUAL_CONTROL 协议约束）
+        if (x < -1000 || x > 1000) {
+            throw new BadRequestException("joystick x must be in [-1000, 1000]");
+        }
+        if (y < -1000 || y > 1000) {
+            throw new BadRequestException("joystick y must be in [-1000, 1000]");
+        }
+        if (z < 0 || z > 1000) {
+            throw new BadRequestException("joystick z (throttle) must be in [0, 1000]");
+        }
+        if (r < -1000 || r > 1000) {
+            throw new BadRequestException("joystick r (yaw) must be in [-1000, 1000]");
+        }
         commands.manualControl(sysid, x, y, z, r);
         return Map.of("status", "ok");
     }
@@ -117,10 +133,16 @@ public class DroneController {
      * "alt":50,"holdTime":2}, ...]}. Runs the full MAVLink mission protocol.
      */
     @PostMapping("/{sysid}/mission")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> uploadMission(@PathVariable("sysid") int sysid,
                                              @RequestBody JsonNode body) {
         require(sysid);   // 404 for unknown device
         List<MissionItemRequest> items = parseMissionItems(body);
+        // FR: mission items 数量上限校验（防止过大任务耗尽飞控内存）
+        if (items.size() > 1000) {
+            throw new BadRequestException("mission items count " + items.size()
+                    + " exceeds maximum of 1000");
+        }
         List<MissionItemInt> mavItems = commands.toMissionItems(items, sysid);
         log.info("Uploading mission to sysid={}: {} items", sysid, mavItems.size());
         MissionUploadResult result = commands.uploadMission(sysid, mavItems);
@@ -140,6 +162,7 @@ public class DroneController {
      * "alt":50} - alt is only used by takeoff.
      */
     @PostMapping("/{sysid}/commands")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> sendCommand(@PathVariable("sysid") int sysid,
                                            @RequestBody JsonNode body) {
         require(sysid);
@@ -176,8 +199,8 @@ public class DroneController {
                     // Passthrough for any MAV_CMD (camera protocol session
                     // commands 518/520/521 etc.): cmd + p1..p7 numeric.
                     int cmdId = body.path("cmd").asInt(-1);
-                    if (cmdId <= 0) {
-                        throw new BadRequestException("raw command needs a positive 'cmd' id");
+                    if (cmdId < 0 || cmdId > 65535) {
+                        throw new BadRequestException("raw command 'cmd' id must be in [0, 65535]");
                     }
                     int res = commands.command(sysid, cmdId,
                             (float) body.path("p1").asDouble(0),

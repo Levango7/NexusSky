@@ -176,6 +176,27 @@ public class PriorityScheduler {
     }
 
     /**
+     * 清理 taskIndex 中已完成（COMPLETED）和已取消（CANCELLED）的任务索引，
+     * 避免 taskIndex 只增不减导致内存泄漏。
+     * <p>
+     * 可由外部 ScheduledExecutorService 定期调用。清理后 {@link #getTask} 对这些任务返回 null。
+     *
+     * @return 被清理的任务数量
+     */
+    public int purgeCompletedTasks() {
+        int removed = 0;
+        for (Map.Entry<Long, PriorityTask> entry : taskIndex.entrySet()) {
+            PriorityTask task = entry.getValue();
+            if (task.getStatus() == PriorityTask.Status.COMPLETED
+                    || task.getStatus() == PriorityTask.Status.CANCELLED) {
+                taskIndex.remove(entry.getKey());
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    /**
      * 返回所有队列快照（按优先级分桶，每桶为列表副本）。
      *
      * @return 优先级 → 任务列表

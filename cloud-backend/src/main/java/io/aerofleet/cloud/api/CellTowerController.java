@@ -3,6 +3,8 @@ package io.aerofleet.cloud.api;
 import io.aerofleet.cloud.api.dto.CellTowerSnapshot;
 import io.aerofleet.cloud.api.dto.CellTowerSnapshot.TerminalInfo;
 import io.aerofleet.cloud.gateway.UdpGateway;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import io.aerofleet.mavlink.messages.CellHandoverMsg;
 import io.aerofleet.mavlink.messages.CellTowerConfigMsg;
 import org.slf4j.Logger;
@@ -81,12 +83,26 @@ public class CellTowerController {
 
     /** 下发基站配置（FR-CT-05）。 */
     @PutMapping("/{sysid}/config")
+    @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> configureTower(
             @PathVariable("sysid") int sysid,
             @RequestBody ConfigRequest body) {
         if (body.cellType < 0 || body.cellType > 2) {
             return ResponseEntity.badRequest().body(
                     Map.of("error", "cellType must be 0 (LTE), 1 (WIFI), or 2 (LORA)"));
+        }
+        // FR: 数值参数范围校验
+        if (body.txPowerDbm < -10 || body.txPowerDbm > 30) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "txPowerDbm must be in [-10, 30] dBm"));
+        }
+        if (body.maxTerminals < 1 || body.maxTerminals > 1000) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "maxTerminals must be in [1, 1000]"));
+        }
+        if (body.frequencyChannel < 0 || body.frequencyChannel > 1000) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "frequencyChannel must be in [0, 1000]"));
         }
         CellTowerConfigMsg msg = new CellTowerConfigMsg(
                 sysid, body.cellType, body.txPowerDbm,
@@ -131,6 +147,7 @@ public class CellTowerController {
 
     /** 触发漫游切换（FR-HO-03）。 */
     @PostMapping("/{sysid}/handover")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> triggerHandover(
             @PathVariable("sysid") int sysid,
             @RequestBody HandoverRequest body) {

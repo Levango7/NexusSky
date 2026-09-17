@@ -25,31 +25,34 @@ public final class DronePhysics {
     private final double cruiseSpeed;
 
     // --- state ---
-    private double north;      // m from home, +N
-    private double east;       // m from home, +E
-    private double alt;       // m relative to home
-    private double yawRad;      // heading, 0 = north, CW positive
-    private double groundSpeed; // m/s horizontal
-    private double vz;         // m/s vertical, +up
-    private double rollRad;
-    private double pitchRad;
+    // volatile: tick 线程写，其他线程通过 getter 读取，保证跨线程可见性
+    private volatile double north;      // m from home, +N
+    private volatile double east;       // m from home, +E
+    private volatile double alt;       // m relative to home
+    private volatile double yawRad;      // heading, 0 = north, CW positive
+    private volatile double groundSpeed; // m/s horizontal
+    private volatile double vz;         // m/s vertical, +up
+    private volatile double rollRad;
+    private volatile double pitchRad;
 
-    private double targetNorth = Double.NaN;
-    private double targetEast = Double.NaN;
-    private double targetAlt = Double.NaN;
-    private double targetSpeed = Double.NaN;
+    // volatile: 命令线程写（setTarget/holdAt/clearTarget），tick 线程读
+    private volatile double targetNorth = Double.NaN;
+    private volatile double targetEast = Double.NaN;
+    private volatile double targetAlt = Double.NaN;
+    private volatile double targetSpeed = Double.NaN;
 
     private final long bootMillis;
-    private long lastTickMs;
-    private double airborneSeconds;
+    private volatile long lastTickMs;
+    private volatile double airborneSeconds;
     /** Mode-weighted energy seconds (E4): hover/climb cost more, drift drains battery via batteryVoltage(). */
-    private double drainSeconds;
+    private volatile double drainSeconds;
     /**
      * 温度影响电池能耗的乘性因子（FR-11，M0b 环境气象）。
      * 默认 1.0（常温行为不变，DFX 4.5）；由 {@link EnvironmentModel#tempDrainFactor()} 注入。
      * T < 5°C → 1.3（低温电池内阻增大）；T > 40°C → 1.15（高温散热负荷）；常温 → 1.0。
+     * <p>volatile: 外部线程（EnvironmentModel）写，tick 线程读，保证可见性。
      */
-    private double tempDrainFactor = 1.0;
+    private volatile double tempDrainFactor = 1.0;
 
     /** Energy multipliers: cruise=1.0 baseline, hover/climb above, descent below. */
     private static final double HOVER_DRAIN = 1.3;
@@ -169,15 +172,16 @@ public final class DronePhysics {
     }
 
     /** Wind displacement applied this tick (excluded from the attitude solve). */
-    private double windDriftN;
-    private double windDriftE;
+    private volatile double windDriftN;
+    private volatile double windDriftE;
 
     // ---- MANUAL_CONTROL steering state (body frame) ----
-    private boolean manualActive;
-    private double manualFwd;
-    private double manualRight;
-    private double manualUp;
-    private double manualYawRate;
+    // volatile: 命令线程写（setManualVelocity/clearManual），tick 线程读
+    private volatile boolean manualActive;
+    private volatile double manualFwd;
+    private volatile double manualRight;
+    private volatile double manualUp;
+    private volatile double manualYawRate;
 
     // ---- simulation step ----
 
@@ -246,8 +250,8 @@ public final class DronePhysics {
     }
 
     /** Velocity components kept across ticks (v2: acceleration-limited motion). */
-    private double velN;
-    private double velE;
+    private volatile double velN;
+    private volatile double velE;
 
     /** Mode-dependent power draw multiplier (E4). */
     private double drainFactor() {

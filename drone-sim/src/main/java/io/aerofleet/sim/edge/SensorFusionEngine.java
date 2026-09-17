@@ -77,7 +77,7 @@ public class SensorFusionEngine {
      * @param imuAccelY 北向加速度（米/秒²）
      * @param imuAccelZ 垂直加速度（米/秒²，向上为正）
      */
-    public void predict(double dt, double imuAccelX, double imuAccelY, double imuAccelZ) {
+    public synchronized void predict(double dt, double imuAccelX, double imuAccelY, double imuAccelZ) {
         if (!initialized || dt <= 0) {
             return;
         }
@@ -317,10 +317,14 @@ public class SensorFusionEngine {
      *   S = H·P·Hᵀ + R
      *   K = P·Hᵀ·S⁻¹
      *   x = x + K·y
-     *   P = (I - K·H)·P
+     *   P = (I - K·H)·P·(I - K·H)ᵀ + K·R·Kᵀ   （Joseph 形式，数值稳定）
      * </pre>
+     * <p>协方差更新采用 Joseph 形式以保证正定性与对称性，
+     * 避免简化形式 P=(I-KH)P 在有限精度下数值漂移导致失去正定。
+     * <p>矩阵 S 求逆时若奇异（观测信息冗余/数值退化），
+     * 捕获 {@link ArithmeticException} 跳过本次更新并记录日志，不抛出。
      */
-    private void update(double[] z, double[][] H, double[][] R) {
+    private synchronized void update(double[] z, double[][] H, double[][] R) {
         int m = z.length;
         double[] Hx = matVec(H, x);
         double[] y = new double[m];
@@ -329,14 +333,27 @@ public class SensorFusionEngine {
         }
         double[][] Ht = transpose(H);
         double[][] S = matAdd(matMul(matMul(H, P), Ht), R);   // m×m
-        double[][] K = matMul(matMul(P, Ht), inverse(S));      // n×m
+        double[][] Sinv;
+        try {
+            Sinv = inverse(S);
+        } catch (ArithmeticException e) {
+            // 奇异矩阵：观测信息冗余或数值退化，跳过本次更新避免状态污染
+            System.out.println("[SensorFusionEngine] update skipped (singular S): " + e.getMessage());
+            return;
+        }
+        double[][] K = matMul(matMul(P, Ht), Sinv);      // n×m
         double[] Ky = matVec(K, y);
         for (int i = 0; i < N; i++) {
             x[i] += Ky[i];
         }
+        // Joseph 形式协方差更新：P = (I-KH)·P·(I-KH)ᵀ + K·R·Kᵀ
+        // 相比简化形式 P=(I-KH)P，Joseph 形式在有限精度下能保证 P 的正定性与对称性
         double[][] KH = matMul(K, H);
         double[][] IKH = matSub(identity(N), KH);
-        P = matMul(IKH, P);
+        double[][] IKHt = transpose(IKH);
+        double[][] KR = matMul(K, R);
+        double[][] KRKt = matMul(KR, transpose(K));
+        P = matAdd(matMul(matMul(IKH, P), IKHt), KRKt);
     }
 
     /** 由速度状态计算航向（度，正北 0，顺时针为正） */

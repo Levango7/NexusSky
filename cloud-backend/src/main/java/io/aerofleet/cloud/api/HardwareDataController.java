@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.vision.RadarController;
 import io.aerofleet.cloud.vision.RotorController;
 import io.aerofleet.mavlink.enums.ScanMode;
@@ -61,9 +63,15 @@ public class HardwareDataController {
 
     /** FR-24 配置雷达扫描。 */
     @PostMapping("/radar/config")
+    @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> configureRadar(@RequestBody Map<String, Object> body) {
         try {
             int sysid = num(body, "sysid").intValue();
+            // FR: sysid 范围校验（MAVLink sysid 为 u8，有效范围 1~255）
+            if (sysid < 1 || sysid > 255) {
+                return ResponseEntity.badRequest().body(
+                        Map.of("error", "sysid must be in [1, 255]"));
+            }
             ScanMode mode = ScanMode.valueOf(str(body, "mode"));
             double azimCenter = num(body, "azimCenter").doubleValue();
             double azimWidth = num(body, "azimWidth").doubleValue();
@@ -129,6 +137,7 @@ public class HardwareDataController {
 
     /** FR-26 配置气动参数。 */
     @PostMapping("/rotor/config")
+    @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> configureRotor(@RequestBody Map<String, Object> body) {
         try {
             int sysid = num(body, "sysid").intValue();
