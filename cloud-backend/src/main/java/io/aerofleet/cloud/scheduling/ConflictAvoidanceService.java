@@ -268,14 +268,42 @@ public class ConflictAvoidanceService {
 
     /**
      * 冲突解决机动：根据策略生成具体机动建议。
+     * <p>
+     * 注意：{@link ConflictResult} 不携带冲突双方 sysid（设计上仅描述冲突几何特征），
+     * 因此本重载无法获知真实冲突双方，使用占位 sysid 0/1 仅为满足接口契约。
+     * <ul>
+     *   <li>调用方若持有 {@link DroneTrajectory}（含 sysid），应改用
+     *       {@link #resolveConflict(DroneTrajectory, DroneTrajectory, ConflictResult, ResolutionStrategy)}
+     *       或 {@link #resolveConflict(int, int, ConflictResult, ResolutionStrategy)} 传入真实 sysid。</li>
+     *   <li>若确无 sysid 信息（如仅基于裸几何参数检测），本重载返回的占位结果仅可用于策略预览，
+     *       不可直接下发执行。</li>
+     * </ul>
      *
-     * @param conflict  冲突结果（需含冲突双方信息）
+     * @param conflict  冲突结果（仅含几何特征，不含 sysid）
      * @param strategy  解决策略
-     * @return 机动建议
+     * @return 机动建议（sysid 为占位 0/1）
      */
     public ResolutionAdvice resolveConflict(ConflictResult conflict, ResolutionStrategy strategy) {
-        // ConflictResult 不携带 sysid，这里用占位 0/1；调用方可通过 DroneTrajectory.sysid 关联
+        // ConflictResult 不携带 sysid，占位 0/1 仅为满足接口契约。
+        // 调用方应优先使用带 sysid 的重载，或通过 DroneTrajectory 重载关联真实 sysid。
         return resolveConflict(0, 1, conflict, strategy);
+    }
+
+    /**
+     * 冲突解决机动（带 DroneTrajectory 重载）：从航迹中提取真实 sysid 后委托给带 sysid 的重载。
+     * <p>
+     * 适用于通过 {@link #checkAllConflicts} 或 {@link #checkConflict4D} 检测冲突后，
+     * 调用方持有冲突双方 {@link DroneTrajectory} 的场景。
+     *
+     * @param traj1    第一架无人机航迹（提供 sysid）
+     * @param traj2    第二架无人机航迹（提供 sysid）
+     * @param conflict 冲突结果
+     * @param strategy 解决策略
+     * @return 机动建议（携带真实 sysid）
+     */
+    public ResolutionAdvice resolveConflict(DroneTrajectory traj1, DroneTrajectory traj2,
+                                            ConflictResult conflict, ResolutionStrategy strategy) {
+        return resolveConflict(traj1.sysid, traj2.sysid, conflict, strategy);
     }
 
     /**

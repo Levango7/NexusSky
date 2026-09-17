@@ -55,7 +55,12 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
-        // Read-only channel at scaffold stage; ignore client frames.
+        // /ws/telemetry 为只读广播通道：服务端 1Hz pusher 向所有连接的 GCS 客户端单向推送遥测 JSON 帧，
+        // 客户端不应上行数据。此处不处理客户端帧，仅记录 debug 日志以便排查客户端误发消息的情况。
+        // 若未来需支持 GCS 下行命令（如任务下发、返航指令），应在此解析 JSON 帧并路由到对应命令处理器，
+        // 并补充相应的认证/鉴权与限流逻辑。
+        log.debug("WS /ws/telemetry 收到客户端上行帧（只读通道，已忽略）: session={} payloadLen={}",
+                session.getId(), message.getPayloadLength());
     }
 
     @Override
