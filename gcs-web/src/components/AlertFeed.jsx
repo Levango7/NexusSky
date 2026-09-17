@@ -26,10 +26,10 @@ export default function AlertFeed({ alerts }) {
         )}
         <div className="alert-scroll">
           <ul className="alert-list">
-            {alerts.map((a) => {
+            {alerts.map((a, i) => {
               const meta = SEV_META[a.severity ?? 6] || SEV_META[6]
-              // 用告警唯一标识作为 key，优先 id，其次 ts+sysid 组合，避免数组索引 key
-              const key = a.id != null ? a.id : `${a.ts}-${a.sysid}`
+              // 同毫秒内告警可能重复，索引仅用于业务字段组合仍冲突时兜底。
+              const key = `${a.id ?? ''}-${a.ts}-${a.sysid}-${i}`
               return (
                 <li key={key} style={{ borderLeftColor: meta.color }}>
                   <span className="sev" style={{ color: meta.color }}>[{meta.label}]</span>

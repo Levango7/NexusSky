@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 覆盖优化算法核心（M9 应急任务编排，T3 覆盖优化算法）。
@@ -442,7 +443,7 @@ public class CoverageOptimizer {
     /**
      * 带缓存的 Haversine 距离计算（m）。
      * <p>
-     * 将坐标量化到约 1m 精度后格式化为字符串 key，缓存距离结果。
+     * 将坐标量化到约 0.1m 精度（%.6f 约对应纬度 0.11m）后格式化为字符串 key，缓存距离结果。
      * 在 optimize 一次调用内，同一对（量化后相同的）坐标只计算一次 Haversine，
      * 后续命中缓存直接返回。使用字符串 key 避免 XOR hash 碰撞。
      *
@@ -453,8 +454,9 @@ public class CoverageOptimizer {
      * @return 两点间球面距离（m）
      */
     private double haversineMeters(double lat1Deg, double lon1Deg, double lat2Deg, double lon2Deg) {
-        // 量化到 ~1m 精度，用字符串 key 避免 XOR hash 碰撞
-        String key = String.format("%.6f,%.6f,%.6f,%.6f", lat1Deg, lon1Deg, lat2Deg, lon2Deg);
+        // 量化到 ~0.1m 精度（%.6f 约对应纬度 0.11m），用字符串 key 避免 XOR hash 碰撞；
+        // Locale.ROOT 保证小数点始终为 '.'，避免本地化环境（如小数点为 ','）导致缓存 key 不一致
+        String key = String.format(Locale.ROOT, "%.6f,%.6f,%.6f,%.6f", lat1Deg, lon1Deg, lat2Deg, lon2Deg);
         Double cached = distanceCache.get(key);
         if (cached != null) {
             return cached;

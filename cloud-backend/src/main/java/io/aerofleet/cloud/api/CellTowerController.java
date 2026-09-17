@@ -87,6 +87,12 @@ public class CellTowerController {
     public ResponseEntity<Map<String, Object>> configureTower(
             @PathVariable("sysid") int sysid,
             @RequestBody ConfigRequest body) {
+        // FR: sysid 范围校验（MAVLink sysid 为 u8，有效范围 1~255，
+        // 与 HardwareDataController 保持一致）
+        if (sysid < 1 || sysid > 255) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "sysid must be in [1, 255]"));
+        }
         if (body.cellType < 0 || body.cellType > 2) {
             return ResponseEntity.badRequest().body(
                     Map.of("error", "cellType must be 0 (LTE), 1 (WIFI), or 2 (LORA)"));
@@ -151,6 +157,12 @@ public class CellTowerController {
     public ResponseEntity<Map<String, Object>> triggerHandover(
             @PathVariable("sysid") int sysid,
             @RequestBody HandoverRequest body) {
+        // FR: sysid 范围校验（MAVLink sysid 为 u8，有效范围 1~255，
+        // 与 HardwareDataController 保持一致）
+        if (sysid < 1 || sysid > 255) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "sysid must be in [1, 255]"));
+        }
         if (body.toSysid <= 0) {
             return ResponseEntity.badRequest().body(
                     Map.of("error", "toSysid must be a valid drone sysid"));

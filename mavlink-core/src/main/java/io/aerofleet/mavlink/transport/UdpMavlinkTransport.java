@@ -37,6 +37,7 @@ public class UdpMavlinkTransport implements AutoCloseable {
     private final DatagramSocket socket;
     private final MavlinkParser parser = new MavlinkParser();
     private final Thread receiveThread;
+    private final Thread cleanupThread;
     private volatile boolean running = true;
 
     private final ConcurrentLinkedQueue<Consumer<MavlinkFrame>> frameListeners = new ConcurrentLinkedQueue<>();
@@ -59,9 +60,9 @@ public class UdpMavlinkTransport implements AutoCloseable {
         this.receiveThread.setDaemon(true);
         this.receiveThread.start();
         // 启动 peer 清理线程：定期移除超时未活跃的 peer 记录
-        Thread cleanupThread = new Thread(this::peerCleanupLoop, "mavlink-peer-cleanup-" + bindPort);
-        cleanupThread.setDaemon(true);
-        cleanupThread.start();
+        this.cleanupThread = new Thread(this::peerCleanupLoop, "mavlink-peer-cleanup-" + bindPort);
+        this.cleanupThread.setDaemon(true);
+        this.cleanupThread.start();
     }
 
     /** 注册带源地址的监听器（多机路由用）；注册后普通监听器不再被回调。 */
@@ -172,10 +173,10 @@ public class UdpMavlinkTransport implements AutoCloseable {
             long now = System.currentTimeMillis();
             int removed = 0;
             for (var entry : peerLastSeen.entrySet()) {
-                if (now - entry.getValue() > PEER_TIMEOUT_MS) {
-                    if (peerLastSeen.remove(entry.getKey()) != null) {
-                        removed++;
-                    }
+                // 原子比较时间戳后删除，避免移除已被收包线程更新的活跃 peer。
+                if (now - entry.getValue() > PEER_TIMEOUT_MS
+                        && peerLastSeen.remove(entry.getKey(), entry.getValue())) {
+                    removed++;
                 }
             }
             if (removed > 0) {
@@ -253,5 +254,6 @@ public class UdpMavlinkTransport implements AutoCloseable {
         running = false;
         socket.close();
         receiveThread.interrupt();
+        cleanupThread.interrupt();
     }
 }

@@ -56,12 +56,20 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
       setMapError(e.message || '地图初始化失败')
       return
     }
-    // 监听地图加载错误（瓦片源不可达、样式异常等）
+    // 监听地图加载错误，按严重程度分级处理：
+    // - 瓦片级错误（单个瓦片 404/超时）：地图仍可正常使用，仅 console.warn，不触发降级
+    // - 其他错误（样式加载失败、WebGL 上下文异常等关键资源错误）：触发降级 UI
     map.on('error', (e) => {
-      // MapLibre 对单个瓦片错误也会触发 error 事件，每次初始化仅记录首次错误
+      const msg = (e.error && e.error.message) || ''
+      // MapLibre 对单个瓦片错误也会触发 error 事件，不能因个别瓦片失败整图降级
+      if (msg.includes('tile') || msg.includes('Tile')) {
+        console.warn('[MapView] 瓦片加载失败（已忽略，不影响地图使用）:', msg)
+        return
+      }
+      // 非瓦片错误视为关键错误：每次初始化仅处理首个（去重），显示降级 UI
       if (!errorLoggedRef.current) {
         errorLoggedRef.current = true
-        setMapError(e.error?.message || '地图加载错误')
+        setMapError(msg || '地图加载错误')
       }
     })
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right')
@@ -80,7 +88,7 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
     })
     // Crosshair cursor with Shift held - hint for the planning gesture
     const canvas = map.getCanvas()
-    canvas.addEventListener('keydown', () => {})
+
     map.on('mousemove', (e) => {
       const shift = e.originalEvent && e.originalEvent.shiftKey
       canvas.style.cursor = shift ? 'crosshair' : ''

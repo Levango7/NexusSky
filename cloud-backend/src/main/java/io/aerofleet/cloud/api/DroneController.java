@@ -137,12 +137,17 @@ public class DroneController {
     public Map<String, Object> uploadMission(@PathVariable("sysid") int sysid,
                                              @RequestBody JsonNode body) {
         require(sysid);   // 404 for unknown device
-        List<MissionItemRequest> items = parseMissionItems(body);
-        // FR: mission items 数量上限校验（防止过大任务耗尽飞控内存）
-        if (items.size() > 1000) {
-            throw new BadRequestException("mission items count " + items.size()
+        // FR: 解析前校验 items 数量上限（先检查再逐项解析，防止超大 payload
+        // 在 parseMissionItems 中全量转换耗尽内存）。
+        JsonNode rawItems = body.path("items");
+        if (!rawItems.isArray() || rawItems.isEmpty()) {
+            throw new BadRequestException("body must contain a non-empty 'items' array");
+        }
+        if (rawItems.size() > 1000) {
+            throw new BadRequestException("mission items count " + rawItems.size()
                     + " exceeds maximum of 1000");
         }
+        List<MissionItemRequest> items = parseMissionItems(body);
         List<MissionItemInt> mavItems = commands.toMissionItems(items, sysid);
         log.info("Uploading mission to sysid={}: {} items", sysid, mavItems.size());
         MissionUploadResult result = commands.uploadMission(sysid, mavItems);

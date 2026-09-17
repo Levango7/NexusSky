@@ -391,8 +391,22 @@ export default function App() {
         </div>
       ) : (
       <div className="gcs-body">
-        {/* 移动端侧栏抽屉遮罩，点击关闭 */}
-        {mobileRail && <div className="mobile-rail-mask" onClick={() => setMobileRail(null)} />}
+        {/* 移动端侧栏抽屉遮罩：点击/Enter/Escape 关闭（带 role/tabIndex/aria-label 保证键盘与读屏可访问） */}
+        {mobileRail && (
+          <div
+            className="mobile-rail-mask"
+            role="button"
+            aria-label="关闭侧栏"
+            tabIndex={0}
+            onClick={() => setMobileRail(null)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === 'Escape') {
+                e.preventDefault()
+                setMobileRail(null)
+              }
+            }}
+          />
+        )}
         <aside className={`rail left ${mobileRail === 'left' ? 'mobile-open' : ''}`}>
           <DroneList drones={drones} selectedSysid={selectedSysid} onSelect={(sysid) => { setSelectedSysid(sysid); setMobileRail(null) }} />
           <MissionPlanner
