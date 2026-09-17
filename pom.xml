@@ -48,6 +48,11 @@
         <artifactId>aerofleet-mavlink-core</artifactId>
         <version>${project.version}</version>
       </dependency>
+      <dependency>
+        <groupId>io.aerofleet</groupId>
+        <artifactId>aerofleet-drone-sim</artifactId>
+        <version>${project.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 

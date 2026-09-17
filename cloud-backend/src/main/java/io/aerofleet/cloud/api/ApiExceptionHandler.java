@@ -1,13 +1,18 @@
 package io.aerofleet.cloud.api;
 
+import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+
+import java.util.stream.Collectors;
 
 /**
  * Uniform error body {"error": "..."} for all REST failures.
@@ -50,10 +55,32 @@ public class ApiExceptionHandler {
         return body(HttpStatus.NOT_FOUND, "no such endpoint");
     }
 
+    /** @RequestBody @Valid 校验失败（字段约束）。 */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Object> validationFailed(MethodArgumentNotValidException e) {
+        String detail = e.getBindingResult().getFieldErrors().stream()
+                .map(this::formatFieldError)
+                .collect(Collectors.joining("; "));
+        return body(HttpStatus.BAD_REQUEST, "validation failed: " + detail);
+    }
+
+    /** 方法级 @Validated 校验失败（ConstraintViolationException）。 */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<Object> constraintViolated(ConstraintViolationException e) {
+        String detail = e.getConstraintViolations().stream()
+                .map(v -> v.getPropertyPath() + " " + v.getMessage())
+                .collect(Collectors.joining("; "));
+        return body(HttpStatus.BAD_REQUEST, "validation failed: " + detail);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> internal(Exception e) {
         return body(HttpStatus.INTERNAL_SERVER_ERROR,
                 "internal error: " + rootMessage(e));
+    }
+
+    private String formatFieldError(FieldError fe) {
+        return fe.getField() + " " + fe.getDefaultMessage();
     }
 
     private ResponseEntity<Object> body(HttpStatus status, String message) {

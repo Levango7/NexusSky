@@ -616,3 +616,112 @@ body {
   .drone-item { padding: 12px; }
   .db-card { padding: 12px 14px; }
 }
+/* ============ 3D 可视化（Scene3D / Trajectory3D）============ */
+
+.scene3d-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg);
+}
+.scene3d-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.scene3d-side { width: 380px; flex: none; display: flex; flex-direction: column; gap: 8px; }
+
+.scene3d-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--bg);
+}
+.scene3d-canvas { position: absolute; inset: 0; }
+.scene3d-canvas canvas { display: block; }
+
+.scene3d-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; color: var(--dim); font-size: 13px;
+  background: rgba(11, 14, 20, .85);
+}
+.scene3d-overlay.err { color: var(--crit); }
+.scene3d-overlay .dim { color: var(--dim-2); }
+
+.scene3d-spinner {
+  width: 28px; height: 28px;
+  border: 3px solid var(--line-2);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: scene3d-spin 0.9s linear infinite;
+}
+@keyframes scene3d-spin { to { transform: rotate(360deg); } }
+
+.scene3d-hud {
+  position: absolute; top: 8px; left: 8px;
+  display: flex; gap: 6px; flex-wrap: wrap;
+  pointer-events: none;
+}
+.scene3d-hud .chip { background: rgba(11, 14, 20, .7); backdrop-filter: blur(4px); }
+
+/* Trajectory3D */
+.traj3d-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+.traj3d-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.traj3d-head h3 { font-size: 13px; font-weight: 600; color: var(--text); }
+.traj3d-canvas { position: relative; flex: 1; min-height: 0; }
+.traj3d-canvas canvas { display: block; }
+
+.traj3d-timeline {
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.traj3d-ts { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dim); }
+.traj3d-ts b { color: var(--text); }
+.traj3d-slider {
+  width: 100%; height: 6px;
+  -webkit-appearance: none; appearance: none;
+  background: var(--line-2); border-radius: 3px; outline: none;
+  cursor: pointer;
+}
+.traj3d-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--cyan); border: 2px solid var(--bg);
+  box-shadow: 0 0 6px rgba(0, 212, 255, .6);
+}
+.traj3d-slider::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--cyan); border: 2px solid var(--bg);
+}
+.traj3d-playhead { display: flex; gap: 6px; flex-wrap: wrap; }
+.traj3d-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--dim-2); font-size: 13px;
+}
+
+/* 3D 视图响应式 */
+@media (max-width: 1024px) {
+  .scene3d-layout { flex-direction: column; }
+  .scene3d-side { width: 100%; flex: 1; min-height: 300px; }
+  .scene3d-main { min-height: 320px; }
+}

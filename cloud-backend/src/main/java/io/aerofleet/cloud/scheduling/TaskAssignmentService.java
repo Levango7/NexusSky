@@ -24,6 +24,17 @@ public class TaskAssignmentService {
             Comparator.comparingInt(TaskRequest::getPriority).reversed());
     private final Map<String, AssignmentResult> assignments = new ConcurrentHashMap<>();
 
+    // --- GA 参数（M10 调度算法优化）---
+    /** 任务数低于此值时回退到简单评分，避免 GA 开销无收益 */
+    private static final int GA_MIN_TASKS = 4;
+    /** 无人机数低于此值时回退到简单评分 */
+    private static final int GA_MIN_DRONES = 4;
+    private static final int GA_POP_SIZE = 50;
+    private static final int GA_GENERATIONS = 100;
+    private static final double GA_MUTATION_RATE = 0.1;
+    private static final int GA_ELITE = 2;
+    private static final int GA_TOURNAMENT_K = 3;
+
     public TaskAssignmentService(DeviceRegistry registry) {
         this.registry = registry;
     }
@@ -56,6 +67,267 @@ public class TaskAssignmentService {
         taskQueue.offer(req);
         log.info("Task {} assigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
         return result;
+    }
+
+    /**
+     * 批量分配多个任务到无人机集群（M10 调度算法优化）。
+     * <p>
+     * 当任务数 ≥ {@value #GA_MIN_TASKS} 且无人机数 ≥ {@value #GA_MIN_DRONES} 时启用遗传算法，
+     * 综合优化距离、电量、能力匹配、任务紧急度与负载均衡；否则回退到逐任务简单评分。
+     *
+     * @param requests 待分配任务列表
+     * @return 与输入顺序对应的分配结果列表
+     */
+    public List<AssignmentResult> assignTasks(List<TaskRequest> requests) {
+        List<DroneSnapshot> drones = registry.all();
+        List<AssignmentResult> results = new ArrayList<>();
+        if (drones.isEmpty()) {
+            for (TaskRequest req : requests) {
+                results.add(new AssignmentResult(req.getTaskId(), -1, 0, "无可用无人机", false));
+            }
+            return results;
+        }
+        if (requests.isEmpty()) {
+            return results;
+        }
+
+        int nTasks = requests.size();
+        int nDrones = drones.size();
+        boolean useGa = nTasks >= GA_MIN_TASKS && nDrones >= GA_MIN_DRONES;
+
+        // 求解最优分配映射：mapping[i] = 第 i 个任务分配到的无人机索引
+        int[] mapping = useGa
+                ? runGa(requests, drones, new Random())
+                : greedyAssign(requests, drones);
+
+        String algo = useGa ? "GA" : "SCORE";
+        for (int i = 0; i < nTasks; i++) {
+            int di = mapping[i];
+            DroneSnapshot d = drones.get(di);
+            double score = scoreDrone(d, requests.get(i));
+            AssignmentResult r = new AssignmentResult(requests.get(i).getTaskId(), d.sysid, score,
+                    String.format("%s sysid=%d score=%.1f", algo, d.sysid, score), true);
+            assignments.put(requests.get(i).getTaskId(), r);
+            taskQueue.offer(requests.get(i));
+            results.add(r);
+        }
+        log.info("assignTasks: {} tasks to {} drones via {}", nTasks, nDrones, algo);
+        return results;
+    }
+
+    // ==================== 遗传算法（GA） ====================
+
+    /**
+     * 运行遗传算法求解任务-无人机分配。
+     * <p>
+     * 染色体编码：int[nTasks]，chromosome[i] ∈ [0, nDrones) 表示第 i 个任务分配到的无人机索引。
+     *
+     * @return 最优染色体的分配映射
+     */
+    private int[] runGa(List<TaskRequest> tasks, List<DroneSnapshot> drones, Random rnd) {
+        final int nTasks = tasks.size();
+        final int nDrones = drones.size();
+        final int popSize = GA_POP_SIZE;
+
+        // 初始化种群（随机分配）
+        int[][] pop = new int[popSize][nTasks];
+        double[] fit = new double[popSize];
+        for (int i = 0; i < popSize; i++) {
+            for (int j = 0; j < nTasks; j++) {
+                pop[i][j] = rnd.nextInt(nDrones);
+            }
+            fit[i] = fitness(pop[i], tasks, drones);
+        }
+
+        // 进化
+        for (int gen = 0; gen < GA_GENERATIONS; gen++) {
+            // 精英保留：按适应度降序取前 GA_ELITE 个直接进入下一代
+            final double[] fitRef = fit;
+            Integer[] order = new Integer[popSize];
+            for (int i = 0; i < popSize; i++) {
+                order[i] = i;
+            }
+            Arrays.sort(order, Comparator.comparingDouble((Integer a) -> fitRef[a]).reversed());
+
+            int[][] newPop = new int[popSize][nTasks];
+            double[] newFit = new double[popSize];
+            for (int e = 0; e < GA_ELITE && e < popSize; e++) {
+                newPop[e] = pop[order[e]].clone();
+                newFit[e] = fit[order[e]];
+            }
+            // 交叉 + 变异填充剩余个体
+            for (int i = GA_ELITE; i < popSize; i++) {
+                int[] parent1 = tournamentSelect(pop, fit, rnd);
+                int[] parent2 = tournamentSelect(pop, fit, rnd);
+                int[] child = pmxCrossover(parent1, parent2, rnd);
+                if (rnd.nextDouble() < GA_MUTATION_RATE) {
+                    mutate(child, rnd);
+                }
+                newPop[i] = child;
+                newFit[i] = fitness(child, tasks, drones);
+            }
+            pop = newPop;
+            fit = newFit;
+        }
+
+        // 返回最优个体
+        int best = 0;
+        for (int i = 1; i < popSize; i++) {
+            if (fit[i] > fit[best]) {
+                best = i;
+            }
+        }
+        return pop[best];
+    }
+
+    /**
+     * 适应度函数：综合考虑距离、电量、能力匹配、任务紧急度与负载均衡。
+     * <p>
+     * 个体适应度 = 平均( scoreDrone×0.6 + capabilityMatch×0.4 ) + 负载均衡奖励
+     *
+     * @param chrom  染色体（任务->无人机索引映射）
+     * @param tasks  任务列表
+     * @param drones 无人机列表
+     * @return 适应度值，越大越优
+     */
+    private double fitness(int[] chrom, List<TaskRequest> tasks, List<DroneSnapshot> drones) {
+        final int nDrones = drones.size();
+        double sum = 0;
+        int[] loadCount = new int[nDrones];
+        for (int i = 0; i < tasks.size(); i++) {
+            int di = chrom[i];
+            if (di < 0 || di >= nDrones) {
+                di = 0; // 防护：越界回退到首台
+            }
+            DroneSnapshot d = drones.get(di);
+            if (d.online) {
+                sum += scoreDrone(d, tasks.get(i)) * 0.6 + capabilityMatch(d, tasks.get(i)) * 0.4;
+            }
+            // 离线无人机贡献为 0，GA 自然避免分配（均衡奖励不足以补偿）
+            loadCount[di]++;
+        }
+        double avg = sum / tasks.size();
+
+        // 负载均衡奖励：分配任务数的标准差越小（越均衡）奖励越高
+        double meanLoad = (double) tasks.size() / nDrones;
+        double variance = 0;
+        for (int c : loadCount) {
+            variance += (c - meanLoad) * (c - meanLoad);
+        }
+        variance /= nDrones;
+        double balanceBonus = Math.max(0, 10.0 - Math.sqrt(variance));
+
+        return avg + balanceBonus;
+    }
+
+    /**
+     * 能力匹配评分（0-100）：基于在线状态、任务类型电量门槛与当前负载推断载荷/传感器能力。
+     * <p>
+     * 不同任务类型对电量要求不同：RESCUE > SPRAY > RELAY > SURVEY。
+     */
+    private double capabilityMatch(DroneSnapshot d, TaskRequest req) {
+        if (!d.online) {
+            return 0;
+        }
+        double score = 50.0; // 基础能力分
+        int threshold;
+        switch (req.getTaskType()) {
+            case "RESCUE": threshold = 60; break;
+            case "SPRAY":  threshold = 50; break;
+            case "RELAY":  threshold = 40; break;
+            default:       threshold = 30; break; // SURVEY
+        }
+        int battery = d.battery > 0 ? d.battery : 0;
+        score += (battery >= threshold) ? 30 : 30.0 * battery / Math.max(1, threshold);
+        // 当前负载越轻，可用能力越强（load 为千分比，-1 表示未知）
+        if (d.load >= 0) {
+            score += Math.max(0, 20 - d.load / 50.0);
+        } else {
+            score += 20;
+        }
+        return Math.min(100, score);
+    }
+
+    /** 锦标赛选择：随机取 k 个个体，返回适应度最高者。 */
+    private int[] tournamentSelect(int[][] pop, double[] fit, Random rnd) {
+        int best = rnd.nextInt(pop.length);
+        for (int i = 1; i < GA_TOURNAMENT_K; i++) {
+            int candidate = rnd.nextInt(pop.length);
+            if (fit[candidate] > fit[best]) {
+                best = candidate;
+            }
+        }
+        return pop[best];
+    }
+
+    /**
+     * 部分映射交叉（PMX）：在两个交叉点之间交换基因，并用映射关系修复段外冲突。
+     * <p>
+     * 对分配编码（无人机索引可重复），修复仍产生合法解（值域 [0, nDrones)）。
+     */
+    private int[] pmxCrossover(int[] p1, int[] p2, Random rnd) {
+        int n = p1.length;
+        int[] child = p1.clone();
+        int c1 = rnd.nextInt(n);
+        int c2 = rnd.nextInt(n);
+        if (c1 > c2) {
+            int t = c1; c1 = c2; c2 = t;
+        }
+        // 段 [c1, c2] 从 p2 拷贝，并建立 p2[i] -> p1[i] 映射
+        Map<Integer, Integer> segMap = new HashMap<>();
+        for (int i = c1; i <= c2; i++) {
+            child[i] = p2[i];
+            segMap.put(p2[i], p1[i]);
+        }
+        // 修复段外：跟随映射链直到值不在段映射中
+        for (int i = 0; i < n; i++) {
+            if (i >= c1 && i <= c2) {
+                continue;
+            }
+            int v = child[i];
+            Integer mapped = segMap.get(v);
+            int guard = 0;
+            while (mapped != null && guard < n) {
+                v = mapped;
+                mapped = segMap.get(v);
+                guard++;
+            }
+            child[i] = v;
+        }
+        return child;
+    }
+
+    /** 变异：随机交换两个任务的无人机分配。 */
+    private void mutate(int[] chrom, Random rnd) {
+        if (chrom.length < 2) {
+            return;
+        }
+        int i = rnd.nextInt(chrom.length);
+        int j = rnd.nextInt(chrom.length);
+        if (i == j) {
+            j = (j + 1) % chrom.length;
+        }
+        int tmp = chrom[i];
+        chrom[i] = chrom[j];
+        chrom[j] = tmp;
+    }
+
+    /** 贪心分配（fallback）：逐任务选择评分最高的无人机。 */
+    private int[] greedyAssign(List<TaskRequest> tasks, List<DroneSnapshot> drones) {
+        int[] mapping = new int[tasks.size()];
+        for (int i = 0; i < tasks.size(); i++) {
+            int best = 0;
+            double bestScore = -1;
+            for (int j = 0; j < drones.size(); j++) {
+                double s = scoreDrone(drones.get(j), tasks.get(i));
+                if (s > bestScore) {
+                    bestScore = s;
+                    best = j;
+                }
+            }
+            mapping[i] = best;
+        }
+        return mapping;
     }
 
     /** 综合评分：能力(40%) + 电量(30%) + 距离(20%) + 优先级(10%) */

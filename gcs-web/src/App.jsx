@@ -16,6 +16,8 @@ import CellTowerPanel from './components/CellTowerPanel.jsx'
 import EmergencyOrchPanel from './components/EmergencyOrchPanel.jsx'
 import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
+import Scene3D from './components/Scene3D.jsx'
+import Trajectory3D from './components/Trajectory3D.jsx'
 import { api, wsUrl } from './api.js'
 
 function haversine(a, b) {
@@ -46,7 +48,7 @@ export default function App() {
   const [wsState, setWsState] = useState('connecting')
   const [apiOk, setApiOk] = useState(false)
   const [now, setNow] = useState(Date.now())
-  const [view, setView] = useState('control')               // 'control' | 'dashboard' | 'formation' | 'spray' | 'hardware' | 'mesh' | 'celltower'
+  const [view, setView] = useState('control')               // 'control' | 'dashboard' | 'formation' | 'spray' | 'hardware' | 'mesh' | 'celltower' | 'scene3d'
   const [formations, setFormations] = useState([])          // 编队列表（WebSocket 推送）
   const [meshTopology, setMeshTopology] = useState(null)    // mesh 拓扑（WebSocket 推送）
   const [satLinkData, setSatLinkData] = useState(null)      // sat-link 数据（WebSocket 推送）
@@ -213,6 +215,13 @@ export default function App() {
               仪表盘
             </button>
             <button
+              className={`btn ${view === 'scene3d' ? 'primary' : ''}`}
+              style={{ padding: '4px 12px', fontSize: 11 }}
+              onClick={() => setView('scene3d')}
+            >
+              3D 视图
+            </button>
+            <button
               className={`btn ${view === 'control' ? 'primary' : ''}`}
               style={{ padding: '4px 12px', fontSize: 11 }}
               onClick={() => setView('control')}
@@ -335,6 +344,27 @@ export default function App() {
       ) : view === 'emergency' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <EmergencyOrchPanel />
+        </div>
+      ) : view === 'scene3d' ? (
+        <div className="scene3d-layout">
+          <div className="scene3d-main">
+            <Scene3D
+              drones={drones}
+              telemetry={telemetry}
+              track={track}
+              formations={formations}
+              selected={selected}
+              terrainData={terrainData}
+            />
+          </div>
+          <div className="scene3d-side">
+            <Trajectory3D
+              track={track}
+              missionDraft={missionDraft}
+              telemetry={telemetry}
+              selected={selected}
+            />
+          </div>
         </div>
       ) : (
       <div className="gcs-body">
