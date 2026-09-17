@@ -94,6 +94,9 @@ public class EmergencyOrchService {
 
     /**
      * 获取阶段进度与事件列表。
+     * <p>
+     * 返回防御性浅拷贝：调用方修改返回的列表不会影响 plan 内部状态
+     * （phases 元素为 ConcurrentHashMap，浅拷贝保留阶段状态的并发更新）。
      */
     public Map<String, Object> getProgress(long planId) {
         Map<String, Object> plan = plans.get(planId);
@@ -101,13 +104,16 @@ public class EmergencyOrchService {
             return null;
         }
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("phases", plan.get("phases"));
-        result.put("events", plan.get("events"));
+        result.put("phases", new ArrayList<>((List<?>) plan.get("phases")));
+        result.put("events", new ArrayList<>((List<?>) plan.get("events")));
         return result;
     }
 
     /**
      * 获取覆盖信息。
+     * <p>
+     * 返回防御性浅拷贝：deployments/uncoveredAreas 复制后返回，避免调用方绕过
+     * 内部 synchronizedList 的保护直接修改内部状态。
      */
     public Map<String, Object> getCoverage(long planId) {
         Map<String, Object> plan = plans.get(planId);
@@ -117,8 +123,8 @@ public class EmergencyOrchService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("coverageRate", plan.get("coverageRate"));
         result.put("connectRate", plan.get("connectRate"));
-        result.put("deployments", plan.get("deployments"));
-        result.put("uncoveredAreas", plan.get("uncoveredAreas"));
+        result.put("deployments", new ArrayList<>((List<?>) plan.get("deployments")));
+        result.put("uncoveredAreas", new ArrayList<>((List<?>) plan.get("uncoveredAreas")));
         return result;
     }
 

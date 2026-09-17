@@ -1,10 +1,26 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 
 // 任务规划器：手动加点 / 一键模板 / 距离统计 / 上传
 export default function MissionPlanner({ drone, missionDraft, setMissionDraft, onUploaded }) {
   const [status, setStatus] = useState(null)
   const [busy, setBusy] = useState(false)
+  const idPrefix = useId()
+  const nextIdRef = useRef(0)
+  const createWaypoint = useCallback((waypoint) => ({
+    ...waypoint,
+    id: `${idPrefix}-${nextIdRef.current++}`,
+  }), [idPrefix])
+  // 地图点击由父组件添加无 id 航点；统一补齐后用于渲染并回写草稿。
+  const waypoints = useMemo(() => missionDraft.map((w) => (
+    w.id == null ? createWaypoint(w) : w
+  )), [missionDraft, createWaypoint])
+  useEffect(() => {
+    if (missionDraft.some((w) => w.id == null)) {
+      // 不覆盖规范化期间父组件可能追加的航点，下次渲染会处理新草稿。
+      setMissionDraft((current) => current === missionDraft ? waypoints : current)
+    }
+  }, [missionDraft, waypoints, setMissionDraft])
 
   const base = drone || {}
 
@@ -12,7 +28,8 @@ export default function MissionPlanner({ drone, missionDraft, setMissionDraft, o
     const last = missionDraft.length > 0 ? missionDraft[missionDraft.length - 1] : null
     const lat = Number(((last?.lat ?? base.lat ?? 22.5907) + dlat).toFixed(6))
     const lon = Number(((last?.lon ?? base.lon ?? 113.9345) + dlon).toFixed(6))
-    setMissionDraft([...missionDraft, { cmd: 'waypoint', lat, lon, alt: 50, holdTime: 2 }])
+    const waypoint = createWaypoint({ cmd: 'waypoint', lat, lon, alt: 50, holdTime: 2 })
+    setMissionDraft((current) => [...current, waypoint])
   }
 
   // 一键生成：起降点 + 方形测绘航线
@@ -27,7 +44,7 @@ export default function MissionPlanner({ drone, missionDraft, setMissionDraft, o
       { cmd: 'waypoint', lat, lon: lon + d, alt: 60, holdTime: 2 },
       { cmd: 'waypoint', lat, lon, alt: 60, holdTime: 2 },
       { cmd: 'rtl', lat, lon, alt: 0, holdTime: 0 },
-    ])
+    ].map(createWaypoint))
   }
 
   // 一键生成：直线往返巡检航线
@@ -39,7 +56,7 @@ export default function MissionPlanner({ drone, missionDraft, setMissionDraft, o
       { cmd: 'waypoint', lat, lon: lon + 0.0022, alt: 40, holdTime: 3 },
       { cmd: 'waypoint', lat, lon, alt: 40, holdTime: 3 },
       { cmd: 'rtl', lat, lon, alt: 0, holdTime: 0 },
-    ])
+    ].map(createWaypoint))
   }
 
   const removeAt = (i) => setMissionDraft(missionDraft.filter((_, j) => j !== i))
@@ -54,7 +71,7 @@ export default function MissionPlanner({ drone, missionDraft, setMissionDraft, o
       const r = await api.downloadMission(drone.sysid)
       if (r.status === 'ok') {
         const cmdName = { 22: 'takeoff', 16: 'waypoint', 20: 'rtl', 21: 'land', 19: 'return' }
-        const items = (r.items || []).map((it) => ({
+        const items = (r.items || []).map((it) => createWaypoint({
           cmd: cmdName[it.command] || `cmd${it.command}`,
           lat: it.lat,
           lon: it.lon,
@@ -122,8 +139,8 @@ export default function MissionPlanner({ drone, missionDraft, setMissionDraft, o
 
         {missionDraft.length > 0 && (
           <ol className="mission-list">
-            {missionDraft.map((w, i) => (
-              <li key={`${w.cmd}-${w.lat}-${w.lon}`}>
+            {waypoints.map((w, i) => (
+              <li key={w.id}>
                 <span className="seq-badge">{i + 1}</span>
                 <code>{w.cmd}</code>
                 <span className="coords">

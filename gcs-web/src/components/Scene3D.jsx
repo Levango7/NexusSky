@@ -164,9 +164,9 @@ function buildTerrain(THREE) {
     const x = pos.getX(i)
     const z = pos.getZ(i) // PlaneGeometry 旋转前 z 即平面第二维
     const h = Math.sin(x * 0.05) * Math.cos(z * 0.04) * 1.5 + Math.sin(x * 0.02 + z * 0.03) * 2.5
-    // PlaneGeometry 默认在 XY 平面，旋转 -PI/2 绕 X 轴后 Y 轴变为 Z 轴（高度方向）。
-    // 因此起伏高度应设置在 Y 分量上，旋转后即映射为世界高度。
-    pos.setY(i, h)
+    // PlaneGeometry 默认在 XY 平面（z=0），绕 X 轴旋转 -PI/2 后：原 z → 世界 y（高度方向），
+    // 原 y → 世界 -z（水平）。因此起伏高度必须在旋转前的 z 分量上设置。
+    pos.setZ(i, h)
   }
   ground.geometry.attributes.position.needsUpdate = true
   ground.geometry.computeVertexNormals()

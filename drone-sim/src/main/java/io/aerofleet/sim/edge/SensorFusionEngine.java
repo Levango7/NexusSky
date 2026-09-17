@@ -127,7 +127,7 @@ public class SensorFusionEngine {
      * @param alt      高度（米）
      * @param accuracy GPS 精度（米，1σ，典型 3-5m）
      */
-    public void updateGps(double lat, double lon, double alt, double accuracy) {
+    public synchronized void updateGps(double lat, double lon, double alt, double accuracy) {
         if (!initialized) {
             init(lat, lon, alt);
         }
@@ -150,7 +150,7 @@ public class SensorFusionEngine {
      * @param lon      经度（度）
      * @param accuracy 视觉精度（米，1σ，典型 0.5-2m）
      */
-    public void updateVision(double lat, double lon, double accuracy) {
+    public synchronized void updateVision(double lat, double lon, double accuracy) {
         if (!initialized) {
             init(lat, lon, 0.0);
         }
@@ -171,7 +171,7 @@ public class SensorFusionEngine {
      * @param alt      高度（米）
      * @param accuracy LiDAR 精度（米，1σ，典型 0.1m）
      */
-    public void updateLidar(double alt, double accuracy) {
+    public synchronized void updateLidar(double alt, double accuracy) {
         if (!initialized) {
             init(0.0, 0.0, alt);
         }
@@ -188,7 +188,7 @@ public class SensorFusionEngine {
      *
      * @return 融合状态（位置、航向、速度、精度、传感器掩码）
      */
-    public FusedState getFusedState() {
+    public synchronized FusedState getFusedState() {
         double heading = computeHeading();
         double velocity = computeSpeedMps();
         // 位置不确定度（米，1σ）：水平 + 垂直
@@ -203,12 +203,12 @@ public class SensorFusionEngine {
     /**
      * 返回当前状态协方差矩阵（9×9，深拷贝）。
      */
-    public double[][] getCovariance() {
+    public synchronized double[][] getCovariance() {
         return cloneMat(P);
     }
 
     /** 是否已初始化（已收到首个位置观测） */
-    public boolean isInitialized() {
+    public synchronized boolean isInitialized() {
         return initialized;
     }
 
@@ -228,7 +228,7 @@ public class SensorFusionEngine {
      *
      * @return 融合状态
      */
-    public FusedState fuse(double gpsLat, double gpsLon, double gpsAlt,
+    public synchronized FusedState fuse(double gpsLat, double gpsLon, double gpsAlt,
                            double imuHeading, double imuVelocity,
                            double visionLat, double visionLon,
                            double lidarAlt,
@@ -292,7 +292,7 @@ public class SensorFusionEngine {
      * <p>
      * 观测 [vLat, vLon]，测量噪声由 IMU 速度精度决定。
      */
-    private void updateImuVelocity(double headingDeg, double velocityMps, double accuracyMps) {
+    private synchronized void updateImuVelocity(double headingDeg, double velocityMps, double accuracyMps) {
         if (!initialized) {
             return;
         }

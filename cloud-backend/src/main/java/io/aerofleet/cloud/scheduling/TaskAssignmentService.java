@@ -40,7 +40,7 @@ public class TaskAssignmentService {
     }
 
     /** 分配任务到最优无人机 */
-    public AssignmentResult assignTask(TaskRequest req) {
+    public synchronized AssignmentResult assignTask(TaskRequest req) {
         List<DroneSnapshot> drones = registry.all();
         if (drones.isEmpty()) {
             log.warn("No drones available for task {}", req.getTaskId());
@@ -78,7 +78,7 @@ public class TaskAssignmentService {
      * @param requests 待分配任务列表
      * @return 与输入顺序对应的分配结果列表
      */
-    public List<AssignmentResult> assignTasks(List<TaskRequest> requests) {
+    public synchronized List<AssignmentResult> assignTasks(List<TaskRequest> requests) {
         List<DroneSnapshot> drones = registry.all();
         List<AssignmentResult> results = new ArrayList<>();
         if (drones.isEmpty()) {
@@ -360,7 +360,7 @@ public class TaskAssignmentService {
     }
 
     /** 取消任务 */
-    public boolean cancelTask(String taskId) {
+    public synchronized boolean cancelTask(String taskId) {
         AssignmentResult removed = assignments.remove(taskId);
         if (removed != null) {
             // 同步从任务队列移除，避免队列只增不减
@@ -370,15 +370,21 @@ public class TaskAssignmentService {
     }
 
     /** 从任务队列取出下一个待执行任务（消费队列，避免只增不减）。 */
-    public TaskRequest pollNextTask() {
+    public synchronized TaskRequest pollNextTask() {
         return taskQueue.poll();
     }
 
-    /** 全量重新分配（无人机损毁后触发） */
-    public void reassignAll() {
-        log.info("Reassigning all tasks, count={}", assignments.size());
-        assignments.clear();
-        // 从队列取出所有待重分配任务
+    /**
+     * 全量重新分配（无人机损毁后触发）。
+     * <p>
+     * 线程安全说明：使用 synchronized 与 assignTask/assignTasks/cancelTask/pollNextTask 对共享状态
+     * （taskQueue、assignments）的访问保持互斥，消除 drainTo 与并发 offer/poll 之间的竞态。
+     * 重分配策略：仅重分配 taskQueue 中待执行的任务；正在执行中的任务（已从队列消费、
+     * 仅有 assignments 记录）不受影响，其分配记录被保留。
+     */
+    public synchronized void reassignAll() {
+        log.info("Reassigning all tasks, pendingQueueCount={}", taskQueue.size());
+        // 从队列取出所有待重分配任务（不加 assignments.clear()，保留执行中任务的分配记录）
         List<TaskRequest> pending = new ArrayList<>();
         taskQueue.drainTo(pending);
         // 重新分配：仅对在线无人机分配（损毁无人机已离线）
@@ -399,10 +405,11 @@ public class TaskAssignmentService {
             if (best != null) {
                 AssignmentResult result = new AssignmentResult(req.getTaskId(), best.sysid, bestScore,
                         String.format("sysid=%d score=%.1f", best.sysid, bestScore), true);
-                assignments.put(req.getTaskId(), result);
+                assignments.put(req.getTaskId(), result); // 覆盖旧分配记录
                 taskQueue.offer(req);
                 log.info("Task {} reassigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
             } else {
+                // 无在线无人机时保留旧分配记录，不影响执行中任务的信息。
                 log.warn("Task {} cannot be reassigned: no online drone available", req.getTaskId());
             }
         }

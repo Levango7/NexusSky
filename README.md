@@ -404,7 +404,7 @@ TerrainUpdate/FlightRestriction），REST `/api/v1/terrain/*`，
 （`PriorityScheduler`）四级抢占式调度（搜救>指挥>测绘>常规），场景预设
 （`ScenarioPresetFactory`）支持地震/泥石流/火灾一键启动。MAVLink 消息 465–467
 （EmergencyMissionPlan/CoverageOptimization/EmergencyPriority），
-REST `/api/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进度。
+REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进度。
 
 ### MAVLink 消息 ID 分配（420–467 段）
 

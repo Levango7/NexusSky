@@ -168,18 +168,27 @@ class TaskAssignmentServiceTest {
     }
 
     @Test
-    @DisplayName("reassignAll 清空所有分配")
-    void reassignAllClearsAssignments() {
-        DroneSnapshot d = new DroneSnapshot(1);
-        d.battery = 80;
+    @DisplayName("reassignAll 仅重分配待执行任务并保留执行中任务")
+    void reassignAllPreservesRunningAssignments() {
+        DroneSnapshot d = onlineDrone(1, 80);
         registry.add(d);
-        service.assignTask(new TaskRequest("t-1", "SURVEY", 5, 30.0, 120.0, 100.0));
-        service.assignTask(new TaskRequest("t-2", "SURVEY", 5, 30.0, 120.0, 100.0));
-        assertThat(service.getAllAssignments()).hasSize(2);
+        TaskRequest running = new TaskRequest("t-1", "SURVEY", 5, 30.0, 120.0, 100.0);
+        AssignmentResult runningAssignment = service.assignTask(running);
+        assertThat(service.pollNextTask()).isSameAs(running);
+        TaskRequest pending = new TaskRequest("t-2", "SURVEY", 5, 30.0, 120.0, 100.0);
+        service.assignTask(pending);
 
+        // 原无人机离线后，只有仍在队列中的任务应转移到新无人机。
+        d.online = false;
+        registry.add(onlineDrone(2, 90));
         service.reassignAll();
 
-        assertThat(service.getAllAssignments()).isEmpty();
+        assertThat(service.getAllAssignments()).hasSize(2);
+        assertThat(service.getAllAssignments().get("t-1")).isSameAs(runningAssignment);
+        assertThat(service.getAllAssignments().get("t-1").getAssignedSysid()).isEqualTo(1);
+        assertThat(service.getAllAssignments().get("t-2").getAssignedSysid()).isEqualTo(2);
+        assertThat(service.pollNextTask()).isSameAs(pending);
+        assertThat(service.pollNextTask()).isNull();
     }
 
     @Test

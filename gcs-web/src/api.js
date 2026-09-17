@@ -264,8 +264,8 @@ export const api = {
 }
 
 // ---- Emergency Orchestration (应急任务编排 M9) ----
-// 注意：应急编排 API 挂载在 /api/emergency 下（独立于 v1 BASE）
-const EMERGENCY_BASE = '/api/emergency'
+// 注意：应急编排 API 挂载在 /api/v1/emergency 下（独立于 v1 BASE，但带 v1 前缀）
+const EMERGENCY_BASE = '/api/v1/emergency'
 
 export const emergencyOrch = {
   // 获取场景预设列表
