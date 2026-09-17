@@ -104,6 +104,9 @@ public class DeliveryService {
      * @throws BadRequestException 未知 action
      */
     public Map<Integer, AckResult> control(int id, String action) {
+        if (action == null) {
+            throw new BadRequestException("action is required");
+        }
         DeliverySequence seq = sequences.get(id);
         if (seq == null) {
             throw new NotFoundException("delivery " + id + " not found");

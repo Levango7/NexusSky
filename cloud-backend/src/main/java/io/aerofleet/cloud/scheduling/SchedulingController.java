@@ -3,6 +3,7 @@ package io.aerofleet.cloud.scheduling;
 import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -27,7 +28,7 @@ public class SchedulingController {
 
     @PostMapping("/tasks")
     @RequireRole(Role.OPERATOR)
-    public AssignmentResult createTask(@RequestBody TaskRequest req) {
+    public AssignmentResult createTask(@RequestBody @Valid TaskRequest req) {
         log.info("Create task: {} type={} pri={}", req.getTaskId(), req.getTaskType(), req.getPriority());
         return assignmentService.assignTask(req);
     }

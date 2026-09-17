@@ -397,6 +397,14 @@ export default function Scene3D({
     // 移除消失的
     droneModels.forEach((m, sysid) => {
       if (!liveMap.has(sysid)) {
+        // 释放 geometry 和 material，避免 GPU 内存泄漏
+        m.group.traverse((obj) => {
+          if (obj.geometry) obj.geometry.dispose()
+          if (obj.material) {
+            if (Array.isArray(obj.material)) obj.material.forEach((mat) => mat.dispose())
+            else obj.material.dispose()
+          }
+        })
         scene.remove(m.group)
         droneModels.delete(sysid)
       }

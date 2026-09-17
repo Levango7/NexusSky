@@ -107,6 +107,9 @@ public class SprayTaskService {
      * @throws BadRequestException 未知 action
      */
     public Map<Integer, AckResult> control(int id, String action) {
+        if (action == null) {
+            throw new BadRequestException("action is required");
+        }
         SprayTask task = tasks.get(id);
         if (task == null) {
             throw new NotFoundException("spray task " + id + " not found");

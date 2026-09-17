@@ -2,6 +2,9 @@ package io.aerofleet.cloud.mission;
 
 import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -42,7 +45,8 @@ public class DeliveryController {
 
     /** 创建配送任务（FR-23）。 */
     @PostMapping
-    public Map<String, Object> create(@RequestBody DeliveryRequest req) {
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> create(@RequestBody @Valid DeliveryRequest req) {
         if (req.sites == null || req.sites.isEmpty()) {
             throw new BadRequestException("sites must not be empty");
         }
@@ -90,6 +94,7 @@ public class DeliveryController {
 
     /** 控制配送任务（推进/跳过站点）。 */
     @PostMapping("/{id}/control")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> control(@PathVariable("id") int id,
                                        @RequestBody ControlRequest body) {
         Map<Integer, DeliveryService.AckResult> results =
@@ -128,7 +133,8 @@ public class DeliveryController {
         out.put("payloads", payloads);
         out.put("totalWeight", totalWeight);
         out.put("totalVolume", totalVolume);
-        out.put("combinedCenterOfGravity", totalWeight > 0 ? weightedCog / totalWeight : 0);
+        // TODO: combinedCenterOfGravity 需要 payload 在机舱中的位置数据才能计算加权重心
+        out.put("combinedCenterOfGravity", 0);
         return out;
     }
 

@@ -66,6 +66,9 @@ export default function TerrainMapPanel({ terrainData }) {
     gridResolution: 50,
   })
   const timerRef = useRef(null)
+  // 建图消息自动消失的 timer，组件卸载时需清理，避免内存泄漏
+  // 经验来源：2026-09-16-react-side-effect-cleanup-timeout-ref-callback-leak
+  const buildTimerRef = useRef(null)
 
   // 初始加载 + 周期刷新
   const refresh = useCallback(async () => {
@@ -99,16 +102,25 @@ export default function TerrainMapPanel({ terrainData }) {
     }
   }, [terrainData, refresh])
 
+  // 组件卸载时清理建图消息 timer，防止 setState 作用于已卸载组件
+  useEffect(() => {
+    return () => {
+      if (buildTimerRef.current) clearTimeout(buildTimerRef.current)
+    }
+  }, [])
+
   // 触发建图
   const handleBuild = async () => {
     try {
       const res = await api.buildTerrainMap(buildForm)
       setBuildMsg(`建图已触发：${res.message || 'accepted'}`)
-      setTimeout(() => setBuildMsg(null), 4000)
+      if (buildTimerRef.current) clearTimeout(buildTimerRef.current)
+      buildTimerRef.current = setTimeout(() => setBuildMsg(null), 4000)
       refresh()
     } catch (e) {
       setBuildMsg(`建图失败：${e.message}`)
-      setTimeout(() => setBuildMsg(null), 4000)
+      if (buildTimerRef.current) clearTimeout(buildTimerRef.current)
+      buildTimerRef.current = setTimeout(() => setBuildMsg(null), 4000)
     }
   }
 

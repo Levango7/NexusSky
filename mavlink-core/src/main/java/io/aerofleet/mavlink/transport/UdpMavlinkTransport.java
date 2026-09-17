@@ -88,6 +88,9 @@ public class UdpMavlinkTransport implements AutoCloseable {
 
     private final java.util.concurrent.CopyOnWriteArrayList<DiscoveryTask> discoveryTasks =
             new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** discovery 线程引用（P2: close() 时中断，避免线程泄漏）。 */
+    private final java.util.concurrent.CopyOnWriteArrayList<Thread> discoveryThreads =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
 
     /** 每个对端最近发包时间（发现任务的静默检测用）。 */
     private final java.util.concurrent.ConcurrentHashMap<SocketAddress, Long> peerLastSeen =
@@ -105,6 +108,7 @@ public class UdpMavlinkTransport implements AutoCloseable {
         discoveryTasks.add(task);
         Thread t = new Thread(() -> discoveryLoop(task), "mavlink-discovery");
         t.setDaemon(true);
+        discoveryThreads.add(t);
         t.start();
     }
 
@@ -255,5 +259,9 @@ public class UdpMavlinkTransport implements AutoCloseable {
         socket.close();
         receiveThread.interrupt();
         cleanupThread.interrupt();
+        // P2: 中断 discovery 线程，避免线程泄漏
+        for (Thread t : discoveryThreads) {
+            t.interrupt();
+        }
     }
 }

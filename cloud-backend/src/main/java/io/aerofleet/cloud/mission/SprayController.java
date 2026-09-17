@@ -7,6 +7,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
+import jakarta.validation.Valid;
 
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -44,7 +47,8 @@ public class SprayController {
 
     /** 创建喷洒任务（FR-12）。 */
     @PostMapping
-    public Map<String, Object> create(@RequestBody SprayTaskRequest req) {
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> create(@RequestBody @Valid SprayTaskRequest req) {
         if (req.waypoints == null || req.waypoints.size() < 2) {
             throw new BadRequestException("waypoints must have >= 2 points");
         }
@@ -77,6 +81,7 @@ public class SprayController {
 
     /** 控制喷洒任务（FR-14）。 */
     @PostMapping("/{id}/control")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> control(@PathVariable("id") int id,
                                        @RequestBody ControlRequest body) {
         Map<Integer, SprayTaskService.AckResult> results = sprayService.control(id, body.action);

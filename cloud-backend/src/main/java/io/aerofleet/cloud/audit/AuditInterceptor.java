@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
@@ -25,7 +26,7 @@ import java.util.Set;
  *   <li>userId — JWT subject，未认证时为 "anonymous"</li>
  *   <li>action — HTTP 方法</li>
  *   <li>target — 请求 URI</li>
- *   <li>ip — X-Forwarded-For 首段或 remoteAddr</li>
+ *   <li>ip — 默认 remoteAddr；仅当 {@code aerofleet.security.trust-forwarded-for=true} 时使用 X-Forwarded-For 首段</li>
  * </ul>
  *
  * @see AuditService
@@ -41,6 +42,10 @@ public class AuditInterceptor implements HandlerInterceptor {
 
     private final AuditService auditService;
     private final JwtDecoder jwtDecoder;
+
+    /** 默认只使用直连地址；仅在可信代理覆盖转发头时允许开启。 */
+    @Value("${aerofleet.security.trust-forwarded-for:false}")
+    private boolean trustForwardedFor;
 
     public AuditInterceptor(AuditService auditService, JwtDecoder jwtDecoder) {
         this.auditService = auditService;
@@ -88,15 +93,24 @@ public class AuditInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 提取客户端真实 IP：优先 X-Forwarded-For 首段，否则 remoteAddr。
+     * 提取客户端真实 IP。
+     * <p>
+     * 默认只使用直连地址 {@code request.getRemoteAddr()}，避免客户端伪造
+     * X-Forwarded-For 绕过审计。仅当 {@code aerofleet.security.trust-forwarded-for=true}
+     * （部署在可信反向代理之后）时才信任 X-Forwarded-For 首段。
      *
      * @return 客户端 IP
      */
     private String extractClientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            // X-Forwarded-For 可能含多个 IP，取第一个（最原始客户端）
-            return forwarded.split(",")[0].trim();
+        if (trustForwardedFor) {
+            String forwarded = request.getHeader("X-Forwarded-For");
+            if (forwarded != null && !forwarded.isBlank()) {
+                // X-Forwarded-For 可能含多个 IP，取第一个（最原始客户端）
+                String clientIp = forwarded.split(",", 2)[0].trim();
+                if (!clientIp.isEmpty()) {
+                    return clientIp;
+                }
+            }
         }
         return request.getRemoteAddr();
     }

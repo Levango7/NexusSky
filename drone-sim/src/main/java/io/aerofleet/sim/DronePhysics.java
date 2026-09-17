@@ -445,8 +445,14 @@ public final class DronePhysics {
         if (noiseRadius <= 0) {
             return lon;
         }
+        // P1: 极点附近 cos(homeLat)=0 会导致除零产生 Infinity；
+        // 极点处经度无意义，直接返回原经度不添加噪声。
+        double cosLat = Math.cos(Math.toRadians(homeLat));
+        if (Math.abs(cosLat) < 1e-6) {
+            return lon;
+        }
         return lon + (ThreadLocalRandom.current().nextDouble(-1, 1) * noiseRadius)
-                / (111_320.0 * Math.cos(Math.toRadians(homeLat)));
+                / (111_320.0 * cosLat);
     }
 
     public double lat() {

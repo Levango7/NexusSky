@@ -168,27 +168,35 @@ public class EmergencyOrchService {
         }
         @SuppressWarnings("unchecked")
         Map<Long, Integer> taskPriorities = (Map<Long, Integer>) plan.get("taskPriorities");
-        int oldPriority = taskPriorities.getOrDefault(taskId, 4); // 默认常规
-        taskPriorities.put(taskId, priority);
-
-        // 移动到新优先级队列
         @SuppressWarnings("unchecked")
         Map<String, List<Long>> queues = (Map<String, List<Long>>) plan.get("priorityQueues");
-        String oldQueueName = priorityQueueName(oldPriority);
-        String newQueueName = priorityQueueName(priority);
-        queues.get(oldQueueName).remove(Long.valueOf(taskId));
-        if (!queues.get(newQueueName).contains(taskId)) {
-            queues.get(newQueueName).add(taskId);
-        }
 
-        // 抢占：若提升到最高优先级，抢占同队列首个低优先级任务
-        long preemptedTaskId = 0L;
-        if (priority < oldPriority) {
-            for (int p = priority + 1; p <= 4; p++) {
-                List<Long> queue = queues.get(priorityQueueName(p));
-                if (!queue.isEmpty()) {
-                    preemptedTaskId = queue.get(0);
-                    break;
+        // P1: 队列移动 + 抢占组合操作必须原子，避免并发下任务从旧队列移除后
+        // 但尚未加入新队列时被其他线程观察到不一致状态。synchronized(plan)
+        // 保证同一计划内的优先级调整串行化。
+        int oldPriority;
+        long preemptedTaskId;
+        synchronized (plan) {
+            oldPriority = taskPriorities.getOrDefault(taskId, 4); // 默认常规
+            taskPriorities.put(taskId, priority);
+
+            // 移动到新优先级队列
+            String oldQueueName = priorityQueueName(oldPriority);
+            String newQueueName = priorityQueueName(priority);
+            queues.get(oldQueueName).remove(Long.valueOf(taskId));
+            if (!queues.get(newQueueName).contains(taskId)) {
+                queues.get(newQueueName).add(taskId);
+            }
+
+            // 抢占：若提升到最高优先级，抢占同队列首个低优先级任务
+            preemptedTaskId = 0L;
+            if (priority < oldPriority) {
+                for (int p = priority + 1; p <= 4; p++) {
+                    List<Long> queue = queues.get(priorityQueueName(p));
+                    if (!queue.isEmpty()) {
+                        preemptedTaskId = queue.get(0);
+                        break;
+                    }
                 }
             }
         }

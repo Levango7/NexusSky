@@ -39,6 +39,10 @@ public class JwtTokenProvider {
     private final JwtDecoder decoder;
 
     public JwtTokenProvider(@Value("${aerofleet.security.jwt-secret}") String secret) {
+        if (secret == null || secret.getBytes().length < 32) {
+            throw new IllegalArgumentException(
+                    "aerofleet.security.jwt-secret must be at least 32 bytes for HMAC-SHA256");
+        }
         SecretKey key = new SecretKeySpec(secret.getBytes(), "HmacSHA256");
         JWK jwk = new OctetSequenceKey.Builder(key).keyID("aerofleet").build();
         JWKSource<SecurityContext> jwkSource = new ImmutableJWKSet<>(

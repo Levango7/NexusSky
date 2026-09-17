@@ -33,6 +33,9 @@ export default function SatLinkPanel({ satLinkData }) {
   const [pollErr, setPollErr] = useState(null)
   const [strategyMsg, setStrategyMsg] = useState(null)
   const timerRef = useRef(null)
+  // 策略消息自动消失的 timer，组件卸载时需清理，避免内存泄漏
+  // 经验来源：2026-09-16-react-side-effect-cleanup-timeout-ref-callback-leak
+  const strategyTimerRef = useRef(null)
 
   // 初始加载 + 周期刷新
   const refresh = useCallback(async () => {
@@ -68,16 +71,25 @@ export default function SatLinkPanel({ satLinkData }) {
     }
   }, [satLinkData, refresh])
 
+  // 组件卸载时清理策略消息 timer，防止 setState 作用于已卸载组件
+  useEffect(() => {
+    return () => {
+      if (strategyTimerRef.current) clearTimeout(strategyTimerRef.current)
+    }
+  }, [])
+
   // 策略切换
   const handleStrategyChange = async (newStrategy) => {
     try {
       const res = await api.setSatLinkStrategy(newStrategy)
       setStrategyMsg(`策略已切换为 ${STRATEGY_LABELS[newStrategy] || newStrategy}`)
-      setTimeout(() => setStrategyMsg(null), 3000)
+      if (strategyTimerRef.current) clearTimeout(strategyTimerRef.current)
+      strategyTimerRef.current = setTimeout(() => setStrategyMsg(null), 3000)
       refresh()
     } catch (e) {
       setStrategyMsg(`切换失败：${e.message}`)
-      setTimeout(() => setStrategyMsg(null), 3000)
+      if (strategyTimerRef.current) clearTimeout(strategyTimerRef.current)
+      strategyTimerRef.current = setTimeout(() => setStrategyMsg(null), 3000)
     }
   }
 

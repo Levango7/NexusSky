@@ -377,6 +377,10 @@ public final class VirtualDrone implements AutoCloseable {
             satRelayEngine.close();
         }
         scheduler.shutdownNow();
+        // P0: 关闭 ground-truth HTTP sidecar，避免端口和线程泄漏
+        if (truthServer != null) {
+            truthServer.stop();
+        }
         transport.close();
     }
 
