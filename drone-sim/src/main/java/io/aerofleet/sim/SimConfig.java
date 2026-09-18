@@ -242,8 +242,17 @@ public final class SimConfig {
                     case "env-temp-range" -> {
                         String[] parts = value.split(":");
                         if (parts.length == 2) {
-                            envTempRange = new double[]{
-                                    Double.parseDouble(parts[0]), Double.parseDouble(parts[1])};
+                            double lo = Double.parseDouble(parts[0]);
+                            double hi = Double.parseDouble(parts[1]);
+                            // 校验 min < max，违反则告警并交换
+                            if (lo > hi) {
+                                SimLog.warn("Invalid --env-temp-range: min > max (" + lo + " > " + hi
+                                    + "), swapping to " + hi + ":" + lo);
+                                double tmp = lo;
+                                lo = hi;
+                                hi = tmp;
+                            }
+                            envTempRange = new double[]{lo, hi};
                         } else {
                             SimLog.warn("Invalid --env-temp-range: " + value + " (using default -40:55)");
                         }

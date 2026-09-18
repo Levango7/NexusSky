@@ -37,8 +37,8 @@ public class OpticalFlowSource {
         if (dtSeconds < 0) {
             throw new IllegalArgumentException("dtSeconds must be non-negative");
         }
-        double dx = quantize(vx * dtSeconds);
-        double dy = quantize(vy * dtSeconds);
+        double dx = sanitize(quantize(vx * dtSeconds));
+        double dy = sanitize(quantize(vy * dtSeconds));
         return new double[]{dx, dy};
     }
 
@@ -59,5 +59,10 @@ public class OpticalFlowSource {
     /** 量化到 resolution 网格。 */
     private double quantize(double v) {
         return Math.round(v / resolution) * resolution;
+    }
+
+    /** NaN/Infinity 防御：非有限值（NaN 或 ±Infinity）返回 0.0。 */
+    private static double sanitize(double v) {
+        return Double.isFinite(v) ? v : 0.0;
     }
 }

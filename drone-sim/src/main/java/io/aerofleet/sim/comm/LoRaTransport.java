@@ -77,6 +77,13 @@ public final class LoRaTransport {
             throw new IllegalArgumentException(
                 "maxPayloadBytes must be > " + FRAG_HEADER_BYTES + " (header size), got " + maxPayloadBytes);
         }
+        // 物理参数校验：频率/带宽必须为正，否则抛 IllegalArgumentException
+        if (freq <= 0) {
+            throw new IllegalArgumentException("frequencyMHz must be positive, got " + freq);
+        }
+        if (bw <= 0) {
+            throw new IllegalArgumentException("bandwidthKHz must be positive, got " + bw);
+        }
         this.frequencyMHz = freq;
         this.spreadingFactor = sf;
         this.bandwidthKHz = bw;
@@ -219,6 +226,11 @@ public final class LoRaTransport {
 
         // 存放当前分片载荷（去掉头）
         int dataLen = loraPayload.length - FRAG_HEADER_BYTES;
+        // 重复分片覆盖告警：该槽位已有分片，新分片将覆盖旧数据
+        if (frags[index] != null) {
+            SimLog.warn("LoRa reassemble: duplicate fragment overwrite frameId=" + frameId
+                + " index=" + index + "/" + total + ", old data replaced");
+        }
         frags[index] = new byte[dataLen];
         System.arraycopy(loraPayload, FRAG_HEADER_BYTES, frags[index], 0, dataLen);
 
@@ -255,6 +267,10 @@ public final class LoRaTransport {
      * @return 估算延迟（毫秒），≥ 1
      */
     public long estimatedLatencyMs(int payloadBytes) {
+        // 负载荷无物理意义，返回 0
+        if (payloadBytes < 0) {
+            return 0L;
+        }
         // 基础空口延迟：SF7→50ms, SF12→2000ms，线性插值
         // 每级 SF 增加 (2000-50)/(12-7) = 390ms
         long baseLatency = LATENCY_SF7_MS + (spreadingFactor - SF_MIN)

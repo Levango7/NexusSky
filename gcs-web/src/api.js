@@ -314,6 +314,18 @@ export const BUDGET_MODES = {
   ADVANCED: 'advanced',  // 进阶版：+光流+红外
 }
 
+// 合法预算档位列表（不含 FULL/null，null 表示完整版单独处理）
+const VALID_BUDGET_MODES = ['toy', 'standard', 'advanced']
+
+// 规范化 budgetMode：未知值 fallback 到 'standard' 并 console.warn 告警
+// null/undefined 原样返回（表示完整版）；合法值原样返回
+export function normalizeBudgetMode(mode) {
+  if (mode == null) return null
+  if (VALID_BUDGET_MODES.includes(mode)) return mode
+  console.warn(`Unknown budgetMode "${mode}", falling back to "standard"`)
+  return 'standard'
+}
+
 // 百元级可用的面板
 export const TOY_PANELS = ['telemetry', 'camera', 'map', 'status']
 // 千元级可用的面板
@@ -322,17 +334,21 @@ export const STANDARD_PANELS = [...TOY_PANELS, 'formation', 'mesh', 'mission', '
 export const ADVANCED_PANELS = [...STANDARD_PANELS, 'thermal', 'opticalflow']
 
 // 根据预算档位返回可用面板列表；null 表示全部可用（完整版）
+// 传入未知 budgetMode 会 fallback 到 'standard' 并告警
 export function getAvailablePanels(budgetMode) {
-  if (!budgetMode || budgetMode === BUDGET_MODES.FULL) return null // null = all
-  if (budgetMode === BUDGET_MODES.TOY) return TOY_PANELS
-  if (budgetMode === BUDGET_MODES.STANDARD) return STANDARD_PANELS
-  if (budgetMode === BUDGET_MODES.ADVANCED) return ADVANCED_PANELS
+  const mode = normalizeBudgetMode(budgetMode)
+  if (!mode || mode === BUDGET_MODES.FULL) return null // null = all
+  if (mode === BUDGET_MODES.TOY) return TOY_PANELS
+  if (mode === BUDGET_MODES.STANDARD) return STANDARD_PANELS
+  if (mode === BUDGET_MODES.ADVANCED) return ADVANCED_PANELS
   return null
 }
 
 // 判断单个面板在指定预算档位下是否可用
+// 传入未知 budgetMode 会 fallback 到 'standard' 并告警
 export function isPanelAvailable(panelName, budgetMode) {
-  const available = getAvailablePanels(budgetMode)
+  const mode = normalizeBudgetMode(budgetMode)
+  const available = getAvailablePanels(mode)
   if (available === null) return true // 全部可用
   return available.includes(panelName)
 }

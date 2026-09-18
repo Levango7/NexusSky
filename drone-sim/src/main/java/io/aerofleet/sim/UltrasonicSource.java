@@ -20,6 +20,12 @@ public class UltrasonicSource implements DepthSource {
     /** HC-SR04 精度 ±3mm。 */
     private static final double ACCURACY_M = 0.003;
 
+    /** 默认最小测距（米），HC-SR04 最小测距 2cm。 */
+    private static final double DEFAULT_MIN_RANGE_M = 0.02;
+
+    /** nearestObstacleDirection 的默认障碍阈值（米），用于 thresholdM ≤ 0 时回退。 */
+    private static final double DEFAULT_THRESHOLD_M = 5.0;
+
     /**
      * 4 个传感器方向角（度），索引对应 measure 读数顺序：
      * 0=前(0°), 1=后(180°), 2=左(90°), 3=右(270°)。
@@ -42,14 +48,33 @@ public class UltrasonicSource implements DepthSource {
 
     /** 测试可注入确定性 Random。 */
     public UltrasonicSource(double maxRangeM, int sensorCount, Random rng) {
+        this(maxRangeM, DEFAULT_MIN_RANGE_M, sensorCount, rng);
+    }
+
+    /**
+     * 指定最小测距范围（minRangeM 可配置）。
+     *
+     * @param maxRangeM   最大测距（米），必须为正
+     * @param minRangeM   最小测距（米），必须为正且 &lt; maxRangeM
+     * @param sensorCount 传感器数量，必须为正
+     * @param rng         随机数生成器（null 时新建）
+     */
+    public UltrasonicSource(double maxRangeM, double minRangeM, int sensorCount, Random rng) {
         if (maxRangeM <= 0) {
             throw new IllegalArgumentException("maxRangeM must be positive");
         }
         if (sensorCount <= 0) {
             throw new IllegalArgumentException("sensorCount must be positive");
         }
+        if (minRangeM <= 0) {
+            throw new IllegalArgumentException("minRangeM must be positive");
+        }
+        if (minRangeM >= maxRangeM) {
+            throw new IllegalArgumentException(
+                "minRangeM must be < maxRangeM, got minRangeM=" + minRangeM + " maxRangeM=" + maxRangeM);
+        }
         this.maxRangeM = maxRangeM;
-        this.minRangeM = 0.02; // HC-SR04 最小测距 2cm
+        this.minRangeM = minRangeM;
         this.sensorCount = sensorCount;
         this.rng = rng != null ? rng : new Random();
     }
@@ -99,6 +124,10 @@ public class UltrasonicSource implements DepthSource {
             throw new IllegalArgumentException(
                     "readings length must equal sensorCount=" + sensorCount);
         }
+        // thresholdM 校验：≤0 时回退到默认值 5.0
+        if (thresholdM <= 0) {
+            thresholdM = DEFAULT_THRESHOLD_M;
+        }
         int nearest = -1;
         double minDist = Double.MAX_VALUE;
         for (int i = 0; i < sensorCount; i++) {
@@ -112,6 +141,11 @@ public class UltrasonicSource implements DepthSource {
 
     public double maxRangeM() {
         return maxRangeM;
+    }
+
+    /** 最小测距（米）。 */
+    public double minRangeM() {
+        return minRangeM;
     }
 
     public int sensorCount() {
