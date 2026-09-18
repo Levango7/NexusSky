@@ -61,6 +61,9 @@ import io.aerofleet.mavlink.messages.EdgeTaskStatusMsg;
 import io.aerofleet.mavlink.messages.SensorFusionDataMsg;
 import io.aerofleet.mavlink.messages.TwinStateSyncMsg;
 import io.aerofleet.mavlink.messages.PredictionResultMsg;
+import io.aerofleet.mavlink.messages.AlarmTriggerMsg;
+import io.aerofleet.mavlink.messages.AlarmAckMsg;
+import io.aerofleet.mavlink.messages.SurveillanceStatusMsg;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.cloud.api.TelemetryWebSocketHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -198,6 +201,10 @@ public class TelemetryIngestService {
                 case SensorFusionDataMsg.ID -> forwardToWs(sysid, "sensor-fusion", msg);
                 case TwinStateSyncMsg.ID -> forwardToWs(sysid, "twin-state-sync", msg);
                 case PredictionResultMsg.ID -> forwardToWs(sysid, "prediction-result", msg);
+                // 4a 空地一体化应急指挥消息路由（msgId 477-479）：报警触发/确认/安防设备状态。
+                case AlarmTriggerMsg.ID -> forwardToWs(sysid, "alarm-trigger", msg);
+                case AlarmAckMsg.ID -> forwardToWs(sysid, "alarm-ack", msg);
+                case SurveillanceStatusMsg.ID -> forwardToWs(sysid, "surveillance-status", msg);
                 default -> { /* SYSTEM_TIME / HOME_POSITION etc.: not needed yet */ }
             }
         } catch (RuntimeException e) {
