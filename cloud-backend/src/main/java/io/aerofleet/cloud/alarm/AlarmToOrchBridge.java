@@ -64,8 +64,8 @@ public class AlarmToOrchBridge {
         }
 
         int scenarioType = mapScenarioType(event.getEventType());
-        int centerLat = toE7(event.getLat());
-        int centerLon = toE7(event.getLon());
+        int centerLat = toE7(clamp(event.getLat(), -90.0, 90.0));
+        int centerLon = toE7(clamp(event.getLon(), -180.0, 180.0));
         int radius = (int) Math.max(1, rule.getTargetRadiusM());
         List<Integer> droneIds = generateDroneId(rule.getDroneCount());
 
@@ -137,9 +137,33 @@ public class AlarmToOrchBridge {
         };
     }
 
-    /** 经纬度（度）→ 1E7 度定点整数。 */
+    /**
+     * 经纬度（度）→ 1E7 度定点整数。
+     * <p>
+     * 调用方应先通过 {@link #clamp(double, double, double)} 将经纬度钳位到合法范围，
+     * 避免非法值（如 lat=300）经 ×1E7 后溢出 Integer.MAX_VALUE 变为负数。
+     */
     private static int toE7(double deg) {
-        return (int) Math.round(deg * LATLON_SCALE);
+        long scaled = Math.round(deg * LATLON_SCALE);
+        // 防御性溢出保护：若调用方未钳位，此处截断到 int 可表示范围
+        if (scaled > Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        if (scaled < Integer.MIN_VALUE) {
+            return Integer.MIN_VALUE;
+        }
+        return (int) scaled;
+    }
+
+    /** 将值钳位到 [min, max] 范围。 */
+    private static double clamp(double value, double min, double max) {
+        if (value < min) {
+            return min;
+        }
+        if (value > max) {
+            return max;
+        }
+        return value;
     }
 
     /** 生成 droneCount 个无人机 ID（1..droneCount）。 */

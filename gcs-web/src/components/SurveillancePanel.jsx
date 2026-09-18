@@ -43,8 +43,9 @@ const PTZ_BUTTONS = [
 ]
 
 const PTZ_ZOOM = [
-  { cmd: 'zoom_in', label: '＋', title: '放大' },
-  { cmd: 'zoom_out', label: '－', title: '缩小' },
+  // 修复 Major 7：与后端 OnvifClient.PTZ_COMMANDS 对齐（驼峰而非下划线）
+  { cmd: 'zoomIn', label: '＋', title: '放大' },
+  { cmd: 'zoomOut', label: '－', title: '缩小' },
 ]
 
 // 在线状态 → 颜色

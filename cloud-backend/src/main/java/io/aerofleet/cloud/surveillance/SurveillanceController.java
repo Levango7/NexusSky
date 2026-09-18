@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.surveillance;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -61,6 +63,17 @@ public class SurveillanceController {
     public SurveillanceController(SurveillanceDeviceRegistry registry, OnvifClient onvifClient) {
         this.registry = registry;
         this.onvifClient = onvifClient;
+    }
+
+    /**
+     * 容器销毁时关闭 SSE 心跳调度器，避免 Spring 热重载场景下线程泄漏。
+     * <p>
+     * 幂等安全：多次调用 shutdownNow() 不抛异常。
+     */
+    @PreDestroy
+    public void shutdown() {
+        sseScheduler.shutdownNow();
+        log.info("SSE heartbeat scheduler shut down");
     }
 
     // ------------------------------------------------------------------
@@ -168,7 +181,7 @@ public class SurveillanceController {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("deviceId", id);
             result.put("channel", channel);
-            result.put("rtspUrl", url);
+            result.put("rtspUrl", maskRtspCredentials(url));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.warn("GetStreamUri failed for {}: {}", id, e.getMessage());
@@ -264,7 +277,7 @@ public class SurveillanceController {
                     }
                 });
         // SSE 心跳：每 15 秒发送注释行，保持连接活跃
-        sseScheduler.scheduleAtFixedRate(() -> {
+        ScheduledFuture<?> heartbeatFuture = sseScheduler.scheduleAtFixedRate(() -> {
             try {
                 emitter.send(SseEmitter.event().comment("heartbeat"));
             } catch (Exception e) {
@@ -274,14 +287,17 @@ public class SurveillanceController {
         }, SSE_HEARTBEAT_SECONDS, SSE_HEARTBEAT_SECONDS, TimeUnit.SECONDS);
 
         emitter.onCompletion(() -> {
+            heartbeatFuture.cancel(false);
             onvifClient.unsubscribeEvents(handle);
             log.info("SSE subscription completed for device {}", id);
         });
         emitter.onTimeout(() -> {
+            heartbeatFuture.cancel(false);
             onvifClient.unsubscribeEvents(handle);
             log.info("SSE subscription timed out for device {}", id);
         });
         emitter.onError(e -> {
+            heartbeatFuture.cancel(false);
             onvifClient.unsubscribeEvents(handle);
             log.warn("SSE subscription error for device {}: {}", id, e.getMessage());
         });
@@ -303,9 +319,25 @@ public class SurveillanceController {
         v.put("username", d.username);
         v.put("status", d.status.name());
         v.put("capabilities", d.getCapabilities());
-        v.put("rtspUrl", d.rtspUrl);
+        v.put("rtspUrl", maskRtspCredentials(d.rtspUrl));
         v.put("lastHeartbeatMs", d.lastHeartbeatMs);
         return v;
+    }
+
+    /**
+     * 对 RTSP URL 中的用户凭据脱敏，防止明文密码泄露到前端。
+     * <p>
+     * 将 {@code rtsp://user:pass@host/path} 替换为 {@code rtsp://***@host/path}。
+     * 仅脱敏 userinfo 部分，保留 host/path 供前端展示。
+     *
+     * @param url 原始 RTSP URL，可能为 null
+     * @return 脱敏后的 URL；输入为 null/空时原样返回
+     */
+    private static String maskRtspCredentials(String url) {
+        if (url == null || url.isEmpty()) {
+            return url;
+        }
+        return url.replaceFirst("(rtsp://[^@]+@)", "rtsp://***@");
     }
 
     private static ResponseEntity<Map<String, Object>> badRequest(String message) {

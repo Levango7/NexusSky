@@ -139,8 +139,8 @@ public class OneClickEmergencyResponse {
     /** 调用 EmergencyOrchService 启动编排任务。 */
     private long startOrchestration(EmergencyCommand cmd) {
         int scenarioType = toScenarioType(cmd.getIncidentType());
-        int centerLat = (int) (cmd.getLocation().getLat() * 1E7);
-        int centerLon = (int) (cmd.getLocation().getLon() * 1E7);
+        int centerLat = toE7(clamp(cmd.getLocation().getLat(), -90.0, 90.0));
+        int centerLon = toE7(clamp(cmd.getLocation().getLon(), -180.0, 180.0));
         PresetPlan preset = presetFor(cmd.getIncidentType());
         List<Integer> droneIds = new ArrayList<>(cmd.getAssignedDrones());
         if (droneIds.isEmpty()) {
@@ -180,6 +180,29 @@ public class OneClickEmergencyResponse {
             case FIRE -> 2;
             default -> 3; // 自定义
         };
+    }
+
+    /** 经纬度（度）→ 1E7 度定点整数（与 AlarmToOrchBridge.toE7 一致，使用 Math.round 避免截断误差）。 */
+    private static int toE7(double deg) {
+        long scaled = Math.round(deg * 1E7);
+        if (scaled > Integer.MAX_VALUE) {
+            return Integer.MAX_VALUE;
+        }
+        if (scaled < Integer.MIN_VALUE) {
+            return Integer.MIN_VALUE;
+        }
+        return (int) scaled;
+    }
+
+    /** 将值钳位到 [min, max] 范围。 */
+    private static double clamp(double value, double min, double max) {
+        if (value < min) {
+            return min;
+        }
+        if (value > max) {
+            return max;
+        }
+        return value;
     }
 
     /** 事件类型 → 预设方案。 */

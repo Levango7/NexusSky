@@ -53,12 +53,12 @@ const SOURCE_TYPES = [
 ]
 
 // 联动规则触发动作类型
+// 与后端 AlarmLinkageRule.ActionType 枚举对齐：DEPLOY_DRONE / NOTIFY_ONLY / RECORD_VIDEO
+// 修复 Major 6：原 'recon'/'hover'/'record'/'alert'/'notify' 会导致后端 parseRule 抛 BadRequestException
 const ACTION_TYPES = [
-  { key: 'recon', label: '无人机侦察' },
-  { key: 'hover', label: '悬停监控' },
-  { key: 'record', label: '录像存证' },
-  { key: 'alert', label: '声光报警' },
-  { key: 'notify', label: '通知推送' },
+  { key: 'DEPLOY_DRONE', label: '部署无人机' },
+  { key: 'NOTIFY_ONLY', label: '仅通知' },
+  { key: 'RECORD_VIDEO', label: '录制视频' },
 ]
 
 export default function AlarmPanel() {
@@ -484,7 +484,7 @@ function RuleEditor({ rule, onSave, onCancel }) {
     name: '',
     alarmType: '',
     source: '',
-    action: 'recon',
+    action: 'DEPLOY_DRONE', // 修复 Major 6：与后端 ActionType 枚举对齐
     missionTemplate: '',
     enabled: true,
     priority: 'P1',
