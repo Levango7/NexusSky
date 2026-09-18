@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
  * 报警联动引擎（M10 报警联动编排，FR-31）。
@@ -39,6 +40,10 @@ public class AlarmLinkageEngine {
     private final AlarmEventStore eventStore;
     /** 报警→应急编排桥接。 */
     private final AlarmToOrchBridge bridge;
+    /** 联动执行日志（最近 N 条，线程安全的有界队列）。 */
+    private final ConcurrentLinkedDeque<LinkageLog> linkageLogs = new ConcurrentLinkedDeque<>();
+    /** 联动日志容量上限。 */
+    private static final int LINKAGE_LOG_CAPACITY = 500;
 
     public AlarmLinkageEngine(AlarmEventStore eventStore, AlarmToOrchBridge bridge) {
         this.eventStore = eventStore;
@@ -135,6 +140,21 @@ public class AlarmLinkageEngine {
                 event.getId(), executions.size(),
                 executions.stream().map(ActionExecution::getActionType).toList());
 
+        // 3. 记录联动日志
+        if (!executions.isEmpty()) {
+            for (ActionExecution exec : executions) {
+                LinkageLog logEntry = new LinkageLog(
+                        event.getId(), exec.getRuleId(), exec.getActionType(),
+                        exec.getStatus(), exec.getPlanId(), exec.getError(),
+                        System.currentTimeMillis());
+                linkageLogs.addFirst(logEntry);
+            }
+            // 驱逐超容量日志
+            while (linkageLogs.size() > LINKAGE_LOG_CAPACITY) {
+                linkageLogs.pollLast();
+            }
+        }
+
         return new ProcessResult(event.getId(), executions.size(), executions);
     }
 
@@ -205,6 +225,25 @@ public class AlarmLinkageEngine {
     /** 当前规则总数。 */
     public int ruleCount() {
         return rules.size();
+    }
+
+    /**
+     * 获取联动执行日志（最近 N 条，最新在前）。
+     *
+     * @param limit 最多返回条数，<=0 表示返回全部
+     * @return 联动日志列表（不可变快照）
+     */
+    public List<LinkageLog> getLinkageLogs(int limit) {
+        List<LinkageLog> snapshot = new ArrayList<>(linkageLogs);
+        if (limit > 0 && snapshot.size() > limit) {
+            return Collections.unmodifiableList(snapshot.subList(0, limit));
+        }
+        return Collections.unmodifiableList(snapshot);
+    }
+
+    /** 当前联动日志总数。 */
+    public int linkageLogCount() {
+        return linkageLogs.size();
     }
 
     // =====================================================================
@@ -286,6 +325,63 @@ public class AlarmLinkageEngine {
 
         public String getError() {
             return error;
+        }
+    }
+
+    /** 联动执行日志条目。 */
+    public static class LinkageLog {
+        /** 报警事件 ID。 */
+        private final String eventId;
+        /** 联动规则 ID。 */
+        private final String ruleId;
+        /** 动作类型。 */
+        private final String actionType;
+        /** 执行状态。 */
+        private final String status;
+        /** 编排计划 ID（-1 表示未启动）。 */
+        private final long planId;
+        /** 错误信息（失败时填充，null 表示成功）。 */
+        private final String error;
+        /** 日志记录时间戳（毫秒）。 */
+        private final long timestampMs;
+
+        public LinkageLog(String eventId, String ruleId, String actionType,
+                          String status, long planId, String error, long timestampMs) {
+            this.eventId = eventId;
+            this.ruleId = ruleId;
+            this.actionType = actionType;
+            this.status = status;
+            this.planId = planId;
+            this.error = error;
+            this.timestampMs = timestampMs;
+        }
+
+        public String getEventId() {
+            return eventId;
+        }
+
+        public String getRuleId() {
+            return ruleId;
+        }
+
+        public String getActionType() {
+            return actionType;
+        }
+
+        public String getStatus() {
+            return status;
+        }
+
+        public long getPlanId() {
+            return planId;
+        }
+
+        public String getError() {
+            return error;
+        }
+
+        public long getTimestampMs() {
+            return timestampMs;
         }
     }
 }

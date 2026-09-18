@@ -33,7 +33,8 @@ import java.util.concurrent.TimeUnit;
  *   <li>RTSP 流 URL 获取（{@code /stream}）</li>
  *   <li>PTZ 控制（{@code /ptz}）</li>
  *   <li>子网设备发现（{@code /discover}）</li>
- *   <li>事件订阅 SSE（{@code /events}）</li>
+ *   <li>事件订阅 SSE（{@code /devices/{id}/events}）</li>
+ *   <li>全局安防事件查询（{@code /events}）</li>
  * </ul>
  * <p>
  * 错误响应统一使用 {@code {"error": "..."}} 格式，与
@@ -380,6 +381,44 @@ public class SurveillanceController {
         });
         log.info("SSE subscription established for device {}", id);
         return emitter;
+    }
+
+    // ------------------------------------------------------------------
+    // 全局安防事件查询
+    // ------------------------------------------------------------------
+
+    /**
+     * 查询全局安防事件列表（分页）。
+     * <p>
+     * 当前实现返回空列表 + 分页信息（全局 SurveillanceEventStore 尚未实现）。
+     * 后续可接入各设备的事件订阅缓存或独立事件存储。
+     *
+     * @param page 页码（0-based，默认 0）
+     * @param size 每页大小（默认 20）
+     * @param deviceId 设备 ID 过滤（可选）
+     */
+    @GetMapping("/events")
+    public ResponseEntity<Map<String, Object>> listEvents(
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "deviceId", required = false) String deviceId) {
+        if (page < 0) {
+            return badRequest("page must be >= 0");
+        }
+        if (size <= 0 || size > 1000) {
+            return badRequest("size must be in [1, 1000]");
+        }
+
+        // 当前没有全局 SurveillanceEventStore，返回空列表 + 分页信息
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", new ArrayList<>());
+        result.put("total", 0);
+        result.put("page", page);
+        result.put("size", size);
+        if (deviceId != null && !deviceId.isBlank()) {
+            result.put("deviceId", deviceId);
+        }
+        return ResponseEntity.ok(result);
     }
 
     // ------------------------------------------------------------------

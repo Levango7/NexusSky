@@ -1,7 +1,14 @@
 package io.aerofleet.cloud.alarm;
 
+import io.aerofleet.cloud.mission.EmergencyCommand;
+import io.aerofleet.cloud.mission.EmergencyCommandWorkflow;
+import io.aerofleet.cloud.mission.OneClickEmergencyResponse;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,12 +19,17 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
@@ -33,6 +45,10 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * GET    /api/alarms/events            查询报警事件列表（分页/筛选）
  * GET    /api/alarms/events/{id}       获取报警事件详情
  * POST   /api/alarms/events/{id}/ack   确认报警
+ * POST   /api/alarms/events/ack-batch  批量确认报警
+ * POST   /api/alarms/events/{id}/respond 一键应急响应
+ * GET    /api/alarms/stream            报警事件 SSE 实时推送
+ * GET    /api/alarms/linkage-logs      联动执行日志查询
  * GET    /api/alarms/rules             列出联动规则
  * POST   /api/alarms/rules             创建联动规则
  * PUT    /api/alarms/rules/{id}        更新联动规则
@@ -44,12 +60,43 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 @RequestMapping("/api/alarms")
 public class AlarmController {
 
+    private static final Logger log = LoggerFactory.getLogger(AlarmController.class);
+
+    /** SSE 心跳间隔（秒）。 */
+    private static final long SSE_HEARTBEAT_SECONDS = 15L;
+    /** SSE 超时时间（毫秒，30 分钟）。 */
+    private static final long SSE_TIMEOUT_MS = 30 * 60 * 1000L;
+    /** SSE 事件轮询间隔（毫秒）。 */
+    private static final long SSE_POLL_INTERVAL_MS = 2000L;
+
     private final AlarmLinkageEngine engine;
     private final AlarmEventStore store;
+    private final EmergencyCommandWorkflow emergencyWorkflow;
+    private final OneClickEmergencyResponse oneClickResponse;
+    /** SSE 心跳与事件轮询调度器：单线程足够，多个 emitter 共享。 */
+    private final ScheduledExecutorService sseScheduler =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "alarm-sse-scheduler");
+                t.setDaemon(true);
+                return t;
+            });
 
-    public AlarmController(AlarmLinkageEngine engine, AlarmEventStore store) {
+    public AlarmController(AlarmLinkageEngine engine, AlarmEventStore store,
+                           EmergencyCommandWorkflow emergencyWorkflow,
+                           OneClickEmergencyResponse oneClickResponse) {
         this.engine = engine;
         this.store = store;
+        this.emergencyWorkflow = emergencyWorkflow;
+        this.oneClickResponse = oneClickResponse;
+    }
+
+    /**
+     * 容器销毁时关闭 SSE 调度器，避免线程泄漏。
+     */
+    @PreDestroy
+    public void shutdown() {
+        sseScheduler.shutdownNow();
+        log.info("Alarm SSE scheduler shut down");
     }
 
     // =====================================================================
@@ -120,6 +167,188 @@ public class AlarmController {
         resp.put("eventId", id);
         resp.put("acknowledged", true);
         resp.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.ok(resp);
+    }
+
+    // =====================================================================
+    // 批量确认 / 一键应急响应 / SSE 实时推送 / 联动日志
+    // =====================================================================
+
+    /**
+     * 批量确认报警。
+     * <p>
+     * body: {@code {"eventIds": ["id1", "id2", ...]}}
+     * <p>
+     * 循环调用 {@link AlarmEventStore#acknowledge}，返回成功确认的数量。
+     */
+    @PostMapping("/events/ack-batch")
+    @RequireRole(Role.OPERATOR)
+    public ResponseEntity<Map<String, Object>> acknowledgeBatch(@RequestBody Map<String, Object> body) {
+        Object idsObj = body.get("eventIds");
+        if (idsObj == null) {
+            throw new BadRequestException("field 'eventIds' is required");
+        }
+        if (!(idsObj instanceof List)) {
+            throw new BadRequestException("field 'eventIds' must be a list of strings");
+        }
+        @SuppressWarnings("unchecked")
+        List<Object> rawIds = (List<Object>) idsObj;
+        if (rawIds.isEmpty()) {
+            throw new BadRequestException("field 'eventIds' must not be empty");
+        }
+
+        int successCount = 0;
+        List<String> failedIds = new ArrayList<>();
+        for (Object o : rawIds) {
+            String eventId = String.valueOf(o);
+            if (store.acknowledge(eventId)) {
+                successCount++;
+            } else {
+                failedIds.add(eventId);
+            }
+        }
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("totalRequested", rawIds.size());
+        resp.put("successCount", successCount);
+        resp.put("failedIds", failedIds);
+        resp.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * 一键应急响应。
+     * <p>
+     * 从报警事件触发无人机侦察任务：查找报警事件 → 创建 EmergencyCommand →
+     * 调用 {@link OneClickEmergencyResponse#execute} 启动一键应急响应。
+     * <p>
+     * 返回: {@code {"commandId", "status", "message"}}
+     */
+    @PostMapping("/events/{id}/respond")
+    @RequireRole(Role.OPERATOR)
+    public ResponseEntity<Map<String, Object>> triggerEmergencyResponse(@PathVariable("id") String id) {
+        AlarmEvent event = store.getById(id);
+        if (event == null) {
+            throw new NotFoundException("alarm event not found: " + id);
+        }
+
+        // 报警事件类型 → 应急事件类型映射
+        EmergencyCommand.IncidentType incidentType = mapIncidentType(event.getEventType());
+        EmergencyCommand.Severity severity = mapSeverity(event.getSeverity());
+        EmergencyCommand.Location location = new EmergencyCommand.Location(
+                event.getLat(), event.getLon(), event.getAlt());
+
+        // 创建应急指挥命令
+        EmergencyCommand cmd = new EmergencyCommand(
+                null, incidentType, severity, location,
+                "报警事件触发: " + event.getDescription(),
+                "alarm-system", "alarm-event:" + id,
+                System.currentTimeMillis());
+        EmergencyCommand created = emergencyWorkflow.createCommand(cmd);
+
+        // 启动一键应急响应
+        EmergencyCommand executing = oneClickResponse.execute(created.getId());
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("commandId", created.getId());
+        resp.put("eventId", id);
+        if (executing != null) {
+            resp.put("status", executing.getCurrentPhase().name());
+            resp.put("message", "emergency response triggered successfully");
+        } else {
+            resp.put("status", "FAILED");
+            resp.put("message", "failed to execute emergency response");
+        }
+        resp.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * 报警事件 SSE 实时推送。
+     * <p>
+     * 客户端通过 EventSource 连接本端点，服务端会：
+     * <ol>
+     *   <li>每 2 秒轮询 {@link AlarmEventStore} 获取最新事件并推送</li>
+     *   <li>每 15 秒发送一次 SSE 心跳注释，保持连接</li>
+     * </ol>
+     */
+    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamEvents() {
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        // 记录已推送的事件数量，用于增量推送
+        int[] lastSeenSize = {store.size()};
+
+        // 事件轮询：每 2 秒检查是否有新事件
+        ScheduledFuture<?> pollFuture = sseScheduler.scheduleAtFixedRate(() -> {
+            try {
+                int currentSize = store.size();
+                if (currentSize > lastSeenSize[0]) {
+                    // 有新事件，查询最新的事件推送
+                    AlarmEventStore.PageResult result = store.query(0, currentSize - lastSeenSize[0], null, null);
+                    for (AlarmEvent e : result.getItems()) {
+                        emitter.send(SseEmitter.event()
+                                .name("alarm-event")
+                                .data(eventToMap(e)));
+                    }
+                    lastSeenSize[0] = currentSize;
+                }
+            } catch (Exception e) {
+                log.debug("SSE event poll failed: {}", e.getMessage());
+            }
+        }, SSE_POLL_INTERVAL_MS, SSE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+
+        // SSE 心跳：每 15 秒发送注释行，保持连接活跃
+        ScheduledFuture<?> heartbeatFuture = sseScheduler.scheduleAtFixedRate(() -> {
+            try {
+                emitter.send(SseEmitter.event().comment("heartbeat"));
+            } catch (Exception e) {
+                log.debug("SSE heartbeat failed: {}", e.getMessage());
+            }
+        }, SSE_HEARTBEAT_SECONDS, SSE_HEARTBEAT_SECONDS, TimeUnit.SECONDS);
+
+        emitter.onCompletion(() -> {
+            pollFuture.cancel(false);
+            heartbeatFuture.cancel(false);
+            log.info("Alarm SSE stream completed");
+        });
+        emitter.onTimeout(() -> {
+            pollFuture.cancel(false);
+            heartbeatFuture.cancel(false);
+            log.info("Alarm SSE stream timed out");
+        });
+        emitter.onError(e -> {
+            pollFuture.cancel(false);
+            heartbeatFuture.cancel(false);
+            log.warn("Alarm SSE stream error: {}", e.getMessage());
+        });
+        log.info("Alarm SSE stream established");
+        return emitter;
+    }
+
+    /**
+     * 查询联动执行日志。
+     * <p>
+     * 返回最近 N 条联动执行记录（含事件 ID、规则 ID、动作类型、执行状态等）。
+     *
+     * @param limit 最多返回条数（默认 100）
+     */
+    @GetMapping("/linkage-logs")
+    public ResponseEntity<Map<String, Object>> listLinkageLogs(
+            @RequestParam(value = "limit", defaultValue = "100") int limit) {
+        if (limit <= 0) {
+            limit = 100;
+        }
+        List<AlarmLinkageEngine.LinkageLog> logs = engine.getLinkageLogs(limit);
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (AlarmLinkageEngine.LinkageLog l : logs) {
+            items.add(linkageLogToMap(l));
+        }
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("items", items);
+        resp.put("total", items.size());
+        resp.put("limit", limit);
         return ResponseEntity.ok(resp);
     }
 
@@ -361,6 +590,39 @@ public class AlarmController {
             list.add(executionToMap(e));
         }
         return list;
+    }
+
+    /** 联动日志 → map。 */
+    static Map<String, Object> linkageLogToMap(AlarmLinkageEngine.LinkageLog l) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("eventId", l.getEventId());
+        m.put("ruleId", l.getRuleId());
+        m.put("actionType", l.getActionType());
+        m.put("status", l.getStatus());
+        m.put("planId", l.getPlanId());
+        if (l.getError() != null) {
+            m.put("error", l.getError());
+        }
+        m.put("timestampMs", l.getTimestampMs());
+        return m;
+    }
+
+    /** 报警事件类型 → 应急事件类型映射。 */
+    private static EmergencyCommand.IncidentType mapIncidentType(AlarmEvent.EventType type) {
+        return switch (type) {
+            case FIRE -> EmergencyCommand.IncidentType.FIRE;
+            case INTRUSION, MOTION, DOOR -> EmergencyCommand.IncidentType.SECURITY_ALARM;
+            case CUSTOM -> EmergencyCommand.IncidentType.OTHER;
+        };
+    }
+
+    /** 报警严重程度 → 应急严重级别映射。 */
+    private static EmergencyCommand.Severity mapSeverity(AlarmEvent.Severity severity) {
+        return switch (severity) {
+            case INFO -> EmergencyCommand.Severity.INFO;
+            case WARN -> EmergencyCommand.Severity.WARN;
+            case CRITICAL -> EmergencyCommand.Severity.CRITICAL;
+        };
     }
 
     private static String str(Map<String, Object> body, String key, String def) {

@@ -283,4 +283,63 @@ class SurveillanceControllerTest {
         mockMvc.perform(get("/api/surveillance/devices/lifecycle-1"))
                 .andExpect(status().isNotFound());
     }
+
+    // ===== GET /events 全局安防事件查询 =====
+
+    @Test
+    @DisplayName("GET /events 返回 200 + 空列表 + 分页信息")
+    void listEvents_returnsEmptyListWithPagination() throws Exception {
+        mockMvc.perform(get("/api/surveillance/events"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.total").value(0))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20));
+    }
+
+    @Test
+    @DisplayName("GET /events 自定义分页参数")
+    void listEvents_customPagination() throws Exception {
+        mockMvc.perform(get("/api/surveillance/events")
+                        .param("page", "2")
+                        .param("size", "50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.size").value(50))
+                .andExpect(jsonPath("$.total").value(0));
+    }
+
+    @Test
+    @DisplayName("GET /events 带 deviceId 过滤参数")
+    void listEvents_withDeviceIdFilter() throws Exception {
+        mockMvc.perform(get("/api/surveillance/events")
+                        .param("deviceId", "cam-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deviceId").value("cam-1"))
+                .andExpect(jsonPath("$.total").value(0));
+    }
+
+    @Test
+    @DisplayName("GET /events page<0 返回 400")
+    void listEvents_negativePage_returns400() throws Exception {
+        mockMvc.perform(get("/api/surveillance/events")
+                        .param("page", "-1"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("GET /events size<=0 返回 400")
+    void listEvents_zeroSize_returns400() throws Exception {
+        mockMvc.perform(get("/api/surveillance/events")
+                        .param("size", "0"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("GET /events size>1000 返回 400")
+    void listEvents_oversizedSize_returns400() throws Exception {
+        mockMvc.perform(get("/api/surveillance/events")
+                        .param("size", "1001"))
+                .andExpect(status().isBadRequest());
+    }
 }

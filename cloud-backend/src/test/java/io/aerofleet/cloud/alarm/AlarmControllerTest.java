@@ -1,11 +1,16 @@
 package io.aerofleet.cloud.alarm;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import io.aerofleet.cloud.api.EmergencyOrchService;
+import io.aerofleet.cloud.mission.EmergencyCommand;
+import io.aerofleet.cloud.mission.EmergencyCommandWorkflow;
+import io.aerofleet.cloud.mission.OneClickEmergencyResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,6 +30,8 @@ class AlarmControllerTest {
 
     private AlarmEventStore store;
     private AlarmLinkageEngine engine;
+    private EmergencyCommandWorkflow emergencyWorkflow;
+    private OneClickEmergencyResponse oneClickResponse;
     private AlarmController controller;
 
     @BeforeEach
@@ -33,7 +40,9 @@ class AlarmControllerTest {
         store = new AlarmEventStore();
         AlarmToOrchBridge bridge = new AlarmToOrchBridge(orchService);
         engine = new AlarmLinkageEngine(store, bridge);
-        controller = new AlarmController(engine, store);
+        emergencyWorkflow = new EmergencyCommandWorkflow();
+        oneClickResponse = new OneClickEmergencyResponse(emergencyWorkflow, orchService);
+        controller = new AlarmController(engine, store, emergencyWorkflow, oneClickResponse);
     }
 
     private static Map<String, Object> eventBody(String deviceId, String type, String severity) {
@@ -240,5 +249,178 @@ class AlarmControllerTest {
     void testRuleNotFoundThrows() {
         assertThatThrownBy(() -> controller.testRule("nonexistent", new LinkedHashMap<>()))
                 .isInstanceOf(NotFoundException.class);
+    }
+
+    // ===== POST /events/ack-batch 批量确认 =====
+
+    @Test
+    @DisplayName("POST /events/ack-batch 批量确认多个报警事件")
+    void acknowledgeBatchSuccess() {
+        ResponseEntity<Map<String, Object>> e1 = controller.receiveEvent(eventBody("dev-1", "FIRE", "CRITICAL"));
+        ResponseEntity<Map<String, Object>> e2 = controller.receiveEvent(eventBody("dev-2", "MOTION", "WARN"));
+        String id1 = (String) e1.getBody().get("eventId");
+        String id2 = (String) e2.getBody().get("eventId");
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("eventIds", List.of(id1, id2));
+        ResponseEntity<Map<String, Object>> resp = controller.acknowledgeBatch(body);
+
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        Map<String, Object> result = resp.getBody();
+        assertThat(result.get("totalRequested")).isEqualTo(2);
+        assertThat(result.get("successCount")).isEqualTo(2);
+        @SuppressWarnings("unchecked")
+        List<String> failed = (List<String>) result.get("failedIds");
+        assertThat(failed).isEmpty();
+    }
+
+    @Test
+    @DisplayName("POST /events/ack-batch 部分不存在时返回失败 ID 列表")
+    void acknowledgeBatchPartialNotFound() {
+        ResponseEntity<Map<String, Object>> e1 = controller.receiveEvent(eventBody("dev-1", "FIRE", "CRITICAL"));
+        String id1 = (String) e1.getBody().get("eventId");
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("eventIds", List.of(id1, "nonexistent-id"));
+        ResponseEntity<Map<String, Object>> resp = controller.acknowledgeBatch(body);
+
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        Map<String, Object> result = resp.getBody();
+        assertThat(result.get("totalRequested")).isEqualTo(2);
+        assertThat(result.get("successCount")).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        List<String> failed = (List<String>) result.get("failedIds");
+        assertThat(failed).containsExactly("nonexistent-id");
+    }
+
+    @Test
+    @DisplayName("POST /events/ack-batch 缺 eventIds 抛 BadRequestException")
+    void acknowledgeBatchMissingEventIdsThrows() {
+        assertThatThrownBy(() -> controller.acknowledgeBatch(new LinkedHashMap<>()))
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    @DisplayName("POST /events/ack-batch 空 eventIds 抛 BadRequestException")
+    void acknowledgeBatchEmptyEventIdsThrows() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("eventIds", List.of());
+        assertThatThrownBy(() -> controller.acknowledgeBatch(body))
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    // ===== POST /events/{id}/respond 一键应急响应 =====
+
+    @Test
+    @DisplayName("POST /events/{id}/respond 触发一键应急响应")
+    void triggerEmergencyResponseSuccess() {
+        ResponseEntity<Map<String, Object>> created = controller.receiveEvent(
+                eventBody("dev-1", "FIRE", "CRITICAL"));
+        String eventId = (String) created.getBody().get("eventId");
+
+        ResponseEntity<Map<String, Object>> resp = controller.triggerEmergencyResponse(eventId);
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        Map<String, Object> result = resp.getBody();
+        assertThat(result.get("commandId")).isNotNull();
+        assertThat(result.get("eventId")).isEqualTo(eventId);
+        assertThat(result.get("status")).isNotNull();
+        assertThat(result).containsKey("message");
+    }
+
+    @Test
+    @DisplayName("POST /events/{id}/respond 不存在时抛 NotFoundException")
+    void triggerEmergencyResponseNotFoundThrows() {
+        assertThatThrownBy(() -> controller.triggerEmergencyResponse("nonexistent"))
+                .isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("POST /events/{id}/respond 安防报警事件类型正确映射")
+    void triggerEmergencyResponseSecurityAlarmMapping() {
+        ResponseEntity<Map<String, Object>> created = controller.receiveEvent(
+                eventBody("dev-1", "INTRUSION", "WARN"));
+        String eventId = (String) created.getBody().get("eventId");
+
+        ResponseEntity<Map<String, Object>> resp = controller.triggerEmergencyResponse(eventId);
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        // 验证命令已创建
+        String commandId = (String) resp.getBody().get("commandId");
+        assertThat(emergencyWorkflow.getCommand(commandId)).isNotNull();
+    }
+
+    // ===== GET /stream SSE 实时推送 =====
+
+    @Test
+    @DisplayName("GET /stream 返回 SseEmitter")
+    void streamEventsReturnsSseEmitter() {
+        SseEmitter emitter = controller.streamEvents();
+        assertThat(emitter).isNotNull();
+        // emitter 应有非零超时
+        assertThat(emitter.getTimeout()).isPositive();
+    }
+
+    @Test
+    @DisplayName("GET /stream 多次调用返回独立 emitter")
+    void streamEventsMultipleIndependentEmitters() {
+        SseEmitter e1 = controller.streamEvents();
+        SseEmitter e2 = controller.streamEvents();
+        assertThat(e1).isNotSameAs(e2);
+    }
+
+    // ===== GET /linkage-logs 联动日志查询 =====
+
+    @Test
+    @DisplayName("GET /linkage-logs 无联动时返回空列表")
+    void listLinkageLogsEmpty() {
+        ResponseEntity<Map<String, Object>> resp = controller.listLinkageLogs(100);
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        Map<String, Object> result = resp.getBody();
+        assertThat(result.get("total")).isEqualTo(0);
+        @SuppressWarnings("unchecked")
+        List<?> items = (List<?>) result.get("items");
+        assertThat(items).isEmpty();
+    }
+
+    @Test
+    @DisplayName("GET /linkage-logs 有联动时返回日志列表")
+    void listLinkageLogsAfterLinkageExecution() {
+        // 创建规则并触发联动
+        controller.createRule(ruleBody("r1", "fire-rule", "FIRE", "DEPLOY_DRONE", true));
+        controller.receiveEvent(eventBody("dev-1", "FIRE", "CRITICAL"));
+
+        ResponseEntity<Map<String, Object>> resp = controller.listLinkageLogs(100);
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        Map<String, Object> result = resp.getBody();
+        assertThat(result.get("total")).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> items = (List<Map<String, Object>>) result.get("items");
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).get("ruleId")).isEqualTo("r1");
+        assertThat(items.get(0).get("actionType")).isEqualTo("DEPLOY_DRONE");
+        assertThat(items.get(0)).containsKey("timestampMs");
+    }
+
+    @Test
+    @DisplayName("GET /linkage-logs limit 参数限制返回条数")
+    void listLinkageLogsWithLimit() {
+        // 创建规则并触发多次联动
+        controller.createRule(ruleBody("r1", "fire-rule", "FIRE", "NOTIFY_ONLY", true));
+        controller.receiveEvent(eventBody("dev-1", "FIRE", "CRITICAL"));
+        controller.receiveEvent(eventBody("dev-2", "FIRE", "CRITICAL"));
+        controller.receiveEvent(eventBody("dev-3", "FIRE", "CRITICAL"));
+
+        ResponseEntity<Map<String, Object>> resp = controller.listLinkageLogs(2);
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        Map<String, Object> result = resp.getBody();
+        assertThat(result.get("total")).isEqualTo(2);
+        assertThat(result.get("limit")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("GET /linkage-logs limit<=0 时使用默认值 100")
+    void listLinkageLogsInvalidLimitUsesDefault() {
+        ResponseEntity<Map<String, Object>> resp = controller.listLinkageLogs(0);
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        assertThat(resp.getBody().get("limit")).isEqualTo(100);
     }
 }

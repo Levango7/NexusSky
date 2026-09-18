@@ -56,7 +56,7 @@ public class AlarmEventStore {
      *
      * @param event 报警事件
      */
-    public void store(AlarmEvent event) {
+    public synchronized void store(AlarmEvent event) {
         events.addFirst(event);
         index.put(event.getId(), event);
         // 驱逐超容量事件
