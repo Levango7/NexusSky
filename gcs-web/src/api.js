@@ -304,3 +304,35 @@ export const emergencyOrch = {
 export const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${
   location.host
 }/ws/telemetry`
+// ---- Budget Mode (丐版模式配置) ----
+// 根据预算档位限制可见面板，用于在低成本硬件上裁剪功能。
+// 经验来源：2026-09-17-react-mount-existing-components-export-signature-dialog-wrap（命名导出用法）
+export const BUDGET_MODES = {
+  FULL: null,            // 完整版（默认，全部面板可用）
+  TOY: 'toy',            // 百元级：仅遥测+航拍+简易地图+状态
+  STANDARD: 'standard',  // 千元级：+编队+Mesh+航点+应急
+  ADVANCED: 'advanced',  // 进阶版：+光流+红外
+}
+
+// 百元级可用的面板
+export const TOY_PANELS = ['telemetry', 'camera', 'map', 'status']
+// 千元级可用的面板
+export const STANDARD_PANELS = [...TOY_PANELS, 'formation', 'mesh', 'mission', 'emergency']
+// 进阶版可用的面板
+export const ADVANCED_PANELS = [...STANDARD_PANELS, 'thermal', 'opticalflow']
+
+// 根据预算档位返回可用面板列表；null 表示全部可用（完整版）
+export function getAvailablePanels(budgetMode) {
+  if (!budgetMode || budgetMode === BUDGET_MODES.FULL) return null // null = all
+  if (budgetMode === BUDGET_MODES.TOY) return TOY_PANELS
+  if (budgetMode === BUDGET_MODES.STANDARD) return STANDARD_PANELS
+  if (budgetMode === BUDGET_MODES.ADVANCED) return ADVANCED_PANELS
+  return null
+}
+
+// 判断单个面板在指定预算档位下是否可用
+export function isPanelAvailable(panelName, budgetMode) {
+  const available = getAvailablePanels(budgetMode)
+  if (available === null) return true // 全部可用
+  return available.includes(panelName)
+}
