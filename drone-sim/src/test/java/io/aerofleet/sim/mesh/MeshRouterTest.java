@@ -21,7 +21,7 @@ class MeshRouterTest {
     private static final InetSocketAddress NEIGHBOR_ADDR = new InetSocketAddress("10.0.0.2", 14551);
 
     private static MeshRouter newRouter(int selfSysid) {
-        return new MeshRouter(selfSysid, MeshRouterConfig.defaults(), null);
+        return new MeshRouter(selfSysid, MeshRouterConfig.defaults(), (io.aerofleet.mavlink.transport.UdpMavlinkTransport) null);
     }
 
     @Test
