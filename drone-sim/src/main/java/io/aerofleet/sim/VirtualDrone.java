@@ -127,6 +127,10 @@ public final class VirtualDrone implements AutoCloseable {
     private volatile RotorConfig rotorConfig = null;
     private volatile LiDARSource lidarSource = null;
     private volatile ImuSource imuSource = null;
+    /** 热成像数据源（FR-04）：null 表示未注入，不产生热成像上报（DFX 4.5）。 */
+    private volatile ThermalSource thermalSource = null;
+    /** 丐版模式快照（config.budgetMode）：null=完整版，"toy"/"standard"/"advanced"=降级模式。 */
+    private final String budgetMode;
     /** 雷达启用标志（volatile 保证接收线程写与 tick 线程读可见性）。 */
     private volatile boolean radarEnabled = false;
     /**
@@ -343,6 +347,15 @@ public final class VirtualDrone implements AutoCloseable {
                     + " config=" + config.orchConfig);
         } else {
             this.orchEngine = null;
+        }
+        // 丐版模式处理（budget）：根据 budgetMode 降级传感器，输出日志（DFX 4.5：null 时既有行为不变）
+        this.budgetMode = config.budgetMode;
+        if ("toy".equals(budgetMode)) {
+            SimLog.info("Budget mode: toy (ultrasonic+WiFi only)");
+        } else if ("standard".equals(budgetMode)) {
+            SimLog.info("Budget mode: standard (GPS+ToF+LoRa)");
+        } else if ("advanced".equals(budgetMode)) {
+            SimLog.info("Budget mode: advanced (all sensors)");
         }
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "drone-sim-tick");
@@ -1829,8 +1842,12 @@ public final class VirtualDrone implements AutoCloseable {
     // M4 硬件抽象（FR-01~FR-22）：数据源注入 + 气动切换 + 硬件数据上报
     // ------------------------------------------------------------------
 
-    /** 注入相控阵雷达（FR-01）。null 表示不启用雷达。 */
+    /** 注入相控阵雷达（FR-01）。null 表示不启用雷达。budget toy/standard 模式下忽略注入（DFX 4.5）。 */
     public void setRadar(PhasedArrayRadar radar) {
+        if ("toy".equals(budgetMode) || "standard".equals(budgetMode)) {
+            SimLog.warn("Budget mode " + budgetMode + ": radar disabled, ignoring setRadar");
+            return;
+        }
         this.radar = radar;
     }
 
@@ -1854,14 +1871,32 @@ public final class VirtualDrone implements AutoCloseable {
         this.rotorConfig = rotorConfig;
     }
 
-    /** 注入 LiDAR 数据源（FR-12）。null 表示不启用 LiDAR。 */
+    /** 注入 LiDAR 数据源（FR-12）。null 表示不启用 LiDAR。budget toy 模式下忽略注入（DFX 4.5）。 */
     public void setLidarSource(LiDARSource lidarSource) {
+        if ("toy".equals(budgetMode)) {
+            SimLog.warn("Budget mode toy: lidar disabled, ignoring setLidarSource");
+            return;
+        }
         this.lidarSource = lidarSource;
     }
 
     /** 注入 IMU 数据源（FR-15）。null 表示不启用 IMU。 */
     public void setImuSource(ImuSource imuSource) {
         this.imuSource = imuSource;
+    }
+
+    /** 注入热成像数据源（FR-04）。null 表示不启用热成像。budget toy/standard 模式下忽略注入（DFX 4.5）。 */
+    public void setThermalSource(ThermalSource thermalSource) {
+        if ("toy".equals(budgetMode) || "standard".equals(budgetMode)) {
+            SimLog.warn("Budget mode " + budgetMode + ": thermal disabled, ignoring setThermalSource");
+            return;
+        }
+        this.thermalSource = thermalSource;
+    }
+
+    /** 当前热成像数据源（供 tickOnce 读取，null 表示未注入）。 */
+    public ThermalSource getThermalSource() {
+        return thermalSource;
     }
 
     /**
