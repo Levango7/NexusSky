@@ -52,6 +52,7 @@ public class SurveillanceController {
 
     private final SurveillanceDeviceRegistry registry;
     private final OnvifClient onvifClient;
+    private final RapidDeployService rapidDeployService;
     /** SSE 心跳调度器：单线程足够，多个 emitter 共享。 */
     private final ScheduledExecutorService sseScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -60,9 +61,12 @@ public class SurveillanceController {
                 return t;
             });
 
-    public SurveillanceController(SurveillanceDeviceRegistry registry, OnvifClient onvifClient) {
+    public SurveillanceController(SurveillanceDeviceRegistry registry,
+                                  OnvifClient onvifClient,
+                                  RapidDeployService rapidDeployService) {
         this.registry = registry;
         this.onvifClient = onvifClient;
+        this.rapidDeployService = rapidDeployService;
     }
 
     /**
@@ -243,6 +247,79 @@ public class SurveillanceController {
     }
 
     // ------------------------------------------------------------------
+    // 布控球快速部署
+    // ------------------------------------------------------------------
+
+    /**
+     * 一键扫描子网并自动注册所有发现的布控球设备。
+     * <p>
+     * body 字段：
+     * <ul>
+     *   <li>subnet — 子网 CIDR，如 "192.168.1.0/24"（必填）</li>
+     *   <li>username — ONVIF 登录用户名（可选，默认 admin）</li>
+     *   <li>password — ONVIF 登录密码（可选，默认 admin123）</li>
+     * </ul>
+     * <p>
+     * 响应：部署结果数组，每个元素包含 deviceId/ip/vendor/status/message/rtspUrl。
+     */
+    @PostMapping("/rapid-deploy")
+    public ResponseEntity<Map<String, Object>> rapidDeploy(@RequestBody JsonNode body) {
+        String subnet = body.path("subnet").asText("");
+        String username = body.path("username").asText("");
+        String password = body.path("password").asText("");
+        if (subnet.isBlank()) {
+            return badRequest("subnet is required");
+        }
+        try {
+            List<DeployResult> results = rapidDeployService.scanAndDeploy(subnet, username, password);
+            List<Map<String, Object>> view = new ArrayList<>(results.size());
+            for (DeployResult r : results) {
+                view.add(deployResultView(r));
+            }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("subnet", subnet);
+            result.put("count", results.size());
+            result.put("results", view);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.warn("Rapid deploy failed for {}: {}", subnet, e.getMessage());
+            return ResponseEntity.status(502).body(
+                    Map.of("error", "rapid deploy failed: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 仅扫描子网发现设备，不注册到 Registry。
+     * <p>
+     * body 字段：subnet — 子网 CIDR（必填）
+     * <p>
+     * 响应：发现的设备列表，status 全为 SKIPPED（仅展示）。
+     */
+    @PostMapping("/scan")
+    public ResponseEntity<Map<String, Object>> scan(@RequestBody JsonNode body) {
+        String subnet = body.path("subnet").asText("");
+        if (subnet.isBlank()) {
+            return badRequest("subnet is required");
+        }
+        try {
+            List<DeployResult> results = rapidDeployService.scanOnly(subnet);
+            List<Map<String, Object>> view = new ArrayList<>(results.size());
+            for (DeployResult r : results) {
+                view.add(deployResultView(r));
+            }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("subnet", subnet);
+            result.put("count", results.size());
+            result.put("results", view);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.warn("Scan failed for {}: {}", subnet, e.getMessage());
+            return ResponseEntity.status(502).body(
+                    Map.of("error", "scan failed: " + e.getMessage()));
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 事件订阅 SSE
     // ------------------------------------------------------------------
 
@@ -321,6 +398,22 @@ public class SurveillanceController {
         v.put("capabilities", d.getCapabilities());
         v.put("rtspUrl", maskRtspCredentials(d.rtspUrl));
         v.put("lastHeartbeatMs", d.lastHeartbeatMs);
+        return v;
+    }
+
+    /**
+     * 将 {@link DeployResult} 转为 REST 响应视图。
+     * <p>
+     * RTSP URL 中的凭据脱敏，防止明文密码泄露到前端。
+     */
+    private static Map<String, Object> deployResultView(DeployResult r) {
+        Map<String, Object> v = new LinkedHashMap<>();
+        v.put("deviceId", r.getDeviceId());
+        v.put("ip", r.getIp());
+        v.put("vendor", r.getVendor());
+        v.put("status", r.getStatus().name());
+        v.put("message", r.getMessage());
+        v.put("rtspUrl", maskRtspCredentials(r.getRtspUrl()));
         return v;
     }
 

@@ -33,6 +33,7 @@ class SurveillanceControllerTest {
 
     private SurveillanceDeviceRegistry registry;
     private OnvifClient onvifClient;
+    private RapidDeployService rapidDeployService;
     private SurveillanceController controller;
     private MockMvc mockMvc;
 
@@ -40,7 +41,8 @@ class SurveillanceControllerTest {
     void setUp() {
         registry = new SurveillanceDeviceRegistry();
         onvifClient = new OnvifClient();
-        controller = new SurveillanceController(registry, onvifClient);
+        rapidDeployService = new RapidDeployService(onvifClient, registry);
+        controller = new SurveillanceController(registry, onvifClient, rapidDeployService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
