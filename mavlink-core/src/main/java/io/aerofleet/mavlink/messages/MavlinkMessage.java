@@ -173,6 +173,13 @@ public abstract class MavlinkMessage {
                 return TwinStateSyncMsg.decode(frame);
             case PredictionResultMsg.ID:
                 return PredictionResultMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M14 安防报警，msgId 477-479）----
+            case AlarmTriggerMsg.ID:
+                return AlarmTriggerMsg.decode(frame);
+            case AlarmAckMsg.ID:
+                return AlarmAckMsg.decode(frame);
+            case SurveillanceStatusMsg.ID:
+                return SurveillanceStatusMsg.decode(frame);
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }

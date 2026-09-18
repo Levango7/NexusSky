@@ -14,6 +14,8 @@ import SatLinkPanel from './components/SatLinkPanel.jsx'
 import TerrainMapPanel from './components/TerrainMapPanel.jsx'
 import CellTowerPanel from './components/CellTowerPanel.jsx'
 import EmergencyOrchPanel from './components/EmergencyOrchPanel.jsx'
+import SurveillancePanel from './components/SurveillancePanel.jsx'
+import AlarmPanel from './components/AlarmPanel.jsx'
 import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
@@ -52,6 +54,8 @@ const VIEW_PANEL_MAP = {
   satlink: 'mesh',         // 星地中继属于通信（千元级可用）
   terrain: 'mission',      // 地形属于任务规划（千元级可用）
   emergency: 'emergency',  // 应急编排（千元级可用）
+  surveillance: 'mission', // 安防监控归入任务范畴（千元级可用）
+  alarm: 'emergency',      // 报警联动归入应急范畴（千元级可用）
 }
 
 export default function App() {
@@ -250,6 +254,8 @@ export default function App() {
               { key: 'satlink', label: '星地中继' },
               { key: 'terrain', label: '地形' },
               { key: 'emergency', label: '应急编排' },
+              { key: 'surveillance', label: '安防监控' },
+              { key: 'alarm', label: '报警联动' },
             ]
               .filter((tab) => isPanelAvailable(VIEW_PANEL_MAP[tab.key], budgetMode))
               .map((tab) => (
@@ -353,6 +359,14 @@ export default function App() {
       ) : view === 'emergency' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <EmergencyOrchPanel />
+        </div>
+      ) : view === 'surveillance' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <SurveillancePanel />
+        </div>
+      ) : view === 'alarm' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <AlarmPanel />
         </div>
       ) : view === 'scene3d' ? (
         <div className="scene3d-layout">

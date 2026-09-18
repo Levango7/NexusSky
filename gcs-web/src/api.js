@@ -352,3 +352,134 @@ export function isPanelAvailable(panelName, budgetMode) {
   if (available === null) return true // 全部可用
   return available.includes(panelName)
 }
+// ---- Surveillance (安防视频监控 M10) ----
+// 安防设备管理 API 挂载在 /api/surveillance 下（独立于 v1 BASE）
+// 支持海康/大华/宇视等厂商设备注册、RTSP 流获取、PTZ 云台控制、子网自动发现
+const SURVEILLANCE_BASE = '/api/surveillance'
+
+// 查询已注册的安防设备列表（含在线状态、厂商、通道数等）
+export async function listSurveillanceDevices() {
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices`)
+}
+
+// 手动注册安防设备（IP/端口/厂商/用户名/密码/通道数）
+export async function registerSurveillanceDevice(device) {
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(device),
+  })
+}
+
+// 注销安防设备
+export async function unregisterSurveillanceDevice(deviceId) {
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices/${deviceId}`, { method: 'DELETE' })
+}
+
+// 获取设备某通道的流地址（RTSP / HLS / WS-FLV），前端按协议渲染
+export async function getDeviceStream(deviceId, channel) {
+  const qs = channel != null ? `?channel=${encodeURIComponent(channel)}` : ''
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices/${deviceId}/stream${qs}`)
+}
+
+// PTZ 云台控制：cmd = up|down|left|right|zoom_in|zoom_out|stop
+export async function ptzControl(deviceId, cmd) {
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices/${deviceId}/ptz`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cmd }),
+  })
+}
+
+// 子网自动发现安防设备（扫描 192.168.x.0/24 等）
+export async function discoverDevices(subnet) {
+  return jsonFetch(`${SURVEILLANCE_BASE}/discover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subnet }),
+  })
+}
+
+// 查询最近安防事件（报警 / 移动检测 / 离线等），支持分页与时间范围
+export async function listSurveillanceEvents(params = {}) {
+  const qs = new URLSearchParams(params).toString()
+  return jsonFetch(`${SURVEILLANCE_BASE}/events${qs ? '?' + qs : ''}`)
+}
+
+// ---- Alarms (报警联动 M11) ----
+// 报警事件管理 API 挂载在 /api/alarms 下（独立于 v1 BASE）
+// 支持 SSE 实时推送、联动规则管理、一键应急响应触发无人机侦察任务
+const ALARM_BASE = '/api/alarms'
+
+// 报警事件 SSE 订阅地址（EventSource 用）
+export const alarmStreamUrl = `${location.protocol === 'https:' ? 'https' : 'http'}://${
+  location.host
+}${ALARM_BASE}/stream`
+
+// 查询报警事件列表（支持 severity/source/type/since/until/acknowledged 等筛选）
+export async function listAlarmEvents(params = {}) {
+  const qs = new URLSearchParams(params).toString()
+  return jsonFetch(`${ALARM_BASE}/events${qs ? '?' + qs : ''}`)
+}
+
+// 确认（消除未读）报警事件
+export async function acknowledgeAlarm(eventId) {
+  return jsonFetch(`${ALARM_BASE}/events/${eventId}/ack`, { method: 'POST' })
+}
+
+// 批量确认报警事件
+export async function acknowledgeAlarms(eventIds) {
+  return jsonFetch(`${ALARM_BASE}/events/ack-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eventIds }),
+  })
+}
+
+// 查询联动规则列表（报警类型 → 无人机任务模板）
+export async function listAlarmRules() {
+  return jsonFetch(`${ALARM_BASE}/rules`)
+}
+
+// 创建联动规则
+export async function createAlarmRule(rule) {
+  return jsonFetch(`${ALARM_BASE}/rules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rule),
+  })
+}
+
+// 更新联动规则
+export async function updateAlarmRule(id, rule) {
+  return jsonFetch(`${ALARM_BASE}/rules/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rule),
+  })
+}
+
+// 删除联动规则
+export async function deleteAlarmRule(id) {
+  return jsonFetch(`${ALARM_BASE}/rules/${id}`, { method: 'DELETE' })
+}
+
+// 测试联动规则（模拟触发，不真正派发无人机）
+export async function testAlarmRule(id) {
+  return jsonFetch(`${ALARM_BASE}/rules/${id}/test`, { method: 'POST' })
+}
+
+// 一键应急响应：选中报警事件 → 触发无人机侦察任务
+export async function triggerEmergencyResponse(eventId, payload = {}) {
+  return jsonFetch(`${ALARM_BASE}/events/${eventId}/respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+// 查询联动日志（报警 → 规则 → 无人机任务 → 执行结果）
+export async function listLinkageLogs(params = {}) {
+  const qs = new URLSearchParams(params).toString()
+  return jsonFetch(`${ALARM_BASE}/linkage-logs${qs ? '?' + qs : ''}`)
+}
