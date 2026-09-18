@@ -40,6 +40,9 @@ public final class LoRaTransport {
     private final int txPowerDbm;         // 20
     private final int maxPayloadBytes;    // 50
 
+    /** 重组缓冲最大帧数，超过时淘汰最旧帧（防 OOM） */
+    private static final int MAX_REASSEMBLY_FRAMES = 64;
+
     /** 重组缓冲：frameId -> 分片数组（按 fragIndex 槽位存放） */
     private final Map<Integer, byte[][]> reassemblyBuffer = new HashMap<>();
 
@@ -184,12 +187,26 @@ public final class LoRaTransport {
         }
         int total = loraPayload[1] & 0xFF;
         int index = loraPayload[2] & 0xFF;
+        int payloadFrameId = loraPayload[0] & 0xFF;
+        if (frameId != payloadFrameId) {
+            SimLog.warn("LoRa reassemble: frameId mismatch param=" + frameId
+                + " payload=" + payloadFrameId);
+            return null;
+        }
         if (total == 0 || index >= total) {
             SimLog.warn("LoRa reassemble: invalid header total=" + total + " index=" + index);
             return null;
         }
 
         byte[][] frags = reassemblyBuffer.get(frameId);
+        if (frags == null) {
+            // 新帧：检查缓冲上限，淘汰最旧帧防 OOM
+            if (reassemblyBuffer.size() >= MAX_REASSEMBLY_FRAMES) {
+                Integer oldest = reassemblyBuffer.keySet().iterator().next();
+                reassemblyBuffer.remove(oldest);
+                SimLog.warn("LoRa reassemble: buffer full, evicted frameId=" + oldest);
+            }
+        }
         if (frags == null || frags.length != total) {
             // 新帧或总分片数不一致，初始化缓冲
             if (frags != null) {
