@@ -131,6 +131,21 @@ public final class VirtualDrone implements AutoCloseable {
     private volatile ThermalSource thermalSource = null;
     /** 丐版模式快照（config.budgetMode）：null=完整版，"toy"/"standard"/"advanced"=降级模式。 */
     private final String budgetMode;
+    /**
+     * 丐版超声波传感器（budget toy/standard 模式自动实例化，null 表示未启用）。
+     * 作为 {@link DepthSource} 的丐版实现，驱动 {@link #obstacleDetector} 避障。
+     */
+    private final UltrasonicSource ultrasonicSource;
+    /**
+     * 丐版红外阵列热源（budget toy/standard 模式自动实例化，null 表示未启用）。
+     * 作为 {@link ThermalSource} 的丐版实现，替代高端热成像相机。
+     */
+    private final BudgetThermalSource budgetThermalSource;
+    /**
+     * 丐版光流定位数据源（budget toy 模式自动实例化，null 表示未启用）。
+     * 用于无 GPS 环境下的位置估计，替代 LiDAR 定位。
+     */
+    private final OpticalFlowSource opticalFlowSource;
     /** 雷达启用标志（volatile 保证接收线程写与 tick 线程读可见性）。 */
     private volatile boolean radarEnabled = false;
     /**
@@ -348,14 +363,44 @@ public final class VirtualDrone implements AutoCloseable {
         } else {
             this.orchEngine = null;
         }
-        // 丐版模式处理（budget）：根据 budgetMode 降级传感器，输出日志（DFX 4.5：null 时既有行为不变）
+        // 丐版模式处理（budget）：根据 budgetMode 实例化丐版传感器并自动装配避障/热成像
+        // DFX 4.5：null 或 "advanced" 时既有行为不变（不实例化丐版传感器）
         this.budgetMode = config.budgetMode;
         if ("toy".equals(budgetMode)) {
-            SimLog.info("Budget mode: toy (ultrasonic+WiFi only)");
+            // toy 模式（百元级）：超声波避障 + 红外阵列热源 + 光流定位
+            // 替代雷达/LiDAR/高端热成像，不使用 GPS/多光谱
+            this.ultrasonicSource = new UltrasonicSource();
+            this.budgetThermalSource = new BudgetThermalSource();
+            this.opticalFlowSource = new OpticalFlowSource();
+            // 自动装配：ObstacleDetector 使用超声波作为 DepthSource
+            // safety=2.0m, emergency=0.5m（适配超声波 4m 量程）
+            this.depthSource = this.ultrasonicSource;
+            this.obstacleDetector = new ObstacleDetector(this.ultrasonicSource, 2.0, 0.5);
+            this.thermalSource = this.budgetThermalSource;
+            SimLog.info("Budget mode: toy (ultrasonic+opticalflow+budget-thermal, no radar/lidar)");
         } else if ("standard".equals(budgetMode)) {
-            SimLog.info("Budget mode: standard (GPS+ToF+LoRa)");
+            // standard 模式（千元级）：超声波作为 DepthSource 补充（双冗余避障）+ 红外阵列热源
+            // 保留 GPS + LoRa（既有通信链路不变）
+            this.ultrasonicSource = new UltrasonicSource();
+            this.budgetThermalSource = new BudgetThermalSource();
+            this.opticalFlowSource = null;
+            // 自动装配：ObstacleDetector 使用超声波作为 DepthSource
+            // 外部可通过 setDepthSource 注入高端 DepthSource 作为补充（双冗余）
+            this.depthSource = this.ultrasonicSource;
+            this.obstacleDetector = new ObstacleDetector(this.ultrasonicSource, 2.0, 0.5);
+            this.thermalSource = this.budgetThermalSource;
+            SimLog.info("Budget mode: standard (ultrasonic+budget-thermal+GPS+LoRa)");
         } else if ("advanced".equals(budgetMode)) {
+            // advanced 模式：使用全部高端传感器（既有行为不变，DFX 4.5）
+            this.ultrasonicSource = null;
+            this.budgetThermalSource = null;
+            this.opticalFlowSource = null;
             SimLog.info("Budget mode: advanced (all sensors)");
+        } else {
+            // null = 完整版（既有行为不变，DFX 4.5）
+            this.ultrasonicSource = null;
+            this.budgetThermalSource = null;
+            this.opticalFlowSource = null;
         }
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "drone-sim-tick");
@@ -1818,13 +1863,31 @@ public final class VirtualDrone implements AutoCloseable {
         }
     }
 
-    /** 注入深度数据源（FR-12）。null 表示不启用深度感知。 */
+    /**
+     * 注入深度数据源（FR-12）。null 表示不启用深度感知。
+     * <p>
+     * budget toy 模式下忽略注入（toy 模式强制使用超声波避障，DFX 4.5）；
+     * standard 模式下允许注入高端 DepthSource 作为双冗余补充（超声波仍作为主避障源）。
+     */
     public void setDepthSource(DepthSource depthSource) {
+        if ("toy".equals(budgetMode)) {
+            SimLog.warn("Budget mode toy: ultrasonic forced, ignoring setDepthSource");
+            return;
+        }
         this.depthSource = depthSource;
     }
 
-    /** 注入避障检测器（FR-13/FR-14）。null 表示不启用避障检测。 */
+    /**
+     * 注入避障检测器（FR-13/FR-14）。null 表示不启用避障检测。
+     * <p>
+     * budget toy 模式下忽略注入（toy 模式自动装配超声波避障，DFX 4.5）；
+     * standard 模式下允许注入自定义检测器（覆盖超声波默认检测器）。
+     */
     public void setObstacleDetector(ObstacleDetector obstacleDetector) {
+        if ("toy".equals(budgetMode)) {
+            SimLog.warn("Budget mode toy: ultrasonic detector forced, ignoring setObstacleDetector");
+            return;
+        }
         this.obstacleDetector = obstacleDetector;
     }
 
@@ -1897,6 +1960,40 @@ public final class VirtualDrone implements AutoCloseable {
     /** 当前热成像数据源（供 tickOnce 读取，null 表示未注入）。 */
     public ThermalSource getThermalSource() {
         return thermalSource;
+    }
+
+    // ------------------------------------------------------------------
+    // 丐版模式（budget）传感器查询接口（供集成测试/监控验证装配状态）
+    // ------------------------------------------------------------------
+
+    /** 当前 budget 模式（null=完整版，"toy"/"standard"/"advanced"=丐版模式）。 */
+    public String getBudgetMode() {
+        return budgetMode;
+    }
+
+    /** 当前深度数据源（供测试验证，null 表示未注入）。 */
+    public DepthSource getDepthSource() {
+        return depthSource;
+    }
+
+    /** 当前避障检测器（供测试验证，null 表示未注入）。 */
+    public ObstacleDetector getObstacleDetector() {
+        return obstacleDetector;
+    }
+
+    /** 丐版超声波传感器（budget toy/standard 模式自动实例化，null 表示未启用）。 */
+    public UltrasonicSource getUltrasonicSource() {
+        return ultrasonicSource;
+    }
+
+    /** 丐版红外阵列热源（budget toy/standard 模式自动实例化，null 表示未启用）。 */
+    public BudgetThermalSource getBudgetThermalSource() {
+        return budgetThermalSource;
+    }
+
+    /** 丐版光流定位数据源（budget toy 模式自动实例化，null 表示未启用）。 */
+    public OpticalFlowSource getOpticalFlowSource() {
+        return opticalFlowSource;
     }
 
     /**
