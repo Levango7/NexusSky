@@ -71,6 +71,53 @@ public class FlightTrackStore {
     }
 
     /**
+     * 按时间范围查询轨迹点（fromMs <= timestampMs <= toMs），按时间升序返回。
+     * <p>
+     * 约定：
+     * <ul>
+     *   <li>{@code fromMs <= 0} 表示不限制起始时间</li>
+     *   <li>{@code toMs <= 0} 表示不限制结束时间</li>
+     *   <li>{@code limit > 0} 时最多返回 limit 条（取时间最近的 limit 条）</li>
+     * </ul>
+     * <p>
+     * 线程安全：遍历 {@link ConcurrentLinkedDeque} 是弱一致的（遍历期间并发追加
+     * 不保证可见），对历史回放场景可接受。结果按 {@code timestampMs} 升序排列。
+     *
+     * @param sysid  无人机 systemId
+     * @param fromMs 起始时间戳（epoch ms），<=0 表示不限起始
+     * @param toMs   结束时间戳（epoch ms），<=0 表示不限结束
+     * @param limit  最多返回 N 条（<=0 表示不限制）
+     * @return 轨迹点列表（按时间升序），无匹配时返回空列表
+     */
+    public List<TrackPoint> getTrack(int sysid, long fromMs, long toMs, int limit) {
+        Deque<TrackPoint> deque = tracks.get(sysid);
+        if (deque == null || deque.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<TrackPoint> filtered = new ArrayList<>();
+        for (TrackPoint p : deque) {
+            long ts = p.timestampMs;
+            if (fromMs > 0 && ts < fromMs) {
+                continue;
+            }
+            if (toMs > 0 && ts > toMs) {
+                continue;
+            }
+            filtered.add(p);
+        }
+        if (filtered.isEmpty()) {
+            return Collections.emptyList();
+        }
+        // 按 timestampMs 升序排列（addPoint 不强制时间顺序，调用方可能乱序写入）
+        filtered.sort((a, b) -> Long.compare(a.timestampMs, b.timestampMs));
+        // limit > 0 时截断，取时间最近的 limit 条（列表末尾）
+        if (limit > 0 && filtered.size() > limit) {
+            return new ArrayList<>(filtered.subList(filtered.size() - limit, filtered.size()));
+        }
+        return filtered;
+    }
+
+    /**
      * 获取最后已知位置（最新轨迹点）；无轨迹时返回 null。
      */
     public TrackPoint getLastKnown(int sysid) {

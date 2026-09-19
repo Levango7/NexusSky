@@ -103,6 +103,54 @@ class TrackingControllerTest {
     }
 
     // ------------------------------------------------------------------
+    // GET /api/tracking/{sysid}/replay
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("replayTrack 按时间范围查询返回子集（升序）")
+    void testReplayEndpoint() {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        FlightTrackStore store = new FlightTrackStore();
+        // 时间戳：1000, 2000, 3000, 4000, 5000
+        for (int i = 1; i <= 5; i++) {
+            store.addPoint(1, tp(1, i * 1000L, 22.0 + i * 0.01, 113.0));
+        }
+        LostDroneAlertService alerts = newAlertService(registry, store);
+        TrackingController controller = newController(registry, store, alerts);
+
+        // 查询 [2000, 4000]，limit=1000（不截断）
+        List<FlightTrackStore.TrackPoint> replay = controller.replayTrack(1, 2000L, 4000L, 1000);
+
+        assertThat(replay).hasSize(3);
+        assertThat(replay.get(0).timestampMs).isEqualTo(2000L);
+        assertThat(replay.get(1).timestampMs).isEqualTo(3000L);
+        assertThat(replay.get(2).timestampMs).isEqualTo(4000L);
+    }
+
+    @Test
+    @DisplayName("replayTrack 不传参数时使用默认值（from=0, to=0, limit=1000）")
+    void testReplayDefaultParams() {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        FlightTrackStore store = new FlightTrackStore();
+        // 添加 5 个点（< 默认 limit 1000）
+        for (int i = 1; i <= 5; i++) {
+            store.addPoint(1, tp(1, i * 1000L, 22.0, 113.0));
+        }
+        LostDroneAlertService alerts = newAlertService(registry, store);
+        TrackingController controller = newController(registry, store, alerts);
+
+        // 模拟不传参数：from=0, to=0, limit=1000（Controller 默认值）
+        List<FlightTrackStore.TrackPoint> replay = controller.replayTrack(1, 0L, 0L, 1000);
+
+        assertThat(replay).hasSize(5);
+        // 验证升序
+        assertThat(replay.get(0).timestampMs).isEqualTo(1000L);
+        assertThat(replay.get(4).timestampMs).isEqualTo(5000L);
+    }
+
+    // ------------------------------------------------------------------
     // GET /api/tracking/{sysid}/last-known
     // ------------------------------------------------------------------
 

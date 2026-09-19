@@ -121,6 +121,91 @@ class FlightTrackStoreTest {
     }
 
     // ------------------------------------------------------------------
+    // 时间范围查询 / 历史回放
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("replay 按时间范围查询返回子集（升序）")
+    void testReplayByTimeRange() {
+        FlightTrackStore store = newStore();
+        // 时间戳：1000, 2000, 3000, 4000, 5000
+        for (int i = 1; i <= 5; i++) {
+            store.addPoint(1, point(1, i * 1000L, 22.0 + i * 0.01, 113.0));
+        }
+
+        // 查询 [2000, 4000] 应返回 3 条（2000, 3000, 4000）
+        List<FlightTrackStore.TrackPoint> replay = store.getTrack(1, 2000L, 4000L, 0);
+
+        assertThat(replay).hasSize(3);
+        assertThat(replay.get(0).timestampMs).isEqualTo(2000L);
+        assertThat(replay.get(1).timestampMs).isEqualTo(3000L);
+        assertThat(replay.get(2).timestampMs).isEqualTo(4000L);
+    }
+
+    @Test
+    @DisplayName("replay from=0, to=0 查询全部")
+    void testReplayAllTimeRange() {
+        FlightTrackStore store = newStore();
+        for (int i = 1; i <= 5; i++) {
+            store.addPoint(1, point(1, i * 1000L, 22.0, 113.0));
+        }
+
+        List<FlightTrackStore.TrackPoint> replay = store.getTrack(1, 0L, 0L, 0);
+
+        assertThat(replay).hasSize(5);
+        // 验证升序
+        for (int i = 0; i < replay.size() - 1; i++) {
+            assertThat(replay.get(i).timestampMs).isLessThanOrEqualTo(replay.get(i + 1).timestampMs);
+        }
+    }
+
+    @Test
+    @DisplayName("replay limit 截断取时间最近的 N 条")
+    void testReplayWithLimit() {
+        FlightTrackStore store = newStore();
+        // 时间戳：1000..5000
+        for (int i = 1; i <= 5; i++) {
+            store.addPoint(1, point(1, i * 1000L, 22.0, 113.0));
+        }
+
+        // 范围内 5 条，limit=2 应返回最近的 2 条（4000, 5000）
+        List<FlightTrackStore.TrackPoint> replay = store.getTrack(1, 0L, 0L, 2);
+
+        assertThat(replay).hasSize(2);
+        assertThat(replay.get(0).timestampMs).isEqualTo(4000L);
+        assertThat(replay.get(1).timestampMs).isEqualTo(5000L);
+    }
+
+    @Test
+    @DisplayName("replay 时间范围内无点返回空列表")
+    void testReplayEmptyRange() {
+        FlightTrackStore store = newStore();
+        store.addPoint(1, point(1, 1000L, 22.0, 113.0));
+        store.addPoint(1, point(1, 2000L, 22.0, 113.0));
+
+        // 查询 [5000, 6000] 范围内无点
+        List<FlightTrackStore.TrackPoint> replay = store.getTrack(1, 5000L, 6000L, 0);
+
+        assertThat(replay).isEmpty();
+    }
+
+    @Test
+    @DisplayName("replay 边界条件：fromMs == timestampMs == toMs")
+    void testReplayBoundary() {
+        FlightTrackStore store = newStore();
+        store.addPoint(1, point(1, 1000L, 22.0, 113.0));
+        store.addPoint(1, point(1, 2000L, 22.1, 113.1));
+        store.addPoint(1, point(1, 3000L, 22.2, 113.2));
+
+        // from == to == 2000，应精确匹配 timestampMs=2000 的点
+        List<FlightTrackStore.TrackPoint> replay = store.getTrack(1, 2000L, 2000L, 0);
+
+        assertThat(replay).hasSize(1);
+        assertThat(replay.get(0).timestampMs).isEqualTo(2000L);
+        assertThat(replay.get(0).lat).isEqualTo(22.1);
+    }
+
+    // ------------------------------------------------------------------
     // 最后已知位置
     // ------------------------------------------------------------------
 
