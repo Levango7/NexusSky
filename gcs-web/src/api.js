@@ -261,6 +261,104 @@ export const api = {
 
   // 获取漫游切换历史
   getCellTowerHandovers: () => jsonFetch(`${BASE}/celltowers/handovers`),
+
+  // ---- Tracking (飞行轨迹追踪与丢失找回) ----
+  // base 路径 /api/tracking（独立于 v1 BASE）
+  // 获取无人机飞行轨迹（limit 限制点数）
+  getFlightTrack: (sysid, limit) => {
+    const qs = limit != null ? `?limit=${encodeURIComponent(limit)}` : ''
+    return jsonFetch(`/api/tracking/${sysid}/track${qs}`)
+  },
+
+  // 轨迹回放：时间范围 [from, to] + 点数限制
+  replayTrack: (sysid, from, to, limit) => {
+    const qs = new URLSearchParams({ from, to, limit }).toString()
+    return jsonFetch(`/api/tracking/${sysid}/replay?${qs}`)
+  },
+
+  // 最近一次已知位置
+  getLastKnown: (sysid) => jsonFetch(`/api/tracking/${sysid}/last-known`),
+
+  // 丢失无人机列表
+  getLostDrones: () => jsonFetch('/api/tracking/lost'),
+
+  // 搜索引导（预测航向/距离）
+  getSearchGuide: (sysid) => jsonFetch(`/api/tracking/${sysid}/search-guide`),
+
+  // 触发丢失无人机扫描
+  scanLostDrones: () => jsonFetch('/api/tracking/scan'),
+
+  // ---- Geofence (地理围栏) ----
+  // base 路径 /api/geofence（独立于 v1 BASE）
+  // 创建围栏区域（zone JSON）
+  createGeofenceZone: (zone) =>
+    jsonFetch('/api/geofence/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(zone),
+    }),
+
+  // 查询所有围栏区域
+  listGeofenceZones: () => jsonFetch('/api/geofence/zones'),
+
+  // 查询单个围栏区域
+  getGeofenceZone: (id) => jsonFetch(`/api/geofence/zones/${id}`),
+
+  // 更新围栏区域（zone JSON）
+  updateGeofenceZone: (id, zone) =>
+    jsonFetch(`/api/geofence/zones/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(zone),
+    }),
+
+  // 删除围栏区域
+  deleteGeofenceZone: (id) =>
+    jsonFetch(`/api/geofence/zones/${id}`, { method: 'DELETE' }),
+
+  // 查询围栏突破事件（sysid 与 zoneId 均为可选筛选）
+  getGeofenceBreaches: (sysid, zoneId) => {
+    const params = {}
+    if (sysid != null) params.sysid = sysid
+    if (zoneId != null) params.zoneId = zoneId
+    const qs = new URLSearchParams(params).toString()
+    return jsonFetch(`/api/geofence/breaches${qs ? '?' + qs : ''}`)
+  },
+
+  // 触发围栏检查
+  checkGeofence: () =>
+    jsonFetch('/api/geofence/check', { method: 'POST' }),
+
+  // ---- DroneLock (无人机锁定/解锁) ----
+  // base 路径 /api/drone-lock（独立于 v1 BASE）
+  // 锁定无人机（payload 含 reason/lockedBy/action）
+  lockDrone: (sysid, payload) =>
+    jsonFetch(`/api/drone-lock/${sysid}/lock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 解锁无人机（payload 含 unlockedBy）
+  unlockDrone: (sysid, payload) =>
+    jsonFetch(`/api/drone-lock/${sysid}/unlock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 查询单机锁定状态
+  getLockStatus: (sysid) => jsonFetch(`/api/drone-lock/${sysid}`),
+
+  // 查询所有已锁定无人机
+  getLockedDrones: () => jsonFetch('/api/drone-lock/locked'),
+
+  // 查询全部锁定状态
+  getAllLockStates: () => jsonFetch('/api/drone-lock/all'),
+
+  // 清除单机锁定状态
+  clearLockState: (sysid) =>
+    jsonFetch(`/api/drone-lock/${sysid}`, { method: 'DELETE' }),
 }
 
 // ---- Emergency Orchestration (应急任务编排 M9) ----
@@ -483,3 +581,9 @@ export async function listLinkageLogs(params = {}) {
   const qs = new URLSearchParams(params).toString()
   return jsonFetch(`${ALARM_BASE}/linkage-logs${qs ? '?' + qs : ''}`)
 }
+// ---- 命名导出：tracking / geofence / droneLock（供面板组件 import）----
+export const {
+  getFlightTrack, replayTrack, getLastKnown, getLostDrones, getSearchGuide, scanLostDrones,
+  createGeofenceZone, listGeofenceZones, getGeofenceZone, updateGeofenceZone, deleteGeofenceZone, getGeofenceBreaches, checkGeofence,
+  lockDrone, unlockDrone, getLockStatus, getLockedDrones, getAllLockStates, clearLockState,
+} = api
