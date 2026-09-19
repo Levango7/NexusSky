@@ -65,15 +65,15 @@ class SurveillanceStatusMsgTest {
     @Test
     @DisplayName("边界值：lastEventMs/uptimeSec/deviceId 及 u8 字段最大最小")
     void boundaryValues() {
-        // 最大值
+        // 最大值（deviceType/status 受语义范围约束：[0,3]/[0,3]）
         SurveillanceStatusMsg maxMsg = new SurveillanceStatusMsg(
-                0xFFFFFFFFL, 0xFFFFFFFFL, 0xFFFF, 255, 255, 255, 255);
+                0xFFFFFFFFL, 0xFFFFFFFFL, 0xFFFF, 3, 3, 255, 255);
         SurveillanceStatusMsg maxBack = roundtrip(maxMsg);
         assertThat(maxBack.lastEventMs).isEqualTo(0xFFFFFFFFL);
         assertThat(maxBack.uptimeSec).isEqualTo(0xFFFFFFFFL);
         assertThat(maxBack.deviceId).isEqualTo(0xFFFF);
-        assertThat(maxBack.deviceType).isEqualTo(255);
-        assertThat(maxBack.status).isEqualTo(255);
+        assertThat(maxBack.deviceType).isEqualTo(3);
+        assertThat(maxBack.status).isEqualTo(3);
         assertThat(maxBack.onlineCameras).isEqualTo(255);
         assertThat(maxBack.totalCameras).isEqualTo(255);
 

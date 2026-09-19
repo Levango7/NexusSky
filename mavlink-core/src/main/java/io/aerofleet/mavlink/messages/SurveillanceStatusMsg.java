@@ -41,6 +41,12 @@ public final class SurveillanceStatusMsg extends MavlinkMessage {
     public SurveillanceStatusMsg(long lastEventMs, long uptimeSec, int deviceId,
                                  int deviceType, int status,
                                  int onlineCameras, int totalCameras) {
+        if (deviceType < 0 || deviceType > 3) {
+            throw new IllegalArgumentException("deviceType must be in [0, 3]: " + deviceType);
+        }
+        if (status < 0 || status > 3) {
+            throw new IllegalArgumentException("status must be in [0, 3]: " + status);
+        }
         this.lastEventMs = lastEventMs;
         this.uptimeSec = uptimeSec;
         this.deviceId = deviceId;

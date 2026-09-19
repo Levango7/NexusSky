@@ -36,6 +36,9 @@ public final class AlarmAckMsg extends MavlinkMessage {
 
     public AlarmAckMsg(long alarmId, long timestamp, int estimatedArrivalSec,
                        int droneSysid, int ackResult) {
+        if (ackResult < 0 || ackResult > 3) {
+            throw new IllegalArgumentException("ackResult must be in [0, 3]: " + ackResult);
+        }
         this.alarmId = alarmId;
         this.timestamp = timestamp;
         this.estimatedArrivalSec = estimatedArrivalSec;

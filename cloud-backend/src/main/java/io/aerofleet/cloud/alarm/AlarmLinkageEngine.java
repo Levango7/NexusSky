@@ -91,7 +91,7 @@ public class AlarmLinkageEngine {
      * 获取全部规则（不可变快照）。
      */
     public List<AlarmLinkageRule> getAllRules() {
-        return new ArrayList<>(rules.values());
+        return Collections.unmodifiableList(new ArrayList<>(rules.values()));
     }
 
     /**
@@ -104,7 +104,7 @@ public class AlarmLinkageEngine {
                 active.add(r);
             }
         }
-        return active;
+        return Collections.unmodifiableList(active);
     }
 
     /**

@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * {@link AlarmLinkageEngine} 单元测试（M10 报警联动编排，FR-31）。
@@ -263,14 +264,14 @@ class AlarmLinkageEngineTest {
     }
 
     @Test
-    @DisplayName("getAllRules 返回全部规则快照")
+    @DisplayName("getAllRules 返回全部规则不可变快照")
     void getAllRulesReturnsSnapshot() {
         engine.addRule(deployRule("r1", null, AlarmEvent.Severity.INFO));
         engine.addRule(deployRule("r2", null, AlarmEvent.Severity.INFO));
         List<AlarmLinkageRule> all = engine.getAllRules();
         assertThat(all).hasSize(2);
-        // 修改返回列表不影响引擎内部状态
-        all.clear();
+        // 返回不可变快照，修改不影响引擎内部状态
+        assertThatThrownBy(all::clear).isInstanceOf(UnsupportedOperationException.class);
         assertThat(engine.ruleCount()).isEqualTo(2);
     }
 }

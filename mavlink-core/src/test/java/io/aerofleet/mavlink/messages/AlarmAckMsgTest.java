@@ -61,15 +61,15 @@ class AlarmAckMsgTest {
     @Test
     @DisplayName("边界值：alarmId/timestamp/estimatedArrivalSec/droneSysid/ackResult 最大最小")
     void boundaryValues() {
-        // 最大值
+        // 最大值（ackResult 受语义范围约束：[0,3]）
         AlarmAckMsg maxMsg = new AlarmAckMsg(
-                0xFFFFFFFFL, 0xFFFFFFFFL, 0xFFFF, 255, 255);
+                0xFFFFFFFFL, 0xFFFFFFFFL, 0xFFFF, 255, 3);
         AlarmAckMsg maxBack = roundtrip(maxMsg);
         assertThat(maxBack.alarmId).isEqualTo(0xFFFFFFFFL);
         assertThat(maxBack.timestamp).isEqualTo(0xFFFFFFFFL);
         assertThat(maxBack.estimatedArrivalSec).isEqualTo(0xFFFF);
         assertThat(maxBack.droneSysid).isEqualTo(255);
-        assertThat(maxBack.ackResult).isEqualTo(255);
+        assertThat(maxBack.ackResult).isEqualTo(3);
 
         // 最小值
         AlarmAckMsg minMsg = new AlarmAckMsg(0L, 0L, 0, 0, 0);

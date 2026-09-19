@@ -119,7 +119,7 @@ function VideoTile({ device, channel, selected, onSelect }) {
           if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = url
             video.play().catch(() => {})
-          } else if (window.Hls || true) {
+          } else {
             // 动态加载 hls.js
             try {
               const Hls = await loadHlsJs()

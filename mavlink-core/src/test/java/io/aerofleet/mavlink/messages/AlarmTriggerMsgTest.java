@@ -67,18 +67,18 @@ class AlarmTriggerMsgTest {
     @Test
     @DisplayName("边界值：timestamp/lat/lon/alt/sourceDeviceId 最大最小")
     void boundaryValues() {
-        // 最大值
+        // 最大值（alarmType/severity 受语义范围约束：[0,4]/[0,2]）
         AlarmTriggerMsg maxMsg = new AlarmTriggerMsg(
                 0xFFFFFFFFL, Integer.MAX_VALUE, Integer.MAX_VALUE, 0xFFFF,
-                Short.MAX_VALUE, 255, 255, "max");
+                Short.MAX_VALUE, 4, 2, "max");
         AlarmTriggerMsg maxBack = roundtrip(maxMsg);
         assertThat(maxBack.timestamp).isEqualTo(0xFFFFFFFFL);
         assertThat(maxBack.lat).isEqualTo(Integer.MAX_VALUE);
         assertThat(maxBack.lon).isEqualTo(Integer.MAX_VALUE);
         assertThat(maxBack.sourceDeviceId).isEqualTo(0xFFFF);
         assertThat(maxBack.alt).isEqualTo(Short.MAX_VALUE);
-        assertThat(maxBack.alarmType).isEqualTo(255);
-        assertThat(maxBack.severity).isEqualTo(255);
+        assertThat(maxBack.alarmType).isEqualTo(4);
+        assertThat(maxBack.severity).isEqualTo(2);
 
         // 最小值（负数 lat/lon/alt）
         AlarmTriggerMsg minMsg = new AlarmTriggerMsg(

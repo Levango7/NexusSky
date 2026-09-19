@@ -43,6 +43,12 @@ public final class AlarmTriggerMsg extends MavlinkMessage {
 
     public AlarmTriggerMsg(long timestamp, int lat, int lon, int sourceDeviceId,
                            int alt, int alarmType, int severity, String description) {
+        if (alarmType < 0 || alarmType > 4) {
+            throw new IllegalArgumentException("alarmType must be in [0, 4]: " + alarmType);
+        }
+        if (severity < 0 || severity > 2) {
+            throw new IllegalArgumentException("severity must be in [0, 2]: " + severity);
+        }
         this.timestamp = timestamp;
         this.lat = lat;
         this.lon = lon;

@@ -260,7 +260,11 @@ public final class EmergencyCommand {
     public EmergencyCommandPhase getCurrentPhase() { return currentPhase; }
 
     /** 包级可见：仅 {@link EmergencyCommandWorkflow} 可写。 */
-    void setCurrentPhase(EmergencyCommandPhase phase) { this.currentPhase = phase; }
+    void setCurrentPhase(EmergencyCommandPhase phase) {
+        synchronized (phaseHistory) {
+            this.currentPhase = phase;
+        }
+    }
 
     /** 返回阶段历史防御性拷贝。 */
     public List<PhaseTransition> getPhaseHistory() {
@@ -271,7 +275,9 @@ public final class EmergencyCommand {
 
     /** 包级可见：追加阶段转移记录。 */
     void addPhaseTransition(PhaseTransition transition) {
-        phaseHistory.add(transition);
+        synchronized (phaseHistory) {
+            phaseHistory.add(transition);
+        }
     }
 
     /** 返回已分配无人机集合防御性拷贝。 */

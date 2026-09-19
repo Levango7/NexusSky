@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 报警事件内存存储（M10 报警联动编排，FR-31）。
@@ -35,6 +36,8 @@ public class AlarmEventStore {
     private final ConcurrentLinkedDeque<AlarmEvent> events;
     /** id → event 索引，支持 O(1) 按 ID 查询。 */
     private final ConcurrentHashMap<String, AlarmEvent> index;
+    /** 事件计数器，避免 ConcurrentLinkedDeque.size() 的 O(n) 遍历。 */
+    private final AtomicInteger count = new AtomicInteger(0);
 
     public AlarmEventStore() {
         this(DEFAULT_CAPACITY);
@@ -59,15 +62,17 @@ public class AlarmEventStore {
     public synchronized void store(AlarmEvent event) {
         events.addFirst(event);
         index.put(event.getId(), event);
+        count.incrementAndGet();
         // 驱逐超容量事件
-        while (events.size() > capacity) {
+        while (count.get() > capacity) {
             AlarmEvent evicted = events.pollLast();
             if (evicted != null) {
                 index.remove(evicted.getId());
+                count.decrementAndGet();
             }
         }
         log.debug("alarm event stored: id={} type={} total={}",
-                event.getId(), event.getEventType(), events.size());
+                event.getId(), event.getEventType(), count.get());
     }
 
     /**
@@ -134,7 +139,7 @@ public class AlarmEventStore {
 
     /** 当前存储事件总数。 */
     public int size() {
-        return events.size();
+        return count.get();
     }
 
     /** 容量上限。 */

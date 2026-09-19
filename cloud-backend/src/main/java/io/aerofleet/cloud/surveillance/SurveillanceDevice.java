@@ -69,6 +69,9 @@ public class SurveillanceDevice {
         if (port <= 0 || port > 65535) {
             throw new IllegalArgumentException("port must be in [1, 65535]");
         }
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("username must not be blank");
+        }
         this.id = id;
         this.name = name;
         this.vendor = vendor;
@@ -93,7 +96,7 @@ public class SurveillanceDevice {
     }
 
     /** 触发一次心跳：更新 lastHeartbeatMs 并标记 ONLINE。 */
-    public void heartbeat() {
+    public synchronized void heartbeat() {
         this.lastHeartbeatMs = System.currentTimeMillis();
         this.status = Status.ONLINE;
     }

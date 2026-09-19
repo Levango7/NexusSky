@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -78,9 +79,10 @@ public class SurveillanceDeviceRegistry {
      * @return 设备列表（不可变副本）
      */
     public List<SurveillanceDevice> listDevices() {
-        return devices.values().stream()
+        List<SurveillanceDevice> snapshot = devices.values().stream()
                 .sorted(Comparator.comparing(d -> d.id))
                 .collect(Collectors.toCollection(ArrayList::new));
+        return Collections.unmodifiableList(snapshot);
     }
 
     /**
@@ -125,14 +127,17 @@ public class SurveillanceDeviceRegistry {
         long now = System.currentTimeMillis();
         List<String> stale = new ArrayList<>();
         for (SurveillanceDevice d : devices.values()) {
-            if (d.status == SurveillanceDevice.Status.ONLINE
-                    && d.lastHeartbeatMs > 0
-                    && now - d.lastHeartbeatMs > timeoutMs) {
-                d.status = SurveillanceDevice.Status.OFFLINE;
-                stale.add(d.id);
-                log.warn("Surveillance device stale (offline): id={} lastHeartbeatMs={} ago={}ms",
-                        d.id, d.lastHeartbeatMs, now - d.lastHeartbeatMs);
-            }
+            devices.computeIfPresent(d.id, (k, dev) -> {
+                if (dev.status == SurveillanceDevice.Status.ONLINE
+                        && dev.lastHeartbeatMs > 0
+                        && now - dev.lastHeartbeatMs > timeoutMs) {
+                    dev.status = SurveillanceDevice.Status.OFFLINE;
+                    stale.add(k);
+                    log.warn("Surveillance device stale (offline): id={} lastHeartbeatMs={} ago={}ms",
+                            k, dev.lastHeartbeatMs, now - dev.lastHeartbeatMs);
+                }
+                return dev;
+            });
         }
         return stale;
     }
