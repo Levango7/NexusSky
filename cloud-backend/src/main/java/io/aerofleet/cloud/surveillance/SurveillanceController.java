@@ -1,6 +1,10 @@
 package io.aerofleet.cloud.surveillance;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +47,7 @@ import java.util.concurrent.TimeUnit;
  */
 @RestController
 @RequestMapping("/api/surveillance")
+@Tag(name = "Surveillance", description = "安防设备 REST API：ONVIF 设备全生命周期管理、RTSP 流、PTZ 控制、事件订阅")
 public class SurveillanceController {
 
     private static final Logger log = LoggerFactory.getLogger(SurveillanceController.class);
@@ -91,6 +96,11 @@ public class SurveillanceController {
      * <p>
      * body 字段：id, name, vendor(HIKVISION/DAHUA/UNIVIEW), ip, port, username, password
      */
+    @Operation(summary = "注册安防设备", description = "body 字段：id, name, vendor(HIKVISION/DAHUA/UNIVIEW), ip, port, username, password")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "注册成功"),
+        @ApiResponse(responseCode = "400", description = "参数错误")
+    })
     @PostMapping("/devices")
     public ResponseEntity<Map<String, Object>> registerDevice(@RequestBody JsonNode body) {
         String id = body.path("id").asText("");
@@ -131,7 +141,8 @@ public class SurveillanceController {
         return ResponseEntity.ok(deviceView(device));
     }
 
-    /** 列出所有安防设备。 */
+    @Operation(summary = "列出所有安防设备")
+    @ApiResponse(responseCode = "200", description = "设备列表")
     @GetMapping("/devices")
     public ResponseEntity<Map<String, Object>> listDevices() {
         List<SurveillanceDevice> all = registry.listDevices();
@@ -145,7 +156,11 @@ public class SurveillanceController {
         return ResponseEntity.ok(result);
     }
 
-    /** 获取设备详情。 */
+    @Operation(summary = "获取设备详情")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "设备详情"),
+        @ApiResponse(responseCode = "404", description = "设备不存在")
+    })
     @GetMapping("/devices/{id}")
     public ResponseEntity<Map<String, Object>> getDevice(@PathVariable("id") String id) {
         SurveillanceDevice d = registry.getDevice(id);
@@ -155,7 +170,11 @@ public class SurveillanceController {
         return ResponseEntity.ok(deviceView(d));
     }
 
-    /** 注销设备。 */
+    @Operation(summary = "注销设备")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "注销成功"),
+        @ApiResponse(responseCode = "404", description = "设备不存在")
+    })
     @DeleteMapping("/devices/{id}")
     public ResponseEntity<Map<String, Object>> unregisterDevice(@PathVariable("id") String id) {
         SurveillanceDevice removed = registry.unregister(id);
@@ -169,7 +188,13 @@ public class SurveillanceController {
     // RTSP 流 / PTZ / 发现
     // ------------------------------------------------------------------
 
-    /** 获取 RTSP 流 URL。 */
+    @Operation(summary = "获取 RTSP 流 URL", description = "channel 参数指定通道号（默认 1）")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "RTSP URL"),
+        @ApiResponse(responseCode = "400", description = "通道号非法"),
+        @ApiResponse(responseCode = "404", description = "设备不存在"),
+        @ApiResponse(responseCode = "502", description = "获取流 URL 失败")
+    })
     @GetMapping("/devices/{id}/stream")
     public ResponseEntity<Map<String, Object>> getStreamUrl(@PathVariable("id") String id,
                                                             @RequestParam(value = "channel",
@@ -196,7 +221,13 @@ public class SurveillanceController {
         }
     }
 
-    /** PTZ 控制。body: {"cmd": "up"/"down"/"left"/"right"/"zoomIn"/"zoomOut"/"stop"} */
+    @Operation(summary = "PTZ 控制", description = "body: {\"cmd\": \"up\"/\"down\"/\"left\"/\"right\"/\"zoomIn\"/\"zoomOut\"/\"stop\"}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "控制成功"),
+        @ApiResponse(responseCode = "400", description = "cmd 非法"),
+        @ApiResponse(responseCode = "404", description = "设备不存在"),
+        @ApiResponse(responseCode = "502", description = "PTZ 控制失败")
+    })
     @PostMapping("/devices/{id}/ptz")
     public ResponseEntity<Map<String, Object>> ptzControl(@PathVariable("id") String id,
                                                           @RequestBody JsonNode body) {
@@ -223,7 +254,12 @@ public class SurveillanceController {
         }
     }
 
-    /** 发现子网内设备。body: {"subnet": "192.168.1.0/24"} */
+    @Operation(summary = "发现子网内设备", description = "body: {\"subnet\": \"192.168.1.0/24\"}")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "发现的设备列表"),
+        @ApiResponse(responseCode = "400", description = "subnet 缺失"),
+        @ApiResponse(responseCode = "502", description = "发现失败")
+    })
     @PostMapping("/discover")
     public ResponseEntity<Map<String, Object>> discover(@RequestBody JsonNode body) {
         String subnet = body.path("subnet").asText("");
@@ -264,6 +300,12 @@ public class SurveillanceController {
      * <p>
      * 响应：部署结果数组，每个元素包含 deviceId/ip/vendor/status/message/rtspUrl。
      */
+    @Operation(summary = "一键扫描子网并自动注册布控球设备", description = "body: subnet(必填), username, password")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "部署结果"),
+        @ApiResponse(responseCode = "400", description = "subnet 缺失"),
+        @ApiResponse(responseCode = "502", description = "部署失败")
+    })
     @PostMapping("/rapid-deploy")
     public ResponseEntity<Map<String, Object>> rapidDeploy(@RequestBody JsonNode body) {
         String subnet = body.path("subnet").asText("");
@@ -297,6 +339,12 @@ public class SurveillanceController {
      * <p>
      * 响应：发现的设备列表，status 全为 SKIPPED（仅展示）。
      */
+    @Operation(summary = "仅扫描子网发现设备（不注册）", description = "body: subnet(必填)")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "发现的设备列表"),
+        @ApiResponse(responseCode = "400", description = "subnet 缺失"),
+        @ApiResponse(responseCode = "502", description = "扫描失败")
+    })
     @PostMapping("/scan")
     public ResponseEntity<Map<String, Object>> scan(@RequestBody JsonNode body) {
         String subnet = body.path("subnet").asText("");
@@ -335,6 +383,11 @@ public class SurveillanceController {
      *   <li>当 OnvifClient 模拟事件触发时，通过 emitter 推送事件数据</li>
      * </ol>
      */
+    @Operation(summary = "订阅设备事件（SSE）", description = "每 15 秒发送心跳，事件触发时推送数据")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "SSE 流"),
+        @ApiResponse(responseCode = "404", description = "设备不存在")
+    })
     @GetMapping("/devices/{id}/events")
     public SseEmitter subscribeEvents(@PathVariable("id") String id) {
         SurveillanceDevice d = registry.getDevice(id);
@@ -398,6 +451,11 @@ public class SurveillanceController {
      * @param size 每页大小（默认 20）
      * @param deviceId 设备 ID 过滤（可选）
      */
+    @Operation(summary = "查询全局安防事件列表（分页）", description = "支持 page/size/deviceId 过滤")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "事件列表"),
+        @ApiResponse(responseCode = "400", description = "分页参数非法")
+    })
     @GetMapping("/events")
     public ResponseEntity<Map<String, Object>> listEvents(
             @RequestParam(value = "page", defaultValue = "0") int page,

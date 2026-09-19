@@ -2,6 +2,10 @@ package io.aerofleet.cloud.mission;
 
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,6 +45,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  */
 @RestController
 @RequestMapping("/api/emergency-command")
+@Tag(name = "EmergencyCommand", description = "应急指挥工作流 REST API：接报→研判→部署→执行→评估→总结全生命周期管理")
 public class EmergencyCommandController {
 
     private final EmergencyCommandWorkflow workflow;
@@ -52,7 +57,11 @@ public class EmergencyCommandController {
         this.oneClickResponse = oneClickResponse;
     }
 
-    /** 创建指挥命令（接报）。 */
+    @Operation(summary = "创建指挥命令（接报）", description = "需要 OPERATOR 角色；lat ∈ [-90,90]，lon ∈ [-180,180]")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "创建成功"),
+        @ApiResponse(responseCode = "400", description = "参数非法")
+    })
     @PostMapping
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
@@ -82,7 +91,8 @@ public class EmergencyCommandController {
         return ResponseEntity.ok(toMap(created));
     }
 
-    /** 列出指挥命令（支持阶段筛选）。 */
+    @Operation(summary = "列出指挥命令（支持阶段筛选）", description = "phase 参数可选，用于按阶段过滤")
+    @ApiResponse(responseCode = "200", description = "命令列表")
     @GetMapping
     public ResponseEntity<Map<String, Object>> list(
             @RequestParam(value = "phase", required = false) String phase) {
@@ -98,7 +108,11 @@ public class EmergencyCommandController {
         return ResponseEntity.ok(result);
     }
 
-    /** 获取命令详情。 */
+    @Operation(summary = "获取命令详情")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "命令详情"),
+        @ApiResponse(responseCode = "404", description = "命令不存在")
+    })
     @GetMapping("/{id}")
     public ResponseEntity<Map<String, Object>> get(@PathVariable("id") String id) {
         EmergencyCommand cmd = workflow.getCommand(id);
@@ -108,7 +122,11 @@ public class EmergencyCommandController {
         return ResponseEntity.ok(toMap(cmd));
     }
 
-    /** 研判。 */
+    @Operation(summary = "研判", description = "需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "研判成功"),
+        @ApiResponse(responseCode = "400", description = "命令不存在或阶段非法")
+    })
     @PostMapping("/{id}/assess")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> assess(@PathVariable("id") String id,
@@ -123,7 +141,11 @@ public class EmergencyCommandController {
         return ResponseEntity.ok(toMap(cmd));
     }
 
-    /** 部署。 */
+    @Operation(summary = "部署", description = "需要 OPERATOR 角色；estimatedDurationMin 必须 > 0")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "部署成功"),
+        @ApiResponse(responseCode = "400", description = "命令不存在或参数非法")
+    })
     @PostMapping("/{id}/deploy")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> deploy(@PathVariable("id") String id,
@@ -148,7 +170,11 @@ public class EmergencyCommandController {
         return ResponseEntity.ok(toMap(cmd));
     }
 
-    /** 开始执行。 */
+    @Operation(summary = "开始执行", description = "需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "执行已启动"),
+        @ApiResponse(responseCode = "400", description = "命令不存在或阶段非法")
+    })
     @PostMapping("/{id}/execute")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> execute(@PathVariable("id") String id,
@@ -162,7 +188,11 @@ public class EmergencyCommandController {
         return ResponseEntity.ok(toMap(cmd));
     }
 
-    /** 评估。 */
+    @Operation(summary = "评估", description = "需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "评估成功"),
+        @ApiResponse(responseCode = "400", description = "命令不存在或阶段非法")
+    })
     @PostMapping("/{id}/evaluate")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> evaluate(@PathVariable("id") String id,
@@ -177,7 +207,11 @@ public class EmergencyCommandController {
         return ResponseEntity.ok(toMap(cmd));
     }
 
-    /** 总结关闭。 */
+    @Operation(summary = "总结关闭", description = "需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "关闭成功"),
+        @ApiResponse(responseCode = "400", description = "命令不存在或阶段非法")
+    })
     @PostMapping("/{id}/close")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> close(@PathVariable("id") String id,
@@ -192,7 +226,11 @@ public class EmergencyCommandController {
         return ResponseEntity.ok(toMap(cmd));
     }
 
-    /** 一键应急响应（自动走完接报→研判→部署→执行全流程）。 */
+    @Operation(summary = "一键应急响应", description = "自动走完接报→研判→部署→执行全流程；需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "一键响应完成"),
+        @ApiResponse(responseCode = "400", description = "命令不存在")
+    })
     @PostMapping("/{id}/one-click")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> oneClick(@PathVariable("id") String id) {
@@ -203,7 +241,11 @@ public class EmergencyCommandController {
         return ResponseEntity.ok(toMap(cmd));
     }
 
-    /** 获取阶段转移历史。 */
+    @Operation(summary = "获取阶段转移历史")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "阶段历史"),
+        @ApiResponse(responseCode = "404", description = "命令不存在")
+    })
     @GetMapping("/{id}/history")
     public ResponseEntity<Map<String, Object>> history(@PathVariable("id") String id) {
         EmergencyCommand cmd = workflow.getCommand(id);

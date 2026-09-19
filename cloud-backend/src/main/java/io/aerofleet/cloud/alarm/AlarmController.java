@@ -5,6 +5,10 @@ import io.aerofleet.cloud.mission.EmergencyCommandWorkflow;
 import io.aerofleet.cloud.mission.OneClickEmergencyResponse;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,6 +63,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  */
 @RestController
 @RequestMapping("/api/alarms")
+@Tag(name = "Alarm", description = "报警联动 REST API：报警事件接收/查询/确认、联动规则 CRUD、SSE 实时推送、一键应急响应")
 public class AlarmController {
 
     private static final Logger log = LoggerFactory.getLogger(AlarmController.class);
@@ -109,6 +114,8 @@ public class AlarmController {
      * <p>
      * 接收后立即由 {@link AlarmLinkageEngine} 处理：存储 + 匹配规则 + 执行联动。
      */
+    @Operation(summary = "接收报警事件", description = "接收后立即由 AlarmLinkageEngine 处理：存储 + 匹配规则 + 执行联动")
+    @ApiResponse(responseCode = "200", description = "处理结果（匹配数、执行列表）")
     @PostMapping("/events")
     public ResponseEntity<Map<String, Object>> receiveEvent(@RequestBody Map<String, Object> body) {
         AlarmEvent event = parseEvent(body);
@@ -130,6 +137,8 @@ public class AlarmController {
      * @param severity 严重程度过滤（INFO/WARN/CRITICAL）
      * @param type     事件类型过滤（MOTION/INTRUSION/FIRE/DOOR/CUSTOM）
      */
+    @Operation(summary = "查询报警事件列表（分页/筛选）", description = "支持 page/size/severity/type 过滤")
+    @ApiResponse(responseCode = "200", description = "事件列表")
     @GetMapping("/events")
     public ResponseEntity<Map<String, Object>> queryEvents(
             @RequestParam(value = "page", defaultValue = "0") int page,
@@ -146,7 +155,11 @@ public class AlarmController {
         return ResponseEntity.ok(resp);
     }
 
-    /** 获取报警事件详情。 */
+    @Operation(summary = "获取报警事件详情")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "事件详情"),
+        @ApiResponse(responseCode = "404", description = "事件不存在")
+    })
     @GetMapping("/events/{id}")
     public ResponseEntity<Map<String, Object>> getEvent(@PathVariable("id") String id) {
         AlarmEvent event = store.getById(id);
@@ -156,7 +169,11 @@ public class AlarmController {
         return ResponseEntity.ok(eventToMap(event));
     }
 
-    /** 确认报警。 */
+    @Operation(summary = "确认报警", description = "需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "确认成功"),
+        @ApiResponse(responseCode = "404", description = "事件不存在")
+    })
     @PostMapping("/events/{id}/ack")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> acknowledge(@PathVariable("id") String id) {
@@ -182,6 +199,11 @@ public class AlarmController {
      * <p>
      * 循环调用 {@link AlarmEventStore#acknowledge}，返回成功确认的数量。
      */
+    @Operation(summary = "批量确认报警", description = "body: {\"eventIds\": [\"id1\", \"id2\", ...]}；需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "批量确认结果"),
+        @ApiResponse(responseCode = "400", description = "eventIds 缺失或格式错误")
+    })
     @PostMapping("/events/ack-batch")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> acknowledgeBatch(@RequestBody Map<String, Object> body) {
@@ -225,6 +247,11 @@ public class AlarmController {
      * <p>
      * 返回: {@code {"commandId", "status", "message"}}
      */
+    @Operation(summary = "一键应急响应", description = "从报警事件触发无人机侦察任务；需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "应急命令已创建并启动"),
+        @ApiResponse(responseCode = "404", description = "报警事件不存在")
+    })
     @PostMapping("/events/{id}/respond")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> triggerEmergencyResponse(@PathVariable("id") String id) {
@@ -273,6 +300,8 @@ public class AlarmController {
      *   <li>每 15 秒发送一次 SSE 心跳注释，保持连接</li>
      * </ol>
      */
+    @Operation(summary = "报警事件 SSE 实时推送", description = "每 2 秒轮询新事件推送，每 15 秒发送心跳")
+    @ApiResponse(responseCode = "200", description = "SSE 流")
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamEvents() {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
@@ -333,6 +362,8 @@ public class AlarmController {
      *
      * @param limit 最多返回条数（默认 100）
      */
+    @Operation(summary = "查询联动执行日志", description = "返回最近 N 条联动执行记录")
+    @ApiResponse(responseCode = "200", description = "联动日志列表")
     @GetMapping("/linkage-logs")
     public ResponseEntity<Map<String, Object>> listLinkageLogs(
             @RequestParam(value = "limit", defaultValue = "100") int limit) {
@@ -357,7 +388,8 @@ public class AlarmController {
     // 联动规则端点
     // =====================================================================
 
-    /** 列出联动规则。 */
+    @Operation(summary = "列出联动规则")
+    @ApiResponse(responseCode = "200", description = "规则列表")
     @GetMapping("/rules")
     public ResponseEntity<Map<String, Object>> listRules() {
         List<AlarmLinkageRule> rules = engine.getAllRules();
@@ -367,7 +399,11 @@ public class AlarmController {
         return ResponseEntity.ok(resp);
     }
 
-    /** 创建联动规则。 */
+    @Operation(summary = "创建联动规则", description = "需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "创建成功"),
+        @ApiResponse(responseCode = "400", description = "规则参数非法")
+    })
     @PostMapping("/rules")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> createRule(@RequestBody Map<String, Object> body) {
@@ -379,7 +415,12 @@ public class AlarmController {
         return ResponseEntity.ok(resp);
     }
 
-    /** 更新联动规则。 */
+    @Operation(summary = "更新联动规则", description = "需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "更新成功"),
+        @ApiResponse(responseCode = "404", description = "规则不存在"),
+        @ApiResponse(responseCode = "400", description = "规则参数非法")
+    })
     @PutMapping("/rules/{id}")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> updateRule(@PathVariable("id") String id,
@@ -396,7 +437,11 @@ public class AlarmController {
         return ResponseEntity.ok(resp);
     }
 
-    /** 删除联动规则。 */
+    @Operation(summary = "删除联动规则", description = "需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "删除成功"),
+        @ApiResponse(responseCode = "404", description = "规则不存在")
+    })
     @DeleteMapping("/rules/{id}")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> deleteRule(@PathVariable("id") String id) {
@@ -416,6 +461,11 @@ public class AlarmController {
      * 构造一个模拟报警事件（CRITICAL 严重程度 + 规则匹配的设备 ID），
      * 调用引擎处理，返回匹配结果。用于规则配置后的验证。
      */
+    @Operation(summary = "测试联动规则（模拟触发）", description = "构造模拟报警事件验证规则匹配；需要 OPERATOR 角色")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "测试结果"),
+        @ApiResponse(responseCode = "404", description = "规则不存在")
+    })
     @PostMapping("/rules/{id}/test")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> testRule(@PathVariable("id") String id,
