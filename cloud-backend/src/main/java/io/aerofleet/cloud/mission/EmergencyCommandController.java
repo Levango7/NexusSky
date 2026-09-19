@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
@@ -62,6 +63,13 @@ public class EmergencyCommandController {
         double lat = numDouble(body, "lat", 0);
         double lon = numDouble(body, "lon", 0);
         double alt = numDouble(body, "alt", 0);
+        // 地理坐标范围校验：lat ∈ [-90,90]，lon ∈ [-180,180]
+        if (lat < -90 || lat > 90) {
+            throw new BadRequestException("lat must be in [-90, 90], got: " + lat);
+        }
+        if (lon < -180 || lon > 180) {
+            throw new BadRequestException("lon must be in [-180, 180], got: " + lon);
+        }
         String description = str(body, "description", "");
         String reporterName = str(body, "reporterName", "");
         String reporterContact = str(body, "reporterContact", "");
@@ -123,6 +131,10 @@ public class EmergencyCommandController {
         String planName = str(body, "planName", "auto-plan");
         String strategy = str(body, "strategy", "default");
         int duration = numInt(body, "estimatedDurationMin", 60);
+        // 预计时长必须为正数
+        if (duration <= 0) {
+            throw new BadRequestException("estimatedDurationMin must be > 0, got: " + duration);
+        }
         String relay = str(body, "communicationRelay", "mesh");
         String operator = str(body, "operator", "system");
 
@@ -266,7 +278,7 @@ public class EmergencyCommandController {
             return null;
         }
         try {
-            return EmergencyCommandPhase.valueOf(s.trim().toUpperCase());
+            return EmergencyCommandPhase.valueOf(s.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new BadRequestException("invalid phase: " + s);
         }

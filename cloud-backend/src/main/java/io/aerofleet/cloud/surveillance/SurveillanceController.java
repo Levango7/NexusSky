@@ -18,6 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -105,7 +106,7 @@ public class SurveillanceController {
         }
         SurveillanceDevice.Vendor vendor;
         try {
-            vendor = SurveillanceDevice.Vendor.valueOf(vendorStr.toUpperCase());
+            vendor = SurveillanceDevice.Vendor.valueOf(vendorStr.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             return badRequest("unknown vendor: " + vendorStr
                     + ", supported: HIKVISION/DAHUA/UNIVIEW");

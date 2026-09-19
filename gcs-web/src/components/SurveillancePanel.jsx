@@ -286,8 +286,12 @@ export default function SurveillancePanel() {
         const list = Array.isArray(data) ? data : (data && data.devices) || []
         setDevices(list)
         setDevicesLoading(false)
-        // 默认选中第一个在线设备
-        if (list.length > 0 && !list.some((d) => d.id === selectedDeviceId)) {
+        // 设备列表为空时清空选中，避免 selectedDeviceId 指向已不存在的设备
+        // 导致后续 PTZ / 流请求失败
+        if (list.length === 0) {
+          if (selectedDeviceId !== null) setSelectedDeviceId(null)
+        } else if (!list.some((d) => d.id === selectedDeviceId)) {
+          // 默认选中第一个在线设备
           setSelectedDeviceId(list[0].id)
         }
       } catch (e) {

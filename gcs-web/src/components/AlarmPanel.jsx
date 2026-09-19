@@ -61,6 +61,25 @@ const ACTION_TYPES = [
   { key: 'RECORD_VIDEO', label: '录制视频' },
 ]
 
+// 事件去重 key：优先 id，其次 eventId+ts，再次 description+type+source+severity 复合键
+// 修复 Minor 6：原 key 为 e.id || (e.eventId||'') + '|' + (e.ts||e.timestamp||'')
+// 若多个事件均无 id/eventId/ts，key 退化为 '|'，导致后续事件被误去重
+function eventDedupKey(e) {
+  if (e.id) return e.id
+  const eventId = e.eventId || ''
+  const ts = e.ts != null ? e.ts : (e.timestamp != null ? e.timestamp : '')
+  if (eventId || ts) return eventId + '|' + ts
+  // 复合键：尽量区分不同事件
+  const desc = e.description || e.message || e.title || ''
+  const type = e.type || e.alarmType || ''
+  const source = e.source || e.sourceType || ''
+  const sev = e.severity || ''
+  const composite = desc + '|' + type + '|' + source + '|' + sev
+  // 若复合键也全空，返回 null 表示完全退化
+  if (composite === '|||') return null
+  return 'cmp:' + composite
+}
+
 export default function AlarmPanel() {
   // ---- 状态 ----
   const [events, setEvents] = useState([])               // 报警事件列表
@@ -80,6 +99,8 @@ export default function AlarmPanel() {
   // 事件列表引用（供 SSE 回调读取最新值做去重）
   const eventsRef = useRef([])
   eventsRef.current = events
+  // 退化事件去重计数器：无任何可识别字段时分配唯一 key，避免误去重
+  const dedupCounterRef = useRef(0)
 
   // ---- SSE 实时订阅报警事件 ----
   // 经验：在订阅函数体第一行插入前置检查（signal.aborted），创建 EventSource 之前
@@ -111,14 +132,24 @@ export default function AlarmPanel() {
         }
         // 兼容单事件 / 批量事件
         const incoming = Array.isArray(data) ? data : [data]
+        // 预计算去重 key：退化事件（无任何可识别字段）用递增计数器兜底
+        const incomingKeys = incoming.map((e) => {
+          const key = eventDedupKey(e)
+          return key === null ? '__dedup_' + (dedupCounterRef.current++) : key
+        })
         setEvents((prev) => {
-          const seen = new Set(prev.map((e) => e.id || (e.eventId || '') + '|' + (e.ts || e.timestamp || '')))
-          const fresh = incoming.filter((e) => {
-            const key = e.id || (e.eventId || '') + '|' + (e.ts || e.timestamp || '')
-            if (seen.has(key)) return false
+          const seen = new Set()
+          for (const e of prev) {
+            const key = eventDedupKey(e)
+            if (key !== null) seen.add(key)
+          }
+          const fresh = []
+          for (let i = 0; i < incoming.length; i++) {
+            const key = incomingKeys[i]
+            if (seen.has(key)) continue
             seen.add(key)
-            return true
-          })
+            fresh.push(incoming[i])
+          }
           return [...fresh, ...prev].slice(0, 200)
         })
       }

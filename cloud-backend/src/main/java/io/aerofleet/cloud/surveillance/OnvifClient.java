@@ -4,6 +4,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -121,7 +123,11 @@ public class OnvifClient {
         }
         log.info("GetStreamUri {}:{} channel={} (simulated)", ip, port, channel);
         // 模拟实现：rtsp://user:pass@ip:554/Streaming/Channels/channel
-        return String.format("rtsp://%s:%s@%s:554/Streaming/Channels/%d", user, pass, ip, channel);
+        // 凭据需 URL 编码，避免密码含 @ : / # ? 等特殊字符破坏 URL 结构
+        String encodedUser = URLEncoder.encode(user, StandardCharsets.UTF_8);
+        String encodedPass = URLEncoder.encode(pass, StandardCharsets.UTF_8);
+        return String.format("rtsp://%s:%s@%s:554/Streaming/Channels/%d",
+                encodedUser, encodedPass, ip, channel);
     }
 
     /**

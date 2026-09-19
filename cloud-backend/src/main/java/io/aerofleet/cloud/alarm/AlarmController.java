@@ -24,6 +24,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -499,11 +500,14 @@ public class AlarmController {
         String actionStr = str(body, "actionType", "DEPLOY_DRONE");
         AlarmLinkageRule.ActionType actionType;
         try {
-            actionType = AlarmLinkageRule.ActionType.valueOf(actionStr.toUpperCase());
+            actionType = AlarmLinkageRule.ActionType.valueOf(actionStr.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new BadRequestException("invalid actionType: " + actionStr);
         }
         int droneCount = (int) num(body, "droneCount", 1);
+        if (droneCount < 1) {
+            throw new BadRequestException("droneCount must be >= 1");
+        }
         double targetLat = body.containsKey("targetLat") ? num(body, "targetLat", 0) : Double.NaN;
         double targetLon = body.containsKey("targetLon") ? num(body, "targetLon", 0) : Double.NaN;
         double targetRadiusM = num(body, "targetRadiusM", 500);

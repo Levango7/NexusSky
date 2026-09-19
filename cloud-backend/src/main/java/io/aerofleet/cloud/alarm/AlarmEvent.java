@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.alarm;
 
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -56,7 +57,7 @@ public class AlarmEvent {
                 return INFO;
             }
             try {
-                return Severity.valueOf(s.toUpperCase());
+                return Severity.valueOf(s.toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException e) {
                 return INFO;
             }
@@ -141,7 +142,7 @@ public class AlarmEvent {
             return EventType.CUSTOM;
         }
         try {
-            return EventType.valueOf(s.toUpperCase());
+            return EventType.valueOf(s.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             return EventType.CUSTOM;
         }
