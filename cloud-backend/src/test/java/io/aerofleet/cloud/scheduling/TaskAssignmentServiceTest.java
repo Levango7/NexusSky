@@ -168,18 +168,27 @@ class TaskAssignmentServiceTest {
     }
 
     @Test
-    @DisplayName("reassignAll 清空所有分配")
-    void reassignAllClearsAssignments() {
-        DroneSnapshot d = new DroneSnapshot(1);
-        d.battery = 80;
+    @DisplayName("reassignAll 仅重分配待执行任务并保留执行中任务")
+    void reassignAllPreservesRunningAssignments() {
+        DroneSnapshot d = onlineDrone(1, 80);
         registry.add(d);
-        service.assignTask(new TaskRequest("t-1", "SURVEY", 5, 30.0, 120.0, 100.0));
-        service.assignTask(new TaskRequest("t-2", "SURVEY", 5, 30.0, 120.0, 100.0));
-        assertThat(service.getAllAssignments()).hasSize(2);
+        TaskRequest running = new TaskRequest("t-1", "SURVEY", 5, 30.0, 120.0, 100.0);
+        AssignmentResult runningAssignment = service.assignTask(running);
+        assertThat(service.pollNextTask()).isSameAs(running);
+        TaskRequest pending = new TaskRequest("t-2", "SURVEY", 5, 30.0, 120.0, 100.0);
+        service.assignTask(pending);
 
+        // 原无人机离线后，只有仍在队列中的任务应转移到新无人机。
+        d.online = false;
+        registry.add(onlineDrone(2, 90));
         service.reassignAll();
 
-        assertThat(service.getAllAssignments()).isEmpty();
+        assertThat(service.getAllAssignments()).hasSize(2);
+        assertThat(service.getAllAssignments().get("t-1")).isSameAs(runningAssignment);
+        assertThat(service.getAllAssignments().get("t-1").getAssignedSysid()).isEqualTo(1);
+        assertThat(service.getAllAssignments().get("t-2").getAssignedSysid()).isEqualTo(2);
+        assertThat(service.pollNextTask()).isSameAs(pending);
+        assertThat(service.pollNextTask()).isNull();
     }
 
     @Test
@@ -187,6 +196,33 @@ class TaskAssignmentServiceTest {
     void reassignAllOnEmptyDoesNotThrow() {
         service.reassignAll();
         assertThat(service.getAllAssignments()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("reassignAll 无在线无人机时任务放回队列不丢失")
+    void reassignAllNoOnlineDroneRequeuesTasks() {
+        // 先有一台在线无人机，分配任务并消费队列
+        DroneSnapshot d = onlineDrone(1, 80);
+        registry.add(d);
+        TaskRequest pending = new TaskRequest("t-1", "SURVEY", 5, 30.0, 120.0, 100.0);
+        service.assignTask(pending);
+        assertThat(service.pollNextTask()).isSameAs(pending);
+
+        // 再添加一个待执行任务（留在队列中）
+        TaskRequest pending2 = new TaskRequest("t-2", "SURVEY", 3, 31.0, 121.0, 100.0);
+        service.assignTask(pending2);
+        assertThat(service.getAllAssignments()).hasSize(2);
+
+        // 所有无人机离线后触发重分配
+        d.online = false;
+        service.reassignAll();
+
+        // 任务应放回队列，不丢失
+        TaskRequest polled = service.pollNextTask();
+        assertThat(polled).isNotNull();
+        assertThat(polled.getTaskId()).isEqualTo("t-2");
+        // 队列中不应还有额外任务（t-1 已被消费，不在队列中）
+        assertThat(service.pollNextTask()).isNull();
     }
 
     // ==================== GA 批量分配测试（M10 调度算法优化）====================

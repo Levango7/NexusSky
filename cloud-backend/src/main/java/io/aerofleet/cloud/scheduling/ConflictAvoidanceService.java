@@ -63,7 +63,7 @@ public class ConflictAvoidanceService {
         boolean vConflict = vDist < MIN_VERTICAL_SEP;
 
         if (hConflict && vConflict) {
-            double timeToConflict = estimateTimeToConflict(hDist, v1, v2);
+            double timeToConflict = estimateTimeToConflict(hDist, v1, v2, heading1, heading2);
             log.warn("Conflict detected: hDist={}m vDist={}m timeToConflict={}s", hDist, vDist, timeToConflict);
             return new ConflictResult(true, hDist, vDist, timeToConflict, "COLLISION");
         }
@@ -113,7 +113,9 @@ public class ConflictAvoidanceService {
         double stepMeters = velocity; // 1s * velocity(m/s)
         // 经纬度每米对应的度数（近似，使用当前纬度修正经度收敛）
         double latPerMeter = 1.0 / EARTH_RADIUS_M * 180.0 / Math.PI;
-        double lonPerMeter = 1.0 / (EARTH_RADIUS_M * Math.cos(Math.toRadians(lat))) * 180.0 / Math.PI;
+        // 高纬度保护：cos(lat)→0 时避免除零/数值爆炸，下限 0.01 对应约 89.4° 纬度
+        double cosLat = Math.max(0.01, Math.cos(Math.toRadians(lat)));
+        double lonPerMeter = 1.0 / (EARTH_RADIUS_M * cosLat) * 180.0 / Math.PI;
         // 北向/东向分量
         double northComponent = stepMeters * Math.cos(headingRad);
         double eastComponent = stepMeters * Math.sin(headingRad);
@@ -266,14 +268,42 @@ public class ConflictAvoidanceService {
 
     /**
      * 冲突解决机动：根据策略生成具体机动建议。
+     * <p>
+     * 注意：{@link ConflictResult} 不携带冲突双方 sysid（设计上仅描述冲突几何特征），
+     * 因此本重载无法获知真实冲突双方，使用占位 sysid 0/1 仅为满足接口契约。
+     * <ul>
+     *   <li>调用方若持有 {@link DroneTrajectory}（含 sysid），应改用
+     *       {@link #resolveConflict(DroneTrajectory, DroneTrajectory, ConflictResult, ResolutionStrategy)}
+     *       或 {@link #resolveConflict(int, int, ConflictResult, ResolutionStrategy)} 传入真实 sysid。</li>
+     *   <li>若确无 sysid 信息（如仅基于裸几何参数检测），本重载返回的占位结果仅可用于策略预览，
+     *       不可直接下发执行。</li>
+     * </ul>
      *
-     * @param conflict  冲突结果（需含冲突双方信息）
+     * @param conflict  冲突结果（仅含几何特征，不含 sysid）
      * @param strategy  解决策略
-     * @return 机动建议
+     * @return 机动建议（sysid 为占位 0/1）
      */
     public ResolutionAdvice resolveConflict(ConflictResult conflict, ResolutionStrategy strategy) {
-        // ConflictResult 不携带 sysid，这里用占位 0/1；调用方可通过 DroneTrajectory.sysid 关联
+        // ConflictResult 不携带 sysid，占位 0/1 仅为满足接口契约。
+        // 调用方应优先使用带 sysid 的重载，或通过 DroneTrajectory 重载关联真实 sysid。
         return resolveConflict(0, 1, conflict, strategy);
+    }
+
+    /**
+     * 冲突解决机动（带 DroneTrajectory 重载）：从航迹中提取真实 sysid 后委托给带 sysid 的重载。
+     * <p>
+     * 适用于通过 {@link #checkAllConflicts} 或 {@link #checkConflict4D} 检测冲突后，
+     * 调用方持有冲突双方 {@link DroneTrajectory} 的场景。
+     *
+     * @param traj1    第一架无人机航迹（提供 sysid）
+     * @param traj2    第二架无人机航迹（提供 sysid）
+     * @param conflict 冲突结果
+     * @param strategy 解决策略
+     * @return 机动建议（携带真实 sysid）
+     */
+    public ResolutionAdvice resolveConflict(DroneTrajectory traj1, DroneTrajectory traj2,
+                                            ConflictResult conflict, ResolutionStrategy strategy) {
+        return resolveConflict(traj1.sysid, traj2.sysid, conflict, strategy);
     }
 
     /**
@@ -346,6 +376,8 @@ public class ConflictAvoidanceService {
             throw new IllegalArgumentException("radius must be non-negative");
         }
         synchronized (reservationTable) {
+            // 顺带清理已过期的预约（endTime < 新预约 startTime），避免预约表只增不减
+            purgeExpiredReservationsInternal(startTime);
             if (checkReservationConflict(sysid, lat, lon, alt, startTime, endTime, radius)) {
                 log.warn("Reservation rejected for sysid {}: conflict with existing reservation", sysid);
                 return false;
@@ -413,6 +445,28 @@ public class ConflictAvoidanceService {
         return vDist < MIN_VERTICAL_SEP;
     }
 
+    /**
+     * 清理过期的 4D 预约（endTime &lt; currentTime），避免预约表只增不减导致内存泄漏。
+     * <p>
+     * 可由外部 ScheduledExecutorService 定期调用，或在 {@link #reserveAirspace} 时顺带触发。
+     *
+     * @param currentTime 当前时间(s)，endTime 早于此值的预约将被清理
+     */
+    public void purgeExpiredReservations(double currentTime) {
+        synchronized (reservationTable) {
+            purgeExpiredReservationsInternal(currentTime);
+        }
+    }
+
+    /** 内部清理实现（调用方需已持有 reservationTable 监视器锁）。 */
+    private void purgeExpiredReservationsInternal(double currentTime) {
+        for (List<Reservation4D> reservations : reservationTable.values()) {
+            reservations.removeIf(r -> r.endTime < currentTime);
+        }
+        // 清理空列表对应的 sysid 条目
+        reservationTable.entrySet().removeIf(e -> e.getValue().isEmpty());
+    }
+
     /** 清空所有预约（测试辅助） */
     public void clearReservations() {
         reservationTable.clear();
@@ -435,8 +489,16 @@ public class ConflictAvoidanceService {
         return RE * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    private double estimateTimeToConflict(double dist, double v1, double v2) {
-        double closingRate = (v1 + v2) / 2;
+    private double estimateTimeToConflict(double dist, double v1, double v2, double heading1, double heading2) {
+        // 航向差归一化到 [0, 180]
+        double headingDiff = Math.abs(heading1 - heading2);
+        headingDiff = Math.min(headingDiff, 360.0 - headingDiff);
+        // 航向差因子：(1 - cos(headingDiff)) / 2 ∈ [0, 1]
+        // 同向(0°)：因子=0，接近率=0（同向飞行不接近）
+        // 反向(180°)：因子=1，接近率=(v1+v2)/2（对头接近最快）
+        // 垂直(90°)：因子=0.5，接近率=(v1+v2)/4
+        double headingFactor = (1.0 - Math.cos(Math.toRadians(headingDiff))) / 2.0;
+        double closingRate = (v1 + v2) / 2.0 * headingFactor;
         return closingRate > 0 ? dist / closingRate : Double.MAX_VALUE;
     }
 

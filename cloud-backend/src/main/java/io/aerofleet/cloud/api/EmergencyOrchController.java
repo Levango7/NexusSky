@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -13,27 +15,29 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
+
 /**
  * 应急任务编排 REST 端点（M9 应急任务编排，FR-30）。
  * <p>
- * 独立路径前缀 /api/emergency/*，既有端点不受影响（DFX 4.5）。
+ * 独立路径前缀 /api/v1/emergency/*，既有端点不受影响（DFX 4.5）。
  * <p>
  * 端点清单：
  * <pre>
- * POST /api/emergency/orch/start                 启动编排计划
- * POST /api/emergency/orch/{planId}/abort        中止编排计划
- * GET  /api/emergency/orch/{planId}              查询计划状态
- * GET  /api/emergency/orch/{planId}/progress     查询阶段进度
- * GET  /api/emergency/orch/{planId}/coverage     查询覆盖信息
- * POST /api/emergency/orch/{planId}/replan       重规划
- * POST /api/emergency/orch/{planId}/priority     调整任务优先级
- * GET  /api/emergency/orch/{planId}/priority/queue  查询优先级队列
- * GET  /api/emergency/scenarios                  查询场景预设列表
- * POST /api/emergency/scenarios/{type}/start     加载预设并启动
+ * POST /api/v1/emergency/orch/start                 启动编排计划（自定义参数）
+ * POST /api/v1/emergency/orch/{planId}/abort        中止编排计划
+ * GET  /api/v1/emergency/orch/{planId}              查询计划状态
+ * GET  /api/v1/emergency/orch/{planId}/progress     查询阶段进度
+ * GET  /api/v1/emergency/orch/{planId}/coverage     查询覆盖信息
+ * POST /api/v1/emergency/orch/{planId}/replan       重规划
+ * POST /api/v1/emergency/orch/{planId}/priority     调整任务优先级
+ * GET  /api/v1/emergency/orch/{planId}/priority/queue  查询优先级队列
+ * GET  /api/v1/emergency/scenarios                  查询场景预设列表
+ * POST /api/v1/emergency/scenarios/{type}/start     加载预设并启动（用预设默认值填充缺失参数）
  * </pre>
  */
 @RestController
-@RequestMapping("/api/emergency")
+@RequestMapping("/api/v1/emergency")
 public class EmergencyOrchController {
 
     private final EmergencyOrchService service;
@@ -42,8 +46,15 @@ public class EmergencyOrchController {
         this.service = service;
     }
 
-    /** 启动编排计划。 */
+    /**
+     * 启动编排计划（自定义参数模式）。
+     * <p>
+     * 调用方需提供全部参数（scenarioType/centerLat/centerLon/radius/droneIds），
+     * 适用于非预设场景的自定义编排。若需基于预设场景启动，请使用
+     * {@link #startScenario(int, Map)}（自动填充预设默认值）。
+     */
     @PostMapping("/orch/start")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> start(@RequestBody Map<String, Object> body) {
         int scenarioType = numInt(body, "scenarioType", 3);
         int centerLat = numInt(body, "centerLat", 0);
@@ -60,6 +71,7 @@ public class EmergencyOrchController {
 
     /** 中止编排计划。 */
     @PostMapping("/orch/{planId}/abort")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> abort(@PathVariable("planId") long planId) {
         boolean ok = service.abort(planId);
         if (!ok) {
@@ -108,6 +120,7 @@ public class EmergencyOrchController {
 
     /** 重规划。 */
     @PostMapping("/orch/{planId}/replan")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> replan(@PathVariable("planId") long planId,
                                                       @RequestBody Map<String, Object> body) {
         String reason = str(body, "reason", "");
@@ -124,6 +137,7 @@ public class EmergencyOrchController {
 
     /** 调整任务优先级。 */
     @PostMapping("/orch/{planId}/priority")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> adjustPriority(@PathVariable("planId") long planId,
                                                               @RequestBody Map<String, Object> body) {
         long taskId = numLong(body, "taskId", 0);
@@ -157,8 +171,15 @@ public class EmergencyOrchController {
         return ResponseEntity.ok(result);
     }
 
-    /** 加载预设并启动。 */
+    /**
+     * 加载预设场景并启动（预设参数模式）。
+     * <p>
+     * 根据 type 查找预设场景，用预设默认值填充缺失的 radius/droneIds 参数，
+     * 然后委托 {@link #start(Map)} 启动。与 start 的区别：start 要求调用方
+     * 提供全部参数，startScenario 自动填充预设默认值，简化常见场景的调用。
+     */
     @PostMapping("/scenarios/{type}/start")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> startScenario(@PathVariable("type") int type,
                                                              @RequestBody Map<String, Object> body) {
         int centerLat = numInt(body, "centerLat", 0);
@@ -180,7 +201,12 @@ public class EmergencyOrchController {
     // 请求解析辅助
     // =====================================================================
 
-    /** 从 body 提取 int 值，缺失返回默认值。 */
+    /**
+     * 从 body 提取 int 值，缺失返回默认值。
+     * <p>
+     * 数值格式异常时抛出 {@link BadRequestException}（400），而非让
+     * Spring 兜底返回 500。
+     */
     private static int numInt(Map<String, Object> body, String key, int def) {
         Object v = body.get(key);
         if (v == null) {
@@ -189,10 +215,19 @@ public class EmergencyOrchController {
         if (v instanceof Number) {
             return ((Number) v).intValue();
         }
-        return Integer.parseInt(v.toString());
+        try {
+            return Integer.parseInt(v.toString());
+        } catch (NumberFormatException e) {
+            throw new BadRequestException("field '" + key + "' is not a valid integer: " + v);
+        }
     }
 
-    /** 从 body 提取 long 值。 */
+    /**
+     * 从 body 提取 long 值。
+     * <p>
+     * 数值格式异常时抛出 {@link BadRequestException}（400），而非让
+     * Spring 兜底返回 500。
+     */
     private static long numLong(Map<String, Object> body, String key, long def) {
         Object v = body.get(key);
         if (v == null) {
@@ -201,7 +236,11 @@ public class EmergencyOrchController {
         if (v instanceof Number) {
             return ((Number) v).longValue();
         }
-        return Long.parseLong(v.toString());
+        try {
+            return Long.parseLong(v.toString());
+        } catch (NumberFormatException e) {
+            throw new BadRequestException("field '" + key + "' is not a valid long: " + v);
+        }
     }
 
     /** 从 body 提取 String 值。 */

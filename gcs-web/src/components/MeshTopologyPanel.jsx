@@ -46,7 +46,14 @@ export default function MeshTopologyPanel({ meshTopology, onSelectNode, onSelect
   const [nodeNeighbors, setNodeNeighbors] = useState(null)
   const [nodeRoutes, setNodeRoutes] = useState(null)
   const [pollErr, setPollErr] = useState(null)
+  const [now, setNow] = useState(Date.now())
   const timerRef = useRef(null)
+
+  // 定时更新 now 用于 isOffline 判断（避免渲染中调用 Date.now()）
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
 
   // 初始加载 + 周期刷新拓扑
   const refreshTopology = useCallback(async () => {
@@ -187,7 +194,7 @@ export default function MeshTopologyPanel({ meshTopology, onSelectNode, onSelect
               if (!pos) return null
               const isSelected = selectedNode === node.sysid
               const isOffline = node.lastUpdateMs
-                && Date.now() - node.lastUpdateMs > 6000
+                && now - node.lastUpdateMs > 6000
               return (
                 <g
                   key={`node-${node.sysid}`}

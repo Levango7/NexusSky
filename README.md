@@ -317,10 +317,11 @@ ARM → startMission → 逐站拍照 → 逐站逆解算定位 → 喂跟踪器
 - 每台无人机独立命名空间；e2e 中环绕 4 站对同一静态目标连续命中
   形成 hits=4 单航迹，交叉目标不串扰。
 
-## 能力扩展（M0a–M9）
+## 能力扩展（M0a–M9、4a）
 
-十一个里程碑在骨架之上叠加了组网、环境、编队、喷洒、成像、硬件抽象与灾害应急通讯组网能力，
-均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按 420–467 段连续分配。
+十二个里程碑在骨架之上叠加了组网、环境、编队、喷洒、成像、硬件抽象、灾害应急通讯组网
+与空地一体化应急指挥能力，均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按
+420–467、477–479 段分配。
 
 ### M0a — Mesh 组网落地
 
@@ -404,9 +405,29 @@ TerrainUpdate/FlightRestriction），REST `/api/v1/terrain/*`，
 （`PriorityScheduler`）四级抢占式调度（搜救>指挥>测绘>常规），场景预设
 （`ScenarioPresetFactory`）支持地震/泥石流/火灾一键启动。MAVLink 消息 465–467
 （EmergencyMissionPlan/CoverageOptimization/EmergencyPriority），
-REST `/api/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进度。
+REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进度。
 
-### MAVLink 消息 ID 分配（420–467 段）
+### 4a — 空地一体化应急指挥
+
+在 M9 应急编排之上接入安防硬件与报警联动，形成"空（无人机）地（安防设备）一体"
+应急指挥闭环。
+
+**ONVIF 安防设备接入**（`surveillance` 包）：兼容海康威视/大华/宇视三大安防硬件
+供应商协议，支持设备发现、RTSP 视频流拉取、PTZ 云台控制、事件订阅。
+
+**报警联动编排引擎**（`alarm` 包）：报警事件接收 → 联动规则匹配 → 自动触发
+无人机侦察任务（起飞 → 飞往报警位置 → 盘旋侦察 → 实时回传 → 返航）。
+
+**GCS 视频融合面板**：`SurveillancePanel`（设备列表/多画面分屏/PTZ 控制）+
+`AlarmPanel`（SSE 实时报警/联动规则管理/一键应急响应）。
+
+**MAVLink 报警消息**：`AlarmTriggerMsg`(477)/`AlarmAckMsg`(478)/
+`SurveillanceStatusMsg`(479)。
+
+**应急指挥工作流**：六阶段（接报 → 研判 → 部署 → 执行 → 评估 → 总结），
+一键应急响应自动走完全流程。
+
+### MAVLink 消息 ID 分配（420–467、477–479 段）
 
 | 范围 | 里程碑 | 消息 |
 |---|---|---|
@@ -420,6 +441,7 @@ REST `/api/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进度�
 | 459–461 | M7 | SatLinkStatus, SatPassSchedule, HierarchicalRouteDecision |
 | 462–464 | M8 | TerrainTypeMap, TerrainUpdate, FlightRestriction |
 | 465–467 | M9 | EmergencyMissionPlan, CoverageOptimization, EmergencyPriority |
+| 477–479 | 4a | AlarmTriggerMsg, AlarmAckMsg, SurveillanceStatusMsg |
 
 ## 飞行日志（flightlog，JSONL 落盘）
 

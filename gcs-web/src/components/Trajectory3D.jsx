@@ -51,6 +51,9 @@ export default function Trajectory3D({
 
   useEffect(() => {
     let renderer, scene, camera, animationId, disposed = false
+    // 提升事件监听器 / ResizeObserver 引用到 useEffect 顶层，以便 cleanup 能访问。
+    // 经验来源：2026-09-16-react-side-effect-cleanup-timeout-ref-callback-leak
+    let dom, onDown, onMove, onUp, onWheel, ro
     const cam = { theta: Math.PI / 3, phi: Math.PI / 2.5, radius: 120, target: { x: 0, y: 8, z: 0 } }
 
     function applyCam() {
@@ -108,10 +111,10 @@ export default function Trajectory3D({
         playheadRef.current = { mesh: playMesh }
 
         // 相机控制（简版：左键旋转 / 滚轮缩放）
-        const dom = renderer.domElement
+        dom = renderer.domElement
         let dragging = false, lastX = 0, lastY = 0
-        const onDown = (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY }
-        const onMove = (e) => {
+        onDown = (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY }
+        onMove = (e) => {
           if (!dragging) return
           cam.theta -= (e.clientX - lastX) * 0.005
           cam.phi -= (e.clientY - lastY) * 0.005
@@ -119,8 +122,8 @@ export default function Trajectory3D({
           lastX = e.clientX; lastY = e.clientY
           applyCam()
         }
-        const onUp = () => { dragging = false }
-        const onWheel = (e) => {
+        onUp = () => { dragging = false }
+        onWheel = (e) => {
           e.preventDefault()
           cam.radius *= 1 + e.deltaY * 0.001
           cam.radius = Math.max(8, Math.min(500, cam.radius))
@@ -139,7 +142,7 @@ export default function Trajectory3D({
           camera.updateProjectionMatrix()
           renderer.setSize(nw, nh)
         }
-        const ro = new ResizeObserver(onResize)
+        ro = new ResizeObserver(onResize)
         ro.observe(el)
 
         const animate = () => {
@@ -159,6 +162,16 @@ export default function Trajectory3D({
     return () => {
       disposed = true
       if (animationId) cancelAnimationFrame(animationId)
+      // 清理事件监听器（防止组件卸载后仍持有 DOM/window 引用）
+      if (dom) {
+        dom.removeEventListener('mousedown', onDown)
+        dom.removeEventListener('wheel', onWheel)
+      }
+      if (onMove) window.removeEventListener('mousemove', onMove)
+      if (onUp) window.removeEventListener('mouseup', onUp)
+      // 清理 ResizeObserver
+      if (ro) ro.disconnect()
+      // 清理 renderer
       if (renderer) {
         renderer.dispose()
         if (renderer.domElement && renderer.domElement.parentNode) {

@@ -8,9 +8,12 @@ import io.aerofleet.cloud.api.SatLinkMonitorService;
 import io.aerofleet.cloud.api.TerrainMapService;
 import io.aerofleet.cloud.telemetry.AlertBus;
 import io.aerofleet.cloud.telemetry.PendingAcks;
+import io.aerofleet.cloud.tracking.FlightTrackStore;
+import io.aerofleet.cloud.vision.ObstacleAvoidanceController;
 import io.aerofleet.cloud.vision.RadarController;
 import io.aerofleet.cloud.vision.RotorController;
 import io.aerofleet.mavlink.MavlinkFrame;
+import io.aerofleet.mavlink.enums.ThreatLevel;
 import io.aerofleet.mavlink.messages.Attitude;
 import io.aerofleet.mavlink.messages.CellHandoverMsg;
 import io.aerofleet.mavlink.messages.CellTowerStatusMsg;
@@ -31,6 +34,7 @@ import io.aerofleet.mavlink.messages.MissionCurrent;
 import io.aerofleet.mavlink.messages.MissionItemInt;
 import io.aerofleet.mavlink.messages.MissionRequest;
 import io.aerofleet.mavlink.messages.MissionRequestInt;
+import io.aerofleet.mavlink.messages.ObstacleReportMsg;
 import io.aerofleet.mavlink.messages.RadarScanMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
 import io.aerofleet.mavlink.messages.RadioStatus;
@@ -43,6 +47,7 @@ import io.aerofleet.mavlink.messages.SysStatus;
 import io.aerofleet.mavlink.messages.TerrainTypeMapMsg;
 import io.aerofleet.mavlink.messages.TerrainUpdateMsg;
 import io.aerofleet.mavlink.messages.VfrHud;
+import io.aerofleet.mavlink.messages.VisionDetectionMsg;
 import io.aerofleet.mavlink.messages.EnvironmentAlert;
 import io.aerofleet.mavlink.messages.EnvironmentStatus;
 import io.aerofleet.mavlink.messages.EmergencyMissionPlanMsg;
@@ -57,6 +62,9 @@ import io.aerofleet.mavlink.messages.EdgeTaskStatusMsg;
 import io.aerofleet.mavlink.messages.SensorFusionDataMsg;
 import io.aerofleet.mavlink.messages.TwinStateSyncMsg;
 import io.aerofleet.mavlink.messages.PredictionResultMsg;
+import io.aerofleet.mavlink.messages.AlarmTriggerMsg;
+import io.aerofleet.mavlink.messages.AlarmAckMsg;
+import io.aerofleet.mavlink.messages.SurveillanceStatusMsg;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.cloud.api.TelemetryWebSocketHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -84,6 +92,7 @@ public class TelemetryIngestService {
     private final AlertBus alerts;
     private final RadarController radarController;
     private final RotorController rotorController;
+    private final ObstacleAvoidanceController obstacleAvoidanceController;
     private final HardwareDataController hardwareDataController;
     private final MeshTopologyService meshTopologyService;
     private final SatLinkMonitorService satLinkMonitorService;
@@ -92,9 +101,11 @@ public class TelemetryIngestService {
     private final EmergencyOrchService emergencyOrchService;
     private final TelemetryWebSocketHandler wsHandler;
     private final ObjectMapper objectMapper;
+    private final FlightTrackStore flightTrackStore;
 
     public TelemetryIngestService(DeviceRegistry registry, PendingAcks pendings, AlertBus alerts,
                                   @Lazy RadarController radarController, @Lazy RotorController rotorController,
+                                  @Lazy ObstacleAvoidanceController obstacleAvoidanceController,
                                   @Lazy HardwareDataController hardwareDataController,
                                   @Lazy MeshTopologyService meshTopologyService,
                                   @Lazy SatLinkMonitorService satLinkMonitorService,
@@ -102,12 +113,14 @@ public class TelemetryIngestService {
                                   @Lazy CellTowerTopologyService cellTowerTopologyService,
                                   @Lazy EmergencyOrchService emergencyOrchService,
                                   @Lazy TelemetryWebSocketHandler wsHandler,
+                                  @Lazy FlightTrackStore flightTrackStore,
                                   ObjectMapper objectMapper) {
         this.registry = registry;
         this.pendings = pendings;
         this.alerts = alerts;
         this.radarController = radarController;
         this.rotorController = rotorController;
+        this.obstacleAvoidanceController = obstacleAvoidanceController;
         this.hardwareDataController = hardwareDataController;
         this.meshTopologyService = meshTopologyService;
         this.satLinkMonitorService = satLinkMonitorService;
@@ -115,6 +128,7 @@ public class TelemetryIngestService {
         this.cellTowerTopologyService = cellTowerTopologyService;
         this.emergencyOrchService = emergencyOrchService;
         this.wsHandler = wsHandler;
+        this.flightTrackStore = flightTrackStore;
         this.objectMapper = objectMapper;
     }
 
@@ -153,6 +167,10 @@ public class TelemetryIngestService {
                 case RotorTelemetryMsg.ID -> rotorController.onRotorTelemetry((RotorTelemetryMsg) msg);
                 case LidarDataMsg.ID -> hardwareDataController.onLidarData((LidarDataMsg) msg);
                 case ImuDataMsg.ID -> hardwareDataController.onImuData((ImuDataMsg) msg);
+                // M3 感知成像增强消息路由（msgId 430/434，FR-15/FR-23）：
+                // ObstacleReport → 避障控制器（威胁→命令映射）；VisionDetection → WebSocket 实时展示。
+                case ObstacleReportMsg.ID -> onObstacleReport(sysid, (ObstacleReportMsg) msg);
+                case VisionDetectionMsg.ID -> forwardToWs(sysid, "vision-detection", msg);
                 // M5 mesh 拓扑上报路由（msgId 450/454，FR-27）：
                 // MeshHeartbeat → 更新节点在线状态；MeshNeighborTable → 更新拓扑快照。
                 case MeshHeartbeatMsg.ID -> onMeshHeartbeat(sysid, (MeshHeartbeatMsg) msg);
@@ -187,6 +205,10 @@ public class TelemetryIngestService {
                 case SensorFusionDataMsg.ID -> forwardToWs(sysid, "sensor-fusion", msg);
                 case TwinStateSyncMsg.ID -> forwardToWs(sysid, "twin-state-sync", msg);
                 case PredictionResultMsg.ID -> forwardToWs(sysid, "prediction-result", msg);
+                // 4a 空地一体化应急指挥消息路由（msgId 477-479）：报警触发/确认/安防设备状态。
+                case AlarmTriggerMsg.ID -> forwardToWs(sysid, "alarm-trigger", msg);
+                case AlarmAckMsg.ID -> forwardToWs(sysid, "alarm-ack", msg);
+                case SurveillanceStatusMsg.ID -> forwardToWs(sysid, "surveillance-status", msg);
                 default -> { /* SYSTEM_TIME / HOME_POSITION etc.: not needed yet */ }
             }
         } catch (RuntimeException e) {
@@ -233,6 +255,18 @@ public class TelemetryIngestService {
         s.current = st.currentBattery;
         s.battery = st.batteryRemaining;
         s.load = st.load;
+        // 飞行轨迹存储：电量更新时同步写入轨迹点（仅当已有位置时）
+        if (flightTrackStore != null && !Double.isNaN(s.lat) && !Double.isNaN(s.lon)) {
+            long now = System.currentTimeMillis();
+            flightTrackStore.addPoint(sysid, new FlightTrackStore.TrackPoint(
+                    sysid, now, s.lat, s.lon,
+                    Double.isNaN(s.relativeAlt) ? 0.0 : s.relativeAlt,
+                    Double.isNaN(s.vx) ? Double.NaN : s.vx,
+                    Double.isNaN(s.vy) ? Double.NaN : s.vy,
+                    Double.isNaN(s.vz) ? Double.NaN : s.vz,
+                    Double.isNaN(s.heading) ? Double.NaN : s.heading,
+                    s.battery >= 0 ? s.battery : -1.0));
+        }
     }
 
     /**
@@ -256,6 +290,18 @@ public class TelemetryIngestService {
         s.satellites = g.satellitesVisible;
         s.eph = g.eph;
         s.gpsHealthy = g.fixType >= 3 && g.satellitesVisible >= 6;
+        // 飞行轨迹存储：GPS 修复时记录轨迹点（GPS_RAW_INT 含 alt 但无 vx/vy，仅写位置）
+        if (flightTrackStore != null && s.gpsHealthy && g.latE7 != 0 && g.lonE7 != 0) {
+            long now = System.currentTimeMillis();
+            double lat = g.latE7 / 1e7;
+            double lon = g.lonE7 / 1e7;
+            double altM = g.altMm / 1000.0;
+            flightTrackStore.addPoint(sysid, new FlightTrackStore.TrackPoint(
+                    sysid, now, lat, lon, altM,
+                    Double.NaN, Double.NaN, Double.NaN,
+                    g.yaw > 0 ? g.yaw / 100.0 : Double.NaN,
+                    s.battery >= 0 ? s.battery : -1.0));
+        }
         if (wasHealthy && !s.gpsHealthy) {
             AlertEntry entry = new AlertEntry(2, "GPS fix degraded (fixType="
                     + g.fixType + ", sats=" + g.satellitesVisible + ")",
@@ -294,6 +340,15 @@ public class TelemetryIngestService {
         if (p.latE7 != 0 || p.lonE7 != 0) {
             s.track.add(new TrackPoint(p.lat(), p.lon(), p.relativeAltM(),
                     System.currentTimeMillis()));
+        }
+        // 飞行轨迹存储：GLOBAL_POSITION_INT 是最完整的遥测源，写入完整轨迹点
+        if (flightTrackStore != null && (p.latE7 != 0 || p.lonE7 != 0)) {
+            long now = System.currentTimeMillis();
+            flightTrackStore.addPoint(sysid, new FlightTrackStore.TrackPoint(
+                    sysid, now, p.lat(), p.lon(), p.relativeAltM(),
+                    p.vx / 100.0, p.vy / 100.0, p.vz / 100.0,
+                    p.hdg != MavEnums.HDG_UNKNOWN ? p.hdg / 100.0 : Double.NaN,
+                    s.battery >= 0 ? s.battery : -1.0));
         }
     }
 
@@ -398,6 +453,21 @@ public class TelemetryIngestService {
                 msg.preemptedTaskId, msg.reason);
         log.debug("EMERGENCY_PRIORITY sysid={} planId={} task={} pri={} action={}",
                 sysid, msg.planId, msg.taskId, msg.priority, msg.action);
+    }
+
+    /**
+     * M3 障碍物报告路由（FR-15/FR-16）：将 ObstacleReportMsg 解码后转发至
+     * {@link ObstacleAvoidanceController}，由其按威胁等级执行避障命令下发。
+     */
+    private void onObstacleReport(int sysid, ObstacleReportMsg msg) {
+        ThreatLevel threat = msg.threat >= 0 && msg.threat < ThreatLevel.values().length
+                ? ThreatLevel.values()[msg.threat]
+                : ThreatLevel.NONE;
+        obstacleAvoidanceController.onObstacleReport(
+                msg.sysid > 0 ? msg.sysid : sysid,
+                msg.distance, msg.direction, threat);
+        log.debug("OBSTACLE_REPORT sysid={} distance={}m direction={}° threat={}",
+                sysid, msg.distance, msg.direction, threat);
     }
 
     /**

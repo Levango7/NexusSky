@@ -73,6 +73,9 @@ public final class SimConfig {
     // ---- M9 应急任务编排参数（FR-01~33）----
     /** 应急任务编排配置（--orch 开关 + 子参数）。enabled=false 时 VirtualDrone.orchEngine=null，既有行为不变（DFX 4.5）。 */
     public final OrchestrationConfig orchConfig;
+    // ---- 丐版模式参数（budget）----
+    /** 丐版模式："toy"(百元级) | "standard"(千元级) | "advanced"(进阶) | null(完整版，既有行为不变 DFX 4.5)。 */
+    public final String budgetMode;
 
     private SimConfig(int port, int sysid, double lat, double lon, double speed,
                       String name, String scenario, String bindIp, boolean failsafe,
@@ -85,8 +88,9 @@ public final class SimConfig {
                        boolean meshEnabled, MeshRouterConfig meshRouterConfig,
                         boolean satRelayEnabled, SatRelayConfig satRelayConfig,
                          boolean terrainAdaptEnabled, double terrainGridResolution,
-                         io.aerofleet.sim.celltower.CellTowerSimConfig cellTowerConfig,
-                         OrchestrationConfig orchConfig) {
+                          io.aerofleet.sim.celltower.CellTowerSimConfig cellTowerConfig,
+                          OrchestrationConfig orchConfig,
+                          String budgetMode) {
         this.port = port;
         this.sysid = sysid;
         this.lat = lat;
@@ -118,6 +122,7 @@ public final class SimConfig {
         this.terrainGridResolution = terrainGridResolution;
         this.cellTowerConfig = cellTowerConfig;
         this.orchConfig = orchConfig;
+        this.budgetMode = budgetMode;
     }
 
     /** Defaults: Shenzhen University Town area, 8 m/s cruise, port 14540, sysid 1. */
@@ -130,7 +135,8 @@ public final class SimConfig {
                 false, SatRelayConfig.defaults(),
                 false, 100.0,
                 io.aerofleet.sim.celltower.CellTowerSimConfig.defaults(),
-                OrchestrationConfig.defaults());
+                OrchestrationConfig.defaults(),
+                null);
     }
 
     /**
@@ -184,6 +190,8 @@ public final class SimConfig {
         double cellHandoverThreshold = -80.0;
         double cellLoadBalanceThreshold = 0.8;
         long cellHeartbeatTimeoutMs = 30_000L;
+        // 丐版模式默认值：null = 完整版（既有行为不变，DFX 4.5）
+        String budgetMode = null;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -234,8 +242,17 @@ public final class SimConfig {
                     case "env-temp-range" -> {
                         String[] parts = value.split(":");
                         if (parts.length == 2) {
-                            envTempRange = new double[]{
-                                    Double.parseDouble(parts[0]), Double.parseDouble(parts[1])};
+                            double lo = Double.parseDouble(parts[0]);
+                            double hi = Double.parseDouble(parts[1]);
+                            // 校验 min < max，违反则告警并交换
+                            if (lo > hi) {
+                                SimLog.warn("Invalid --env-temp-range: min > max (" + lo + " > " + hi
+                                    + "), swapping to " + hi + ":" + lo);
+                                double tmp = lo;
+                                lo = hi;
+                                hi = tmp;
+                            }
+                            envTempRange = new double[]{lo, hi};
                         } else {
                             SimLog.warn("Invalid --env-temp-range: " + value + " (using default -40:55)");
                         }
@@ -263,6 +280,14 @@ public final class SimConfig {
                     case "cell-handover-threshold" -> cellHandoverThreshold = Double.parseDouble(value);
                     case "cell-load-balance-threshold" -> cellLoadBalanceThreshold = Double.parseDouble(value);
                     case "cell-heartbeat-timeout-ms" -> cellHeartbeatTimeoutMs = Long.parseLong(value);
+                    // 丐版模式参数（budget，DFX 4.4 配置可追溯）
+                    case "budget" -> {
+                        if ("toy".equals(value) || "standard".equals(value) || "advanced".equals(value)) {
+                            budgetMode = value;
+                        } else {
+                            SimLog.warn("Invalid --budget: " + value + " (expected toy|standard|advanced, ignoring)");
+                        }
+                    }
                     default -> {
                         SimLog.warn("Unknown option --" + key);
                         printUsage();
@@ -313,7 +338,8 @@ public final class SimConfig {
                         celltowerEnabled, cellTypeStr, cellTxPower, cellMaxTerminals, cellFreq,
                         cellSignalThreshold, cellHandoverThreshold,
                         cellLoadBalanceThreshold, cellHeartbeatTimeoutMs),
-                OrchestrationConfig.defaults());
+                OrchestrationConfig.defaults(),
+                budgetMode);
     }
 
     public static void printUsage() {
@@ -385,6 +411,9 @@ public final class SimConfig {
         System.out.println("[sim]   --cell-handover-threshold       handover threshold dBm (default -80)");
         System.out.println("[sim]   --cell-load-balance-threshold   load balance threshold (default 0.8)");
         System.out.println("[sim]   --cell-heartbeat-timeout-ms     heartbeat timeout ms (default 30000)");
+        // 丐版模式参数说明（budget，DFX 4.4 配置可追溯）
+        System.out.println("[sim]   --budget              budget mode: toy|standard|advanced (default off = full)");
+        System.out.println("[sim]              toy=ultrasonic+WiFi only, standard=GPS+ToF+LoRa, advanced=all sensors");
     }
 }
 

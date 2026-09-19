@@ -186,7 +186,7 @@
 
 ## 八、应急编排 API
 
-### POST /api/emergency/orchestrate
+### POST /api/v1/emergency/orchestrate
 启动应急编排。
 
 **请求：**

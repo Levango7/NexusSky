@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
@@ -29,18 +29,48 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
   const mapInstance = useRef(null)
   const markerRef = useRef(null)
   const followedRef = useRef(false)
+  const [mapError, setMapError] = useState(null)
+  const [retryKey, setRetryKey] = useState(0)
+  const [loadedRetryKey, setLoadedRetryKey] = useState(null)
+  // 用 ref 记录是否已记录过地图错误，避免闭包陷阱：
+  // state 的闭包值在 effect 创建时固定，直接读 state 永远是旧值
+  const errorLoggedRef = useRef(false)
   // keep the latest click handler in a ref so the map listener (bound once)
   // always calls the freshest closure
   const clickRef = useRef(null)
   clickRef.current = onMapClick
 
   useEffect(() => {
-    const map = new maplibregl.Map({
-      container: mapRef.current,
-      style: MAP_STYLE,
-      center: [DRONE_HOME.lon, DRONE_HOME.lat],
-      zoom: 15,
-      attributionControl: false,
+    let map = null
+    errorLoggedRef.current = false
+    followedRef.current = false
+    try {
+      map = new maplibregl.Map({
+        container: mapRef.current,
+        style: MAP_STYLE,
+        center: [DRONE_HOME.lon, DRONE_HOME.lat],
+        zoom: 15,
+        attributionControl: false,
+      })
+    } catch (e) {
+      setMapError(e.message || '地图初始化失败')
+      return
+    }
+    // 监听地图加载错误，按严重程度分级处理：
+    // - 瓦片级错误（单个瓦片 404/超时）：地图仍可正常使用，仅 console.warn，不触发降级
+    // - 其他错误（样式加载失败、WebGL 上下文异常等关键资源错误）：触发降级 UI
+    map.on('error', (e) => {
+      const msg = (e.error && e.error.message) || ''
+      // MapLibre 对单个瓦片错误也会触发 error 事件，不能因个别瓦片失败整图降级
+      if (msg.includes('tile') || msg.includes('Tile')) {
+        console.warn('[MapView] 瓦片加载失败（已忽略，不影响地图使用）:', msg)
+        return
+      }
+      // 非瓦片错误视为关键错误：每次初始化仅处理首个（去重），显示降级 UI
+      if (!errorLoggedRef.current) {
+        errorLoggedRef.current = true
+        setMapError(msg || '地图加载错误')
+      }
     })
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right')
     map.addControl(new maplibregl.ScaleControl(), 'bottom-left')
@@ -58,7 +88,7 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
     })
     // Crosshair cursor with Shift held - hint for the planning gesture
     const canvas = map.getCanvas()
-    canvas.addEventListener('keydown', () => {})
+
     map.on('mousemove', (e) => {
       const shift = e.originalEvent && e.originalEvent.shiftKey
       canvas.style.cursor = shift ? 'crosshair' : ''
@@ -126,13 +156,15 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
           'line-dasharray': [2, 2],
         },
       })
+      // 样式异步加载完成后重绘，避免依赖数据不变时新地图保持空白。
+      setLoadedRetryKey(retryKey)
     })
 
     return () => {
-      map.remove()
+      if (map) map.remove()
       mapInstance.current = null
     }
-  }, [])
+  }, [retryKey]) // retryKey 变化时重新初始化地图
 
   // 实时位置更新 + 任务草稿航线绘制
   useEffect(() => {
@@ -142,7 +174,7 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
 
     marker.setLngLat([telemetry.lon, telemetry.lat])
 
-    // 任务草稿航线：地图样式未加载完成时跳过本轮（下次状态变化重绘）
+    // 任务草稿航线：样式未加载完成时跳过，load 完成后会再次重绘
     if (map.isStyleLoaded?.() && map.getSource('mission-line')) {
       const coords = missionDraft.map((w) => [w.lon, w.lat])
       map.getSource('mission-line').setData({
@@ -168,7 +200,7 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
       map.flyTo({ center: [telemetry.lon, telemetry.lat], zoom: 16, duration: 1500 })
       followedRef.current = true
     }
-  }, [telemetry, missionDraft])
+  }, [telemetry, missionDraft, retryKey, loadedRetryKey])
 
   // 轨迹重绘
   useEffect(() => {
@@ -185,7 +217,7 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
         })
       }
     }
-  }, [track])
+  }, [track, retryKey, loadedRetryKey])
 
   // 环绕圈重绘（D2：视觉面板提交任务时传入 center/radius）
   useEffect(() => {
@@ -213,7 +245,32 @@ export default function MapView({ telemetry, track, missionDraft, onMapClick, se
         features,
       })
     }
-  }, [orbitOverlay])
+  }, [orbitOverlay, retryKey, loadedRetryKey])
+
+  // 地图加载失败降级 UI：显示错误信息和重试按钮
+  if (mapError) {
+    return (
+      <div className="map-view map-error" ref={mapRef}>
+        <div>
+          <div style={{ fontSize: 28, opacity: .4, marginBottom: 8 }}>🗺️</div>
+          <b style={{ color: 'var(--crit)', display: 'block', marginBottom: 6 }}>地图加载失败</b>
+          <div style={{ fontSize: 11, color: 'var(--dim-2)', marginBottom: 14, wordBreak: 'break-word' }}>
+            {mapError}
+          </div>
+          <button
+            className="btn primary"
+            onClick={() => {
+              errorLoggedRef.current = false
+              setMapError(null)
+              setRetryKey((k) => k + 1)
+            }}
+          >
+            ⟳ 重试
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return <div ref={mapRef} className="map-view" />
 }

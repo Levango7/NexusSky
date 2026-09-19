@@ -14,6 +14,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * MAVLink over UDP 单线程传输：一个线程收包解析 + 回调分发，发送线程安全。
@@ -25,9 +27,17 @@ import java.util.function.Consumer;
  */
 public class UdpMavlinkTransport implements AutoCloseable {
 
+    private static final Logger log = Logger.getLogger(UdpMavlinkTransport.class.getName());
+
+    /** peer 超时清理：超过此时间未活跃的 peer 记录将被移除（ms）。 */
+    private static final long PEER_TIMEOUT_MS = 120_000L;
+    /** peer 清理周期（ms）。 */
+    private static final long PEER_CLEANUP_INTERVAL_MS = 30_000L;
+
     private final DatagramSocket socket;
     private final MavlinkParser parser = new MavlinkParser();
     private final Thread receiveThread;
+    private final Thread cleanupThread;
     private volatile boolean running = true;
 
     private final ConcurrentLinkedQueue<Consumer<MavlinkFrame>> frameListeners = new ConcurrentLinkedQueue<>();
@@ -49,6 +59,10 @@ public class UdpMavlinkTransport implements AutoCloseable {
         this.receiveThread = new Thread(this::receiveLoop, "mavlink-udp-" + bindPort);
         this.receiveThread.setDaemon(true);
         this.receiveThread.start();
+        // 启动 peer 清理线程：定期移除超时未活跃的 peer 记录
+        this.cleanupThread = new Thread(this::peerCleanupLoop, "mavlink-peer-cleanup-" + bindPort);
+        this.cleanupThread.setDaemon(true);
+        this.cleanupThread.start();
     }
 
     /** 注册带源地址的监听器（多机路由用）；注册后普通监听器不再被回调。 */
@@ -74,6 +88,9 @@ public class UdpMavlinkTransport implements AutoCloseable {
 
     private final java.util.concurrent.CopyOnWriteArrayList<DiscoveryTask> discoveryTasks =
             new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** discovery 线程引用（P2: close() 时中断，避免线程泄漏）。 */
+    private final java.util.concurrent.CopyOnWriteArrayList<Thread> discoveryThreads =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
 
     /** 每个对端最近发包时间（发现任务的静默检测用）。 */
     private final java.util.concurrent.ConcurrentHashMap<SocketAddress, Long> peerLastSeen =
@@ -91,6 +108,7 @@ public class UdpMavlinkTransport implements AutoCloseable {
         discoveryTasks.add(task);
         Thread t = new Thread(() -> discoveryLoop(task), "mavlink-discovery");
         t.setDaemon(true);
+        discoveryThreads.add(t);
         t.start();
     }
 
@@ -126,7 +144,8 @@ public class UdpMavlinkTransport implements AutoCloseable {
                     socket.send(new DatagramPacket(data, data.length, task.target));
                 }
             } catch (IOException | RuntimeException e) {
-                // 发现包发送失败：下轮重试
+                // 发现包发送失败：记录日志，下轮重试
+                log.log(Level.WARNING, "MAVLink discovery send failed to " + task.target + ": " + e.getMessage());
             }
             try {
                 Thread.sleep(1000);
@@ -141,6 +160,34 @@ public class UdpMavlinkTransport implements AutoCloseable {
     private long lastPacketFrom(SocketAddress target) {
         Long ts = peerLastSeen.get(target);
         return ts != null ? ts : 0L;
+    }
+
+    /**
+     * peer 清理循环：定期移除超过 {@link #PEER_TIMEOUT_MS} 未活跃的 peer 记录，
+     * 防止 peerLastSeen map 只增不删导致内存泄漏。
+     */
+    private void peerCleanupLoop() {
+        while (running) {
+            try {
+                Thread.sleep(PEER_CLEANUP_INTERVAL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            long now = System.currentTimeMillis();
+            int removed = 0;
+            for (var entry : peerLastSeen.entrySet()) {
+                // 原子比较时间戳后删除，避免移除已被收包线程更新的活跃 peer。
+                if (now - entry.getValue() > PEER_TIMEOUT_MS
+                        && peerLastSeen.remove(entry.getKey(), entry.getValue())) {
+                    removed++;
+                }
+            }
+            if (removed > 0) {
+                log.log(Level.FINE, "peer cleanup: removed " + removed
+                        + " stale peers (timeout=" + PEER_TIMEOUT_MS + "ms)");
+            }
+        }
     }
 
     private void receiveLoop() {
@@ -176,7 +223,9 @@ public class UdpMavlinkTransport implements AutoCloseable {
                 }
             } catch (IOException e) {
                 if (running) {
-                    // 端口被占或套接字异常：骨架阶段仅吞掉，由健康检查暴露
+                    // 端口被占或套接字异常：记录日志，由健康检查暴露
+                    log.log(Level.WARNING, "MAVLink UDP receive error on port "
+                            + socket.getLocalPort() + ": " + e.getMessage());
                 }
             }
         }
@@ -209,5 +258,10 @@ public class UdpMavlinkTransport implements AutoCloseable {
         running = false;
         socket.close();
         receiveThread.interrupt();
+        cleanupThread.interrupt();
+        // P2: 中断 discovery 线程，避免线程泄漏
+        for (Thread t : discoveryThreads) {
+            t.interrupt();
+        }
     }
 }

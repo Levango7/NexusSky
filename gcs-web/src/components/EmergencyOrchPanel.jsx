@@ -366,7 +366,7 @@ export default function EmergencyOrchPanel() {
             <span style={inputCaptionStyle}>中心纬度</span>
             <input
               type="number" step="0.0001" value={centerLat}
-              onChange={(e) => setCenterLat(e.target.value)}
+              onChange={(e) => setCenterLat(Number(e.target.value))}
               style={inputStyle}
             />
           </label>
@@ -374,7 +374,7 @@ export default function EmergencyOrchPanel() {
             <span style={inputCaptionStyle}>中心经度</span>
             <input
               type="number" step="0.0001" value={centerLon}
-              onChange={(e) => setCenterLon(e.target.value)}
+              onChange={(e) => setCenterLon(Number(e.target.value))}
               style={inputStyle}
             />
           </label>

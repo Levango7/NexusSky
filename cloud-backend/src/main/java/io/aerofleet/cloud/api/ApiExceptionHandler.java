@@ -1,6 +1,9 @@
 package io.aerofleet.cloud.api;
 
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -16,9 +19,18 @@ import java.util.stream.Collectors;
 
 /**
  * Uniform error body {"error": "..."} for all REST failures.
+ * <p>
+ * 内部异常（500）在非 dev 模式下只返回通用错误消息，不泄露内部细节，
+ * 避免向客户端暴露堆栈/类名等敏感信息。
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
+
+    /** dev 模式下返回详细内部错误信息便于调试；生产模式下只返回通用消息。 */
+    @Value("${aerofleet.security.dev-mode:false}")
+    private boolean devMode;
 
     public static class NotFoundException extends RuntimeException {
         public NotFoundException(String message) {
@@ -75,8 +87,13 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> internal(Exception e) {
-        return body(HttpStatus.INTERNAL_SERVER_ERROR,
-                "internal error: " + rootMessage(e));
+        // 记录完整异常到服务端日志（含堆栈），便于排查
+        log.error("Unhandled internal error", e);
+        // dev 模式返回详细消息便于调试；生产模式只返回通用消息，不泄露内部细节
+        String message = devMode
+                ? "internal error: " + rootMessage(e)
+                : "internal server error";
+        return body(HttpStatus.INTERNAL_SERVER_ERROR, message);
     }
 
     private String formatFieldError(FieldError fe) {

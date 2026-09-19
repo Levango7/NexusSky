@@ -1,6 +1,8 @@
 package io.aerofleet.cloud.security;
 
+import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.jwk.KeyUse;
 import com.nimbusds.jose.jwk.OctetSequenceKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
@@ -8,12 +10,14 @@ import com.nimbusds.jose.proc.SecurityContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.stereotype.Component;
@@ -39,8 +43,16 @@ public class JwtTokenProvider {
     private final JwtDecoder decoder;
 
     public JwtTokenProvider(@Value("${aerofleet.security.jwt-secret}") String secret) {
+        if (secret == null || secret.getBytes().length < 32) {
+            throw new IllegalArgumentException(
+                    "aerofleet.security.jwt-secret must be at least 32 bytes for HMAC-SHA256");
+        }
         SecretKey key = new SecretKeySpec(secret.getBytes(), "HmacSHA256");
-        JWK jwk = new OctetSequenceKey.Builder(key).keyID("aerofleet").build();
+        JWK jwk = new OctetSequenceKey.Builder(key)
+                .keyID("aerofleet")
+                .algorithm(JWSAlgorithm.HS256)
+                .keyUse(KeyUse.SIGNATURE)
+                .build();
         JWKSource<SecurityContext> jwkSource = new ImmutableJWKSet<>(
                 new com.nimbusds.jose.jwk.JWKSet(jwk));
         this.encoder = new NimbusJwtEncoder(jwkSource);
@@ -68,7 +80,8 @@ public class JwtTokenProvider {
                 .expiresAt(now.plus(expiry))
                 .claim("type", "access")
                 .build();
-        return encoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
+        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).keyId("aerofleet").build();
+        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
 
     /**

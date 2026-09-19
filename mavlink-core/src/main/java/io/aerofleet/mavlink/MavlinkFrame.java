@@ -37,6 +37,9 @@ public final class MavlinkFrame {
     /** 构造发送帧：按官方 finalize 算法计算完整 CRC（头字段 + payload + CRC_EXTRA）。 */
     public static MavlinkFrame of(int systemId, int componentId, int sequence,
                                   int messageId, int crcExtra, byte[] payload) {
+        if (payload != null && payload.length > 255) {
+            throw new IllegalArgumentException("MAVLink payload exceeds 255 bytes: " + payload.length);
+        }
         int crc = MavlinkCrc.init();
         crc = MavlinkCrc.accumulate(crc, payload.length);
         crc = MavlinkCrc.accumulate(crc, 0);

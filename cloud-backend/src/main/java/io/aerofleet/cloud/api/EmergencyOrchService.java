@@ -94,6 +94,9 @@ public class EmergencyOrchService {
 
     /**
      * 获取阶段进度与事件列表。
+     * <p>
+     * 返回防御性浅拷贝：调用方修改返回的列表不会影响 plan 内部状态
+     * （phases 元素为 ConcurrentHashMap，浅拷贝保留阶段状态的并发更新）。
      */
     public Map<String, Object> getProgress(long planId) {
         Map<String, Object> plan = plans.get(planId);
@@ -101,13 +104,16 @@ public class EmergencyOrchService {
             return null;
         }
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("phases", plan.get("phases"));
-        result.put("events", plan.get("events"));
+        result.put("phases", new ArrayList<>((List<?>) plan.get("phases")));
+        result.put("events", new ArrayList<>((List<?>) plan.get("events")));
         return result;
     }
 
     /**
      * 获取覆盖信息。
+     * <p>
+     * 返回防御性浅拷贝：deployments/uncoveredAreas 复制后返回，避免调用方绕过
+     * 内部 synchronizedList 的保护直接修改内部状态。
      */
     public Map<String, Object> getCoverage(long planId) {
         Map<String, Object> plan = plans.get(planId);
@@ -117,8 +123,8 @@ public class EmergencyOrchService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("coverageRate", plan.get("coverageRate"));
         result.put("connectRate", plan.get("connectRate"));
-        result.put("deployments", plan.get("deployments"));
-        result.put("uncoveredAreas", plan.get("uncoveredAreas"));
+        result.put("deployments", new ArrayList<>((List<?>) plan.get("deployments")));
+        result.put("uncoveredAreas", new ArrayList<>((List<?>) plan.get("uncoveredAreas")));
         return result;
     }
 
@@ -162,27 +168,35 @@ public class EmergencyOrchService {
         }
         @SuppressWarnings("unchecked")
         Map<Long, Integer> taskPriorities = (Map<Long, Integer>) plan.get("taskPriorities");
-        int oldPriority = taskPriorities.getOrDefault(taskId, 4); // 默认常规
-        taskPriorities.put(taskId, priority);
-
-        // 移动到新优先级队列
         @SuppressWarnings("unchecked")
         Map<String, List<Long>> queues = (Map<String, List<Long>>) plan.get("priorityQueues");
-        String oldQueueName = priorityQueueName(oldPriority);
-        String newQueueName = priorityQueueName(priority);
-        queues.get(oldQueueName).remove(Long.valueOf(taskId));
-        if (!queues.get(newQueueName).contains(taskId)) {
-            queues.get(newQueueName).add(taskId);
-        }
 
-        // 抢占：若提升到最高优先级，抢占同队列首个低优先级任务
-        long preemptedTaskId = 0L;
-        if (priority < oldPriority) {
-            for (int p = priority + 1; p <= 4; p++) {
-                List<Long> queue = queues.get(priorityQueueName(p));
-                if (!queue.isEmpty()) {
-                    preemptedTaskId = queue.get(0);
-                    break;
+        // P1: 队列移动 + 抢占组合操作必须原子，避免并发下任务从旧队列移除后
+        // 但尚未加入新队列时被其他线程观察到不一致状态。synchronized(plan)
+        // 保证同一计划内的优先级调整串行化。
+        int oldPriority;
+        long preemptedTaskId;
+        synchronized (plan) {
+            oldPriority = taskPriorities.getOrDefault(taskId, 4); // 默认常规
+            taskPriorities.put(taskId, priority);
+
+            // 移动到新优先级队列
+            String oldQueueName = priorityQueueName(oldPriority);
+            String newQueueName = priorityQueueName(priority);
+            queues.get(oldQueueName).remove(Long.valueOf(taskId));
+            if (!queues.get(newQueueName).contains(taskId)) {
+                queues.get(newQueueName).add(taskId);
+            }
+
+            // 抢占：若提升到最高优先级，抢占同队列首个低优先级任务
+            preemptedTaskId = 0L;
+            if (priority < oldPriority) {
+                for (int p = priority + 1; p <= 4; p++) {
+                    List<Long> queue = queues.get(priorityQueueName(p));
+                    if (!queue.isEmpty()) {
+                        preemptedTaskId = queue.get(0);
+                        break;
+                    }
                 }
             }
         }
@@ -367,7 +381,8 @@ public class EmergencyOrchService {
     /** 创建新计划状态 map。 */
     private Map<String, Object> newPlanMap(long planId, int scenarioType, int centerLat, int centerLon,
                                            int radius, List<Integer> droneIds, long now) {
-        Map<String, Object> plan = new LinkedHashMap<>();
+        // 使用 ConcurrentHashMap 保证多线程并发读写 plan 内部状态安全
+        Map<String, Object> plan = new ConcurrentHashMap<>();
         plan.put("planId", planId);
         plan.put("scenarioType", scenarioType);
         plan.put("status", "RUNNING");
@@ -376,7 +391,7 @@ public class EmergencyOrchService {
         plan.put("centerLat", centerLat);
         plan.put("centerLon", centerLon);
         plan.put("radius", radius);
-        plan.put("droneIds", new ArrayList<>(droneIds));
+        plan.put("droneIds", Collections.synchronizedList(new ArrayList<>(droneIds)));
         plan.put("droneCount", droneIds.size());
         plan.put("coverageRate", 0);
         plan.put("connectRate", 0);
@@ -387,7 +402,7 @@ public class EmergencyOrchService {
         // 5 个阶段，初始全部 PENDING，第 0 阶段设为 RUNNING
         List<Map<String, Object>> phases = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
-            Map<String, Object> ph = new LinkedHashMap<>();
+            Map<String, Object> ph = new ConcurrentHashMap<>();
             ph.put("phase", i);
             ph.put("status", i == 0 ? "RUNNING" : "PENDING");
             ph.put("durationMs", 0);
@@ -401,8 +416,8 @@ public class EmergencyOrchService {
         plan.put("deployments", Collections.synchronizedList(new ArrayList<>()));
         plan.put("uncoveredAreas", Collections.synchronizedList(new ArrayList<>()));
 
-        // 4 级优先级队列
-        Map<String, List<Long>> queues = new LinkedHashMap<>();
+        // 4 级优先级队列（ConcurrentHashMap 保证并发读安全）
+        Map<String, List<Long>> queues = new ConcurrentHashMap<>();
         queues.put("SEARCH_RESCUE", Collections.synchronizedList(new ArrayList<>()));
         queues.put("COMMAND", Collections.synchronizedList(new ArrayList<>()));
         queues.put("MAPPING", Collections.synchronizedList(new ArrayList<>()));

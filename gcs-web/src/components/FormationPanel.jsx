@@ -243,7 +243,15 @@ function FormationCard({ f, selected, onSelect }) {
   const onlineCount = (f.members || []).filter((m) => m.online).length
   return (
     <li
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
       style={{
         cursor: 'pointer',
         padding: '10px 12px',

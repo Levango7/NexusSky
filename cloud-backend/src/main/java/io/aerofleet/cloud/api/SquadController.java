@@ -2,6 +2,8 @@ package io.aerofleet.cloud.api;
 
 import io.aerofleet.cloud.mission.SquadDispatcher;
 import io.aerofleet.cloud.mission.SquadRoleService;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -45,6 +47,7 @@ public class SquadController {
 
     /** Recompute + dispatch orbit missions to the assigned drones. */
     @PostMapping("/assign")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> assign() {
         roles.refresh();
         Map<String, Object> result = dispatcher.dispatch();
@@ -54,6 +57,7 @@ public class SquadController {
 
     /** Manual leader override. */
     @PostMapping("/leader/{sysid}")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> setLeader(@PathVariable("sysid") int sysid) {
         roles.refresh();
         roles.assignLeader(sysid);

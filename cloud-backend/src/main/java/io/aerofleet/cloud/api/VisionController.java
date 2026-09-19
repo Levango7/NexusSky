@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.vision.CaptureService;
 import io.aerofleet.cloud.vision.OrbitJobManager;
 import io.aerofleet.cloud.vision.OrbitService;
@@ -48,6 +50,7 @@ public class VisionController {
      * default = the configured aerofleet.vision.source.
      */
     @PostMapping("/drones/{sysid}/capture")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> captureAndLocate(@PathVariable("sysid") int sysid,
                                                 @RequestParam(value = "source", required = false)
                                                 String source) {
@@ -67,6 +70,7 @@ public class VisionController {
      * One in-flight job per drone: a repeat POST while running -> 409.
      */
     @PostMapping("/drones/{sysid}/orbit")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> orbit(@PathVariable("sysid") int sysid,
                                                      @RequestBody Map<String, Object> body) {
         double lat = num(body, "lat");

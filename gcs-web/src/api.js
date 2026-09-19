@@ -261,11 +261,109 @@ export const api = {
 
   // 获取漫游切换历史
   getCellTowerHandovers: () => jsonFetch(`${BASE}/celltowers/handovers`),
+
+  // ---- Tracking (飞行轨迹追踪与丢失找回) ----
+  // base 路径 /api/tracking（独立于 v1 BASE）
+  // 获取无人机飞行轨迹（limit 限制点数）
+  getFlightTrack: (sysid, limit) => {
+    const qs = limit != null ? `?limit=${encodeURIComponent(limit)}` : ''
+    return jsonFetch(`/api/tracking/${sysid}/track${qs}`)
+  },
+
+  // 轨迹回放：时间范围 [from, to] + 点数限制
+  replayTrack: (sysid, from, to, limit) => {
+    const qs = new URLSearchParams({ from, to, limit }).toString()
+    return jsonFetch(`/api/tracking/${sysid}/replay?${qs}`)
+  },
+
+  // 最近一次已知位置
+  getLastKnown: (sysid) => jsonFetch(`/api/tracking/${sysid}/last-known`),
+
+  // 丢失无人机列表
+  getLostDrones: () => jsonFetch('/api/tracking/lost'),
+
+  // 搜索引导（预测航向/距离）
+  getSearchGuide: (sysid) => jsonFetch(`/api/tracking/${sysid}/search-guide`),
+
+  // 触发丢失无人机扫描
+  scanLostDrones: () => jsonFetch('/api/tracking/scan'),
+
+  // ---- Geofence (地理围栏) ----
+  // base 路径 /api/geofence（独立于 v1 BASE）
+  // 创建围栏区域（zone JSON）
+  createGeofenceZone: (zone) =>
+    jsonFetch('/api/geofence/zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(zone),
+    }),
+
+  // 查询所有围栏区域
+  listGeofenceZones: () => jsonFetch('/api/geofence/zones'),
+
+  // 查询单个围栏区域
+  getGeofenceZone: (id) => jsonFetch(`/api/geofence/zones/${id}`),
+
+  // 更新围栏区域（zone JSON）
+  updateGeofenceZone: (id, zone) =>
+    jsonFetch(`/api/geofence/zones/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(zone),
+    }),
+
+  // 删除围栏区域
+  deleteGeofenceZone: (id) =>
+    jsonFetch(`/api/geofence/zones/${id}`, { method: 'DELETE' }),
+
+  // 查询围栏突破事件（sysid 与 zoneId 均为可选筛选）
+  getGeofenceBreaches: (sysid, zoneId) => {
+    const params = {}
+    if (sysid != null) params.sysid = sysid
+    if (zoneId != null) params.zoneId = zoneId
+    const qs = new URLSearchParams(params).toString()
+    return jsonFetch(`/api/geofence/breaches${qs ? '?' + qs : ''}`)
+  },
+
+  // 触发围栏检查
+  checkGeofence: () =>
+    jsonFetch('/api/geofence/check', { method: 'POST' }),
+
+  // ---- DroneLock (无人机锁定/解锁) ----
+  // base 路径 /api/drone-lock（独立于 v1 BASE）
+  // 锁定无人机（payload 含 reason/lockedBy/action）
+  lockDrone: (sysid, payload) =>
+    jsonFetch(`/api/drone-lock/${sysid}/lock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 解锁无人机（payload 含 unlockedBy）
+  unlockDrone: (sysid, payload) =>
+    jsonFetch(`/api/drone-lock/${sysid}/unlock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 查询单机锁定状态
+  getLockStatus: (sysid) => jsonFetch(`/api/drone-lock/${sysid}`),
+
+  // 查询所有已锁定无人机
+  getLockedDrones: () => jsonFetch('/api/drone-lock/locked'),
+
+  // 查询全部锁定状态
+  getAllLockStates: () => jsonFetch('/api/drone-lock/all'),
+
+  // 清除单机锁定状态
+  clearLockState: (sysid) =>
+    jsonFetch(`/api/drone-lock/${sysid}`, { method: 'DELETE' }),
 }
 
 // ---- Emergency Orchestration (应急任务编排 M9) ----
-// 注意：应急编排 API 挂载在 /api/emergency 下（独立于 v1 BASE）
-const EMERGENCY_BASE = '/api/emergency'
+// 注意：应急编排 API 挂载在 /api/v1/emergency 下（独立于 v1 BASE，但带 v1 前缀）
+const EMERGENCY_BASE = '/api/v1/emergency'
 
 export const emergencyOrch = {
   // 获取场景预设列表
@@ -304,3 +402,188 @@ export const emergencyOrch = {
 export const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${
   location.host
 }/ws/telemetry`
+// ---- Budget Mode (丐版模式配置) ----
+// 根据预算档位限制可见面板，用于在低成本硬件上裁剪功能。
+// 经验来源：2026-09-17-react-mount-existing-components-export-signature-dialog-wrap（命名导出用法）
+export const BUDGET_MODES = {
+  FULL: null,            // 完整版（默认，全部面板可用）
+  TOY: 'toy',            // 百元级：仅遥测+航拍+简易地图+状态
+  STANDARD: 'standard',  // 千元级：+编队+Mesh+航点+应急
+  ADVANCED: 'advanced',  // 进阶版：+光流+红外
+}
+
+// 合法预算档位列表（不含 FULL/null，null 表示完整版单独处理）
+const VALID_BUDGET_MODES = ['toy', 'standard', 'advanced']
+
+// 规范化 budgetMode：未知值 fallback 到 'standard' 并 console.warn 告警
+// null/undefined 原样返回（表示完整版）；合法值原样返回
+export function normalizeBudgetMode(mode) {
+  if (mode == null) return null
+  if (VALID_BUDGET_MODES.includes(mode)) return mode
+  console.warn(`Unknown budgetMode "${mode}", falling back to "standard"`)
+  return 'standard'
+}
+
+// 百元级可用的面板
+export const TOY_PANELS = ['telemetry', 'camera', 'map', 'status']
+// 千元级可用的面板
+export const STANDARD_PANELS = [...TOY_PANELS, 'formation', 'mesh', 'mission', 'emergency']
+// 进阶版可用的面板
+export const ADVANCED_PANELS = [...STANDARD_PANELS, 'thermal', 'opticalflow']
+
+// 根据预算档位返回可用面板列表；null 表示全部可用（完整版）
+// 传入未知 budgetMode 会 fallback 到 'standard' 并告警
+export function getAvailablePanels(budgetMode) {
+  const mode = normalizeBudgetMode(budgetMode)
+  if (!mode || mode === BUDGET_MODES.FULL) return null // null = all
+  if (mode === BUDGET_MODES.TOY) return TOY_PANELS
+  if (mode === BUDGET_MODES.STANDARD) return STANDARD_PANELS
+  if (mode === BUDGET_MODES.ADVANCED) return ADVANCED_PANELS
+  return null
+}
+
+// 判断单个面板在指定预算档位下是否可用
+// 传入未知 budgetMode 会 fallback 到 'standard' 并告警
+export function isPanelAvailable(panelName, budgetMode) {
+  const mode = normalizeBudgetMode(budgetMode)
+  const available = getAvailablePanels(mode)
+  if (available === null) return true // 全部可用
+  return available.includes(panelName)
+}
+// ---- Surveillance (安防视频监控 M10) ----
+// 安防设备管理 API 挂载在 /api/surveillance 下（独立于 v1 BASE）
+// 支持海康/大华/宇视等厂商设备注册、RTSP 流获取、PTZ 云台控制、子网自动发现
+const SURVEILLANCE_BASE = '/api/surveillance'
+
+// 查询已注册的安防设备列表（含在线状态、厂商、通道数等）
+export async function listSurveillanceDevices() {
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices`)
+}
+
+// 手动注册安防设备（IP/端口/厂商/用户名/密码/通道数）
+export async function registerSurveillanceDevice(device) {
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(device),
+  })
+}
+
+// 注销安防设备
+export async function unregisterSurveillanceDevice(deviceId) {
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices/${deviceId}`, { method: 'DELETE' })
+}
+
+// 获取设备某通道的流地址（RTSP / HLS / WS-FLV），前端按协议渲染
+export async function getDeviceStream(deviceId, channel) {
+  const qs = channel != null ? `?channel=${encodeURIComponent(channel)}` : ''
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices/${deviceId}/stream${qs}`)
+}
+
+// PTZ 云台控制：cmd = up|down|left|right|zoom_in|zoom_out|stop
+export async function ptzControl(deviceId, cmd) {
+  return jsonFetch(`${SURVEILLANCE_BASE}/devices/${deviceId}/ptz`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cmd }),
+  })
+}
+
+// 子网自动发现安防设备（扫描 192.168.x.0/24 等）
+export async function discoverDevices(subnet) {
+  return jsonFetch(`${SURVEILLANCE_BASE}/discover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subnet }),
+  })
+}
+
+// 查询最近安防事件（报警 / 移动检测 / 离线等），支持分页与时间范围
+export async function listSurveillanceEvents(params = {}) {
+  const qs = new URLSearchParams(params).toString()
+  return jsonFetch(`${SURVEILLANCE_BASE}/events${qs ? '?' + qs : ''}`)
+}
+
+// ---- Alarms (报警联动 M11) ----
+// 报警事件管理 API 挂载在 /api/alarms 下（独立于 v1 BASE）
+// 支持 SSE 实时推送、联动规则管理、一键应急响应触发无人机侦察任务
+const ALARM_BASE = '/api/alarms'
+
+// 报警事件 SSE 订阅地址（EventSource 用）
+export const alarmStreamUrl = `${location.protocol === 'https:' ? 'https' : 'http'}://${
+  location.host
+}${ALARM_BASE}/stream`
+
+// 查询报警事件列表（支持 severity/source/type/since/until/acknowledged 等筛选）
+export async function listAlarmEvents(params = {}) {
+  const qs = new URLSearchParams(params).toString()
+  return jsonFetch(`${ALARM_BASE}/events${qs ? '?' + qs : ''}`)
+}
+
+// 确认（消除未读）报警事件
+export async function acknowledgeAlarm(eventId) {
+  return jsonFetch(`${ALARM_BASE}/events/${eventId}/ack`, { method: 'POST' })
+}
+
+// 批量确认报警事件
+export async function acknowledgeAlarms(eventIds) {
+  return jsonFetch(`${ALARM_BASE}/events/ack-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eventIds }),
+  })
+}
+
+// 查询联动规则列表（报警类型 → 无人机任务模板）
+export async function listAlarmRules() {
+  return jsonFetch(`${ALARM_BASE}/rules`)
+}
+
+// 创建联动规则
+export async function createAlarmRule(rule) {
+  return jsonFetch(`${ALARM_BASE}/rules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rule),
+  })
+}
+
+// 更新联动规则
+export async function updateAlarmRule(id, rule) {
+  return jsonFetch(`${ALARM_BASE}/rules/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rule),
+  })
+}
+
+// 删除联动规则
+export async function deleteAlarmRule(id) {
+  return jsonFetch(`${ALARM_BASE}/rules/${id}`, { method: 'DELETE' })
+}
+
+// 测试联动规则（模拟触发，不真正派发无人机）
+export async function testAlarmRule(id) {
+  return jsonFetch(`${ALARM_BASE}/rules/${id}/test`, { method: 'POST' })
+}
+
+// 一键应急响应：选中报警事件 → 触发无人机侦察任务
+export async function triggerEmergencyResponse(eventId, payload = {}) {
+  return jsonFetch(`${ALARM_BASE}/events/${eventId}/respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+// 查询联动日志（报警 → 规则 → 无人机任务 → 执行结果）
+export async function listLinkageLogs(params = {}) {
+  const qs = new URLSearchParams(params).toString()
+  return jsonFetch(`${ALARM_BASE}/linkage-logs${qs ? '?' + qs : ''}`)
+}
+// ---- 命名导出：tracking / geofence / droneLock（供面板组件 import）----
+export const {
+  getFlightTrack, replayTrack, getLastKnown, getLostDrones, getSearchGuide, scanLostDrones,
+  createGeofenceZone, listGeofenceZones, getGeofenceZone, updateGeofenceZone, deleteGeofenceZone, getGeofenceBreaches, checkGeofence,
+  lockDrone, unlockDrone, getLockStatus, getLockedDrones, getAllLockStates, clearLockState,
+} = api

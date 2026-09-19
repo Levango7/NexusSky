@@ -108,6 +108,10 @@ public final class MavlinkMessageInfo {
         // ---- NexusSky 自定义扩展消息（M13 数字孪生与轨迹预测，msgId 475-476）----
         INFOS[475] = new Info(28, 259);   // TWIN_STATE_SYNC
         INFOS[476] = new Info(20, 260);   // PREDICTION_RESULT
+        // ---- NexusSky 自定义扩展消息（M14 安防报警，msgId 477-479）----
+        INFOS[477] = new Info(68, 261);   // ALARM_TRIGGER
+        INFOS[478] = new Info(12, 262);   // ALARM_ACK
+        INFOS[479] = new Info(14, 263);   // SURVEILLANCE_STATUS
     }
 
     private MavlinkMessageInfo() {

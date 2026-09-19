@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import { api } from '../api.js'
 
 // 虚拟摇杆：按住拖动发送 MANUAL_CONTROL（10Hz），松开 2 秒后自动悬停。
@@ -11,6 +11,18 @@ export default function Joystick({ drone }) {
   const timerRef = useRef(null)
   const stateRef = useRef({ x: 0, y: 0, z: 500, r: 0 })
   stateRef.current = { x: stick.x, y: stick.y, z: throttle, r: 0 }
+
+  // 组件卸载时停止发送循环并清理 pending timer，防止卸载后幽灵 API 调用。
+  // 经验来源：2026-09-16-react-component-settimeout-useref-useeffect-cleanup
+  useEffect(() => {
+    return () => {
+      sendingRef.current = false
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+    }
+  }, [])
 
   const sendLoop = () => {
     // 10 Hz sender: runs while the stick is engaged or throttle is off-center
@@ -82,9 +94,9 @@ export default function Joystick({ drone }) {
           ref={padRef}
           className={`joypad ${armed ? '' : 'disabled'}`}
           onMouseDown={engage}
-          onMouseMove={sendingRef.current ? moveStick : undefined}
+          onMouseMove={moveStick}
           onMouseUp={release}
-          onMouseLeave={sendingRef.current ? release : undefined}
+          onMouseLeave={release}
           title={armed ? '按住拖动飞行' : '需先解锁'}
         >
           <div

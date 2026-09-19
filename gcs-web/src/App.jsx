@@ -14,11 +14,17 @@ import SatLinkPanel from './components/SatLinkPanel.jsx'
 import TerrainMapPanel from './components/TerrainMapPanel.jsx'
 import CellTowerPanel from './components/CellTowerPanel.jsx'
 import EmergencyOrchPanel from './components/EmergencyOrchPanel.jsx'
+import SurveillancePanel from './components/SurveillancePanel.jsx'
+import AlarmPanel from './components/AlarmPanel.jsx'
+import TrackingPanel from './components/TrackingPanel.jsx'
+import GeofencePanel from './components/GeofencePanel.jsx'
+import DroneLockPanel from './components/DroneLockPanel.jsx'
 import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
 import Trajectory3D from './components/Trajectory3D.jsx'
-import { api, wsUrl } from './api.js'
+import { api, wsUrl, isPanelAvailable, BUDGET_MODES } from './api.js'
+import BudgetBadge from './components/BudgetBadge.jsx'
 
 function haversine(a, b) {
   const R = 6371000
@@ -35,6 +41,27 @@ function fmtDur(sec) {
   const m = Math.floor(sec / 60)
   const s = Math.floor(sec % 60)
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+// 视图标签 -> 预算面板名称映射（用于丐版模式下隐藏不可用面板）
+// 经验来源：2026-09-17-react-mount-existing-components-export-signature-dialog-wrap
+const VIEW_PANEL_MAP = {
+  dashboard: 'status',     // 仪表盘/状态（百元级可用）
+  scene3d: 'mission',      // 3D 视图归入千元级（依赖航点/地图渲染）
+  control: 'telemetry',    // 主操控视图（百元级可用，含地图+遥测+航拍）
+  formation: 'formation',  // 编队（千元级可用）
+  spray: 'mission',        // 喷洒属于任务范畴（千元级可用）
+  hardware: 'opticalflow', // 硬件抽象含光流/红外（进阶版可用）
+  mesh: 'mesh',            // Mesh 拓扑（千元级可用）
+  celltower: 'mesh',       // 基站属于 mesh 通信（千元级可用）
+  satlink: 'mesh',         // 星地中继属于通信（千元级可用）
+  terrain: 'mission',      // 地形属于任务规划（千元级可用）
+  emergency: 'emergency',  // 应急编排（千元级可用）
+  surveillance: 'mission', // 安防监控归入任务范畴（千元级可用）
+  alarm: 'emergency',      // 报警联动归入应急范畴（千元级可用）
+  tracking: 'mission',     // 飞行追踪/遗失查找归入任务范畴（千元级可用）
+  geofence: 'mission',     // 电子围栏归入任务范畴（千元级可用）
+  dronelock: 'status',     // 远程锁机归入状态管理（百元级可用）
 }
 
 export default function App() {
@@ -55,7 +82,13 @@ export default function App() {
   const [terrainData, setTerrainData] = useState(null)      // terrain 数据（WebSocket 推送）
   const [cellTowerData, setCellTowerData] = useState(null)  // celltower 数据（WebSocket 推送）
   const [telemetryHistory, setTelemetryHistory] = useState([]) // 遥测历史数据点（最近 120 个）
+  const [mobileRail, setMobileRail] = useState(null) // 移动端侧栏抽屉：null | 'left' | 'right'
+  const [budgetMode, setBudgetMode] = useState(null) // 丐版预算档位：null=完整版 | 'toy' | 'standard' | 'advanced'
   const wsRef = useRef(null)
+  // 用 ref 跟踪 selectedSysid，使 WebSocket onmessage 能读取最新值而无需重连
+  // 经验来源：2026-09-13-yjs-multi-provider-destroy-order（effect 依赖与 ref 解耦模式）
+  const selectedSysidRef = useRef(selectedSysid)
+  selectedSysidRef.current = selectedSysid
 
   const selected = drones.find((d) => d.sysid === selectedSysid)
   const onlineCount = drones.filter((d) => d.online).length
@@ -110,6 +143,13 @@ export default function App() {
     return () => clearInterval(t)
   }, [])
 
+  // 丐版模式切换后，若当前视图在该档位下不可用，自动回退到主操控视图
+  useEffect(() => {
+    if (!isPanelAvailable(VIEW_PANEL_MAP[view], budgetMode)) {
+      setView('control')
+    }
+  }, [budgetMode, view])
+
   // WebSocket 实时遥测（断线 3s 自动重连）
   useEffect(() => {
     let ws
@@ -132,7 +172,7 @@ export default function App() {
           return
         }
         if (msg.type === 'telemetry' || msg.type === 'status') {
-          if (msg.sysid === selectedSysid) {
+          if (msg.sysid === selectedSysidRef.current) {
             setTelemetry((prev) => ({ ...(prev || {}), ...msg.data, sysid: msg.sysid }))
           }
           // 追加遥测历史数据点（保留最近 120 个）
@@ -187,13 +227,14 @@ export default function App() {
       clearTimeout(retryTimer)
       ws.close()
     }
-  }, [selectedSysid])
+  }, []) // WebSocket 只连接一次，selectedSysid 变化通过 ref 读取，不重连
 
   return (
     <div className="gcs-root">
       <header className="topbar">
         <div className="brand">
-          <svg className="brand-mark" width="26" height="26" viewBox="0 0 26 26">
+          <svg className="brand-mark" width="26" height="26" viewBox="0 0 26 26" role="img" aria-label="NexusSky 标志">
+            <title>NexusSky 无人机地面站标志</title>
             <circle cx="13" cy="13" r="11.5" fill="none" stroke="#00d4ff" stroke-width="1.2" />
             <path d="M13 4 A 9 9 0 0 1 22 13 L 13 13 Z" fill="#00d4ff" opacity=".35" />
             <path d="M13 13 L 20 20" stroke="#00d4ff" stroke-width="1.4" />
@@ -207,83 +248,35 @@ export default function App() {
 
         <div className="topbar-center">
           <div className="view-tabs" style={{ display: 'inline-flex', gap: 4, marginRight: 6 }}>
-            <button
-              className={`btn ${view === 'dashboard' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('dashboard')}
-            >
-              仪表盘
-            </button>
-            <button
-              className={`btn ${view === 'scene3d' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('scene3d')}
-            >
-              3D 视图
-            </button>
-            <button
-              className={`btn ${view === 'control' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('control')}
-            >
-              操控
-            </button>
-            <button
-              className={`btn ${view === 'formation' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('formation')}
-            >
-              编队
-            </button>
-            <button
-              className={`btn ${view === 'spray' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('spray')}
-            >
-              喷洒
-            </button>
-            <button
-              className={`btn ${view === 'hardware' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('hardware')}
-            >
-              硬件
-            </button>
-            <button
-              className={`btn ${view === 'mesh' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('mesh')}
-            >
-              Mesh
-            </button>
-            <button
-              className={`btn ${view === 'celltower' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('celltower')}
-            >
-              基站
-            </button>
-            <button
-              className={`btn ${view === 'satlink' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('satlink')}
-            >
-              星地中继
-            </button>
-            <button
-              className={`btn ${view === 'terrain' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('terrain')}
-            >
-              地形
-            </button>
-            <button
-              className={`btn ${view === 'emergency' ? 'primary' : ''}`}
-              style={{ padding: '4px 12px', fontSize: 11 }}
-              onClick={() => setView('emergency')}
-            >
-              应急编排
-            </button>
+            {[
+              { key: 'dashboard', label: '仪表盘' },
+              { key: 'scene3d', label: '3D 视图' },
+              { key: 'control', label: '操控' },
+              { key: 'formation', label: '编队' },
+              { key: 'spray', label: '喷洒' },
+              { key: 'hardware', label: '硬件' },
+              { key: 'mesh', label: 'Mesh' },
+              { key: 'celltower', label: '基站' },
+              { key: 'satlink', label: '星地中继' },
+              { key: 'terrain', label: '地形' },
+              { key: 'emergency', label: '应急编排' },
+              { key: 'surveillance', label: '安防监控' },
+              { key: 'alarm', label: '报警联动' },
+              { key: 'tracking', label: '追踪' },
+              { key: 'geofence', label: '围栏' },
+              { key: 'dronelock', label: '锁机' },
+            ]
+              .filter((tab) => isPanelAvailable(VIEW_PANEL_MAP[tab.key], budgetMode))
+              .map((tab) => (
+                <button
+                  key={tab.key}
+                  className={`btn ${view === tab.key ? 'primary' : ''}`}
+                  style={{ padding: '4px 12px', fontSize: 11 }}
+                  onClick={() => setView(tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
           </div>
           <span className="chip mono">{new Date(now).toLocaleTimeString('zh-CN', { hour12: false })}</span>
           <span className="chip">
@@ -296,10 +289,41 @@ export default function App() {
         </div>
 
         <div className="topbar-right">
+          {/* 丐版预算档位切换：选择后隐藏不可用面板 */}
+          <select
+            value={budgetMode || ''}
+            onChange={(e) => setBudgetMode(e.target.value || null)}
+            title="切换预算档位"
+            aria-label="切换预算档位"
+            style={{ padding: '4px 8px', fontSize: 11, marginRight: 6 }}
+          >
+            <option value="">完整版</option>
+            <option value={BUDGET_MODES.TOY}>丐版·百元级</option>
+            <option value={BUDGET_MODES.STANDARD}>丐版·千元级</option>
+            <option value={BUDGET_MODES.ADVANCED}>丐版·进阶</option>
+          </select>
+          <BudgetBadge mode={budgetMode} />
           <span className={`ws-badge ${wsState === 'open' ? 'ok' : 'bad'}`}>
             <i className="dotp" />
             {wsState === 'open' ? 'LIVE' : 'RECONNECTING'}
           </span>
+          {/* 移动端侧栏切换按钮（汉堡菜单），仅在小屏显示 */}
+          <button
+            className="btn mobile-rail-toggle"
+            onClick={() => setMobileRail(mobileRail === 'left' ? null : 'left')}
+            title="机队/任务侧栏"
+            aria-label="切换机队侧栏"
+          >
+            <span className="icon">☰</span>
+          </button>
+          <button
+            className="btn mobile-rail-toggle"
+            onClick={() => setMobileRail(mobileRail === 'right' ? null : 'right')}
+            title="操控/告警侧栏"
+            aria-label="切换操控侧栏"
+          >
+            <span className="icon">⚙</span>
+          </button>
         </div>
       </header>
 
@@ -345,6 +369,26 @@ export default function App() {
         <div className="gcs-body" style={{ display: 'block' }}>
           <EmergencyOrchPanel />
         </div>
+      ) : view === 'surveillance' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <SurveillancePanel />
+        </div>
+      ) : view === 'alarm' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <AlarmPanel />
+        </div>
+      ) : view === 'tracking' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <TrackingPanel />
+        </div>
+      ) : view === 'geofence' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <GeofencePanel />
+        </div>
+      ) : view === 'dronelock' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <DroneLockPanel />
+        </div>
       ) : view === 'scene3d' ? (
         <div className="scene3d-layout">
           <div className="scene3d-main">
@@ -368,8 +412,24 @@ export default function App() {
         </div>
       ) : (
       <div className="gcs-body">
-        <aside className="rail left">
-          <DroneList drones={drones} selectedSysid={selectedSysid} onSelect={setSelectedSysid} />
+        {/* 移动端侧栏抽屉遮罩：点击/Enter/Escape 关闭（带 role/tabIndex/aria-label 保证键盘与读屏可访问） */}
+        {mobileRail && (
+          <div
+            className="mobile-rail-mask"
+            role="button"
+            aria-label="关闭侧栏"
+            tabIndex={0}
+            onClick={() => setMobileRail(null)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === 'Escape') {
+                e.preventDefault()
+                setMobileRail(null)
+              }
+            }}
+          />
+        )}
+        <aside className={`rail left ${mobileRail === 'left' ? 'mobile-open' : ''}`}>
+          <DroneList drones={drones} selectedSysid={selectedSysid} onSelect={(sysid) => { setSelectedSysid(sysid); setMobileRail(null) }} />
           <MissionPlanner
             drone={selected}
             missionDraft={missionDraft}
@@ -422,7 +482,7 @@ export default function App() {
           </div>
         </main>
 
-        <aside className="rail right">
+        <aside className={`rail right ${mobileRail === 'right' ? 'mobile-open' : ''}`}>
           <Joystick drone={selected} />
           <VisionPanel
             drone={selected}

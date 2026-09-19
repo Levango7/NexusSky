@@ -164,10 +164,10 @@ function buildTerrain(THREE) {
     const x = pos.getX(i)
     const z = pos.getZ(i) // PlaneGeometry 旋转前 z 即平面第二维
     const h = Math.sin(x * 0.05) * Math.cos(z * 0.04) * 1.5 + Math.sin(x * 0.02 + z * 0.03) * 2.5
-    pos.setZ(i, h) // 旋转前设置局部 z（旋转后变为 -y），这里在旋转前用 z 分量
+    // PlaneGeometry 默认在 XY 平面（z=0），绕 X 轴旋转 -PI/2 后：原 z → 世界 y（高度方向），
+    // 原 y → 世界 -z（水平）。因此起伏高度必须在旋转前的 z 分量上设置。
+    pos.setZ(i, h)
   }
-  // 注意：PlaneGeometry 默认在 XY 平面，旋转 -PI/2 绕 X 轴后 Y→Z。我们在旋转前修改 Z（厚度方向无），
-  // 实际起伏应改 Y。修正：在旋转后改 position.y。简化处理——重新用 Y 分量。
   ground.geometry.attributes.position.needsUpdate = true
   ground.geometry.computeVertexNormals()
 
@@ -200,6 +200,9 @@ export default function Scene3D({
 
   useEffect(() => {
     let renderer, scene, camera, animationId, disposed = false
+    // 提升事件监听器 / ResizeObserver 引用到 useEffect 顶层，以便 cleanup 能访问。
+    // 经验来源：2026-09-16-react-side-effect-cleanup-timeout-ref-callback-leak
+    let dom, onDown, onMove, onUp, onWheel, onCtx, ro
     const cam = createOrbitState()
     const droneModels = new Map() // sysid -> { group, rotors, label }
     const trackLineRef = { current: null }
@@ -258,17 +261,17 @@ export default function Scene3D({
         scene.add(formationGroupRef.current)
 
         // ---- 相机控制 ----
-        const dom = renderer.domElement
+        dom = renderer.domElement
         let dragging = null // 'rotate' | 'pan'
         let lastX = 0, lastY = 0
 
-        const onDown = (e) => {
+        onDown = (e) => {
           if (e.button === 2) dragging = 'pan'
           else dragging = 'rotate'
           lastX = e.clientX
           lastY = e.clientY
         }
-        const onMove = (e) => {
+        onMove = (e) => {
           if (!dragging) return
           const dx = e.clientX - lastX
           const dy = e.clientY - lastY
@@ -289,14 +292,14 @@ export default function Scene3D({
           }
           applyOrbit(camera, cam)
         }
-        const onUp = () => { dragging = null }
-        const onWheel = (e) => {
+        onUp = () => { dragging = null }
+        onWheel = (e) => {
           e.preventDefault()
           cam.radius *= 1 + e.deltaY * 0.001
           cam.radius = Math.max(10, Math.min(800, cam.radius))
           applyOrbit(camera, cam)
         }
-        const onCtx = (e) => e.preventDefault()
+        onCtx = (e) => e.preventDefault()
         dom.addEventListener('mousedown', onDown)
         window.addEventListener('mousemove', onMove)
         window.addEventListener('mouseup', onUp)
@@ -313,7 +316,7 @@ export default function Scene3D({
           camera.updateProjectionMatrix()
           renderer.setSize(nw, nh)
         }
-        const ro = new ResizeObserver(onResize)
+        ro = new ResizeObserver(onResize)
         ro.observe(el)
 
         // ---- 渲染循环 ----
@@ -350,6 +353,17 @@ export default function Scene3D({
     return () => {
       disposed = true
       if (animationId) cancelAnimationFrame(animationId)
+      // 清理事件监听器（防止组件卸载后仍持有 DOM/window 引用）
+      if (dom) {
+        dom.removeEventListener('mousedown', onDown)
+        dom.removeEventListener('wheel', onWheel)
+        dom.removeEventListener('contextmenu', onCtx)
+      }
+      if (onMove) window.removeEventListener('mousemove', onMove)
+      if (onUp) window.removeEventListener('mouseup', onUp)
+      // 清理 ResizeObserver
+      if (ro) ro.disconnect()
+      // 清理 renderer
       if (renderer) {
         renderer.dispose()
         if (renderer.domElement && renderer.domElement.parentNode) {
@@ -383,6 +397,14 @@ export default function Scene3D({
     // 移除消失的
     droneModels.forEach((m, sysid) => {
       if (!liveMap.has(sysid)) {
+        // 释放 geometry 和 material，避免 GPU 内存泄漏
+        m.group.traverse((obj) => {
+          if (obj.geometry) obj.geometry.dispose()
+          if (obj.material) {
+            if (Array.isArray(obj.material)) obj.material.forEach((mat) => mat.dispose())
+            else obj.material.dispose()
+          }
+        })
         scene.remove(m.group)
         droneModels.delete(sysid)
       }

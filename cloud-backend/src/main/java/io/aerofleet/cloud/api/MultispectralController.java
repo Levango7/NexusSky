@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.vision.MultispectralTaskService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,9 +35,16 @@ public class MultispectralController {
 
     /** FR-27 创建多光谱任务。 */
     @PostMapping("/tasks")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> createTask(@RequestBody Map<String, Object> body) {
         try {
-            int sysid = ((Number) body.get("sysid")).intValue();
+            // P3-fix(Minor): sysid 缺失时返回友好错误消息而非 NPE 的 "null"
+            Object sysidRaw = body.get("sysid");
+            if (!(sysidRaw instanceof Number)) {
+                return ResponseEntity.badRequest().body(
+                        Map.of("error", "field 'sysid' is required and must be a number"));
+            }
+            int sysid = ((Number) sysidRaw).intValue();
             @SuppressWarnings("unchecked")
             List<String> bands = (List<String>) body.getOrDefault("bands", List.of("NIR", "RED"));
             @SuppressWarnings("unchecked")
