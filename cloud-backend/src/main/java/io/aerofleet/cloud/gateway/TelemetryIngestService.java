@@ -8,6 +8,7 @@ import io.aerofleet.cloud.api.SatLinkMonitorService;
 import io.aerofleet.cloud.api.TerrainMapService;
 import io.aerofleet.cloud.telemetry.AlertBus;
 import io.aerofleet.cloud.telemetry.PendingAcks;
+import io.aerofleet.cloud.tracking.FlightTrackStore;
 import io.aerofleet.cloud.vision.ObstacleAvoidanceController;
 import io.aerofleet.cloud.vision.RadarController;
 import io.aerofleet.cloud.vision.RotorController;
@@ -100,6 +101,7 @@ public class TelemetryIngestService {
     private final EmergencyOrchService emergencyOrchService;
     private final TelemetryWebSocketHandler wsHandler;
     private final ObjectMapper objectMapper;
+    private final FlightTrackStore flightTrackStore;
 
     public TelemetryIngestService(DeviceRegistry registry, PendingAcks pendings, AlertBus alerts,
                                   @Lazy RadarController radarController, @Lazy RotorController rotorController,
@@ -111,6 +113,7 @@ public class TelemetryIngestService {
                                   @Lazy CellTowerTopologyService cellTowerTopologyService,
                                   @Lazy EmergencyOrchService emergencyOrchService,
                                   @Lazy TelemetryWebSocketHandler wsHandler,
+                                  @Lazy FlightTrackStore flightTrackStore,
                                   ObjectMapper objectMapper) {
         this.registry = registry;
         this.pendings = pendings;
@@ -125,6 +128,7 @@ public class TelemetryIngestService {
         this.cellTowerTopologyService = cellTowerTopologyService;
         this.emergencyOrchService = emergencyOrchService;
         this.wsHandler = wsHandler;
+        this.flightTrackStore = flightTrackStore;
         this.objectMapper = objectMapper;
     }
 
@@ -251,6 +255,18 @@ public class TelemetryIngestService {
         s.current = st.currentBattery;
         s.battery = st.batteryRemaining;
         s.load = st.load;
+        // 飞行轨迹存储：电量更新时同步写入轨迹点（仅当已有位置时）
+        if (flightTrackStore != null && !Double.isNaN(s.lat) && !Double.isNaN(s.lon)) {
+            long now = System.currentTimeMillis();
+            flightTrackStore.addPoint(sysid, new FlightTrackStore.TrackPoint(
+                    sysid, now, s.lat, s.lon,
+                    Double.isNaN(s.relativeAlt) ? 0.0 : s.relativeAlt,
+                    Double.isNaN(s.vx) ? Double.NaN : s.vx,
+                    Double.isNaN(s.vy) ? Double.NaN : s.vy,
+                    Double.isNaN(s.vz) ? Double.NaN : s.vz,
+                    Double.isNaN(s.heading) ? Double.NaN : s.heading,
+                    s.battery >= 0 ? s.battery : -1.0));
+        }
     }
 
     /**
@@ -274,6 +290,18 @@ public class TelemetryIngestService {
         s.satellites = g.satellitesVisible;
         s.eph = g.eph;
         s.gpsHealthy = g.fixType >= 3 && g.satellitesVisible >= 6;
+        // 飞行轨迹存储：GPS 修复时记录轨迹点（GPS_RAW_INT 含 alt 但无 vx/vy，仅写位置）
+        if (flightTrackStore != null && s.gpsHealthy && g.latE7 != 0 && g.lonE7 != 0) {
+            long now = System.currentTimeMillis();
+            double lat = g.latE7 / 1e7;
+            double lon = g.lonE7 / 1e7;
+            double altM = g.altMm / 1000.0;
+            flightTrackStore.addPoint(sysid, new FlightTrackStore.TrackPoint(
+                    sysid, now, lat, lon, altM,
+                    Double.NaN, Double.NaN, Double.NaN,
+                    g.yaw > 0 ? g.yaw / 100.0 : Double.NaN,
+                    s.battery >= 0 ? s.battery : -1.0));
+        }
         if (wasHealthy && !s.gpsHealthy) {
             AlertEntry entry = new AlertEntry(2, "GPS fix degraded (fixType="
                     + g.fixType + ", sats=" + g.satellitesVisible + ")",
@@ -312,6 +340,15 @@ public class TelemetryIngestService {
         if (p.latE7 != 0 || p.lonE7 != 0) {
             s.track.add(new TrackPoint(p.lat(), p.lon(), p.relativeAltM(),
                     System.currentTimeMillis()));
+        }
+        // 飞行轨迹存储：GLOBAL_POSITION_INT 是最完整的遥测源，写入完整轨迹点
+        if (flightTrackStore != null && (p.latE7 != 0 || p.lonE7 != 0)) {
+            long now = System.currentTimeMillis();
+            flightTrackStore.addPoint(sysid, new FlightTrackStore.TrackPoint(
+                    sysid, now, p.lat(), p.lon(), p.relativeAltM(),
+                    p.vx / 100.0, p.vy / 100.0, p.vz / 100.0,
+                    p.hdg != MavEnums.HDG_UNKNOWN ? p.hdg / 100.0 : Double.NaN,
+                    s.battery >= 0 ? s.battery : -1.0));
         }
     }
 

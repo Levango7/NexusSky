@@ -47,7 +47,7 @@ class TelemetryIngestServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         return new TelemetryIngestService(
                 registry, pendings, alerts,
-                null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null,
                 objectMapper);
     }
 
@@ -56,7 +56,7 @@ class TelemetryIngestServiceTest {
     void constructor_withNullDeps_noException() {
         assertThatCode(() -> new TelemetryIngestService(
                 new DeviceRegistry(), new PendingAcks(), new AlertBus(),
-                null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null,
                 new ObjectMapper())).doesNotThrowAnyException();
     }
 
