@@ -76,7 +76,8 @@ public class FailoverManager {
 
         AtomicInteger counter = failureCounters.computeIfAbsent(sysid, k -> new AtomicInteger(0));
 
-        if (currentScore < config.getFailoverThreshold()) {
+        int failoverThreshold = config.snapshot().failoverThreshold();
+        if (currentScore < failoverThreshold) {
             int count = counter.incrementAndGet();
             log.warn("Low quality score for sysid={}: score={}, consecutiveCount={}",
                     sysid, currentScore, count);
@@ -132,7 +133,7 @@ public class FailoverManager {
         int targetScore = LinkQualityMonitor.calculateLinkScore(
                 score.getDetails().get(targetLink));
 
-        if (targetScore < config.getFailoverThreshold()) {
+        if (targetScore < config.snapshot().failoverThreshold()) {
             // 目标链路质量也不达标，切换失败
             FailoverResult result = new FailoverResult(sysid, fromLink, targetLink,
                     FailoverResult.Status.FAILED, System.currentTimeMillis(),

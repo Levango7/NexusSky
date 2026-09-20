@@ -106,20 +106,24 @@ public class AdaptiveRouter {
         LinkQuality.LinkType bestLink = score.getBestLinkType();
         int bestScore = score.getOverallScore();
 
+        CommAdaptConfig.ConfigSnapshot cfg = config.snapshot();
+        int switchThreshold = cfg.switchThreshold();
+        int failoverThreshold = cfg.failoverThreshold();
+
         // 当前链路就是最优链路，无需切换
-        if (bestLink == current && currentScore >= config.getSwitchThreshold()) {
+        if (bestLink == current && currentScore >= switchThreshold) {
             return new SwitchDecision(sysid, current, current, currentScore, bestScore,
                     "current link is optimal", SwitchDecision.Urgency.NO_SWITCH);
         }
 
         // 当前链路评分低于切换阈值，且备选链路评分高于候选阈值
-        if (currentScore < config.getSwitchThreshold() && bestScore > CANDIDATE_SCORE_THRESHOLD) {
-            SwitchDecision.Urgency urgency = currentScore < config.getFailoverThreshold()
+        if (currentScore < switchThreshold && bestScore > CANDIDATE_SCORE_THRESHOLD) {
+            SwitchDecision.Urgency urgency = currentScore < failoverThreshold
                     ? SwitchDecision.Urgency.IMMEDIATE
                     : SwitchDecision.Urgency.DELAYED;
             String reason = String.format(
                     "current %s score=%d below threshold=%d, candidate %s score=%d above %d",
-                    current, currentScore, config.getSwitchThreshold(),
+                    current, currentScore, switchThreshold,
                     bestLink, bestScore, CANDIDATE_SCORE_THRESHOLD);
             log.info("Switch recommended for sysid={}: {} → {} ({})", sysid, current, bestLink, urgency);
             return new SwitchDecision(sysid, current, bestLink, currentScore, bestScore,
@@ -127,7 +131,7 @@ public class AdaptiveRouter {
         }
 
         // 当前链路评分低于切换阈值，但备选链路评分也不够高
-        if (currentScore < config.getSwitchThreshold()) {
+        if (currentScore < switchThreshold) {
             return new SwitchDecision(sysid, current, bestLink, currentScore, bestScore,
                     "current link degraded but no better alternative available",
                     SwitchDecision.Urgency.NO_SWITCH);
