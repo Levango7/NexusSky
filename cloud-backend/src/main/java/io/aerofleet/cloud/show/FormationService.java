@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>{@link FormationType#STAR} 星形 — 五角星轮廓分布</li>
  * </ul>
  */
-@Service
+@Service("showFormationService")
 public class FormationService {
 
     private static final Logger log = LoggerFactory.getLogger(FormationService.class);
