@@ -71,9 +71,9 @@ export default function VoiceCmdPanel() {
   const [broadcastResult, setBroadcastResult] = useState(null)
 
   // ---- 告警播报 ----
-  const [alertText, setAlertText] = useState('')
   const [alertSysid, setAlertSysid] = useState('')
   const [alerting, setAlerting] = useState(false)
+  const [alertResult, setAlertResult] = useState(null)
 
   // ---- 播报状态 ----
   const [statusSysid, setStatusSysid] = useState('')
@@ -200,10 +200,12 @@ export default function VoiceCmdPanel() {
       return
     }
     setAlerting(true)
+    setAlertResult(null)
     try {
-      await broadcastVoiceAlert(Number(sysid))
+      const data = await broadcastVoiceAlert(Number(sysid))
+      setAlertResult(data)
     } catch (e) {
-      setBroadcastResult({ error: e && e.message ? e.message : String(e) })
+      setAlertResult({ error: e && e.message ? e.message : String(e) })
     } finally {
       setAlerting(false)
     }
@@ -328,7 +330,7 @@ export default function VoiceCmdPanel() {
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
               <input
                 type="number"
-                placeholder="sysid（可选）"
+                placeholder="sysid（必填）"
                 value={broadcastSysid}
                 onChange={(e) => setBroadcastSysid(e.target.value)}
                 style={{ ...modalInputStyle, width: 120, flex: '0 0 120px' }}
@@ -361,17 +363,10 @@ export default function VoiceCmdPanel() {
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
               <input
                 type="number"
-                placeholder="sysid（可选）"
+                placeholder="sysid（必填）"
                 value={alertSysid}
                 onChange={(e) => setAlertSysid(e.target.value)}
                 style={{ ...modalInputStyle, width: 120, flex: '0 0 120px' }}
-              />
-              <input
-                type="text"
-                placeholder="告警内容"
-                value={alertText}
-                onChange={(e) => setAlertText(e.target.value)}
-                style={{ ...modalInputStyle, flex: '1 1 160px' }}
               />
               <button
                 onClick={handleAlert}
@@ -381,6 +376,16 @@ export default function VoiceCmdPanel() {
                 {alerting ? '告警中…' : '告警播报'}
               </button>
             </div>
+            {alertResult && (
+              <div style={{ fontSize: 10, color: alertResult.error ? 'var(--crit)' : 'var(--ok)', padding: '4px 6px', background: 'var(--bg-1)', borderRadius: 3 }}>
+                {alertResult.error ? `⚠ ${alertResult.error}` : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <div>告警文本：<span style={{ color: 'var(--text)' }}>{pick(alertResult, 'text') || '--'}</span></div>
+                    <div>告警类型：<span style={{ color: 'var(--text)' }}>{pick(alertResult, 'alertType') || '--'}</span></div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 播报状态 */}

@@ -159,7 +159,7 @@ class ShowControllerTest {
     }
 
     @Test
-    @DisplayName("POST /tasks 队形不存在抛 BadRequestException")
+    @DisplayName("POST /tasks 队形不存在抛 NotFoundException")
     void createTaskFormationNotFound() {
         ShowController.CreateTaskRequest req = new ShowController.CreateTaskRequest();
         req.name = "表演1";

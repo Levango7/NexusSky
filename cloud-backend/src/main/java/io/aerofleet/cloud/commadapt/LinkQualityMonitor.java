@@ -9,8 +9,8 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 通信链路质量监控服务。
@@ -32,8 +32,6 @@ public class LinkQualityMonitor {
     private final Map<Integer, Map<LinkQuality.LinkType, LinkQuality>> qualityData =
             new ConcurrentHashMap<>();
 
-    /** 随机数生成器（用于模拟质量指标） */
-    private final Random random = new Random();
 
     /**
      * 定期采集所有已注册无人机的链路质量。
@@ -63,11 +61,11 @@ public class LinkQualityMonitor {
         // MESH 链路：低延迟、中等带宽、信号较强
         LinkQuality mesh = new LinkQuality(
                 LinkQuality.LinkType.MESH,
-                5 + random.nextDouble() * 20,         // latencyMs: 5-25ms
-                500 + random.nextDouble() * 1500,     // bandwidthKbps: 500-2000kbps
-                -40 + random.nextDouble() * 20,       // rssiDbm: -40 to -20 dBm
-                random.nextDouble() * 2,              // packetLossPct: 0-2%
-                1 + random.nextDouble() * 4,          // jitterMs: 1-5ms
+                5 + ThreadLocalRandom.current().nextDouble() * 20,         // latencyMs: 5-25ms
+                500 + ThreadLocalRandom.current().nextDouble() * 1500,     // bandwidthKbps: 500-2000kbps
+                -40 + ThreadLocalRandom.current().nextDouble() * 20,       // rssiDbm: -40 to -20 dBm
+                ThreadLocalRandom.current().nextDouble() * 2,              // packetLossPct: 0-2%
+                1 + ThreadLocalRandom.current().nextDouble() * 4,          // jitterMs: 1-5ms
                 now,
                 sysid
         );
@@ -76,11 +74,11 @@ public class LinkQualityMonitor {
         // SATELLITE 链路：高延迟、低带宽、信号较弱
         LinkQuality satellite = new LinkQuality(
                 LinkQuality.LinkType.SATELLITE,
-                200 + random.nextDouble() * 300,      // latencyMs: 200-500ms
-                50 + random.nextDouble() * 150,       // bandwidthKbps: 50-200kbps
-                -100 + random.nextDouble() * 30,      // rssiDbm: -100 to -70 dBm
-                random.nextDouble() * 5,              // packetLossPct: 0-5%
-                10 + random.nextDouble() * 20,        // jitterMs: 10-30ms
+                200 + ThreadLocalRandom.current().nextDouble() * 300,      // latencyMs: 200-500ms
+                50 + ThreadLocalRandom.current().nextDouble() * 150,       // bandwidthKbps: 50-200kbps
+                -100 + ThreadLocalRandom.current().nextDouble() * 30,      // rssiDbm: -100 to -70 dBm
+                ThreadLocalRandom.current().nextDouble() * 5,              // packetLossPct: 0-5%
+                10 + ThreadLocalRandom.current().nextDouble() * 20,        // jitterMs: 10-30ms
                 now,
                 sysid
         );
@@ -89,11 +87,11 @@ public class LinkQualityMonitor {
         // CELLULAR 链路：中等延迟、中等带宽、信号中等
         LinkQuality cellular = new LinkQuality(
                 LinkQuality.LinkType.CELLULAR,
-                30 + random.nextDouble() * 70,        // latencyMs: 30-100ms
-                200 + random.nextDouble() * 800,      // bandwidthKbps: 200-1000kbps
-                -80 + random.nextDouble() * 30,       // rssiDbm: -80 to -50 dBm
-                random.nextDouble() * 3,              // packetLossPct: 0-3%
-                5 + random.nextDouble() * 10,         // jitterMs: 5-15ms
+                30 + ThreadLocalRandom.current().nextDouble() * 70,        // latencyMs: 30-100ms
+                200 + ThreadLocalRandom.current().nextDouble() * 800,      // bandwidthKbps: 200-1000kbps
+                -80 + ThreadLocalRandom.current().nextDouble() * 30,       // rssiDbm: -80 to -50 dBm
+                ThreadLocalRandom.current().nextDouble() * 3,              // packetLossPct: 0-3%
+                5 + ThreadLocalRandom.current().nextDouble() * 10,         // jitterMs: 5-15ms
                 now,
                 sysid
         );

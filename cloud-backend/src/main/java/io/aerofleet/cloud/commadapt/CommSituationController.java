@@ -339,12 +339,13 @@ public class CommSituationController {
     }
 
     private static Map<String, Object> configToMap(CommAdaptConfig c) {
+        CommAdaptConfig.ConfigSnapshot snap = c.snapshot();
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("switchThreshold", c.getSwitchThreshold());
-        m.put("failoverThreshold", c.getFailoverThreshold());
-        m.put("detectionIntervalMs", c.getDetectionIntervalMs());
-        m.put("autoSwitchEnabled", c.isAutoSwitchEnabled());
-        m.put("minStableTimeMs", c.getMinStableTimeMs());
+        m.put("switchThreshold", snap.switchThreshold());
+        m.put("failoverThreshold", snap.failoverThreshold());
+        m.put("detectionIntervalMs", snap.detectionIntervalMs());
+        m.put("autoSwitchEnabled", snap.autoSwitchEnabled());
+        m.put("minStableTimeMs", snap.minStableTimeMs());
         return m;
     }
 

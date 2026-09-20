@@ -43,7 +43,8 @@ public class ShowTaskService {
      * @param centerLat   队形中心纬度
      * @param centerLon   队形中心经度
      * @return 创建的表演任务
-     * @throws BadRequestException 队形不存在或参数非法
+     * @throws NotFoundException 队形不存在
+     * @throws BadRequestException 参数非法
      */
     public ShowTask createTask(String name, String formationId,
                                List<Integer> droneSysids, int durationSec,

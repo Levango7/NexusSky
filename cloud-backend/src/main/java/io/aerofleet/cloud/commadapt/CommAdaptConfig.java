@@ -138,6 +138,45 @@ public class CommAdaptConfig {
         }
     }
 
+    /**
+     * 在锁内一次性读取所有配置字段，返回不可变快照。
+     * <p>
+     * 解决组合读不一致问题：避免在 {@link #updateConfig} 执行过程中
+     * 读取者通过连续调用多个 getter 看到部分更新的中间状态。
+     * <p>
+     * 推荐在需要读取多个配置字段的场景使用此方法，而非逐个调用 getter。
+     *
+     * @return 配置快照
+     */
+    public ConfigSnapshot snapshot() {
+        synchronized (configLock) {
+            return new ConfigSnapshot(
+                    switchThreshold,
+                    failoverThreshold,
+                    detectionIntervalMs,
+                    autoSwitchEnabled,
+                    minStableTimeMs
+            );
+        }
+    }
+
+    /**
+     * 配置快照记录类，用于一次性原子读取所有配置字段。
+     *
+     * @param switchThreshold    链路切换阈值
+     * @param failoverThreshold  故障检测阈值
+     * @param detectionIntervalMs 质量检测间隔（毫秒）
+     * @param autoSwitchEnabled  是否启用自动切换
+     * @param minStableTimeMs    最小稳定时间（毫秒）
+     */
+    public record ConfigSnapshot(
+            int switchThreshold,
+            int failoverThreshold,
+            long detectionIntervalMs,
+            boolean autoSwitchEnabled,
+            long minStableTimeMs
+    ) {}
+
     @Override
     public String toString() {
         return "CommAdaptConfig{switchThreshold=" + switchThreshold

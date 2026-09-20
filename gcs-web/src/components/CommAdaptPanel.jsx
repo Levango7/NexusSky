@@ -80,6 +80,7 @@ export default function CommAdaptPanel() {
   const [failoverHistory, setFailoverHistory] = useState([])
   const [failoverError, setFailoverError] = useState(null)
   const [executingFailover, setExecutingFailover] = useState(false)
+  const [failoverResult, setFailoverResult] = useState(null)
 
   // ---- 自适应配置 ----
   const [config, setConfig] = useState(null)
@@ -209,8 +210,10 @@ export default function CommAdaptPanel() {
     }
     setExecutingFailover(true)
     setFailoverError(null)
+    setFailoverResult(null)
     try {
-      await executeCommFailover(Number(sysid), targetLink)
+      const data = await executeCommFailover(Number(sysid), targetLink)
+      setFailoverResult(data)
     } catch (e) {
       setFailoverError(e && e.message ? e.message : String(e))
     } finally {
@@ -342,6 +345,26 @@ export default function CommAdaptPanel() {
                 style={{ ...modalInputStyle, flex: '1 1 200px' }}
               />
             </div>
+            {failoverResult && (
+              <div style={{ fontSize: 10, color: 'var(--dim-2)', marginBottom: 4, padding: '4px 8px', background: 'var(--bg-1)', borderRadius: 3, border: `1px solid ${pick(failoverResult, 'status') === 'success' ? 'var(--ok)' : 'var(--crit)'}` }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span>切换结果：</span>
+                  <span style={{ color: LINK_META[pick(failoverResult, 'fromLink')]?.color || 'var(--text)' }}>
+                    {LINK_META[pick(failoverResult, 'fromLink')]?.label || pick(failoverResult, 'fromLink') || '--'}
+                  </span>
+                  <span>→</span>
+                  <span style={{ color: LINK_META[pick(failoverResult, 'toLink')]?.color || 'var(--ok)' }}>
+                    {LINK_META[pick(failoverResult, 'toLink')]?.label || pick(failoverResult, 'toLink') || '--'}
+                  </span>
+                  <span style={{ color: pick(failoverResult, 'status') === 'success' ? 'var(--ok)' : 'var(--crit)', fontWeight: 'bold' }}>
+                    {pick(failoverResult, 'status') || '--'}
+                  </span>
+                </div>
+                {pick(failoverResult, 'message') && (
+                  <div style={{ marginTop: 2, color: 'var(--dim)' }}>{pick(failoverResult, 'message')}</div>
+                )}
+              </div>
+            )}
             {scoreError && <div style={{ fontSize: 10, color: 'var(--crit)', marginBottom: 4 }}>⚠ {scoreError}</div>}
             {decisionError && <div style={{ fontSize: 10, color: 'var(--crit)', marginBottom: 4 }}>⚠ {decisionError}</div>}
             {score && (

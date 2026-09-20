@@ -56,6 +56,10 @@ public class SituationOverlayService {
         while (situationHistory.putIfAbsent(key, situation) != null) {
             key++;
         }
+        // 同毫秒递增时，同步 situation 内部 timestamp 与最终 key 一致
+        if (key != now) {
+            situation.setTimestamp(key);
+        }
         // 限制历史记录数量，移除最旧的条目
         while (situationHistory.size() > MAX_HISTORY_SIZE) {
             Long oldest = situationHistory.firstKey();
@@ -114,13 +118,7 @@ public class SituationOverlayService {
      * 获取时间范围内的态势列表。
      */
     public List<RealtimeSituation> getSituationsBetween(long from, long to) {
-        List<RealtimeSituation> result = new ArrayList<>();
-        for (Map.Entry<Long, RealtimeSituation> entry : situationHistory.entrySet()) {
-            if (entry.getKey() >= from && entry.getKey() <= to) {
-                result.add(entry.getValue());
-            }
-        }
-        return result;
+        return new ArrayList<>(situationHistory.subMap(from, true, to, true).values());
     }
 
     /**
