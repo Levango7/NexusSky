@@ -359,6 +359,209 @@ export const api = {
   // 清除单机锁定状态
   clearLockState: (sysid) =>
     jsonFetch(`/api/drone-lock/${sysid}`, { method: 'DELETE' }),
+
+  // ---- AutoDispatch (自动出警 P0) ----
+  // base 路径 /api/autodispatch（独立于 v1 BASE）
+  // 手动触发出警：经纬度 + 报警ID + 无人机数
+  triggerAutoDispatch: (payload) =>
+    jsonFetch('/api/autodispatch/trigger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 出警历史列表
+  getAutoDispatchHistory: () => jsonFetch('/api/autodispatch/history'),
+
+  // 进行中出警任务
+  getAutoDispatchActive: () => jsonFetch('/api/autodispatch/active'),
+
+  // 中止出警任务
+  abortAutoDispatch: (dispatchId) =>
+    jsonFetch(`/api/autodispatch/${dispatchId}/abort`, { method: 'POST' }),
+
+  // 获取自动出警配置
+  getAutoDispatchConfig: () => jsonFetch('/api/autodispatch/config'),
+
+  // 更新自动出警配置
+  updateAutoDispatchConfig: (config) =>
+    jsonFetch('/api/autodispatch/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    }),
+
+  // ---- VideoStream (视频流管理 P0) ----
+  // base 路径 /api/video-stream
+  // 获取视频流地址
+  getVideoStreamUrl: (sysid) => jsonFetch(`/api/video-stream/${sysid}/url`),
+
+  // 启动视频流
+  startVideoStream: (sysid) =>
+    jsonFetch(`/api/video-stream/${sysid}/start`, { method: 'POST' }),
+
+  // 停止视频流
+  stopVideoStream: (sysid) =>
+    jsonFetch(`/api/video-stream/${sysid}/stop`, { method: 'POST' }),
+
+  // 查询活跃视频流
+  getActiveVideoStreams: () => jsonFetch('/api/video-stream/active'),
+
+  // ---- VoiceIntercom (语音对讲 P0) ----
+  // base 路径 /api/voice-intercom
+  // 启动语音对讲
+  startVoiceIntercom: (sysid) =>
+    jsonFetch(`/api/voice-intercom/${sysid}/start`, { method: 'POST' }),
+
+  // 停止语音对讲
+  stopVoiceIntercom: (sysid) =>
+    jsonFetch(`/api/voice-intercom/${sysid}/stop`, { method: 'POST' }),
+
+  // 广播喊话
+  broadcastVoice: (sysid, payload) =>
+    jsonFetch(`/api/voice-intercom/${sysid}/broadcast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // ---- Scenarios (应急场景库 P1) ----
+  // base 路径 /api/scenarios
+  // 获取场景模板列表
+  getScenarioTemplates: () => jsonFetch('/api/scenarios/templates'),
+
+  // 获取场景模板详情
+  getScenarioTemplate: (id) => jsonFetch(`/api/scenarios/templates/${id}`),
+
+  // 按灾害类型获取模板
+  getScenarioTemplatesByType: (disasterType) =>
+    jsonFetch(`/api/scenarios/templates/by-type/${disasterType}`),
+
+  // 启动场景
+  launchScenario: (templateId, payload) =>
+    jsonFetch(`/api/scenarios/launch/${templateId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    }),
+
+  // 进行中场景列表
+  getActiveScenarioLaunches: () => jsonFetch('/api/scenarios/launch/active'),
+
+  // 场景历史
+  getScenarioLaunchHistory: () => jsonFetch('/api/scenarios/launch/history'),
+
+  // 中止场景
+  abortScenarioLaunch: (launchId) =>
+    jsonFetch(`/api/scenarios/launch/${launchId}/abort`, { method: 'POST' }),
+
+  // 查询场景启动状态
+  getScenarioLaunchStatus: (launchId) =>
+    jsonFetch(`/api/scenarios/launch/${launchId}/status`),
+
+  // 启动演练
+  startScenarioDrill: (templateId, payload) =>
+    jsonFetch(`/api/scenarios/drill/${templateId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    }),
+
+  // 获取演练结果
+  getScenarioDrillResult: (drillId) =>
+    jsonFetch(`/api/scenarios/drill/${drillId}/result`),
+
+  // 演练历史
+  getScenarioDrillHistory: () => jsonFetch('/api/scenarios/drill/history'),
+
+  // ---- Inspection (智能巡检 P1) ----
+  // base 路径 /api/inspection
+  // 创建巡检任务
+  createInspectionTask: (payload) =>
+    jsonFetch('/api/inspection/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 巡检任务列表
+  listInspectionTasks: () => jsonFetch('/api/inspection/tasks'),
+
+  // 巡检任务详情
+  getInspectionTask: (id) => jsonFetch(`/api/inspection/tasks/${id}`),
+
+  // 启动巡检任务
+  startInspectionTask: (id) =>
+    jsonFetch(`/api/inspection/tasks/${id}/start`, { method: 'POST' }),
+
+  // 中止巡检任务
+  abortInspectionTask: (id) =>
+    jsonFetch(`/api/inspection/tasks/${id}/abort`, { method: 'POST' }),
+
+  // 巡检任务进度
+  getInspectionProgress: (id) =>
+    jsonFetch(`/api/inspection/tasks/${id}/progress`),
+
+  // 巡检报告
+  getInspectionReport: (taskId) =>
+    jsonFetch(`/api/inspection/reports/${taskId}`),
+
+  // 异常清单
+  getInspectionAnomalies: (taskId) =>
+    jsonFetch(`/api/inspection/reports/${taskId}/anomalies`),
+
+  // 巡检照片（GPS标注）
+  getInspectionPhotos: (taskId) =>
+    jsonFetch(`/api/inspection/reports/${taskId}/photos`),
+
+  // ---- Health (健康管理 P1) ----
+  // base 路径 /api/health
+  // 单机健康详情
+  getDroneHealth: (sysid) => jsonFetch(`/api/health/${sysid}`),
+
+  // 机队健康总览
+  getFleetHealth: () => jsonFetch('/api/health/fleet'),
+
+  // 单机健康历史
+  getDroneHealthHistory: (sysid) => jsonFetch(`/api/health/${sysid}/history`),
+
+  // 单机部件健康详情
+  getComponentHealth: (sysid, component) =>
+    jsonFetch(`/api/health/${sysid}/components/${component}`),
+
+  // 健康告警列表
+  getHealthWarnings: () => jsonFetch('/api/health/warnings'),
+
+  // ---- Maintenance (维护管理 P1) ----
+  // base 路径 /api/maintenance
+  // 维护记录列表
+  listMaintenanceRecords: () => jsonFetch('/api/maintenance/records'),
+
+  // 创建维护记录
+  createMaintenanceRecord: (payload) =>
+    jsonFetch('/api/maintenance/records', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 更新维护记录
+  updateMaintenanceRecord: (id, payload) =>
+    jsonFetch(`/api/maintenance/records/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // 预测性维护建议（全机队）
+  getMaintenancePredictions: () => jsonFetch('/api/maintenance/predictions'),
+
+  // 单机预测性维护建议
+  getDroneMaintenancePredictions: (sysid) =>
+    jsonFetch(`/api/maintenance/predictions/${sysid}`),
+
+  // 维护计划
+  getMaintenanceSchedule: () => jsonFetch('/api/maintenance/schedule'),
 }
 
 // ---- Emergency Orchestration (应急任务编排 M9) ----
@@ -581,9 +784,16 @@ export async function listLinkageLogs(params = {}) {
   const qs = new URLSearchParams(params).toString()
   return jsonFetch(`${ALARM_BASE}/linkage-logs${qs ? '?' + qs : ''}`)
 }
-// ---- 命名导出：tracking / geofence / droneLock（供面板组件 import）----
+// ---- 命名导出：tracking / geofence / droneLock / autodispatch / videostream / voiceintercom / scenarios / inspection / health / maintenance（供面板组件 import）----
 export const {
   getFlightTrack, replayTrack, getLastKnown, getLostDrones, getSearchGuide, scanLostDrones,
   createGeofenceZone, listGeofenceZones, getGeofenceZone, updateGeofenceZone, deleteGeofenceZone, getGeofenceBreaches, checkGeofence,
   lockDrone, unlockDrone, getLockStatus, getLockedDrones, getAllLockStates, clearLockState,
+  triggerAutoDispatch, getAutoDispatchHistory, getAutoDispatchActive, abortAutoDispatch, getAutoDispatchConfig, updateAutoDispatchConfig,
+  getVideoStreamUrl, startVideoStream, stopVideoStream, getActiveVideoStreams,
+  startVoiceIntercom, stopVoiceIntercom, broadcastVoice,
+  getScenarioTemplates, getScenarioTemplate, getScenarioTemplatesByType, launchScenario, getActiveScenarioLaunches, getScenarioLaunchHistory, abortScenarioLaunch, getScenarioLaunchStatus, startScenarioDrill, getScenarioDrillResult, getScenarioDrillHistory,
+  createInspectionTask, listInspectionTasks, getInspectionTask, startInspectionTask, abortInspectionTask, getInspectionProgress, getInspectionReport, getInspectionAnomalies, getInspectionPhotos,
+  getDroneHealth, getFleetHealth, getDroneHealthHistory, getComponentHealth, getHealthWarnings,
+  listMaintenanceRecords, createMaintenanceRecord, updateMaintenanceRecord, getMaintenancePredictions, getDroneMaintenancePredictions, getMaintenanceSchedule,
 } = api

@@ -19,6 +19,10 @@ import AlarmPanel from './components/AlarmPanel.jsx'
 import TrackingPanel from './components/TrackingPanel.jsx'
 import GeofencePanel from './components/GeofencePanel.jsx'
 import DroneLockPanel from './components/DroneLockPanel.jsx'
+import AutoDispatchPanel from './components/AutoDispatchPanel.jsx'
+import ScenarioLibraryPanel from './components/ScenarioLibraryPanel.jsx'
+import InspectionPanel from './components/InspectionPanel.jsx'
+import HealthPanel from './components/HealthPanel.jsx'
 import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
@@ -62,6 +66,10 @@ const VIEW_PANEL_MAP = {
   tracking: 'mission',     // 飞行追踪/遗失查找归入任务范畴（千元级可用）
   geofence: 'mission',     // 电子围栏归入任务范畴（千元级可用）
   dronelock: 'status',     // 远程锁机归入状态管理（百元级可用）
+  autodispatch: 'emergency', // 自动出警归入应急范畴（千元级可用）
+  scenariolib: 'emergency', // 场景库归入应急范畴（千元级可用）
+  inspection: 'mission',   // 智能巡检归入任务范畴（千元级可用）
+  health: 'status',        // 健康管理归入状态管理（百元级可用）
 }
 
 export default function App() {
@@ -265,6 +273,10 @@ export default function App() {
               { key: 'tracking', label: '追踪' },
               { key: 'geofence', label: '围栏' },
               { key: 'dronelock', label: '锁机' },
+              { key: 'autodispatch', label: '自动出警' },
+              { key: 'scenariolib', label: '场景库' },
+              { key: 'inspection', label: '智能巡检' },
+              { key: 'health', label: '健康管理' },
             ]
               .filter((tab) => isPanelAvailable(VIEW_PANEL_MAP[tab.key], budgetMode))
               .map((tab) => (
@@ -388,6 +400,22 @@ export default function App() {
       ) : view === 'dronelock' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <DroneLockPanel />
+        </div>
+      ) : view === 'autodispatch' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <AutoDispatchPanel />
+        </div>
+      ) : view === 'scenariolib' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <ScenarioLibraryPanel />
+        </div>
+      ) : view === 'inspection' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <InspectionPanel />
+        </div>
+      ) : view === 'health' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <HealthPanel />
         </div>
       ) : view === 'scene3d' ? (
         <div className="scene3d-layout">
