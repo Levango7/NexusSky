@@ -11,12 +11,11 @@ import {
   confirmDeliveryTask,
   searchLandingSites,
 } from '../api.js'
+import { POLL_MS, fmtTime, pick, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
 
 // P4 物流配送面板
 // 配送任务创建 + 路线优化 + 状态追踪 + 降落点搜索
 // 风格与 TrackingPanel / GeofencePanel 一致
-
-const POLL_MS = 5000
 
 // 配送类型（对齐后端 DeliveryTask2.Type 枚举）
 const DELIVERY_TYPES = [
@@ -44,27 +43,12 @@ const DELIVERY_METHODS = [
   { key: 'ROPE_LOWER', label: '绳索降下' },
 ]
 
-// 格式化时间戳
-function fmtTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const n = Number(ts)
-  if (!Number.isFinite(n)) return String(ts)
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
-}
-
-// 字段兼容提取
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
 
 export default function DeliveryPanel() {
   // ---- 任务列表 ----
   const [tasks, setTasks] = useState([])
   const [tasksError, setTasksError] = useState(null)
+  const [successMsg, setSuccessMsg] = useState(null)
 
   // ---- 选中任务 ----
   const [selectedTaskId, setSelectedTaskId] = useState(null)
@@ -202,6 +186,8 @@ export default function DeliveryPanel() {
     try {
       await createDeliveryTask(payload)
       setForm((prev) => ({ ...prev, payloadKg: '', pickupLat: '', pickupLon: '', dropoffLat: '', dropoffLon: '' }))
+      setSuccessMsg('配送任务创建成功')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (err) {
       setFormError('创建任务失败：' + (err && err.message ? err.message : String(err)))
     } finally {
@@ -215,6 +201,8 @@ export default function DeliveryPanel() {
     setOptimizing(true)
     try {
       await optimizeDeliveryRoute(selectedTaskId)
+      setSuccessMsg('路线优化已启动')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('路线优化失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -228,6 +216,8 @@ export default function DeliveryPanel() {
     setStarting(true)
     try {
       await startDeliveryTask(selectedTaskId)
+      setSuccessMsg('配送已启动')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('启动失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -254,6 +244,8 @@ export default function DeliveryPanel() {
     setDelivering(true)
     try {
       await deliverDeliveryTask(selectedTaskId, { method: deliverMethod })
+      setSuccessMsg('投放指令已发送')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('投放失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -267,6 +259,8 @@ export default function DeliveryPanel() {
     setConfirming(true)
     try {
       await confirmDeliveryTask(selectedTaskId)
+      setSuccessMsg('签收确认已提交')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('签收失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -277,6 +271,12 @@ export default function DeliveryPanel() {
   // ---- 搜索降落点 ----
   const handleSearchLanding = useCallback(async () => {
     setLandingError(null)
+    const lat = Number(landingSearch.lat)
+    const lon = Number(landingSearch.lon)
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      setLandingError('纬度和经度必须为有效数字')
+      return
+    }
     const params = {}
     if (landingSearch.lat) params.lat = landingSearch.lat
     if (landingSearch.lon) params.lon = landingSearch.lon
@@ -313,6 +313,12 @@ export default function DeliveryPanel() {
         </div>
       )}
 
+      {successMsg && (
+        <div style={{ color: 'var(--ok)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--ok)' }}>
+          ✓ {successMsg}
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         {/* 左列：任务列表 + 创建表单 */}
         <div style={{ flex: '1 1 420px', minWidth: 360, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -333,7 +339,7 @@ export default function DeliveryPanel() {
                   const isSel = tid === selectedTaskId
                   return (
                     <div
-                      key={tid != null ? tid : i}
+                      key={tid != null ? tid : `task-${i}`}
                       onClick={() => setSelectedTaskId(tid)}
                       style={{
                         padding: '6px 10px', borderBottom: '1px solid var(--line-2)', cursor: 'pointer',
@@ -370,17 +376,17 @@ export default function DeliveryPanel() {
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 120px' }}>
                   <div style={labelStyle}>配送类型</div>
-                  <select value={form.type} onChange={(e) => updateForm('type', e.target.value)} style={modalInputStyle}>
+                  <select value={form.type} onChange={(e) => updateForm('type', e.target.value)} style={modalInputStyle} aria-label="配送类型">
                     {DELIVERY_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
                   </select>
                 </div>
                 <div style={{ flex: '1 1 80px' }}>
                   <div style={labelStyle}>负载 (kg)</div>
-                  <input type="number" step="any" value={form.payloadKg} onChange={(e) => updateForm('payloadKg', e.target.value)} style={modalInputStyle} placeholder="kg" />
+                  <input type="number" step="any" value={form.payloadKg} onChange={(e) => updateForm('payloadKg', e.target.value)} style={modalInputStyle} placeholder="kg" aria-label="负载重量（千克）" />
                 </div>
                 <div style={{ flex: '1 1 120px' }}>
                   <div style={labelStyle}>优先级</div>
-                  <select value={form.priority} onChange={(e) => updateForm('priority', e.target.value)} style={modalInputStyle}>
+                  <select value={form.priority} onChange={(e) => updateForm('priority', e.target.value)} style={modalInputStyle} aria-label="优先级">
                     <option value="LOW">低</option>
                     <option value="NORMAL">中</option>
                     <option value="HIGH">高</option>
@@ -390,21 +396,21 @@ export default function DeliveryPanel() {
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>起飞纬度</div>
-                  <input type="number" step="any" value={form.pickupLat} onChange={(e) => updateForm('pickupLat', e.target.value)} style={modalInputStyle} placeholder="纬度" />
+                  <input type="number" step="any" value={form.pickupLat} onChange={(e) => updateForm('pickupLat', e.target.value)} style={modalInputStyle} placeholder="纬度" aria-label="起飞纬度" />
                 </div>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>起飞经度</div>
-                  <input type="number" step="any" value={form.pickupLon} onChange={(e) => updateForm('pickupLon', e.target.value)} style={modalInputStyle} placeholder="经度" />
+                  <input type="number" step="any" value={form.pickupLon} onChange={(e) => updateForm('pickupLon', e.target.value)} style={modalInputStyle} placeholder="经度" aria-label="起飞经度" />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>降落纬度</div>
-                  <input type="number" step="any" value={form.dropoffLat} onChange={(e) => updateForm('dropoffLat', e.target.value)} style={modalInputStyle} placeholder="纬度" />
+                  <input type="number" step="any" value={form.dropoffLat} onChange={(e) => updateForm('dropoffLat', e.target.value)} style={modalInputStyle} placeholder="纬度" aria-label="降落纬度" />
                 </div>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>降落经度</div>
-                  <input type="number" step="any" value={form.dropoffLon} onChange={(e) => updateForm('dropoffLon', e.target.value)} style={modalInputStyle} placeholder="经度" />
+                  <input type="number" step="any" value={form.dropoffLon} onChange={(e) => updateForm('dropoffLon', e.target.value)} style={modalInputStyle} placeholder="经度" aria-label="降落经度" />
                 </div>
               </div>
               <button type="submit" disabled={submitting} style={{ ...miniBtnStyle, padding: '4px 12px', alignSelf: 'flex-start', border: '1px solid var(--cyan)', color: 'var(--cyan)', cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.5 : 1 }}>{submitting ? '创建中…' : '创建任务'}</button>
@@ -423,7 +429,7 @@ export default function DeliveryPanel() {
                   <button onClick={handleOptimize} disabled={optimizing} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--cyan)', borderColor: 'var(--cyan)', opacity: optimizing ? 0.5 : 1, cursor: optimizing ? 'not-allowed' : 'pointer' }}>{optimizing ? '优化中…' : '优化路线'}</button>
                   <button onClick={handleStart} disabled={starting} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--ok)', borderColor: 'var(--ok)', opacity: starting ? 0.5 : 1, cursor: starting ? 'not-allowed' : 'pointer' }}>{starting ? '启动中…' : '启动'}</button>
                   <button onClick={handleDeliver} disabled={delivering} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--warn)', borderColor: 'var(--warn)', opacity: delivering ? 0.5 : 1, cursor: delivering ? 'not-allowed' : 'pointer' }}>{delivering ? '投放中…' : '投放'}</button>
-                  <select value={deliverMethod} onChange={(e) => setDeliverMethod(e.target.value)} style={{ ...miniBtnStyle, fontSize: 9, padding: '1px 4px' }}>
+                  <select value={deliverMethod} onChange={(e) => setDeliverMethod(e.target.value)} style={{ ...miniBtnStyle, fontSize: 9, padding: '1px 4px' }} aria-label="投放方式" disabled={delivering}>
                     {DELIVERY_METHODS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
                   </select>
                   <button onClick={handleConfirm} disabled={confirming} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--ok)', borderColor: 'var(--ok)', opacity: confirming ? 0.5 : 1, cursor: confirming ? 'not-allowed' : 'pointer' }}>{confirming ? '签收中…' : '签收'}</button>
@@ -466,16 +472,16 @@ export default function DeliveryPanel() {
             {landingError && <div style={{ color: 'var(--crit)', fontSize: 10, marginBottom: 4 }}>⚠ {landingError}</div>}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
               <div style={{ flex: '1 1 80px' }}>
-                <input type="number" step="any" placeholder="纬度" value={landingSearch.lat} onChange={(e) => updateLandingSearch('lat', e.target.value)} style={modalInputStyle} />
+                <input type="number" step="any" placeholder="纬度" value={landingSearch.lat} onChange={(e) => updateLandingSearch('lat', e.target.value)} style={modalInputStyle} aria-label="搜索纬度" />
               </div>
               <div style={{ flex: '1 1 80px' }}>
-                <input type="number" step="any" placeholder="经度" value={landingSearch.lon} onChange={(e) => updateLandingSearch('lon', e.target.value)} style={modalInputStyle} />
+                <input type="number" step="any" placeholder="经度" value={landingSearch.lon} onChange={(e) => updateLandingSearch('lon', e.target.value)} style={modalInputStyle} aria-label="搜索经度" />
               </div>
               <div style={{ flex: '1 1 80px' }}>
-                <input type="number" placeholder="半径(m)" value={landingSearch.radius} onChange={(e) => updateLandingSearch('radius', e.target.value)} style={modalInputStyle} />
+                <input type="number" placeholder="半径(m)" value={landingSearch.radius} onChange={(e) => updateLandingSearch('radius', e.target.value)} style={modalInputStyle} aria-label="搜索半径（米）" />
               </div>
               <div style={{ flex: '1 1 100px' }}>
-                <select value={landingSearch.groundType} onChange={(e) => updateLandingSearch('groundType', e.target.value)} style={modalInputStyle}>
+                <select value={landingSearch.groundType} onChange={(e) => updateLandingSearch('groundType', e.target.value)} style={modalInputStyle} aria-label="地面类型">
                   <option value="">不限</option>
                   {GROUND_TYPES.map((g) => <option key={g} value={g}>{g}</option>)}
                 </select>
@@ -485,7 +491,7 @@ export default function DeliveryPanel() {
             {landingSites.length > 0 && (
               <div style={{ maxHeight: 160, overflowY: 'auto' }}>
                 {landingSites.map((s, i) => (
-                  <div key={i} style={{ fontSize: 9, color: 'var(--dim-2)', padding: '4px 0', borderBottom: '1px solid var(--line-2)' }}>
+                  <div key={`site-${i}`} style={{ fontSize: 9, color: 'var(--dim-2)', padding: '4px 0', borderBottom: '1px solid var(--line-2)' }}>
                     <span style={{ color: 'var(--cyan)' }}>#{pick(s, 'id', 'siteId') != null ? pick(s, 'id', 'siteId') : i + 1}</span>
                     {' '}{pick(s, 'groundType') || '--'}
                     {' · '}{pick(s, 'lat') != null ? Number(pick(s, 'lat')).toFixed(4) : '--'}, {pick(s, 'lon') != null ? Number(pick(s, 'lon')).toFixed(4) : '--'}
@@ -501,39 +507,3 @@ export default function DeliveryPanel() {
   )
 }
 
-// ===== 内联样式 =====
-const cardStyle = {
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 4,
-  padding: '6px 10px',
-}
-
-const labelStyle = {
-  fontSize: 10,
-  color: 'var(--dim-2)',
-  marginBottom: 2,
-}
-
-const miniBtnStyle = {
-  fontSize: 10,
-  padding: '2px 8px',
-  cursor: 'pointer',
-  border: '1px solid var(--line-2)',
-  background: 'transparent',
-  color: 'var(--dim)',
-  borderRadius: 3,
-}
-
-const modalInputStyle = {
-  width: '100%',
-  padding: '4px 6px',
-  fontSize: 11,
-  fontFamily: 'var(--mono)',
-  color: 'var(--text)',
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 3,
-  outline: 'none',
-  boxSizing: 'border-box',
-}

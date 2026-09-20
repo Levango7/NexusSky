@@ -9,12 +9,11 @@ import {
   getVoiceHistory,
   getVoicePending,
 } from '../api.js'
+import { POLL_MS, fmtTime, pick, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
 
 // P3 语音指挥面板
 // 语音指令解析 + 执行 + 待确认 + 播报 + 告警 + 历史
 // 风格与 TrackingPanel / GeofencePanel 一致
-
-const POLL_MS = 5000
 
 // 优先级 → 颜色 / 标签
 const PRIORITY_META = {
@@ -33,29 +32,7 @@ const STATUS_META = {
   FAILED: { color: 'var(--crit)', label: '失败' },
 }
 
-// 格式化时间戳
-function fmtTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const n = Number(ts)
-  if (!Number.isFinite(n)) return String(ts)
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
-}
 
-// 字段兼容提取
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
-
-// 播报状态模板
-const BROADCAST_TEMPLATES = [
-  { key: 'STATUS', label: '状态播报' },
-  { key: 'WARNING', label: '警告播报' },
-  { key: 'CUSTOM', label: '自定义播报' },
-]
 
 export default function VoiceCmdPanel() {
   // ---- 指令输入 + 解析 ----
@@ -187,7 +164,10 @@ export default function VoiceCmdPanel() {
   // ---- 语音播报 ----
   const handleBroadcast = useCallback(async () => {
     const text = broadcastText.trim()
-    if (!text) return
+    if (!text) {
+      setBroadcastResult({ error: '请输入播报内容' })
+      return
+    }
     const sysid = broadcastSysid.trim()
     if (!sysid) {
       setBroadcastResult({ error: '请输入 sysid' })
@@ -227,7 +207,10 @@ export default function VoiceCmdPanel() {
   // ---- 查询播报状态 ----
   const handleQueryStatus = useCallback(async () => {
     const sysid = statusSysid.trim()
-    if (!sysid) return
+    if (!sysid) {
+      setVoiceStatus({ error: '请输入 sysid' })
+      return
+    }
     setStatusLoading(true)
     try {
       const data = await getVoiceStatus(sysid)
@@ -252,6 +235,7 @@ export default function VoiceCmdPanel() {
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
               <input
                 type="text"
+                aria-label="语音指令输入"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleParse() }}
@@ -293,7 +277,8 @@ export default function VoiceCmdPanel() {
             {execError && <div style={{ fontSize: 10, color: 'var(--crit)', marginTop: 4 }}>⚠ {execError}</div>}
             {execResult && (
               <div style={{ fontSize: 10, color: 'var(--ok)', marginTop: 4, padding: '4px 6px', background: 'var(--bg-1)', borderRadius: 3 }}>
-                执行结果：{JSON.stringify(execResult)}
+                <div>状态：<span style={{ color: 'var(--text)' }}>{pick(execResult, 'status') || '--'}</span></div>
+                <div>消息：<span style={{ color: 'var(--text)' }}>{pick(execResult, 'message') || '--'}</span></div>
               </div>
             )}
           </div>
@@ -313,7 +298,7 @@ export default function VoiceCmdPanel() {
                   const priority = pick(cmd, 'priority')
                   const meta = PRIORITY_META[priority] || { color: 'var(--dim)', label: priority || '--' }
                   return (
-                    <div key={pid != null ? pid : i} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${meta.color}` }}>
+                    <div key={pid != null ? pid : `pending-${i}`} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${meta.color}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1, minWidth: 0 }}>
                           <span style={{ fontSize: 9, color: meta.color, fontWeight: 'bold' }}>[{meta.label}]</span>
@@ -345,6 +330,7 @@ export default function VoiceCmdPanel() {
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
               <input
                 type="number"
+                aria-label="播报 sysid"
                 placeholder="sysid（必填）"
                 value={broadcastSysid}
                 onChange={(e) => setBroadcastSysid(e.target.value)}
@@ -352,6 +338,7 @@ export default function VoiceCmdPanel() {
               />
               <input
                 type="text"
+                aria-label="播报内容"
                 placeholder="播报内容"
                 value={broadcastText}
                 onChange={(e) => setBroadcastText(e.target.value)}
@@ -378,6 +365,7 @@ export default function VoiceCmdPanel() {
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
               <input
                 type="number"
+                aria-label="告警 sysid"
                 placeholder="sysid（必填）"
                 value={alertSysid}
                 onChange={(e) => setAlertSysid(e.target.value)}
@@ -409,6 +397,7 @@ export default function VoiceCmdPanel() {
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
               <input
                 type="number"
+                aria-label="查询状态 sysid"
                 placeholder="sysid"
                 value={statusSysid}
                 onChange={(e) => setStatusSysid(e.target.value)}
@@ -443,7 +432,7 @@ export default function VoiceCmdPanel() {
                   const status = pick(h, 'status')
                   const statusMeta = STATUS_META[status] || { color: 'var(--dim)', label: status || '--' }
                   return (
-                    <div key={i} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${statusMeta.color}` }}>
+                    <div key={pick(h, 'commandId') ?? `cmd-${i}`} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${statusMeta.color}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1, minWidth: 0 }}>
                           <span style={{ fontSize: 9, color: statusMeta.color, fontWeight: 'bold' }}>[{statusMeta.label}]</span>
@@ -466,33 +455,3 @@ export default function VoiceCmdPanel() {
   )
 }
 
-// ===== 内联样式 =====
-const cardStyle = {
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 4,
-  padding: '6px 10px',
-}
-
-const miniBtnStyle = {
-  fontSize: 10,
-  padding: '2px 8px',
-  cursor: 'pointer',
-  border: '1px solid var(--line-2)',
-  background: 'transparent',
-  color: 'var(--dim)',
-  borderRadius: 3,
-}
-
-const modalInputStyle = {
-  width: '100%',
-  padding: '4px 6px',
-  fontSize: 11,
-  fontFamily: 'var(--mono)',
-  color: 'var(--text)',
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 3,
-  outline: 'none',
-  boxSizing: 'border-box',
-}

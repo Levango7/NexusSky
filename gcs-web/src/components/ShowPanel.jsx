@@ -12,11 +12,10 @@ import {
   getShowActions,
   configureShowMusicSync,
 } from '../api.js'
+import { POLL_MS, fmtTime, pick, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
 
 // P4 编队表演面板
 // 队形定义管理 + 队形位置计算 + 表演任务管理 + 动作序列 + 音乐同步
-
-const POLL_MS = 5000
 
 const FORMATION_TYPES = [
   { key: 'LINE', label: '直线' },
@@ -45,20 +44,6 @@ const ACTION_TYPE_META = {
   LAND: { color: 'var(--dim)', label: '降落' },
 }
 
-function fmtTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const n = Number(ts)
-  if (!Number.isFinite(n)) return String(ts)
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
-}
-
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
 
 export default function ShowPanel() {
   const [formations, setFormations] = useState([])
@@ -73,6 +58,9 @@ export default function ShowPanel() {
   const [startingTask, setStartingTask] = useState(false)
   const [abortingTask, setAbortingTask] = useState(false)
   const [calculatingPos, setCalculatingPos] = useState(false)
+  const [successMsg, setSuccessMsg] = useState(null)
+  const [startError, setStartError] = useState(null)
+  const [abortError, setAbortError] = useState(null)
 
   const [formForm, setFormForm] = useState({
     type: 'LINE',
@@ -167,6 +155,8 @@ export default function ShowPanel() {
         spacingM,
       })
       setFormForm((prev) => ({ ...prev, name: '', droneCount: '', spacingM: '' }))
+      setSuccessMsg('队形创建成功')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setFormFormError('创建队形失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -208,6 +198,8 @@ export default function ShowPanel() {
         name: taskForm.name.trim(),
       })
       setTaskForm((prev) => ({ ...prev, formationId: '', name: '' }))
+      setSuccessMsg('任务创建成功')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setTaskFormError('创建任务失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -221,7 +213,7 @@ export default function ShowPanel() {
     try {
       await startShowTask(selectedTaskId)
     } catch (e) {
-      setError('启动失败：' + (e && e.message ? e.message : String(e)))
+      setStartError('启动失败：' + (e && e.message ? e.message : String(e)))
     } finally {
       setStartingTask(false)
     }
@@ -233,7 +225,7 @@ export default function ShowPanel() {
     try {
       await abortShowTask(selectedTaskId)
     } catch (e) {
-      setError('中止失败：' + (e && e.message ? e.message : String(e)))
+      setAbortError('中止失败：' + (e && e.message ? e.message : String(e)))
     } finally {
       setAbortingTask(false)
     }
@@ -249,6 +241,8 @@ export default function ShowPanel() {
       if (musicForm.musicUrl) payload.musicUrl = musicForm.musicUrl
       if (musicForm.startTimeOffsetSec) payload.startTimeOffsetSec = Number(musicForm.startTimeOffsetSec)
       await configureShowMusicSync(selectedTaskId, payload)
+      setSuccessMsg('音乐同步配置已保存')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setMusicError('配置失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -270,6 +264,12 @@ export default function ShowPanel() {
         </div>
       )}
 
+      {successMsg && (
+        <div style={{ color: 'var(--ok)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--ok)' }}>
+          ✓ {successMsg}
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         {/* 左列：队形列表 + 创建队形 + 位置计算 */}
         <div style={{ flex: '1 1 420px', minWidth: 360, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -288,7 +288,7 @@ export default function ShowPanel() {
                   const isSel = fid === selectedFormationId
                   return (
                     <div
-                      key={fid != null ? fid : i}
+                      key={fid != null ? fid : `formation-${i}`}
                       onClick={() => setSelectedFormationId(fid)}
                       style={{
                         padding: '6px 10px', borderBottom: '1px solid var(--line-2)', cursor: 'pointer',
@@ -320,21 +320,21 @@ export default function ShowPanel() {
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <div style={{ flex: '1 1 120px' }}>
                 <div style={labelStyle}>队形类型</div>
-                <select value={formForm.type} onChange={(e) => updateFormForm('type', e.target.value)} style={modalInputStyle}>
+                <select aria-label="队形类型" value={formForm.type} onChange={(e) => updateFormForm('type', e.target.value)} style={modalInputStyle}>
                   {FORMATION_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
                 </select>
               </div>
               <div style={{ flex: '1 1 120px' }}>
                 <div style={labelStyle}>队形名称</div>
-                <input type="text" value={formForm.name} onChange={(e) => updateFormForm('name', e.target.value)} style={modalInputStyle} placeholder="必填" />
+                <input type="text" aria-label="队形名称" value={formForm.name} onChange={(e) => updateFormForm('name', e.target.value)} style={modalInputStyle} placeholder="必填" />
               </div>
               <div style={{ flex: '1 1 80px' }}>
                 <div style={labelStyle}>无人机数</div>
-                <input type="number" min="1" value={formForm.droneCount} onChange={(e) => updateFormForm('droneCount', e.target.value)} style={modalInputStyle} placeholder="架数" />
+                <input type="number" aria-label="无人机数量" min="1" value={formForm.droneCount} onChange={(e) => updateFormForm('droneCount', e.target.value)} style={modalInputStyle} placeholder="架数" />
               </div>
               <div style={{ flex: '1 1 80px' }}>
                 <div style={labelStyle}>间距 (m)</div>
-                <input type="number" step="any" value={formForm.spacingM} onChange={(e) => updateFormForm('spacingM', e.target.value)} style={modalInputStyle} placeholder="米" />
+                <input type="number" aria-label="间距（米）" step="any" value={formForm.spacingM} onChange={(e) => updateFormForm('spacingM', e.target.value)} style={modalInputStyle} placeholder="米" />
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
@@ -353,7 +353,7 @@ export default function ShowPanel() {
               </div>
               <div style={{ maxHeight: 200, overflowY: 'auto' }}>
                 {(Array.isArray(pick(positions, 'positions')) ? pick(positions, 'positions') : []).map((p, i) => (
-                  <div key={i} style={{ fontSize: 9, color: 'var(--dim-2)', padding: '3px 10px', borderBottom: '1px solid var(--line-2)', fontFamily: 'var(--mono)' }}>
+                  <div key={`pos-${i}`} style={{ fontSize: 9, color: 'var(--dim-2)', padding: '3px 10px', borderBottom: '1px solid var(--line-2)', fontFamily: 'var(--mono)' }}>
                     <span style={{ color: 'var(--cyan)' }}>#{pick(p, 'droneIndex', 'index') != null ? pick(p, 'droneIndex', 'index') : i}</span>
                     {' '}x:{pick(p, 'x', 'relX') != null ? Number(pick(p, 'x', 'relX')).toFixed(2) : '--'}
                     {' '}y:{pick(p, 'y', 'relY') != null ? Number(pick(p, 'y', 'relY')).toFixed(2) : '--'}
@@ -374,11 +374,11 @@ export default function ShowPanel() {
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <div style={{ flex: '1 1 80px' }}>
                 <div style={labelStyle}>队形ID</div>
-                <input type="text" value={taskForm.formationId} onChange={(e) => updateTaskForm('formationId', e.target.value)} style={modalInputStyle} placeholder="ID" />
+                <input type="text" aria-label="队形ID" value={taskForm.formationId} onChange={(e) => updateTaskForm('formationId', e.target.value)} style={modalInputStyle} placeholder="ID" />
               </div>
               <div style={{ flex: '1 1 160px' }}>
                 <div style={labelStyle}>任务名称</div>
-                <input type="text" value={taskForm.name} onChange={(e) => updateTaskForm('name', e.target.value)} style={modalInputStyle} placeholder="必填" />
+                <input type="text" aria-label="任务名称" value={taskForm.name} onChange={(e) => updateTaskForm('name', e.target.value)} style={modalInputStyle} placeholder="必填" />
               </div>
               <button onClick={handleCreateTask} disabled={creatingTask} style={{ ...miniBtnStyle, color: 'var(--cyan)', borderColor: 'var(--cyan)', opacity: creatingTask ? 0.5 : 1, cursor: creatingTask ? 'not-allowed' : 'pointer' }}>{creatingTask ? '创建中…' : '创建'}</button>
             </div>
@@ -400,7 +400,7 @@ export default function ShowPanel() {
                   const isSel = tid === selectedTaskId
                   return (
                     <div
-                      key={tid != null ? tid : i}
+                      key={tid != null ? tid : `task-${i}`}
                       onClick={() => setSelectedTaskId(tid)}
                       style={{
                         padding: '6px 10px', borderBottom: '1px solid var(--line-2)', cursor: 'pointer',
@@ -430,6 +430,8 @@ export default function ShowPanel() {
                   <button onClick={handleAbortTask} disabled={abortingTask} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--crit)', borderColor: 'var(--crit)', opacity: abortingTask ? 0.5 : 1, cursor: abortingTask ? 'not-allowed' : 'pointer' }}>{abortingTask ? '中止中…' : '中止'}</button>
                 </div>
               </div>
+              {startError && <div style={{ color: 'var(--crit)', fontSize: 10, marginBottom: 4 }}>⚠ {startError}</div>}
+              {abortError && <div style={{ color: 'var(--crit)', fontSize: 10, marginBottom: 4 }}>⚠ {abortError}</div>}
               {detailLoading ? (
                 <div style={{ fontSize: 10, color: 'var(--cyan)' }}>加载中…</div>
               ) : taskDetail ? (
@@ -455,7 +457,7 @@ export default function ShowPanel() {
                   const actionType = pick(a, 'type', 'actionType')
                   const meta = ACTION_TYPE_META[actionType] || { color: 'var(--dim)', label: actionType || '--' }
                   return (
-                    <div key={i} style={{ padding: '4px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${meta.color}` }}>
+                    <div key={`action-${i}`} style={{ padding: '4px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${meta.color}` }}>
                       <div style={{ fontSize: 9, display: 'flex', gap: 6, alignItems: 'center' }}>
                         <span style={{ color: meta.color, fontWeight: 'bold' }}>{meta.label}</span>
                         <span style={{ color: 'var(--dim-2)' }}>{pick(a, 'description', 'desc') || ''}</span>
@@ -476,15 +478,15 @@ export default function ShowPanel() {
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 60px' }}>
                   <div style={labelStyle}>BPM</div>
-                  <input type="number" value={musicForm.bpm} onChange={(e) => updateMusicForm('bpm', e.target.value)} style={modalInputStyle} placeholder="BPM" />
+                  <input type="number" aria-label="BPM" value={musicForm.bpm} onChange={(e) => updateMusicForm('bpm', e.target.value)} style={modalInputStyle} placeholder="BPM" />
                 </div>
                 <div style={{ flex: '1 1 140px' }}>
                   <div style={labelStyle}>音乐URL</div>
-                  <input type="text" value={musicForm.musicUrl} onChange={(e) => updateMusicForm('musicUrl', e.target.value)} style={modalInputStyle} placeholder="URL" />
+                  <input type="text" aria-label="音乐URL" value={musicForm.musicUrl} onChange={(e) => updateMusicForm('musicUrl', e.target.value)} style={modalInputStyle} placeholder="URL" />
                 </div>
                 <div style={{ flex: '1 1 80px' }}>
                   <div style={labelStyle}>偏移(s)</div>
-                  <input type="number" value={musicForm.startTimeOffsetSec} onChange={(e) => updateMusicForm('startTimeOffsetSec', e.target.value)} style={modalInputStyle} placeholder="秒" />
+                  <input type="number" aria-label="偏移秒数" value={musicForm.startTimeOffsetSec} onChange={(e) => updateMusicForm('startTimeOffsetSec', e.target.value)} style={modalInputStyle} placeholder="秒" />
                 </div>
                 <button onClick={handleMusicSync} disabled={musicSaving} style={{ ...miniBtnStyle, color: 'var(--cyan)', borderColor: 'var(--cyan)', opacity: musicSaving ? 0.5 : 1, cursor: musicSaving ? 'not-allowed' : 'pointer' }}>{musicSaving ? '保存中…' : '保存'}</button>
               </div>
@@ -496,38 +498,3 @@ export default function ShowPanel() {
   )
 }
 
-const cardStyle = {
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 4,
-  padding: '6px 10px',
-}
-
-const labelStyle = {
-  fontSize: 10,
-  color: 'var(--dim-2)',
-  marginBottom: 2,
-}
-
-const miniBtnStyle = {
-  fontSize: 10,
-  padding: '2px 8px',
-  cursor: 'pointer',
-  border: '1px solid var(--line-2)',
-  background: 'transparent',
-  color: 'var(--dim)',
-  borderRadius: 3,
-}
-
-const modalInputStyle = {
-  width: '100%',
-  padding: '4px 6px',
-  fontSize: 11,
-  fontFamily: 'var(--mono)',
-  color: 'var(--text)',
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 3,
-  outline: 'none',
-  boxSizing: 'border-box',
-}

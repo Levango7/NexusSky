@@ -8,13 +8,13 @@ import {
   getCommConfig,
   updateCommConfig,
 } from '../api.js'
+import { POLL_MS, fmtTime, pick, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
 
 // P2 多模态通信自适应面板
 // 链路质量监控 + 综合评分 + 切换决策 + 故障切换历史 + 自适应配置
 // 风格与 TrackingPanel / GeofencePanel 一致：卡片布局 + 内联 CSS + CSS 变量
 // 轮询间隔 5s；AbortController 竞态守卫
 
-const POLL_MS = 5000
 
 // 链路类型
 const LINK_TYPES = ['MESH', 'SATELLITE', 'CELLULAR']
@@ -43,22 +43,6 @@ const URGENCY_META = {
   CRITICAL: { color: 'var(--crit)', label: '紧急' },
 }
 
-// 格式化时间戳
-function fmtTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const n = Number(ts)
-  if (!Number.isFinite(n)) return String(ts)
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
-}
-
-// 字段兼容提取
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
 
 export default function CommAdaptPanel() {
   // ---- 链路质量列表 ----
@@ -87,6 +71,7 @@ export default function CommAdaptPanel() {
   const [configLoading, setConfigLoading] = useState(false)
   const [configSaving, setConfigSaving] = useState(false)
   const [configError, setConfigError] = useState(null)
+  const [configSuccess, setConfigSuccess] = useState(null)
   const [configForm, setConfigForm] = useState({
     switchThreshold: '',
     failoverThreshold: '',
@@ -214,6 +199,7 @@ export default function CommAdaptPanel() {
     try {
       const data = await executeCommFailover(Number(sysid), targetLink)
       setFailoverResult(data)
+      setFailoverTargetLink('')
     } catch (e) {
       setFailoverError(e && e.message ? e.message : String(e))
     } finally {
@@ -225,6 +211,7 @@ export default function CommAdaptPanel() {
   const handleSaveConfig = useCallback(async () => {
     setConfigSaving(true)
     setConfigError(null)
+    setConfigSuccess(null)
     try {
       const payload = {}
       if (configForm.switchThreshold !== '') payload.switchThreshold = Number(configForm.switchThreshold)
@@ -234,6 +221,7 @@ export default function CommAdaptPanel() {
       if (configForm.minStableTimeMs !== '') payload.minStableTimeMs = Number(configForm.minStableTimeMs)
       const data = await updateCommConfig(payload)
       setConfig(data)
+      setConfigSuccess('配置保存成功')
     } catch (e) {
       setConfigError(e && e.message ? e.message : String(e))
     } finally {
@@ -283,7 +271,7 @@ export default function CommAdaptPanel() {
                   const rssi = pick(link, 'rssiDbm', 'rssi')
                   const meta = LINK_META[linkType] || { label: linkType || '--', color: 'var(--dim)' }
                   return (
-                    <div key={sysid != null ? sysid : i} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${meta.color}` }}>
+                    <div key={sysid != null ? sysid : `link-${i}`} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${meta.color}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1, minWidth: 0 }}>
                           <span style={{ fontSize: 9, color: 'var(--cyan)', fontWeight: 'bold', flexShrink: 0 }}>#{sysid != null ? sysid : '?'}</span>
@@ -310,8 +298,10 @@ export default function CommAdaptPanel() {
               <input
                 type="number"
                 placeholder="sysid"
+                aria-label="无人机 sysid"
                 value={scoreSysid}
                 onChange={(e) => setScoreSysid(e.target.value)}
+                disabled={scoreLoading}
                 style={{ ...modalInputStyle, width: 90, flex: '0 0 90px' }}
               />
               <button
@@ -340,8 +330,10 @@ export default function CommAdaptPanel() {
               <input
                 type="text"
                 placeholder="目标链路（MESH/SATELLITE/CELLULAR）"
+                aria-label="故障切换目标链路"
                 value={failoverTargetLink}
                 onChange={(e) => setFailoverTargetLink(e.target.value)}
+                disabled={executingFailover}
                 style={{ ...modalInputStyle, flex: '1 1 200px' }}
               />
             </div>
@@ -412,7 +404,7 @@ export default function CommAdaptPanel() {
                   const reason = pick(h, 'reason')
                   const ts = pick(h, 'triggerTime', 'timestamp', 'ts', 'time')
                   return (
-                    <div key={sysid != null ? sysid : i} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: '3px solid var(--warn)' }}>
+                    <div key={sysid != null ? sysid : `failover-${i}`} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: '3px solid var(--warn)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 9, color: 'var(--cyan)', fontWeight: 'bold' }}>#{sysid != null ? sysid : '?'}</span>
                         <span style={{ fontSize: 9, color: 'var(--dim-2)', fontFamily: 'var(--mono)' }}>{fmtTime(ts)}</span>
@@ -434,6 +426,9 @@ export default function CommAdaptPanel() {
             {configError && (
               <div style={{ color: 'var(--crit)', fontSize: 10, marginBottom: 6, padding: '3px 6px', background: 'var(--bg-1)', borderRadius: 3, border: '1px solid var(--crit)' }}>⚠ {configError}</div>
             )}
+            {configSuccess && (
+              <div style={{ color: 'var(--ok)', fontSize: 10, marginBottom: 6, padding: '3px 6px', background: 'var(--bg-1)', borderRadius: 3, border: '1px solid var(--ok)' }}>✓ {configSuccess}</div>
+            )}
             {configLoading ? (
               <div style={{ fontSize: 10, color: 'var(--cyan)' }}>加载中…</div>
             ) : (
@@ -441,25 +436,25 @@ export default function CommAdaptPanel() {
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <div style={{ flex: '1 1 120px' }}>
                     <div style={labelStyle}>切换阈值</div>
-                    <input type="number" step="any" value={configForm.switchThreshold} onChange={(e) => updateConfigForm('switchThreshold', e.target.value)} style={modalInputStyle} placeholder="切换阈值" />
+                    <input type="number" step="any" aria-label="切换阈值" value={configForm.switchThreshold} onChange={(e) => updateConfigForm('switchThreshold', e.target.value)} style={modalInputStyle} placeholder="切换阈值" />
                   </div>
                   <div style={{ flex: '1 1 120px' }}>
                     <div style={labelStyle}>故障切换阈值</div>
-                    <input type="number" step="any" value={configForm.failoverThreshold} onChange={(e) => updateConfigForm('failoverThreshold', e.target.value)} style={modalInputStyle} placeholder="故障切换阈值" />
+                    <input type="number" step="any" aria-label="故障切换阈值" value={configForm.failoverThreshold} onChange={(e) => updateConfigForm('failoverThreshold', e.target.value)} style={modalInputStyle} placeholder="故障切换阈值" />
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <div style={{ flex: '1 1 160px' }}>
                     <div style={labelStyle}>检测间隔 (ms)</div>
-                    <input type="number" value={configForm.detectionIntervalMs} onChange={(e) => updateConfigForm('detectionIntervalMs', e.target.value)} style={modalInputStyle} placeholder="毫秒" />
+                    <input type="number" aria-label="检测间隔毫秒" value={configForm.detectionIntervalMs} onChange={(e) => updateConfigForm('detectionIntervalMs', e.target.value)} style={modalInputStyle} placeholder="毫秒" />
                   </div>
                   <div style={{ flex: '1 1 160px' }}>
                     <div style={labelStyle}>最小稳定时间 (ms)</div>
-                    <input type="number" value={configForm.minStableTimeMs} onChange={(e) => updateConfigForm('minStableTimeMs', e.target.value)} style={modalInputStyle} placeholder="毫秒" />
+                    <input type="number" aria-label="最小稳定时间毫秒" value={configForm.minStableTimeMs} onChange={(e) => updateConfigForm('minStableTimeMs', e.target.value)} style={modalInputStyle} placeholder="毫秒" />
                   </div>
                   <div style={{ flex: '1 1 120px' }}>
                     <div style={labelStyle}>自动切换</div>
-                    <select value={configForm.autoSwitchEnabled} onChange={(e) => updateConfigForm('autoSwitchEnabled', e.target.value)} style={modalInputStyle}>
+                    <select aria-label="自动切换开关" value={configForm.autoSwitchEnabled} onChange={(e) => updateConfigForm('autoSwitchEnabled', e.target.value)} style={modalInputStyle}>
                       <option value="">未设置</option>
                       <option value="true">启用</option>
                       <option value="false">禁用</option>
@@ -482,39 +477,3 @@ export default function CommAdaptPanel() {
   )
 }
 
-// ===== 内联样式 =====
-const cardStyle = {
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 4,
-  padding: '6px 10px',
-}
-
-const labelStyle = {
-  fontSize: 10,
-  color: 'var(--dim-2)',
-  marginBottom: 2,
-}
-
-const miniBtnStyle = {
-  fontSize: 10,
-  padding: '2px 8px',
-  cursor: 'pointer',
-  border: '1px solid var(--line-2)',
-  background: 'transparent',
-  color: 'var(--dim)',
-  borderRadius: 3,
-}
-
-const modalInputStyle = {
-  width: '100%',
-  padding: '4px 6px',
-  fontSize: 11,
-  fontFamily: 'var(--mono)',
-  color: 'var(--text)',
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 3,
-  outline: 'none',
-  boxSizing: 'border-box',
-}

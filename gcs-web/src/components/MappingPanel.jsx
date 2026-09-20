@@ -8,12 +8,11 @@ import {
   generateMappingResult,
   getMappingResult,
 } from '../api.js'
+import { POLL_MS, fmtTime, pick, METERS_PER_DEGREE_LAT, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
 
 // P2 航拍测绘面板
 // 测绘任务创建 + 航线规划 + 采集照片 + 测绘成果
 // 风格与 TrackingPanel / GeofencePanel 一致
-
-const POLL_MS = 5000
 
 // 测绘类型
 const MAPPING_TYPES = [
@@ -32,22 +31,6 @@ const TASK_STATUS_META = {
   FAILED: { color: 'var(--crit)', label: '失败' },
 }
 
-// 格式化时间戳
-function fmtTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const n = Number(ts)
-  if (!Number.isFinite(n)) return String(ts)
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
-}
-
-// 字段兼容提取
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
 
 export default function MappingPanel() {
   // ---- 任务列表 ----
@@ -74,6 +57,9 @@ export default function MappingPanel() {
   const [result, setResult] = useState(null)
   const [generating, setGenerating] = useState(false)
   const [resultLoading, setResultLoading] = useState(false)
+
+  // ---- 操作成功提示 ----
+  const [successMsg, setSuccessMsg] = useState(null)
 
   // ---- 创建表单 ----
   const [form, setForm] = useState({
@@ -175,9 +161,9 @@ export default function MappingPanel() {
     }
 
     // 将矩形区域（中心点 + 宽高）转换为 polygon 顶点列表
-    // 纬度 1 度 ≈ 111320 m，经度 1 度 ≈ 111320 * cos(lat) m
-    const dLat = heightM / 2 / 111320
-    const dLon = widthM / 2 / (111320 * Math.cos(centerLat * Math.PI / 180))
+    // 纬度 1 度 ≈ METERS_PER_DEGREE_LAT m，经度 1 度 ≈ METERS_PER_DEGREE_LAT * cos(lat) m
+    const dLat = heightM / 2 / METERS_PER_DEGREE_LAT
+    const dLon = widthM / 2 / (METERS_PER_DEGREE_LAT * Math.cos(centerLat * Math.PI / 180))
     const points = [
       [centerLat - dLat, centerLon - dLon],
       [centerLat - dLat, centerLon + dLon],
@@ -219,6 +205,8 @@ export default function MappingPanel() {
       } else {
         setRoute(data)
       }
+      setSuccessMsg('航线规划成功')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('航线规划失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -249,6 +237,8 @@ export default function MappingPanel() {
     setGenerating(true)
     try {
       await generateMappingResult(selectedTaskId)
+      setSuccessMsg('测绘成果生成已启动')
+      setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('生成成果失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -317,7 +307,7 @@ export default function MappingPanel() {
                   const isSel = tid === selectedTaskId
                   return (
                     <div
-                      key={tid != null ? tid : i}
+                      key={tid != null ? tid : `task-${i}`}
                       onClick={() => setSelectedTaskId(tid)}
                       style={{
                         padding: '6px 10px', borderBottom: '1px solid var(--line-2)', cursor: 'pointer',
@@ -352,41 +342,41 @@ export default function MappingPanel() {
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 140px' }}>
                   <div style={labelStyle}>测绘类型</div>
-                  <select value={form.type} onChange={(e) => updateForm('type', e.target.value)} style={modalInputStyle}>
+                  <select aria-label="测绘类型" value={form.type} onChange={(e) => updateForm('type', e.target.value)} style={modalInputStyle}>
                     {MAPPING_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
                   </select>
                 </div>
                 <div style={{ flex: '1 1 160px' }}>
                   <div style={labelStyle}>任务名称</div>
-                  <input type="text" value={form.name} onChange={(e) => updateForm('name', e.target.value)} style={modalInputStyle} placeholder="必填" />
+                  <input aria-label="任务名称" type="text" value={form.name} onChange={(e) => updateForm('name', e.target.value)} style={modalInputStyle} placeholder="必填" />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>中心纬度</div>
-                  <input type="number" step="any" value={form.centerLat} onChange={(e) => updateForm('centerLat', e.target.value)} style={modalInputStyle} placeholder="纬度" />
+                  <input aria-label="中心纬度" type="number" step="any" value={form.centerLat} onChange={(e) => updateForm('centerLat', e.target.value)} style={modalInputStyle} placeholder="纬度" />
                 </div>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>中心经度</div>
-                  <input type="number" step="any" value={form.centerLon} onChange={(e) => updateForm('centerLon', e.target.value)} style={modalInputStyle} placeholder="经度" />
+                  <input aria-label="中心经度" type="number" step="any" value={form.centerLon} onChange={(e) => updateForm('centerLon', e.target.value)} style={modalInputStyle} placeholder="经度" />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>区域宽度 (m)</div>
-                  <input type="number" step="any" value={form.widthM} onChange={(e) => updateForm('widthM', e.target.value)} style={modalInputStyle} placeholder="米" />
+                  <input aria-label="区域宽度（米）" type="number" step="any" value={form.widthM} onChange={(e) => updateForm('widthM', e.target.value)} style={modalInputStyle} placeholder="米" />
                 </div>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>区域高度 (m)</div>
-                  <input type="number" step="any" value={form.heightM} onChange={(e) => updateForm('heightM', e.target.value)} style={modalInputStyle} placeholder="米" />
+                  <input aria-label="区域高度（米）" type="number" step="any" value={form.heightM} onChange={(e) => updateForm('heightM', e.target.value)} style={modalInputStyle} placeholder="米" />
                 </div>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>飞行高度 (m)</div>
-                  <input type="number" step="any" value={form.altitudeM} onChange={(e) => updateForm('altitudeM', e.target.value)} style={modalInputStyle} placeholder="米" />
+                  <input aria-label="飞行高度（米）" type="number" step="any" value={form.altitudeM} onChange={(e) => updateForm('altitudeM', e.target.value)} style={modalInputStyle} placeholder="米" />
                 </div>
                 <div style={{ flex: '1 1 100px' }}>
                   <div style={labelStyle}>重叠率 (%)</div>
-                  <input type="number" step="any" value={form.overlapPct} onChange={(e) => updateForm('overlapPct', e.target.value)} style={modalInputStyle} placeholder="%" />
+                  <input aria-label="重叠率（百分比）" type="number" step="any" value={form.overlapPct} onChange={(e) => updateForm('overlapPct', e.target.value)} style={modalInputStyle} placeholder="%" />
                 </div>
               </div>
               <button
@@ -415,6 +405,7 @@ export default function MappingPanel() {
               )}
             </div>
             {detailError && <div style={{ fontSize: 10, color: 'var(--crit)', marginBottom: 4 }}>⚠ {detailError}</div>}
+            {successMsg && <div style={{ fontSize: 10, color: 'var(--ok)', marginBottom: 4 }}>✓ {successMsg}</div>}
             {detailLoading ? (
               <div style={{ fontSize: 10, color: 'var(--cyan)' }}>加载中…</div>
             ) : taskDetail ? (
@@ -439,7 +430,7 @@ export default function MappingPanel() {
               </div>
               <div style={{ maxHeight: 160, overflowY: 'auto' }}>
                 {(Array.isArray(pick(route, 'waypoints', 'points')) ? pick(route, 'waypoints', 'points') : []).map((wp, i) => (
-                  <div key={i} style={{ fontSize: 9, color: 'var(--dim-2)', padding: '2px 0', borderBottom: '1px solid var(--line-2)', fontFamily: 'var(--mono)' }}>
+                  <div key={`wp-${i}`} style={{ fontSize: 9, color: 'var(--dim-2)', padding: '2px 0', borderBottom: '1px solid var(--line-2)', fontFamily: 'var(--mono)' }}>
                     WP{i + 1}: {Number(pick(wp, 'lat')).toFixed(6)}, {Number(pick(wp, 'lon')).toFixed(6)} · {pick(wp, 'alt', 'altitude') != null ? `${Number(pick(wp, 'alt', 'altitude')).toFixed(0)}m` : '--'}
                   </div>
                 ))}
@@ -460,7 +451,7 @@ export default function MappingPanel() {
                 <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无照片</div>
               ) : (
                 photos.map((p, i) => (
-                  <div key={i} style={{ fontSize: 9, color: 'var(--dim-2)', padding: '4px 10px', borderBottom: '1px solid var(--line-2)', fontFamily: 'var(--mono)' }}>
+                  <div key={`photo-${i}`} style={{ fontSize: 9, color: 'var(--dim-2)', padding: '4px 10px', borderBottom: '1px solid var(--line-2)', fontFamily: 'var(--mono)' }}>
                     <span style={{ color: 'var(--cyan)' }}>#{pick(p, 'id', 'index') != null ? pick(p, 'id', 'index') : i + 1}</span>
                     {' '}{pick(p, 'filename', 'name') || '--'}
                     {' · '}{pick(p, 'lat') != null ? Number(pick(p, 'lat')).toFixed(6) : '--'}, {pick(p, 'lon') != null ? Number(pick(p, 'lon')).toFixed(6) : '--'}
@@ -494,39 +485,3 @@ export default function MappingPanel() {
   )
 }
 
-// ===== 内联样式 =====
-const cardStyle = {
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 4,
-  padding: '6px 10px',
-}
-
-const labelStyle = {
-  fontSize: 10,
-  color: 'var(--dim-2)',
-  marginBottom: 2,
-}
-
-const miniBtnStyle = {
-  fontSize: 10,
-  padding: '2px 8px',
-  cursor: 'pointer',
-  border: '1px solid var(--line-2)',
-  background: 'transparent',
-  color: 'var(--dim)',
-  borderRadius: 3,
-}
-
-const modalInputStyle = {
-  width: '100%',
-  padding: '4px 6px',
-  fontSize: 11,
-  fontFamily: 'var(--mono)',
-  color: 'var(--text)',
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 3,
-  outline: 'none',
-  boxSizing: 'border-box',
-}
