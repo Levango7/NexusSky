@@ -25,7 +25,11 @@ public class AlarmLinkageRule {
         /** 仅通知（短信/邮件/IM）。 */
         NOTIFY_ONLY,
         /** 录制视频。 */
-        RECORD_VIDEO
+        RECORD_VIDEO,
+        /** 自动出警（P0-1：调用 AutoDispatchService 派遣无人机飞往报警位置）。 */
+        AUTO_DISPATCH,
+        /** 语音广播（P0-1：调用 VoiceIntercomService 向现场喊话）。 */
+        VOICE_BROADCAST
     }
 
     /** 规则 ID。 */

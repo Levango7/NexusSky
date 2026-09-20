@@ -1,13 +1,19 @@
 package io.aerofleet.cloud.alarm;
 
+import io.aerofleet.cloud.autodispatch.AutoDispatchService;
+import io.aerofleet.cloud.autodispatch.DispatchResult;
+import io.aerofleet.cloud.autodispatch.VoiceIntercomService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
@@ -40,14 +46,33 @@ public class AlarmLinkageEngine {
     private final AlarmEventStore eventStore;
     /** 报警→应急编排桥接。 */
     private final AlarmToOrchBridge bridge;
+    /** 自动出警服务（@Lazy 避免循环依赖，可能未注入）。 */
+    private final Optional<AutoDispatchService> autoDispatchService;
+    /** 语音对讲服务（@Lazy 避免循环依赖，可能未注入）。 */
+    private final Optional<VoiceIntercomService> voiceIntercomService;
     /** 联动执行日志（最近 N 条，线程安全的有界队列）。 */
     private final ConcurrentLinkedDeque<LinkageLog> linkageLogs = new ConcurrentLinkedDeque<>();
     /** 联动日志容量上限。 */
     private static final int LINKAGE_LOG_CAPACITY = 500;
 
+    @Autowired
+    public AlarmLinkageEngine(AlarmEventStore eventStore, AlarmToOrchBridge bridge,
+                              @Lazy AutoDispatchService autoDispatchService,
+                              @Lazy VoiceIntercomService voiceIntercomService) {
+        this.eventStore = eventStore;
+        this.bridge = bridge;
+        this.autoDispatchService = Optional.ofNullable(autoDispatchService);
+        this.voiceIntercomService = Optional.ofNullable(voiceIntercomService);
+    }
+
+    /**
+     * 兼容旧构造器：不注入自动出警/语音对讲服务（用于测试与向后兼容）。
+     */
     public AlarmLinkageEngine(AlarmEventStore eventStore, AlarmToOrchBridge bridge) {
         this.eventStore = eventStore;
         this.bridge = bridge;
+        this.autoDispatchService = Optional.empty();
+        this.voiceIntercomService = Optional.empty();
     }
 
     /**
@@ -162,6 +187,8 @@ public class AlarmLinkageEngine {
      * 执行联动动作。
      * <p>
      * DEPLOY_DRONE 委托 {@link AlarmToOrchBridge} 启动无人机编排；
+     * AUTO_DISPATCH 委托 {@link AutoDispatchService} 自动出警（P0-1）；
+     * VOICE_BROADCAST 委托 {@link VoiceIntercomService} 广播喊话（P0-1）；
      * NOTIFY_ONLY/RECORD_VIDEO 仅记录日志（后续可扩展为通知服务/录像服务）。
      */
     private ActionExecution executeAction(AlarmEvent event, AlarmLinkageRule rule) {
@@ -176,6 +203,12 @@ public class AlarmLinkageEngine {
                             result.getPlanId(),
                             result.getTaskTemplate(),
                             null);
+                }
+                case AUTO_DISPATCH -> {
+                    return executeAutoDispatch(event, rule);
+                }
+                case VOICE_BROADCAST -> {
+                    return executeVoiceBroadcast(event, rule);
                 }
                 case NOTIFY_ONLY -> {
                     log.info("notify-only action: eventId={} ruleId={}",
@@ -220,6 +253,81 @@ public class AlarmLinkageEngine {
                     null,
                     e.getMessage());
         }
+    }
+
+    /**
+     * 执行 AUTO_DISPATCH 动作：调用 {@link AutoDispatchService#dispatchDrone} 派遣无人机。
+     * <p>
+     * 目标位置：规则指定优先（{@link AlarmLinkageRule#getTargetLat()} 非 NaN），
+     * 否则使用事件位置。派遣数量使用 {@link AlarmLinkageRule#getDroneCount()}。
+     */
+    private ActionExecution executeAutoDispatch(AlarmEvent event, AlarmLinkageRule rule) {
+        if (autoDispatchService.isEmpty()) {
+            log.warn("auto dispatch service not available: eventId={} ruleId={}",
+                    event.getId(), rule.getId());
+            return new ActionExecution(
+                    rule.getId(), rule.getActionType().name(),
+                    "SKIPPED", -1L, null, "auto dispatch service not available");
+        }
+        double targetLat = Double.isNaN(rule.getTargetLat()) ? event.getLat() : rule.getTargetLat();
+        double targetLon = Double.isNaN(rule.getTargetLon()) ? event.getLon() : rule.getTargetLon();
+        int droneCount = rule.getDroneCount() > 0 ? rule.getDroneCount() : 1;
+
+        DispatchResult result = autoDispatchService.get()
+                .dispatchDrone(targetLat, targetLon, event.getId(), droneCount);
+        log.info("auto dispatch action: eventId={} ruleId={} status={} dispatched={}",
+                event.getId(), rule.getId(), result.getStatus(),
+                result.getDispatchedDrones().size());
+
+        Map<String, Object> template = new java.util.LinkedHashMap<>();
+        template.put("dispatchId", result.getDispatchId());
+        template.put("status", result.getStatus().name());
+        template.put("dispatchedDrones", result.getDispatchedDrones().size());
+        template.put("message", result.getMessage());
+
+        return new ActionExecution(
+                rule.getId(), rule.getActionType().name(),
+                result.getStatus().name(), -1L, template, null);
+    }
+
+    /**
+     * 执行 VOICE_BROADCAST 动作：调用 {@link VoiceIntercomService#broadcast} 广播喊话。
+     * <p>
+     * 广播文本：优先使用规则 taskTemplate（透传字段），否则使用事件描述。
+     * 音量默认使用 {@link VoiceIntercomService#DEFAULT_VOLUME}。
+     */
+    private ActionExecution executeVoiceBroadcast(AlarmEvent event, AlarmLinkageRule rule) {
+        if (voiceIntercomService.isEmpty()) {
+            log.warn("voice intercom service not available: eventId={} ruleId={}",
+                    event.getId(), rule.getId());
+            return new ActionExecution(
+                    rule.getId(), rule.getActionType().name(),
+                    "SKIPPED", -1L, null, "voice intercom service not available");
+        }
+        String text = (rule.getTaskTemplate() != null && !rule.getTaskTemplate().isBlank())
+                ? rule.getTaskTemplate()
+                : event.getDescription();
+        if (text == null || text.isBlank()) {
+            text = "请立即注意现场情况";
+        }
+
+        // 选取首个在线无人机作为广播目标（简化策略）
+        int targetSysid = 1;
+        VoiceIntercomService.BroadcastResult result = voiceIntercomService.get()
+                .broadcast(targetSysid, text, VoiceIntercomService.DEFAULT_VOLUME);
+        log.info("voice broadcast action: eventId={} ruleId={} sysid={} status={}",
+                event.getId(), rule.getId(), targetSysid, result.getStatus());
+
+        Map<String, Object> template = new java.util.LinkedHashMap<>();
+        template.put("sysid", result.getSysid());
+        template.put("status", result.getStatus());
+        template.put("message", result.getMessage());
+        template.put("volume", result.getVolume());
+
+        return new ActionExecution(
+                rule.getId(), rule.getActionType().name(),
+                result.getStatus(), -1L, template,
+                "SENT".equals(result.getStatus()) ? null : result.getMessage());
     }
 
     /** 当前规则总数。 */
