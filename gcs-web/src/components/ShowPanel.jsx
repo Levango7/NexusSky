@@ -31,11 +31,10 @@ const FORMATION_TYPES = [
 
 const SHOW_STATUS_META = {
   CREATED: { color: 'var(--dim)', label: '已创建' },
-  READY: { color: 'var(--cyan)', label: '就绪' },
-  RUNNING: { color: 'var(--warn)', label: '表演中' },
+  DEPLOYING: { color: 'var(--cyan)', label: '部署中' },
+  PERFORMING: { color: 'var(--warn)', label: '表演中' },
   COMPLETED: { color: 'var(--ok)', label: '已完成' },
   ABORTED: { color: 'var(--crit)', label: '已中止' },
-  FAILED: { color: 'var(--crit)', label: '失败' },
 }
 
 const ACTION_TYPE_META = {
@@ -91,7 +90,7 @@ export default function ShowPanel() {
   const [taskFormError, setTaskFormError] = useState(null)
   const [creatingTask, setCreatingTask] = useState(false)
 
-  const [musicForm, setMusicForm] = useState({ bpm: '', url: '', offsetMs: '' })
+  const [musicForm, setMusicForm] = useState({ bpm: '', musicUrl: '', startTimeOffsetSec: '' })
   const [musicSaving, setMusicSaving] = useState(false)
   const [musicError, setMusicError] = useState(null)
 
@@ -247,8 +246,8 @@ export default function ShowPanel() {
     try {
       const payload = {}
       if (musicForm.bpm) payload.bpm = Number(musicForm.bpm)
-      if (musicForm.url) payload.url = musicForm.url
-      if (musicForm.offsetMs) payload.offsetMs = Number(musicForm.offsetMs)
+      if (musicForm.musicUrl) payload.musicUrl = musicForm.musicUrl
+      if (musicForm.startTimeOffsetSec) payload.startTimeOffsetSec = Number(musicForm.startTimeOffsetSec)
       await configureShowMusicSync(selectedTaskId, payload)
     } catch (e) {
       setMusicError('配置失败：' + (e && e.message ? e.message : String(e)))
@@ -481,11 +480,11 @@ export default function ShowPanel() {
                 </div>
                 <div style={{ flex: '1 1 140px' }}>
                   <div style={labelStyle}>音乐URL</div>
-                  <input type="text" value={musicForm.url} onChange={(e) => updateMusicForm('url', e.target.value)} style={modalInputStyle} placeholder="URL" />
+                  <input type="text" value={musicForm.musicUrl} onChange={(e) => updateMusicForm('musicUrl', e.target.value)} style={modalInputStyle} placeholder="URL" />
                 </div>
                 <div style={{ flex: '1 1 80px' }}>
-                  <div style={labelStyle}>偏移(ms)</div>
-                  <input type="number" value={musicForm.offsetMs} onChange={(e) => updateMusicForm('offsetMs', e.target.value)} style={modalInputStyle} placeholder="ms" />
+                  <div style={labelStyle}>偏移(s)</div>
+                  <input type="number" value={musicForm.startTimeOffsetSec} onChange={(e) => updateMusicForm('startTimeOffsetSec', e.target.value)} style={modalInputStyle} placeholder="秒" />
                 </div>
                 <button onClick={handleMusicSync} disabled={musicSaving} style={{ ...miniBtnStyle, color: 'var(--cyan)', borderColor: 'var(--cyan)', opacity: musicSaving ? 0.5 : 1, cursor: musicSaving ? 'not-allowed' : 'pointer' }}>{musicSaving ? '保存中…' : '保存'}</button>
               </div>

@@ -92,6 +92,12 @@ public class ShowController {
         if (req.type == null || req.type.isBlank()) {
             throw new BadRequestException("type is required");
         }
+        if (req.droneCount <= 0 || req.droneCount > 100) {
+            throw new BadRequestException("droneCount must be > 0 and <= 100");
+        }
+        if (req.spacingM <= 0 || req.spacingM > 500) {
+            throw new BadRequestException("spacingM must be > 0 and <= 500");
+        }
         FormationType type;
         try {
             type = FormationType.valueOf(req.type.toUpperCase());

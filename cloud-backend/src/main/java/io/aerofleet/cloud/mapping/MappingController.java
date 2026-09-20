@@ -156,18 +156,18 @@ public class MappingController {
 
         log.info("Mapping task created: id={} type={} waypoints={}", taskId, type, waypoints.size());
 
-        return Map.of(
-                "id", taskId,
-                "name", req.name,
-                "type", type.name(),
-                "status", task.getStatus().name(),
-                "assignedSysid", req.sysid != null ? req.sysid : "null",
-                "altitudeM", altitudeM,
-                "overlapPct", overlapPct,
-                "sidelapPct", sidelapPct,
-                "gsdCm", gsdCm,
-                "waypointCount", waypoints.size()
-        );
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("id", taskId);
+        response.put("name", req.name);
+        response.put("type", type.name());
+        response.put("status", task.getStatus().name());
+        response.put("assignedSysid", req.sysid);
+        response.put("altitudeM", altitudeM);
+        response.put("overlapPct", overlapPct);
+        response.put("sidelapPct", sidelapPct);
+        response.put("gsdCm", gsdCm);
+        response.put("waypointCount", waypoints.size());
+        return response;
     }
 
     /**
@@ -520,7 +520,7 @@ public class MappingController {
         summary.put("name", task.getName());
         summary.put("type", task.getType().name());
         summary.put("status", task.getStatus().name());
-        summary.put("assignedSysid", task.getAssignedSysid() != null ? task.getAssignedSysid() : "null");
+        summary.put("assignedSysid", task.getAssignedSysid());
         summary.put("altitudeM", task.getAltitudeM());
         summary.put("overlapPct", task.getOverlapPct());
         summary.put("sidelapPct", task.getSidelapPct());

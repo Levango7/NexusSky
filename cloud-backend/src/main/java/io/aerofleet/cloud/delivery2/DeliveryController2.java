@@ -68,6 +68,21 @@ public class DeliveryController2 {
         if (task == null) {
             throw new BadRequestException("task body is required");
         }
+        if (task.getType() == null) {
+            throw new BadRequestException("type is required");
+        }
+        if (task.getSenderLat() == 0.0 || task.getSenderLon() == 0.0) {
+            throw new BadRequestException("senderLat and senderLon are required");
+        }
+        if (task.getReceiverLat() == 0.0 || task.getReceiverLon() == 0.0) {
+            throw new BadRequestException("receiverLat and receiverLon are required");
+        }
+        if (task.getPayload() == null) {
+            throw new BadRequestException("payload is required");
+        }
+        if (task.getPayload().getWeightKg() <= 0) {
+            throw new BadRequestException("payload weightKg must be > 0");
+        }
         String id = "DT-" + String.format("%04d", taskCounter.incrementAndGet());
         task.setId(id);
         if (task.getStatus() == null) {

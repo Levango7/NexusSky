@@ -23,6 +23,9 @@ public class DisasterSimulationService {
 
     private static final Logger log = LoggerFactory.getLogger(DisasterSimulationService.class);
 
+    /** 最大保存模拟记录数，超过时移除最旧记录。 */
+    private static final int MAX_SIMULATIONS = 100;
+
     private final ConcurrentMap<String, DisasterSimulation> simulations = new ConcurrentHashMap<>();
 
     /**
@@ -61,6 +64,7 @@ public class DisasterSimulationService {
                 params, zones, result);
 
         simulations.put(id, sim);
+        evictIfFull();
         log.info("Flood simulation completed: id={} radiusKm={} depthM={} durationMin={}",
                 id, radiusKm, depthM, durationMin);
         return sim;
@@ -102,6 +106,7 @@ public class DisasterSimulationService {
                 params, zones, result);
 
         simulations.put(id, sim);
+        evictIfFull();
         log.info("Fire simulation completed: id={} radiusKm={} windSpeed={} durationMin={}",
                 id, radiusKm, windSpeed, durationMin);
         return sim;
@@ -144,6 +149,7 @@ public class DisasterSimulationService {
                 params, zones, result);
 
         simulations.put(id, sim);
+        evictIfFull();
         log.info("Earthquake simulation completed: id={} magnitude={} durationMin={}",
                 id, magnitude, durationMin);
         return sim;
@@ -181,8 +187,32 @@ public class DisasterSimulationService {
                 params, zones, result);
 
         simulations.put(id, sim);
+        evictIfFull();
         log.info("Evacuation simulation completed: id={} radiusKm={}", id, radiusKm);
         return sim;
+    }
+
+    /**
+     * 当模拟记录超过容量限制时，移除最旧的记录。
+     */
+    private void evictIfFull() {
+        while (simulations.size() > MAX_SIMULATIONS) {
+            // 移除 startTime 最小的记录（最旧的）
+            String oldestId = null;
+            long oldestTime = Long.MAX_VALUE;
+            for (Map.Entry<String, DisasterSimulation> entry : simulations.entrySet()) {
+                if (entry.getValue().getStartTime() < oldestTime) {
+                    oldestTime = entry.getValue().getStartTime();
+                    oldestId = entry.getKey();
+                }
+            }
+            if (oldestId != null) {
+                simulations.remove(oldestId);
+                log.debug("Evicted oldest simulation: id={}", oldestId);
+            } else {
+                break;
+            }
+        }
     }
 
     /**

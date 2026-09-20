@@ -278,9 +278,9 @@ export default function CommAdaptPanel() {
                   const sysid = pick(link, 'sysid', 'id')
                   const linkType = pick(link, 'linkType', 'type')
                   const latency = pick(link, 'latency', 'latencyMs')
-                  const bandwidth = pick(link, 'bandwidth', 'bandwidthMbps')
-                  const packetLoss = pick(link, 'packetLoss', 'lossRate')
-                  const rssi = pick(link, 'rssi', 'signalStrength')
+                  const bandwidth = pick(link, 'bandwidthKbps', 'bandwidth')
+                  const packetLoss = pick(link, 'packetLossPct', 'packetLoss')
+                  const rssi = pick(link, 'rssiDbm', 'rssi')
                   const meta = LINK_META[linkType] || { label: linkType || '--', color: 'var(--dim)' }
                   return (
                     <div key={sysid != null ? sysid : i} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${meta.color}` }}>
@@ -292,7 +292,7 @@ export default function CommAdaptPanel() {
                       </div>
                       <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                         <span>延迟：{latency != null ? `${Number(latency).toFixed(0)} ms` : '--'}</span>
-                        <span>带宽：{bandwidth != null ? `${Number(bandwidth).toFixed(1)} Mbps` : '--'}</span>
+                        <span>带宽：{bandwidth != null ? `${(Number(bandwidth) / 1000).toFixed(1)} Mbps` : '--'}</span>
                         <span>丢包：{packetLoss != null ? `${Number(packetLoss).toFixed(1)}%` : '--'}</span>
                         <span>RSSI：{rssi != null ? `${Number(rssi).toFixed(0)} dBm` : '--'}</span>
                       </div>
@@ -410,7 +410,7 @@ export default function CommAdaptPanel() {
                   const fromLink = pick(h, 'fromLink', 'from')
                   const toLink = pick(h, 'toLink', 'to')
                   const reason = pick(h, 'reason')
-                  const ts = pick(h, 'timestamp', 'ts', 'time')
+                  const ts = pick(h, 'triggerTime', 'timestamp', 'ts', 'time')
                   return (
                     <div key={sysid != null ? sysid : i} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: '3px solid var(--warn)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>

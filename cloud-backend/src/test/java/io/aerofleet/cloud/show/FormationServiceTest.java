@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.show;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,13 +64,13 @@ class FormationServiceTest {
     @DisplayName("创建队形参数校验")
     void createFormationValidation() {
         assertThatThrownBy(() -> formationService.createFormation("", FormationType.LINE, 5, 10.0, null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(BadRequestException.class);
         assertThatThrownBy(() -> formationService.createFormation("test", null, 5, 10.0, null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(BadRequestException.class);
         assertThatThrownBy(() -> formationService.createFormation("test", FormationType.LINE, 0, 10.0, null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(BadRequestException.class);
         assertThatThrownBy(() -> formationService.createFormation("test", FormationType.LINE, 5, 0, null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(BadRequestException.class);
     }
 
     // ---- LINE 直线队形 ----
@@ -255,10 +256,10 @@ class FormationServiceTest {
     void computePositionsValidation() {
         assertThatThrownBy(() -> formationService.computePositions(
                 FormationType.LINE, 0, 10.0, null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(BadRequestException.class);
         assertThatThrownBy(() -> formationService.computePositions(
                 FormationType.LINE, 5, 0, null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(BadRequestException.class);
     }
 
     @Test

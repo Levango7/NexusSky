@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 /**
@@ -37,7 +38,7 @@ public class PhotoCaptureService {
     public CapturedPhoto capture(int sysid, MappingWaypoint wp) {
         String photoId = UUID.randomUUID().toString();
         // 模拟文件大小 3~8 MB
-        long fileSize = 3_000_000 + (long) (Math.random() * 5_000_000);
+        long fileSize = 3_000_000 + (long) (ThreadLocalRandom.current().nextDouble() * 5_000_000);
         String url = "https://storage.mapping/photos/" + photoId + ".jpg";
 
         CapturedPhoto photo = new CapturedPhoto(

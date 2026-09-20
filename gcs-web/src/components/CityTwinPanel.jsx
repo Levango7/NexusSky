@@ -19,22 +19,22 @@ const POLL_MS = 5000
 
 // 灾害类型
 const DISASTER_TYPES = [
-  { key: 'flood', label: '洪水' },
-  { key: 'fire', label: '火灾' },
-  { key: 'earthquake', label: '地震' },
-  { key: 'evacuation', label: '疏散' },
+  { key: 'FLOOD', label: '洪水' },
+  { key: 'FIRE', label: '火灾' },
+  { key: 'EARTHQUAKE', label: '地震' },
+  { key: 'EVACUATION', label: '疏散' },
 ]
 
 // 灾害类型 → 额外必填参数
 const DISASTER_EXTRA_PARAMS = {
-  flood: [{ key: 'depthM', label: '水深（米）', placeholder: '如：2.5' }],
-  fire: [{ key: 'windSpeed', label: '风速（m/s）', placeholder: '如：5' }],
-  earthquake: [{ key: 'magnitude', label: '震级', placeholder: '如：6.5' }],
-  evacuation: [],
+  FLOOD: [{ key: 'depthM', label: '水深（米）', placeholder: '如：2.5' }],
+  FIRE: [{ key: 'windSpeed', label: '风速（m/s）', placeholder: '如：5' }],
+  EARTHQUAKE: [{ key: 'magnitude', label: '震级', placeholder: '如：6.5' }],
+  EVACUATION: [],
 }
 
 // 需要 durationMin 的灾害类型
-const TYPES_REQUIRING_DURATION = ['flood', 'fire', 'earthquake']
+const TYPES_REQUIRING_DURATION = ['FLOOD', 'FIRE', 'EARTHQUAKE']
 
 // 模拟状态 → 颜色 / 标签
 const SIM_STATUS_META = {
@@ -87,7 +87,7 @@ export default function CityTwinPanel() {
 
   // ---- 创建模拟表单 ----
   const [simForm, setSimForm] = useState({
-    type: 'flood',
+    type: 'FLOOD',
     centerLat: '',
     centerLon: '',
     radiusKm: '',
@@ -233,7 +233,7 @@ export default function CityTwinPanel() {
     }
     setCreatingSim(true)
     try {
-      const data = await createCitySimulation(simForm.type, queryParams)
+      const data = await createCitySimulation(simForm.type.toLowerCase(), queryParams)
       const newId = pick(data, 'id', 'simulationId')
       if (newId != null) setSelectedSimId(newId)
       setSimForm((prev) => ({ ...prev, centerLat: '', centerLon: '', radiusKm: '', durationMin: '', depthM: '', windSpeed: '', magnitude: '' }))

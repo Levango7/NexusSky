@@ -354,7 +354,11 @@ public class CommSituationController {
             return n.intValue();
         }
         if (o instanceof String s) {
-            return Integer.parseInt(s);
+            try {
+                return Integer.parseInt(s);
+            } catch (NumberFormatException e) {
+                throw new BadRequestException("invalid integer value: " + s);
+            }
         }
         return 0;
     }
@@ -364,7 +368,11 @@ public class CommSituationController {
             return n.longValue();
         }
         if (o instanceof String s) {
-            return Long.parseLong(s);
+            try {
+                return Long.parseLong(s);
+            } catch (NumberFormatException e) {
+                throw new BadRequestException("invalid long value: " + s);
+            }
         }
         return 0L;
     }

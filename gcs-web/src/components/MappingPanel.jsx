@@ -23,13 +23,11 @@ const MAPPING_TYPES = [
   { key: 'MIXED', label: '混合测绘' },
 ]
 
-// 任务状态 → 颜色 / 标签
+// 任务状态 → 颜色 / 标签（对齐后端 MappingTask.Status 枚举）
 const TASK_STATUS_META = {
-  CREATED: { color: 'var(--dim)', label: '已创建' },
-  PLANNED: { color: 'var(--cyan)', label: '已规划' },
-  CAPTURING: { color: 'var(--warn)', label: '采集中' },
-  CAPTURED: { color: 'var(--cyan)', label: '采集完成' },
-  PROCESSING: { color: 'var(--warn)', label: '处理中' },
+  PENDING: { color: 'var(--dim)', label: '待处理' },
+  PLANNING: { color: 'var(--cyan)', label: '规划中' },
+  IN_PROGRESS: { color: 'var(--warn)', label: '执行中' },
   COMPLETED: { color: 'var(--ok)', label: '已完成' },
   FAILED: { color: 'var(--crit)', label: '失败' },
 }
@@ -80,7 +78,7 @@ export default function MappingPanel() {
   // ---- 创建表单 ----
   const [form, setForm] = useState({
     type: 'ORTHO_PHOTO',
-    areaName: '',
+    name: '',
     centerLat: '',
     centerLon: '',
     widthM: '',
@@ -163,6 +161,10 @@ export default function MappingPanel() {
     const altitudeM = Number(form.altitudeM)
     const overlapPct = Number(form.overlapPct)
 
+    if (!form.name || !form.name.trim()) {
+      setFormError('任务名称必填')
+      return
+    }
     if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
       setFormError('中心坐标必须为有效数字')
       return
@@ -172,14 +174,23 @@ export default function MappingPanel() {
       return
     }
 
+    // 将矩形区域（中心点 + 宽高）转换为 polygon 顶点列表
+    // 纬度 1 度 ≈ 111320 m，经度 1 度 ≈ 111320 * cos(lat) m
+    const dLat = heightM / 2 / 111320
+    const dLon = widthM / 2 / (111320 * Math.cos(centerLat * Math.PI / 180))
+    const points = [
+      [centerLat - dLat, centerLon - dLon],
+      [centerLat - dLat, centerLon + dLon],
+      [centerLat + dLat, centerLon + dLon],
+      [centerLat + dLat, centerLon - dLon],
+    ]
+
     const payload = {
+      name: form.name.trim(),
       type: form.type,
       area: {
-        name: form.areaName.trim() || undefined,
-        centerLat,
-        centerLon,
-        widthM,
-        heightM,
+        type: 'polygon',
+        points,
       },
       altitudeM: Number.isFinite(altitudeM) ? altitudeM : undefined,
       overlapPct: Number.isFinite(overlapPct) ? overlapPct : undefined,
@@ -188,7 +199,7 @@ export default function MappingPanel() {
     setSubmitting(true)
     try {
       await createMappingTask(payload)
-      setForm((prev) => ({ ...prev, areaName: '', centerLat: '', centerLon: '', widthM: '', heightM: '', altitudeM: '', overlapPct: '' }))
+      setForm((prev) => ({ ...prev, name: '', centerLat: '', centerLon: '', widthM: '', heightM: '', altitudeM: '', overlapPct: '' }))
     } catch (err) {
       setFormError('创建任务失败：' + (err && err.message ? err.message : String(err)))
     } finally {
@@ -202,7 +213,12 @@ export default function MappingPanel() {
     setPlanningRoute(true)
     try {
       const data = await planMappingRoute(selectedTaskId)
-      setRoute(data)
+      // 后端返回 List<MappingWaypoint>（数组），规范化为统一对象格式
+      if (Array.isArray(data)) {
+        setRoute({ waypoints: data, waypointCount: data.length })
+      } else {
+        setRoute(data)
+      }
     } catch (e) {
       setDetailError('航线规划失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -246,7 +262,19 @@ export default function MappingPanel() {
     setResultLoading(true)
     try {
       const data = await getMappingResult(selectedTaskId)
-      setResult(data)
+      // 后端返回 List<MappingResult>（数组），合并多个成果的 URL 到统一对象
+      if (Array.isArray(data)) {
+        const merged = {}
+        for (const item of data) {
+          if (item.orthophotoUrl) merged.orthophotoUrl = item.orthophotoUrl
+          if (item.demUrl) merged.demUrl = item.demUrl
+          if (item.modelUrl) merged.modelUrl = item.modelUrl
+          if (item.model3dUrl) merged.model3dUrl = item.model3dUrl
+        }
+        setResult(Object.keys(merged).length > 0 ? merged : (data.length > 0 ? data[0] : null))
+      } else {
+        setResult(data)
+      }
     } catch (e) {
       setDetailError('获取成果失败：' + (e && e.message ? e.message : String(e)))
       setResult(null)
@@ -329,8 +357,8 @@ export default function MappingPanel() {
                   </select>
                 </div>
                 <div style={{ flex: '1 1 160px' }}>
-                  <div style={labelStyle}>区域名称</div>
-                  <input type="text" value={form.areaName} onChange={(e) => updateForm('areaName', e.target.value)} style={modalInputStyle} placeholder="可选" />
+                  <div style={labelStyle}>任务名称</div>
+                  <input type="text" value={form.name} onChange={(e) => updateForm('name', e.target.value)} style={modalInputStyle} placeholder="必填" />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

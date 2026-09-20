@@ -20,8 +20,17 @@ const POLL_MS = 5000
 const PRIORITY_META = {
   LOW: { color: 'var(--ok)', label: '低' },
   MEDIUM: { color: 'var(--cyan)', label: '中' },
+  NORMAL: { color: 'var(--ok)', label: '普通' },
   HIGH: { color: 'var(--warn)', label: '高' },
   CRITICAL: { color: 'var(--crit)', label: '紧急' },
+}
+
+// 执行状态 → 颜色 / 标签（对齐后端 ExecutionResult.Status）
+const STATUS_META = {
+  EXECUTED: { color: 'var(--ok)', label: '已执行' },
+  PENDING_CONFIRMATION: { color: 'var(--warn)', label: '待确认' },
+  REJECTED: { color: 'var(--crit)', label: '已拒绝' },
+  FAILED: { color: 'var(--crit)', label: '失败' },
 }
 
 // 格式化时间戳
@@ -148,8 +157,12 @@ export default function VoiceCmdPanel() {
     try {
       const payload = {
         action: pick(parsed, 'action'),
-        target: pick(parsed, 'target'),
-        parameters: pick(parsed, 'parameters', 'params'),
+        targetName: pick(parsed, 'targetName', 'target'),
+        sysid: pick(parsed, 'sysid') || 1,
+        altitudeM: pick(parsed, 'altitudeM', 'altitude'),
+        speedMps: pick(parsed, 'speedMps', 'speed'),
+        targetLat: pick(parsed, 'targetLat'),
+        targetLon: pick(parsed, 'targetLon'),
         priority: pick(parsed, 'priority'),
       }
       const data = await executeVoiceCommand(payload)
@@ -257,14 +270,15 @@ export default function VoiceCmdPanel() {
             {parsed && (
               <div style={{ fontSize: 10, color: 'var(--dim-2)', display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 0' }}>
                 <div>动作：<span style={{ color: 'var(--text)', fontWeight: 'bold' }}>{pick(parsed, 'action') || '--'}</span></div>
-                <div>目标：<span style={{ color: 'var(--cyan)' }}>{pick(parsed, 'target') || '--'}</span></div>
-                <div>参数：<span style={{ color: 'var(--text)' }}>{JSON.stringify(pick(parsed, 'parameters', 'params') || {})}</span></div>
+                <div>目标：<span style={{ color: 'var(--cyan)' }}>{pick(parsed, 'targetName', 'target') || '--'}</span></div>
+                <div>高度：<span style={{ color: 'var(--text)' }}>{pick(parsed, 'altitudeM', 'altitude') != null ? `${pick(parsed, 'altitudeM', 'altitude')}m` : '--'}</span></div>
+                <div>速度：<span style={{ color: 'var(--text)' }}>{pick(parsed, 'speedMps', 'speed') != null ? `${pick(parsed, 'speedMps', 'speed')}m/s` : '--'}</span></div>
                 <div>优先级：
                   <span style={{ color: PRIORITY_META[pick(parsed, 'priority')]?.color || 'var(--dim)' }}>
                     {PRIORITY_META[pick(parsed, 'priority')]?.label || pick(parsed, 'priority') || '--'}
                   </span>
                 </div>
-                <div>置信度：<span style={{ color: 'var(--text)' }}>{pick(parsed, 'confidence') != null ? `${Number(pick(parsed, 'confidence')).toFixed(2)}` : '--'}</span></div>
+                <div>置信度：<span style={{ color: 'var(--text)' }}>{pick(parsed, 'confidencePct', 'confidence') != null ? `${pick(parsed, 'confidencePct', 'confidence')}%` : '--'}</span></div>
               </div>
             )}
             {parsed && (
@@ -295,7 +309,8 @@ export default function VoiceCmdPanel() {
               ) : (
                 pending.map((p, i) => {
                   const pid = pick(p, 'pendingId', 'id')
-                  const priority = pick(p, 'priority')
+                  const cmd = pick(p, 'command') || p
+                  const priority = pick(cmd, 'priority')
                   const meta = PRIORITY_META[priority] || { color: 'var(--dim)', label: priority || '--' }
                   return (
                     <div key={pid != null ? pid : i} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${meta.color}` }}>
@@ -303,7 +318,7 @@ export default function VoiceCmdPanel() {
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1, minWidth: 0 }}>
                           <span style={{ fontSize: 9, color: meta.color, fontWeight: 'bold' }}>[{meta.label}]</span>
                           <span style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                            {pick(p, 'action') || '--'} → {pick(p, 'target') || '--'}
+                            {pick(cmd, 'action') || '--'} → {pick(cmd, 'targetName', 'target') || '--'}
                           </span>
                         </div>
                         <button
@@ -313,7 +328,7 @@ export default function VoiceCmdPanel() {
                           确认执行
                         </button>
                       </div>
-                      <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2 }}>{pick(p, 'originalText', 'text') || '--'}</div>
+                      <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2 }}>{pick(cmd, 'rawText', 'originalText', 'text') || '--'}</div>
                     </div>
                   )
                 })
@@ -425,20 +440,20 @@ export default function VoiceCmdPanel() {
                 <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无指令历史</div>
               ) : (
                 history.map((h, i) => {
-                  const priority = pick(h, 'priority')
-                  const meta = PRIORITY_META[priority] || { color: 'var(--dim)', label: priority || '--' }
+                  const status = pick(h, 'status')
+                  const statusMeta = STATUS_META[status] || { color: 'var(--dim)', label: status || '--' }
                   return (
-                    <div key={i} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${meta.color}` }}>
+                    <div key={i} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${statusMeta.color}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1, minWidth: 0 }}>
-                          <span style={{ fontSize: 9, color: meta.color, fontWeight: 'bold' }}>[{meta.label}]</span>
+                          <span style={{ fontSize: 9, color: statusMeta.color, fontWeight: 'bold' }}>[{statusMeta.label}]</span>
                           <span style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                            {pick(h, 'action') || '--'} → {pick(h, 'target') || '--'}
+                            {pick(h, 'executedAction') || '--'}
                           </span>
                         </div>
-                        <span style={{ fontSize: 9, color: 'var(--dim-2)', flexShrink: 0, fontFamily: 'var(--mono)' }}>{fmtTime(pick(h, 'timestamp', 'ts'))}</span>
+                        <span style={{ fontSize: 9, color: 'var(--dim-2)', flexShrink: 0, fontFamily: 'var(--mono)' }}>{pick(h, 'commandId') || '--'}</span>
                       </div>
-                      <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2 }}>{pick(h, 'originalText', 'text') || '--'}</div>
+                      <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2 }}>{pick(h, 'message') || '--'}</div>
                     </div>
                   )
                 })

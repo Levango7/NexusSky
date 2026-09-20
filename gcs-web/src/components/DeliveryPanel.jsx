@@ -18,25 +18,20 @@ import {
 
 const POLL_MS = 5000
 
-// 配送类型
+// 配送类型（对齐后端 DeliveryTask2.Type 枚举）
 const DELIVERY_TYPES = [
-  { key: 'STANDARD', label: '标准配送' },
-  { key: 'EXPRESS', label: '急件配送' },
-  { key: 'MEDICAL', label: '医疗配送' },
-  { key: 'EMERGENCY', label: '应急配送' },
+  { key: 'REGULAR_PARCEL', label: '常规包裹' },
+  { key: 'MEDICAL_SAMPLE', label: '医疗样本' },
+  { key: 'EMERGENCY_SUPPLY', label: '应急物资' },
 ]
 
-// 配送状态 → 颜色 / 标签
+// 配送状态 → 颜色 / 标签（对齐后端 DeliveryTask2.Status 枚举）
 const DELIVERY_STATUS_META = {
-  CREATED: { color: 'var(--dim)', label: '已创建' },
-  ROUTE_OPTIMIZED: { color: 'var(--cyan)', label: '路线已优化' },
-  STARTED: { color: 'var(--warn)', label: '配送中' },
-  APPROACHING: { color: 'var(--warn)', label: '接近目标' },
-  DELIVERING: { color: 'var(--warn)', label: '投放中' },
-  DELIVERED: { color: 'var(--ok)', label: '已投放' },
-  CONFIRMED: { color: 'var(--ok)', label: '已签收' },
-  ABORTED: { color: 'var(--crit)', label: '已中止' },
+  PENDING: { color: 'var(--dim)', label: '待处理' },
+  IN_PROGRESS: { color: 'var(--warn)', label: '配送中' },
+  DELIVERED: { color: 'var(--ok)', label: '已送达' },
   FAILED: { color: 'var(--crit)', label: '失败' },
+  ABORTED: { color: 'var(--crit)', label: '已中止' },
 }
 
 // 地面类型
@@ -92,9 +87,9 @@ export default function DeliveryPanel() {
 
   // ---- 创建表单 ----
   const [form, setForm] = useState({
-    type: 'STANDARD',
+    type: 'REGULAR_PARCEL',
     payloadKg: '',
-    priority: 'MEDIUM',
+    priority: 'NORMAL',
     pickupLat: '',
     pickupLon: '',
     dropoffLat: '',
@@ -195,10 +190,12 @@ export default function DeliveryPanel() {
 
     const payload = {
       type: form.type,
-      payloadKg,
       priority: form.priority,
-      pickup: { lat: pickupLat, lon: pickupLon },
-      dropoff: { lat: dropoffLat, lon: dropoffLon },
+      senderLat: pickupLat,
+      senderLon: pickupLon,
+      receiverLat: dropoffLat,
+      receiverLon: dropoffLon,
+      payload: { weightKg: payloadKg },
     }
 
     setSubmitting(true)
@@ -352,7 +349,11 @@ export default function DeliveryPanel() {
                         <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: `1px solid ${statusMeta.color}`, color: statusMeta.color }}>{statusMeta.label}</span>
                       </div>
                       <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2 }}>
-                        {pick(t, 'payloadKg') != null ? `${Number(pick(t, 'payloadKg')).toFixed(1)} kg` : '--'} · {fmtTime(pick(t, 'createdAt', 'created'))}
+                        {pick(t, 'payload', 'payloadKg') != null
+                          ? (pick(t, 'payload') != null
+                              ? `${Number(pick(pick(t, 'payload'), 'weightKg', 'payloadKg')).toFixed(1)} kg`
+                              : `${Number(pick(t, 'payloadKg')).toFixed(1)} kg`)
+                          : '--'} · {fmtTime(pick(t, 'createdAt', 'created'))}
                       </div>
                     </div>
                   )
@@ -381,9 +382,8 @@ export default function DeliveryPanel() {
                   <div style={labelStyle}>优先级</div>
                   <select value={form.priority} onChange={(e) => updateForm('priority', e.target.value)} style={modalInputStyle}>
                     <option value="LOW">低</option>
-                    <option value="MEDIUM">中</option>
+                    <option value="NORMAL">中</option>
                     <option value="HIGH">高</option>
-                    <option value="CRITICAL">紧急</option>
                   </select>
                 </div>
               </div>
@@ -438,9 +438,9 @@ export default function DeliveryPanel() {
               <div style={{ fontSize: 10, color: 'var(--dim-2)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <div>类型：<span style={{ color: 'var(--text)' }}>{DELIVERY_TYPES.find((dt) => dt.key === pick(taskDetail, 'type'))?.label || pick(taskDetail, 'type') || '--'}</span></div>
                 <div>状态：<span style={{ color: DELIVERY_STATUS_META[pick(taskDetail, 'status')]?.color || 'var(--text)' }}>{DELIVERY_STATUS_META[pick(taskDetail, 'status')]?.label || pick(taskDetail, 'status') || '--'}</span></div>
-                <div>负载：{pick(taskDetail, 'payloadKg') != null ? `${Number(pick(taskDetail, 'payloadKg')).toFixed(1)} kg` : '--'}</div>
-                <div>起飞点：{pick(taskDetail, 'pickupLat') != null ? `${Number(pick(taskDetail, 'pickupLat')).toFixed(4)}, ${Number(pick(taskDetail, 'pickupLon')).toFixed(4)}` : '--'}</div>
-                <div>降落点：{pick(taskDetail, 'dropoffLat') != null ? `${Number(pick(taskDetail, 'dropoffLat')).toFixed(4)}, ${Number(pick(taskDetail, 'dropoffLon')).toFixed(4)}` : '--'}</div>
+                <div>负载：{pick(taskDetail, 'payload') != null ? `${Number(pick(pick(taskDetail, 'payload'), 'weightKg')).toFixed(1)} kg` : (pick(taskDetail, 'payloadKg') != null ? `${Number(pick(taskDetail, 'payloadKg')).toFixed(1)} kg` : '--')}</div>
+                <div>起飞点：{pick(taskDetail, 'senderLat') != null ? `${Number(pick(taskDetail, 'senderLat')).toFixed(4)}, ${Number(pick(taskDetail, 'senderLon')).toFixed(4)}` : (pick(taskDetail, 'pickupLat') != null ? `${Number(pick(taskDetail, 'pickupLat')).toFixed(4)}, ${Number(pick(taskDetail, 'pickupLon')).toFixed(4)}` : '--')}</div>
+                <div>降落点：{pick(taskDetail, 'receiverLat') != null ? `${Number(pick(taskDetail, 'receiverLat')).toFixed(4)}, ${Number(pick(taskDetail, 'receiverLon')).toFixed(4)}` : (pick(taskDetail, 'dropoffLat') != null ? `${Number(pick(taskDetail, 'dropoffLat')).toFixed(4)}, ${Number(pick(taskDetail, 'dropoffLon')).toFixed(4)}` : '--')}</div>
               </div>
             ) : (
               <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>选择任务查看详情</div>
@@ -452,8 +452,8 @@ export default function DeliveryPanel() {
             <div style={{ ...cardStyle, padding: 10 }}>
               <div style={{ fontSize: 11, color: 'var(--text)', marginBottom: 6 }}>配送状态追踪</div>
               <div style={{ fontSize: 10, color: 'var(--dim-2)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <div>当前状态：<span style={{ color: DELIVERY_STATUS_META[pick(deliveryStatus, 'status')]?.color || 'var(--text)' }}>{DELIVERY_STATUS_META[pick(deliveryStatus, 'status')]?.label || pick(deliveryStatus, 'status') || '--'}</span></div>
-                <div>剩余距离：{pick(deliveryStatus, 'remainingDistanceM', 'remainingDistance') != null ? `${Number(pick(deliveryStatus, 'remainingDistanceM', 'remainingDistance')).toFixed(0)} m` : '--'}</div>
+                <div>当前状态：<span style={{ color: DELIVERY_STATUS_META[pick(deliveryStatus, 'phase', 'status')]?.color || 'var(--text)' }}>{DELIVERY_STATUS_META[pick(deliveryStatus, 'phase', 'status')]?.label || pick(deliveryStatus, 'phase', 'status') || '--'}</span></div>
+                <div>剩余距离：{pick(deliveryStatus, 'remainingDistanceKm', 'remainingDistanceM', 'remainingDistance') != null ? `${Number(pick(deliveryStatus, 'remainingDistanceKm', 'remainingDistanceM', 'remainingDistance')).toFixed(0)} m` : '--'}</div>
                 <div>预估到达：{pick(deliveryStatus, 'estimatedArrivalMin', 'etaMin') != null ? `${Number(pick(deliveryStatus, 'estimatedArrivalMin', 'etaMin')).toFixed(0)} 分钟` : '--'}</div>
                 <div>航点序列：{Array.isArray(pick(deliveryStatus, 'waypoints', 'route')) ? pick(deliveryStatus, 'waypoints', 'route').length + ' 个航点' : '--'}</div>
               </div>

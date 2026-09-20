@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.show;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,22 +46,22 @@ public class FormationService {
      * @param spacingM   间距（米）
      * @param parameters 队形特定参数（可为 null）
      * @return 创建的队形定义
-     * @throws IllegalArgumentException 参数非法
+     * @throws BadRequestException 参数非法
      */
     public FormationDefinition createFormation(String name, FormationType type,
                                                 int droneCount, double spacingM,
                                                 Map<String, Double> parameters) {
         if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("name is required");
+            throw new BadRequestException("name is required");
         }
         if (type == null) {
-            throw new IllegalArgumentException("type is required");
+            throw new BadRequestException("type is required");
         }
         if (droneCount <= 0) {
-            throw new IllegalArgumentException("droneCount must be positive");
+            throw new BadRequestException("droneCount must be positive");
         }
         if (spacingM <= 0) {
-            throw new IllegalArgumentException("spacingM must be positive");
+            throw new BadRequestException("spacingM must be positive");
         }
         String id = UUID.randomUUID().toString();
         FormationDefinition formation = new FormationDefinition(
@@ -100,13 +101,13 @@ public class FormationService {
     public List<double[]> computePositions(FormationType type, int droneCount,
                                            double spacingM, Map<String, Double> parameters) {
         if (type == null) {
-            throw new IllegalArgumentException("type is required");
+            throw new BadRequestException("type is required");
         }
         if (droneCount <= 0) {
-            throw new IllegalArgumentException("droneCount must be positive");
+            throw new BadRequestException("droneCount must be positive");
         }
         if (spacingM <= 0) {
-            throw new IllegalArgumentException("spacingM must be positive");
+            throw new BadRequestException("spacingM must be positive");
         }
         List<double[]> positions = switch (type) {
             case LINE -> computeLine(droneCount, spacingM);
