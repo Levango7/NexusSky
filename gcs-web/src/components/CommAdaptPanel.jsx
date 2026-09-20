@@ -346,7 +346,7 @@ export default function CommAdaptPanel() {
               />
             </div>
             {failoverResult && (
-              <div style={{ fontSize: 10, color: 'var(--dim-2)', marginBottom: 4, padding: '4px 8px', background: 'var(--bg-1)', borderRadius: 3, border: `1px solid ${pick(failoverResult, 'status') === 'success' ? 'var(--ok)' : 'var(--crit)'}` }}>
+              <div style={{ fontSize: 10, color: 'var(--dim-2)', marginBottom: 4, padding: '4px 8px', background: 'var(--bg-1)', borderRadius: 3, border: `1px solid ${(pick(failoverResult, 'status') || '').toUpperCase() === 'SUCCESS' ? 'var(--ok)' : 'var(--crit)'}` }}>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span>切换结果：</span>
                   <span style={{ color: LINK_META[pick(failoverResult, 'fromLink')]?.color || 'var(--text)' }}>
@@ -356,7 +356,7 @@ export default function CommAdaptPanel() {
                   <span style={{ color: LINK_META[pick(failoverResult, 'toLink')]?.color || 'var(--ok)' }}>
                     {LINK_META[pick(failoverResult, 'toLink')]?.label || pick(failoverResult, 'toLink') || '--'}
                   </span>
-                  <span style={{ color: pick(failoverResult, 'status') === 'success' ? 'var(--ok)' : 'var(--crit)', fontWeight: 'bold' }}>
+                  <span style={{ color: (pick(failoverResult, 'status') || '').toUpperCase() === 'SUCCESS' ? 'var(--ok)' : 'var(--crit)', fontWeight: 'bold' }}>
                     {pick(failoverResult, 'status') || '--'}
                   </span>
                 </div>

@@ -196,7 +196,7 @@ export default function VoiceCmdPanel() {
   const handleAlert = useCallback(async () => {
     const sysid = alertSysid.trim()
     if (!sysid) {
-      setBroadcastResult({ error: '请输入 sysid' })
+      setAlertResult({ error: '请输入 sysid' })
       return
     }
     setAlerting(true)
