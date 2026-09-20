@@ -5,6 +5,7 @@ import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.tracking.FlightTrackStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -57,6 +58,7 @@ public class AutoDispatchService {
         this(deviceRegistry, trackStore, new AutoDispatchConfig());
     }
 
+    @Autowired
     public AutoDispatchService(DeviceRegistry deviceRegistry, FlightTrackStore trackStore,
                                AutoDispatchConfig config) {
         this.deviceRegistry = deviceRegistry;

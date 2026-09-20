@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.autodispatch;
 
+import org.springframework.stereotype.Component;
+
 /**
  * 自动出警配置（P0-1 安防报警→无人机自动出警闭环）。
  * <p>
@@ -12,6 +14,7 @@ package io.aerofleet.cloud.autodispatch;
  * @see AutoDispatchService
  * @see AutoDispatchController
  */
+@Component
 public class AutoDispatchConfig {
 
     /** 是否启用自动出警（报警事件触发时自动派遣无人机）。 */
