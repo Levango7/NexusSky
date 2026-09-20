@@ -108,10 +108,15 @@ export default function CommAdaptPanel() {
           failoverData = await getCommFailoverHistory(Number(scoreSysid.trim())).catch(() => [])
         }
         if (controller.signal.aborted || stopped) return
-        const linksList = Array.isArray(linksData) ? linksData : (linksData && linksData.links) || []
+        const rawItems = Array.isArray(linksData) ? linksData : (linksData && linksData.items) || []
+        // 后端 fleet quality items 是无人机综合评分对象，链路级数据在 details 子数组中
+        // 展开 details，将每个链路作为单独条目展示，同时保留无人机级信息
+        const linksList = rawItems.flatMap(item =>
+          (item.details || []).map(d => ({ ...d, sysid: item.sysid, grade: item.grade, overallScore: item.overallScore }))
+        )
         setLinks(linksList)
         setLinksError(null)
-        const failoverList = Array.isArray(failoverData) ? failoverData : (failoverData && failoverData.history) || []
+        const failoverList = Array.isArray(failoverData) ? failoverData : (failoverData && failoverData.items) || []
         setFailoverHistory(failoverList)
         setFailoverError(null)
       } catch (e) {
@@ -179,7 +184,8 @@ export default function CommAdaptPanel() {
     setDecisionError(null)
     try {
       const data = await getCommDecision()
-      setDecision(data)
+      const items = (data && data.items) || []
+      setDecision(items.length > 0 ? items[0] : null)
     } catch (e) {
       setDecisionError(e && e.message ? e.message : String(e))
       setDecision(null)
@@ -347,7 +353,7 @@ export default function CommAdaptPanel() {
                   {pick(score, 'grade') || '--'}
                 </span>
                 <span style={{ fontSize: 14, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>
-                  {pick(score, 'score', 'totalScore') != null ? Number(pick(score, 'score', 'totalScore')).toFixed(1) : '--'} 分
+                  {pick(score, 'overallScore', 'score', 'totalScore') != null ? Number(pick(score, 'overallScore', 'score', 'totalScore')).toFixed(1) : '--'} 分
                 </span>
               </div>
             )}

@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -177,6 +178,6 @@ public class MappingResultService {
 
     private void storeResult(String taskId, MappingResult result) {
         resultsById.put(result.getId(), result);
-        resultsByTask.computeIfAbsent(taskId, k -> new ArrayList<>()).add(result);
+        resultsByTask.computeIfAbsent(taskId, k -> new CopyOnWriteArrayList<>()).add(result);
     }
 }

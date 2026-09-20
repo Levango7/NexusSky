@@ -297,6 +297,7 @@ class MappingControllerTest {
     void processOrthophotoTask() {
         Map<String, Object> created = controller.createTask(createRequest("ORTHO_PHOTO"));
         String id = (String) created.get("id");
+        controller.startTask(id);
 
         Map<String, Object> result = controller.processTask(id);
         assertThat(result.get("status")).isEqualTo("COMPLETED");
@@ -308,6 +309,7 @@ class MappingControllerTest {
     void processDemTask() {
         Map<String, Object> created = controller.createTask(createRequest("DEM"));
         String id = (String) created.get("id");
+        controller.startTask(id);
 
         Map<String, Object> result = controller.processTask(id);
         assertThat(result.get("status")).isEqualTo("COMPLETED");
@@ -319,6 +321,7 @@ class MappingControllerTest {
     void process3DModelTask() {
         Map<String, Object> created = controller.createTask(createRequest("THREE_D_MODEL"));
         String id = (String) created.get("id");
+        controller.startTask(id);
 
         Map<String, Object> result = controller.processTask(id);
         assertThat(result.get("status")).isEqualTo("COMPLETED");
@@ -330,6 +333,7 @@ class MappingControllerTest {
     void processMixedTask() {
         Map<String, Object> created = controller.createTask(createRequest("MIXED"));
         String id = (String) created.get("id");
+        controller.startTask(id);
 
         Map<String, Object> result = controller.processTask(id);
         assertThat(result.get("status")).isEqualTo("COMPLETED");
@@ -350,6 +354,7 @@ class MappingControllerTest {
     void getTaskResult() {
         Map<String, Object> created = controller.createTask(createRequest("ORTHO_PHOTO"));
         String id = (String) created.get("id");
+        controller.startTask(id);
         controller.processTask(id);
 
         List<MappingResult> results = controller.getTaskResult(id);
@@ -376,6 +381,7 @@ class MappingControllerTest {
     void downloadResult() {
         Map<String, Object> created = controller.createTask(createRequest("ORTHO_PHOTO"));
         String id = (String) created.get("id");
+        controller.startTask(id);
         controller.processTask(id);
 
         List<MappingResult> results = controller.getTaskResult(id);

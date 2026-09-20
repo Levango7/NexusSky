@@ -25,6 +25,17 @@ const DISASTER_TYPES = [
   { key: 'evacuation', label: '疏散' },
 ]
 
+// 灾害类型 → 额外必填参数
+const DISASTER_EXTRA_PARAMS = {
+  flood: [{ key: 'depthM', label: '水深（米）', placeholder: '如：2.5' }],
+  fire: [{ key: 'windSpeed', label: '风速（m/s）', placeholder: '如：5' }],
+  earthquake: [{ key: 'magnitude', label: '震级', placeholder: '如：6.5' }],
+  evacuation: [],
+}
+
+// 需要 durationMin 的灾害类型
+const TYPES_REQUIRING_DURATION = ['flood', 'fire', 'earthquake']
+
 // 模拟状态 → 颜色 / 标签
 const SIM_STATUS_META = {
   CREATED: { color: 'var(--dim)', label: '已创建' },
@@ -81,6 +92,9 @@ export default function CityTwinPanel() {
     centerLon: '',
     radiusKm: '',
     durationMin: '',
+    depthM: '',
+    windSpeed: '',
+    magnitude: '',
   })
   const [simFormError, setSimFormError] = useState(null)
   const [creatingSim, setCreatingSim] = useState(false)
@@ -172,18 +186,57 @@ export default function CityTwinPanel() {
       setSimFormError('影响半径必须为正数')
       return
     }
+
+    // durationMin 对 flood/fire/earthquake 必填
+    const needsDuration = TYPES_REQUIRING_DURATION.includes(simForm.type)
+    if (needsDuration) {
+      const durationMin = Number(simForm.durationMin)
+      if (!simForm.durationMin || !Number.isFinite(durationMin) || durationMin <= 0) {
+        setSimFormError('时长（分钟）为必填项，必须为正数')
+        return
+      }
+    }
+
+    // 灾害类型特定参数验证
+    const extraParams = DISASTER_EXTRA_PARAMS[simForm.type] || []
+    for (const param of extraParams) {
+      const val = Number(simForm[param.key])
+      if (!simForm[param.key] || !Number.isFinite(val)) {
+        setSimFormError(`${param.label}为必填项`)
+        return
+      }
+      if (param.key === 'depthM' && val <= 0) {
+        setSimFormError('水深必须大于0')
+        return
+      }
+      if (param.key === 'windSpeed' && val < 0) {
+        setSimFormError('风速不能为负数')
+        return
+      }
+      if (param.key === 'magnitude' && val <= 0) {
+        setSimFormError('震级必须大于0')
+        return
+      }
+    }
+
     const queryParams = {
       centerLat,
       centerLon,
       radiusKm,
     }
-    if (simForm.durationMin) queryParams.durationMin = Number(simForm.durationMin)
+    if (needsDuration) {
+      queryParams.durationMin = Number(simForm.durationMin)
+    }
+    // 传递灾害类型特定参数
+    for (const param of extraParams) {
+      queryParams[param.key] = Number(simForm[param.key])
+    }
     setCreatingSim(true)
     try {
       const data = await createCitySimulation(simForm.type, queryParams)
       const newId = pick(data, 'id', 'simulationId')
       if (newId != null) setSelectedSimId(newId)
-      setSimForm((prev) => ({ ...prev, centerLat: '', centerLon: '', radiusKm: '', durationMin: '' }))
+      setSimForm((prev) => ({ ...prev, centerLat: '', centerLon: '', radiusKm: '', durationMin: '', depthM: '', windSpeed: '', magnitude: '' }))
     } catch (e) {
       setSimFormError('创建模拟失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -369,9 +422,16 @@ export default function CityTwinPanel() {
                 <input type="number" step="any" value={simForm.radiusKm} onChange={(e) => updateSimForm('radiusKm', e.target.value)} style={modalInputStyle} placeholder="km" />
               </div>
               <div style={{ flex: '1 1 80px' }}>
-                <div style={labelStyle}>时长 (min)</div>
-                <input type="number" value={simForm.durationMin} onChange={(e) => updateSimForm('durationMin', e.target.value)} style={modalInputStyle} placeholder="分钟" />
+                <div style={labelStyle}>{TYPES_REQUIRING_DURATION.includes(simForm.type) ? '时长 (min) *' : '时长 (min)'}</div>
+                <input type="number" value={simForm.durationMin} onChange={(e) => updateSimForm('durationMin', e.target.value)} style={modalInputStyle} placeholder={TYPES_REQUIRING_DURATION.includes(simForm.type) ? '必填' : '可选'} />
               </div>
+              {/* 灾害类型特定额外参数 */}
+              {(DISASTER_EXTRA_PARAMS[simForm.type] || []).map((param) => (
+                <div key={param.key} style={{ flex: '1 1 100px' }}>
+                  <div style={labelStyle}>{param.label} *</div>
+                  <input type="number" step="any" value={simForm[param.key]} onChange={(e) => updateSimForm(param.key, e.target.value)} style={modalInputStyle} placeholder={param.placeholder} />
+                </div>
+              ))}
             </div>
             <button onClick={handleCreateSim} disabled={creatingSim} style={{ ...miniBtnStyle, marginTop: 6, padding: '4px 12px', border: '1px solid var(--warn)', color: 'var(--warn)', cursor: creatingSim ? 'not-allowed' : 'pointer', opacity: creatingSim ? 0.5 : 1 }}>{creatingSim ? '创建中…' : '创建模拟'}</button>
           </div>

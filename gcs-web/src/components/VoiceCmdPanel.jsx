@@ -404,8 +404,7 @@ export default function VoiceCmdPanel() {
             </div>
             {voiceStatus && (
               <div style={{ fontSize: 10, color: 'var(--dim-2)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <div>状态：<span style={{ color: 'var(--text)' }}>{pick(voiceStatus, 'status', 'state') || '--'}</span></div>
-                <div>当前播报：<span style={{ color: 'var(--text)' }}>{pick(voiceStatus, 'currentMessage', 'message') || '--'}</span></div>
+                <div>播报状态：<span style={{ color: 'var(--text)' }}>{pick(voiceStatus, 'text') || '--'}</span></div>
                 {voiceStatus.error && <div style={{ color: 'var(--crit)' }}>⚠ {voiceStatus.error}</div>}
               </div>
             )}

@@ -49,6 +49,9 @@ public class SimulationController {
             @RequestParam("depthM") double depthM,
             @RequestParam("durationMin") int durationMin) {
         validateGeoParams(centerLat, centerLon, radiusKm, durationMin);
+        if (depthM <= 0) {
+            throw new BadRequestException("depthM must be > 0");
+        }
         log.info("Flood simulation request: centerLat={} centerLon={} radiusKm={} depthM={} durationMin={}",
                 centerLat, centerLon, radiusKm, depthM, durationMin);
         return simulationService.simulateFlood(centerLat, centerLon, radiusKm, depthM, durationMin);
@@ -63,6 +66,9 @@ public class SimulationController {
             @RequestParam("windSpeed") double windSpeed,
             @RequestParam("durationMin") int durationMin) {
         validateGeoParams(centerLat, centerLon, radiusKm, durationMin);
+        if (windSpeed < 0) {
+            throw new BadRequestException("windSpeed must be >= 0");
+        }
         log.info("Fire simulation request: centerLat={} centerLon={} radiusKm={} windSpeed={} durationMin={}",
                 centerLat, centerLon, radiusKm, windSpeed, durationMin);
         return simulationService.simulateFire(centerLat, centerLon, radiusKm, windSpeed, durationMin);
@@ -76,6 +82,9 @@ public class SimulationController {
             @RequestParam("magnitude") double magnitude,
             @RequestParam("durationMin") int durationMin) {
         validateLatLon(centerLat, centerLon);
+        if (magnitude <= 0) {
+            throw new BadRequestException("magnitude must be > 0");
+        }
         if (durationMin <= 0) {
             throw new BadRequestException("durationMin must be > 0");
         }

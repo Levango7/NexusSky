@@ -147,6 +147,10 @@ export default function ShowPanel() {
     setFormFormError(null)
     const droneCount = Number(formForm.droneCount)
     const spacingM = Number(formForm.spacingM)
+    if (!formForm.name.trim()) {
+      setFormFormError('队形名称为必填项')
+      return
+    }
     if (!Number.isFinite(droneCount) || droneCount <= 0) {
       setFormFormError('无人机数量必须为正整数')
       return
@@ -159,7 +163,7 @@ export default function ShowPanel() {
     try {
       await createShowFormation({
         type: formForm.type,
-        name: formForm.name.trim() || undefined,
+        name: formForm.name.trim(),
         droneCount,
         spacingM,
       })
@@ -194,11 +198,15 @@ export default function ShowPanel() {
       setTaskFormError('队形ID不能为空')
       return
     }
+    if (!taskForm.name.trim()) {
+      setTaskFormError('任务名称为必填项')
+      return
+    }
     setCreatingTask(true)
     try {
       await createShowTask({
         formationId,
-        name: taskForm.name.trim() || undefined,
+        name: taskForm.name.trim(),
       })
       setTaskForm((prev) => ({ ...prev, formationId: '', name: '' }))
     } catch (e) {
@@ -319,7 +327,7 @@ export default function ShowPanel() {
               </div>
               <div style={{ flex: '1 1 120px' }}>
                 <div style={labelStyle}>队形名称</div>
-                <input type="text" value={formForm.name} onChange={(e) => updateFormForm('name', e.target.value)} style={modalInputStyle} placeholder="可选" />
+                <input type="text" value={formForm.name} onChange={(e) => updateFormForm('name', e.target.value)} style={modalInputStyle} placeholder="必填" />
               </div>
               <div style={{ flex: '1 1 80px' }}>
                 <div style={labelStyle}>无人机数</div>
@@ -371,7 +379,7 @@ export default function ShowPanel() {
               </div>
               <div style={{ flex: '1 1 160px' }}>
                 <div style={labelStyle}>任务名称</div>
-                <input type="text" value={taskForm.name} onChange={(e) => updateTaskForm('name', e.target.value)} style={modalInputStyle} placeholder="可选" />
+                <input type="text" value={taskForm.name} onChange={(e) => updateTaskForm('name', e.target.value)} style={modalInputStyle} placeholder="必填" />
               </div>
               <button onClick={handleCreateTask} disabled={creatingTask} style={{ ...miniBtnStyle, color: 'var(--cyan)', borderColor: 'var(--cyan)', opacity: creatingTask ? 0.5 : 1, cursor: creatingTask ? 'not-allowed' : 'pointer' }}>{creatingTask ? '创建中…' : '创建'}</button>
             </div>

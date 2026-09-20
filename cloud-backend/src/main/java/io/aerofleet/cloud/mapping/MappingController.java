@@ -320,6 +320,13 @@ public class MappingController {
     @PostMapping("/tasks/{id}/process")
     public Map<String, Object> processTask(@PathVariable("id") String id) {
         MappingTask task = requireTask(id);
+        // P1-fix: 添加状态校验，只允许 IN_PROGRESS 状态触发成果生成
+        MappingTask.Status currentStatus = task.getStatus();
+        if (currentStatus != MappingTask.Status.IN_PROGRESS) {
+            throw new BadRequestException(
+                    "cannot process task in status: " + currentStatus
+                            + ", only IN_PROGRESS allowed");
+        }
         List<CapturedPhoto> photos = photoCaptureService.getPhotos(id);
 
         // 如果没有照片，模拟采集
