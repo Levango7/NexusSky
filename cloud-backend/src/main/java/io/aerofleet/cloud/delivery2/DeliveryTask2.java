@@ -2,11 +2,21 @@ package io.aerofleet.cloud.delivery2;
 
 import java.time.Instant;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
 /**
  * 配送任务模型（P4-1 无人机物流配送）。
  * <p>
  * 支持应急物资空投、医疗样本运输、偏远地区配送等场景。
  */
+@Entity
+@Table(name = "delivery_task2")
 public class DeliveryTask2 {
 
     /** 配送任务类型。 */
@@ -24,19 +34,27 @@ public class DeliveryTask2 {
         HIGH, NORMAL, LOW
     }
 
+    @Id
     private String id;
+    @Enumerated(EnumType.STRING)
     private Type type;
+    @Enumerated(EnumType.STRING)
     private Status status;
     private double senderLat;
     private double senderLon;
     private double receiverLat;
     private double receiverLon;
     private String receiverName;
+    @Embedded
     private Payload payload;
     private Integer assignedSysid;
+    @Enumerated(EnumType.STRING)
     private Priority priority;
+    @Column(columnDefinition = "TIMESTAMP")
     private Instant startTime;
+    @Column(columnDefinition = "TIMESTAMP")
     private Instant estimatedDeliveryTime;
+    @Column(columnDefinition = "TIMESTAMP")
     private Instant actualDeliveryTime;
     private double routeDistanceKm;
 

@@ -40,13 +40,27 @@ class FormationServiceTest {
     private FormationService service;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         registry = new DeviceRegistry();
         roles = new SquadRoleService(registry);
         clock = new FormationClock(registry);
         commands = mock(DroneCommandService.class);
         gateway = mock(UdpGateway.class);
         service = new FormationService(roles, commands, registry, gateway, clock);
+
+        // 创建 mock FormationRepository 模拟内存存储，反射注入到 @Autowired 字段
+        FormationRepository mockRepo = mock(FormationRepository.class);
+        java.util.Map<Integer, FormationEntity> formMap = new java.util.concurrent.ConcurrentHashMap<>();
+        when(mockRepo.save(any(FormationEntity.class))).thenAnswer(inv -> {
+            FormationEntity e = inv.getArgument(0);
+            formMap.put(e.getFormationId(), e);
+            return e;
+        });
+        when(mockRepo.findById(anyInt()))
+                .thenAnswer(inv -> java.util.Optional.ofNullable(formMap.get(inv.getArgument(0))));
+        java.lang.reflect.Field f = FormationService.class.getDeclaredField("repository");
+        f.setAccessible(true);
+        f.set(service, mockRepo);
     }
 
     /** 注册一架在线、电量充足的飞机。 */
@@ -249,13 +263,27 @@ class FormationServiceTest {
     }
 
     @Test
-    void lightsSyncRequiresClockReady() {
+    void lightsSyncRequiresClockReady() throws Exception {
         // sync=true 但时钟未就绪 → BadRequestException（FR-11）
         // 用 mock clock 模拟未就绪（create 会 pollLeaderHeartbeat，真实 clock 会就绪）
         FormationClock mockClock = mock(FormationClock.class);
         when(mockClock.ready()).thenReturn(false);
         when(mockClock.formationClockUs()).thenReturn(-1L);
         FormationService svc = new FormationService(roles, commands, registry, gateway, mockClock);
+
+        // svc 也需要注入 mock FormationRepository
+        FormationRepository mockRepo2 = mock(FormationRepository.class);
+        java.util.Map<Integer, FormationEntity> formMap2 = new java.util.concurrent.ConcurrentHashMap<>();
+        when(mockRepo2.save(any(FormationEntity.class))).thenAnswer(inv -> {
+            FormationEntity e = inv.getArgument(0);
+            formMap2.put(e.getFormationId(), e);
+            return e;
+        });
+        when(mockRepo2.findById(anyInt()))
+                .thenAnswer(inv -> java.util.Optional.ofNullable(formMap2.get(inv.getArgument(0))));
+        java.lang.reflect.Field f2 = FormationService.class.getDeclaredField("repository");
+        f2.setAccessible(true);
+        f2.set(svc, mockRepo2);
 
         Set<Integer> members = new java.util.HashSet<>();
         for (int s : new int[]{1, 2}) {

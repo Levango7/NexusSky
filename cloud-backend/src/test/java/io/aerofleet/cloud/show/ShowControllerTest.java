@@ -5,9 +5,13 @@ import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -26,11 +30,24 @@ class ShowControllerTest {
     private ActionSequenceService actionSequenceService;
     private MusicSyncService musicSyncService;
     private ShowController controller;
+    private final Map<String, ShowTask> taskStore = new ConcurrentHashMap<>();
 
     @BeforeEach
     void setUp() {
         formationService = new FormationService();
-        taskService = new ShowTaskService(formationService);
+        ShowTaskRepository showTaskRepository = Mockito.mock(ShowTaskRepository.class);
+        taskStore.clear();
+        Mockito.when(showTaskRepository.save(Mockito.any(ShowTask.class)))
+                .thenAnswer(inv -> {
+                    ShowTask t = inv.getArgument(0);
+                    taskStore.put(t.getId(), t);
+                    return t;
+                });
+        Mockito.when(showTaskRepository.findAll())
+                .thenAnswer(inv -> new ArrayList<>(taskStore.values()));
+        Mockito.when(showTaskRepository.findById(Mockito.anyString()))
+                .thenAnswer(inv -> Optional.ofNullable(taskStore.get(inv.getArgument(0))));
+        taskService = new ShowTaskService(showTaskRepository, formationService);
         actionSequenceService = new ActionSequenceService(taskService, formationService);
         musicSyncService = new MusicSyncService(taskService, actionSequenceService);
         controller = new ShowController(

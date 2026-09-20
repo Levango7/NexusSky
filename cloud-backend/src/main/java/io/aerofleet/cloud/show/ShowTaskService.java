@@ -4,31 +4,30 @@ import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 表演任务管理服务。
  * <p>
- * 持有 {@code ConcurrentHashMap<taskId, ShowTask>}，承载任务创建 / 查询 / 启动 / 中止；
+ * 通过 {@link ShowTaskRepository} 持久化任务数据，承载任务创建 / 查询 / 启动 / 中止；
  * 队形定义委托 {@link FormationService} 查询。
- * <p>
- * 并发安全：tasks ConcurrentHashMap + UUID 任务 ID。
  */
 @Service
 public class ShowTaskService {
 
     private static final Logger log = LoggerFactory.getLogger(ShowTaskService.class);
 
-    private final Map<String, ShowTask> tasks = new ConcurrentHashMap<>();
+    private final ShowTaskRepository repository;
     private final FormationService formationService;
 
-    public ShowTaskService(FormationService formationService) {
+    @Autowired
+    public ShowTaskService(ShowTaskRepository repository, FormationService formationService) {
+        this.repository = repository;
         this.formationService = formationService;
     }
 
@@ -46,6 +45,7 @@ public class ShowTaskService {
      * @throws NotFoundException 队形不存在
      * @throws BadRequestException 参数非法
      */
+    @Transactional
     public ShowTask createTask(String name, String formationId,
                                List<Integer> droneSysids, int durationSec,
                                double altitudeM, double centerLat, double centerLon) {
@@ -75,7 +75,7 @@ public class ShowTaskService {
         String taskId = UUID.randomUUID().toString();
         ShowTask task = new ShowTask(taskId, name, formationId,
                 droneSysids, durationSec, altitudeM, centerLat, centerLon);
-        tasks.put(taskId, task);
+        repository.save(task);
         log.info("Show task created: id={} name={} formation={} drones={}",
                 taskId, name, formationId, droneSysids.size());
         return task;
@@ -84,16 +84,16 @@ public class ShowTaskService {
     /** 列出所有表演任务（可按状态筛选）。 */
     public List<ShowTask> listTasks(ShowStatus status) {
         if (status == null) {
-            return new ArrayList<>(tasks.values());
+            return repository.findAll();
         }
-        return tasks.values().stream()
+        return repository.findAll().stream()
                 .filter(t -> t.getStatus() == status)
                 .toList();
     }
 
     /** 获取任务详情。 */
     public ShowTask getTask(String taskId) {
-        ShowTask task = tasks.get(taskId);
+        ShowTask task = repository.findById(taskId).orElse(null);
         if (task == null) {
             throw new NotFoundException("show task not found: " + taskId);
         }
@@ -101,18 +101,22 @@ public class ShowTaskService {
     }
 
     /** 启动表演任务：CREATED → DEPLOYING → PERFORMING。 */
+    @Transactional
     public ShowTask startTask(String taskId) {
         ShowTask task = getTask(taskId);
         task.deploy();
         task.perform();
+        repository.save(task);
         log.info("Show task started: id={}", taskId);
         return task;
     }
 
     /** 中止表演任务。 */
+    @Transactional
     public ShowTask abortTask(String taskId) {
         ShowTask task = getTask(taskId);
         task.abort();
+        repository.save(task);
         log.info("Show task aborted: id={}", taskId);
         return task;
     }

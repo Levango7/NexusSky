@@ -2,25 +2,24 @@ package io.aerofleet.cloud.alarm;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 报警事件内存存储（M10 报警联动编排，FR-31）。
+ * 报警事件持久化存储（M10 报警联动编排，FR-31）。
  * <p>
- * 线程安全的有界存储：使用 {@link ConcurrentLinkedDeque} 维护最近 N 条事件，
- * {@link ConcurrentHashMap} 维护 id → event 索引以支持 O(1) 查询。
- * <p>
+ * 基于 JPA Repository 的有界存储：事件持久化到数据库，重启不丢失。
  * 容量达到上限时，新事件会驱逐最旧事件（FIFO 驱逐策略）。
- * 适用于开发/演示环境；生产环境应替换为持久化存储。
  *
  * @see AlarmEvent
+ * @see AlarmEventRepository
  * @see AlarmController
  */
 @Component
@@ -32,12 +31,9 @@ public class AlarmEventStore {
     public static final int DEFAULT_CAPACITY = 1000;
 
     private final int capacity;
-    /** 按时间顺序保存的事件（最新在队首）。 */
-    private final ConcurrentLinkedDeque<AlarmEvent> events;
-    /** id → event 索引，支持 O(1) 按 ID 查询。 */
-    private final ConcurrentHashMap<String, AlarmEvent> index;
-    /** 事件计数器，避免 ConcurrentLinkedDeque.size() 的 O(n) 遍历。 */
-    private final AtomicInteger count = new AtomicInteger(0);
+
+    @Autowired
+    private AlarmEventRepository repository;
 
     public AlarmEventStore() {
         this(DEFAULT_CAPACITY);
@@ -48,31 +44,31 @@ public class AlarmEventStore {
             throw new IllegalArgumentException("capacity must be positive: " + capacity);
         }
         this.capacity = capacity;
-        this.events = new ConcurrentLinkedDeque<>();
-        this.index = new ConcurrentHashMap<>();
     }
 
     /**
      * 存储报警事件。
      * <p>
-     * 容量达到上限时驱逐最旧事件（队尾）。索引同步更新。
+     * 容量达到上限时驱逐最旧事件。持久化到数据库。
      *
      * @param event 报警事件
      */
+    @Transactional
     public synchronized void store(AlarmEvent event) {
-        events.addFirst(event);
-        index.put(event.getId(), event);
-        count.incrementAndGet();
-        // 驱逐超容量事件
-        while (count.get() > capacity) {
-            AlarmEvent evicted = events.pollLast();
-            if (evicted != null) {
-                index.remove(evicted.getId());
-                count.decrementAndGet();
+        repository.save(event);
+        // 驱逐超容量事件：按时间戳正序（最旧在前），删除超出容量的部分
+        long total = repository.count();
+        if (total > capacity) {
+            int excess = (int) (total - capacity);
+            PageRequest oldestPage = PageRequest.of(0, excess, Sort.by("timestampMs").ascending());
+            List<AlarmEvent> oldest = repository.findAll(oldestPage).getContent();
+            for (AlarmEvent evicted : oldest) {
+                repository.delete(evicted);
             }
+            log.debug("evicted {} oldest alarm events to maintain capacity {}", excess, capacity);
         }
         log.debug("alarm event stored: id={} type={} total={}",
-                event.getId(), event.getEventType(), count.get());
+                event.getId(), event.getEventType(), repository.count());
     }
 
     /**
@@ -82,7 +78,7 @@ public class AlarmEventStore {
      * @return 事件，不存在返回 null
      */
     public AlarmEvent getById(String id) {
-        return index.get(id);
+        return repository.findById(id).orElse(null);
     }
 
     /**
@@ -91,12 +87,14 @@ public class AlarmEventStore {
      * @param id 事件 ID
      * @return true 若事件存在并已确认
      */
+    @Transactional
     public boolean acknowledge(String id) {
-        AlarmEvent event = index.get(id);
+        AlarmEvent event = repository.findById(id).orElse(null);
         if (event == null) {
             return false;
         }
         event.acknowledge();
+        repository.save(event);
         log.info("alarm event acknowledged: id={}", id);
         return true;
     }
@@ -120,9 +118,13 @@ public class AlarmEventStore {
         if (size <= 0) {
             size = 20;
         }
-        // 筛选 + 排序（最新在前）
+        // 从数据库加载所有事件，筛选 + 排序（最新在前）
+        List<AlarmEvent> all = repository.findAll(
+                PageRequest.of(0, capacity, Sort.by("timestampMs").descending())
+        ).getContent();
+
         List<AlarmEvent> filtered = new ArrayList<>();
-        for (AlarmEvent e : events) {
+        for (AlarmEvent e : all) {
             if (!matchesFilter(e, severityFilter, typeFilter)) {
                 continue;
             }
@@ -139,7 +141,7 @@ public class AlarmEventStore {
 
     /** 当前存储事件总数。 */
     public int size() {
-        return count.get();
+        return (int) repository.count();
     }
 
     /** 容量上限。 */

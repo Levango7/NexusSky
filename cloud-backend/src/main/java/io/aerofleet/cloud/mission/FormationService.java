@@ -9,7 +9,9 @@ import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.LedControlMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -65,6 +67,9 @@ public class FormationService {
     private final DeviceRegistry registry;
     private final UdpGateway gateway;
     private final FormationClock formationClock;
+
+    @Autowired
+    private FormationRepository repository;
 
     public FormationService(SquadRoleService roles,
                            DroneCommandService commands,
@@ -139,6 +144,7 @@ public class FormationService {
      *
      * @throws BadRequestException 参数非法（members < 2、spacing < 2、经纬高非法）
      */
+    @Transactional
     public FormationCreateResult create(FormationCreateRequest req) {
         // FR-02 参数校验
         if (req.members == null || req.members.size() < 2) {
@@ -186,6 +192,11 @@ public class FormationService {
         f.version.incrementAndGet();
         formations.put(formationId, f);
 
+        // 持久化编队配置到数据库（只保存核心配置数据，不保存运行时数据）
+        repository.save(new FormationEntity(formationId, req.shape,
+                req.spacing, req.heading, req.refLat, req.refLon, req.refAlt,
+                leader, Formation.FormationState.FORMING));
+
         // 轮询 Leader 心跳以建立队内时钟基准（零修改 TelemetryIngestService）
         formationClock.pollLeaderHeartbeat(leader);
 
@@ -228,6 +239,7 @@ public class FormationService {
      * @throws NotFoundException 编队不存在
      * @throws BadRequestException 编队已解散
      */
+    @Transactional
     public Map<Integer, AckResult> command(int formationId, FormationCommand cmd) {
         Formation f = formations.get(formationId);
         if (f == null) {
@@ -310,6 +322,7 @@ public class FormationService {
      * @throws NotFoundException 编队不存在
      * @throws BadRequestException steps < 1
      */
+    @Transactional
     public Map<Integer, List<Formation.GeoPos>> transition(int formationId,
                                                             FormationGeometry.Shape newShape,
                                                             int steps) {
@@ -355,6 +368,13 @@ public class FormationService {
             f.targetPositions.putAll(newTargets);
             f.state = Formation.FormationState.TRANSITIONING;
             f.version.incrementAndGet();
+
+            // 同步更新持久化实体的状态和队形
+            repository.findById(formationId).ifPresent(entity -> {
+                entity.setState(Formation.FormationState.TRANSITIONING);
+                entity.setShape(newShape);
+                repository.save(entity);
+            });
         }
 
         // 逐机逐点下发 DO_REPOSITION（即时机动引导，线性插值路径单调趋近目标，无折返）
@@ -462,6 +482,7 @@ public class FormationService {
      *
      * @throws NotFoundException 编队不存在
      */
+    @Transactional
     public void removeMember(int formationId, int sysid) {
         Formation f = formations.get(formationId);
         if (f == null) {
@@ -477,6 +498,13 @@ public class FormationService {
                 // 成员不足：解散
                 f.state = Formation.FormationState.DISSOLVED;
                 f.version.incrementAndGet();
+
+                // 同步更新持久化实体状态为 DISSOLVED
+                repository.findById(formationId).ifPresent(entity -> {
+                    entity.setState(Formation.FormationState.DISSOLVED);
+                    repository.save(entity);
+                });
+
                 log.info("formation {} dissolved: < 2 members after removal of sysid={}",
                         formationId, sysid);
                 return;
@@ -504,6 +532,15 @@ public class FormationService {
             f.targetPositions.putAll(newTargets);
             f.state = Formation.FormationState.TRANSITIONING;
             f.version.incrementAndGet();
+
+            // 同步更新持久化实体的状态和队形
+            final FormationGeometry.Shape finalShape = effectiveShape;
+            repository.findById(formationId).ifPresent(entity -> {
+                entity.setState(Formation.FormationState.TRANSITIONING);
+                entity.setShape(finalShape);
+                repository.save(entity);
+            });
+
             // 下发调整命令（逐机 DO_REPOSITION）
             for (var e : newTargets.entrySet()) {
                 int sid = e.getKey();
@@ -547,6 +584,13 @@ public class FormationService {
         }
         f.state = Formation.FormationState.DISSOLVED;
         f.version.incrementAndGet();
+
+        // 同步更新持久化实体状态为 DISSOLVED
+        repository.findById(f.formationId).ifPresent(entity -> {
+            entity.setState(Formation.FormationState.DISSOLVED);
+            repository.save(entity);
+        });
+
         log.info("formation {} dissolved", f.formationId);
         return results;
     }

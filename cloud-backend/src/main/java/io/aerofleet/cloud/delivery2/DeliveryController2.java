@@ -6,6 +6,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,11 +17,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -50,7 +50,9 @@ public class DeliveryController2 {
     private final LandingSiteSelector landingSiteSelector;
     private final DeliveryStatusTracker statusTracker;
 
-    private final ConcurrentHashMap<String, DeliveryTask2> tasks = new ConcurrentHashMap<>();
+    @Autowired
+    private DeliveryTask2Repository repository;
+
     private final AtomicInteger taskCounter = new AtomicInteger(0);
 
     public DeliveryController2(RouteOptimizer routeOptimizer,
@@ -63,6 +65,7 @@ public class DeliveryController2 {
 
     /** 创建配送任务。 */
     @PostMapping("/tasks")
+    @Transactional
     @Operation(summary = "创建配送任务", description = "创建一个新的无人机配送任务")
     public DeliveryTask2 createTask(@RequestBody DeliveryTask2 task) {
         if (task == null) {
@@ -88,7 +91,7 @@ public class DeliveryController2 {
         if (task.getStatus() == null) {
             task.setStatus(DeliveryTask2.Status.PENDING);
         }
-        tasks.put(id, task);
+        repository.save(task);
         statusTracker.initStatus(id);
         log.info("配送任务创建：id={} type={} priority={}", id, task.getType(), task.getPriority());
         return task;
@@ -98,14 +101,14 @@ public class DeliveryController2 {
     @GetMapping("/tasks")
     @Operation(summary = "列出配送任务", description = "返回所有配送任务列表")
     public List<DeliveryTask2> listTasks() {
-        return new ArrayList<>(tasks.values());
+        return repository.findAll();
     }
 
     /** 获取任务详情。 */
     @GetMapping("/tasks/{id}")
     @Operation(summary = "获取任务详情", description = "根据任务 ID 获取配送任务详细信息")
     public DeliveryTask2 getTask(@PathVariable("id") String id) {
-        DeliveryTask2 task = tasks.get(id);
+        DeliveryTask2 task = repository.findById(id).orElse(null);
         if (task == null) {
             throw new NotFoundException("delivery task " + id + " not found");
         }
@@ -114,9 +117,10 @@ public class DeliveryController2 {
 
     /** 启动配送。 */
     @PostMapping("/tasks/{id}/start")
+    @Transactional
     @Operation(summary = "启动配送", description = "启动指定配送任务，状态从 PENDING 转为 IN_PROGRESS")
     public DeliveryTask2 startTask(@PathVariable("id") String id) {
-        DeliveryTask2 task = tasks.get(id);
+        DeliveryTask2 task = repository.findById(id).orElse(null);
         if (task == null) {
             throw new NotFoundException("delivery task " + id + " not found");
         }
@@ -125,6 +129,7 @@ public class DeliveryController2 {
         }
         task.setStatus(DeliveryTask2.Status.IN_PROGRESS);
         task.setStartTime(Instant.now());
+        repository.save(task);
         statusTracker.advancePhase(id);
         statusTracker.advancePhase(id);
         log.info("配送任务启动：id={}", id);
@@ -133,9 +138,10 @@ public class DeliveryController2 {
 
     /** 中止配送。 */
     @PostMapping("/tasks/{id}/abort")
+    @Transactional
     @Operation(summary = "中止配送", description = "中止指定配送任务，状态转为 ABORTED")
     public DeliveryTask2 abortTask(@PathVariable("id") String id) {
-        DeliveryTask2 task = tasks.get(id);
+        DeliveryTask2 task = repository.findById(id).orElse(null);
         if (task == null) {
             throw new NotFoundException("delivery task " + id + " not found");
         }
@@ -145,6 +151,7 @@ public class DeliveryController2 {
                     "task " + id + " cannot be aborted from state " + task.getStatus());
         }
         task.setStatus(DeliveryTask2.Status.ABORTED);
+        repository.save(task);
         log.info("配送任务中止：id={}", id);
         return task;
     }
@@ -153,7 +160,7 @@ public class DeliveryController2 {
     @GetMapping("/tasks/{id}/route")
     @Operation(summary = "获取优化路线", description = "为指定配送任务计算优化路线")
     public OptimizedRoute getRoute(@PathVariable("id") String id) {
-        DeliveryTask2 task = tasks.get(id);
+        DeliveryTask2 task = repository.findById(id).orElse(null);
         if (task == null) {
             throw new NotFoundException("delivery task " + id + " not found");
         }
@@ -164,10 +171,11 @@ public class DeliveryController2 {
 
     /** 执行投放。 */
     @PostMapping("/tasks/{id}/deliver")
+    @Transactional
     @Operation(summary = "执行投放", description = "执行配送投放操作（空投/着陆交付/绳索降下）")
     public Map<String, Object> deliver(@PathVariable("id") String id,
                                        @RequestBody DeliverRequest body) {
-        DeliveryTask2 task = tasks.get(id);
+        DeliveryTask2 task = repository.findById(id).orElse(null);
         if (task == null) {
             throw new NotFoundException("delivery task " + id + " not found");
         }
@@ -199,6 +207,7 @@ public class DeliveryController2 {
 
         task.setStatus(DeliveryTask2.Status.DELIVERED);
         task.setActualDeliveryTime(Instant.now());
+        repository.save(task);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("taskId", id);
@@ -222,15 +231,17 @@ public class DeliveryController2 {
 
     /** 确认签收。 */
     @PostMapping("/tasks/{id}/confirm")
+    @Transactional
     @Operation(summary = "确认签收", description = "确认配送任务已签收完成")
     public Map<String, Object> confirm(@PathVariable("id") String id) {
-        DeliveryTask2 task = tasks.get(id);
+        DeliveryTask2 task = repository.findById(id).orElse(null);
         if (task == null) {
             throw new NotFoundException("delivery task " + id + " not found");
         }
         if (task.getStatus() != DeliveryTask2.Status.DELIVERED) {
             throw new BadRequestException("task " + id + " is not DELIVERED");
         }
+        repository.save(task);
         statusTracker.advancePhase(id);
 
         Map<String, Object> result = new LinkedHashMap<>();

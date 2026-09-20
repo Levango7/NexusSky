@@ -34,7 +34,7 @@ class FormationKeeperTest {
     private FormationKeeper keeper;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         registry = new DeviceRegistry();
         SquadRoleService roles = new SquadRoleService(registry);
         FormationClock clock = new FormationClock(registry);
@@ -42,6 +42,20 @@ class FormationKeeperTest {
         UdpGateway gateway = mock(UdpGateway.class);
         service = new FormationService(roles, commands, registry, gateway, clock);
         keeper = new FormationKeeper(service, registry, commands);
+
+        // 创建 mock FormationRepository 模拟内存存储，反射注入到 @Autowired 字段
+        FormationRepository mockRepo = mock(FormationRepository.class);
+        java.util.Map<Integer, FormationEntity> formMap = new java.util.concurrent.ConcurrentHashMap<>();
+        when(mockRepo.save(any(FormationEntity.class))).thenAnswer(inv -> {
+            FormationEntity e = inv.getArgument(0);
+            formMap.put(e.getFormationId(), e);
+            return e;
+        });
+        when(mockRepo.findById(anyInt()))
+                .thenAnswer(inv -> java.util.Optional.ofNullable(formMap.get(inv.getArgument(0))));
+        java.lang.reflect.Field f = FormationService.class.getDeclaredField("repository");
+        f.setAccessible(true);
+        f.set(service, mockRepo);
     }
 
     private DroneSnapshot online(int sysid) {

@@ -1,5 +1,11 @@
 package io.aerofleet.cloud.alarm;
 
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
 import java.util.Locale;
 import java.util.UUID;
 
@@ -9,12 +15,13 @@ import java.util.UUID;
  * 描述安防设备（海康/大华/宇视）触发的一次报警，包含事件类型、严重程度、
  * 设备信息、地理位置与时间戳。{@link #acknowledged} 标记是否已被运维人员确认。
  * <p>
- * 不可变值对象（除 acknowledged 外）：创建后字段不可修改，便于在
- * {@code ConcurrentHashMap} 等并发结构中安全共享。
+ * JPA 实体，持久化到 {@code alarm_event} 表。
  *
  * @see AlarmLinkageRule
  * @see AlarmLinkageEngine
  */
+@Entity
+@Table(name = "alarm_event")
 public class AlarmEvent {
 
     /** 报警事件类型。 */
@@ -65,27 +72,34 @@ public class AlarmEvent {
     }
 
     /** 事件 ID（UUID）。 */
-    private final String id;
+    @Id
+    private String id;
     /** 源设备 ID。 */
-    private final String sourceDeviceId;
+    private String sourceDeviceId;
     /** 源设备名称。 */
-    private final String sourceDeviceName;
+    private String sourceDeviceName;
     /** 事件类型。 */
-    private final EventType eventType;
+    @Enumerated(EnumType.STRING)
+    private EventType eventType;
     /** 严重程度。 */
-    private final Severity severity;
+    @Enumerated(EnumType.STRING)
+    private Severity severity;
     /** 事件描述。 */
-    private final String description;
+    private String description;
     /** 纬度（WGS84，度）。 */
-    private final double lat;
+    private double lat;
     /** 经度（WGS84，度）。 */
-    private final double lon;
+    private double lon;
     /** 海拔（米）。 */
-    private final double alt;
+    private double alt;
     /** 触发时间戳（毫秒）。 */
-    private final long timestampMs;
+    private long timestampMs;
     /** 是否已被确认。 */
     private volatile boolean acknowledged;
+
+    /** JPA 无参构造器。 */
+    public AlarmEvent() {
+    }
 
     public AlarmEvent(String id, String sourceDeviceId, String sourceDeviceName,
                       EventType eventType, Severity severity, String description,
@@ -190,6 +204,50 @@ public class AlarmEvent {
 
     public boolean isAcknowledged() {
         return acknowledged;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public void setSourceDeviceId(String sourceDeviceId) {
+        this.sourceDeviceId = sourceDeviceId;
+    }
+
+    public void setSourceDeviceName(String sourceDeviceName) {
+        this.sourceDeviceName = sourceDeviceName;
+    }
+
+    public void setEventType(EventType eventType) {
+        this.eventType = eventType;
+    }
+
+    public void setSeverity(Severity severity) {
+        this.severity = severity;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public void setLat(double lat) {
+        this.lat = lat;
+    }
+
+    public void setLon(double lon) {
+        this.lon = lon;
+    }
+
+    public void setAlt(double alt) {
+        this.alt = alt;
+    }
+
+    public void setTimestampMs(long timestampMs) {
+        this.timestampMs = timestampMs;
+    }
+
+    public void setAcknowledged(boolean acknowledged) {
+        this.acknowledged = acknowledged;
     }
 
     /** 标记事件为已确认。 */

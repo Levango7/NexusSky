@@ -6,9 +6,13 @@ import io.aerofleet.cloud.gateway.DeviceRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -27,6 +31,8 @@ class MappingControllerTest {
     private MappingResultService resultService;
     private DeviceRegistry registry;
     private MappingController controller;
+    private MappingTaskRepository taskRepository;
+    private final Map<String, MappingTask> taskStore = new ConcurrentHashMap<>();
 
     @BeforeEach
     void setUp() {
@@ -34,7 +40,19 @@ class MappingControllerTest {
         photoCaptureService = new PhotoCaptureService();
         resultService = new MappingResultService();
         registry = new DeviceRegistry();
-        controller = new MappingController(routePlanner, photoCaptureService, resultService, registry);
+        taskStore.clear();
+        taskRepository = Mockito.mock(MappingTaskRepository.class);
+        Mockito.when(taskRepository.save(Mockito.any(MappingTask.class)))
+                .thenAnswer(inv -> {
+                    MappingTask t = inv.getArgument(0);
+                    taskStore.put(t.getId(), t);
+                    return t;
+                });
+        Mockito.when(taskRepository.findAll())
+                .thenAnswer(inv -> new ArrayList<>(taskStore.values()));
+        Mockito.when(taskRepository.findById(Mockito.anyString()))
+                .thenAnswer(inv -> Optional.ofNullable(taskStore.get(inv.getArgument(0))));
+        controller = new MappingController(routePlanner, photoCaptureService, resultService, registry, taskRepository);
     }
 
     private MappingController.CreateTaskRequest createRequest(String type) {

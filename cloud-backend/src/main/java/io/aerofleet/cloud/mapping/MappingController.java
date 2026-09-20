@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -55,9 +56,8 @@ public class MappingController {
     private final PhotoCaptureService photoCaptureService;
     private final MappingResultService resultService;
     private final DeviceRegistry registry;
+    private final MappingTaskRepository taskRepository;
 
-    /** 按任务 ID 存储的测绘任务。 */
-    private final ConcurrentHashMap<String, MappingTask> tasks = new ConcurrentHashMap<>();
     /** 按任务 ID 存储的航线航点。 */
     private final ConcurrentHashMap<String, List<MappingWaypoint>> waypointsByTask = new ConcurrentHashMap<>();
 
@@ -65,11 +65,13 @@ public class MappingController {
     public MappingController(MappingRoutePlanner routePlanner,
                              PhotoCaptureService photoCaptureService,
                              MappingResultService resultService,
-                             DeviceRegistry registry) {
+                             DeviceRegistry registry,
+                             MappingTaskRepository taskRepository) {
         this.routePlanner = routePlanner;
         this.photoCaptureService = photoCaptureService;
         this.resultService = resultService;
         this.registry = registry;
+        this.taskRepository = taskRepository;
     }
 
     // ========== 请求体定义 ==========
@@ -119,6 +121,7 @@ public class MappingController {
         @ApiResponse(responseCode = "400", description = "参数错误")
     })
     @PostMapping("/tasks")
+    @Transactional
     public Map<String, Object> createTask(@RequestBody CreateTaskRequest req) {
         validateCreateRequest(req);
         MappingType type = parseType(req.type);
@@ -147,12 +150,13 @@ public class MappingController {
                 0,
                 0.0
         );
-        tasks.put(taskId, task);
+        taskRepository.save(task);
 
         // 规划航线
         List<MappingWaypoint> waypoints = planRouteForTask(task);
         waypointsByTask.put(taskId, waypoints);
         task.setStatus(MappingTask.Status.PLANNING);
+        taskRepository.save(task);
 
         log.info("Mapping task created: id={} type={} waypoints={}", taskId, type, waypoints.size());
 
@@ -183,7 +187,7 @@ public class MappingController {
         }
 
         List<Map<String, Object>> result = new ArrayList<>();
-        for (MappingTask task : tasks.values()) {
+        for (MappingTask task : taskRepository.findAll()) {
             if (filter != null && task.getStatus() != filter) {
                 continue;
             }
@@ -218,6 +222,7 @@ public class MappingController {
         @ApiResponse(responseCode = "404", description = "任务不存在")
     })
     @PostMapping("/tasks/{id}/start")
+    @Transactional
     public Map<String, Object> startTask(@PathVariable("id") String id) {
         MappingTask task = requireTask(id);
         // P1-fix: 添加状态校验，只允许从 PENDING 或 PLANNING 状态启动
@@ -230,6 +235,7 @@ public class MappingController {
         }
         task.setStatus(MappingTask.Status.IN_PROGRESS);
         task.setStartTime(Instant.now());
+        taskRepository.save(task);
         log.info("Mapping task started: id={}", id);
         return Map.of(
                 "id", id,
@@ -247,6 +253,7 @@ public class MappingController {
         @ApiResponse(responseCode = "404", description = "任务不存在")
     })
     @PostMapping("/tasks/{id}/abort")
+    @Transactional
     public Map<String, Object> abortTask(@PathVariable("id") String id) {
         MappingTask task = requireTask(id);
         // P1-fix: 添加状态校验，只允许从 PLANNING 或 IN_PROGRESS 状态中止
@@ -259,6 +266,7 @@ public class MappingController {
         }
         task.setStatus(MappingTask.Status.FAILED);
         task.setEndTime(Instant.now());
+        taskRepository.save(task);
         log.info("Mapping task aborted: id={}", id);
         return Map.of(
                 "id", id,
@@ -318,6 +326,7 @@ public class MappingController {
         @ApiResponse(responseCode = "404", description = "任务不存在")
     })
     @PostMapping("/tasks/{id}/process")
+    @Transactional
     public Map<String, Object> processTask(@PathVariable("id") String id) {
         MappingTask task = requireTask(id);
         // P1-fix: 添加状态校验，只允许 IN_PROGRESS 状态触发成果生成
@@ -358,6 +367,7 @@ public class MappingController {
         task.setStatus(MappingTask.Status.COMPLETED);
         task.setEndTime(Instant.now());
         task.setProgressPct(100.0);
+        taskRepository.save(task);
 
         log.info("Mapping task processed: id={} results={}", id, results.size());
 
@@ -414,7 +424,7 @@ public class MappingController {
     // ========== 内部方法 ==========
 
     private MappingTask requireTask(String id) {
-        MappingTask task = tasks.get(id);
+        MappingTask task = taskRepository.findById(id).orElse(null);
         if (task == null) {
             throw new NotFoundException("mapping task not found: " + id);
         }

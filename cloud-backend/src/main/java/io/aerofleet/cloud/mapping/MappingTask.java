@@ -1,5 +1,13 @@
 package io.aerofleet.cloud.mapping;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
 import java.time.Instant;
 
 /**
@@ -8,7 +16,9 @@ import java.time.Instant;
  * 包含任务基本信息、测绘参数、区域定义、执行状态与进度。
  * 由 {@link MappingController} 创建，经航线规划、影像采集、成果生成等阶段完成。
  */
-public final class MappingTask {
+@Entity
+@Table(name = "mapping_task")
+public class MappingTask {
 
     /** 任务状态枚举。 */
     public enum Status {
@@ -25,14 +35,18 @@ public final class MappingTask {
     }
 
     /** 任务 ID。 */
+    @Id
     private String id;
     /** 任务名称。 */
     private String name;
     /** 测绘类型。 */
+    @Enumerated(EnumType.STRING)
     private MappingType type;
     /** 任务状态。 */
+    @Enumerated(EnumType.STRING)
     private Status status;
     /** 测绘区域。 */
+    @Convert(converter = MappingAreaConverter.class)
     private MappingArea area;
     /** 飞行高度（m）。 */
     private double altitudeM;
@@ -47,8 +61,10 @@ public final class MappingTask {
     /** 分配执行的无人机 systemId。 */
     private Integer assignedSysid;
     /** 任务开始时间。 */
+    @Column(columnDefinition = "TIMESTAMP")
     private Instant startTime;
     /** 任务结束时间。 */
+    @Column(columnDefinition = "TIMESTAMP")
     private Instant endTime;
     /** 已采集照片数。 */
     private int photosCaptured;

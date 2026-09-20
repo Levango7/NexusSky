@@ -4,6 +4,7 @@ import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.util.List;
 
@@ -24,11 +25,27 @@ class DeliveryController2Test {
     private DeliveryController2 controller;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         routeOptimizer = new RouteOptimizer();
         landingSiteSelector = new LandingSiteSelector();
         statusTracker = new DeliveryStatusTracker();
         controller = new DeliveryController2(routeOptimizer, landingSiteSelector, statusTracker);
+
+        // 创建 mock DeliveryTask2Repository 模拟内存存储，反射注入到 @Autowired 字段
+        DeliveryTask2Repository mockRepo = Mockito.mock(DeliveryTask2Repository.class);
+        java.util.Map<String, DeliveryTask2> taskMap = new java.util.concurrent.ConcurrentHashMap<>();
+        Mockito.when(mockRepo.save(Mockito.any(DeliveryTask2.class))).thenAnswer(inv -> {
+            DeliveryTask2 t = inv.getArgument(0);
+            taskMap.put(t.getId(), t);
+            return t;
+        });
+        Mockito.when(mockRepo.findById(Mockito.anyString()))
+                .thenAnswer(inv -> java.util.Optional.ofNullable(taskMap.get(inv.getArgument(0))));
+        Mockito.when(mockRepo.findAll())
+                .thenAnswer(inv -> new java.util.ArrayList<>(taskMap.values()));
+        java.lang.reflect.Field f = DeliveryController2.class.getDeclaredField("repository");
+        f.setAccessible(true);
+        f.set(controller, mockRepo);
     }
 
     private DeliveryTask2 newTask(DeliveryTask2.Type type, DeliveryTask2.Priority priority) {

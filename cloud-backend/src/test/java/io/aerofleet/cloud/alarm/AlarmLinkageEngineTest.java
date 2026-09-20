@@ -4,9 +4,17 @@ import io.aerofleet.cloud.api.EmergencyOrchService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -35,6 +43,54 @@ class AlarmLinkageEngineTest {
         // EmergencyOrchService pusher 传 null：测试不验证 WebSocket 推送
         EmergencyOrchService orchService = new EmergencyOrchService(null);
         store = new AlarmEventStore();
+
+        // 创建 mock AlarmEventRepository 并注入，模拟内存存储行为
+        AlarmEventRepository mockRepo = Mockito.mock(AlarmEventRepository.class);
+        Map<String, AlarmEvent> eventMap = new ConcurrentHashMap<>();
+        Mockito.when(mockRepo.save(Mockito.any(AlarmEvent.class))).thenAnswer(inv -> {
+            AlarmEvent e = inv.getArgument(0);
+            eventMap.put(e.getId(), e);
+            return e;
+        });
+        Mockito.when(mockRepo.findById(Mockito.anyString()))
+                .thenAnswer(inv -> Optional.ofNullable(eventMap.get(inv.getArgument(0))));
+        Mockito.when(mockRepo.findAll())
+                .thenAnswer(inv -> new ArrayList<>(eventMap.values()));
+        // 配置 findAll(Pageable)：按排序方向返回分页结果
+        Mockito.when(mockRepo.findAll(Mockito.any(Pageable.class))).thenAnswer(inv -> {
+            Pageable pageable = inv.getArgument(0);
+            List<AlarmEvent> all = new ArrayList<>(eventMap.values());
+            Sort sort = pageable.getSort();
+            if (sort != null && sort.isSorted()) {
+                for (Sort.Order order : sort) {
+                    if ("timestampMs".equals(order.getProperty())) {
+                        Comparator<AlarmEvent> cmp = Comparator.comparingLong(AlarmEvent::getTimestampMs);
+                        if (order.isDescending()) {
+                            cmp = cmp.reversed();
+                        }
+                        all.sort(cmp);
+                    }
+                }
+            }
+            int start = (int) pageable.getOffset();
+            int end = Math.min(start + pageable.getPageSize(), all.size());
+            List<AlarmEvent> subList = start < all.size() ? new ArrayList<>(all.subList(start, end)) : new ArrayList<>();
+            return new PageImpl<>(subList, pageable, all.size());
+        });
+        Mockito.when(mockRepo.count()).thenAnswer(inv -> (long) eventMap.size());
+        Mockito.doAnswer(inv -> {
+            AlarmEvent e = inv.getArgument(0);
+            eventMap.remove(e.getId());
+            return null;
+        }).when(mockRepo).delete(Mockito.any(AlarmEvent.class));
+        try {
+            java.lang.reflect.Field f = AlarmEventStore.class.getDeclaredField("repository");
+            f.setAccessible(true);
+            f.set(store, mockRepo);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new RuntimeException("注入 mock repository 失败", e);
+        }
+
         bridge = new AlarmToOrchBridge(orchService);
         engine = new AlarmLinkageEngine(store, bridge);
     }
