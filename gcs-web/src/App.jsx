@@ -23,6 +23,12 @@ import AutoDispatchPanel from './components/AutoDispatchPanel.jsx'
 import ScenarioLibraryPanel from './components/ScenarioLibraryPanel.jsx'
 import InspectionPanel from './components/InspectionPanel.jsx'
 import HealthPanel from './components/HealthPanel.jsx'
+import CommAdaptPanel from './components/CommAdaptPanel.jsx'
+import MappingPanel from './components/MappingPanel.jsx'
+import VoiceCmdPanel from './components/VoiceCmdPanel.jsx'
+import CityTwinPanel from './components/CityTwinPanel.jsx'
+import DeliveryPanel from './components/DeliveryPanel.jsx'
+import ShowPanel from './components/ShowPanel.jsx'
 import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
@@ -70,6 +76,12 @@ const VIEW_PANEL_MAP = {
   scenariolib: 'emergency', // 场景库归入应急范畴（千元级可用）
   inspection: 'mission',   // 智能巡检归入任务范畴（千元级可用）
   health: 'status',        // 健康管理归入状态管理（百元级可用）
+  commadapt: 'mesh',       // 通信自适应归入通信范畴（千元级可用）
+  mapping: 'mission',      // 航拍测绘归入任务范畴（千元级可用）
+  voicecmd: 'emergency',   // 语音指挥归入应急范畴（千元级可用）
+  citytwin: 'emergency',   // 数字孪生归入应急范畴（千元级可用）
+  delivery: 'mission',     // 物流配送归入任务范畴（千元级可用）
+  show: 'formation',       // 编队表演归入编队范畴（千元级可用）
 }
 
 export default function App() {
@@ -277,6 +289,12 @@ export default function App() {
               { key: 'scenariolib', label: '场景库' },
               { key: 'inspection', label: '智能巡检' },
               { key: 'health', label: '健康管理' },
+              { key: 'commadapt', label: '通信自适应' },
+              { key: 'mapping', label: '航拍测绘' },
+              { key: 'voicecmd', label: '语音指挥' },
+              { key: 'citytwin', label: '数字孪生' },
+              { key: 'delivery', label: '物流配送' },
+              { key: 'show', label: '编队表演' },
             ]
               .filter((tab) => isPanelAvailable(VIEW_PANEL_MAP[tab.key], budgetMode))
               .map((tab) => (
@@ -416,6 +434,30 @@ export default function App() {
       ) : view === 'health' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <HealthPanel />
+        </div>
+      ) : view === 'commadapt' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <CommAdaptPanel />
+        </div>
+      ) : view === 'mapping' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <MappingPanel />
+        </div>
+      ) : view === 'voicecmd' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <VoiceCmdPanel />
+        </div>
+      ) : view === 'citytwin' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <CityTwinPanel />
+        </div>
+      ) : view === 'delivery' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <DeliveryPanel />
+        </div>
+      ) : view === 'show' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <ShowPanel />
         </div>
       ) : view === 'scene3d' ? (
         <div className="scene3d-layout">
