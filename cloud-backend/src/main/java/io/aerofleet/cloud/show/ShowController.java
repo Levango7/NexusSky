@@ -83,6 +83,9 @@ public class ShowController {
     })
     @PostMapping("/formations")
     public Map<String, Object> createFormation(@RequestBody CreateFormationRequest req) {
+        if (req == null) {
+            throw new BadRequestException("request body is required");
+        }
         if (req.name == null || req.name.isBlank()) {
             throw new BadRequestException("name is required");
         }
@@ -131,6 +134,9 @@ public class ShowController {
     @PostMapping("/formations/{id}/positions")
     public Map<String, Object> computePositions(@PathVariable("id") String id,
                                                  @RequestBody ComputePositionsRequest req) {
+        if (req == null) {
+            throw new BadRequestException("request body is required");
+        }
         FormationDefinition formation = formationService.getFormation(id);
         int droneCount = req.droneCount > 0 ? req.droneCount : formation.getDroneCount();
         List<double[]> positions = formationService.computePositions(
@@ -180,6 +186,9 @@ public class ShowController {
     })
     @PostMapping("/tasks")
     public Map<String, Object> createTask(@RequestBody CreateTaskRequest req) {
+        if (req == null) {
+            throw new BadRequestException("request body is required");
+        }
         if (req.name == null || req.name.isBlank()) {
             throw new BadRequestException("name is required");
         }
@@ -271,6 +280,9 @@ public class ShowController {
     @PostMapping("/tasks/{id}/music-sync")
     public Map<String, Object> configureMusicSync(@PathVariable("id") String id,
                                                    @RequestBody MusicSyncRequest req) {
+        if (req == null) {
+            throw new BadRequestException("request body is required");
+        }
         MusicSync sync = musicSyncService.configureMusicSync(
                 id, req.musicUrl, req.bpm, req.startTimeOffsetSec);
         Map<String, Object> out = new LinkedHashMap<>();

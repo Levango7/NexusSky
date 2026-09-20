@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.citytwin;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -190,7 +191,7 @@ public class DisasterSimulationService {
     public DisasterSimulation getSimulation(String id) {
         DisasterSimulation sim = simulations.get(id);
         if (sim == null) {
-            throw new IllegalArgumentException("simulation not found: " + id);
+            throw new NotFoundException("simulation not found: " + id);
         }
         return sim;
     }
@@ -209,7 +210,7 @@ public class DisasterSimulationService {
      */
     private List<SimFrame> generateFloodTimeline(double radiusKm, double depthM, int durationMin) {
         List<SimFrame> frames = new ArrayList<>();
-        int steps = Math.min(durationMin, 10);
+        int steps = Math.max(1, Math.min(durationMin, 10));
         double maxArea = Math.PI * radiusKm * radiusKm;
         for (int i = 0; i <= steps; i++) {
             int t = (durationMin * i) / steps;
@@ -232,7 +233,7 @@ public class DisasterSimulationService {
      */
     private List<SimFrame> generateFireTimeline(double radiusKm, double windSpeed, int durationMin) {
         List<SimFrame> frames = new ArrayList<>();
-        int steps = Math.min(durationMin, 10);
+        int steps = Math.max(1, Math.min(durationMin, 10));
         double maxArea = Math.PI * radiusKm * radiusKm;
         // 风速加速火势蔓延
         double spreadFactor = 1 + windSpeed / 10;
@@ -257,7 +258,7 @@ public class DisasterSimulationService {
      */
     private List<SimFrame> generateEarthquakeTimeline(double magnitude, double radiusKm, int durationMin) {
         List<SimFrame> frames = new ArrayList<>();
-        int steps = Math.min(durationMin, 10);
+        int steps = Math.max(1, Math.min(durationMin, 10));
         double maxArea = Math.PI * radiusKm * radiusKm;
         for (int i = 0; i <= steps; i++) {
             int t = (durationMin * i) / steps;
@@ -282,7 +283,7 @@ public class DisasterSimulationService {
      */
     private List<SimFrame> generateEvacuationTimeline(double radiusKm, int durationMin) {
         List<SimFrame> frames = new ArrayList<>();
-        int steps = Math.min(durationMin, 10);
+        int steps = Math.max(1, Math.min(durationMin, 10));
         double maxArea = Math.PI * radiusKm * radiusKm;
         for (int i = 0; i <= steps; i++) {
             int t = (durationMin * i) / steps;
@@ -306,7 +307,7 @@ public class DisasterSimulationService {
             double endLat = centerLat + directions[i][0] * radiusKm / 111.0;
             double endLon = centerLon + directions[i][1] * radiusKm / (111.0 * Math.cos(Math.toRadians(centerLat)));
             double distanceKm = radiusKm;
-            int durationMin = (int) (radiusKm / 30 * 60); // 30 km/h 平均速度
+            int durationMin = Math.max(1, (int) (radiusKm / 30 * 60)); // 30 km/h 平均速度
             routes.add(new Route("R" + i, names[i], centerLat, centerLon, endLat, endLon, distanceKm, durationMin));
         }
         return routes;

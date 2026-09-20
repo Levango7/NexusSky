@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -127,7 +128,7 @@ public class VoiceCommandExecutor {
      * @return 指令历史 Map（commandId → ExecutionResult）
      */
     public Map<String, ExecutionResult> getHistory() {
-        return history;
+        return Collections.unmodifiableMap(history);
     }
 
     /**
@@ -136,7 +137,7 @@ public class VoiceCommandExecutor {
      * @return 待确认指令 Map（pendingId → ParsedCommand）
      */
     public Map<String, ParsedCommand> getPending() {
-        return pendingCommands;
+        return Collections.unmodifiableMap(pendingCommands);
     }
 
     // --- 内部工具方法 ---

@@ -6,8 +6,7 @@ import {
   getCitySituation,
   createCitySimulation,
   getCitySimulation,
-  startCitySimulation,
-  getCitySimulationFrames,
+
   createCityMarker,
   listCityMarkers,
 } from '../api.js'
@@ -20,10 +19,10 @@ const POLL_MS = 5000
 
 // 灾害类型
 const DISASTER_TYPES = [
-  { key: 'FLOOD', label: '洪水' },
-  { key: 'FIRE', label: '火灾' },
-  { key: 'EARTHQUAKE', label: '地震' },
-  { key: 'EVACUATION', label: '疏散' },
+  { key: 'flood', label: '洪水' },
+  { key: 'fire', label: '火灾' },
+  { key: 'earthquake', label: '地震' },
+  { key: 'evacuation', label: '疏散' },
 ]
 
 // 模拟状态 → 颜色 / 标签
@@ -72,14 +71,12 @@ export default function CityTwinPanel() {
   const [simulations, setSimulations] = useState([])
   const [selectedSimId, setSelectedSimId] = useState(null)
   const [simDetail, setSimDetail] = useState(null)
-  const [simFrames, setSimFrames] = useState([])
   const [simLoading, setSimLoading] = useState(false)
   const [simError, setSimError] = useState(null)
-  const [startingSim, setStartingSim] = useState(false)
 
   // ---- 创建模拟表单 ----
   const [simForm, setSimForm] = useState({
-    type: 'FLOOD',
+    type: 'flood',
     centerLat: '',
     centerLon: '',
     radiusKm: '',
@@ -136,11 +133,10 @@ export default function CityTwinPanel() {
     }
   }, [])
 
-  // ---- 选中模拟 → 加载详情 + 帧 ----
+  // ---- 选中模拟 → 加载详情 ----
   useEffect(() => {
     if (selectedSimId == null) {
       setSimDetail(null)
-      setSimFrames([])
       return
     }
     let cancelled = false
@@ -148,14 +144,9 @@ export default function CityTwinPanel() {
       setSimLoading(true)
       setSimError(null)
       try {
-        const [detail, frames] = await Promise.all([
-          getCitySimulation(selectedSimId),
-          getCitySimulationFrames(selectedSimId).catch(() => []),
-        ])
+        const detail = await getCitySimulation(selectedSimId)
         if (cancelled) return
         setSimDetail(detail)
-        const framesList = Array.isArray(frames) ? frames : (frames && frames.frames) || []
-        setSimFrames(framesList)
       } catch (e) {
         if (cancelled) return
         setSimError(e && e.message ? e.message : String(e))
@@ -181,16 +172,15 @@ export default function CityTwinPanel() {
       setSimFormError('影响半径必须为正数')
       return
     }
-    const payload = {
-      type: simForm.type,
+    const queryParams = {
       centerLat,
       centerLon,
       radiusKm,
-      durationMin: Number(simForm.durationMin) || undefined,
     }
+    if (simForm.durationMin) queryParams.durationMin = Number(simForm.durationMin)
     setCreatingSim(true)
     try {
-      const data = await createCitySimulation(payload)
+      const data = await createCitySimulation(simForm.type, queryParams)
       const newId = pick(data, 'id', 'simulationId')
       if (newId != null) setSelectedSimId(newId)
       setSimForm((prev) => ({ ...prev, centerLat: '', centerLon: '', radiusKm: '', durationMin: '' }))
@@ -201,18 +191,6 @@ export default function CityTwinPanel() {
     }
   }, [simForm])
 
-  // ---- 启动模拟 ----
-  const handleStartSim = useCallback(async () => {
-    if (selectedSimId == null) return
-    setStartingSim(true)
-    try {
-      await startCitySimulation(selectedSimId)
-    } catch (e) {
-      setSimError('启动模拟失败：' + (e && e.message ? e.message : String(e)))
-    } finally {
-      setStartingSim(false)
-    }
-  }, [selectedSimId])
 
   // ---- 创建态势标绘 ----
   const handleCreateMarker = useCallback(async () => {
@@ -403,7 +381,6 @@ export default function CityTwinPanel() {
             <div style={{ ...cardStyle, padding: 10 }}>
               <div style={{ fontSize: 11, color: 'var(--text)', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>模拟详情 #{selectedSimId}</span>
-                <button onClick={handleStartSim} disabled={startingSim} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--ok)', borderColor: 'var(--ok)', opacity: startingSim ? 0.5 : 1, cursor: startingSim ? 'not-allowed' : 'pointer' }}>{startingSim ? '启动中…' : '启动模拟'}</button>
               </div>
               {simError && <div style={{ fontSize: 10, color: 'var(--crit)', marginBottom: 4 }}>⚠ {simError}</div>}
               {simLoading ? (
@@ -418,31 +395,6 @@ export default function CityTwinPanel() {
               ) : (
                 <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无模拟详情</div>
               )}
-            </div>
-          )}
-
-          {/* 模拟帧时间线 */}
-          {simFrames.length > 0 && (
-            <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)' }}>
-                <span style={{ fontSize: 11, color: 'var(--text)' }}>模拟帧（{simFrames.length}）</span>
-              </div>
-              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-                {simFrames.map((f, i) => {
-                  const frameIdx = pick(f, 'frame', 'index', 'frameIndex')
-                  const frameTime = pick(f, 'timestamp', 'time', 'ts')
-                  const description = pick(f, 'description', 'desc')
-                  return (
-                    <div key={i} style={{ padding: '4px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: '3px solid var(--warn)' }}>
-                      <div style={{ fontSize: 9, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                        <span style={{ color: 'var(--cyan)', fontWeight: 'bold' }}>帧 {frameIdx != null ? frameIdx : i}</span>
-                        <span style={{ color: 'var(--dim-2)', fontFamily: 'var(--mono)' }}>{fmtTime(frameTime)}</span>
-                      </div>
-                      {description && <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2 }}>{description}</div>}
-                    </div>
-                  )
-                })}
-              </div>
             </div>
           )}
         </div>

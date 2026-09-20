@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 测绘成果生成服务。
@@ -38,11 +39,11 @@ public class MappingResultService {
         String resultId = UUID.randomUUID().toString();
         String orthophotoUrl = "https://storage.mapping/results/" + resultId + "/orthophoto.tif";
 
-        // 模拟处理参数
-        double coveragePct = Math.min(100.0, 85.0 + Math.random() * 15);
+        // P1-fix: 使用 ThreadLocalRandom 替代 Math.random()，提升多线程性能
+        double coveragePct = Math.min(100.0, 85.0 + ThreadLocalRandom.current().nextDouble() * 15);
         double resolutionCm = photos.isEmpty() ? 5.0 : photos.get(0).getAlt() / 100.0;
-        long processingTimeSec = 30 + (long) (Math.random() * 60);
-        double fileSizeMB = 50 + Math.random() * 200;
+        long processingTimeSec = 30 + (long) (ThreadLocalRandom.current().nextDouble() * 60);
+        double fileSizeMB = 50 + ThreadLocalRandom.current().nextDouble() * 200;
 
         MappingResult result = new MappingResult(
                 resultId,
@@ -78,11 +79,11 @@ public class MappingResultService {
         String resultId = UUID.randomUUID().toString();
         String demUrl = "https://storage.mapping/results/" + resultId + "/dem.tif";
 
-        // 模拟处理参数
-        double coveragePct = Math.min(100.0, 80.0 + Math.random() * 20);
+        // P1-fix: 使用 ThreadLocalRandom 替代 Math.random()，提升多线程性能
+        double coveragePct = Math.min(100.0, 80.0 + ThreadLocalRandom.current().nextDouble() * 20);
         double resolutionCm = photos.isEmpty() ? 10.0 : photos.get(0).getAlt() / 50.0;
-        long processingTimeSec = 60 + (long) (Math.random() * 120);
-        double fileSizeMB = 20 + Math.random() * 100;
+        long processingTimeSec = 60 + (long) (ThreadLocalRandom.current().nextDouble() * 120);
+        double fileSizeMB = 20 + ThreadLocalRandom.current().nextDouble() * 100;
 
         MappingResult result = new MappingResult(
                 resultId,
@@ -118,11 +119,11 @@ public class MappingResultService {
         String resultId = UUID.randomUUID().toString();
         String modelUrl = "https://storage.mapping/results/" + resultId + "/model.obj";
 
-        // 模拟处理参数
-        double coveragePct = Math.min(100.0, 75.0 + Math.random() * 25);
+        // P1-fix: 使用 ThreadLocalRandom 替代 Math.random()，提升多线程性能
+        double coveragePct = Math.min(100.0, 75.0 + ThreadLocalRandom.current().nextDouble() * 25);
         double resolutionCm = photos.isEmpty() ? 3.0 : photos.get(0).getAlt() / 150.0;
-        long processingTimeSec = 120 + (long) (Math.random() * 300);
-        double fileSizeMB = 100 + Math.random() * 500;
+        long processingTimeSec = 120 + (long) (ThreadLocalRandom.current().nextDouble() * 300);
+        double fileSizeMB = 100 + ThreadLocalRandom.current().nextDouble() * 500;
 
         MappingResult result = new MappingResult(
                 resultId,

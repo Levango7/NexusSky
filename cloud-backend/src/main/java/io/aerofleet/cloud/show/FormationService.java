@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.show;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -79,7 +80,7 @@ public class FormationService {
     public FormationDefinition getFormation(String formationId) {
         FormationDefinition formation = formations.get(formationId);
         if (formation == null) {
-            throw new IllegalArgumentException("formation not found: " + formationId);
+            throw new NotFoundException("formation not found: " + formationId);
         }
         return formation;
     }
@@ -98,6 +99,9 @@ public class FormationService {
      */
     public List<double[]> computePositions(FormationType type, int droneCount,
                                            double spacingM, Map<String, Double> parameters) {
+        if (type == null) {
+            throw new IllegalArgumentException("type is required");
+        }
         if (droneCount <= 0) {
             throw new IllegalArgumentException("droneCount must be positive");
         }

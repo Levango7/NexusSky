@@ -56,7 +56,7 @@ public final class ShowTask {
     public double getCenterLon() { return centerLon; }
 
     /** 启动部署：CREATED → DEPLOYING。 */
-    public void deploy() {
+    public synchronized void deploy() {
         if (status == ShowStatus.CREATED) {
             status = ShowStatus.DEPLOYING;
             startTime = Instant.now();
@@ -64,21 +64,21 @@ public final class ShowTask {
     }
 
     /** 开始表演：DEPLOYING → PERFORMING。 */
-    public void perform() {
+    public synchronized void perform() {
         if (status == ShowStatus.DEPLOYING) {
             status = ShowStatus.PERFORMING;
         }
     }
 
     /** 完成表演：PERFORMING → COMPLETED。 */
-    public void complete() {
-        if (status == ShowStatus.PERFORMING || status == ShowStatus.DEPLOYING) {
+    public synchronized void complete() {
+        if (status == ShowStatus.PERFORMING) {
             status = ShowStatus.COMPLETED;
         }
     }
 
     /** 中止表演：任意非终态 → ABORTED。 */
-    public void abort() {
+    public synchronized void abort() {
         if (status != ShowStatus.COMPLETED && status != ShowStatus.ABORTED) {
             status = ShowStatus.ABORTED;
         }

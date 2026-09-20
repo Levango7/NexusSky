@@ -108,7 +108,7 @@ class ShowControllerTest {
     @DisplayName("GET /formations/{id} 不存在抛异常")
     void getFormationNotFound() {
         assertThatThrownBy(() -> controller.getFormation("nonexistent"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(NotFoundException.class);
     }
 
     @Test
@@ -171,7 +171,7 @@ class ShowControllerTest {
         req.centerLon = 116.40;
 
         assertThatThrownBy(() -> controller.createTask(req))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(NotFoundException.class);
     }
 
     @Test

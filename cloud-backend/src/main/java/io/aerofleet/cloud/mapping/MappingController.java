@@ -220,6 +220,14 @@ public class MappingController {
     @PostMapping("/tasks/{id}/start")
     public Map<String, Object> startTask(@PathVariable("id") String id) {
         MappingTask task = requireTask(id);
+        // P1-fix: 添加状态校验，只允许从 PENDING 或 PLANNING 状态启动
+        MappingTask.Status currentStatus = task.getStatus();
+        if (currentStatus != MappingTask.Status.PENDING
+                && currentStatus != MappingTask.Status.PLANNING) {
+            throw new BadRequestException(
+                    "cannot start task in status: " + currentStatus
+                            + ", only PENDING or PLANNING allowed");
+        }
         task.setStatus(MappingTask.Status.IN_PROGRESS);
         task.setStartTime(Instant.now());
         log.info("Mapping task started: id={}", id);
@@ -241,6 +249,14 @@ public class MappingController {
     @PostMapping("/tasks/{id}/abort")
     public Map<String, Object> abortTask(@PathVariable("id") String id) {
         MappingTask task = requireTask(id);
+        // P1-fix: 添加状态校验，只允许从 PLANNING 或 IN_PROGRESS 状态中止
+        MappingTask.Status currentStatus = task.getStatus();
+        if (currentStatus != MappingTask.Status.PLANNING
+                && currentStatus != MappingTask.Status.IN_PROGRESS) {
+            throw new BadRequestException(
+                    "cannot abort task in status: " + currentStatus
+                            + ", only PLANNING or IN_PROGRESS allowed");
+        }
         task.setStatus(MappingTask.Status.FAILED);
         task.setEndTime(Instant.now());
         log.info("Mapping task aborted: id={}", id);

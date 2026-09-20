@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.citytwin;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
@@ -47,6 +48,7 @@ public class SimulationController {
             @RequestParam("radiusKm") double radiusKm,
             @RequestParam("depthM") double depthM,
             @RequestParam("durationMin") int durationMin) {
+        validateGeoParams(centerLat, centerLon, radiusKm, durationMin);
         log.info("Flood simulation request: centerLat={} centerLon={} radiusKm={} depthM={} durationMin={}",
                 centerLat, centerLon, radiusKm, depthM, durationMin);
         return simulationService.simulateFlood(centerLat, centerLon, radiusKm, depthM, durationMin);
@@ -60,6 +62,7 @@ public class SimulationController {
             @RequestParam("radiusKm") double radiusKm,
             @RequestParam("windSpeed") double windSpeed,
             @RequestParam("durationMin") int durationMin) {
+        validateGeoParams(centerLat, centerLon, radiusKm, durationMin);
         log.info("Fire simulation request: centerLat={} centerLon={} radiusKm={} windSpeed={} durationMin={}",
                 centerLat, centerLon, radiusKm, windSpeed, durationMin);
         return simulationService.simulateFire(centerLat, centerLon, radiusKm, windSpeed, durationMin);
@@ -72,6 +75,10 @@ public class SimulationController {
             @RequestParam("centerLon") double centerLon,
             @RequestParam("magnitude") double magnitude,
             @RequestParam("durationMin") int durationMin) {
+        validateLatLon(centerLat, centerLon);
+        if (durationMin <= 0) {
+            throw new BadRequestException("durationMin must be > 0");
+        }
         log.info("Earthquake simulation request: centerLat={} centerLon={} magnitude={} durationMin={}",
                 centerLat, centerLon, magnitude, durationMin);
         return simulationService.simulateEarthquake(centerLat, centerLon, magnitude, durationMin);
@@ -83,6 +90,10 @@ public class SimulationController {
             @RequestParam("centerLat") double centerLat,
             @RequestParam("centerLon") double centerLon,
             @RequestParam("radiusKm") double radiusKm) {
+        validateLatLon(centerLat, centerLon);
+        if (radiusKm <= 0) {
+            throw new BadRequestException("radiusKm must be > 0");
+        }
         log.info("Evacuation simulation request: centerLat={} centerLon={} radiusKm={}",
                 centerLat, centerLon, radiusKm);
         return simulationService.simulateEvacuation(centerLat, centerLon, radiusKm);
@@ -100,5 +111,26 @@ public class SimulationController {
     public List<DisasterSimulation> getSimulationHistory() {
         log.debug("Getting simulation history");
         return simulationService.getSimulationHistory();
+    }
+
+    // --- 参数校验辅助方法 ---
+
+    private void validateGeoParams(double centerLat, double centerLon, double radiusKm, int durationMin) {
+        validateLatLon(centerLat, centerLon);
+        if (radiusKm <= 0) {
+            throw new BadRequestException("radiusKm must be > 0");
+        }
+        if (durationMin <= 0) {
+            throw new BadRequestException("durationMin must be > 0");
+        }
+    }
+
+    private void validateLatLon(double centerLat, double centerLon) {
+        if (centerLat < -90 || centerLat > 90) {
+            throw new BadRequestException("centerLat must be between -90 and 90");
+        }
+        if (centerLon < -180 || centerLon > 180) {
+            throw new BadRequestException("centerLon must be between -180 and 180");
+        }
     }
 }

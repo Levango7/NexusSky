@@ -18,7 +18,7 @@ public class DeliveryStatus {
     }
 
     private String taskId;
-    private Phase phase;
+    private volatile Phase phase;
     private double currentLat;
     private double currentLon;
     private double remainingDistanceKm;

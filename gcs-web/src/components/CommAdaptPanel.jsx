@@ -87,12 +87,11 @@ export default function CommAdaptPanel() {
   const [configSaving, setConfigSaving] = useState(false)
   const [configError, setConfigError] = useState(null)
   const [configForm, setConfigForm] = useState({
-    scoreThresholdA: '',
-    scoreThresholdB: '',
-    scoreThresholdC: '',
-    scoreThresholdD: '',
-    switchIntervalMs: '',
-    maxRetries: '',
+    switchThreshold: '',
+    failoverThreshold: '',
+    detectionIntervalMs: '',
+    autoSwitchEnabled: '',
+    minStableTimeMs: '',
   })
 
   // ---- 轮询链路质量 + 故障切换历史 ----
@@ -103,10 +102,11 @@ export default function CommAdaptPanel() {
 
     const load = async () => {
       try {
-        const [linksData, failoverData] = await Promise.all([
-          getCommLinks().catch(() => []),
-          getCommFailoverHistory().catch(() => []),
-        ])
+        const linksData = await getCommLinks().catch(() => [])
+        let failoverData = []
+        if (scoreSysid.trim()) {
+          failoverData = await getCommFailoverHistory(Number(scoreSysid.trim())).catch(() => [])
+        }
         if (controller.signal.aborted || stopped) return
         const linksList = Array.isArray(linksData) ? linksData : (linksData && linksData.links) || []
         setLinks(linksList)
@@ -128,7 +128,7 @@ export default function CommAdaptPanel() {
       controller.abort()
       clearInterval(timer)
     }
-  }, [])
+  }, [scoreSysid])
 
   // ---- 加载自适应配置 ----
   useEffect(() => {
@@ -138,12 +138,11 @@ export default function CommAdaptPanel() {
         const data = await getCommConfig()
         setConfig(data)
         setConfigForm({
-          scoreThresholdA: pick(data, 'scoreThresholdA', 'score_threshold_a') ?? '',
-          scoreThresholdB: pick(data, 'scoreThresholdB', 'score_threshold_b') ?? '',
-          scoreThresholdC: pick(data, 'scoreThresholdC', 'score_threshold_c') ?? '',
-          scoreThresholdD: pick(data, 'scoreThresholdD', 'score_threshold_d') ?? '',
-          switchIntervalMs: pick(data, 'switchIntervalMs', 'switch_interval_ms') ?? '',
-          maxRetries: pick(data, 'maxRetries', 'max_retries') ?? '',
+          switchThreshold: pick(data, 'switchThreshold') ?? '',
+          failoverThreshold: pick(data, 'failoverThreshold') ?? '',
+          detectionIntervalMs: pick(data, 'detectionIntervalMs') ?? '',
+          autoSwitchEnabled: pick(data, 'autoSwitchEnabled') ?? '',
+          minStableTimeMs: pick(data, 'minStableTimeMs') ?? '',
         })
       } catch (e) {
         setConfigError(e && e.message ? e.message : String(e))
@@ -176,15 +175,10 @@ export default function CommAdaptPanel() {
 
   // ---- 查询切换决策 ----
   const handleQueryDecision = useCallback(async () => {
-    const sysid = scoreSysid.trim()
-    if (!sysid) {
-      setDecisionError('请输入 sysid')
-      return
-    }
     setDecisionLoading(true)
     setDecisionError(null)
     try {
-      const data = await getCommDecision(sysid)
+      const data = await getCommDecision()
       setDecision(data)
     } catch (e) {
       setDecisionError(e && e.message ? e.message : String(e))
@@ -192,25 +186,31 @@ export default function CommAdaptPanel() {
     } finally {
       setDecisionLoading(false)
     }
-  }, [scoreSysid])
+  }, [])
 
   // ---- 执行故障切换 ----
+  const [failoverTargetLink, setFailoverTargetLink] = useState('')
   const handleFailover = useCallback(async () => {
     const sysid = scoreSysid.trim()
     if (!sysid) {
       setFailoverError('请输入 sysid')
       return
     }
+    const targetLink = failoverTargetLink.trim()
+    if (!targetLink) {
+      setFailoverError('请输入目标链路（targetLink）')
+      return
+    }
     setExecutingFailover(true)
     setFailoverError(null)
     try {
-      await executeCommFailover({ sysid: Number(sysid) })
+      await executeCommFailover(Number(sysid), targetLink)
     } catch (e) {
       setFailoverError(e && e.message ? e.message : String(e))
     } finally {
       setExecutingFailover(false)
     }
-  }, [scoreSysid])
+  }, [scoreSysid, failoverTargetLink])
 
   // ---- 保存配置 ----
   const handleSaveConfig = useCallback(async () => {
@@ -218,12 +218,11 @@ export default function CommAdaptPanel() {
     setConfigError(null)
     try {
       const payload = {}
-      if (configForm.scoreThresholdA !== '') payload.scoreThresholdA = Number(configForm.scoreThresholdA)
-      if (configForm.scoreThresholdB !== '') payload.scoreThresholdB = Number(configForm.scoreThresholdB)
-      if (configForm.scoreThresholdC !== '') payload.scoreThresholdC = Number(configForm.scoreThresholdC)
-      if (configForm.scoreThresholdD !== '') payload.scoreThresholdD = Number(configForm.scoreThresholdD)
-      if (configForm.switchIntervalMs !== '') payload.switchIntervalMs = Number(configForm.switchIntervalMs)
-      if (configForm.maxRetries !== '') payload.maxRetries = Number(configForm.maxRetries)
+      if (configForm.switchThreshold !== '') payload.switchThreshold = Number(configForm.switchThreshold)
+      if (configForm.failoverThreshold !== '') payload.failoverThreshold = Number(configForm.failoverThreshold)
+      if (configForm.detectionIntervalMs !== '') payload.detectionIntervalMs = Number(configForm.detectionIntervalMs)
+      if (configForm.autoSwitchEnabled !== '') payload.autoSwitchEnabled = configForm.autoSwitchEnabled === 'true' || configForm.autoSwitchEnabled === true
+      if (configForm.minStableTimeMs !== '') payload.minStableTimeMs = Number(configForm.minStableTimeMs)
       const data = await updateCommConfig(payload)
       setConfig(data)
     } catch (e) {
@@ -328,6 +327,15 @@ export default function CommAdaptPanel() {
                 {executingFailover ? '切换中…' : '故障切换'}
               </button>
             </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+              <input
+                type="text"
+                placeholder="目标链路（MESH/SATELLITE/CELLULAR）"
+                value={failoverTargetLink}
+                onChange={(e) => setFailoverTargetLink(e.target.value)}
+                style={{ ...modalInputStyle, flex: '1 1 200px' }}
+              />
+            </div>
             {scoreError && <div style={{ fontSize: 10, color: 'var(--crit)', marginBottom: 4 }}>⚠ {scoreError}</div>}
             {decisionError && <div style={{ fontSize: 10, color: 'var(--crit)', marginBottom: 4 }}>⚠ {decisionError}</div>}
             {score && (
@@ -402,31 +410,31 @@ export default function CommAdaptPanel() {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <div style={{ flex: '1 1 100px' }}>
-                    <div style={labelStyle}>A 级阈值</div>
-                    <input type="number" step="any" value={configForm.scoreThresholdA} onChange={(e) => updateConfigForm('scoreThresholdA', e.target.value)} style={modalInputStyle} placeholder="≥ A" />
+                  <div style={{ flex: '1 1 120px' }}>
+                    <div style={labelStyle}>切换阈值</div>
+                    <input type="number" step="any" value={configForm.switchThreshold} onChange={(e) => updateConfigForm('switchThreshold', e.target.value)} style={modalInputStyle} placeholder="切换阈值" />
                   </div>
-                  <div style={{ flex: '1 1 100px' }}>
-                    <div style={labelStyle}>B 级阈值</div>
-                    <input type="number" step="any" value={configForm.scoreThresholdB} onChange={(e) => updateConfigForm('scoreThresholdB', e.target.value)} style={modalInputStyle} placeholder="≥ B" />
-                  </div>
-                  <div style={{ flex: '1 1 100px' }}>
-                    <div style={labelStyle}>C 级阈值</div>
-                    <input type="number" step="any" value={configForm.scoreThresholdC} onChange={(e) => updateConfigForm('scoreThresholdC', e.target.value)} style={modalInputStyle} placeholder="≥ C" />
-                  </div>
-                  <div style={{ flex: '1 1 100px' }}>
-                    <div style={labelStyle}>D 级阈值</div>
-                    <input type="number" step="any" value={configForm.scoreThresholdD} onChange={(e) => updateConfigForm('scoreThresholdD', e.target.value)} style={modalInputStyle} placeholder="≥ D" />
+                  <div style={{ flex: '1 1 120px' }}>
+                    <div style={labelStyle}>故障切换阈值</div>
+                    <input type="number" step="any" value={configForm.failoverThreshold} onChange={(e) => updateConfigForm('failoverThreshold', e.target.value)} style={modalInputStyle} placeholder="故障切换阈值" />
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <div style={{ flex: '1 1 160px' }}>
-                    <div style={labelStyle}>切换间隔 (ms)</div>
-                    <input type="number" value={configForm.switchIntervalMs} onChange={(e) => updateConfigForm('switchIntervalMs', e.target.value)} style={modalInputStyle} placeholder="毫秒" />
+                    <div style={labelStyle}>检测间隔 (ms)</div>
+                    <input type="number" value={configForm.detectionIntervalMs} onChange={(e) => updateConfigForm('detectionIntervalMs', e.target.value)} style={modalInputStyle} placeholder="毫秒" />
                   </div>
-                  <div style={{ flex: '1 1 100px' }}>
-                    <div style={labelStyle}>最大重试次数</div>
-                    <input type="number" value={configForm.maxRetries} onChange={(e) => updateConfigForm('maxRetries', e.target.value)} style={modalInputStyle} placeholder="次数" />
+                  <div style={{ flex: '1 1 160px' }}>
+                    <div style={labelStyle}>最小稳定时间 (ms)</div>
+                    <input type="number" value={configForm.minStableTimeMs} onChange={(e) => updateConfigForm('minStableTimeMs', e.target.value)} style={modalInputStyle} placeholder="毫秒" />
+                  </div>
+                  <div style={{ flex: '1 1 120px' }}>
+                    <div style={labelStyle}>自动切换</div>
+                    <select value={configForm.autoSwitchEnabled} onChange={(e) => updateConfigForm('autoSwitchEnabled', e.target.value)} style={modalInputStyle}>
+                      <option value="">未设置</option>
+                      <option value="true">启用</option>
+                      <option value="false">禁用</option>
+                    </select>
                   </div>
                 </div>
                 <button

@@ -14,6 +14,9 @@ public final class MusicSync {
     private final double startTimeOffsetSec;
 
     public MusicSync(String taskId, String musicUrl, double bpm, double startTimeOffsetSec) {
+        if (bpm <= 0) {
+            throw new IllegalArgumentException("bpm must be positive");
+        }
         this.taskId = taskId;
         this.musicUrl = musicUrl;
         this.bpm = bpm;

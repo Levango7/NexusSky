@@ -131,7 +131,7 @@ class CommSituationControllerTest {
     }
 
     @Test
-    @DisplayName("POST /switch/{sysid} 无效链路类型应抛出异常")
+    @DisplayName("POST /switch/{sysid} 无效链路类型应抛出 BadRequestException")
     void switchLink_invalidLinkType_shouldThrowException() {
         int sysid = 1;
         registry.registerIfAbsent(sysid);
@@ -139,7 +139,8 @@ class CommSituationControllerTest {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("targetLink", "INVALID_LINK");
 
-        assertThrows(IllegalArgumentException.class,
+        // P1-fix: 改为 BadRequestException，返回 HTTP 400 而非 500
+        assertThrows(io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException.class,
                 () -> controller.switchLink(sysid, body));
     }
 

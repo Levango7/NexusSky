@@ -4,11 +4,9 @@ import {
   listMappingTasks,
   getMappingTask,
   planMappingRoute,
-  captureMappingPhotos,
   getMappingPhotos,
   generateMappingResult,
   getMappingResult,
-  listMappingAreas,
 } from '../api.js'
 
 // P2 航拍测绘面板
@@ -19,9 +17,9 @@ const POLL_MS = 5000
 
 // 测绘类型
 const MAPPING_TYPES = [
-  { key: 'ORTHO', label: '正射影像' },
+  { key: 'ORTHO_PHOTO', label: '正射影像' },
   { key: 'DEM', label: 'DEM 高程模型' },
-  { key: '3D_MODEL', label: '3D 模型' },
+  { key: 'THREE_D_MODEL', label: '3D 模型' },
   { key: 'MIXED', label: '混合测绘' },
 ]
 
@@ -58,8 +56,6 @@ export default function MappingPanel() {
   const [tasks, setTasks] = useState([])
   const [tasksError, setTasksError] = useState(null)
 
-  // ---- 测绘区域 ----
-  const [areas, setAreas] = useState([])
 
   // ---- 选中任务 ----
   const [selectedTaskId, setSelectedTaskId] = useState(null)
@@ -73,7 +69,7 @@ export default function MappingPanel() {
 
   // ---- 采集照片 ----
   const [photos, setPhotos] = useState([])
-  const [capturing, setCapturing] = useState(false)
+
   const [photosLoading, setPhotosLoading] = useState(false)
 
   // ---- 测绘成果 ----
@@ -83,7 +79,7 @@ export default function MappingPanel() {
 
   // ---- 创建表单 ----
   const [form, setForm] = useState({
-    type: 'ORTHO',
+    type: 'ORTHO_PHOTO',
     areaName: '',
     centerLat: '',
     centerLon: '',
@@ -103,16 +99,11 @@ export default function MappingPanel() {
 
     const load = async () => {
       try {
-        const [tasksData, areasData] = await Promise.all([
-          listMappingTasks().catch(() => []),
-          listMappingAreas().catch(() => []),
-        ])
+        const tasksData = await listMappingTasks().catch(() => [])
         if (controller.signal.aborted || stopped) return
         const tasksList = Array.isArray(tasksData) ? tasksData : (tasksData && tasksData.tasks) || []
         setTasks(tasksList)
         setTasksError(null)
-        const areasList = Array.isArray(areasData) ? areasData : (areasData && areasData.areas) || []
-        setAreas(areasList)
       } catch (e) {
         if (controller.signal.aborted || stopped) return
         setTasksError(e && e.message ? e.message : String(e))
@@ -219,18 +210,6 @@ export default function MappingPanel() {
     }
   }, [selectedTaskId])
 
-  // ---- 采集照片 ----
-  const handleCapture = useCallback(async () => {
-    if (selectedTaskId == null) return
-    setCapturing(true)
-    try {
-      await captureMappingPhotos(selectedTaskId)
-    } catch (e) {
-      setDetailError('采集失败：' + (e && e.message ? e.message : String(e)))
-    } finally {
-      setCapturing(false)
-    }
-  }, [selectedTaskId])
 
   // ---- 获取照片列表 ----
   const handleGetPhotos = useCallback(async () => {
@@ -402,7 +381,7 @@ export default function MappingPanel() {
               {selectedTaskId != null && (
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button onClick={handlePlanRoute} disabled={planningRoute} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--cyan)', borderColor: 'var(--cyan)', opacity: planningRoute ? 0.5 : 1, cursor: planningRoute ? 'not-allowed' : 'pointer' }}>{planningRoute ? '规划中…' : '规划航线'}</button>
-                  <button onClick={handleCapture} disabled={capturing} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--warn)', borderColor: 'var(--warn)', opacity: capturing ? 0.5 : 1, cursor: capturing ? 'not-allowed' : 'pointer' }}>{capturing ? '采集中…' : '采集照片'}</button>
+
                   <button onClick={handleGenerateResult} disabled={generating} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--ok)', borderColor: 'var(--ok)', opacity: generating ? 0.5 : 1, cursor: generating ? 'not-allowed' : 'pointer' }}>{generating ? '生成中…' : '生成成果'}</button>
                 </div>
               )}

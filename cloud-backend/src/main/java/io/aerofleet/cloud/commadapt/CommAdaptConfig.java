@@ -29,6 +29,9 @@ public class CommAdaptConfig {
     /** 最小稳定时间（毫秒）：切换后需稳定此时间才允许再次切换 */
     private volatile long minStableTimeMs;
 
+    // P1-fix: 用于保护组合更新的锁对象
+    private final Object configLock = new Object();
+
     /**
      * 使用默认值构造配置：
      * switchThreshold=60, failoverThreshold=40, detectionIntervalMs=5000,
@@ -57,7 +60,9 @@ public class CommAdaptConfig {
     }
 
     public void setSwitchThreshold(int switchThreshold) {
-        this.switchThreshold = switchThreshold;
+        synchronized (configLock) {
+            this.switchThreshold = switchThreshold;
+        }
     }
 
     public int getFailoverThreshold() {
@@ -65,7 +70,9 @@ public class CommAdaptConfig {
     }
 
     public void setFailoverThreshold(int failoverThreshold) {
-        this.failoverThreshold = failoverThreshold;
+        synchronized (configLock) {
+            this.failoverThreshold = failoverThreshold;
+        }
     }
 
     public long getDetectionIntervalMs() {
@@ -73,7 +80,9 @@ public class CommAdaptConfig {
     }
 
     public void setDetectionIntervalMs(long detectionIntervalMs) {
-        this.detectionIntervalMs = detectionIntervalMs;
+        synchronized (configLock) {
+            this.detectionIntervalMs = detectionIntervalMs;
+        }
     }
 
     public boolean isAutoSwitchEnabled() {
@@ -81,7 +90,9 @@ public class CommAdaptConfig {
     }
 
     public void setAutoSwitchEnabled(boolean autoSwitchEnabled) {
-        this.autoSwitchEnabled = autoSwitchEnabled;
+        synchronized (configLock) {
+            this.autoSwitchEnabled = autoSwitchEnabled;
+        }
     }
 
     public long getMinStableTimeMs() {
@@ -89,7 +100,42 @@ public class CommAdaptConfig {
     }
 
     public void setMinStableTimeMs(long minStableTimeMs) {
-        this.minStableTimeMs = minStableTimeMs;
+        synchronized (configLock) {
+            this.minStableTimeMs = minStableTimeMs;
+        }
+    }
+
+    /**
+     * P1-fix: 原子更新多个配置字段，避免组合写非原子问题。
+     * <p>
+     * 所有提供的字段在同一 synchronized 块内更新，保证读取者不会看到部分更新的状态。
+     *
+     * @param switchThreshold    新的链路切换阈值（null 表示不更新）
+     * @param failoverThreshold  新的故障检测阈值（null 表示不更新）
+     * @param detectionIntervalMs 新的检测间隔（null 表示不更新）
+     * @param autoSwitchEnabled  新的自动切换开关（null 表示不更新）
+     * @param minStableTimeMs    新的最小稳定时间（null 表示不更新）
+     */
+    public void updateConfig(Integer switchThreshold, Integer failoverThreshold,
+                             Long detectionIntervalMs, Boolean autoSwitchEnabled,
+                             Long minStableTimeMs) {
+        synchronized (configLock) {
+            if (switchThreshold != null) {
+                this.switchThreshold = switchThreshold;
+            }
+            if (failoverThreshold != null) {
+                this.failoverThreshold = failoverThreshold;
+            }
+            if (detectionIntervalMs != null) {
+                this.detectionIntervalMs = detectionIntervalMs;
+            }
+            if (autoSwitchEnabled != null) {
+                this.autoSwitchEnabled = autoSwitchEnabled;
+            }
+            if (minStableTimeMs != null) {
+                this.minStableTimeMs = minStableTimeMs;
+            }
+        }
     }
 
     @Override

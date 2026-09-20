@@ -564,36 +564,36 @@ export const api = {
   getMaintenanceSchedule: () => jsonFetch('/api/maintenance/schedule'),
 
   // ---- CommAdapt (多模态通信自适应 P2) ----
-  // base 路径 /api/comm-situation
-  // 获取所有链路质量
-  getCommLinks: () => jsonFetch('/api/comm-situation/links'),
+  // base 路径 /api/comm-adapt
+  // 获取所有链路质量（机队级）
+  getCommLinks: () => jsonFetch('/api/comm-adapt/quality/fleet'),
 
-  // 获取指定无人机链路质量
-  getCommLink: (sysid) => jsonFetch(`/api/comm-situation/links/${sysid}`),
+  // 获取指定无人机链路质量（含综合评分）
+  getCommLink: (sysid) => jsonFetch(`/api/comm-adapt/quality/${sysid}`),
 
-  // 获取综合质量评分
-  getCommScore: (sysid) => jsonFetch(`/api/comm-situation/score/${sysid}`),
+  // 获取综合质量评分（与 getCommLink 合并，复用同一端点）
+  getCommScore: (sysid) => jsonFetch(`/api/comm-adapt/quality/${sysid}`),
 
-  // 获取链路切换决策
-  getCommDecision: (sysid) => jsonFetch(`/api/comm-situation/decision/${sysid}`),
+  // 获取链路切换决策（推荐列表）
+  getCommDecision: () => jsonFetch('/api/comm-adapt/recommendations'),
 
-  // 执行故障切换
-  executeCommFailover: (payload) =>
-    jsonFetch('/api/comm-situation/failover', {
+  // 执行故障切换（sysid 在 path 中，body 含 targetLink）
+  executeCommFailover: (sysid, targetLink) =>
+    jsonFetch(`/api/comm-adapt/switch/${sysid}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ targetLink }),
     }),
 
-  // 获取故障切换历史
-  getCommFailoverHistory: () => jsonFetch('/api/comm-situation/failover/history'),
+  // 获取故障切换历史（按 sysid 过滤）
+  getCommFailoverHistory: (sysid) => jsonFetch(`/api/comm-adapt/failover/history/${sysid}`),
 
   // 获取自适应配置
-  getCommConfig: () => jsonFetch('/api/comm-situation/config'),
+  getCommConfig: () => jsonFetch('/api/comm-adapt/config'),
 
   // 更新自适应配置
   updateCommConfig: (config) =>
-    jsonFetch('/api/comm-situation/config', {
+    jsonFetch('/api/comm-adapt/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config),
@@ -615,32 +615,24 @@ export const api = {
   // 获取测绘任务详情
   getMappingTask: (id) => jsonFetch(`/api/mapping/tasks/${id}`),
 
-  // 规划航线
-  planMappingRoute: (id) =>
-    jsonFetch(`/api/mapping/tasks/${id}/plan-route`, { method: 'POST' }),
-
-  // 模拟采集照片
-  captureMappingPhotos: (id) =>
-    jsonFetch(`/api/mapping/tasks/${id}/capture`, { method: 'POST' }),
+  // 获取航点（航线规划，GET 请求）
+  planMappingRoute: (id) => jsonFetch(`/api/mapping/tasks/${id}/waypoints`),
 
   // 获取采集照片
   getMappingPhotos: (id) => jsonFetch(`/api/mapping/tasks/${id}/photos`),
 
-  // 生成测绘成果
+  // 生成测绘成果（process 端点，采集在 process 中自动完成）
   generateMappingResult: (id) =>
-    jsonFetch(`/api/mapping/tasks/${id}/generate-result`, { method: 'POST' }),
+    jsonFetch(`/api/mapping/tasks/${id}/process`, { method: 'POST' }),
 
   // 获取测绘成果
   getMappingResult: (id) => jsonFetch(`/api/mapping/tasks/${id}/result`),
 
-  // 列出测绘区域
-  listMappingAreas: () => jsonFetch('/api/mapping/areas'),
-
   // ---- VoiceCmd (语音指挥 P3) ----
-  // base 路径 /api/voice
+  // base 路径 /api/voice-cmd
   // 解析语音指令
   parseVoiceCommand: (text) =>
-    jsonFetch('/api/voice/parse', {
+    jsonFetch('/api/voice-cmd/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
@@ -648,7 +640,7 @@ export const api = {
 
   // 执行指令
   executeVoiceCommand: (payload) =>
-    jsonFetch('/api/voice/execute', {
+    jsonFetch('/api/voice-cmd/execute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -656,32 +648,28 @@ export const api = {
 
   // 确认执行
   confirmVoiceCommand: (pendingId) =>
-    jsonFetch(`/api/voice/confirm/${pendingId}`, { method: 'POST' }),
+    jsonFetch(`/api/voice-cmd/confirm/${pendingId}`, { method: 'POST' }),
 
-  // 语音播报
-  broadcastVoiceMessage: (payload) =>
-    jsonFetch('/api/voice/broadcast', {
+  // 语音播报（sysid 在 path 中）
+  broadcastVoiceMessage: (sysid, payload) =>
+    jsonFetch(`/api/voice-cmd/broadcast/${sysid}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
 
   // 获取播报状态
-  getVoiceStatus: (sysid) => jsonFetch(`/api/voice/status/${sysid}`),
+  getVoiceStatus: (sysid) => jsonFetch(`/api/voice-cmd/broadcast/${sysid}/status`),
 
-  // 告警播报
-  broadcastVoiceAlert: (payload) =>
-    jsonFetch('/api/voice/alert', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
+  // 告警播报（GET 请求）
+  broadcastVoiceAlert: (sysid) =>
+    jsonFetch(`/api/voice-cmd/broadcast/${sysid}/alert`),
 
   // 获取指令历史
-  getVoiceHistory: () => jsonFetch('/api/voice/history'),
+  getVoiceHistory: () => jsonFetch('/api/voice-cmd/history'),
 
   // 获取待确认指令
-  getVoicePending: () => jsonFetch('/api/voice/pending'),
+  getVoicePending: () => jsonFetch('/api/voice-cmd/pending'),
 
   // ---- CityTwin (数字孪生城市 P3) ----
   // base 路径 /api/city-twin
@@ -699,26 +687,19 @@ export const api = {
   // 获取城市模型详情
   getCityModel: (id) => jsonFetch(`/api/city-twin/models/${id}`),
 
-  // 获取实时态势
-  getCitySituation: () => jsonFetch('/api/city-twin/situation'),
+  // 获取实时态势（current 端点）
+  getCitySituation: () => jsonFetch('/api/city-twin/situation/current'),
 
-  // 创建灾害模拟
-  createCitySimulation: (payload) =>
-    jsonFetch('/api/city-twin/simulation', {
+  // 创建灾害模拟（type 在 path 中，参数通过 query params 传递）
+  createCitySimulation: (type, payload) => {
+    const qs = new URLSearchParams(payload).toString()
+    return jsonFetch(`/api/city-twin/simulation/${type}${qs ? '?' + qs : ''}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
+    })
+  },
 
   // 获取模拟详情
   getCitySimulation: (id) => jsonFetch(`/api/city-twin/simulation/${id}`),
-
-  // 启动模拟
-  startCitySimulation: (id) =>
-    jsonFetch(`/api/city-twin/simulation/${id}/start`, { method: 'POST' }),
-
-  // 获取模拟帧
-  getCitySimulationFrames: (id) => jsonFetch(`/api/city-twin/simulation/${id}/frames`),
 
   // 创建态势标绘
   createCityMarker: (payload) =>
@@ -755,13 +736,16 @@ export const api = {
   abortDeliveryTask: (id) =>
     jsonFetch(`/api/delivery2/tasks/${id}/abort`, { method: 'POST' }),
 
-  // 优化路线
-  optimizeDeliveryRoute: (id) =>
-    jsonFetch(`/api/delivery2/tasks/${id}/optimize-route`, { method: 'POST' }),
+  // 优化路线（GET 请求获取路线）
+  optimizeDeliveryRoute: (id) => jsonFetch(`/api/delivery2/tasks/${id}/route`),
 
-  // 执行投放
-  deliverDeliveryTask: (id) =>
-    jsonFetch(`/api/delivery2/tasks/${id}/deliver`, { method: 'POST' }),
+  // 执行投放（body: { method })
+  deliverDeliveryTask: (id, body) =>
+    jsonFetch(`/api/delivery2/tasks/${id}/deliver`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
 
   // 获取配送状态
   getDeliveryStatus: (id) => jsonFetch(`/api/delivery2/tasks/${id}/status`),
@@ -792,9 +776,13 @@ export const api = {
   // 获取队形详情
   getShowFormation: (id) => jsonFetch(`/api/show/formations/${id}`),
 
-  // 计算队形位置
-  calculateShowPositions: (id) =>
-    jsonFetch(`/api/show/formations/${id}/positions`, { method: 'POST' }),
+  // 计算队形位置（body: { droneCount }）
+  calculateShowPositions: (id, body) =>
+    jsonFetch(`/api/show/formations/${id}/positions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
 
   // 创建表演任务
   createShowTask: (payload) =>

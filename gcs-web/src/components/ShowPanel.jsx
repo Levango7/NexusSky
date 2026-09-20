@@ -77,6 +77,7 @@ export default function ShowPanel() {
 
   const [formForm, setFormForm] = useState({
     type: 'LINE',
+    name: '',
     droneCount: '',
     spacingM: '',
   })
@@ -158,10 +159,11 @@ export default function ShowPanel() {
     try {
       await createShowFormation({
         type: formForm.type,
+        name: formForm.name.trim() || undefined,
         droneCount,
         spacingM,
       })
-      setFormForm((prev) => ({ ...prev, droneCount: '', spacingM: '' }))
+      setFormForm((prev) => ({ ...prev, name: '', droneCount: '', spacingM: '' }))
     } catch (e) {
       setFormFormError('创建队形失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -173,20 +175,23 @@ export default function ShowPanel() {
     if (selectedFormationId == null) return
     setCalculatingPos(true)
     try {
-      const data = await calculateShowPositions(selectedFormationId)
+      // 从选中的队形定义中获取 droneCount
+      const formation = formations.find((f) => pick(f, 'id', 'formationId') === selectedFormationId)
+      const droneCount = formation ? pick(formation, 'droneCount') : undefined
+      const data = await calculateShowPositions(selectedFormationId, { droneCount })
       setPositions(data)
     } catch (e) {
       setError('计算位置失败：' + (e && e.message ? e.message : String(e)))
     } finally {
       setCalculatingPos(false)
     }
-  }, [selectedFormationId])
+  }, [selectedFormationId, formations])
 
   const handleCreateTask = useCallback(async () => {
     setTaskFormError(null)
-    const formationId = Number(taskForm.formationId)
-    if (!Number.isFinite(formationId) || formationId <= 0) {
-      setTaskFormError('队形ID必须为正整数')
+    const formationId = taskForm.formationId.trim()
+    if (!formationId) {
+      setTaskFormError('队形ID不能为空')
       return
     }
     setCreatingTask(true)
@@ -312,6 +317,10 @@ export default function ShowPanel() {
                   {FORMATION_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
                 </select>
               </div>
+              <div style={{ flex: '1 1 120px' }}>
+                <div style={labelStyle}>队形名称</div>
+                <input type="text" value={formForm.name} onChange={(e) => updateFormForm('name', e.target.value)} style={modalInputStyle} placeholder="可选" />
+              </div>
               <div style={{ flex: '1 1 80px' }}>
                 <div style={labelStyle}>无人机数</div>
                 <input type="number" min="1" value={formForm.droneCount} onChange={(e) => updateFormForm('droneCount', e.target.value)} style={modalInputStyle} placeholder="架数" />
@@ -358,7 +367,7 @@ export default function ShowPanel() {
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <div style={{ flex: '1 1 80px' }}>
                 <div style={labelStyle}>队形ID</div>
-                <input type="number" min="1" value={taskForm.formationId} onChange={(e) => updateTaskForm('formationId', e.target.value)} style={modalInputStyle} placeholder="ID" />
+                <input type="text" value={taskForm.formationId} onChange={(e) => updateTaskForm('formationId', e.target.value)} style={modalInputStyle} placeholder="ID" />
               </div>
               <div style={{ flex: '1 1 160px' }}>
                 <div style={labelStyle}>任务名称</div>

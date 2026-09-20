@@ -117,7 +117,7 @@ public class ActionSequenceService {
                 UUID.randomUUID().toString(), taskId, seq++,
                 ActionType.LAND, currentTime, DEFAULT_LAND_DURATION, null));
 
-        taskActions.put(taskId, actions);
+
         log.info("Action sequence generated: taskId={} actions={}", taskId, actions.size());
         return actions;
     }
@@ -125,10 +125,6 @@ public class ActionSequenceService {
     /** 获取任务的动作序列（如未生成则自动生成）。 */
     public List<ShowAction> getActions(String taskId) {
         taskService.getTask(taskId); // 校验任务存在
-        List<ShowAction> actions = taskActions.get(taskId);
-        if (actions == null) {
-            actions = generateActionSequence(taskId);
-        }
-        return actions;
+        return taskActions.computeIfAbsent(taskId, this::generateActionSequence);
     }
 }

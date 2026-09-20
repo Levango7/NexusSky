@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.show;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -52,10 +53,10 @@ class FormationServiceTest {
     }
 
     @Test
-    @DisplayName("查询不存在的队形抛 IllegalArgumentException")
+    @DisplayName("查询不存在的队形抛 NotFoundException")
     void getFormationNotFound() {
         assertThatThrownBy(() -> formationService.getFormation("nonexistent"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(NotFoundException.class);
     }
 
     @Test

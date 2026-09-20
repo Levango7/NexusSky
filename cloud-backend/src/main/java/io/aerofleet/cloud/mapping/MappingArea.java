@@ -64,7 +64,26 @@ public final class MappingArea {
     }
 
     public Kind kind() { return kind; }
-    public List<double[]> points() { return points; }
+
+    /**
+     * P1-fix: 返回多边形顶点的防御性副本。
+     * <p>
+     * 内部 List 已通过 {@code List.copyOf} 不可变化，
+     * 但每个 {@code double[]} 元素仍是可变引用，
+     * 因此对每个元素也做防御性拷贝，防止外部修改内部数据。
+     *
+     * @return 顶点列表的防御性副本，每个元素为新的 double[]
+     */
+    public List<double[]> points() {
+        if (points == null) {
+            return null;
+        }
+        List<double[]> copy = new java.util.ArrayList<>(points.size());
+        for (double[] p : points) {
+            copy.add(p.clone());
+        }
+        return java.util.Collections.unmodifiableList(copy);
+    }
     public double centerLat() { return centerLat; }
     public double centerLon() { return centerLon; }
     public double radiusM() { return radiusM; }

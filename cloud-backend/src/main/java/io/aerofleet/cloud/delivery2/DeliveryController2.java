@@ -124,6 +124,11 @@ public class DeliveryController2 {
         if (task == null) {
             throw new NotFoundException("delivery task " + id + " not found");
         }
+        if (task.getStatus() != DeliveryTask2.Status.PENDING
+                && task.getStatus() != DeliveryTask2.Status.IN_PROGRESS) {
+            throw new BadRequestException(
+                    "task " + id + " cannot be aborted from state " + task.getStatus());
+        }
         task.setStatus(DeliveryTask2.Status.ABORTED);
         log.info("配送任务中止：id={}", id);
         return task;
@@ -163,12 +168,14 @@ public class DeliveryController2 {
         if (body.method == DeliveryMethod.LAND_DELIVER) {
             landingSite = landingSiteSelector.selectLandingSite(
                     task.getReceiverLat(), task.getReceiverLon());
-            if (landingSite != null) {
-                boolean verified = landingSiteSelector.verifyLandingSite(landingSite);
-                if (!verified) {
-                    throw new BadRequestException(
-                            "landing site " + landingSite.getId() + " verification failed");
-                }
+            if (landingSite == null) {
+                throw new BadRequestException(
+                        "no suitable landing site found for task " + id);
+            }
+            boolean verified = landingSiteSelector.verifyLandingSite(landingSite);
+            if (!verified) {
+                throw new BadRequestException(
+                        "landing site " + landingSite.getId() + " verification failed");
             }
         }
 

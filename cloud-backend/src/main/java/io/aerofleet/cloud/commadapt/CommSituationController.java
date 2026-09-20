@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 
 /**
@@ -144,13 +145,15 @@ public class CommSituationController {
         String targetLinkStr = body.get("targetLink") == null
                 ? null : String.valueOf(body.get("targetLink"));
         if (targetLinkStr == null) {
-            throw new IllegalArgumentException("targetLink is required");
+            // P1-fix: 使用 BadRequestException 替代 IllegalArgumentException，返回 HTTP 400
+            throw new BadRequestException("targetLink is required");
         }
         LinkQuality.LinkType targetLink;
         try {
             targetLink = LinkQuality.LinkType.valueOf(targetLinkStr.toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("invalid targetLink: " + targetLinkStr);
+            // P1-fix: 使用 BadRequestException 替代 IllegalArgumentException，返回 HTTP 400
+            throw new BadRequestException("invalid targetLink: " + targetLinkStr);
         }
 
         FailoverResult result = failoverManager.executeFailover(sysid, targetLink);
@@ -244,21 +247,21 @@ public class CommSituationController {
     @Operation(summary = "更新自适应配置", description = "字段级合并，未提供的字段保留原值")
     @PutMapping("/config")
     public ResponseEntity<Map<String, Object>> updateConfig(@RequestBody Map<String, Object> body) {
-        if (body.containsKey("switchThreshold")) {
-            config.setSwitchThreshold(toInt(body.get("switchThreshold")));
-        }
-        if (body.containsKey("failoverThreshold")) {
-            config.setFailoverThreshold(toInt(body.get("failoverThreshold")));
-        }
-        if (body.containsKey("detectionIntervalMs")) {
-            config.setDetectionIntervalMs(toLong(body.get("detectionIntervalMs")));
-        }
-        if (body.containsKey("autoSwitchEnabled")) {
-            config.setAutoSwitchEnabled(toBool(body.get("autoSwitchEnabled")));
-        }
-        if (body.containsKey("minStableTimeMs")) {
-            config.setMinStableTimeMs(toLong(body.get("minStableTimeMs")));
-        }
+        // P1-fix: 使用原子更新方法，避免 volatile 字段组合写非原子问题
+        Integer switchThreshold = body.containsKey("switchThreshold")
+                ? toInt(body.get("switchThreshold")) : null;
+        Integer failoverThreshold = body.containsKey("failoverThreshold")
+                ? toInt(body.get("failoverThreshold")) : null;
+        Long detectionIntervalMs = body.containsKey("detectionIntervalMs")
+                ? toLong(body.get("detectionIntervalMs")) : null;
+        Boolean autoSwitchEnabled = body.containsKey("autoSwitchEnabled")
+                ? toBool(body.get("autoSwitchEnabled")) : null;
+        Long minStableTimeMs = body.containsKey("minStableTimeMs")
+                ? toLong(body.get("minStableTimeMs")) : null;
+
+        config.updateConfig(switchThreshold, failoverThreshold,
+                detectionIntervalMs, autoSwitchEnabled, minStableTimeMs);
+
         log.info("Config updated: {}", config);
         return ResponseEntity.ok(configToMap(config));
     }

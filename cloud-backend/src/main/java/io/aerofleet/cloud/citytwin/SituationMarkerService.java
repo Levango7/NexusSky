@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.citytwin;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
+import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -37,7 +39,10 @@ public class SituationMarkerService {
         if (marker.getTimestamp() == 0) {
             marker.setTimestamp(System.currentTimeMillis());
         }
-        markers.put(marker.getId(), marker);
+        SituationMarker existing = markers.putIfAbsent(marker.getId(), marker);
+        if (existing != null) {
+            throw new BadRequestException("marker already exists with id: " + marker.getId());
+        }
         log.info("Marker created: id={} type={}", marker.getId(), marker.getType());
         return marker;
     }
@@ -48,7 +53,7 @@ public class SituationMarkerService {
     public void deleteMarker(String id) {
         SituationMarker removed = markers.remove(id);
         if (removed == null) {
-            throw new IllegalArgumentException("marker not found: " + id);
+            throw new NotFoundException("marker not found: " + id);
         }
         log.info("Marker deleted: id={}", id);
     }
@@ -57,14 +62,17 @@ public class SituationMarkerService {
      * 更新标绘。
      */
     public SituationMarker updateMarker(String id, SituationMarker marker) {
-        SituationMarker existing = markers.get(id);
-        if (existing == null) {
-            throw new IllegalArgumentException("marker not found: " + id);
+        SituationMarker[] resultHolder = new SituationMarker[1];
+        markers.computeIfPresent(id, (key, existing) -> {
+            marker.setId(id);
+            marker.setTimestamp(System.currentTimeMillis());
+            resultHolder[0] = marker;
+            return marker;
+        });
+        if (resultHolder[0] == null) {
+            throw new NotFoundException("marker not found: " + id);
         }
-        marker.setId(id);
-        marker.setTimestamp(System.currentTimeMillis());
-        markers.put(id, marker);
         log.info("Marker updated: id={}", id);
-        return marker;
+        return resultHolder[0];
     }
 }

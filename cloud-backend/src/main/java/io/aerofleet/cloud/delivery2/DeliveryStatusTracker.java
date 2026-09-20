@@ -53,7 +53,7 @@ public class DeliveryStatusTracker {
     public void initStatus(String taskId) {
         DeliveryStatus status = new DeliveryStatus(taskId, DeliveryStatus.Phase.CREATED,
                 0, 0, 0, 0, DeliveryStatus.PayloadCondition.NORMAL);
-        statusMap.put(taskId, status);
+        statusMap.putIfAbsent(taskId, status);
         log.info("配送状态初始化：taskId={}", taskId);
     }
 
@@ -64,22 +64,23 @@ public class DeliveryStatusTracker {
      * @return 是否推进成功
      */
     public boolean advancePhase(String taskId) {
-        DeliveryStatus status = statusMap.get(taskId);
-        if (status == null) {
+        boolean[] advanced = {false};
+        statusMap.computeIfPresent(taskId, (key, status) -> {
+            DeliveryStatus.Phase current = status.getPhase();
+            DeliveryStatus.Phase next = nextPhase(current);
+            if (next == null) {
+                log.warn("推进状态失败：taskId={} 已处于终态 {}", taskId, current);
+                return status;
+            }
+            status.setPhase(next);
+            advanced[0] = true;
+            log.info("配送状态推进：taskId={} {} → {}", taskId, current, next);
+            return status;
+        });
+        if (!advanced[0] && !statusMap.containsKey(taskId)) {
             log.warn("推进状态失败：taskId={} 不存在", taskId);
-            return false;
         }
-
-        DeliveryStatus.Phase current = status.getPhase();
-        DeliveryStatus.Phase next = nextPhase(current);
-        if (next == null) {
-            log.warn("推进状态失败：taskId={} 已处于终态 {}", taskId, current);
-            return false;
-        }
-
-        status.setPhase(next);
-        log.info("配送状态推进：taskId={} {} → {}", taskId, current, next);
-        return true;
+        return advanced[0];
     }
 
     /**

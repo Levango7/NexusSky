@@ -42,6 +42,13 @@ const DELIVERY_STATUS_META = {
 // 地面类型
 const GROUND_TYPES = ['CONCRETE', 'GRASS', 'SOIL', 'WATER', 'ROOF']
 
+// 投放方式
+const DELIVERY_METHODS = [
+  { key: 'AIR_DROP', label: '空投' },
+  { key: 'LAND_DELIVER', label: '降落交付' },
+  { key: 'ROPE_LOWER', label: '绳索降下' },
+]
+
 // 格式化时间戳
 function fmtTime(ts) {
   if (ts == null || ts === '') return '--'
@@ -81,6 +88,7 @@ export default function DeliveryPanel() {
   const [aborting, setAborting] = useState(false)
   const [delivering, setDelivering] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [deliverMethod, setDeliverMethod] = useState('AIR_DROP')
 
   // ---- 创建表单 ----
   const [form, setForm] = useState({
@@ -99,7 +107,7 @@ export default function DeliveryPanel() {
   const [landingSearch, setLandingSearch] = useState({
     lat: '',
     lon: '',
-    radiusM: '',
+    radius: '',
     groundType: '',
   })
   const [landingSites, setLandingSites] = useState([])
@@ -248,13 +256,13 @@ export default function DeliveryPanel() {
     if (selectedTaskId == null) return
     setDelivering(true)
     try {
-      await deliverDeliveryTask(selectedTaskId)
+      await deliverDeliveryTask(selectedTaskId, { method: deliverMethod })
     } catch (e) {
       setDetailError('投放失败：' + (e && e.message ? e.message : String(e)))
     } finally {
       setDelivering(false)
     }
-  }, [selectedTaskId])
+  }, [selectedTaskId, deliverMethod])
 
   // ---- 确认签收 ----
   const handleConfirm = useCallback(async () => {
@@ -275,7 +283,7 @@ export default function DeliveryPanel() {
     const params = {}
     if (landingSearch.lat) params.lat = landingSearch.lat
     if (landingSearch.lon) params.lon = landingSearch.lon
-    if (landingSearch.radiusM) params.radiusM = landingSearch.radiusM
+    if (landingSearch.radius) params.radius = landingSearch.radius
     if (landingSearch.groundType) params.groundType = landingSearch.groundType
     setLandingLoading(true)
     try {
@@ -415,6 +423,9 @@ export default function DeliveryPanel() {
                   <button onClick={handleOptimize} disabled={optimizing} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--cyan)', borderColor: 'var(--cyan)', opacity: optimizing ? 0.5 : 1, cursor: optimizing ? 'not-allowed' : 'pointer' }}>{optimizing ? '优化中…' : '优化路线'}</button>
                   <button onClick={handleStart} disabled={starting} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--ok)', borderColor: 'var(--ok)', opacity: starting ? 0.5 : 1, cursor: starting ? 'not-allowed' : 'pointer' }}>{starting ? '启动中…' : '启动'}</button>
                   <button onClick={handleDeliver} disabled={delivering} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--warn)', borderColor: 'var(--warn)', opacity: delivering ? 0.5 : 1, cursor: delivering ? 'not-allowed' : 'pointer' }}>{delivering ? '投放中…' : '投放'}</button>
+                  <select value={deliverMethod} onChange={(e) => setDeliverMethod(e.target.value)} style={{ ...miniBtnStyle, fontSize: 9, padding: '1px 4px' }}>
+                    {DELIVERY_METHODS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                  </select>
                   <button onClick={handleConfirm} disabled={confirming} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--ok)', borderColor: 'var(--ok)', opacity: confirming ? 0.5 : 1, cursor: confirming ? 'not-allowed' : 'pointer' }}>{confirming ? '签收中…' : '签收'}</button>
                   <button onClick={handleAbort} disabled={aborting} style={{ ...miniBtnStyle, fontSize: 9, color: 'var(--crit)', borderColor: 'var(--crit)', opacity: aborting ? 0.5 : 1, cursor: aborting ? 'not-allowed' : 'pointer' }}>{aborting ? '中止中…' : '中止'}</button>
                 </div>
@@ -461,7 +472,7 @@ export default function DeliveryPanel() {
                 <input type="number" step="any" placeholder="经度" value={landingSearch.lon} onChange={(e) => updateLandingSearch('lon', e.target.value)} style={modalInputStyle} />
               </div>
               <div style={{ flex: '1 1 80px' }}>
-                <input type="number" placeholder="半径(m)" value={landingSearch.radiusM} onChange={(e) => updateLandingSearch('radiusM', e.target.value)} style={modalInputStyle} />
+                <input type="number" placeholder="半径(m)" value={landingSearch.radius} onChange={(e) => updateLandingSearch('radius', e.target.value)} style={modalInputStyle} />
               </div>
               <div style={{ flex: '1 1 100px' }}>
                 <select value={landingSearch.groundType} onChange={(e) => updateLandingSearch('groundType', e.target.value)} style={modalInputStyle}>

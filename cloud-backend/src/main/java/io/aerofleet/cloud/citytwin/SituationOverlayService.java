@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
  * 实时态势叠加服务，聚合无人机、车辆、人员、告警等动态要素。
@@ -25,8 +26,11 @@ public class SituationOverlayService {
 
     private final DeviceRegistry deviceRegistry;
 
-    // 历史态势记录，用于回放
-    private final ConcurrentMap<Long, RealtimeSituation> situationHistory = new ConcurrentHashMap<>();
+    // 历史态势记录，用于回放 — 使用 ConcurrentSkipListMap 支持有序查找
+    private final ConcurrentSkipListMap<Long, RealtimeSituation> situationHistory = new ConcurrentSkipListMap<>();
+
+    // 历史记录最大保留数量，防止内存泄漏
+    private static final int MAX_HISTORY_SIZE = 1000;
 
     // 模拟城市中心坐标
     private static final double CITY_CENTER_LAT = 39.9042;
@@ -47,7 +51,20 @@ public class SituationOverlayService {
         List<AlertMarker> alerts = generateSimulatedAlerts(now);
 
         RealtimeSituation situation = new RealtimeSituation(now, drones, vehicles, personnel, alerts);
-        situationHistory.put(now, situation);
+        // 处理同毫秒覆盖：如果 key 已存在，递增直到找到空位
+        long key = now;
+        while (situationHistory.putIfAbsent(key, situation) != null) {
+            key++;
+        }
+        // 限制历史记录数量，移除最旧的条目
+        while (situationHistory.size() > MAX_HISTORY_SIZE) {
+            Long oldest = situationHistory.firstKey();
+            if (oldest != null) {
+                situationHistory.remove(oldest);
+            } else {
+                break;
+            }
+        }
         return situation;
     }
 
@@ -57,17 +74,18 @@ public class SituationOverlayService {
     public RealtimeSituation getSituationAt(long timestamp) {
         RealtimeSituation situation = situationHistory.get(timestamp);
         if (situation == null) {
-            // 查找最接近的历史记录
-            long closestKey = -1;
-            long minDiff = Long.MAX_VALUE;
-            for (Long key : situationHistory.keySet()) {
-                long diff = Math.abs(key - timestamp);
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closestKey = key;
-                }
+            // 使用 floorKey/ceilingKey 查找最接近的历史记录（O(log n)）
+            Long floor = situationHistory.floorKey(timestamp);
+            Long ceiling = situationHistory.ceilingKey(timestamp);
+            Long closestKey = null;
+            if (floor != null && ceiling != null) {
+                closestKey = (timestamp - floor <= ceiling - timestamp) ? floor : ceiling;
+            } else if (floor != null) {
+                closestKey = floor;
+            } else if (ceiling != null) {
+                closestKey = ceiling;
             }
-            if (closestKey != -1) {
+            if (closestKey != null) {
                 situation = situationHistory.get(closestKey);
             }
         }

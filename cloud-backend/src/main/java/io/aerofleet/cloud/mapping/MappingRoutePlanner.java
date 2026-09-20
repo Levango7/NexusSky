@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.mapping;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -56,6 +57,18 @@ public class MappingRoutePlanner {
      */
     public List<MappingWaypoint> planOrthophotoRoute(MappingArea area, double altitudeM,
                                                      double overlapPct, double sidelapPct) {
+        // P1-fix: 校验 overlapPct 和 sidelapPct 范围，防止 >=100 导致无限循环
+        if (overlapPct < 0 || overlapPct > 95) {
+            throw new BadRequestException("overlapPct must be between 0 and 95, got: " + overlapPct);
+        }
+        if (sidelapPct < 0 || sidelapPct > 95) {
+            throw new BadRequestException("sidelapPct must be between 0 and 95, got: " + sidelapPct);
+        }
+        // P1-fix: 校验航高 > 0，防止除零或无限循环
+        if (altitudeM <= 0) {
+            throw new BadRequestException("altitudeM must be positive, got: " + altitudeM);
+        }
+
         double[] bbox = area.boundingBox();
         double minLat = bbox[0], maxLat = bbox[1], minLon = bbox[2], maxLon = bbox[3];
 
@@ -107,6 +120,11 @@ public class MappingRoutePlanner {
      * @return 航点列表
      */
     public List<MappingWaypoint> planDemRoute(MappingArea area, double altitudeM) {
+        // P1-fix: 校验航高 > 0，防止除零或无限循环
+        if (altitudeM <= 0) {
+            throw new BadRequestException("altitudeM must be positive, got: " + altitudeM);
+        }
+
         double[] bbox = area.boundingBox();
         double minLat = bbox[0], maxLat = bbox[1], minLon = bbox[2], maxLon = bbox[3];
 
@@ -163,6 +181,11 @@ public class MappingRoutePlanner {
      * @return 航点列表
      */
     public List<MappingWaypoint> plan3DModelRoute(MappingArea area, double altitudeM) {
+        // P1-fix: 校验航高 > 0，防止除零或无限循环
+        if (altitudeM <= 0) {
+            throw new BadRequestException("altitudeM must be positive, got: " + altitudeM);
+        }
+
         double centerLat, centerLon, radiusM;
         if (area.kind() == MappingArea.Kind.CIRCLE) {
             centerLat = area.centerLat();

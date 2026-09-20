@@ -70,6 +70,10 @@ public class VoiceCommandController {
     })
     @PostMapping("/parse")
     public ParsedCommand parse(@RequestBody Map<String, String> body) {
+        if (body == null) {
+            throw new io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException(
+                    "request body must not be null");
+        }
         String text = body.get("text");
         if (text == null || text.isBlank()) {
             throw new io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException(
@@ -133,6 +137,10 @@ public class VoiceCommandController {
     public BroadcastResult broadcast(@PathVariable("sysid") int sysid,
                                      @RequestBody Map<String, String> body) {
         requireRegistered(sysid);
+        if (body == null) {
+            throw new io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException(
+                    "request body must not be null");
+        }
         String text = body.get("text");
         if (text == null || text.isBlank()) {
             throw new io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException(

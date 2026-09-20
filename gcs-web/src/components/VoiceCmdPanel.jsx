@@ -100,7 +100,7 @@ export default function VoiceCmdPanel() {
         const pendingList = Array.isArray(pendingData) ? pendingData : (pendingData && pendingData.pending) || []
         setPending(pendingList)
         setPendingError(null)
-        const historyList = Array.isArray(historyData) ? historyData : (historyData && pendingData && historyData.history) || []
+        const historyList = Array.isArray(historyData) ? historyData : (historyData && historyData.history) || []
         setHistory(historyList)
         setHistoryError(null)
       } catch (e) {
@@ -175,12 +175,15 @@ export default function VoiceCmdPanel() {
   const handleBroadcast = useCallback(async () => {
     const text = broadcastText.trim()
     if (!text) return
+    const sysid = broadcastSysid.trim()
+    if (!sysid) {
+      setBroadcastResult({ error: '请输入 sysid' })
+      return
+    }
     setBroadcasting(true)
     setBroadcastResult(null)
     try {
-      const payload = { text }
-      if (broadcastSysid.trim()) payload.sysid = Number(broadcastSysid)
-      const data = await broadcastVoiceMessage(payload)
+      const data = await broadcastVoiceMessage(Number(sysid), { text })
       setBroadcastResult(data)
     } catch (e) {
       setBroadcastResult({ error: e && e.message ? e.message : String(e) })
@@ -191,19 +194,20 @@ export default function VoiceCmdPanel() {
 
   // ---- 告警播报 ----
   const handleAlert = useCallback(async () => {
-    const text = alertText.trim()
-    if (!text) return
+    const sysid = alertSysid.trim()
+    if (!sysid) {
+      setBroadcastResult({ error: '请输入 sysid' })
+      return
+    }
     setAlerting(true)
     try {
-      const payload = { text }
-      if (alertSysid.trim()) payload.sysid = Number(alertSysid)
-      await broadcastVoiceAlert(payload)
+      await broadcastVoiceAlert(Number(sysid))
     } catch (e) {
       setBroadcastResult({ error: e && e.message ? e.message : String(e) })
     } finally {
       setAlerting(false)
     }
-  }, [alertText, alertSysid])
+  }, [alertSysid])
 
   // ---- 查询播报状态 ----
   const handleQueryStatus = useCallback(async () => {

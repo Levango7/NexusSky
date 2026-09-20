@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.citytwin;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -33,7 +34,7 @@ public class CityModelService {
     public CityModel getModel(String id) {
         CityModel model = models.get(id);
         if (model == null) {
-            throw new IllegalArgumentException("model not found: " + id);
+            throw new NotFoundException("model not found: " + id);
         }
         return model;
     }
@@ -62,7 +63,7 @@ public class CityModelService {
     public void deleteModel(String id) {
         CityModel removed = models.remove(id);
         if (removed == null) {
-            throw new IllegalArgumentException("model not found: " + id);
+            throw new NotFoundException("model not found: " + id);
         }
         log.info("City model deleted: id={}", id);
     }
@@ -73,7 +74,7 @@ public class CityModelService {
     public CityModel refreshModel(String id) {
         CityModel model = models.get(id);
         if (model == null) {
-            throw new IllegalArgumentException("model not found: " + id);
+            throw new NotFoundException("model not found: " + id);
         }
         model.setLastUpdatedAt(System.currentTimeMillis());
         model.setStatus(CityModel.ModelStatus.LOADED);

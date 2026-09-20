@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -209,6 +210,7 @@ public class FailoverManager {
                                 FailoverResult.Status status, String reason) {
         FailoverRecord record = new FailoverRecord(recordId, sysid, fromLink, toLink,
                 triggerTime, completeTime, status, reason);
-        failoverHistory.computeIfAbsent(sysid, k -> new ArrayList<>()).add(record);
+        // P1-fix: 使用 CopyOnWriteArrayList 替代 ArrayList，保证多线程安全
+        failoverHistory.computeIfAbsent(sysid, k -> new CopyOnWriteArrayList<>()).add(record);
     }
 }

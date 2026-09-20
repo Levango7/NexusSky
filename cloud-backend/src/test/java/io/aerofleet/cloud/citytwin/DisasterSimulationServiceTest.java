@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.citytwin;
 
+import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -132,7 +133,7 @@ class DisasterSimulationServiceTest {
 
     @Test
     void getSimulation_throwsForUnknownId() {
-        assertThrows(IllegalArgumentException.class, () -> service.getSimulation("nonexistent"));
+        assertThrows(NotFoundException.class, () -> service.getSimulation("nonexistent"));
     }
 
     @Test

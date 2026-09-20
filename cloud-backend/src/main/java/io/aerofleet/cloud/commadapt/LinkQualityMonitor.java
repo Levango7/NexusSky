@@ -99,9 +99,9 @@ public class LinkQualityMonitor {
         );
         qualities.add(cellular);
 
-        // 存储最新质量数据
+        // P1-fix: 使用 ConcurrentHashMap 替代 EnumMap，保证多线程安全
         Map<LinkQuality.LinkType, LinkQuality> droneData = qualityData.computeIfAbsent(
-                sysid, k -> new EnumMap<>(LinkQuality.LinkType.class));
+                sysid, k -> new ConcurrentHashMap<>());
         for (LinkQuality lq : qualities) {
             droneData.put(lq.getLinkType(), lq);
         }
@@ -130,7 +130,8 @@ public class LinkQualityMonitor {
         // 计算各链路评分
         LinkQuality.LinkType bestLink = null;
         int bestScore = -1;
-        Map<LinkQuality.LinkType, LinkQuality> details = new EnumMap<>(LinkQuality.LinkType.class);
+        // P1-fix: 使用 ConcurrentHashMap 替代 EnumMap，保证多线程安全
+        Map<LinkQuality.LinkType, LinkQuality> details = new ConcurrentHashMap<>();
 
         for (Map.Entry<LinkQuality.LinkType, LinkQuality> entry : droneData.entrySet()) {
             LinkQuality lq = entry.getValue();
@@ -172,9 +173,11 @@ public class LinkQualityMonitor {
     public Map<LinkQuality.LinkType, LinkQuality> getLatestData(int sysid) {
         Map<LinkQuality.LinkType, LinkQuality> data = qualityData.get(sysid);
         if (data == null) {
-            return new EnumMap<>(LinkQuality.LinkType.class);
+            // P1-fix: 使用 ConcurrentHashMap 替代 EnumMap，保证线程安全
+            return new ConcurrentHashMap<>();
         }
-        return new EnumMap<>(data);
+        // P1-fix: 返回 ConcurrentHashMap 的副本，保证线程安全
+        return new ConcurrentHashMap<>(data);
     }
 
     /**
@@ -235,7 +238,8 @@ public class LinkQualityMonitor {
      * @param sysid 无人机 systemId
      */
     public void initDrone(int sysid) {
-        qualityData.computeIfAbsent(sysid, k -> new EnumMap<>(LinkQuality.LinkType.class));
+        // P1-fix: 使用 ConcurrentHashMap 替代 EnumMap，保证多线程安全
+        qualityData.computeIfAbsent(sysid, k -> new ConcurrentHashMap<>());
         collectQuality(sysid);
     }
 
