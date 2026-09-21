@@ -109,7 +109,7 @@ function fmtCoord(v, suffix) {
   return Number(v).toFixed(6) + (suffix || '')
 }
 
-export default function TrackingPanel() {
+export default function TrackingPanel({ onTrackLoaded }) {
   // ---- 失联列表（轮询）----
   const [lostDrones, setLostDrones] = useState([])
   const [lostError, setLostError] = useState(null)
@@ -157,6 +157,13 @@ export default function TrackingPanel() {
         const list = Array.isArray(data) ? data : (data && data.drones) || (data && data.list) || []
         setLostDrones(list)
         setLostError(null)
+        if (onTrackLoaded) {
+          onTrackLoaded({
+            lostDrones: list.map(normLost),
+            searchGuide: guide ? normGuide(guide) : null,
+            queryTrack: null,
+          })
+        }
       } catch (e) {
         if (cancelled || controller.signal.aborted) return
         // 轮询失败不抛出，仅标记错误，下次轮询自愈
@@ -195,6 +202,13 @@ export default function TrackingPanel() {
         const data = await getSearchGuide(selectedSysid, { signal: controller.signal })
         if (cancelled || controller.signal.aborted) return
         setGuide(data)
+        if (onTrackLoaded) {
+          onTrackLoaded({
+            lostDrones: lostDrones.map(normLost),
+            searchGuide: normGuide(data),
+            queryTrack: null,
+          })
+        }
       } catch (e) {
         if (cancelled || controller.signal.aborted) return
         setGuideError(e && e.message ? e.message : String(e))
@@ -232,6 +246,14 @@ export default function TrackingPanel() {
       if (controller.signal.aborted) return
       const list = Array.isArray(data) ? data : (data && data.points) || (data && data.track) || []
       setTrackPoints(list)
+      if (onTrackLoaded && list.length > 0) {
+        const normalized = list.map(normTrackPoint)
+        onTrackLoaded({
+          queryTrack: normalized,
+          lostDrones: lostDrones.map(normLost),
+          searchGuide: guide ? normGuide(guide) : null,
+        })
+      }
     } catch (e) {
       if (controller.signal.aborted) return
       setTrackError(e && e.message ? e.message : String(e))
@@ -298,7 +320,14 @@ export default function TrackingPanel() {
   // ---- 点击失联无人机行 ----
   const handleSelectLost = useCallback((sysid) => {
     setSelectedSysid((prev) => (prev === sysid ? null : sysid))
-  }, [])
+    if (onTrackLoaded) {
+      onTrackLoaded({
+        lostDrones: lostDrones.map(normLost),
+        searchGuide: null,
+        queryTrack: null,
+      })
+    }
+  }, [onTrackLoaded, lostDrones])
 
   // ---- 派生：归一化失联列表 ----
   const lostNorm = lostDrones.map(normLost)
@@ -309,6 +338,15 @@ export default function TrackingPanel() {
         ? scanResult.newlyLost
         : (scanResult.newlyLost && scanResult.newlyLost.drones) || []).map(normLost)
     : []
+
+  // ---- 组件卸载时清理地图叠加 ----
+  useEffect(() => {
+    return () => {
+      if (onTrackLoaded) {
+        onTrackLoaded(null)
+      }
+    }
+  }, [onTrackLoaded])
 
   return (
     <div style={{ padding: 16, color: 'var(--text)' }}>

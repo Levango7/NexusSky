@@ -104,6 +104,11 @@ export default function App() {
   const [telemetryHistory, setTelemetryHistory] = useState([]) // 遥测历史数据点（最近 120 个）
   const [mobileRail, setMobileRail] = useState(null) // 移动端侧栏抽屉：null | 'left' | 'right'
   const [budgetMode, setBudgetMode] = useState(null) // 丐版预算档位：null=完整版 | 'toy' | 'standard' | 'advanced'
+  const [multiTracks, setMultiTracks] = useState({})        // 多机轨迹：{ sysid: [{lat, lon, alt, ts}] }
+  const [trackColorMode, setTrackColorMode] = useState('single')  // 轨迹着色模式
+  const [replayTrack, setReplayTrack] = useState(null)      // 2D回放轨迹数据
+  const [replayProgress, setReplayProgress] = useState(0)   // 回放进度 0-1
+  const [trackingOverlay, setTrackingOverlay] = useState(null)  // 追踪面板叠加数据
   const wsRef = useRef(null)
   // 用 ref 跟踪 selectedSysid，使 WebSocket onmessage 能读取最新值而无需重连
   // 经验来源：2026-09-13-yjs-multi-provider-destroy-order（effect 依赖与 ref 解耦模式）
@@ -195,6 +200,16 @@ export default function App() {
           if (msg.sysid === selectedSysidRef.current) {
             setTelemetry((prev) => ({ ...(prev || {}), ...msg.data, sysid: msg.sysid }))
           }
+          // 累积多机轨迹（每架机保留最近30个点）
+          setMultiTracks((prev) => {
+            const sysid = msg.sysid
+            const d = msg.data || {}
+            if (d.lat == null || d.lon == null) return prev
+            const point = { lat: d.lat, lon: d.lon, alt: d.relativeAlt || d.alt || 0, ts: Date.now() }
+            const existing = prev[sysid] || []
+            const next = [...existing, point]
+            return { ...prev, [sysid]: next.length > 30 ? next.slice(next.length - 30) : next }
+          })
           // 追加遥测历史数据点（保留最近 120 个）
           const d = msg.data || {}
           setTelemetryHistory((prev) => {
@@ -409,7 +424,9 @@ export default function App() {
         </div>
       ) : view === 'tracking' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
-          <TrackingPanel />
+          <TrackingPanel
+            onTrackLoaded={(overlay) => setTrackingOverlay(overlay)}
+          />
         </div>
       ) : view === 'geofence' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
@@ -515,6 +532,14 @@ export default function App() {
             missionDraft={missionDraft}
             selected={selected}
             orbitOverlay={orbitOverlay}
+            drones={drones}
+            multiTracks={multiTracks}
+            trackColorMode={trackColorMode}
+            replayTrack={replayTrack}
+            replayProgress={replayProgress}
+            formations={formations}
+            trackingOverlay={trackingOverlay}
+            onDroneSelect={(sysid) => setSelectedSysid(sysid)}
             onMapClick={({ lat, lon }) => {
               // Shift+click on the map appends a waypoint to the draft
               setMissionDraft((prev) => [

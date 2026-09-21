@@ -760,3 +760,46 @@ body {
 .error-boundary-icon { font-size: 24px; }
 .error-boundary-text { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .error-boundary-detail { font-size: 12px; opacity: 0.8; }
+/* ============ 可视化增强 — 多机态势感知 ============ */
+
+/* 多机标记容器（HTML Marker） */
+.drone-marker-multi {
+  cursor: pointer;
+  filter: drop-shadow(0 0 6px rgba(0, 0, 0, .5));
+  transition: transform .15s;
+}
+.drone-marker-multi:hover {
+  transform: scale(1.15);
+  z-index: 10;
+}
+
+/* 回放标记容器（HTML Marker） */
+.replay-marker {
+  filter: drop-shadow(0 0 10px rgba(255, 51, 51, .8));
+  z-index: 20;
+}
+
+/* 轨迹着色模式切换按钮组 */
+.track-color-mode-btns {
+  background: rgba(13, 17, 26, .82);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 4px;
+}
+.track-color-mode-btns .btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+.track-color-mode-btns .btn.primary {
+  border-color: rgba(0, 212, 255, .5);
+  color: var(--cyan);
+  background: var(--cyan-dim);
+}
+
+/* 编队标签（MapLibre symbol layer 文字） */
+.maplibregl-canvas-container .formation-labels {
+  font-family: var(--mono);
+  font-weight: 700;
+}
