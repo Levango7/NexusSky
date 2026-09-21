@@ -1,8 +1,11 @@
 package io.aerofleet.cloud.surveillance;
 
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -17,31 +20,64 @@ import java.util.stream.Collectors;
  * <p>
  * 以设备 ID 为键，使用 {@link ConcurrentHashMap} 保证并发读写安全。
  * <p>
- * 与 {@code io.aerofleet.cloud.gateway.DeviceRegistry} 风格保持一致：
+ * 混合模式：内存缓存 + JPA 持久化。
  * <ul>
- *   <li>纯内存实现，重启后状态丢失（与 DeviceRegistry 默认行为一致）</li>
- *   <li>支持心跳更新与超时清理（{@link #pruneStaleDevices(long)}）</li>
- *   <li>支持按厂商筛选（{@link #listDevicesByVendor(SurveillanceDevice.Vendor)}）</li>
+ *   <li>所有读操作从内存缓存读取，保证低延迟</li>
+ *   <li>register/unregister/pruneStaleDevices 同时写内存和数据库</li>
+ *   <li>心跳更新（{@link #updateHeartbeat(String)}）仅写内存，避免高频数据库写入</li>
+ *   <li>启动时通过 {@link #loadFromDatabase()} 从数据库恢复设备列表</li>
  * </ul>
+ * <p>
+ * 当未配置 JPA（如单元测试直接实例化）时，自动降级为纯内存模式。
  */
 @Component
 public class SurveillanceDeviceRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(SurveillanceDeviceRegistry.class);
 
+    @Autowired(required = false)
+    private SurveillanceDeviceRepository repository;
+
     private final Map<String, SurveillanceDevice> devices = new ConcurrentHashMap<>();
 
     /**
+     * 启动时从数据库加载设备到内存缓存。
+     * <p>
+     * 若 repository 未注入（纯内存模式），则跳过。
+     */
+    @PostConstruct
+    public void loadFromDatabase() {
+        if (repository == null) {
+            log.info("SurveillanceDeviceRegistry: 纯内存模式（无 JPA repository）");
+            return;
+        }
+        try {
+            List<SurveillanceDeviceEntity> entities = repository.findAll();
+            for (SurveillanceDeviceEntity entity : entities) {
+                SurveillanceDevice device = entity.toDevice();
+                devices.put(device.id, device);
+            }
+            log.info("SurveillanceDeviceRegistry: 从数据库恢复 {} 台安防设备", entities.size());
+        } catch (Exception e) {
+            log.warn("SurveillanceDeviceRegistry: 从数据库加载设备失败: {}", e.getMessage());
+        }
+    }
+
+    /**
      * 注册设备。若同 ID 设备已存在则覆盖。
+     * <p>
+     * 同时写入内存缓存和数据库。
      *
      * @param device 待注册设备（id 不可为空）
      * @return 被注册的设备
      */
+    @Transactional
     public SurveillanceDevice register(SurveillanceDevice device) {
         if (device == null) {
             throw new IllegalArgumentException("device must not be null");
         }
         devices.put(device.id, device);
+        persistDevice(device);
         log.info("Surveillance device registered: id={} vendor={} ip={}:{}",
                 device.id, device.vendor, device.ip, device.port);
         return device;
@@ -49,14 +85,18 @@ public class SurveillanceDeviceRegistry {
 
     /**
      * 注销设备。
+     * <p>
+     * 同时从内存缓存和数据库删除。
      *
      * @param deviceId 设备 ID
      * @return 被注销的设备；若不存在返回 null
      */
+    @Transactional
     public SurveillanceDevice unregister(String deviceId) {
         if (deviceId == null) return null;
         SurveillanceDevice removed = devices.remove(deviceId);
         if (removed != null) {
+            deleteDeviceFromDb(deviceId);
             log.info("Surveillance device unregistered: id={}", deviceId);
         }
         return removed;
@@ -101,6 +141,8 @@ public class SurveillanceDeviceRegistry {
 
     /**
      * 更新设备心跳：刷新 lastHeartbeatMs 并标记 ONLINE。
+     * <p>
+     * 仅更新内存缓存，不写数据库（心跳频率较高，避免高频 DB 写入）。
      *
      * @param deviceId 设备 ID
      * @return true 若设备存在并已更新
@@ -115,11 +157,14 @@ public class SurveillanceDeviceRegistry {
     /**
      * 清理超时设备：将 lastHeartbeatMs 距今超过 timeoutMs 的设备标记为 OFFLINE。
      * <p>
+     * 同时更新内存缓存和数据库中的设备状态。
+     * <p>
      * 注意：本方法不删除设备，仅将状态置为 OFFLINE，便于上层持续显示设备列表。
      *
      * @param timeoutMs 超时阈值（毫秒）
      * @return 被标记为 OFFLINE 的设备 ID 列表
      */
+    @Transactional
     public List<String> pruneStaleDevices(long timeoutMs) {
         if (timeoutMs < 0) {
             throw new IllegalArgumentException("timeoutMs must be >= 0");
@@ -139,11 +184,65 @@ public class SurveillanceDeviceRegistry {
                 return dev;
             });
         }
+        // 批量同步离线状态到数据库
+        if (!stale.isEmpty()) {
+            persistStaleStatus(stale);
+        }
         return stale;
     }
 
     /** 当前注册设备总数。 */
     public int size() {
         return devices.size();
+    }
+
+    // ===== 内部持久化方法 =====
+
+    /**
+     * 将设备持久化到数据库。
+     * <p>
+     * 若 repository 未注入则跳过（纯内存模式兼容）。
+     */
+    private void persistDevice(SurveillanceDevice device) {
+        if (repository == null) return;
+        try {
+            SurveillanceDeviceEntity entity = SurveillanceDeviceEntity.fromDevice(device);
+            repository.save(entity);
+        } catch (Exception e) {
+            log.warn("安防设备持久化失败 id={}: {}", device.id, e.getMessage());
+        }
+    }
+
+    /**
+     * 从数据库删除设备。
+     * <p>
+     * 若 repository 未注入则跳过。
+     */
+    private void deleteDeviceFromDb(String deviceId) {
+        if (repository == null) return;
+        try {
+            repository.deleteById(deviceId);
+        } catch (Exception e) {
+            log.warn("安防设备数据库删除失败 id={}: {}", deviceId, e.getMessage());
+        }
+    }
+
+    /**
+     * 批量将离线设备状态同步到数据库。
+     * <p>
+     * 若 repository 未注入则跳过。
+     */
+    private void persistStaleStatus(List<String> staleIds) {
+        if (repository == null) return;
+        try {
+            for (String id : staleIds) {
+                repository.findById(id).ifPresent(entity -> {
+                    entity.setStatus(SurveillanceDevice.Status.OFFLINE.name());
+                    repository.save(entity);
+                });
+            }
+        } catch (Exception e) {
+            log.warn("安防设备离线状态同步失败: {}", e.getMessage());
+        }
     }
 }

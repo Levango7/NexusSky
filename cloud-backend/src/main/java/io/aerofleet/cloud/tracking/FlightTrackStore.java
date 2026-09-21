@@ -1,7 +1,10 @@
 package io.aerofleet.cloud.tracking;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -12,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 飞行轨迹存储：为每架无人机维护最近 N 条轨迹点。
@@ -21,6 +25,10 @@ import java.util.concurrent.ConcurrentLinkedDeque;
  * 修剪最旧点实现（非严格 N+1 瞬态，但保证最终不超过容量上限）。
  * <p>
  * 默认容量 3600 点，约 3 分钟 @20Hz 遥测速率。
+ * <p>
+ * 持久化策略：仅将每架无人机的最后已知位置定期写入数据库（通过计数器节流，
+ * 每 {@link #PERSIST_INTERVAL} 次 addPoint 写一次），用于重启恢复。
+ * 所有读操作仍从内存读取，不受持久化影响。
  * <p>
  * 轨迹点字段：sysid, timestampMs, lat, lon, alt, vx, vy, vz, heading, batteryPct。
  * 字段使用基本类型 double/int 以便 Jackson 直接序列化为 camelCase JSON。
@@ -37,6 +45,67 @@ public class FlightTrackStore {
     /** sysid -> 轨迹双端队列（最新点在队尾）。 */
     private final Map<Integer, Deque<TrackPoint>> tracks = new ConcurrentHashMap<>();
 
+    /** 最后已知位置持久化 Repository。 */
+    @Autowired(required = false)
+    private DroneLastKnownPositionRepository repository;
+
+    /** addPoint 计数器，用于节流持久化写入频率。 */
+    private final AtomicInteger addCounter = new AtomicInteger(0);
+
+    /** 每 N 次 addPoint 才持久化一次最后已知位置，避免 20Hz 写入压力。 */
+    private static final int PERSIST_INTERVAL = 10;
+
+    /**
+     * 启动时从数据库加载所有无人机的最后已知位置，作为每架机的第一个轨迹点。
+     * 这样重启后前端可立即显示无人机的最后位置，而非空白。
+     */
+    @PostConstruct
+    public void loadLastKnownPositions() {
+        if (repository == null) {
+            log.info("FlightTrackStore: 纯内存模式（无 JPA repository）");
+            return;
+        }
+        try {
+            List<DroneLastKnownPositionEntity> entities = repository.findAll();
+            for (DroneLastKnownPositionEntity entity : entities) {
+                TrackPoint point = entity.toTrackPoint();
+                Deque<TrackPoint> deque = new ConcurrentLinkedDeque<>();
+                deque.addLast(point);
+                tracks.put(point.sysid, deque);
+                log.info("Restored last known position: sysid={} lat={} lon={} alt={}m ts={}",
+                        point.sysid, point.lat, point.lon, point.alt, point.timestampMs);
+            }
+            if (!entities.isEmpty()) {
+                log.info("Loaded {} drone last known positions from database", entities.size());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load last known positions from database: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 关闭时将所有无人机的最后已知位置写入数据库，确保下次重启可恢复。
+     */
+    @PreDestroy
+    public void persistAllOnShutdown() {
+        if (repository == null) return;
+        int saved = 0;
+        for (Map.Entry<Integer, Deque<TrackPoint>> entry : tracks.entrySet()) {
+            TrackPoint last = entry.getValue().peekLast();
+            if (last != null) {
+                try {
+                    DroneLastKnownPositionEntity entity = DroneLastKnownPositionEntity.fromTrackPoint(last);
+                    repository.save(entity);
+                    saved++;
+                } catch (Exception e) {
+                    log.warn("Failed to persist last known position for sysid={} on shutdown: {}",
+                            entry.getKey(), e.getMessage());
+                }
+            }
+        }
+        log.info("Persisted {} drone last known positions on shutdown", saved);
+    }
+
     /** 追加一个轨迹点；超过容量上限时丢弃最旧点。 */
     public void addPoint(int sysid, TrackPoint point) {
         Deque<TrackPoint> deque = tracks.computeIfAbsent(sysid, k -> new ConcurrentLinkedDeque<>());
@@ -46,6 +115,25 @@ public class FlightTrackStore {
             deque.pollFirst();
         }
         log.trace("Track point added: sysid={} size={}", sysid, deque.size());
+
+        // 节流持久化最后已知位置：每 PERSIST_INTERVAL 次 addPoint 写一次数据库
+        if (addCounter.incrementAndGet() % PERSIST_INTERVAL == 0) {
+            persistLastKnown(sysid, point);
+        }
+    }
+
+    /**
+     * 将指定无人机的最后已知位置写入数据库。
+     * 使用 save() 实现 upsert（sysid 为主键，存在则更新）。
+     */
+    private void persistLastKnown(int sysid, TrackPoint point) {
+        if (repository == null) return;
+        try {
+            DroneLastKnownPositionEntity entity = DroneLastKnownPositionEntity.fromTrackPoint(point);
+            repository.save(entity);
+        } catch (Exception e) {
+            log.warn("Failed to persist last known position for sysid={}: {}", sysid, e.getMessage());
+        }
     }
 
     /**
