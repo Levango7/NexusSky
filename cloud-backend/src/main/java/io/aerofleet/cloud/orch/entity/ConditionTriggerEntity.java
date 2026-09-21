@@ -7,8 +7,11 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 /**
  * 条件触发器持久化实体（JPA）。
@@ -16,10 +19,15 @@ import jakarta.persistence.Table;
  * 保存编排计划中条件触发器的类型、条件表达式及触发动作配置。
  */
 @Entity
-@Table(name = "orch_trigger")
+@Table(name = "orch_trigger", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_plan_trigger", columnNames = {"planId", "triggerId"})
+})
 public class ConditionTriggerEntity {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
     @Column(length = 50)
     private String triggerId;
 
@@ -42,6 +50,14 @@ public class ConditionTriggerEntity {
 
     /** JPA 无参构造器（必需）。 */
     public ConditionTriggerEntity() {
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
     }
 
     public String getTriggerId() {

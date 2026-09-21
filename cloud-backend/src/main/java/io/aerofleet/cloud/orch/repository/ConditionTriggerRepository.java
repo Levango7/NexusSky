@@ -13,7 +13,7 @@ import java.util.List;
  * 提供 ConditionTriggerEntity 的持久化 CRUD 操作及按计划 ID 查询能力。
  */
 @Repository
-public interface ConditionTriggerRepository extends JpaRepository<ConditionTriggerEntity, String> {
+public interface ConditionTriggerRepository extends JpaRepository<ConditionTriggerEntity, Long> {
 
     /**
      * 按计划 ID 查询该计划下的所有条件触发器。

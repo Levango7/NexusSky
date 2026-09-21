@@ -33,7 +33,7 @@ import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
 import Trajectory3D from './components/Trajectory3D.jsx'
-import { api, wsUrl, isPanelAvailable, BUDGET_MODES, isAuthenticated, getCurrentUser, logout } from './api.js'
+import { api, getWsUrl, isPanelAvailable, BUDGET_MODES, isAuthenticated, getCurrentUser, logout } from './api.js'
 import BudgetBadge from './components/BudgetBadge.jsx'
 import LoginPanel from './components/LoginPanel.jsx'
 import TenantPanel from './components/TenantPanel.jsx'
@@ -120,6 +120,9 @@ export default function App() {
   // 经验来源：2026-09-13-yjs-multi-provider-destroy-order（effect 依赖与 ref 解耦模式）
   const selectedSysidRef = useRef(selectedSysid)
   selectedSysidRef.current = selectedSysid
+  // 用 ref 跟踪 apiOk，使指数退避 effect 能读取最新值
+  const apiOkRef = useRef(false)
+  apiOkRef.current = apiOk
 
   const selected = drones.find((d) => d.sysid === selectedSysid)
   const onlineCount = drones.filter((d) => d.online).length
@@ -158,10 +161,26 @@ export default function App() {
     }
   }, [])
 
+  // refreshDrones 轮询：正常 2s，API 离线时指数退避（2→4→8→16→30s）
+  // 经验来源：2026-09-19-settimeout-recursive-send-chain-unmount-cleanup（递归 setTimeout + cleanup）
+  const BACKOFF_STEPS = [2000, 4000, 8000, 16000, 30000]
   useEffect(() => {
-    refreshDrones()
-    const timer = setInterval(refreshDrones, 2000)
-    return () => clearInterval(timer)
+    let timer = null
+    let backoffIndex = 0
+
+    const poll = async () => {
+      await refreshDrones()
+      // 通过 ref 读取最新 apiOk 状态，避免闭包捕获旧值
+      if (!apiOkRef.current) {
+        backoffIndex = Math.min(backoffIndex + 1, BACKOFF_STEPS.length - 1)
+      } else {
+        backoffIndex = 0
+      }
+      timer = setTimeout(poll, BACKOFF_STEPS[backoffIndex])
+    }
+
+    timer = setTimeout(poll, BACKOFF_STEPS[0])
+    return () => clearTimeout(timer)
   }, [refreshDrones])
 
   useEffect(() => {

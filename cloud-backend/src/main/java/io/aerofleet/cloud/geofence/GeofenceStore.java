@@ -115,14 +115,21 @@ public class GeofenceStore {
     /** 新增围栏区域；若 zoneId 已存在则覆盖并返回旧值。 */
     @Transactional
     public GeofenceZone addZone(GeofenceZone zone) {
-        GeofenceZone previous = zones.put(zone.getId(), zone);
+        // ID 由业务层分配，校验非零避免无效数据
+        if (zone.getId() <= 0) {
+            throw new IllegalArgumentException("Geofence zone ID must be > 0, got " + zone.getId());
+        }
+        // 先写数据库，成功后再更新内存，保证一致性
         if (zoneRepository != null) {
             try {
                 zoneRepository.save(GeofenceZoneEntity.fromZone(zone));
             } catch (Exception e) {
-                log.warn("Failed to persist geofence zone: id={} err={}", zone.getId(), e.getMessage());
+                log.error("Failed to persist geofence zone, skipping memory update: id={} err={}",
+                        zone.getId(), e.getMessage());
+                return null;
             }
         }
+        GeofenceZone previous = zones.put(zone.getId(), zone);
         if (previous != null) {
             log.info("Geofence zone replaced: id={} name='{}'", zone.getId(), zone.getName());
         } else {
@@ -138,14 +145,17 @@ public class GeofenceStore {
         if (!zones.containsKey(zone.getId())) {
             return null;
         }
-        zones.put(zone.getId(), zone);
+        // 先写数据库，成功后再更新内存，保证一致性
         if (zoneRepository != null) {
             try {
                 zoneRepository.save(GeofenceZoneEntity.fromZone(zone));
             } catch (Exception e) {
-                log.warn("Failed to persist geofence zone update: id={} err={}", zone.getId(), e.getMessage());
+                log.error("Failed to persist geofence zone update, skipping memory update: id={} err={}",
+                        zone.getId(), e.getMessage());
+                return null;
             }
         }
+        zones.put(zone.getId(), zone);
         log.info("Geofence zone updated: id={} name='{}'", zone.getId(), zone.getName());
         return zone;
     }
@@ -153,17 +163,22 @@ public class GeofenceStore {
     /** 删除围栏区域；返回被删除的围栏，不存在返回 null。 */
     @Transactional
     public GeofenceZone removeZone(int zoneId) {
-        GeofenceZone removed = zones.remove(zoneId);
-        if (removed != null) {
-            if (zoneRepository != null) {
-                try {
-                    zoneRepository.deleteById(zoneId);
-                } catch (Exception e) {
-                    log.warn("Failed to delete geofence zone from DB: id={} err={}", zoneId, e.getMessage());
-                }
-            }
-            log.info("Geofence zone removed: id={} name='{}'", zoneId, removed.getName());
+        GeofenceZone removed = zones.get(zoneId);
+        if (removed == null) {
+            return null;
         }
+        // 先删数据库，成功后再删内存，保证一致性
+        if (zoneRepository != null) {
+            try {
+                zoneRepository.deleteById(zoneId);
+            } catch (Exception e) {
+                log.error("Failed to delete geofence zone from DB, skipping memory update: id={} err={}",
+                        zoneId, e.getMessage());
+                return null;
+            }
+        }
+        zones.remove(zoneId);
+        log.info("Geofence zone removed: id={} name='{}'", zoneId, removed.getName());
         return removed;
     }
 
@@ -191,16 +206,19 @@ public class GeofenceStore {
     /** 记入一条越界事件；超过上限时丢弃最旧记录。 */
     @Transactional
     public void recordBreach(GeofenceBreachEvent event) {
-        breachHistory.addLast(event);
-        while (breachHistory.size() > MAX_BREACH_HISTORY) {
-            breachHistory.pollFirst();
-        }
+        // 先写数据库，成功后再更新内存，保证一致性
         if (breachEventRepository != null) {
             try {
                 breachEventRepository.save(GeofenceBreachEventEntity.fromEvent(event));
             } catch (Exception e) {
-                log.warn("Failed to persist breach event: sysid={} err={}", event.getSysid(), e.getMessage());
+                log.error("Failed to persist breach event, skipping memory update: sysid={} err={}",
+                        event.getSysid(), e.getMessage());
+                return;
             }
+        }
+        breachHistory.addLast(event);
+        while (breachHistory.size() > MAX_BREACH_HISTORY) {
+            breachHistory.pollFirst();
         }
         log.warn("Geofence breach: sysid={} zone={} type={} lat={} lon={}",
                 event.getSysid(), event.getZoneName(),
@@ -264,14 +282,16 @@ public class GeofenceStore {
     @Transactional
     public void clearBreachHistory() {
         int n = breachHistory.size();
-        breachHistory.clear();
+        // 先清数据库，成功后再清内存，保证一致性
         if (breachEventRepository != null) {
             try {
                 breachEventRepository.deleteAll();
             } catch (Exception e) {
-                log.warn("Failed to clear breach events from DB: {}", e.getMessage());
+                log.error("Failed to clear breach events from DB, skipping memory update: {}", e.getMessage());
+                return;
             }
         }
+        breachHistory.clear();
         log.info("Geofence breach history cleared: count={}", n);
     }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   createDeliveryTask,
   listDeliveryTasks,
@@ -49,6 +49,14 @@ export default function DeliveryPanel() {
   const [tasks, setTasks] = useState([])
   const [tasksError, setTasksError] = useState(null)
   const [successMsg, setSuccessMsg] = useState(null)
+  const successTimerRef = useRef(null)
+
+  // 组件卸载时清理 successMsg timer，防止 setState 作用于已卸载组件
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    }
+  }, [])
 
   // ---- 选中任务 ----
   const [selectedTaskId, setSelectedTaskId] = useState(null)
@@ -187,7 +195,8 @@ export default function DeliveryPanel() {
       await createDeliveryTask(payload)
       setForm((prev) => ({ ...prev, payloadKg: '', pickupLat: '', pickupLon: '', dropoffLat: '', dropoffLon: '' }))
       setSuccessMsg('配送任务创建成功')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (err) {
       setFormError('创建任务失败：' + (err && err.message ? err.message : String(err)))
     } finally {
@@ -202,7 +211,8 @@ export default function DeliveryPanel() {
     try {
       await optimizeDeliveryRoute(selectedTaskId)
       setSuccessMsg('路线优化已启动')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('路线优化失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -217,7 +227,8 @@ export default function DeliveryPanel() {
     try {
       await startDeliveryTask(selectedTaskId)
       setSuccessMsg('配送已启动')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('启动失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -245,7 +256,8 @@ export default function DeliveryPanel() {
     try {
       await deliverDeliveryTask(selectedTaskId, { method: deliverMethod })
       setSuccessMsg('投放指令已发送')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('投放失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -260,7 +272,8 @@ export default function DeliveryPanel() {
     try {
       await confirmDeliveryTask(selectedTaskId)
       setSuccessMsg('签收确认已提交')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('签收失败：' + (e && e.message ? e.message : String(e)))
     } finally {

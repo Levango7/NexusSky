@@ -23,6 +23,8 @@ public class TaskAssignmentService {
     private final PriorityBlockingQueue<TaskRequest> taskQueue = new PriorityBlockingQueue<>(100,
             Comparator.comparingInt(TaskRequest::getPriority).reversed());
     private final Map<String, AssignmentResult> assignments = new ConcurrentHashMap<>();
+    /** 无人机 → 正在执行的任务ID集合（反向映射，用于负载跟踪） */
+    private final Map<Integer, Set<String>> droneToTaskIds = new ConcurrentHashMap<>();
 
     // --- GA 参数（M10 调度算法优化）---
     /** 任务数低于此值时回退到简单评分，避免 GA 开销无收益 */
@@ -47,13 +49,29 @@ public class TaskAssignmentService {
             return new AssignmentResult(req.getTaskId(), -1, 0, "无可用无人机", false);
         }
 
+        // 优先选择没有正在执行任务的空闲无人机
         DroneSnapshot best = null;
         double bestScore = -1;
         for (DroneSnapshot d : drones) {
+            Set<String> activeTasks = droneToTaskIds.get(d.sysid);
+            if (activeTasks != null && !activeTasks.isEmpty()) {
+                continue; // 跳过有正在执行任务的无人机
+            }
             double score = scoreDrone(d, req);
             if (score > bestScore) {
                 bestScore = score;
                 best = d;
+            }
+        }
+
+        // 所有无人机都有正在执行的任务时，回退到选择评分最高的无人机（允许排队）
+        if (best == null) {
+            for (DroneSnapshot d : drones) {
+                double score = scoreDrone(d, req);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = d;
+                }
             }
         }
 
@@ -363,6 +381,14 @@ public class TaskAssignmentService {
     public synchronized boolean cancelTask(String taskId) {
         AssignmentResult removed = assignments.remove(taskId);
         if (removed != null) {
+            // 从正在执行映射中移除（任务可能已被 poll 开始执行）
+            Set<String> activeTasks = droneToTaskIds.get(removed.getAssignedSysid());
+            if (activeTasks != null) {
+                activeTasks.remove(taskId);
+                if (activeTasks.isEmpty()) {
+                    droneToTaskIds.remove(removed.getAssignedSysid());
+                }
+            }
             // 同步从任务队列移除，避免队列只增不减
             taskQueue.removeIf(req -> req.getTaskId().equals(taskId));
         }
@@ -371,7 +397,32 @@ public class TaskAssignmentService {
 
     /** 从任务队列取出下一个待执行任务（消费队列，避免只增不减）。 */
     public synchronized TaskRequest pollNextTask() {
-        return taskQueue.poll();
+        TaskRequest task = taskQueue.poll();
+        if (task != null) {
+            // 标记任务为正在执行，加入无人机负载映射
+            AssignmentResult assignment = assignments.get(task.getTaskId());
+            if (assignment != null && assignment.isSuccess()) {
+                droneToTaskIds.computeIfAbsent(assignment.getAssignedSysid(), k -> ConcurrentHashMap.newKeySet())
+                        .add(task.getTaskId());
+            }
+        }
+        return task;
+    }
+
+    /** 标记任务完成，从无人机负载映射中移除。 */
+    public synchronized void completeTask(String taskId) {
+        AssignmentResult assignment = assignments.get(taskId);
+        if (assignment != null && assignment.isSuccess()) {
+            Set<String> activeTasks = droneToTaskIds.get(assignment.getAssignedSysid());
+            if (activeTasks != null) {
+                activeTasks.remove(taskId);
+                if (activeTasks.isEmpty()) {
+                    droneToTaskIds.remove(assignment.getAssignedSysid());
+                }
+            }
+            log.info("Task {} completed, removed from drone {} load tracking",
+                    taskId, assignment.getAssignedSysid());
+        }
     }
 
     /**
@@ -392,14 +443,32 @@ public class TaskAssignmentService {
         for (TaskRequest req : pending) {
             DroneSnapshot best = null;
             double bestScore = -1;
+            // 优先选择没有正在执行任务的在线无人机
             for (DroneSnapshot d : drones) {
                 if (!d.online) {
                     continue; // 跳过离线无人机
+                }
+                Set<String> activeTasks = droneToTaskIds.get(d.sysid);
+                if (activeTasks != null && !activeTasks.isEmpty()) {
+                    continue; // 跳过有正在执行任务的无人机
                 }
                 double score = scoreDrone(d, req);
                 if (score > bestScore) {
                     bestScore = score;
                     best = d;
+                }
+            }
+            // 所有在线无人机都有正在执行的任务时，回退到选择评分最高的在线无人机
+            if (best == null) {
+                for (DroneSnapshot d : drones) {
+                    if (!d.online) {
+                        continue;
+                    }
+                    double score = scoreDrone(d, req);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = d;
+                    }
                 }
             }
             if (best != null) {

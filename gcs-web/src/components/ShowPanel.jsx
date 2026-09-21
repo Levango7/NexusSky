@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   createShowFormation,
   listShowFormations,
@@ -61,6 +61,14 @@ export default function ShowPanel() {
   const [successMsg, setSuccessMsg] = useState(null)
   const [startError, setStartError] = useState(null)
   const [abortError, setAbortError] = useState(null)
+  const successTimerRef = useRef(null)
+
+  // 组件卸载时清理 successMsg timer，防止 setState 作用于已卸载组件
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    }
+  }, [])
 
   const [formForm, setFormForm] = useState({
     type: 'LINE',
@@ -156,7 +164,8 @@ export default function ShowPanel() {
       })
       setFormForm((prev) => ({ ...prev, name: '', droneCount: '', spacingM: '' }))
       setSuccessMsg('队形创建成功')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setFormFormError('创建队形失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -199,7 +208,8 @@ export default function ShowPanel() {
       })
       setTaskForm((prev) => ({ ...prev, formationId: '', name: '' }))
       setSuccessMsg('任务创建成功')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setTaskFormError('创建任务失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -242,7 +252,8 @@ export default function ShowPanel() {
       if (musicForm.startTimeOffsetSec) payload.startTimeOffsetSec = Number(musicForm.startTimeOffsetSec)
       await configureShowMusicSync(selectedTaskId, payload)
       setSuccessMsg('音乐同步配置已保存')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setMusicError('配置失败：' + (e && e.message ? e.message : String(e)))
     } finally {

@@ -2,6 +2,7 @@ package io.aerofleet.cloud.orch;
 
 import io.aerofleet.cloud.orch.entity.ConditionTriggerEntity;
 import io.aerofleet.cloud.orch.entity.OrchestrationPlanEntity;
+import io.aerofleet.cloud.orch.enums.PauseReason;
 import io.aerofleet.cloud.orch.enums.PlanStatus;
 import io.aerofleet.cloud.orch.enums.TriggerAction;
 import io.aerofleet.cloud.orch.enums.TriggerType;
@@ -120,11 +121,13 @@ public class TriggerManager {
     public void onEmergencyEnd(EmergencyEndEvent event) {
         log.info("onEmergencyEnd: planId={}, pushing resume notification", event.getPlanId());
 
-        // 查询所有因应急暂停的计划（PAUSED 状态），发布恢复通知
+        // 只恢复因应急暂停的计划（pauseReason=EMERGENCY），手动暂停的计划不受影响
         List<OrchestrationPlanEntity> pausedPlans = findPlansByStatus(PlanStatus.PAUSED);
         for (OrchestrationPlanEntity plan : pausedPlans) {
-            log.info("onEmergencyEnd: notifying resume availability for paused plan {}", plan.getPlanId());
-            eventPublisher.publishEvent(new ResumePlanEvent(this, plan.getPlanId()));
+            if (plan.getPauseReason() == PauseReason.EMERGENCY) {
+                log.info("onEmergencyEnd: notifying resume availability for paused plan {}", plan.getPlanId());
+                eventPublisher.publishEvent(new ResumePlanEvent(this, plan.getPlanId()));
+            }
         }
     }
 
@@ -192,8 +195,13 @@ public class TriggerManager {
     /**
      * 评估触发条件是否满足。
      * <p>
-     * 条件以 JSON 格式存储，支持简单的键值匹配：
-     * 条件 JSON 中的每个键值对必须与 context 中对应键的值匹配。
+     * 条件以 JSON 格式存储，支持：
+     * <ul>
+     *   <li>简单键值匹配：{"key": "value"} → context 中 key 的值须等于 value</li>
+     *   <li>比较运算符：{"key": {"$lt": value}} → context 中 key 的值须小于 value</li>
+     * </ul>
+     * 支持的运算符：$lt (&lt;), $gt (&gt;), $lte (&lt;=), $gte (&gt;=), $ne (!=)
+     * <p>
      * 若条件为空或解析失败，默认返回 true（无条件触发）。
      *
      * @param trigger 触发器实体
@@ -211,9 +219,20 @@ public class TriggerManager {
                     new TypeReference<Map<String, Object>>() {});
 
             for (Map.Entry<String, Object> entry : conditionMap.entrySet()) {
-                Object contextValue = context.get(entry.getKey());
-                if (contextValue == null || !contextValue.toString().equals(entry.getValue().toString())) {
-                    return false;
+                String key = entry.getKey();
+                Object conditionValue = entry.getValue();
+                Object contextValue = context.get(key);
+
+                if (conditionValue instanceof Map) {
+                    // 比较运算符模式：{"key": {"$lt": value, "$gte": value2}}
+                    if (!evaluateOperatorCondition(contextValue, (Map<String, Object>) conditionValue)) {
+                        return false;
+                    }
+                } else {
+                    // 简单等值匹配模式：{"key": "value"}
+                    if (contextValue == null || !contextValue.toString().equals(conditionValue.toString())) {
+                        return false;
+                    }
                 }
             }
             return true;
@@ -222,6 +241,65 @@ public class TriggerManager {
                     trigger.getTriggerId(), e.getMessage());
             return true;
         }
+    }
+
+    /**
+     * 评估比较运算符条件。
+     * <p>
+     * 支持的运算符：$lt (&lt;), $gt (&gt;), $lte (&lt;=), $gte (&gt;=), $ne (!=)
+     * 多个运算符之间为 AND 关系，全部满足才返回 true。
+     *
+     * @param contextValue 上下文中的值
+     * @param operators    运算符映射
+     * @return true 表示所有运算符条件都满足
+     */
+    @SuppressWarnings("unchecked")
+    private boolean evaluateOperatorCondition(Object contextValue, Map<String, Object> operators) {
+        if (contextValue == null) {
+            return false;
+        }
+
+        double contextNum = toDouble(contextValue);
+
+        for (Map.Entry<String, Object> op : operators.entrySet()) {
+            String operator = op.getKey();
+            double targetNum = toDouble(op.getValue());
+
+            switch (operator) {
+                case "$lt":
+                    if (!(contextNum < targetNum)) return false;
+                    break;
+                case "$gt":
+                    if (!(contextNum > targetNum)) return false;
+                    break;
+                case "$lte":
+                    if (!(contextNum <= targetNum)) return false;
+                    break;
+                case "$gte":
+                    if (!(contextNum >= targetNum)) return false;
+                    break;
+                case "$ne":
+                    if (!contextValue.toString().equals(op.getValue().toString())) return false;
+                    break;
+                default:
+                    log.warn("evaluateOperatorCondition: unknown operator {}", operator);
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 将值转换为 double 用于数值比较。
+     *
+     * @param value 待转换的值
+     * @return double 值
+     */
+    private double toDouble(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        return Double.parseDouble(value.toString());
     }
 
     /**

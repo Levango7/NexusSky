@@ -1,21 +1,105 @@
 const BASE = '/api/v1'
 
 // ---- Token management ----
+// Token 持久化到 sessionStorage，页面刷新后可恢复，关闭浏览器即清除
+const TOKEN_KEY = 'nexus_auth_token'
+const USER_KEY = 'nexus_current_user'
+
 let authToken = null
 let currentUser = null
 
-export function setAuthToken(token) { authToken = token }
+// 模块加载时从 sessionStorage 恢复 token 和 user
+try {
+  authToken = sessionStorage.getItem(TOKEN_KEY)
+  currentUser = JSON.parse(sessionStorage.getItem(USER_KEY) || 'null')
+} catch (e) {
+  authToken = null
+  currentUser = null
+}
+
+// 验证 JWT 基本格式：header.payload.signature（三段以 . 分隔，每段非空）
+function isValidJwtFormat(token) {
+  if (typeof token !== 'string' || !token) return false
+  const parts = token.split('.')
+  return parts.length === 3 && parts.every((p) => p.length > 0)
+}
+
+export function setAuthToken(token) {
+  if (!isValidJwtFormat(token)) {
+    throw new Error('Token 格式无效：JWT 应为 header.payload.signature 三段结构')
+  }
+  authToken = token
+  try { sessionStorage.setItem(TOKEN_KEY, token) } catch (e) { /* sessionStorage 不可用时静默降级 */ }
+}
+
 export function getAuthToken() { return authToken }
-export function setCurrentUser(user) { currentUser = user }
+
+export function setCurrentUser(user) {
+  currentUser = user
+  try { sessionStorage.setItem(USER_KEY, JSON.stringify(user)) } catch (e) { /* sessionStorage 不可用时静默降级 */ }
+}
+
 export function getCurrentUser() { return currentUser }
+
 export function isAuthenticated() { return !!authToken }
-export function logout() { authToken = null; currentUser = null }
+
+export function clearAuthToken() {
+  authToken = null
+  currentUser = null
+  try {
+    sessionStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(USER_KEY)
+  } catch (e) { /* sessionStorage 不可用时静默降级 */ }
+}
+
+export function logout() { clearAuthToken() }
+
+// 请求超时错误类型
+export class TimeoutError extends Error {
+  constructor(timeoutMs) {
+    super(`请求超时（${timeoutMs}ms）`)
+    this.name = 'TimeoutError'
+    this.timeoutMs = timeoutMs
+  }
+}
+
+const DEFAULT_TIMEOUT_MS = 15000
 
 async function jsonFetch(url, options = {}) {
+  const { timeout = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options
+
   if (authToken) {
-    options.headers = { ...(options.headers || {}), 'Authorization': `Bearer ${authToken}` }
+    fetchOptions.headers = { ...(fetchOptions.headers || {}), 'Authorization': `Bearer ${authToken}` }
   }
-  const res = await fetch(url, options)
+
+  // AbortController + setTimeout 实现请求超时控制
+  // 经验来源：2026-09-12-abortcontroller-timeout-cleartimeout-finally-block
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeout)
+  fetchOptions.signal = controller.signal
+
+  let res
+  try {
+    res = await fetch(url, fetchOptions)
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new TimeoutError(timeout)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+
+  // 401 响应：token 过期或无效，自动清除并跳转登录
+  if (res.status === 401) {
+    clearAuthToken()
+    // 避免在登录页面自身触发循环跳转
+    if (!location.pathname.includes('/login')) {
+      location.reload()
+    }
+    throw new Error('认证已过期，请重新登录')
+  }
+
   let body = null
   try {
     body = await res.json()
@@ -911,9 +995,18 @@ export const emergencyOrch = {
     }),
 }
 
-export const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${
-  location.host
-}/ws/telemetry`
+// WebSocket URL 构建函数：在 URL 中携带 token 参数
+export function getWsUrl() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  const base = `${proto}://${location.host}/ws/telemetry`
+  if (authToken) {
+    return `${base}?token=${encodeURIComponent(authToken)}`
+  }
+  return base
+}
+
+// 向后兼容：保留 wsUrl 常量导出（基于模块加载时的 token 计算）
+export const wsUrl = getWsUrl()
 // ---- Budget Mode (丐版模式配置) ----
 // 根据预算档位限制可见面板，用于在低成本硬件上裁剪功能。
 // 经验来源：2026-09-17-react-mount-existing-components-export-signature-dialog-wrap（命名导出用法）

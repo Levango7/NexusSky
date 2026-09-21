@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -172,6 +173,20 @@ public class TenantController {
                     return ResponseEntity.noContent().build();
                 })
                 .orElseGet(() -> errorResponse(HttpStatus.NOT_FOUND, "tenant not found"));
+    }
+
+    // =====================================================================
+    // 异常处理
+    // =====================================================================
+
+    /**
+     * 处理 IllegalStateException，返回 409 Conflict。
+     * <p>
+     * 用于 updateTenant 中 code 冲突等业务校验异常。
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalStateException(IllegalStateException e) {
+        return errorResponse(HttpStatus.CONFLICT, e.getMessage());
     }
 
     // =====================================================================

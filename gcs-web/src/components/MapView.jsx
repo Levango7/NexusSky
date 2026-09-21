@@ -36,6 +36,15 @@ const FORMATION_COLORS = [
   '#b5179e', '#7209b7', '#3c096c', '#f72585', '#4361ee',
 ]
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function getDroneColor(sysid) {
   return DRONE_COLORS[sysid % DRONE_COLORS.length]
 }
@@ -102,12 +111,26 @@ function createDroneMarkerSVG(color, heading, isSelected, isOnline) {
   const arrowLen = isSelected ? 12 : 9
   const arrowWidth = isSelected ? 8 : 6
 
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="opacity:${opacity};display:block">
-    <circle cx="${cx}" cy="${cy}" r="${cx - 2}" fill="rgba(0,0,0,.3)" stroke="${strokeColor}" stroke-width="${isSelected ? 2.5 : 1.5}"/>
-    <g transform="rotate(${heading || 0} ${cx} ${cy})">
-      <path d="M${cx} ${cy - arrowLen} L${cx - arrowWidth / 2} ${cy + arrowLen / 2} L${cx + arrowWidth / 2} ${cy + arrowLen / 2} Z" fill="${fillColor}" stroke="${strokeColor}" stroke-width="1"/>
+  const eSize = escapeHtml(size)
+  const eOpacity = escapeHtml(opacity)
+  const eCx = escapeHtml(cx)
+  const eCy = escapeHtml(cy)
+  const eStrokeColor = escapeHtml(strokeColor)
+  const eFillColor = escapeHtml(fillColor)
+  const eStrokeWidth = escapeHtml(isSelected ? 2.5 : 1.5)
+  const eHeading = escapeHtml(heading || 0)
+  const eArrowLen = escapeHtml(arrowLen)
+  const eArrowWidthHalf = escapeHtml(arrowWidth / 2)
+  const eArrowLenHalf = escapeHtml(arrowLen / 2)
+  const eColor = escapeHtml(color)
+  const eCxPlus3 = escapeHtml(cx + 3)
+
+  return `<svg width="${eSize}" height="${eSize}" viewBox="0 0 ${eSize} ${eSize}" style="opacity:${eOpacity};display:block">
+    <circle cx="${eCx}" cy="${eCy}" r="${escapeHtml(cx - 2)}" fill="rgba(0,0,0,.3)" stroke="${eStrokeColor}" stroke-width="${eStrokeWidth}"/>
+    <g transform="rotate(${eHeading} ${eCx} ${eCy})">
+      <path d="M${eCx} ${escapeHtml(cy - arrowLen)} L${escapeHtml(cx - arrowWidth / 2)} ${eArrowLenHalf} L${escapeHtml(cx + arrowWidth / 2)} ${eArrowLenHalf} Z" fill="${eFillColor}" stroke="${eStrokeColor}" stroke-width="1"/>
     </g>
-    ${isSelected ? `<circle cx="${cx}" cy="${cy}" r="${cx + 3}" fill="none" stroke="${color}" stroke-width="2" stroke-dasharray="3,2"/>` : ''}
+    ${isSelected ? `<circle cx="${eCx}" cy="${eCy}" r="${eCxPlus3}" fill="none" stroke="${eColor}" stroke-width="2" stroke-dasharray="3,2"/>` : ''}
   </svg>`
 }
 

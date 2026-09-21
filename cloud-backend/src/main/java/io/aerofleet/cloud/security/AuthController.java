@@ -195,7 +195,7 @@ public class AuthController {
             return result;
         }
         for (String entry : usersConfig.split(",")) {
-            String[] parts = entry.trim().split(":");
+            String[] parts = entry.trim().split(":", 2);
             if (parts.length == 2) {
                 result.put(parts[0].trim(), passwordEncoder.encode(parts[1].trim()));
             }

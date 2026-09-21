@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   createMappingTask,
   listMappingTasks,
@@ -36,6 +36,14 @@ export default function MappingPanel() {
   // ---- 任务列表 ----
   const [tasks, setTasks] = useState([])
   const [tasksError, setTasksError] = useState(null)
+  const successTimerRef = useRef(null)
+
+  // 组件卸载时清理 successMsg timer，防止 setState 作用于已卸载组件
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    }
+  }, [])
 
 
   // ---- 选中任务 ----
@@ -206,7 +214,8 @@ export default function MappingPanel() {
         setRoute(data)
       }
       setSuccessMsg('航线规划成功')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('航线规划失败：' + (e && e.message ? e.message : String(e)))
     } finally {
@@ -238,7 +247,8 @@ export default function MappingPanel() {
     try {
       await generateMappingResult(selectedTaskId)
       setSuccessMsg('测绘成果生成已启动')
-      setTimeout(() => setSuccessMsg(null), 3000)
+      if (successTimerRef.current) clearTimeout(successTimerRef.current)
+      successTimerRef.current = setTimeout(() => setSuccessMsg(null), 3000)
     } catch (e) {
       setDetailError('生成成果失败：' + (e && e.message ? e.message : String(e)))
     } finally {

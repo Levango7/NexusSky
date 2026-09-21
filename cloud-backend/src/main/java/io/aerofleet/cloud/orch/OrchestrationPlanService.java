@@ -3,6 +3,7 @@ package io.aerofleet.cloud.orch;
 import io.aerofleet.cloud.orch.entity.ConditionTriggerEntity;
 import io.aerofleet.cloud.orch.entity.OrchestrationPlanEntity;
 import io.aerofleet.cloud.orch.entity.TaskStepEntity;
+import io.aerofleet.cloud.orch.enums.PauseReason;
 import io.aerofleet.cloud.orch.enums.PlanStatus;
 import io.aerofleet.cloud.orch.enums.StepStatus;
 import io.aerofleet.cloud.orch.event.PausePlanEvent;
@@ -23,6 +24,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -212,6 +215,7 @@ public class OrchestrationPlanService {
         }
 
         plan.setStatus(PlanStatus.PAUSED);
+        plan.setPauseReason(PauseReason.MANUAL);
         planRepository.save(plan);
 
         log.info("暂停编排计划：planId={}", planId);
@@ -346,8 +350,9 @@ public class OrchestrationPlanService {
         OrchestrationPlanEntity plan = planRepository.findById(event.getPlanId()).orElse(null);
         if (plan != null && plan.getStatus() == PlanStatus.RUNNING) {
             plan.setStatus(PlanStatus.PAUSED);
+            plan.setPauseReason(PauseReason.EMERGENCY);
             planRepository.save(plan);
-            log.info("计划 {} 已暂停", event.getPlanId());
+            log.info("计划 {} 已暂停（应急）", event.getPlanId());
         }
     }
 
@@ -390,11 +395,31 @@ public class OrchestrationPlanService {
             // 检查步骤状态是否仍为 PENDING，避免递归调用导致重复启动
             if (step.getStatus() == StepStatus.PENDING) {
                 log.info("推进步骤：planId={}, stepId={}", planId, step.getStepId());
-                stepExecutor.executeStep(step, planId);
+                // 在事务提交后执行步骤，避免长事务阻塞；非事务上下文中同步执行
+                executeStepAfterCommit(step, planId);
             }
         }
 
         checkPlanCompletion(planId);
+    }
+
+    /**
+     * 在事务提交后执行步骤，若不在事务上下文中则同步执行。
+     *
+     * @param step   步骤实体
+     * @param planId 计划 ID
+     */
+    private void executeStepAfterCommit(TaskStepEntity step, Long planId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    stepExecutor.executeStep(step, planId);
+                }
+            });
+        } else {
+            stepExecutor.executeStep(step, planId);
+        }
     }
 
     /**
@@ -591,6 +616,14 @@ public class OrchestrationPlanService {
         log.info("重启恢复：发现 {} 个 RUNNING 状态的计划", runningPlans.size());
         for (OrchestrationPlanEntity plan : runningPlans) {
             log.info("恢复计划：planId={}", plan.getPlanId());
+
+            // 重建资源所有权映射，确保 ResourceManager 知道该计划占用的无人机
+            List<Integer> resources = parseResourcePool(plan.getResourcePool());
+            if (!resources.isEmpty()) {
+                resourceManager.allocate(plan.getPlanId(), resources);
+                log.info("恢复计划 {} 资源所有权：drones={}", plan.getPlanId(), resources);
+            }
+
             advanceSteps(plan.getPlanId());
         }
     }

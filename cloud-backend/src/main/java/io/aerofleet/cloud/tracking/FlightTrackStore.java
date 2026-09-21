@@ -49,8 +49,8 @@ public class FlightTrackStore {
     @Autowired(required = false)
     private DroneLastKnownPositionRepository repository;
 
-    /** addPoint 计数器，用于节流持久化写入频率。 */
-    private final AtomicInteger addCounter = new AtomicInteger(0);
+    /** per-drone addPoint 计数器，用于节流每架无人机的持久化写入频率。 */
+    private final Map<Integer, AtomicInteger> droneAddCounters = new ConcurrentHashMap<>();
 
     /** 每 N 次 addPoint 才持久化一次最后已知位置，避免 20Hz 写入压力。 */
     private static final int PERSIST_INTERVAL = 10;
@@ -116,8 +116,9 @@ public class FlightTrackStore {
         }
         log.trace("Track point added: sysid={} size={}", sysid, deque.size());
 
-        // 节流持久化最后已知位置：每 PERSIST_INTERVAL 次 addPoint 写一次数据库
-        if (addCounter.incrementAndGet() % PERSIST_INTERVAL == 0) {
+        // 节流持久化最后已知位置：每 PERSIST_INTERVAL 次 addPoint 写一次数据库（per-drone 计数）
+        AtomicInteger counter = droneAddCounters.computeIfAbsent(sysid, k -> new AtomicInteger(0));
+        if (counter.incrementAndGet() % PERSIST_INTERVAL == 0) {
             persistLastKnown(sysid, point);
         }
     }

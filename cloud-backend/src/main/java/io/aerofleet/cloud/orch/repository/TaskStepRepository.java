@@ -14,7 +14,7 @@ import java.util.List;
  * 提供 TaskStepEntity 的持久化 CRUD 操作及按计划 ID、状态查询能力。
  */
 @Repository
-public interface TaskStepRepository extends JpaRepository<TaskStepEntity, String> {
+public interface TaskStepRepository extends JpaRepository<TaskStepEntity, Long> {
 
     /**
      * 按计划 ID 查询该计划下的所有步骤。

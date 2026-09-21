@@ -91,7 +91,14 @@ public class UserController {
     @RequireRole(Role.ADMIN)
     public ResponseEntity<?> getUser(@PathVariable Integer id) {
         return userRepository.findById(id)
-                .map(user -> ResponseEntity.ok(toResponse(user)))
+                .map(user -> {
+                    // 跨租户访问控制：非全局管理员只能访问本租户用户
+                    Integer currentTenantId = TenantContext.getTenantId();
+                    if (currentTenantId != null && !currentTenantId.equals(user.getTenantId())) {
+                        return errorResponse(HttpStatus.NOT_FOUND, "user not found");
+                    }
+                    return ResponseEntity.ok(toResponse(user));
+                })
                 .orElseGet(() -> errorResponse(HttpStatus.NOT_FOUND, "user not found"));
     }
 
@@ -146,9 +153,15 @@ public class UserController {
     @PutMapping("/{id}")
     @RequireRole(Role.ADMIN)
     public ResponseEntity<?> updateUser(@PathVariable Integer id,
-                                        @RequestBody UserRequest request) {
+                                        @Valid @RequestBody UserRequest request) {
         return userRepository.findById(id)
                 .map(user -> {
+                    // 跨租户访问控制：非全局管理员只能更新本租户用户
+                    Integer currentTenantId = TenantContext.getTenantId();
+                    if (currentTenantId != null && !currentTenantId.equals(user.getTenantId())) {
+                        return errorResponse(HttpStatus.NOT_FOUND, "user not found");
+                    }
+
                     // 校验 role 是否为合法枚举值（如果请求体包含 role）
                     if (request.getRole() != null && !request.getRole().isBlank()) {
                         try {
@@ -198,6 +211,12 @@ public class UserController {
                                         HttpServletRequest request) {
         return userRepository.findById(id)
                 .map(user -> {
+                    // 跨租户访问控制：非全局管理员只能删除本租户用户
+                    Integer currentTenantId = TenantContext.getTenantId();
+                    if (currentTenantId != null && !currentTenantId.equals(user.getTenantId())) {
+                        return errorResponse(HttpStatus.NOT_FOUND, "user not found");
+                    }
+
                     // 不允许删除自己
                     String currentUsername = extractUsername(request);
                     if (currentUsername != null && currentUsername.equals(user.getUsername())) {

@@ -3,6 +3,10 @@ package io.aerofleet.cloud.orch;
 import io.aerofleet.cloud.orch.entity.ConditionTriggerEntity;
 import io.aerofleet.cloud.orch.entity.OrchestrationPlanEntity;
 import io.aerofleet.cloud.orch.entity.TaskStepEntity;
+import io.aerofleet.cloud.orch.enums.ModuleType;
+import io.aerofleet.cloud.orch.enums.StepAction;
+import io.aerofleet.cloud.orch.enums.TriggerAction;
+import io.aerofleet.cloud.orch.enums.TriggerType;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -15,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,8 +57,22 @@ public class OrchestrationController {
     /** 创建编排计划。 */
     @PostMapping("/plans")
     public ResponseEntity<Map<String, Object>> createPlan(@RequestBody CreatePlanRequest req) {
+        List<TaskStepEntity> stepEntities = new ArrayList<>();
+        if (req.getSteps() != null) {
+            for (TaskStepRequest stepReq : req.getSteps()) {
+                stepEntities.add(toTaskStepEntity(stepReq));
+            }
+        }
+
+        List<ConditionTriggerEntity> triggerEntities = new ArrayList<>();
+        if (req.getTriggers() != null) {
+            for (TriggerRequest triggerReq : req.getTriggers()) {
+                triggerEntities.add(toConditionTriggerEntity(triggerReq));
+            }
+        }
+
         Long planId = planService.createPlan(
-                req.getName(), req.getResourcePool(), req.getSteps(), req.getTriggers());
+                req.getName(), req.getResourcePool(), stepEntities, triggerEntities);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("planId", planId);
         result.put("status", "DRAFT");
@@ -122,6 +141,31 @@ public class OrchestrationController {
         return ResponseEntity.ok(planService.getProgress(planId));
     }
 
+    // ==================== DTO → Entity 转换 ====================
+
+    private TaskStepEntity toTaskStepEntity(TaskStepRequest req) {
+        TaskStepEntity entity = new TaskStepEntity();
+        entity.setStepId(req.getStepId());
+        entity.setModule(req.getModule());
+        entity.setAction(req.getAction());
+        entity.setParams(req.getParams());
+        entity.setRequiredResources(req.getRequiredResources());
+        entity.setDependsOn(req.getDependsOn());
+        entity.setContinueOnFailure(req.getContinueOnFailure());
+        entity.setTimeoutMs(req.getTimeoutMs());
+        return entity;
+    }
+
+    private ConditionTriggerEntity toConditionTriggerEntity(TriggerRequest req) {
+        ConditionTriggerEntity entity = new ConditionTriggerEntity();
+        entity.setTriggerId(req.getTriggerId());
+        entity.setType(req.getType());
+        entity.setCondition(req.getCondition());
+        entity.setAction(req.getAction());
+        entity.setTargetPlanId(req.getTargetPlanId());
+        return entity;
+    }
+
     // ==================== 异常处理 ====================
 
     /** 参数校验失败 → 400 Bad Request。 */
@@ -149,8 +193,8 @@ public class OrchestrationController {
 
         private String name;
         private List<Integer> resourcePool;
-        private List<TaskStepEntity> steps;
-        private List<ConditionTriggerEntity> triggers;
+        private List<TaskStepRequest> steps;
+        private List<TriggerRequest> triggers;
 
         public String getName() {
             return name;
@@ -168,20 +212,147 @@ public class OrchestrationController {
             this.resourcePool = resourcePool;
         }
 
-        public List<TaskStepEntity> getSteps() {
+        public List<TaskStepRequest> getSteps() {
             return steps;
         }
 
-        public void setSteps(List<TaskStepEntity> steps) {
+        public void setSteps(List<TaskStepRequest> steps) {
             this.steps = steps;
         }
 
-        public List<ConditionTriggerEntity> getTriggers() {
+        public List<TriggerRequest> getTriggers() {
             return triggers;
         }
 
-        public void setTriggers(List<ConditionTriggerEntity> triggers) {
+        public void setTriggers(List<TriggerRequest> triggers) {
             this.triggers = triggers;
+        }
+    }
+
+    /** 任务步骤请求 DTO，只暴露允许客户端设置的字段。 */
+    public static class TaskStepRequest {
+
+        private String stepId;
+        private ModuleType module;
+        private StepAction action;
+        private String params;
+        private String requiredResources;
+        private String dependsOn;
+        private Boolean continueOnFailure;
+        private Long timeoutMs;
+
+        public String getStepId() {
+            return stepId;
+        }
+
+        public void setStepId(String stepId) {
+            this.stepId = stepId;
+        }
+
+        public ModuleType getModule() {
+            return module;
+        }
+
+        public void setModule(ModuleType module) {
+            this.module = module;
+        }
+
+        public StepAction getAction() {
+            return action;
+        }
+
+        public void setAction(StepAction action) {
+            this.action = action;
+        }
+
+        public String getParams() {
+            return params;
+        }
+
+        public void setParams(String params) {
+            this.params = params;
+        }
+
+        public String getRequiredResources() {
+            return requiredResources;
+        }
+
+        public void setRequiredResources(String requiredResources) {
+            this.requiredResources = requiredResources;
+        }
+
+        public String getDependsOn() {
+            return dependsOn;
+        }
+
+        public void setDependsOn(String dependsOn) {
+            this.dependsOn = dependsOn;
+        }
+
+        public Boolean getContinueOnFailure() {
+            return continueOnFailure;
+        }
+
+        public void setContinueOnFailure(Boolean continueOnFailure) {
+            this.continueOnFailure = continueOnFailure;
+        }
+
+        public Long getTimeoutMs() {
+            return timeoutMs;
+        }
+
+        public void setTimeoutMs(Long timeoutMs) {
+            this.timeoutMs = timeoutMs;
+        }
+    }
+
+    /** 触发器请求 DTO，只暴露允许客户端设置的字段。 */
+    public static class TriggerRequest {
+
+        private String triggerId;
+        private TriggerType type;
+        private String condition;
+        private TriggerAction action;
+        private Long targetPlanId;
+
+        public String getTriggerId() {
+            return triggerId;
+        }
+
+        public void setTriggerId(String triggerId) {
+            this.triggerId = triggerId;
+        }
+
+        public TriggerType getType() {
+            return type;
+        }
+
+        public void setType(TriggerType type) {
+            this.type = type;
+        }
+
+        public String getCondition() {
+            return condition;
+        }
+
+        public void setCondition(String condition) {
+            this.condition = condition;
+        }
+
+        public TriggerAction getAction() {
+            return action;
+        }
+
+        public void setAction(TriggerAction action) {
+            this.action = action;
+        }
+
+        public Long getTargetPlanId() {
+            return targetPlanId;
+        }
+
+        public void setTargetPlanId(Long targetPlanId) {
+            this.targetPlanId = targetPlanId;
         }
     }
 }

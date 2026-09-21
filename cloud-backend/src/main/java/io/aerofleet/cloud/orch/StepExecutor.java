@@ -287,10 +287,10 @@ public class StepExecutor {
         step.setStatus(StepStatus.FAILED);
         step.setFailReason(reason);
 
-        // 释放已分配的资源
-        List<Integer> allocated = resourceManager.getPlanAllocations(planId);
-        if (!allocated.isEmpty()) {
-            resourceManager.release(planId, allocated);
+        // 只释放当前步骤所需的资源，不影响其他步骤的资源
+        List<Integer> stepResources = parseRequiredResources(step.getRequiredResources());
+        if (!stepResources.isEmpty()) {
+            resourceManager.release(planId, stepResources);
         }
 
         log.warn("步骤 {} 执行失败：{}", step.getStepId(), reason);

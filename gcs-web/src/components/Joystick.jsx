@@ -43,6 +43,7 @@ export default function Joystick({ drone }) {
 
   const engage = (e) => {
     if (!drone || !drone.armed) return
+    if (sendingRef.current) return
     sendingRef.current = true
     sendLoop()
     moveStick(e)

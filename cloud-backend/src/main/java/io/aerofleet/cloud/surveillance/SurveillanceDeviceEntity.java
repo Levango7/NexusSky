@@ -45,6 +45,7 @@ public class SurveillanceDeviceEntity {
     @Column(name = "username")
     private String username;
 
+    @Convert(converter = PasswordConverter.class)
     @Column(name = "password")
     private String password;
 

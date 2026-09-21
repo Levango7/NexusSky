@@ -17,6 +17,7 @@ public class UserRequest {
     private String username;
 
     /** 密码明文（创建时必填，更新时可选）。 */
+    @NotBlank(message = "password is required")
     private String password;
 
     /** 角色（必填：ADMIN/OPERATOR/OBSERVER）。 */

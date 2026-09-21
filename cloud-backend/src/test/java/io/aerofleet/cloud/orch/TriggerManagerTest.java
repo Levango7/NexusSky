@@ -2,6 +2,7 @@ package io.aerofleet.cloud.orch;
 
 import io.aerofleet.cloud.orch.entity.ConditionTriggerEntity;
 import io.aerofleet.cloud.orch.entity.OrchestrationPlanEntity;
+import io.aerofleet.cloud.orch.enums.PauseReason;
 import io.aerofleet.cloud.orch.enums.PlanStatus;
 import io.aerofleet.cloud.orch.enums.TriggerAction;
 import io.aerofleet.cloud.orch.enums.TriggerType;
@@ -147,7 +148,9 @@ class TriggerManagerTest {
     void onEmergencyEndPushesResumeNotifications() {
         // Arrange
         OrchestrationPlanEntity pausedPlan1 = buildPlan(1L, PlanStatus.PAUSED, "[1]");
+        pausedPlan1.setPauseReason(PauseReason.EMERGENCY);
         OrchestrationPlanEntity pausedPlan2 = buildPlan(2L, PlanStatus.PAUSED, "[2]");
+        pausedPlan2.setPauseReason(PauseReason.EMERGENCY);
 
         TypedQuery<OrchestrationPlanEntity> mockQuery = mock(TypedQuery.class);
         when(entityManager.createQuery(anyString(), eq(OrchestrationPlanEntity.class)))

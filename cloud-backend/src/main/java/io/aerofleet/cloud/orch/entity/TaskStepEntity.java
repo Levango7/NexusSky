@@ -8,8 +8,11 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 /**
  * 任务步骤持久化实体（JPA）。
@@ -17,10 +20,15 @@ import jakarta.persistence.Table;
  * 保存编排计划中单个步骤的配置、依赖关系及执行状态。
  */
 @Entity
-@Table(name = "orch_step")
+@Table(name = "orch_step", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_plan_step", columnNames = {"planId", "stepId"})
+})
 public class TaskStepEntity {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
     @Column(length = 50)
     private String stepId;
 
@@ -62,6 +70,14 @@ public class TaskStepEntity {
 
     /** JPA 无参构造器（必需）。 */
     public TaskStepEntity() {
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
     }
 
     public String getStepId() {

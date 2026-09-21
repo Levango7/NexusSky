@@ -277,6 +277,10 @@ export default function SurveillancePanel() {
   const [discoverResults, setDiscoverResults] = useState([])
 
   // ---- 轮询设备列表 ----
+  // 使用 ref 读取 selectedDeviceId，避免选中设备变化时重启轮询
+  const selectedDeviceIdRef = useRef(null)
+  selectedDeviceIdRef.current = selectedDeviceId
+
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -289,8 +293,8 @@ export default function SurveillancePanel() {
         // 设备列表为空时清空选中，避免 selectedDeviceId 指向已不存在的设备
         // 导致后续 PTZ / 流请求失败
         if (list.length === 0) {
-          if (selectedDeviceId !== null) setSelectedDeviceId(null)
-        } else if (!list.some((d) => d.id === selectedDeviceId)) {
+          if (selectedDeviceIdRef.current !== null) setSelectedDeviceId(null)
+        } else if (!list.some((d) => d.id === selectedDeviceIdRef.current)) {
           // 默认选中第一个在线设备
           setSelectedDeviceId(list[0].id)
         }
@@ -303,7 +307,7 @@ export default function SurveillancePanel() {
     load()
     const timer = setInterval(load, POLL_MS)
     return () => { cancelled = true; clearInterval(timer) }
-  }, [selectedDeviceId])
+  }, [])
 
   // ---- 轮询安防事件 ----
   useEffect(() => {

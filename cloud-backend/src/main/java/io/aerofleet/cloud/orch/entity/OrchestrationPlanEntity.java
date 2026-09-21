@@ -1,8 +1,8 @@
 package io.aerofleet.cloud.orch.entity;
 
+import io.aerofleet.cloud.orch.enums.PauseReason;
 import io.aerofleet.cloud.orch.enums.PlanStatus;
 
-import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -10,8 +10,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,10 +44,16 @@ public class OrchestrationPlanEntity {
     private Long startTime;
     private Long endTime;
 
-    @OneToMany(mappedBy = "planId", cascade = CascadeType.ALL)
+    /** 暂停原因，用于区分应急暂停和手动暂停 */
+    @Enumerated(EnumType.STRING)
+    private PauseReason pauseReason;
+
+    /** 步骤列表（非持久化，由 Service 层通过 Repository 查询） */
+    @Transient
     private List<TaskStepEntity> steps = new ArrayList<>();
 
-    @OneToMany(mappedBy = "planId", cascade = CascadeType.ALL)
+    /** 触发器列表（非持久化，由 Service 层通过 Repository 查询） */
+    @Transient
     private List<ConditionTriggerEntity> triggers = new ArrayList<>();
 
     /** JPA 无参构造器（必需）。 */
@@ -108,6 +114,14 @@ public class OrchestrationPlanEntity {
 
     public void setEndTime(Long endTime) {
         this.endTime = endTime;
+    }
+
+    public PauseReason getPauseReason() {
+        return pauseReason;
+    }
+
+    public void setPauseReason(PauseReason pauseReason) {
+        this.pauseReason = pauseReason;
     }
 
     public List<TaskStepEntity> getSteps() {
