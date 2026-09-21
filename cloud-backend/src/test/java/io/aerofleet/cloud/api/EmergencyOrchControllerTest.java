@@ -3,6 +3,7 @@ package io.aerofleet.cloud.api;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
 
 import java.util.LinkedHashMap;
@@ -21,11 +22,12 @@ class EmergencyOrchControllerTest {
 
     private EmergencyOrchService service;
     private EmergencyOrchController controller;
+    private final ApplicationEventPublisher noopPublisher = event -> { };
 
     @BeforeEach
     void setUp() {
         // pusher 传 null：测试不验证 WebSocket 推送
-        service = new EmergencyOrchService(null);
+        service = new EmergencyOrchService(null, noopPublisher);
         controller = new EmergencyOrchController(service);
     }
 

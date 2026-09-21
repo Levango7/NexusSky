@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -41,10 +42,11 @@ class AlarmControllerTest {
     private EmergencyCommandWorkflow emergencyWorkflow;
     private OneClickEmergencyResponse oneClickResponse;
     private AlarmController controller;
+    private final ApplicationEventPublisher noopPublisher = event -> { };
 
     @BeforeEach
     void setUp() {
-        EmergencyOrchService orchService = new EmergencyOrchService(null);
+        EmergencyOrchService orchService = new EmergencyOrchService(null, noopPublisher);
         store = new AlarmEventStore();
 
         // 创建 mock AlarmEventRepository 并注入，模拟内存存储行为

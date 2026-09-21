@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -37,11 +38,12 @@ class AlarmLinkageEngineTest {
     private AlarmEventStore store;
     private AlarmToOrchBridge bridge;
     private AlarmLinkageEngine engine;
+    private final ApplicationEventPublisher noopPublisher = event -> { };
 
     @BeforeEach
     void setUp() {
         // EmergencyOrchService pusher 传 null：测试不验证 WebSocket 推送
-        EmergencyOrchService orchService = new EmergencyOrchService(null);
+        EmergencyOrchService orchService = new EmergencyOrchService(null, noopPublisher);
         store = new AlarmEventStore();
 
         // 创建 mock AlarmEventRepository 并注入，模拟内存存储行为

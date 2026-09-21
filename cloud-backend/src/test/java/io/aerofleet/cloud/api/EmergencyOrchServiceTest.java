@@ -2,6 +2,7 @@ package io.aerofleet.cloud.api;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.List;
 import java.util.Map;
@@ -16,8 +17,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("EmergencyOrchService 应急编排服务 (FR-30)")
 class EmergencyOrchServiceTest {
 
+    private final ApplicationEventPublisher noopPublisher = event -> { };
+
     private EmergencyOrchService newService() {
-        return new EmergencyOrchService(null);
+        return new EmergencyOrchService(null, noopPublisher);
     }
 
     @Test

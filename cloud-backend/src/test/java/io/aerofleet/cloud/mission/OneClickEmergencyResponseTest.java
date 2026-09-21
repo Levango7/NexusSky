@@ -4,6 +4,7 @@ import io.aerofleet.cloud.api.EmergencyOrchService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,11 +19,12 @@ class OneClickEmergencyResponseTest {
     private EmergencyCommandWorkflow workflow;
     private EmergencyOrchService orchService;
     private OneClickEmergencyResponse oneClick;
+    private final ApplicationEventPublisher noopPublisher = event -> { };
 
     @BeforeEach
     void setUp() {
         workflow = new EmergencyCommandWorkflow();
-        orchService = new EmergencyOrchService(null);
+        orchService = new EmergencyOrchService(null, noopPublisher);
         oneClick = new OneClickEmergencyResponse(workflow, orchService);
     }
 

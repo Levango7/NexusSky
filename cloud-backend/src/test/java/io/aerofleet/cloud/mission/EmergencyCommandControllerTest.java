@@ -5,6 +5,7 @@ import io.aerofleet.cloud.api.EmergencyOrchService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -29,11 +30,12 @@ class EmergencyCommandControllerTest {
     private MockMvc mockMvc;
     private EmergencyCommandWorkflow workflow;
     private final ObjectMapper json = new ObjectMapper();
+    private final ApplicationEventPublisher noopPublisher = event -> { };
 
     @BeforeEach
     void setUp() {
         workflow = new EmergencyCommandWorkflow();
-        EmergencyOrchService orchService = new EmergencyOrchService(null);
+        EmergencyOrchService orchService = new EmergencyOrchService(null, noopPublisher);
         OneClickEmergencyResponse oneClick = new OneClickEmergencyResponse(workflow, orchService);
         EmergencyCommandController controller = new EmergencyCommandController(workflow, oneClick);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)

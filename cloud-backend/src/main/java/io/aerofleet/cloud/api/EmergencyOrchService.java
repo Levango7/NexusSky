@@ -1,7 +1,10 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.orch.event.EmergencyStartEvent;
+import io.aerofleet.cloud.orch.event.EmergencyEndEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -34,9 +37,12 @@ public class EmergencyOrchService {
     private final AtomicLong planIdGenerator = new AtomicLong(10000);
     /** WebSocket 推送器（可为 null，测试场景）。 */
     private final EmergencyOrchPusher pusher;
+    /** 事件发布器。 */
+    private final ApplicationEventPublisher eventPublisher;
 
-    public EmergencyOrchService(EmergencyOrchPusher pusher) {
+    public EmergencyOrchService(EmergencyOrchPusher pusher, ApplicationEventPublisher eventPublisher) {
         this.pusher = pusher;
+        this.eventPublisher = eventPublisher;
     }
 
     // =====================================================================
@@ -62,6 +68,7 @@ public class EmergencyOrchService {
         log.info("emergency plan started: planId={} scenario={} drones={} radius={}m",
                 planId, scenarioName(scenarioType), droneIds.size(), radius);
         pushPlan(planId, plan);
+        eventPublisher.publishEvent(new EmergencyStartEvent(this, planId, droneIds));
         return planId;
     }
 
@@ -82,6 +89,7 @@ public class EmergencyOrchService {
         updatePhaseStatus(plan, phaseOf(plan), 4); // 4=ABORTED
         log.info("emergency plan aborted: planId={}", planId);
         pushPlan(planId, plan);
+        eventPublisher.publishEvent(new EmergencyEndEvent(this, planId));
         return true;
     }
 
@@ -305,6 +313,9 @@ public class EmergencyOrchService {
         log.debug("emergency mission plan update: planId={} phase={} status={} cov={}%",
                 planId, phase, phaseStatus, coverageRate);
         pushPlan(planId, plan);
+        if (phaseStatus == 3) { // COMPLETED
+            eventPublisher.publishEvent(new EmergencyEndEvent(this, planId));
+        }
     }
 
     /**
