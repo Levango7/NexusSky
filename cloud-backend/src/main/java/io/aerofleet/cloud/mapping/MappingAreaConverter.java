@@ -43,6 +43,9 @@ public class MappingAreaConverter implements AttributeConverter<MappingArea, Str
         if (dbData == null || dbData.isBlank()) {
             return null;
         }
+        if (dbData.length() > 10000) {
+            throw new IllegalArgumentException("MappingArea data too long: " + dbData.length());
+        }
         if (dbData.startsWith("CIRCLE:")) {
             String body = dbData.substring("CIRCLE:".length());
             String[] parts = body.split(",");

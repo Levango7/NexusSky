@@ -2,7 +2,7 @@ package io.aerofleet.cloud.delivery2;
 
 import java.time.Instant;
 
-import jakarta.persistence.Column;
+
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -50,11 +50,8 @@ public class DeliveryTask2 {
     private Integer assignedSysid;
     @Enumerated(EnumType.STRING)
     private Priority priority;
-    @Column(columnDefinition = "TIMESTAMP")
     private Instant startTime;
-    @Column(columnDefinition = "TIMESTAMP")
     private Instant estimatedDeliveryTime;
-    @Column(columnDefinition = "TIMESTAMP")
     private Instant actualDeliveryTime;
     private double routeDistanceKm;
 

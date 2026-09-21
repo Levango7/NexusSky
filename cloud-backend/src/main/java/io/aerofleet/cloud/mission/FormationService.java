@@ -356,7 +356,7 @@ public class FormationService {
      * @throws NotFoundException 编队不存在
      * @throws BadRequestException steps < 1
      */
-    @Transactional
+
     public Map<Integer, List<Formation.GeoPos>> transition(int formationId,
                                                             FormationGeometry.Shape newShape,
                                                             int steps) {

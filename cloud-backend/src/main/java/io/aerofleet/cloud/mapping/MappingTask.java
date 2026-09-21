@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.mapping;
 
-import jakarta.persistence.Column;
+
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -61,10 +61,8 @@ public class MappingTask {
     /** 分配执行的无人机 systemId。 */
     private Integer assignedSysid;
     /** 任务开始时间。 */
-    @Column(columnDefinition = "TIMESTAMP")
     private Instant startTime;
     /** 任务结束时间。 */
-    @Column(columnDefinition = "TIMESTAMP")
     private Instant endTime;
     /** 已采集照片数。 */
     private int photosCaptured;
