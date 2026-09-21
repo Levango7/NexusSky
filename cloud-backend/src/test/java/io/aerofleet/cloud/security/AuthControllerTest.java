@@ -34,7 +34,7 @@ class AuthControllerTest {
     void setUp() {
         tokenProvider = new JwtTokenProvider(SECRET);
         passwordEncoder = new BCryptPasswordEncoder();
-        controller = new AuthController(tokenProvider, passwordEncoder, USERS_CONFIG, EXPIRY_SECONDS);
+        controller = new AuthController(tokenProvider, passwordEncoder, USERS_CONFIG, EXPIRY_SECONDS, null);
     }
 
     /** 构造一个带 remoteAddr 的 MockHttpServletRequest。 */

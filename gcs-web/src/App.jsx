@@ -33,8 +33,11 @@ import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
 import Trajectory3D from './components/Trajectory3D.jsx'
-import { api, wsUrl, isPanelAvailable, BUDGET_MODES } from './api.js'
+import { api, wsUrl, isPanelAvailable, BUDGET_MODES, isAuthenticated, getCurrentUser, logout } from './api.js'
 import BudgetBadge from './components/BudgetBadge.jsx'
+import LoginPanel from './components/LoginPanel.jsx'
+import TenantPanel from './components/TenantPanel.jsx'
+import UserPanel from './components/UserPanel.jsx'
 
 function haversine(a, b) {
   const R = 6371000
@@ -82,9 +85,12 @@ const VIEW_PANEL_MAP = {
   citytwin: 'emergency',   // 数字孪生归入应急范畴（千元级可用）
   delivery: 'mission',     // 物流配送归入任务范畴（千元级可用）
   show: 'formation',       // 编队表演归入编队范畴（千元级可用）
+  tenants: 'status',       // 租户管理归入状态管理（百元级可用）
+  users: 'status',         // 用户管理归入状态管理（百元级可用）
 }
 
 export default function App() {
+  const [authed, setAuthed] = useState(isAuthenticated())
   const [drones, setDrones] = useState([])
   const [selectedSysid, setSelectedSysid] = useState(null)
   const [telemetry, setTelemetry] = useState(null)
@@ -264,6 +270,19 @@ export default function App() {
     }
   }, []) // WebSocket 只连接一次，selectedSysid 变化通过 ref 读取，不重连
 
+  // 未认证时渲染登录面板
+  if (!authed) {
+    return <LoginPanel onLoginSuccess={() => setAuthed(true)} />
+  }
+
+  const currentUser = getCurrentUser()
+  const isAdmin = currentUser && currentUser.role === 'ADMIN'
+
+  const handleLogout = () => {
+    logout()
+    setAuthed(false)
+  }
+
   return (
     <div className="gcs-root">
       <header className="topbar">
@@ -310,6 +329,10 @@ export default function App() {
               { key: 'citytwin', label: '数字孪生' },
               { key: 'delivery', label: '物流配送' },
               { key: 'show', label: '编队表演' },
+              ...(isAdmin ? [
+                { key: 'tenants', label: '租户管理' },
+                { key: 'users', label: '用户管理' },
+              ] : []),
             ]
               .filter((tab) => isPanelAvailable(VIEW_PANEL_MAP[tab.key], budgetMode))
               .map((tab) => (
@@ -368,6 +391,24 @@ export default function App() {
             aria-label="切换操控侧栏"
           >
             <span className="icon">⚙</span>
+          </button>
+          {/* 当前用户信息 */}
+          {currentUser && (
+            <span className="chip" title={currentUser.username}>
+              <span style={{ fontSize: 11, color: 'var(--cyan)' }}>
+                {currentUser.role === 'ADMIN' ? '管理员' : currentUser.role === 'OPERATOR' ? '操作员' : '观察者'}
+              </span>
+              <span className="dim" style={{ fontSize: 10 }}>{currentUser.username}</span>
+            </span>
+          )}
+          {/* 登出按钮 */}
+          <button
+            className="btn"
+            onClick={handleLogout}
+            title="登出"
+            style={{ padding: '4px 10px', fontSize: 11 }}
+          >
+            登出
           </button>
         </div>
       </header>
@@ -475,6 +516,14 @@ export default function App() {
       ) : view === 'show' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <ShowPanel />
+        </div>
+      ) : view === 'tenants' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <TenantPanel />
+        </div>
+      ) : view === 'users' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <UserPanel />
         </div>
       ) : view === 'scene3d' ? (
         <div className="scene3d-layout">

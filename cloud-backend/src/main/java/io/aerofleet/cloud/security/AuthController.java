@@ -2,6 +2,7 @@ package io.aerofleet.cloud.security;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -45,6 +46,8 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final Map<String, String> users; // username -> encoded password
     private final long expirySeconds;
+    /** 可选注入：有 Spring 上下文时使用数据库查询，无上下文时降级为内存模式。 */
+    private final UserRepository userRepository;
     /** 默认只使用直连地址；仅在可信代理覆盖转发头时允许开启。 */
     @Value("${aerofleet.security.trust-forwarded-for:false}")
     private boolean trustForwardedFor;
@@ -56,11 +59,13 @@ public class AuthController {
     public AuthController(JwtTokenProvider tokenProvider,
                           PasswordEncoder passwordEncoder,
                           @Value("${aerofleet.security.users:admin:admin}") String usersConfig,
-                          @Value("${aerofleet.security.jwt-expiry:3600}") long expirySeconds) {
+                          @Value("${aerofleet.security.jwt-expiry:3600}") long expirySeconds,
+                          @Autowired(required = false) UserRepository userRepository) {
         this.tokenProvider = tokenProvider;
         this.passwordEncoder = passwordEncoder;
         this.expirySeconds = expirySeconds;
         this.users = parseUsers(usersConfig);
+        this.userRepository = userRepository;
     }
 
     /**
@@ -89,6 +94,32 @@ public class AuthController {
             return errorResponse(HttpStatus.BAD_REQUEST, "username and password are required");
         }
 
+        // 优先使用 UserRepository（数据库模式），降级到内存模式
+        if (userRepository != null) {
+            var userEntityOpt = userRepository.findByUsername(username);
+            if (userEntityOpt.isEmpty() || !userEntityOpt.get().isEnabled()) {
+                log.warn("登录失败: username={} ip={}", username, clientIp);
+                return errorResponse(HttpStatus.UNAUTHORIZED, "invalid credentials");
+            }
+            UserEntity userEntity = userEntityOpt.get();
+            if (!passwordEncoder.matches(password, userEntity.getPasswordHash())) {
+                log.warn("登录失败: username={} ip={}", username, clientIp);
+                return errorResponse(HttpStatus.UNAUTHORIZED, "invalid credentials");
+            }
+            User user = userEntity.toUser();
+            String token = tokenProvider.generateToken(
+                    user.getUsername(), user.getRole(), user.getTenantId(),
+                    Duration.ofSeconds(expirySeconds));
+            log.info("用户登录成功: username={} ip={}", username, clientIp);
+
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("token", token);
+            resp.put("expiresIn", expirySeconds);
+            resp.put("username", username);
+            return ResponseEntity.ok(resp);
+        }
+
+        // 内存模式降级（无 Spring 上下文或无数据库）
         String encodedPassword = users.get(username);
         if (encodedPassword == null || !passwordEncoder.matches(password, encodedPassword)) {
             log.warn("登录失败: username={} ip={}", username, clientIp);
@@ -128,6 +159,23 @@ public class AuthController {
             return errorResponse(HttpStatus.UNAUTHORIZED, "unable to extract username from token");
         }
 
+        // 数据库模式：刷新时重新查询用户，确保 role/tenant_id 为最新值
+        if (userRepository != null) {
+            var userEntityOpt = userRepository.findByUsername(username);
+            if (userEntityOpt.isEmpty() || !userEntityOpt.get().isEnabled()) {
+                return errorResponse(HttpStatus.UNAUTHORIZED, "user no longer exists or disabled");
+            }
+            User user = userEntityOpt.get().toUser();
+            String newToken = tokenProvider.generateToken(
+                    user.getUsername(), user.getRole(), user.getTenantId(),
+                    Duration.ofSeconds(expirySeconds));
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("token", newToken);
+            resp.put("expiresIn", expirySeconds);
+            return ResponseEntity.ok(resp);
+        }
+
+        // 内存模式降级：不含 role/tenant_id claim
         String newToken = tokenProvider.generateToken(username, Duration.ofSeconds(expirySeconds));
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("token", newToken);

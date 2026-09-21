@@ -11,6 +11,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
  * Spring Security 配置。
@@ -57,7 +58,12 @@ public class SecurityConfig {
                             .requestMatchers("/ws/**").permitAll()
                             .anyRequest().authenticated())
                     .oauth2ResourceServer(oauth2 ->
-                            oauth2.jwt(Customizer.withDefaults()));
+                            oauth2.jwt(Customizer.withDefaults()))
+                    // TenantFilter 在 oauth2ResourceServer 之后执行，
+                    // 从 JWT 提取 tenant_id 设置到 TenantContext
+                    .addFilterAfter(
+                            new TenantFilter(jwtTokenProvider.getDecoder(), devMode),
+                            UsernamePasswordAuthenticationFilter.class);
         }
         return http.build();
     }

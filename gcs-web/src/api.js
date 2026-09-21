@@ -1,6 +1,20 @@
 const BASE = '/api/v1'
 
-async function jsonFetch(url, options) {
+// ---- Token management ----
+let authToken = null
+let currentUser = null
+
+export function setAuthToken(token) { authToken = token }
+export function getAuthToken() { return authToken }
+export function setCurrentUser(user) { currentUser = user }
+export function getCurrentUser() { return currentUser }
+export function isAuthenticated() { return !!authToken }
+export function logout() { authToken = null; currentUser = null }
+
+async function jsonFetch(url, options = {}) {
+  if (authToken) {
+    options.headers = { ...(options.headers || {}), 'Authorization': `Bearer ${authToken}` }
+  }
   const res = await fetch(url, options)
   let body = null
   try {
@@ -816,6 +830,47 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+
+  // ---- Auth ----
+  login: (username, password) => jsonFetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  }),
+  refreshToken: (token) => jsonFetch('/api/auth/refresh', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+  }),
+
+  // ---- Tenants ----
+  listTenants: () => jsonFetch(`${BASE}/tenants`),
+  getTenant: (id) => jsonFetch(`${BASE}/tenants/${id}`),
+  createTenant: (name, code, enabled) => jsonFetch(`${BASE}/tenants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, code, enabled }),
+  }),
+  updateTenant: (id, name, code, enabled) => jsonFetch(`${BASE}/tenants/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, code, enabled }),
+  }),
+  deleteTenant: (id) => jsonFetch(`${BASE}/tenants/${id}`, { method: 'DELETE' }),
+
+  // ---- Users ----
+  listUsers: () => jsonFetch(`${BASE}/users`),
+  getUser: (id) => jsonFetch(`${BASE}/users/${id}`),
+  createUser: (username, password, role, tenantId, enabled) => jsonFetch(`${BASE}/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password, role, tenantId, enabled }),
+  }),
+  updateUser: (id, role, enabled, tenantId, password) => jsonFetch(`${BASE}/users/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, enabled, tenantId, ...(password ? { password } : {}) }),
+  }),
+  deleteUser: (id) => jsonFetch(`${BASE}/users/${id}`, { method: 'DELETE' }),
 }
 
 // ---- Emergency Orchestration (应急任务编排 M9) ----
@@ -1056,4 +1111,7 @@ export const {
   createCityModel, listCityModels, getCityModel, getCitySituation, createCitySimulation, getCitySimulation, startCitySimulation, getCitySimulationFrames, createCityMarker, listCityMarkers,
   createDeliveryTask, listDeliveryTasks, getDeliveryTask, startDeliveryTask, abortDeliveryTask, optimizeDeliveryRoute, deliverDeliveryTask, getDeliveryStatus, confirmDeliveryTask, searchLandingSites,
   createShowFormation, listShowFormations, getShowFormation, calculateShowPositions, createShowTask, listShowTasks, getShowTask, startShowTask, abortShowTask, getShowActions, configureShowMusicSync,
+  login, refreshToken,
+  listTenants, getTenant, createTenant, updateTenant, deleteTenant,
+  listUsers, getUser, createUser, updateUser, deleteUser,
 } = api

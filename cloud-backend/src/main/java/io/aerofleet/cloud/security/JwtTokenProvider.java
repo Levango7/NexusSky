@@ -65,7 +65,7 @@ public class JwtTokenProvider {
     }
 
     /**
-     * 生成 JWT 令牌。
+     * 生成 JWT 令牌（向后兼容版本，不含 role/tenant_id claim）。
      *
      * @param username 主题（用户名）
      * @param expiry  有效期
@@ -80,6 +80,38 @@ public class JwtTokenProvider {
                 .expiresAt(now.plus(expiry))
                 .claim("type", "access")
                 .build();
+        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).keyId("aerofleet").build();
+        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
+    /**
+     * 生成 JWT 令牌（含角色和租户 ID claim）。
+     * <p>
+     * 在标准 claim 之外添加：
+     * <ul>
+     *   <li>{@code role} — 用户角色枚举名称（ADMIN/OPERATOR/OBSERVER）</li>
+     *   <li>{@code tenant_id} — 租户 ID（null 表示全局管理员）</li>
+     * </ul>
+     *
+     * @param username 主题（用户名）
+     * @param role    用户角色
+     * @param tenantId 租户 ID（null 表示全局管理员）
+     * @param expiry  有效期
+     * @return JWT 令牌字符串
+     */
+    public String generateToken(String username, Role role, Integer tenantId, Duration expiry) {
+        Instant now = Instant.now();
+        JwtClaimsSet.Builder claimsBuilder = JwtClaimsSet.builder()
+                .issuer("aerofleet")
+                .subject(username)
+                .issuedAt(now)
+                .expiresAt(now.plus(expiry))
+                .claim("type", "access")
+                .claim("role", role.name());
+        if (tenantId != null) {
+            claimsBuilder.claim("tenant_id", tenantId);
+        }
+        JwtClaimsSet claims = claimsBuilder.build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).keyId("aerofleet").build();
         return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
