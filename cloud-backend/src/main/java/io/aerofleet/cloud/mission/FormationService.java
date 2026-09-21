@@ -9,12 +9,14 @@ import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.LedControlMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,6 +83,37 @@ public class FormationService {
         this.registry = registry;
         this.gateway = gateway;
         this.formationClock = formationClock;
+    }
+
+    @PostConstruct
+    void restoreFormations() {
+        List<FormationEntity> entities = repository.findAll();
+        if (entities.isEmpty()) {
+            return;
+        }
+        int maxId = 0;
+        for (FormationEntity entity : entities) {
+            maxId = Math.max(maxId, entity.getFormationId());
+            if (entity.getState() == Formation.FormationState.DISSOLVED) {
+                continue;
+            }
+            Set<Integer> members = new HashSet<>(entity.getMembers());
+            List<FormationGeometry.LocalPos> localPositions = FormationGeometry.compute(
+                    entity.getShape(), members.size(), entity.getSpacing(), entity.getHeading());
+            Map<Integer, Formation.GeoPos> assignments = assign(
+                    members, localPositions, entity.getRefLat(), entity.getRefLon(), entity.getRefAlt());
+            Formation f = new Formation(entity.getFormationId(), members, entity.getShape(),
+                    entity.getSpacing(), entity.getHeading(), entity.getRefLat(), entity.getRefLon(),
+                    entity.getRefAlt(), assignments, entity.getLeaderSysid());
+            f.state = entity.getState();
+            f.version.incrementAndGet();
+            formations.put(entity.getFormationId(), f);
+            log.info("formation {} restored: members={}, shape={}, state={}",
+                    entity.getFormationId(), f.sortedMembers(), entity.getShape(), entity.getState());
+        }
+        nextFormationId.set(maxId);
+        log.info("restored {} formations from database (nextFormationId={})",
+                formations.size(), nextFormationId.get());
     }
 
     // =====================================================================
@@ -195,7 +228,8 @@ public class FormationService {
         // 持久化编队配置到数据库（只保存核心配置数据，不保存运行时数据）
         repository.save(new FormationEntity(formationId, req.shape,
                 req.spacing, req.heading, req.refLat, req.refLon, req.refAlt,
-                leader, Formation.FormationState.FORMING));
+                leader, Formation.FormationState.FORMING,
+                new ArrayList<>(req.members)));
 
         // 轮询 Leader 心跳以建立队内时钟基准（零修改 TelemetryIngestService）
         formationClock.pollLeaderHeartbeat(leader);
@@ -502,6 +536,7 @@ public class FormationService {
                 // 同步更新持久化实体状态为 DISSOLVED
                 repository.findById(formationId).ifPresent(entity -> {
                     entity.setState(Formation.FormationState.DISSOLVED);
+                    entity.setMembers(new ArrayList<>(f.members));
                     repository.save(entity);
                 });
 
@@ -538,6 +573,7 @@ public class FormationService {
             repository.findById(formationId).ifPresent(entity -> {
                 entity.setState(Formation.FormationState.TRANSITIONING);
                 entity.setShape(finalShape);
+                entity.setMembers(new ArrayList<>(f.members));
                 repository.save(entity);
             });
 
@@ -593,6 +629,19 @@ public class FormationService {
 
         log.info("formation {} dissolved", f.formationId);
         return results;
+    }
+
+    /** 将运行时 Formation 的当前状态回写到数据库（供 FormationKeeper 调用）。 */
+    @Transactional
+    void persistState(int formationId) {
+        Formation f = formations.get(formationId);
+        if (f == null) {
+            return;
+        }
+        repository.findById(formationId).ifPresent(entity -> {
+            entity.setState(f.state);
+            repository.save(entity);
+        });
     }
 
     // =====================================================================

@@ -1,10 +1,17 @@
 package io.aerofleet.cloud.mission;
 
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 编队持久化实体（JPA）。
@@ -30,6 +37,11 @@ public class FormationEntity {
     private double refAlt;
     private int leaderSysid;
 
+    @ElementCollection
+    @CollectionTable(name = "formation_members", joinColumns = @JoinColumn(name = "formation_id"))
+    @Column(name = "member_sysid")
+    private List<Integer> members = new ArrayList<>();
+
     @Enumerated(EnumType.STRING)
     private Formation.FormationState state;
 
@@ -41,7 +53,8 @@ public class FormationEntity {
     public FormationEntity(int formationId, FormationGeometry.Shape shape,
                            double spacing, double heading,
                            double refLat, double refLon, double refAlt,
-                           int leaderSysid, Formation.FormationState state) {
+                           int leaderSysid, Formation.FormationState state,
+                           List<Integer> members) {
         this.formationId = formationId;
         this.shape = shape;
         this.spacing = spacing;
@@ -51,6 +64,7 @@ public class FormationEntity {
         this.refAlt = refAlt;
         this.leaderSysid = leaderSysid;
         this.state = state;
+        this.members = new ArrayList<>(members);
     }
 
     public int getFormationId() {
@@ -116,6 +130,9 @@ public class FormationEntity {
     public void setLeaderSysid(int leaderSysid) {
         this.leaderSysid = leaderSysid;
     }
+
+    public List<Integer> getMembers() { return members; }
+    public void setMembers(List<Integer> members) { this.members = new ArrayList<>(members); }
 
     public Formation.FormationState getState() {
         return state;

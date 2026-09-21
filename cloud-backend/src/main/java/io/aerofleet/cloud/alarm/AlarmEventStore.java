@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 报警事件持久化存储（M10 报警联动编排，FR-31）。
@@ -32,6 +33,15 @@ public class AlarmEventStore {
 
     private final int capacity;
 
+    /**
+     * 事件总数高水位缓存计数器。
+     * <p>
+     * 初始值为 -1 表示「未初始化」；首次写入时通过懒初始化从数据库
+     * {@code count()} 同步一次真实总数，此后每次 store 仅做 O(1) 递增/递减，
+     * 避免每次写入都执行全表 COUNT（O(N) 全表扫描）。
+     */
+    private final AtomicInteger cachedCount = new AtomicInteger(-1);
+
     @Autowired
     private AlarmEventRepository repository;
 
@@ -47,6 +57,26 @@ public class AlarmEventStore {
     }
 
     /**
+     * 懒初始化高水位计数器。
+     * <p>
+     * 仅当计数器尚未初始化（值为负数）时，才执行一次数据库 {@code count()} 同步真实总数。
+     * 使用双重检查 + {@code synchronized(this)} 与 {@link #store(AlarmEvent)} 的锁保持一致，
+     * 保证并发/多线程下初始化只发生一次。
+     * <p>
+     * 采用懒初始化而非 {@code @PostConstruct} 的原因：测试中会手动 {@code new AlarmEventStore()}
+     * 并通过反射注入 mock repository，不会触发 Spring 生命周期回调，故必须在首次写入时兜底初始化。
+     */
+    private void ensureCountInit() {
+        if (cachedCount.get() < 0) {
+            synchronized (this) {
+                if (cachedCount.get() < 0) {
+                    cachedCount.set((int) repository.count());
+                }
+            }
+        }
+    }
+
+    /**
      * 存储报警事件。
      * <p>
      * 容量达到上限时驱逐最旧事件。持久化到数据库。
@@ -55,20 +85,22 @@ public class AlarmEventStore {
      */
     @Transactional
     public synchronized void store(AlarmEvent event) {
+        ensureCountInit();
         repository.save(event);
+        cachedCount.incrementAndGet();
         // 驱逐超容量事件：按时间戳正序（最旧在前），删除超出容量的部分
-        long total = repository.count();
-        if (total > capacity) {
-            int excess = (int) (total - capacity);
+        if (cachedCount.get() > capacity) {
+            int excess = cachedCount.get() - capacity;
             PageRequest oldestPage = PageRequest.of(0, excess, Sort.by("timestampMs").ascending());
             List<AlarmEvent> oldest = repository.findAll(oldestPage).getContent();
             for (AlarmEvent evicted : oldest) {
                 repository.delete(evicted);
+                cachedCount.decrementAndGet();
             }
             log.debug("evicted {} oldest alarm events to maintain capacity {}", excess, capacity);
         }
         log.debug("alarm event stored: id={} type={} total={}",
-                event.getId(), event.getEventType(), repository.count());
+                event.getId(), event.getEventType(), cachedCount.get());
     }
 
     /**

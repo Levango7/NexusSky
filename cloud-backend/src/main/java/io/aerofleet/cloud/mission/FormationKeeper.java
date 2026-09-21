@@ -111,6 +111,7 @@ public class FormationKeeper {
         if (allOnlineMembersInTolerance(f)) {
             f.state = Formation.FormationState.STABLE;
             f.version.incrementAndGet();
+            formationService.persistState(f.formationId);
             log.info("formation {} transition complete -> STABLE", f.formationId);
         }
     }
@@ -124,6 +125,7 @@ public class FormationKeeper {
         if (allOnlineMembersInTolerance(f)) {
             f.state = Formation.FormationState.STABLE;
             f.version.incrementAndGet();
+            formationService.persistState(f.formationId);
             log.info("formation {} forming complete -> STABLE", f.formationId);
         }
     }

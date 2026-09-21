@@ -86,7 +86,9 @@ public class DeliveryController2 {
         if (task.getPayload().getWeightKg() <= 0) {
             throw new BadRequestException("payload weightKg must be > 0");
         }
-        String id = "DT-" + String.format("%04d", taskCounter.incrementAndGet());
+        // 在 id 中引入时间戳分量，避免服务重启后 taskCounter 归零导致与已持久化主键冲突；
+        // taskCounter 仍负责同一毫秒内并发创建时的序号区分。
+        String id = "DT-" + System.currentTimeMillis() + "-" + String.format("%04d", taskCounter.incrementAndGet());
         task.setId(id);
         if (task.getStatus() == null) {
             task.setStatus(DeliveryTask2.Status.PENDING);
