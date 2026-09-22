@@ -39,13 +39,16 @@ public class JwtTokenProvider {
 
     private static final Logger log = LoggerFactory.getLogger(JwtTokenProvider.class);
 
+    /** HMAC-SHA256 最小密钥长度（字节）。 */
+    private static final int MIN_SECRET_BYTES = 32;
+
     private final JwtEncoder encoder;
     private final JwtDecoder decoder;
 
     public JwtTokenProvider(@Value("${aerofleet.security.jwt-secret}") String secret) {
-        if (secret == null || secret.getBytes().length < 32) {
+        if (secret == null || secret.getBytes().length < MIN_SECRET_BYTES) {
             throw new IllegalArgumentException(
-                    "aerofleet.security.jwt-secret must be at least 32 bytes for HMAC-SHA256");
+                    "aerofleet.security.jwt-secret must be at least " + MIN_SECRET_BYTES + " bytes for HMAC-SHA256");
         }
         SecretKey key = new SecretKeySpec(secret.getBytes(), "HmacSHA256");
         JWK jwk = new OctetSequenceKey.Builder(key)

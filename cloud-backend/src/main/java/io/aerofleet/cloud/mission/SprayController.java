@@ -38,6 +38,9 @@ import java.util.Map;
 @RequestMapping("/api/v1/spray")
 public class SprayController {
 
+    /** 喷洒任务最少航点数（起点 + 终点）。 */
+    private static final int MIN_WAYPOINTS = 2;
+
     private final SprayTaskService sprayService;
 
     public SprayController(SprayTaskService sprayService) {
@@ -48,8 +51,8 @@ public class SprayController {
     @PostMapping
     @RequireRole(Role.OPERATOR)
     public Map<String, Object> create(@RequestBody @Valid SprayTaskRequest req) {
-        if (req.waypoints == null || req.waypoints.size() < 2) {
-            throw new BadRequestException("waypoints must have >= 2 points");
+        if (req.waypoints == null || req.waypoints.size() < MIN_WAYPOINTS) {
+            throw new BadRequestException("waypoints must have >= " + MIN_WAYPOINTS + " points");
         }
         SprayTask task = sprayService.create(req);
         Map<String, Object> out = new LinkedHashMap<>();

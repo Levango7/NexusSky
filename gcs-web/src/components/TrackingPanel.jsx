@@ -6,6 +6,7 @@ import {
   getSearchGuide,
   scanLostDrones,
 } from '../api.js'
+import { pick, fmtTime, POLL_MS } from '../utils/panelUtils.js'
 
 // M12 无人机追踪 / 遗失辅助查找面板
 // 失联无人机列表（轮询） + 搜索引导卡片 + 飞行轨迹查询 + 历史轨迹回放 + 手动扫描
@@ -13,17 +14,6 @@ import {
 // 轮询间隔 5s；所有异步请求使用 AbortController 防止竞态
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（竞态守卫）
 
-const POLL_MS = 5000
-
-// ---- 字段兼容提取 ----
-// 后端字段命名未最终确定，按常见命名做兼容兜底
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
 
 // 失联无人机字段归一化
 function normLost(d) {
@@ -60,13 +50,6 @@ function normTrackPoint(p) {
   }
 }
 
-// ---- 时间格式化 ----
-function fmtTime(ts) {
-  if (ts == null) return '--'
-  const t = typeof ts === 'number' ? ts : Date.parse(ts)
-  if (isNaN(t)) return '--'
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
-}
 
 // epoch ms → datetime-local 输入框值（本地时区）
 function msToDatetimeLocal(ms) {

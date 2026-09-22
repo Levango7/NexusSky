@@ -36,6 +36,9 @@ public class RadarController {
     /** 自定义命令 ID：雷达扫描配置（NexusSky 扩展，不与 MAVLink common 冲突）。 */
     private static final int MAV_CMD_NEXUS_RADAR_CONFIG = 420;
 
+    /** 每架机维护的目标列表上限，超过时淘汰最旧目标。 */
+    private static final int MAX_TARGETS_PER_DRONE = 64;
+
     private final ConcurrentHashMap<Integer, RadarScanConfig> configs = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, RadarScanStatus> statuses = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, List<RadarTargetMsg>> targets = new ConcurrentHashMap<>();
@@ -113,7 +116,7 @@ public class RadarController {
             List<RadarTargetMsg> list = existing == null
                     ? new ArrayList<>() : new ArrayList<>(existing);
             list.add(msg);
-            while (list.size() > 64) {
+            while (list.size() > MAX_TARGETS_PER_DRONE) {
                 list.remove(0);
             }
             return list;

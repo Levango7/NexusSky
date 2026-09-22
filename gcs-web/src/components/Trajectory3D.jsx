@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react'
-import { loadThree, geoTo3D } from './Scene3D.jsx'
+import { loadThree, geoTo3D } from './Scene3DUtils.js'
 
 /**
  * Trajectory3D —— 3D 轨迹回放组件

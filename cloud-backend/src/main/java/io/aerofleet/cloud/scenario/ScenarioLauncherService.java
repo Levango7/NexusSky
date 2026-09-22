@@ -33,6 +33,11 @@ public class ScenarioLauncherService {
 
     private static final Logger log = LoggerFactory.getLogger(ScenarioLauncherService.class);
 
+    /** 纬度 1° ≈ 111km（地球近似）。 */
+    private static final double KM_PER_DEG_LAT = 111.0;
+    /** 基准覆盖率（%）。 */
+    private static final double BASE_COVERAGE_PCT = 80.0;
+
     /** 启动记录状态。 */
     public enum LaunchStatus {
         RUNNING, ABORTED, COMPLETED, FAILED
@@ -303,8 +308,8 @@ public class ScenarioLauncherService {
             return wps;
         }
         // 将半径 km 转为纬度/经度偏移（近似：1° lat ≈ 111km）
-        double latOffset = radiusKm / 111.0;
-        double lonOffset = radiusKm / (111.0 * Math.cos(Math.toRadians(centerLat)));
+        double latOffset = radiusKm / KM_PER_DEG_LAT;
+        double lonOffset = radiusKm / (KM_PER_DEG_LAT * Math.cos(Math.toRadians(centerLat)));
         for (int i = 0; i < droneCount; i++) {
             double angle = 2 * Math.PI * i / droneCount;
             double wpLat = centerLat + latOffset * Math.sin(angle);
@@ -322,7 +327,7 @@ public class ScenarioLauncherService {
             return 0.0;
         }
         double ratio = (double) actual / requested;
-        double base = 80.0;
+        double base = BASE_COVERAGE_PCT;
         return Math.round(ratio * base * 10) / 10.0;
     }
 

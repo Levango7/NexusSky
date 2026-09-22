@@ -7,7 +7,7 @@ import {
   getAllLockStates,
   clearLockState,
 } from '../api.js'
-import { fmtTime, toArray } from '../utils/panelUtils.js'
+import { fmtTime, toArray, POLL_MS, cardStyle, miniBtnStyle } from '../utils/panelUtils.js'
 
 // 无人机远程锁定/解锁面板（安全防盗功能）
 // 锁定状态总览 + 已锁定无人机列表 + 锁定操作表单 + 解锁操作 + 清除锁定记录
@@ -16,7 +16,6 @@ import { fmtTime, toArray } from '../utils/panelUtils.js'
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（AbortController 竞态守卫）
 // 注：getLockStatus 为单个无人机锁定状态查询，保留 import 以对齐 api.js 契约
 
-const POLL_MS = 5000
 
 const LOCK_ACTIONS = [
   { key: 'DISARM', label: '解除武装(DISARM)' },
@@ -412,14 +411,7 @@ export default function DroneLockPanel() {
   )
 }
 
-// ===== 内联样式（与 AlarmPanel / SurveillancePanel 保持一致）=====
-const cardStyle = {
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 4,
-  padding: '6px 10px',
-}
-
+// ===== 内联样式（labelStyle/inputStyle/selectStyle 为本面板特有，cardStyle/miniBtnStyle 已从 panelUtils.js 导入）=====
 const labelStyle = {
   fontSize: 10,
   color: 'var(--dim-2)',
@@ -427,16 +419,6 @@ const labelStyle = {
   display: 'flex',
   flexDirection: 'column',
   gap: 2,
-}
-
-const miniBtnStyle = {
-  fontSize: 10,
-  padding: '2px 8px',
-  cursor: 'pointer',
-  border: '1px solid var(--line-2)',
-  background: 'transparent',
-  color: 'var(--dim)',
-  borderRadius: 3,
 }
 
 const inputStyle = {

@@ -12,7 +12,7 @@ import {
   getScenarioDrillResult,
   getScenarioDrillHistory,
 } from '../api.js'
-import { toArray } from '../utils/panelUtils.js'
+import { toArray, pick, fmtTime, POLL_MS } from '../utils/panelUtils.js'
 
 // 应急场景库面板（P1）
 // 场景模板列表 + 模板详情 + 一键启动 + 进行中场景 + 场景历史 + 演练模式
@@ -20,7 +20,6 @@ import { toArray } from '../utils/panelUtils.js'
 // 轮询间隔 5s；AbortController 竞态守卫
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（AbortController 竞态守卫）
 
-const POLL_MS = 5000
 
 // 灾害类型
 const DISASTER_TYPES = [
@@ -46,23 +45,6 @@ function launchStatusMeta(s) {
   return LAUNCH_STATUS[s] || { color: 'var(--dim)', label: s || '--' }
 }
 
-// ---- 字段兼容提取 ----
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
-
-
-// 格式化时间戳
-function fmtTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const t = typeof ts === 'number' ? ts : Date.parse(ts)
-  if (isNaN(t)) return String(ts)
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
-}
 
 export default function ScenarioLibraryPanel() {
   // ---- 模板列表 ----

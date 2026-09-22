@@ -12,6 +12,7 @@ import {
   listLinkageLogs,
   alarmStreamUrl,
 } from '../api.js'
+import { POLL_MS } from '../utils/panelUtils.js'
 
 // M11 报警联动面板
 // 报警事件列表（SSE 实时推送） + 联动规则管理 + 一键应急响应 + 联动日志
@@ -21,7 +22,6 @@ import {
 // 经验来源：2026-09-12-abort-signal-precheck-before-eventsource-subscribe（订阅前置检查）
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（竞态守卫）
 
-const POLL_MS = 5000
 
 // 严重程度元数据
 const SEVERITY_META = {

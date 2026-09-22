@@ -4,12 +4,12 @@
 // 轮询间隔（毫秒）
 export const POLL_MS = 5000
 
-// 时间格式化
+// 时间格式化（兼容数字毫秒时间戳和 ISO 字符串）
 export function fmtTime(ts) {
   if (ts == null || ts === '') return '--'
-  const n = Number(ts)
-  if (!Number.isFinite(n)) return String(ts)
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
+  const t = typeof ts === 'number' ? ts : Date.parse(ts)
+  if (isNaN(t)) return String(ts)
+  return new Date(t).toLocaleString('zh-CN', { hour12: false })
 }
 
 // 规范化列表数据：兼容裸数组 / {key:[]} / 其他对象包裹的数组结构

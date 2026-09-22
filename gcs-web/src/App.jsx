@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import React, { useMemo } from 'react'
 import MapView from './components/MapView.jsx'
 import DroneList from './components/DroneList.jsx'
 import TelemetryPanel from './components/TelemetryPanel.jsx'
@@ -33,11 +33,17 @@ import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
 import Trajectory3D from './components/Trajectory3D.jsx'
-import { api, getWsUrl, isPanelAvailable, BUDGET_MODES, isAuthenticated, getCurrentUser, logout } from './api.js'
+import { api, isPanelAvailable, BUDGET_MODES, getCurrentUser } from './api.js'
 import BudgetBadge from './components/BudgetBadge.jsx'
 import LoginPanel from './components/LoginPanel.jsx'
 import TenantPanel from './components/TenantPanel.jsx'
 import UserPanel from './components/UserPanel.jsx'
+import useAuth from './hooks/useAuth.js'
+import useDrones from './hooks/useDrones.js'
+import useWebSocket from './hooks/useWebSocket.js'
+import useUI, { VIEW_PANEL_MAP } from './hooks/useUI.js'
+import useMission from './hooks/useMission.js'
+import useReplay from './hooks/useReplay.js'
 
 function haversine(a, b) {
   const R = 6371000
@@ -56,73 +62,50 @@ function fmtDur(sec) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-// 视图标签 -> 预算面板名称映射（用于丐版模式下隐藏不可用面板）
-// 经验来源：2026-09-17-react-mount-existing-components-export-signature-dialog-wrap
-const VIEW_PANEL_MAP = {
-  dashboard: 'status',     // 仪表盘/状态（百元级可用）
-  scene3d: 'mission',      // 3D 视图归入千元级（依赖航点/地图渲染）
-  control: 'telemetry',    // 主操控视图（百元级可用，含地图+遥测+航拍）
-  formation: 'formation',  // 编队（千元级可用）
-  spray: 'mission',        // 喷洒属于任务范畴（千元级可用）
-  hardware: 'opticalflow', // 硬件抽象含光流/红外（进阶版可用）
-  mesh: 'mesh',            // Mesh 拓扑（千元级可用）
-  celltower: 'mesh',       // 基站属于 mesh 通信（千元级可用）
-  satlink: 'mesh',         // 星地中继属于通信（千元级可用）
-  terrain: 'mission',      // 地形属于任务规划（千元级可用）
-  emergency: 'emergency',  // 应急编排（千元级可用）
-  surveillance: 'mission', // 安防监控归入任务范畴（千元级可用）
-  alarm: 'emergency',      // 报警联动归入应急范畴（千元级可用）
-  tracking: 'mission',     // 飞行追踪/遗失查找归入任务范畴（千元级可用）
-  geofence: 'mission',     // 电子围栏归入任务范畴（千元级可用）
-  dronelock: 'status',     // 远程锁机归入状态管理（百元级可用）
-  autodispatch: 'emergency', // 自动出警归入应急范畴（千元级可用）
-  scenariolib: 'emergency', // 场景库归入应急范畴（千元级可用）
-  inspection: 'mission',   // 智能巡检归入任务范畴（千元级可用）
-  health: 'status',        // 健康管理归入状态管理（百元级可用）
-  commadapt: 'mesh',       // 通信自适应归入通信范畴（千元级可用）
-  mapping: 'mission',      // 航拍测绘归入任务范畴（千元级可用）
-  voicecmd: 'emergency',   // 语音指挥归入应急范畴（千元级可用）
-  citytwin: 'emergency',   // 数字孪生归入应急范畴（千元级可用）
-  delivery: 'mission',     // 物流配送归入任务范畴（千元级可用）
-  show: 'formation',       // 编队表演归入编队范畴（千元级可用）
-  tenants: 'status',       // 租户管理归入状态管理（百元级可用）
-  users: 'status',         // 用户管理归入状态管理（百元级可用）
-}
-
 export default function App() {
-  const [authed, setAuthed] = useState(isAuthenticated())
-  const [drones, setDrones] = useState([])
-  const [selectedSysid, setSelectedSysid] = useState(null)
-  const [telemetry, setTelemetry] = useState(null)
-  const [track, setTrack] = useState([])
-  const [alerts, setAlerts] = useState([])
-  const [missionDraft, setMissionDraft] = useState([])
-  const [orbitOverlay, setOrbitOverlay] = useState(null)   // {center, radiusM} for the map ring
-  const [wsState, setWsState] = useState('connecting')
-  const [apiOk, setApiOk] = useState(false)
-  const [now, setNow] = useState(Date.now())
-  const [view, setView] = useState('control')               // 'control' | 'dashboard' | 'formation' | 'spray' | 'hardware' | 'mesh' | 'celltower' | 'scene3d'
-  const [formations, setFormations] = useState([])          // 编队列表（WebSocket 推送）
-  const [meshTopology, setMeshTopology] = useState(null)    // mesh 拓扑（WebSocket 推送）
-  const [satLinkData, setSatLinkData] = useState(null)      // sat-link 数据（WebSocket 推送）
-  const [terrainData, setTerrainData] = useState(null)      // terrain 数据（WebSocket 推送）
-  const [cellTowerData, setCellTowerData] = useState(null)  // celltower 数据（WebSocket 推送）
-  const [telemetryHistory, setTelemetryHistory] = useState([]) // 遥测历史数据点（最近 120 个）
-  const [mobileRail, setMobileRail] = useState(null) // 移动端侧栏抽屉：null | 'left' | 'right'
-  const [budgetMode, setBudgetMode] = useState(null) // 丐版预算档位：null=完整版 | 'toy' | 'standard' | 'advanced'
-  const [multiTracks, setMultiTracks] = useState({})        // 多机轨迹：{ sysid: [{lat, lon, alt, ts}] }
-  const [trackColorMode, setTrackColorMode] = useState('single')  // 轨迹着色模式
-  const [replayTrack, setReplayTrack] = useState(null)      // 2D回放轨迹数据
-  const [replayProgress, setReplayProgress] = useState(0)   // 回放进度 0-1
-  const [trackingOverlay, setTrackingOverlay] = useState(null)  // 追踪面板叠加数据
-  const wsRef = useRef(null)
-  // 用 ref 跟踪 selectedSysid，使 WebSocket onmessage 能读取最新值而无需重连
-  // 经验来源：2026-09-13-yjs-multi-provider-destroy-order（effect 依赖与 ref 解耦模式）
-  const selectedSysidRef = useRef(selectedSysid)
-  selectedSysidRef.current = selectedSysid
-  // 用 ref 跟踪 apiOk，使指数退避 effect 能读取最新值
-  const apiOkRef = useRef(false)
-  apiOkRef.current = apiOk
+  // 认证状态
+  const { authed, setAuthed, handleLoginSuccess, handleLogout } = useAuth()
+
+  // 无人机数据（含指数退避轮询、遥测加载）
+  const {
+    drones,
+    selectedSysid,
+    setSelectedSysid,
+    telemetry,
+    setTelemetry,
+    track,
+    apiOk,
+    selectedSysidRef,
+    loadTelemetry,
+  } = useDrones()
+
+  // WebSocket 实时推送数据（依赖 selectedSysidRef 和 setTelemetry）
+  const {
+    wsState,
+    alerts,
+    formations,
+    meshTopology,
+    satLinkData,
+    terrainData,
+    cellTowerData,
+    telemetryHistory,
+    multiTracks,
+  } = useWebSocket(selectedSysidRef, setTelemetry)
+
+  // UI 状态（视图、时钟、移动端侧栏、丐版模式）
+  const { view, setView, now, mobileRail, setMobileRail, budgetMode, setBudgetMode } = useUI()
+
+  // 任务规划
+  const { missionDraft, setMissionDraft, orbitOverlay, setOrbitOverlay } = useMission()
+
+  // 回放与追踪
+  const {
+    replayTrack,
+    replayProgress,
+    trackingOverlay,
+    setTrackingOverlay,
+    trackColorMode,
+  } = useReplay()
 
   const selected = drones.find((d) => d.sysid === selectedSysid)
   const onlineCount = drones.filter((d) => d.online).length
@@ -137,170 +120,13 @@ export default function App() {
     return { dist: d / 1000, dur, maxAlt }
   }, [track])
 
-  const refreshDrones = useCallback(async () => {
-    try {
-      const list = await api.listDrones()
-      setDrones(list)
-      setApiOk(true)
-      if (list.length > 0 && !list.some((d) => d.sysid === selectedSysid)) {
-        setSelectedSysid(list[0].sysid)
-      }
-    } catch (e) {
-      setApiOk(false)
-    }
-  }, [selectedSysid])
-
-  const loadTelemetry = useCallback(async (sysid) => {
-    try {
-      const [t, tr] = await Promise.all([api.getTelemetry(sysid), api.getTrack(sysid)])
-      setTelemetry(t)
-      setTrack(Array.isArray(tr) ? tr : [])
-    } catch (e) {
-      setTelemetry(null)
-      setTrack([])
-    }
-  }, [])
-
-  // refreshDrones 轮询：正常 2s，API 离线时指数退避（2→4→8→16→30s）
-  // 经验来源：2026-09-19-settimeout-recursive-send-chain-unmount-cleanup（递归 setTimeout + cleanup）
-  const BACKOFF_STEPS = [2000, 4000, 8000, 16000, 30000]
-  useEffect(() => {
-    let timer = null
-    let backoffIndex = 0
-
-    const poll = async () => {
-      await refreshDrones()
-      // 通过 ref 读取最新 apiOk 状态，避免闭包捕获旧值
-      if (!apiOkRef.current) {
-        backoffIndex = Math.min(backoffIndex + 1, BACKOFF_STEPS.length - 1)
-      } else {
-        backoffIndex = 0
-      }
-      timer = setTimeout(poll, BACKOFF_STEPS[backoffIndex])
-    }
-
-    timer = setTimeout(poll, BACKOFF_STEPS[0])
-    return () => clearTimeout(timer)
-  }, [refreshDrones])
-
-  useEffect(() => {
-    if (selectedSysid != null) loadTelemetry(selectedSysid)
-  }, [selectedSysid, loadTelemetry])
-
-  // 时钟
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
-  }, [])
-
-  // 丐版模式切换后，若当前视图在该档位下不可用，自动回退到主操控视图
-  useEffect(() => {
-    if (!isPanelAvailable(VIEW_PANEL_MAP[view], budgetMode)) {
-      setView('control')
-    }
-  }, [budgetMode, view])
-
-  // WebSocket 实时遥测（断线 3s 自动重连）
-  useEffect(() => {
-    let ws
-    let closed = false
-    let retryTimer = null
-
-    const connect = () => {
-      ws = new WebSocket(wsUrl)
-      wsRef.current = ws
-      ws.onopen = () => setWsState('open')
-      ws.onclose = () => {
-        setWsState('closed')
-        if (!closed) retryTimer = setTimeout(connect, 3000)
-      }
-      ws.onmessage = (ev) => {
-        let msg
-        try {
-          msg = JSON.parse(ev.data)
-        } catch (e) {
-          return
-        }
-        if (msg.type === 'telemetry' || msg.type === 'status') {
-          if (msg.sysid === selectedSysidRef.current) {
-            setTelemetry((prev) => ({ ...(prev || {}), ...msg.data, sysid: msg.sysid }))
-          }
-          // 累积多机轨迹（每架机保留最近30个点）
-          setMultiTracks((prev) => {
-            const sysid = msg.sysid
-            const d = msg.data || {}
-            if (d.lat == null || d.lon == null) return prev
-            const point = { lat: d.lat, lon: d.lon, alt: d.relativeAlt || d.alt || 0, ts: Date.now() }
-            const existing = prev[sysid] || []
-            const next = [...existing, point]
-            return { ...prev, [sysid]: next.length > 30 ? next.slice(next.length - 30) : next }
-          })
-          // 追加遥测历史数据点（保留最近 120 个）
-          const d = msg.data || {}
-          setTelemetryHistory((prev) => {
-            const point = {
-              ts: Date.now(),
-              sysid: msg.sysid,
-              voltage: d.voltage,
-              battery: d.battery,
-              relativeAlt: d.relativeAlt,
-              groundspeed: d.groundspeed,
-              heading: d.heading,
-            }
-            const next = [...prev, point]
-            return next.length > 120 ? next.slice(next.length - 120) : next
-          })
-        } else if (msg.type === 'alert') {
-          setAlerts((prev) => [{ ...msg.data, ts: Date.now(), sysid: msg.sysid }, ...prev.slice(0, 49)])
-        } else if (msg.type === 'formation') {
-          // 编队状态推送（FormationPusher 1Hz）：data 为单编队或编队数组
-          setFormations((prev) => {
-            const data = msg.data
-            if (Array.isArray(data)) return data
-            if (!data || data.formationId == null) return prev
-            const idx = prev.findIndex((f) => f.formationId === data.formationId)
-            if (idx >= 0) {
-              const next = [...prev]
-              next[idx] = data
-              return next
-            }
-            return [...prev, data]
-          })
-        } else if (msg.type === 'mesh-topology') {
-          // mesh 拓扑变化推送（MeshTopologyPusher 2Hz）
-          setMeshTopology(msg)
-        } else if (msg.type === 'sat-link') {
-          // 星-空-地中继数据推送（SatLinkPusher 2Hz）
-          setSatLinkData(msg)
-        } else if (msg.type === 'terrain-update' || msg.type === 'terrain-restriction') {
-          // 地形变更/限制区推送（TerrainPusher 2Hz，M8 FR-31）
-          setTerrainData(msg)
-        } else if (msg.type === 'celltower-topology') {
-          // 基站拓扑变化推送（CellTowerPusher 2Hz，M6）
-          setCellTowerData(msg)
-        }
-      }
-    }
-    connect()
-    return () => {
-      closed = true
-      clearTimeout(retryTimer)
-      ws.close()
-    }
-  }, []) // WebSocket 只连接一次，selectedSysid 变化通过 ref 读取，不重连
-
   // 未认证时渲染登录面板
   if (!authed) {
-    return <LoginPanel onLoginSuccess={() => setAuthed(true)} />
+    return <LoginPanel onLoginSuccess={handleLoginSuccess} />
   }
 
   const currentUser = getCurrentUser()
   const isAdmin = currentUser && currentUser.role === 'ADMIN'
-
-  const handleLogout = () => {
-    logout()
-    setAuthed(false)
-  }
 
   return (
     <div className="gcs-root">

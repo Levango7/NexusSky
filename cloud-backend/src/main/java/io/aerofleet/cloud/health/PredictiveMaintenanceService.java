@@ -42,6 +42,15 @@ public class PredictiveMaintenanceService {
     private static final double RSSI_CRITICAL = -80.0;
     private static final double RSSI_WARN = -75.0;
 
+    /** 电量骤降阈值（%），低于此值立即提升紧迫度。 */
+    private static final double BATTERY_LOW_PCT = 20.0;
+    /** 振动趋势斜率阈值（>0 表示上升）。 */
+    private static final double VIBRATION_TREND_THRESHOLD = 0.01;
+    /** 温度趋势斜率阈值（>0 表示上升）。 */
+    private static final double TEMP_TREND_THRESHOLD = 0.1;
+    /** RSSI 趋势斜率阈值（<0 表示下降）。 */
+    private static final double RSSI_TREND_THRESHOLD = -0.05;
+
     private final HealthMonitorService monitorService;
 
     public PredictiveMaintenanceService(HealthMonitorService monitorService) {
@@ -130,7 +139,7 @@ public class PredictiveMaintenanceService {
         }
 
         // 电量骤降趋势提升紧迫度
-        if (pct >= 0 && pct < 20) {
+        if (pct >= 0 && pct < BATTERY_LOW_PCT) {
             urgency = MaintenancePrediction.Urgency.IMMEDIATE;
             confidence = Math.max(confidence, 85);
             reason = reason + "; 当前电量 " + pct + "% 过低";
@@ -165,7 +174,7 @@ public class PredictiveMaintenanceService {
             failureDate = LocalDate.now().plusDays(Math.min(daysLeft, 7));
             confidence = 70;
             reason = String.format("振动幅值 %.2fg 接近临界值，建议 %d 天内检修轴承", vibG, daysLeft);
-        } else if (trend > 0.01) {
+        } else if (trend > VIBRATION_TREND_THRESHOLD) {
             // 振动持续上升
             urgency = MaintenancePrediction.Urgency.WITHIN_30_DAYS;
             failureDate = LocalDate.now().plusDays(20);
@@ -206,7 +215,7 @@ public class PredictiveMaintenanceService {
             failureDate = LocalDate.now().plusDays(Math.min(daysLeft, 7));
             confidence = 68;
             reason = String.format("温度 %.1f°C 偏高，建议 %d 天内检查散热", tempC, daysLeft);
-        } else if (trend > 0.1) {
+        } else if (trend > TEMP_TREND_THRESHOLD) {
             urgency = MaintenancePrediction.Urgency.WITHIN_30_DAYS;
             failureDate = LocalDate.now().plusDays(25);
             confidence = 50;
@@ -246,7 +255,7 @@ public class PredictiveMaintenanceService {
             failureDate = LocalDate.now().plusDays(Math.min(daysLeft, 7));
             confidence = 65;
             reason = String.format("RSSI %.0fdBm 偏弱，建议 %d 天内检查天线/模块", rssi, daysLeft);
-        } else if (trend < -0.05) {
+        } else if (trend < RSSI_TREND_THRESHOLD) {
             // RSSI 持续下降
             urgency = MaintenancePrediction.Urgency.WITHIN_30_DAYS;
             failureDate = LocalDate.now().plusDays(20);

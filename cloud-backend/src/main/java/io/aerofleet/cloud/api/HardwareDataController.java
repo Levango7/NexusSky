@@ -9,6 +9,7 @@ import io.aerofleet.mavlink.messages.ImuDataMsg;
 import io.aerofleet.mavlink.messages.LidarDataMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -94,7 +95,7 @@ public class HardwareDataController {
     public ResponseEntity<Map<String, Object>> getRadarConfig(@PathVariable("sysid") int sysid) {
         RadarController.RadarScanConfig cfg = radarController.getConfig(sysid);
         if (cfg == null) {
-            return ResponseEntity.status(404).body(
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
                     Map.of("error", "sysid " + sysid + " radar not configured"));
         }
         return ResponseEntity.ok(radarConfigView(cfg));
@@ -168,7 +169,7 @@ public class HardwareDataController {
     public ResponseEntity<Map<String, Object>> getLidarData(@PathVariable("sysid") int sysid) {
         LidarDataMsg msg = lidarCache.get(sysid);
         if (msg == null) {
-            return ResponseEntity.status(404).body(
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
                     Map.of("error", "sysid " + sysid + " no LiDAR data"));
         }
         Map<String, Object> v = new LinkedHashMap<>();
@@ -187,7 +188,7 @@ public class HardwareDataController {
     public ResponseEntity<Map<String, Object>> getImuData(@PathVariable("sysid") int sysid) {
         ImuDataMsg msg = imuCache.get(sysid);
         if (msg == null) {
-            return ResponseEntity.status(404).body(
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
                     Map.of("error", "sysid " + sysid + " no IMU data"));
         }
         Map<String, Object> v = new LinkedHashMap<>();

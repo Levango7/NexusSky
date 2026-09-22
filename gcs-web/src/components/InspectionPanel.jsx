@@ -10,7 +10,7 @@ import {
   getInspectionAnomalies,
   getInspectionPhotos,
 } from '../api.js'
-import { toArray } from '../utils/panelUtils.js'
+import { toArray, pick, fmtTime, POLL_MS } from '../utils/panelUtils.js'
 
 // 智能巡检面板（P1）
 // 任务创建 + 任务列表 + 任务详情 + 巡检报告 + 异常详情 + 行业预设模板
@@ -18,7 +18,6 @@ import { toArray } from '../utils/panelUtils.js'
 // 轮询间隔 5s；AbortController 竞态守卫
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（AbortController 竞态守卫）
 
-const POLL_MS = 5000
 
 // 行业预设模板
 const INDUSTRY_TEMPLATES = [
@@ -55,23 +54,6 @@ function severityColor(s) {
   return SEVERITY_COLOR[s] || 'var(--dim)'
 }
 
-// ---- 字段兼容提取 ----
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
-
-
-// 格式化时间戳
-function fmtTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const t = typeof ts === 'number' ? ts : Date.parse(ts)
-  if (isNaN(t)) return String(ts)
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
-}
 
 export default function InspectionPanel() {
   // ---- 任务列表 ----

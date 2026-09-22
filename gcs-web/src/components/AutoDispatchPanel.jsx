@@ -14,7 +14,7 @@ import {
   stopVoiceIntercom,
   broadcastVoice,
 } from '../api.js'
-import { toArray } from '../utils/panelUtils.js'
+import { toArray, pick, fmtTime, POLL_MS } from '../utils/panelUtils.js'
 
 // 自动出警面板（P0）
 // 自动出警配置 + 手动触发出警 + 出警历史 + 进行中任务 + 视频流管理 + 语音对讲
@@ -22,25 +22,6 @@ import { toArray } from '../utils/panelUtils.js'
 // 轮询间隔 5s；AbortController 竞态守卫
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（AbortController 竞态守卫）
 
-const POLL_MS = 5000
-
-// ---- 字段兼容提取 ----
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
-
-
-// 格式化时间戳
-function fmtTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const t = typeof ts === 'number' ? ts : Date.parse(ts)
-  if (isNaN(t)) return String(ts)
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
-}
 
 // 出警状态 → 颜色 / 标签
 const DISPATCH_STATUS = {

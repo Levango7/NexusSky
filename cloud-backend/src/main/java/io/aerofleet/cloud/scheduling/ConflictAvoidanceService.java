@@ -41,6 +41,19 @@ public class ConflictAvoidanceService {
     /** 等待盘旋机动：默认等待时间(s) */
     private static final double HOLDING_TIME_SEC = 20.0;
 
+    /** 4D 冲突检测：时间对齐容差(s)，超过则视为未对齐 */
+    private static final double TIME_ALIGN_TOLERANCE_SEC = 0.5;
+    /** 冲突类型判定：HEAD-ON 航向差阈值(°) */
+    private static final double HEAD_ON_HEADING_DIFF = 135.0;
+    /** 冲突类型判定：OVERTAKE 航向差阈值(°) */
+    private static final double OVERTAKE_HEADING_DIFF = 45.0;
+    /** 冲突类型判定：OVERTAKE 速度差阈值(m/s) */
+    private static final double OVERTAKE_SPEED_DIFF = 1.0;
+    /** 高纬度保护：cos(lat) 下限，避免除零/数值爆炸 */
+    private static final double MIN_COS_LAT = 0.01;
+    /** 紧急冲突时间阈值(s)，低于此值速度调整加倍 */
+    private static final double URGENT_CONFLICT_TIME_SEC = 10.0;
+
     /**
      * 4D 空域预约表：sysid -> 该无人机已预约的 4D 区块列表。
      * <p>
@@ -113,7 +126,7 @@ public class ConflictAvoidanceService {
         // 经纬度每米对应的度数（近似，使用当前纬度修正经度收敛）
         double latPerMeter = 1.0 / EARTH_RADIUS_M * 180.0 / Math.PI;
         // 高纬度保护：cos(lat)→0 时避免除零/数值爆炸，下限 0.01 对应约 89.4° 纬度
-        double cosLat = Math.max(0.01, Math.cos(Math.toRadians(lat)));
+        double cosLat = Math.max(MIN_COS_LAT, Math.cos(Math.toRadians(lat)));
         double lonPerMeter = 1.0 / (EARTH_RADIUS_M * cosLat) * 180.0 / Math.PI;
         // 北向/东向分量
         double northComponent = stepMeters * Math.cos(headingRad);
@@ -160,7 +173,7 @@ public class ConflictAvoidanceService {
             // 两航迹点时间应一致（按索引对齐，predictTrajectory4D 保证 t 从 0 起）
             double t1 = p1[3];
             double t2 = p2[3];
-            if (Math.abs(t1 - t2) > 0.5) {
+            if (Math.abs(t1 - t2) > TIME_ALIGN_TOLERANCE_SEC) {
                 // 时间未对齐，跳过（防御性）
                 continue;
             }
@@ -209,13 +222,13 @@ public class ConflictAvoidanceService {
         double heading2 = estimateHeadingAt(traj2, conflictIdx);
         double headingDiff = normalizeAngleDiff(heading1 - heading2);
         // headingDiff ∈ [0, 180]
-        if (headingDiff >= 135.0) {
+        if (headingDiff >= HEAD_ON_HEADING_DIFF) {
             return "HEAD-ON";
-        } else if (headingDiff < 45.0) {
+        } else if (headingDiff < OVERTAKE_HEADING_DIFF) {
             // 同向：进一步看速度差判定追击
             double v1 = estimateSpeedAt(traj1, conflictIdx);
             double v2 = estimateSpeedAt(traj2, conflictIdx);
-            if (Math.abs(v1 - v2) > 1.0) {
+            if (Math.abs(v1 - v2) > OVERTAKE_SPEED_DIFF) {
                 return "OVERTAKE";
             }
             // 速度相近的同向接近，归为交叉（边界情形）
@@ -327,7 +340,7 @@ public class ConflictAvoidanceService {
             case SPEED_ADJUST: {
                 // 根据冲突时间调整速度：冲突时间越短，调整越大
                 double adjust = SPEED_ADJUST_DELTA;
-                if (conflict != null && conflict.timeToConflict > 0 && conflict.timeToConflict < 10) {
+                if (conflict != null && conflict.timeToConflict > 0 && conflict.timeToConflict < URGENT_CONFLICT_TIME_SEC) {
                     adjust = SPEED_ADJUST_DELTA * 2.0; // 紧急情况加倍
                 }
                 String desc = String.format(

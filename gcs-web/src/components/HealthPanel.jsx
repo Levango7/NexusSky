@@ -10,7 +10,7 @@ import {
   getMaintenancePredictions,
   getMaintenanceSchedule,
 } from '../api.js'
-import { toArray } from '../utils/panelUtils.js'
+import { toArray, pick, fmtTime, POLL_MS } from '../utils/panelUtils.js'
 
 // 健康管理面板（P1）
 // 机队健康总览 + 单机健康详情 + 健康告警 + 预测性维护 + 维护记录 + 维护计划
@@ -18,7 +18,6 @@ import { toArray } from '../utils/panelUtils.js'
 // 轮询间隔 5s；AbortController 竞态守卫
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（AbortController 竞态守卫）
 
-const POLL_MS = 5000
 
 // 7 部件名称
 const COMPONENTS = [
@@ -51,23 +50,6 @@ function fmtScore(score) {
   return pct.toFixed(0)
 }
 
-// ---- 字段兼容提取 ----
-function pick(obj, ...keys) {
-  if (!obj) return null
-  for (const k of keys) {
-    if (obj[k] != null) return obj[k]
-  }
-  return null
-}
-
-
-// 格式化时间戳
-function fmtTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const t = typeof ts === 'number' ? ts : Date.parse(ts)
-  if (isNaN(t)) return String(ts)
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
-}
 
 // 告警级别 → 颜色
 const WARNING_LEVEL = {

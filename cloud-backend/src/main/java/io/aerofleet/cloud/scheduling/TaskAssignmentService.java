@@ -37,6 +37,23 @@ public class TaskAssignmentService {
     private static final int GA_ELITE = 2;
     private static final int GA_TOURNAMENT_K = 3;
 
+    // --- 评分权重与基础分 ---
+    /** 综合评分权重：能力匹配 40%、电量 30%、距离 20%、优先级 10% */
+    private static final double WEIGHT_CAPABILITY = 0.4;
+    private static final double WEIGHT_BATTERY = 0.3;
+    private static final double WEIGHT_DISTANCE = 0.2;
+    private static final double WEIGHT_PRIORITY = 0.1;
+    /** 基础能力分（0-100） */
+    private static final double BASE_CAPABILITY_SCORE = 50.0;
+    /** 默认距离满分（无位置数据时） */
+    private static final double DEFAULT_DISTANCE_SCORE = 100.0;
+    /** 优先级乘数：priority 0-10 → 0-100 */
+    private static final double PRIORITY_MULTIPLIER = 10.0;
+    /** 距离得分线性递减的基准距离（m），100km 内得分线性递减 */
+    private static final double DISTANCE_SCORE_BASE_M = 100_000.0;
+    /** 地球半径（m），用于 haversine 距离计算 */
+    private static final double EARTH_RADIUS_M = 6371000.0;
+
     public TaskAssignmentService(DeviceRegistry registry) {
         this.registry = registry;
     }
@@ -350,20 +367,21 @@ public class TaskAssignmentService {
 
     /** 综合评分：能力(40%) + 电量(30%) + 距离(20%) + 优先级(10%) */
     private double scoreDrone(DroneSnapshot d, TaskRequest req) {
-        double capabilityScore = 50.0; // 基础能力分（0-100）
-        double batteryScore = d.battery > 0 ? d.battery : 0; // 电量百分比 0-100，归一化到与其它因子同量级
-        double distanceScore = 100.0; // 默认满分，有位置时计算距离
+        double capabilityScore = BASE_CAPABILITY_SCORE;
+        double batteryScore = d.battery > 0 ? d.battery : 0;
+        double distanceScore = DEFAULT_DISTANCE_SCORE;
         if (!Double.isNaN(d.lat) && !Double.isNaN(d.lon) && d.lat != 0 && d.lon != 0) {
-            double dist = haversine(d.lat, d.lon, req.getTargetLat(), req.getTargetLon()); // 米
-            distanceScore = Math.max(0, 100 - dist / 1000); // 100km(100000m) 内得分线性递减
+            double dist = haversine(d.lat, d.lon, req.getTargetLat(), req.getTargetLon());
+            distanceScore = Math.max(0, 100 - dist / (DISTANCE_SCORE_BASE_M / 100));
         }
-        double priorityScore = req.getPriority() * 10.0; // priority 0-10 → 0-100
+        double priorityScore = req.getPriority() * PRIORITY_MULTIPLIER;
 
-        return capabilityScore * 0.4 + batteryScore * 0.3 + distanceScore * 0.2 + priorityScore * 0.1;
+        return capabilityScore * WEIGHT_CAPABILITY + batteryScore * WEIGHT_BATTERY
+                + distanceScore * WEIGHT_DISTANCE + priorityScore * WEIGHT_PRIORITY;
     }
 
     private double haversine(double lat1, double lon1, double lat2, double lon2) {
-        double R = 6371000;
+        double R = EARTH_RADIUS_M;
         double dLat = Math.toRadians(lat2 - lat1);
         double dLon = Math.toRadians(lon2 - lon1);
         double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +

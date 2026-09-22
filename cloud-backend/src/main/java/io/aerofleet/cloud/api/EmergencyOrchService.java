@@ -33,8 +33,20 @@ public class EmergencyOrchService {
 
     /** 编排计划状态：planId → plan 状态 map。 */
     private final ConcurrentHashMap<Long, Map<String, Object>> plans = new ConcurrentHashMap<>();
+    /** planId 生成器起始值。 */
+    private static final long PLAN_ID_START = 10000L;
+    /** 默认优先级（常规）。 */
+    private static final int DEFAULT_PRIORITY = 4;
+    /** 阶段状态：已完成。 */
+    private static final int PHASE_STATUS_COMPLETED = 3;
+    /** 阶段状态：已中止。 */
+    private static final int PHASE_STATUS_ABORTED = 4;
+    /** 编排阶段总数。 */
+    private static final int PHASE_COUNT = 5;
+    /** 优先级取消动作。 */
+    private static final int ACTION_CANCEL = 4;
     /** planId 生成器。 */
-    private final AtomicLong planIdGenerator = new AtomicLong(10000);
+    private final AtomicLong planIdGenerator = new AtomicLong(PLAN_ID_START);
     /** WebSocket 推送器（可为 null，测试场景）。 */
     private final EmergencyOrchPusher pusher;
     /** 事件发布器。 */
@@ -86,7 +98,7 @@ public class EmergencyOrchService {
         plan.put("status", "ABORTED");
         plan.put("timestamp", System.currentTimeMillis());
         addEvent(plan, "plan aborted");
-        updatePhaseStatus(plan, phaseOf(plan), 4); // 4=ABORTED
+        updatePhaseStatus(plan, phaseOf(plan), PHASE_STATUS_ABORTED); // ABORTED
         log.info("emergency plan aborted: planId={}", planId);
         pushPlan(planId, plan);
         eventPublisher.publishEvent(new EmergencyEndEvent(this, planId));
@@ -185,7 +197,7 @@ public class EmergencyOrchService {
         int oldPriority;
         long preemptedTaskId;
         synchronized (plan) {
-            oldPriority = taskPriorities.getOrDefault(taskId, 4); // 默认常规
+            oldPriority = taskPriorities.getOrDefault(taskId, DEFAULT_PRIORITY); // 默认常规
             taskPriorities.put(taskId, priority);
 
             // 移动到新优先级队列
@@ -199,7 +211,7 @@ public class EmergencyOrchService {
             // 抢占：若提升到最高优先级，抢占同队列首个低优先级任务
             preemptedTaskId = 0L;
             if (priority < oldPriority) {
-                for (int p = priority + 1; p <= 4; p++) {
+                for (int p = priority + 1; p <= DEFAULT_PRIORITY; p++) {
                     List<Long> queue = queues.get(priorityQueueName(p));
                     if (!queue.isEmpty()) {
                         preemptedTaskId = queue.get(0);
@@ -313,7 +325,7 @@ public class EmergencyOrchService {
         log.debug("emergency mission plan update: planId={} phase={} status={} cov={}%",
                 planId, phase, phaseStatus, coverageRate);
         pushPlan(planId, plan);
-        if (phaseStatus == 3) { // COMPLETED
+        if (phaseStatus == PHASE_STATUS_COMPLETED) { // COMPLETED
             eventPublisher.publishEvent(new EmergencyEndEvent(this, planId));
         }
     }
@@ -355,7 +367,7 @@ public class EmergencyOrchService {
         }
         @SuppressWarnings("unchecked")
         Map<Long, Integer> taskPriorities = (Map<Long, Integer>) plan.get("taskPriorities");
-        int oldPriority = taskPriorities.getOrDefault(taskId, 4);
+        int oldPriority = taskPriorities.getOrDefault(taskId, DEFAULT_PRIORITY);
         taskPriorities.put(taskId, priority);
 
         @SuppressWarnings("unchecked")
@@ -364,7 +376,7 @@ public class EmergencyOrchService {
         if (!queues.get(queueName).contains(taskId)) {
             queues.get(queueName).add(taskId);
         }
-        if (action == 4) { // 取消
+        if (action == ACTION_CANCEL) { // 取消
             queues.get(queueName).remove(Long.valueOf(taskId));
             taskPriorities.remove(taskId);
         }
@@ -406,13 +418,13 @@ public class EmergencyOrchService {
         plan.put("droneCount", droneIds.size());
         plan.put("coverageRate", 0);
         plan.put("connectRate", 0);
-        plan.put("priority", 4); // 默认常规
+        plan.put("priority", DEFAULT_PRIORITY); // 默认常规
         plan.put("timestamp", now);
         plan.put("createdAt", now);
 
         // 5 个阶段，初始全部 PENDING，第 0 阶段设为 RUNNING
         List<Map<String, Object>> phases = new ArrayList<>();
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < PHASE_COUNT; i++) {
             Map<String, Object> ph = new ConcurrentHashMap<>();
             ph.put("phase", i);
             ph.put("status", i == 0 ? "RUNNING" : "PENDING");

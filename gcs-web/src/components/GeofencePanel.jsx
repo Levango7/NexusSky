@@ -6,6 +6,7 @@ import {
   getGeofenceBreaches,
   checkGeofence,
 } from '../api.js'
+import { POLL_MS, fmtTime, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
 
 // M12 电子围栏管理面板
 // 围栏区域列表（CRUD） + 创建围栏表单（CIRCLE/POLYGON） + 越界历史 + 手动检查
@@ -13,7 +14,6 @@ import {
 // 轮询间隔 5s；AbortController 竞态守卫
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（AbortController 竞态守卫）
 
-const POLL_MS = 5000
 
 // 围栏类型
 const ZONE_TYPES = [
@@ -39,13 +39,6 @@ const BREACH_META = {
   ENTER: { color: 'var(--ok)', label: '进入' },
 }
 
-// 格式化时间戳（ms → 本地时间字符串）
-function fmtTime(ms) {
-  if (ms == null || ms === '') return '--:--:--'
-  const n = Number(ms)
-  if (!Number.isFinite(n)) return String(ms)
-  return new Date(n).toLocaleString('zh-CN', { hour12: false })
-}
 
 // 解析多边形 points 文本框内容（每行一个 "lat,lon"）
 // 返回 { points: [{lat, lon}, ...] | null, error: string | null }
@@ -614,39 +607,3 @@ export default function GeofencePanel() {
   )
 }
 
-// ===== 内联样式（与 AlarmPanel / SurveillancePanel 保持一致）=====
-const cardStyle = {
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 4,
-  padding: '6px 10px',
-}
-
-const labelStyle = {
-  fontSize: 10,
-  color: 'var(--dim-2)',
-  marginBottom: 2,
-}
-
-const miniBtnStyle = {
-  fontSize: 10,
-  padding: '2px 8px',
-  cursor: 'pointer',
-  border: '1px solid var(--line-2)',
-  background: 'transparent',
-  color: 'var(--dim)',
-  borderRadius: 3,
-}
-
-const modalInputStyle = {
-  width: '100%',
-  padding: '4px 6px',
-  fontSize: 11,
-  fontFamily: 'var(--mono)',
-  color: 'var(--text)',
-  background: 'var(--bg-2)',
-  border: '1px solid var(--line-2)',
-  borderRadius: 3,
-  outline: 'none',
-  boxSizing: 'border-box',
-}
