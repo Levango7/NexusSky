@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aerofleet.cloud.api.TelemetryWebSocketHandler;
+import io.aerofleet.cloud.api.ws.TelemetryWebSocketHandler;
 import io.aerofleet.cloud.security.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;

@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.health;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

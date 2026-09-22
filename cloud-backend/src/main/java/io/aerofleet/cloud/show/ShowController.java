@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.show;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;

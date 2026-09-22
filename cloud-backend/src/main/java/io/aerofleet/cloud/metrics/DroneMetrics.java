@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.metrics;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
-import io.aerofleet.cloud.mission.FormationService;
+import io.aerofleet.cloud.mission.formation.FormationService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;

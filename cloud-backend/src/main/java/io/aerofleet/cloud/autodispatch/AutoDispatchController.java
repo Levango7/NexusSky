@@ -20,7 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 
 /**
  * 自动出警 REST API（P0-1 安防报警→无人机自动出警闭环）。
@@ -35,7 +35,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </ul>
  * <p>
  * 错误响应统一使用 {@code {"error": "..."}} 格式，与
- * {@link io.aerofleet.cloud.api.ApiExceptionHandler} 风格一致。
+ * {@link io.aerofleet.cloud.api.exception.ApiExceptionHandler} 风格一致。
  */
 @RestController
 @RequestMapping("/api/v1/autodispatch")

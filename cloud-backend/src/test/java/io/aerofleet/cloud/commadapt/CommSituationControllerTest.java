@@ -41,7 +41,7 @@ class CommSituationControllerTest {
     @Test
     @DisplayName("GET /quality/{sysid} 未注册无人机应抛出 NotFoundException")
     void getQuality_unregisteredDrone_shouldThrowNotFound() {
-        assertThrows(io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException.class,
+        assertThrows(io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException.class,
                 () -> controller.getQuality(999));
     }
 
@@ -50,7 +50,7 @@ class CommSituationControllerTest {
     void getQuality_registeredButNoData_shouldThrowNotFound() {
         int sysid = 1;
         registry.registerIfAbsent(sysid);
-        assertThrows(io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException.class,
+        assertThrows(io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException.class,
                 () -> controller.getQuality(sysid));
     }
 
@@ -105,7 +105,7 @@ class CommSituationControllerTest {
     void switchLink_unregisteredDrone_shouldThrowNotFound() {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("targetLink", "SATELLITE");
-        assertThrows(io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException.class,
+        assertThrows(io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException.class,
                 () -> controller.switchLink(999, body));
     }
 
@@ -140,14 +140,14 @@ class CommSituationControllerTest {
         body.put("targetLink", "INVALID_LINK");
 
         // P1-fix: 改为 BadRequestException，返回 HTTP 400 而非 500
-        assertThrows(io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException.class,
+        assertThrows(io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException.class,
                 () -> controller.switchLink(sysid, body));
     }
 
     @Test
     @DisplayName("GET /failover/history/{sysid} 未注册无人机应抛出 NotFoundException")
     void getFailoverHistory_unregisteredDrone_shouldThrowNotFound() {
-        assertThrows(io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException.class,
+        assertThrows(io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException.class,
                 () -> controller.getFailoverHistory(999));
     }
 

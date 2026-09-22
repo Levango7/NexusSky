@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.orch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aerofleet.cloud.api.TelemetryWebSocketHandler;
+import io.aerofleet.cloud.api.ws.TelemetryWebSocketHandler;
 import io.aerofleet.cloud.orch.event.EmergencyEndEvent;
 import io.aerofleet.cloud.orch.event.EmergencyStartEvent;
 import io.aerofleet.cloud.orch.event.PausePlanEvent;

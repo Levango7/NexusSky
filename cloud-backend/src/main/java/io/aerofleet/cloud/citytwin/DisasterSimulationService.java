@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.citytwin;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;

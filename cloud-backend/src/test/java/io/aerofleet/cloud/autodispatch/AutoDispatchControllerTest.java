@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.autodispatch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aerofleet.cloud.api.ApiExceptionHandler;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.tracking.FlightTrackStore;

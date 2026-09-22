@@ -1,11 +1,11 @@
 package io.aerofleet.cloud;
 
-import io.aerofleet.cloud.api.DroneController;
-import io.aerofleet.cloud.api.TelemetryPusher;
+import io.aerofleet.cloud.api.controller.DroneController;
+import io.aerofleet.cloud.api.pusher.TelemetryPusher;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.TelemetryIngestService;
 import io.aerofleet.cloud.gateway.UdpGateway;
-import io.aerofleet.cloud.mission.DroneCommandService;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.cloud.telemetry.PendingAcks;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

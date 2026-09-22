@@ -24,8 +24,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import static io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
-import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 
 /**
  * 维护管理 REST API（P1-2 维护管理）。

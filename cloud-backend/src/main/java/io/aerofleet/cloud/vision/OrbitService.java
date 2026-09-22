@@ -2,9 +2,9 @@ package io.aerofleet.cloud.vision;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.aerofleet.cloud.mission.DroneCommandService;
-import io.aerofleet.cloud.mission.MissionItemRequest;
-import io.aerofleet.cloud.mission.MissionUploadResult;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
+import io.aerofleet.cloud.mission.common.MissionItemRequest;
+import io.aerofleet.cloud.mission.common.MissionUploadResult;
 
 import io.aerofleet.mavlink.messages.MissionItemInt;
 import org.slf4j.Logger;

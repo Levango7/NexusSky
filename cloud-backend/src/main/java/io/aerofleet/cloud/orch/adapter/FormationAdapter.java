@@ -1,9 +1,9 @@
 package io.aerofleet.cloud.orch.adapter;
 
-import io.aerofleet.cloud.mission.Formation;
-import io.aerofleet.cloud.mission.FormationCreateRequest;
-import io.aerofleet.cloud.mission.FormationGeometry;
-import io.aerofleet.cloud.mission.FormationService;
+import io.aerofleet.cloud.mission.formation.Formation;
+import io.aerofleet.cloud.mission.formation.FormationCreateRequest;
+import io.aerofleet.cloud.mission.formation.FormationGeometry;
+import io.aerofleet.cloud.mission.formation.FormationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;

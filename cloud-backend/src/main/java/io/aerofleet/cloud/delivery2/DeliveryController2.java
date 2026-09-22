@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.delivery2;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
-import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;

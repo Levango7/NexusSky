@@ -3,7 +3,7 @@ package io.aerofleet.cloud.vision;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
-import io.aerofleet.cloud.mission.DroneCommandService;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

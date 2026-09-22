@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.delivery2;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -160,7 +160,7 @@ class DeliveryController2Test {
         controller.startTask(created.getId());
 
         assertThatThrownBy(() -> controller.startTask(created.getId()))
-                .isInstanceOf(io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException.class);
+                .isInstanceOf(io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException.class);
     }
 
     // ------------------------------------------------------------------
@@ -256,7 +256,7 @@ class DeliveryController2Test {
         req.method = DeliveryMethod.AIR_DROP;
 
         assertThatThrownBy(() -> controller.deliver(created.getId(), req))
-                .isInstanceOf(io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException.class);
+                .isInstanceOf(io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException.class);
     }
 
     // ------------------------------------------------------------------
@@ -310,7 +310,7 @@ class DeliveryController2Test {
                 newTask(DeliveryTask2.Type.EMERGENCY_SUPPLY, DeliveryTask2.Priority.HIGH));
 
         assertThatThrownBy(() -> controller.confirm(created.getId()))
-                .isInstanceOf(io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException.class);
+                .isInstanceOf(io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException.class);
     }
 
     // ------------------------------------------------------------------

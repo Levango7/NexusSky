@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 
 /**
  * 场景演练 REST API（P0-2 应急救援场景库）。

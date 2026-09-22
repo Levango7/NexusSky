@@ -24,8 +24,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
-import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 
 /**
  * 无人机航拍测绘 REST API。

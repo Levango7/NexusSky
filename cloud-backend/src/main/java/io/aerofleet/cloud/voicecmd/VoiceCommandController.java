@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 
 /**
  * 语音/自然语言指挥 REST API。
@@ -71,12 +71,12 @@ public class VoiceCommandController {
     @PostMapping("/parse")
     public ParsedCommand parse(@RequestBody Map<String, String> body) {
         if (body == null) {
-            throw new io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException(
+            throw new io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException(
                     "request body must not be null");
         }
         String text = body.get("text");
         if (text == null || text.isBlank()) {
-            throw new io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException(
+            throw new io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException(
                     "body must contain a non-empty 'text' field");
         }
         log.info("Parsing voice text: '{}'", text);
@@ -138,12 +138,12 @@ public class VoiceCommandController {
                                      @RequestBody Map<String, String> body) {
         requireRegistered(sysid);
         if (body == null) {
-            throw new io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException(
+            throw new io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException(
                     "request body must not be null");
         }
         String text = body.get("text");
         if (text == null || text.isBlank()) {
-            throw new io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException(
+            throw new io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException(
                     "body must contain a non-empty 'text' field");
         }
         log.info("Broadcasting to sysid={}: '{}'", sysid, text);

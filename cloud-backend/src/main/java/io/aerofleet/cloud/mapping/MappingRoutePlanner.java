@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.mapping;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;

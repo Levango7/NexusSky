@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.scheduling;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
 import jakarta.validation.Valid;

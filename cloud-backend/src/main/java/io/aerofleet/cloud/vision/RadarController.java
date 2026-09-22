@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.vision;
 
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
-import io.aerofleet.cloud.mission.DroneCommandService;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.mavlink.enums.ScanMode;
 
 import io.aerofleet.mavlink.messages.RadarScanMsg;

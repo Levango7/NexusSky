@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.citytwin;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

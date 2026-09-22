@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.drone;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;

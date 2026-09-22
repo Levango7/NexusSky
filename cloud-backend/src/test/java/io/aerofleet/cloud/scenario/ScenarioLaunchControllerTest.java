@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.scenario;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;

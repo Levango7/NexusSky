@@ -50,7 +50,7 @@ class TrackingControllerTest {
         TrackingController controller = newController(registry, store, alerts);
 
         assertThatThrownBy(() -> controller.getTrack(99, null))
-                .isInstanceOf(io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException.class)
+                .isInstanceOf(io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException.class)
                 .hasMessageContaining("99");
     }
 
@@ -163,7 +163,7 @@ class TrackingControllerTest {
         TrackingController controller = newController(registry, store, alerts);
 
         assertThatThrownBy(() -> controller.getLastKnown(42))
-                .isInstanceOf(io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException.class);
+                .isInstanceOf(io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException.class);
     }
 
     @Test
@@ -240,7 +240,7 @@ class TrackingControllerTest {
         TrackingController controller = newController(registry, store, alerts);
 
         assertThatThrownBy(() -> controller.getSearchGuide(77))
-                .isInstanceOf(io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException.class);
+                .isInstanceOf(io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException.class);
     }
 
     @Test

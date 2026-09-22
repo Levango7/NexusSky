@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.mapping;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
-import io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

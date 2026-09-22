@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.geofence;
 
-import io.aerofleet.cloud.api.ApiExceptionHandler;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import org.junit.jupiter.api.BeforeEach;

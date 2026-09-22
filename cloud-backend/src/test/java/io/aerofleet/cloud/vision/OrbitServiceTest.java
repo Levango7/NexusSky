@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.vision;
 
-import io.aerofleet.cloud.mission.MissionItemRequest;
+import io.aerofleet.cloud.mission.common.MissionItemRequest;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.alarm;
 
-import io.aerofleet.cloud.api.EmergencyOrchService;
+import io.aerofleet.cloud.api.service.EmergencyOrchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;

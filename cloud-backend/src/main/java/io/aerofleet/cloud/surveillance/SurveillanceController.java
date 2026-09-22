@@ -43,7 +43,7 @@ import java.util.concurrent.TimeUnit;
  * </ul>
  * <p>
  * 错误响应统一使用 {@code {"error": "..."}} 格式，与
- * {@link io.aerofleet.cloud.api.ApiExceptionHandler} 风格一致。
+ * {@link io.aerofleet.cloud.api.exception.ApiExceptionHandler} 风格一致。
  */
 @RestController
 @RequestMapping("/api/v1/surveillance")

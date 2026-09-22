@@ -1,8 +1,8 @@
 package io.aerofleet.cloud.alarm;
 
-import io.aerofleet.cloud.mission.EmergencyCommand;
-import io.aerofleet.cloud.mission.EmergencyCommandWorkflow;
-import io.aerofleet.cloud.mission.OneClickEmergencyResponse;
+import io.aerofleet.cloud.mission.emergency.EmergencyCommand;
+import io.aerofleet.cloud.mission.emergency.EmergencyCommandWorkflow;
+import io.aerofleet.cloud.mission.emergency.OneClickEmergencyResponse;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,8 +36,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-import static io.aerofleet.cloud.api.ApiExceptionHandler.BadRequestException;
-import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 
 /**
  * 报警联动 REST 端点（M10 报警联动编排，FR-31）。
