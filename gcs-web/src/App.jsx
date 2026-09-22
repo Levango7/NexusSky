@@ -29,6 +29,7 @@ import VoiceCmdPanel from './components/VoiceCmdPanel.jsx'
 import CityTwinPanel from './components/CityTwinPanel.jsx'
 import DeliveryPanel from './components/DeliveryPanel.jsx'
 import ShowPanel from './components/ShowPanel.jsx'
+import DisasterCommPanel from './components/DisasterCommPanel.jsx'
 import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
@@ -174,6 +175,7 @@ export default function App() {
               { key: 'citytwin', label: '数字孪生' },
               { key: 'delivery', label: '物流配送' },
               { key: 'show', label: '编队表演' },
+              { key: 'disastercomm', label: '灾害通信' },
               ...(isAdmin ? [
                 { key: 'tenants', label: '租户管理' },
                 { key: 'users', label: '用户管理' },
@@ -361,6 +363,10 @@ export default function App() {
       ) : view === 'show' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <ShowPanel />
+        </div>
+      ) : view === 'disastercomm' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <DisasterCommPanel />
         </div>
       ) : view === 'tenants' ? (
         <div className="gcs-body" style={{ display: 'block' }}>

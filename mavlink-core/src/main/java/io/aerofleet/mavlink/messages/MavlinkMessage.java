@@ -180,6 +180,13 @@ public abstract class MavlinkMessage {
                 return AlarmAckMsg.decode(frame);
             case SurveillanceStatusMsg.ID:
                 return SurveillanceStatusMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（P2 灾害应急通讯组网，msgId 480-482）----
+            case QoSRouteDecisionMsg.ID:
+                return QoSRouteDecisionMsg.decode(frame);
+            case ClusterFormationMsg.ID:
+                return ClusterFormationMsg.decode(frame);
+            case DisasterModeStatusMsg.ID:
+                return DisasterModeStatusMsg.decode(frame);
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }

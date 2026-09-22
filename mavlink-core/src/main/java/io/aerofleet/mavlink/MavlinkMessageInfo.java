@@ -112,6 +112,10 @@ public final class MavlinkMessageInfo {
         INFOS[477] = new Info(68, 261);   // ALARM_TRIGGER
         INFOS[478] = new Info(12, 262);   // ALARM_ACK
         INFOS[479] = new Info(14, 263);   // SURVEILLANCE_STATUS
+        // ---- NexusSky 自定义扩展消息（P2 灾害应急通讯组网，msgId 480-482）----
+        INFOS[480] = new Info(12, 264);   // QOS_ROUTE_DECISION
+        INFOS[481] = new Info(18, 265);   // CLUSTER_FORMATION
+        INFOS[482] = new Info(8, 266);    // DISASTER_MODE_STATUS
     }
 
     private MavlinkMessageInfo() {

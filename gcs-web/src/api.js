@@ -995,6 +995,36 @@ export const emergencyOrch = {
     }),
 }
 
+// ---- Disaster Comm (灾害应急通信 P2-4) ----
+// base 路径 /api/v1/disaster（独立于 v1 BASE）
+const DISASTER_BASE = '/api/v1/disaster'
+
+export const disaster = {
+  // 获取灾害模式状态（active/inactive + 触发原因 + 恢复率）
+  getStatus: () => jsonFetch(`${DISASTER_BASE}/status`),
+
+  // 激活灾害模式（body 含 reason）
+  activate: (reason) =>
+    jsonFetch(`${DISASTER_BASE}/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    }),
+
+  // 退出灾害模式
+  deactivate: () =>
+    jsonFetch(`${DISASTER_BASE}/deactivate`, { method: 'POST' }),
+
+  // 获取分簇拓扑（簇ID/簇头/成员/簇半径）
+  getClusters: () => jsonFetch(`${DISASTER_BASE}/clusters`),
+
+  // 获取 QoS 优先级队列状态（4级队列深度/吞吐）
+  getQoS: () => jsonFetch(`${DISASTER_BASE}/qos`),
+
+  // 获取异构链路桥接状态（WiFi/LTE/LoRa/Sat 链路质量）
+  getLinks: () => jsonFetch(`${DISASTER_BASE}/links`),
+}
+
 // WebSocket URL 构建函数：在 URL 中携带 token 参数
 export function getWsUrl() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
