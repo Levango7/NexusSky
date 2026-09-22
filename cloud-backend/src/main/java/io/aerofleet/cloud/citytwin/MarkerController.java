@@ -27,7 +27,7 @@ import java.util.List;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/city-twin/markers")
+@RequestMapping("/api/v1/city-twin/markers")
 @Tag(name = "CityTwin-Markers", description = "态势标绘：在地图上创建、更新、删除点/线/面/圆/文本标记")
 public class MarkerController {
 

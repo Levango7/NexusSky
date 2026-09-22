@@ -30,9 +30,9 @@ class SimulationControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/city-twin/simulation/flood 洪水模拟")
+    @DisplayName("POST /api/v1/city-twin/simulation/flood 洪水模拟")
     void simulateFlood_returnsSimulation() throws Exception {
-        mockMvc.perform(post("/api/city-twin/simulation/flood")
+        mockMvc.perform(post("/api/v1/city-twin/simulation/flood")
                         .param("centerLat", "39.9")
                         .param("centerLon", "116.4")
                         .param("radiusKm", "5.0")
@@ -46,9 +46,9 @@ class SimulationControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/city-twin/simulation/fire 火灾模拟")
+    @DisplayName("POST /api/v1/city-twin/simulation/fire 火灾模拟")
     void simulateFire_returnsSimulation() throws Exception {
-        mockMvc.perform(post("/api/city-twin/simulation/fire")
+        mockMvc.perform(post("/api/v1/city-twin/simulation/fire")
                         .param("centerLat", "39.9")
                         .param("centerLon", "116.4")
                         .param("radiusKm", "3.0")
@@ -61,9 +61,9 @@ class SimulationControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/city-twin/simulation/earthquake 地震模拟")
+    @DisplayName("POST /api/v1/city-twin/simulation/earthquake 地震模拟")
     void simulateEarthquake_returnsSimulation() throws Exception {
-        mockMvc.perform(post("/api/city-twin/simulation/earthquake")
+        mockMvc.perform(post("/api/v1/city-twin/simulation/earthquake")
                         .param("centerLat", "39.9")
                         .param("centerLon", "116.4")
                         .param("magnitude", "7.0")
@@ -75,9 +75,9 @@ class SimulationControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/city-twin/simulation/evacuation 疏散模拟")
+    @DisplayName("POST /api/v1/city-twin/simulation/evacuation 疏散模拟")
     void simulateEvacuation_returnsSimulation() throws Exception {
-        mockMvc.perform(post("/api/city-twin/simulation/evacuation")
+        mockMvc.perform(post("/api/v1/city-twin/simulation/evacuation")
                         .param("centerLat", "39.9")
                         .param("centerLon", "116.4")
                         .param("radiusKm", "5.0"))
@@ -88,25 +88,25 @@ class SimulationControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/city-twin/simulation/{id} 获取模拟结果")
+    @DisplayName("GET /api/v1/city-twin/simulation/{id} 获取模拟结果")
     void getSimulation_returnsById() throws Exception {
         // 先创建一个模拟
         DisasterSimulation sim = simulationService.simulateFlood(39.9, 116.4, 5.0, 2.5, 60);
 
-        mockMvc.perform(get("/api/city-twin/simulation/" + sim.getId()))
+        mockMvc.perform(get("/api/v1/city-twin/simulation/" + sim.getId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(sim.getId()))
                 .andExpect(jsonPath("$.type").value("FLOOD"));
     }
 
     @Test
-    @DisplayName("GET /api/city-twin/simulation/history 模拟历史")
+    @DisplayName("GET /api/v1/city-twin/simulation/history 模拟历史")
     void getSimulationHistory_returnsAll() throws Exception {
         // 先创建两个模拟
         simulationService.simulateFlood(39.9, 116.4, 5.0, 2.5, 60);
         simulationService.simulateFire(39.9, 116.4, 3.0, 15.0, 30);
 
-        mockMvc.perform(get("/api/city-twin/simulation/history"))
+        mockMvc.perform(get("/api/v1/city-twin/simulation/history"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").exists())
                 .andExpect(jsonPath("$[1].id").exists());

@@ -31,7 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 超过返回 429 Too Many Requests，防止暴力破解。
  */
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/api/v1/auth")
 public class AuthController {
 
     /** 每 IP 每分钟最大登录尝试次数。 */

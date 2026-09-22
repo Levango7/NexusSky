@@ -28,7 +28,7 @@ import java.util.List;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/city-twin/simulation")
+@RequestMapping("/api/v1/city-twin/simulation")
 @Tag(name = "CityTwin-Simulation", description = "灾害模拟推演：洪水、火灾、地震、疏散模拟及结果查询")
 public class SimulationController {
 

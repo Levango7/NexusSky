@@ -32,7 +32,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/inspection/reports")
+@RequestMapping("/api/v1/inspection/reports")
 @Tag(name = "InspectionReport", description = "巡检报告 REST API：报告查询、异常清单、照片列表、导出")
 public class InspectionReportController {
 

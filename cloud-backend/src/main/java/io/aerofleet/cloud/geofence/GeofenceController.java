@@ -46,7 +46,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </pre>
  */
 @RestController
-@RequestMapping("/api/geofence")
+@RequestMapping("/api/v1/geofence")
 @Tag(name = "Geofence", description = "电子围栏 REST API：围栏区域 CRUD、越界历史查询、手动检查")
 public class GeofenceController {
 

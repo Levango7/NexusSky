@@ -32,13 +32,13 @@ curl -sf http://localhost:8080/actuator/prometheus > /dev/null || { echo "FAIL: 
 echo "  ✅ /actuator/prometheus available"
 
 # 认证端点
-TOKEN=$(curl -sf -X POST http://localhost:8080/api/auth/login \
+TOKEN=$(curl -sf -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin"}' | grep -o '"token":"[^"]*"' | cut -d'"' -f4) || true
 if [ -n "$TOKEN" ]; then
-  echo "  ✅ /api/auth/login returned JWT token"
+  echo "  ✅ /api/v1/auth/login returned JWT token"
 else
-  echo "  ⚠️ /api/auth/login did not return token (may be in dev-mode)"
+  echo "  ⚠️ /api/v1/auth/login did not return token (may be in dev-mode)"
 fi
 
 # 4. 清理

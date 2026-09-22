@@ -63,7 +63,7 @@ class ScenarioTemplateControllerTest {
     @Test
     @DisplayName("GET /templates 返回 18 个预设模板")
     void listReturnsAllPresets() throws Exception {
-        mockMvc.perform(get("/api/scenarios/templates"))
+        mockMvc.perform(get("/api/v1/scenarios/templates"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(18));
     }
@@ -71,7 +71,7 @@ class ScenarioTemplateControllerTest {
     @Test
     @DisplayName("GET /templates/{id} 返回预设模板详情")
     void getReturnsPresetTemplate() throws Exception {
-        mockMvc.perform(get("/api/scenarios/templates/preset-FIRE-SMALL"))
+        mockMvc.perform(get("/api/v1/scenarios/templates/preset-FIRE-SMALL"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("preset-FIRE-SMALL"))
                 .andExpect(jsonPath("$.disasterType").value("FIRE"))
@@ -83,7 +83,7 @@ class ScenarioTemplateControllerTest {
     @Test
     @DisplayName("GET /templates/{id} 不存在时返回 404")
     void getReturns404ForNonExistent() throws Exception {
-        mockMvc.perform(get("/api/scenarios/templates/non-existent"))
+        mockMvc.perform(get("/api/v1/scenarios/templates/non-existent"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").exists());
     }
@@ -96,7 +96,7 @@ class ScenarioTemplateControllerTest {
     @DisplayName("POST /templates 创建自定义模板并获取详情")
     void createCustomTemplate() throws Exception {
         // POST 创建
-        mockMvc.perform(post("/api/scenarios/templates")
+        mockMvc.perform(post("/api/v1/scenarios/templates")
                         .contentType("application/json")
                         .content(json(templateBody("custom-1", "my-fire-scenario"))))
                 .andExpect(status().isOk())
@@ -106,12 +106,12 @@ class ScenarioTemplateControllerTest {
                 .andExpect(jsonPath("$.droneCount").value(3));
 
         // GET 单个
-        mockMvc.perform(get("/api/scenarios/templates/custom-1"))
+        mockMvc.perform(get("/api/v1/scenarios/templates/custom-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("my-fire-scenario"));
 
         // 列表应包含 19 个（18 预设 + 1 自定义）
-        mockMvc.perform(get("/api/scenarios/templates"))
+        mockMvc.perform(get("/api/v1/scenarios/templates"))
                 .andExpect(jsonPath("$.length()").value(19));
     }
 
@@ -119,7 +119,7 @@ class ScenarioTemplateControllerTest {
     @DisplayName("POST /templates 未指定 ID 时自动生成")
     void createAutoGeneratesId() throws Exception {
         Map<String, Object> body = templateBody(null, "auto-id-template");
-        mockMvc.perform(post("/api/scenarios/templates")
+        mockMvc.perform(post("/api/v1/scenarios/templates")
                         .contentType("application/json")
                         .content(json(body)))
                 .andExpect(status().isOk())
@@ -131,14 +131,14 @@ class ScenarioTemplateControllerTest {
     @DisplayName("PUT /templates/{id} 更新模板")
     void updateTemplate() throws Exception {
         // 先创建
-        mockMvc.perform(post("/api/scenarios/templates")
+        mockMvc.perform(post("/api/v1/scenarios/templates")
                 .contentType("application/json")
                 .content(json(templateBody("custom-2", "before-update"))));
 
         // PUT 更新
         Map<String, Object> updateBody = templateBody("custom-2", "after-update");
         updateBody.put("droneCount", 10);
-        mockMvc.perform(put("/api/scenarios/templates/custom-2")
+        mockMvc.perform(put("/api/v1/scenarios/templates/custom-2")
                         .contentType("application/json")
                         .content(json(updateBody)))
                 .andExpect(status().isOk())
@@ -147,7 +147,7 @@ class ScenarioTemplateControllerTest {
                 .andExpect(jsonPath("$.droneCount").value(10));
 
         // GET 验证更新生效
-        mockMvc.perform(get("/api/scenarios/templates/custom-2"))
+        mockMvc.perform(get("/api/v1/scenarios/templates/custom-2"))
                 .andExpect(jsonPath("$.name").value("after-update"))
                 .andExpect(jsonPath("$.droneCount").value(10));
     }
@@ -155,7 +155,7 @@ class ScenarioTemplateControllerTest {
     @Test
     @DisplayName("PUT /templates/{id} 不存在时返回 404")
     void updateReturns404ForNonExistent() throws Exception {
-        mockMvc.perform(put("/api/scenarios/templates/non-existent")
+        mockMvc.perform(put("/api/v1/scenarios/templates/non-existent")
                         .contentType("application/json")
                         .content(json(templateBody("non-existent", "nope"))))
                 .andExpect(status().isNotFound());
@@ -165,25 +165,25 @@ class ScenarioTemplateControllerTest {
     @DisplayName("DELETE /templates/{id} 删除自定义模板")
     void deleteCustomTemplate() throws Exception {
         // 先创建
-        mockMvc.perform(post("/api/scenarios/templates")
+        mockMvc.perform(post("/api/v1/scenarios/templates")
                 .contentType("application/json")
                 .content(json(templateBody("custom-3", "to-delete"))));
 
         // DELETE 删除
-        mockMvc.perform(delete("/api/scenarios/templates/custom-3"))
+        mockMvc.perform(delete("/api/v1/scenarios/templates/custom-3"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.deleted").value(true))
                 .andExpect(jsonPath("$.id").value("custom-3"));
 
         // 删除后再获取应 404
-        mockMvc.perform(get("/api/scenarios/templates/custom-3"))
+        mockMvc.perform(get("/api/v1/scenarios/templates/custom-3"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     @DisplayName("DELETE /templates/{id} 不存在时返回 404")
     void deleteReturns404ForNonExistent() throws Exception {
-        mockMvc.perform(delete("/api/scenarios/templates/non-existent"))
+        mockMvc.perform(delete("/api/v1/scenarios/templates/non-existent"))
                 .andExpect(status().isNotFound());
     }
 
@@ -194,7 +194,7 @@ class ScenarioTemplateControllerTest {
     @Test
     @DisplayName("GET /templates/by-type/FIRE 返回 3 个火灾模板")
     void byTypeReturnsFireTemplates() throws Exception {
-        mockMvc.perform(get("/api/scenarios/templates/by-type/FIRE"))
+        mockMvc.perform(get("/api/v1/scenarios/templates/by-type/FIRE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(3))
                 .andExpect(jsonPath("$[0].disasterType").value("FIRE"));
@@ -203,7 +203,7 @@ class ScenarioTemplateControllerTest {
     @Test
     @DisplayName("GET /templates/by-type/EARTHQUAKE 返回 3 个地震模板")
     void byTypeReturnsEarthquakeTemplates() throws Exception {
-        mockMvc.perform(get("/api/scenarios/templates/by-type/EARTHQUAKE"))
+        mockMvc.perform(get("/api/v1/scenarios/templates/by-type/EARTHQUAKE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(3));
     }
@@ -211,7 +211,7 @@ class ScenarioTemplateControllerTest {
     @Test
     @DisplayName("GET /templates/by-type/CHEMICAL_LEAK 返回 3 个化工厂泄漏模板")
     void byTypeReturnsChemicalLeakTemplates() throws Exception {
-        mockMvc.perform(get("/api/scenarios/templates/by-type/CHEMICAL_LEAK"))
+        mockMvc.perform(get("/api/v1/scenarios/templates/by-type/CHEMICAL_LEAK"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(3));
     }

@@ -74,7 +74,7 @@ class ScenarioLaunchControllerTest {
     void launchScenarioSuccess() throws Exception {
         registerOnlineDrones(5);
 
-        mockMvc.perform(post("/api/scenarios/launch/preset-FIRE-SMALL")
+        mockMvc.perform(post("/api/v1/scenarios/launch/preset-FIRE-SMALL")
                         .contentType("application/json")
                         .content(json(launchBody(39.9, 116.3))))
                 .andExpect(status().isOk())
@@ -88,7 +88,7 @@ class ScenarioLaunchControllerTest {
     @Test
     @DisplayName("POST /launch/{templateId} 无无人机时返回 FAILED")
     void launchScenarioFailedNoDrones() throws Exception {
-        mockMvc.perform(post("/api/scenarios/launch/preset-FIRE-SMALL")
+        mockMvc.perform(post("/api/v1/scenarios/launch/preset-FIRE-SMALL")
                         .contentType("application/json")
                         .content(json(launchBody(39.9, 116.3))))
                 .andExpect(status().isOk())
@@ -99,7 +99,7 @@ class ScenarioLaunchControllerTest {
     @Test
     @DisplayName("POST /launch/{templateId} 模板不存在时返回 404")
     void launchScenarioTemplateNotFound() throws Exception {
-        mockMvc.perform(post("/api/scenarios/launch/non-existent")
+        mockMvc.perform(post("/api/v1/scenarios/launch/non-existent")
                         .contentType("application/json")
                         .content(json(launchBody(39.9, 116.3))))
                 .andExpect(status().isNotFound())
@@ -115,7 +115,7 @@ class ScenarioLaunchControllerTest {
         overrides.put("droneCount", 3);
         body.put("overrides", overrides);
 
-        mockMvc.perform(post("/api/scenarios/launch/preset-FIRE-LARGE")
+        mockMvc.perform(post("/api/v1/scenarios/launch/preset-FIRE-LARGE")
                         .contentType("application/json")
                         .content(json(body)))
                 .andExpect(status().isOk())
@@ -133,15 +133,15 @@ class ScenarioLaunchControllerTest {
         registerOnlineDrones(10);
 
         // 启动两个场景
-        mockMvc.perform(post("/api/scenarios/launch/preset-FIRE-SMALL")
+        mockMvc.perform(post("/api/v1/scenarios/launch/preset-FIRE-SMALL")
                 .contentType("application/json")
                 .content(json(launchBody(39.9, 116.3))));
-        mockMvc.perform(post("/api/scenarios/launch/preset-FLOOD-SMALL")
+        mockMvc.perform(post("/api/v1/scenarios/launch/preset-FLOOD-SMALL")
                 .contentType("application/json")
                 .content(json(launchBody(40.0, 117.0))));
 
         // 查询进行中
-        mockMvc.perform(get("/api/scenarios/launch/active"))
+        mockMvc.perform(get("/api/v1/scenarios/launch/active"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2));
     }
@@ -151,11 +151,11 @@ class ScenarioLaunchControllerTest {
     void getHistory() throws Exception {
         registerOnlineDrones(10);
 
-        mockMvc.perform(post("/api/scenarios/launch/preset-FIRE-SMALL")
+        mockMvc.perform(post("/api/v1/scenarios/launch/preset-FIRE-SMALL")
                 .contentType("application/json")
                 .content(json(launchBody(39.9, 116.3))));
 
-        mockMvc.perform(get("/api/scenarios/launch/history"))
+        mockMvc.perform(get("/api/v1/scenarios/launch/history"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].templateId").value("preset-FIRE-SMALL"));
@@ -165,13 +165,13 @@ class ScenarioLaunchControllerTest {
     @DisplayName("GET /launch/{launchId}/status 查询场景执行状态")
     void getStatus() throws Exception {
         registerOnlineDrones(5);
-        String response = mockMvc.perform(post("/api/scenarios/launch/preset-FIRE-SMALL")
+        String response = mockMvc.perform(post("/api/v1/scenarios/launch/preset-FIRE-SMALL")
                         .contentType("application/json")
                         .content(json(launchBody(39.9, 116.3))))
                 .andReturn().getResponse().getContentAsString();
         String launchId = MAPPER.readTree(response).get("launchId").asText();
 
-        mockMvc.perform(get("/api/scenarios/launch/" + launchId + "/status"))
+        mockMvc.perform(get("/api/v1/scenarios/launch/" + launchId + "/status"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.launchId").value(launchId))
                 .andExpect(jsonPath("$.status").value("RUNNING"))
@@ -181,7 +181,7 @@ class ScenarioLaunchControllerTest {
     @Test
     @DisplayName("GET /launch/{launchId}/status 不存在时返回 404")
     void getStatusNotFound() throws Exception {
-        mockMvc.perform(get("/api/scenarios/launch/non-existent/status"))
+        mockMvc.perform(get("/api/v1/scenarios/launch/non-existent/status"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").exists());
     }
@@ -194,26 +194,26 @@ class ScenarioLaunchControllerTest {
     @DisplayName("POST /launch/{launchId}/abort 中止进行中的场景")
     void abortRunningLaunch() throws Exception {
         registerOnlineDrones(5);
-        String response = mockMvc.perform(post("/api/scenarios/launch/preset-FIRE-SMALL")
+        String response = mockMvc.perform(post("/api/v1/scenarios/launch/preset-FIRE-SMALL")
                         .contentType("application/json")
                         .content(json(launchBody(39.9, 116.3))))
                 .andReturn().getResponse().getContentAsString();
         String launchId = MAPPER.readTree(response).get("launchId").asText();
 
-        mockMvc.perform(post("/api/scenarios/launch/" + launchId + "/abort"))
+        mockMvc.perform(post("/api/v1/scenarios/launch/" + launchId + "/abort"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.launchId").value(launchId))
                 .andExpect(jsonPath("$.status").value("ABORTED"));
 
         // 中止后 active 应为空
-        mockMvc.perform(get("/api/scenarios/launch/active"))
+        mockMvc.perform(get("/api/v1/scenarios/launch/active"))
                 .andExpect(jsonPath("$.length()").value(0));
     }
 
     @Test
     @DisplayName("POST /launch/{launchId}/abort 不存在时返回 404")
     void abortNonExistentReturns404() throws Exception {
-        mockMvc.perform(post("/api/scenarios/launch/non-existent/abort"))
+        mockMvc.perform(post("/api/v1/scenarios/launch/non-existent/abort"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").exists());
     }

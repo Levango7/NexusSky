@@ -1,0 +1,18 @@
+# PodDisruptionBudget for gcs-web
+# 保证至少 1 个副本可用，防止 voluntary disruption（如 drain）导致服务中断
+# 用法：kubectl apply -f deploy/k8s/pdb-gcs-web.yaml -n nexussky
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gcs-web
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: gcs-web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/component: gcs-web

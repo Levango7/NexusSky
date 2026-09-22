@@ -29,7 +29,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/voice-intercom")
+@RequestMapping("/api/v1/voice-intercom")
 @Tag(name = "VoiceIntercom", description = "语音对讲 REST API：双向对讲启停、状态查询、广播喊话")
 public class VoiceIntercomController {
 

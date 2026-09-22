@@ -76,7 +76,7 @@ class MaintenanceControllerTest {
     }
 
     // ------------------------------------------------------------------
-    // POST /api/maintenance/records
+    // POST /api/v1/maintenance/records
     // ------------------------------------------------------------------
 
     @Test
@@ -85,7 +85,7 @@ class MaintenanceControllerTest {
         MaintenanceRecord r = newRecord(1, ComponentType.BATTERY,
                 MaintenanceRecord.MaintenanceType.REPLACE,
                 MaintenanceRecord.Status.SCHEDULED);
-        mockMvc.perform(post("/api/maintenance/records")
+        mockMvc.perform(post("/api/v1/maintenance/records")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(r)))
                 .andExpect(status().isOk())
@@ -102,7 +102,7 @@ class MaintenanceControllerTest {
                 MaintenanceRecord.MaintenanceType.REPLACE,
                 MaintenanceRecord.Status.SCHEDULED);
         r.setComponentType(null);
-        mockMvc.perform(post("/api/maintenance/records")
+        mockMvc.perform(post("/api/v1/maintenance/records")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(r)))
                 .andExpect(status().isBadRequest());
@@ -114,14 +114,14 @@ class MaintenanceControllerTest {
         MaintenanceRecord r = newRecord(0, ComponentType.BATTERY,
                 MaintenanceRecord.MaintenanceType.REPLACE,
                 MaintenanceRecord.Status.SCHEDULED);
-        mockMvc.perform(post("/api/maintenance/records")
+        mockMvc.perform(post("/api/v1/maintenance/records")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(r)))
                 .andExpect(status().isBadRequest());
     }
 
     // ------------------------------------------------------------------
-    // GET /api/maintenance/records
+    // GET /api/v1/maintenance/records
     // ------------------------------------------------------------------
 
     @Test
@@ -131,7 +131,7 @@ class MaintenanceControllerTest {
                 MaintenanceRecord.MaintenanceType.REPLACE, MaintenanceRecord.Status.SCHEDULED));
         controller.createRecord(newRecord(2, ComponentType.MOTOR,
                 MaintenanceRecord.MaintenanceType.REPAIR, MaintenanceRecord.Status.COMPLETED));
-        mockMvc.perform(get("/api/maintenance/records"))
+        mockMvc.perform(get("/api/v1/maintenance/records"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].sysid").exists());
     }
@@ -143,7 +143,7 @@ class MaintenanceControllerTest {
                 MaintenanceRecord.MaintenanceType.REPLACE, MaintenanceRecord.Status.SCHEDULED));
         controller.createRecord(newRecord(2, ComponentType.MOTOR,
                 MaintenanceRecord.MaintenanceType.REPAIR, MaintenanceRecord.Status.COMPLETED));
-        mockMvc.perform(get("/api/maintenance/records").param("sysid", "1"))
+        mockMvc.perform(get("/api/v1/maintenance/records").param("sysid", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].sysid").value(1));
     }
@@ -155,13 +155,13 @@ class MaintenanceControllerTest {
                 MaintenanceRecord.MaintenanceType.REPLACE, MaintenanceRecord.Status.SCHEDULED));
         controller.createRecord(newRecord(2, ComponentType.MOTOR,
                 MaintenanceRecord.MaintenanceType.REPAIR, MaintenanceRecord.Status.COMPLETED));
-        mockMvc.perform(get("/api/maintenance/records").param("status", "SCHEDULED"))
+        mockMvc.perform(get("/api/v1/maintenance/records").param("status", "SCHEDULED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].status").value("SCHEDULED"));
     }
 
     // ------------------------------------------------------------------
-    // PUT /api/maintenance/records/{id}
+    // PUT /api/v1/maintenance/records/{id}
     // ------------------------------------------------------------------
 
     @Test
@@ -175,7 +175,7 @@ class MaintenanceControllerTest {
         update.setNotes("completed");
         update.setCost(150.0);
 
-        mockMvc.perform(put("/api/maintenance/records/" + created.getId())
+        mockMvc.perform(put("/api/v1/maintenance/records/" + created.getId())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(update)))
                 .andExpect(status().isOk())
@@ -189,14 +189,14 @@ class MaintenanceControllerTest {
     void updateRecord_notFound_returns404() throws Exception {
         MaintenanceRecord update = new MaintenanceRecord();
         update.setStatus(MaintenanceRecord.Status.COMPLETED);
-        mockMvc.perform(put("/api/maintenance/records/nonexistent")
+        mockMvc.perform(put("/api/v1/maintenance/records/nonexistent")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(update)))
                 .andExpect(status().isNotFound());
     }
 
     // ------------------------------------------------------------------
-    // GET /api/maintenance/predictions
+    // GET /api/v1/maintenance/predictions
     // ------------------------------------------------------------------
 
     @Test
@@ -204,7 +204,7 @@ class MaintenanceControllerTest {
     void getPredictions_returnsAll() throws Exception {
         monitor.updateScore(monitor.calculateScore(1, healthySnapshot()));
         monitor.updateScore(monitor.calculateScore(2, healthySnapshot()));
-        mockMvc.perform(get("/api/maintenance/predictions"))
+        mockMvc.perform(get("/api/v1/maintenance/predictions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].sysid").exists());
     }
@@ -212,20 +212,20 @@ class MaintenanceControllerTest {
     @Test
     @DisplayName("GET /predictions 无数据返回空数组")
     void getPredictions_empty_returnsEmptyArray() throws Exception {
-        mockMvc.perform(get("/api/maintenance/predictions"))
+        mockMvc.perform(get("/api/v1/maintenance/predictions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
     }
 
     // ------------------------------------------------------------------
-    // GET /api/maintenance/predictions/{sysid}
+    // GET /api/v1/maintenance/predictions/{sysid}
     // ------------------------------------------------------------------
 
     @Test
     @DisplayName("GET /predictions/{sysid} 返回单机预测")
     void getPredictionsBySysid_returnsList() throws Exception {
         monitor.updateScore(monitor.calculateScore(1, healthySnapshot()));
-        mockMvc.perform(get("/api/maintenance/predictions/1"))
+        mockMvc.perform(get("/api/v1/maintenance/predictions/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].sysid").value(1))
                 .andExpect(jsonPath("$[0].predictedComponent").exists())
@@ -235,13 +235,13 @@ class MaintenanceControllerTest {
     @Test
     @DisplayName("GET /predictions/{sysid} 无评分返回空数组")
     void getPredictionsBySysid_noScore_returnsEmpty() throws Exception {
-        mockMvc.perform(get("/api/maintenance/predictions/99"))
+        mockMvc.perform(get("/api/v1/maintenance/predictions/99"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
     }
 
     // ------------------------------------------------------------------
-    // GET /api/maintenance/schedule
+    // GET /api/v1/maintenance/schedule
     // ------------------------------------------------------------------
 
     @Test
@@ -253,7 +253,7 @@ class MaintenanceControllerTest {
                 MaintenanceRecord.MaintenanceType.REPAIR, MaintenanceRecord.Status.IN_PROGRESS));
         controller.createRecord(newRecord(3, ComponentType.GPS,
                 MaintenanceRecord.MaintenanceType.INSPECT, MaintenanceRecord.Status.COMPLETED));
-        mockMvc.perform(get("/api/maintenance/schedule"))
+        mockMvc.perform(get("/api/v1/maintenance/schedule"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].status").value("SCHEDULED"));
     }
@@ -261,7 +261,7 @@ class MaintenanceControllerTest {
     @Test
     @DisplayName("GET /schedule 无计划返回空数组")
     void getSchedule_empty_returnsEmptyArray() throws Exception {
-        mockMvc.perform(get("/api/maintenance/schedule"))
+        mockMvc.perform(get("/api/v1/maintenance/schedule"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
     }

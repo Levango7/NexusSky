@@ -35,7 +35,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/inspection")
+@RequestMapping("/api/v1/inspection")
 @Tag(name = "Inspection", description = "无人机集群智能巡检 REST API：任务管理、航线规划、异常检测、报告生成")
 public class InspectionController {
 

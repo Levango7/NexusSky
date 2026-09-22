@@ -62,7 +62,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </pre>
  */
 @RestController
-@RequestMapping("/api/alarms")
+@RequestMapping("/api/v1/alarms")
 @Tag(name = "Alarm", description = "报警联动 REST API：报警事件接收/查询/确认、联动规则 CRUD、SSE 实时推送、一键应急响应")
 public class AlarmController {
 

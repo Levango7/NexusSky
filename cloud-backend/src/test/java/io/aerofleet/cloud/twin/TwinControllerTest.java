@@ -15,11 +15,11 @@ class TwinControllerTest {
 
     @Test
     void testGetAllStates() throws Exception {
-        mockMvc.perform(get("/api/twin/state")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/twin/state")).andExpect(status().isOk());
     }
 
     @Test
     void testPredict() throws Exception {
-        mockMvc.perform(get("/api/twin/predict/1").param("horizon", "10")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/twin/predict/1").param("horizon", "10")).andExpect(status().isOk());
     }
 }

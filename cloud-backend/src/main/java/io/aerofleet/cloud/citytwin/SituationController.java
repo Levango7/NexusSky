@@ -23,7 +23,7 @@ import java.util.List;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/city-twin/situation")
+@RequestMapping("/api/v1/city-twin/situation")
 @Tag(name = "CityTwin-Situation", description = "实时态势叠加：当前态势、历史态势、无人机位置、告警标记")
 public class SituationController {
 

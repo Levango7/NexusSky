@@ -37,7 +37,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/scenarios/drill")
+@RequestMapping("/api/v1/scenarios/drill")
 @Tag(name = "ScenarioDrill", description = "应急救援场景演练：模拟执行与评估报告")
 public class ScenarioDrillController {
 

@@ -38,7 +38,7 @@ class TrackingControllerTest {
     }
 
     // ------------------------------------------------------------------
-    // GET /api/tracking/{sysid}/track
+    // GET /api/v1/tracking/{sysid}/track
     // ------------------------------------------------------------------
 
     @Test
@@ -103,7 +103,7 @@ class TrackingControllerTest {
     }
 
     // ------------------------------------------------------------------
-    // GET /api/tracking/{sysid}/replay
+    // GET /api/v1/tracking/{sysid}/replay
     // ------------------------------------------------------------------
 
     @Test
@@ -151,7 +151,7 @@ class TrackingControllerTest {
     }
 
     // ------------------------------------------------------------------
-    // GET /api/tracking/{sysid}/last-known
+    // GET /api/v1/tracking/{sysid}/last-known
     // ------------------------------------------------------------------
 
     @Test
@@ -196,7 +196,7 @@ class TrackingControllerTest {
     }
 
     // ------------------------------------------------------------------
-    // GET /api/tracking/lost
+    // GET /api/v1/tracking/lost
     // ------------------------------------------------------------------
 
     @Test
@@ -228,7 +228,7 @@ class TrackingControllerTest {
     }
 
     // ------------------------------------------------------------------
-    // GET /api/tracking/{sysid}/search-guide
+    // GET /api/v1/tracking/{sysid}/search-guide
     // ------------------------------------------------------------------
 
     @Test
@@ -266,7 +266,7 @@ class TrackingControllerTest {
     }
 
     // ------------------------------------------------------------------
-    // GET /api/tracking/scan
+    // GET /api/v1/tracking/scan
     // ------------------------------------------------------------------
 
     @Test

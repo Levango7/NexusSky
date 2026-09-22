@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * License 信息载体。
@@ -52,6 +54,30 @@ public class LicenseInfo {
     @JsonProperty("active")
     private boolean active;
 
+    /** License 唯一标识 */
+    @JsonProperty("licenseId")
+    private String licenseId;
+
+    /** 授权模块集合，取值: core, fleet, emergency, network, advanced */
+    @JsonProperty("modules")
+    private Set<String> modules;
+
+    /** 每日最大 API 调用次数，<=0 视为无限制 */
+    @JsonProperty("maxApiCallsPerDay")
+    private int maxApiCallsPerDay;
+
+    /** 最大并发无人机数，<=0 视为无限制 */
+    @JsonProperty("maxConcurrentDrones")
+    private int maxConcurrentDrones;
+
+    /** RSA-SHA256 签名（Base64），用于验证 license 完整性 */
+    @JsonProperty("signature")
+    private String signature;
+
+    /** 签名证书（Base64），用于验证签名来源 */
+    @JsonProperty("signerCert")
+    private String signerCert;
+
     /** Jackson 反序列化需要的无参构造器 */
     public LicenseInfo() {
     }
@@ -67,6 +93,28 @@ public class LicenseInfo {
         this.issuedAt = issuedAt;
         this.issuedTo = issuedTo;
         this.active = active;
+    }
+
+    public LicenseInfo(String licenseKey, String tenantId, String productName,
+                       int maxDevices, Instant expiryDate, Instant issuedAt,
+                       String issuedTo, boolean active,
+                       String licenseId, Set<String> modules,
+                       int maxApiCallsPerDay, int maxConcurrentDrones,
+                       String signature, String signerCert) {
+        this.licenseKey = licenseKey;
+        this.tenantId = tenantId;
+        this.productName = productName;
+        this.maxDevices = maxDevices;
+        this.expiryDate = expiryDate;
+        this.issuedAt = issuedAt;
+        this.issuedTo = issuedTo;
+        this.active = active;
+        this.licenseId = licenseId;
+        this.modules = modules;
+        this.maxApiCallsPerDay = maxApiCallsPerDay;
+        this.maxConcurrentDrones = maxConcurrentDrones;
+        this.signature = signature;
+        this.signerCert = signerCert;
     }
 
     /**
@@ -171,16 +219,80 @@ public class LicenseInfo {
         this.active = active;
     }
 
+    public String getLicenseId() {
+        return licenseId;
+    }
+
+    public void setLicenseId(String licenseId) {
+        this.licenseId = licenseId;
+    }
+
+    public Set<String> getModules() {
+        return modules;
+    }
+
+    public void setModules(Set<String> modules) {
+        this.modules = modules;
+    }
+
+    public int getMaxApiCallsPerDay() {
+        return maxApiCallsPerDay;
+    }
+
+    public void setMaxApiCallsPerDay(int maxApiCallsPerDay) {
+        this.maxApiCallsPerDay = maxApiCallsPerDay;
+    }
+
+    public int getMaxConcurrentDrones() {
+        return maxConcurrentDrones;
+    }
+
+    public void setMaxConcurrentDrones(int maxConcurrentDrones) {
+        this.maxConcurrentDrones = maxConcurrentDrones;
+    }
+
+    public String getSignature() {
+        return signature;
+    }
+
+    public void setSignature(String signature) {
+        this.signature = signature;
+    }
+
+    public String getSignerCert() {
+        return signerCert;
+    }
+
+    public void setSignerCert(String signerCert) {
+        this.signerCert = signerCert;
+    }
+
+    /**
+     * 判断指定模块是否在授权范围内。
+     *
+     * @param module 模块名 (core, fleet, emergency, network, advanced)
+     * @return 已授权返回 true，否则 false
+     */
+    public boolean hasModule(String module) {
+        return modules != null && modules.contains(module);
+    }
+
     @Override
     public String toString() {
         return "LicenseInfo{" +
-                "tenantId='" + tenantId + '\'' +
+                "licenseId='" + licenseId + '\'' +
+                ", tenantId='" + tenantId + '\'' +
                 ", productName='" + productName + '\'' +
                 ", maxDevices=" + maxDevices +
+                ", modules=" + modules +
+                ", maxApiCallsPerDay=" + maxApiCallsPerDay +
+                ", maxConcurrentDrones=" + maxConcurrentDrones +
                 ", expiryDate=" + expiryDate +
                 ", issuedAt=" + issuedAt +
                 ", issuedTo='" + issuedTo + '\'' +
                 ", active=" + active +
+                ", signature='" + (signature != null ? "[present]" : "null") + '\'' +
+                ", signerCert='" + (signerCert != null ? "[present]" : "null") + '\'' +
                 '}';
     }
 }

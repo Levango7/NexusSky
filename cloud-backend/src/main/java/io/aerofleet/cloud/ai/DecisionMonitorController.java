@@ -5,7 +5,7 @@ import java.util.Map;
 
 /** M11 决策监控 REST API */
 @RestController
-@RequestMapping("/api/ai")
+@RequestMapping("/api/v1/ai")
 public class DecisionMonitorController {
     private final DecisionMonitorService service;
 

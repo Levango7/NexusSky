@@ -15,7 +15,7 @@ import java.util.Map;
  * @author AeroFleet Cloud Team
  */
 @RestController
-@RequestMapping("/api/license")
+@RequestMapping("/api/v1/license")
 public class LicenseController {
 
 

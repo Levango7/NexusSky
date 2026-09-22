@@ -59,7 +59,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("POST /parse 解析中文起飞指令")
     void parse_takeoff_cn() throws Exception {
-        mockMvc.perform(post("/api/voice-cmd/parse")
+        mockMvc.perform(post("/api/v1/voice-cmd/parse")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("text", "起飞"))))
                 .andExpect(status().isOk())
@@ -70,7 +70,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("POST /parse 解析复合指令")
     void parse_complex() throws Exception {
-        mockMvc.perform(post("/api/voice-cmd/parse")
+        mockMvc.perform(post("/api/v1/voice-cmd/parse")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(
                                 Map.of("text", "无人机1号起飞，高度50米，前往东门侦察"))))
@@ -83,7 +83,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("POST /parse 空文本返回 400")
     void parse_emptyText_badRequest() throws Exception {
-        mockMvc.perform(post("/api/voice-cmd/parse")
+        mockMvc.perform(post("/api/v1/voice-cmd/parse")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("text", ""))))
                 .andExpect(status().isBadRequest());
@@ -98,7 +98,7 @@ class VoiceCommandControllerTest {
         cmd.setAction(ParsedCommand.Action.TAKEOFF);
         cmd.setSysid(1);
 
-        mockMvc.perform(post("/api/voice-cmd/execute")
+        mockMvc.perform(post("/api/v1/voice-cmd/execute")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(cmd)))
                 .andExpect(status().isOk())
@@ -114,7 +114,7 @@ class VoiceCommandControllerTest {
         cmd.setSysid(1);
         cmd.setPriority(ParsedCommand.Priority.HIGH);
 
-        mockMvc.perform(post("/api/voice-cmd/execute")
+        mockMvc.perform(post("/api/v1/voice-cmd/execute")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(cmd)))
                 .andExpect(status().isOk())
@@ -129,7 +129,7 @@ class VoiceCommandControllerTest {
         cmd.setAction(ParsedCommand.Action.TAKEOFF);
         cmd.setSysid(99);
 
-        mockMvc.perform(post("/api/voice-cmd/execute")
+        mockMvc.perform(post("/api/v1/voice-cmd/execute")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(cmd)))
                 .andExpect(status().isOk())
@@ -149,7 +149,7 @@ class VoiceCommandControllerTest {
         ExecutionResult pendingResult = executor.execute(cmd);
         String pendingId = pendingResult.getCommandId();
 
-        mockMvc.perform(post("/api/voice-cmd/confirm/" + pendingId))
+        mockMvc.perform(post("/api/v1/voice-cmd/confirm/" + pendingId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("EXECUTED"))
                 .andExpect(jsonPath("$.commandId").value(pendingId));
@@ -158,7 +158,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("POST /confirm/{pendingId} 不存在的 pendingId 返回 404")
     void confirm_nonExistent() throws Exception {
-        mockMvc.perform(post("/api/voice-cmd/confirm/non-existent-id"))
+        mockMvc.perform(post("/api/v1/voice-cmd/confirm/non-existent-id"))
                 .andExpect(status().isNotFound());
     }
 
@@ -167,7 +167,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("POST /broadcast/{sysid} 发送播报")
     void broadcast_sent() throws Exception {
-        mockMvc.perform(post("/api/voice-cmd/broadcast/1")
+        mockMvc.perform(post("/api/v1/voice-cmd/broadcast/1")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("text", "请注意前方障碍物"))))
                 .andExpect(status().isOk())
@@ -179,7 +179,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("POST /broadcast/{sysid} 未注册无人机返回 404")
     void broadcast_unknownDrone() throws Exception {
-        mockMvc.perform(post("/api/voice-cmd/broadcast/99")
+        mockMvc.perform(post("/api/v1/voice-cmd/broadcast/99")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(Map.of("text", "测试"))))
                 .andExpect(status().isNotFound());
@@ -190,7 +190,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("GET /broadcast/{sysid}/status 获取状态播报")
     void statusBroadcast() throws Exception {
-        mockMvc.perform(get("/api/voice-cmd/broadcast/1/status"))
+        mockMvc.perform(get("/api/v1/voice-cmd/broadcast/1/status"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.text").exists())
                 .andExpect(jsonPath("$.text").value(org.hamcrest.Matchers.containsString("无人机1")));
@@ -199,7 +199,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("GET /broadcast/{sysid}/status 未注册无人机返回 404")
     void statusBroadcast_unknownDrone() throws Exception {
-        mockMvc.perform(get("/api/voice-cmd/broadcast/99/status"))
+        mockMvc.perform(get("/api/v1/voice-cmd/broadcast/99/status"))
                 .andExpect(status().isNotFound());
     }
 
@@ -208,7 +208,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("GET /broadcast/{sysid}/alert 获取告警播报")
     void alertBroadcast() throws Exception {
-        mockMvc.perform(get("/api/voice-cmd/broadcast/1/alert"))
+        mockMvc.perform(get("/api/v1/voice-cmd/broadcast/1/alert"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.text").exists())
                 .andExpect(jsonPath("$.alertType").exists());
@@ -217,7 +217,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("GET /broadcast/{sysid}/alert 未注册无人机返回 404")
     void alertBroadcast_unknownDrone() throws Exception {
-        mockMvc.perform(get("/api/voice-cmd/broadcast/99/alert"))
+        mockMvc.perform(get("/api/v1/voice-cmd/broadcast/99/alert"))
                 .andExpect(status().isNotFound());
     }
 
@@ -232,7 +232,7 @@ class VoiceCommandControllerTest {
         cmd.setSysid(1);
         executor.execute(cmd);
 
-        mockMvc.perform(get("/api/voice-cmd/history"))
+        mockMvc.perform(get("/api/v1/voice-cmd/history"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
     }
@@ -249,7 +249,7 @@ class VoiceCommandControllerTest {
         cmd.setPriority(ParsedCommand.Priority.HIGH);
         executor.execute(cmd);
 
-        mockMvc.perform(get("/api/voice-cmd/pending"))
+        mockMvc.perform(get("/api/v1/voice-cmd/pending"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$[0].pendingId").exists());
@@ -258,7 +258,7 @@ class VoiceCommandControllerTest {
     @Test
     @DisplayName("GET /pending 无待确认指令返回空数组")
     void pending_empty() throws Exception {
-        mockMvc.perform(get("/api/voice-cmd/pending"))
+        mockMvc.perform(get("/api/v1/voice-cmd/pending"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$").isEmpty());

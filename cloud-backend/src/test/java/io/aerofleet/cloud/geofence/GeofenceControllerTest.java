@@ -87,7 +87,7 @@ class GeofenceControllerTest {
     @DisplayName("testCreateAndGetZone: 创建圆形围栏并获取详情")
     void testCreateAndGetZone() throws Exception {
         // POST 创建
-        mockMvc.perform(post("/api/geofence/zones")
+        mockMvc.perform(post("/api/v1/geofence/zones")
                         .contentType("application/json")
                         .content(json(circleBody(1, "base-circle"))))
                 .andExpect(status().isOk())
@@ -101,19 +101,19 @@ class GeofenceControllerTest {
                 .andExpect(jsonPath("$.enabled").value(true));
 
         // GET 单个
-        mockMvc.perform(get("/api/geofence/zones/1"))
+        mockMvc.perform(get("/api/v1/geofence/zones/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.name").value("base-circle"));
 
         // GET 列表
-        mockMvc.perform(get("/api/geofence/zones"))
+        mockMvc.perform(get("/api/v1/geofence/zones"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(1))
                 .andExpect(jsonPath("$.items[0].id").value(1));
 
         // 创建多边形围栏
-        mockMvc.perform(post("/api/geofence/zones")
+        mockMvc.perform(post("/api/v1/geofence/zones")
                         .contentType("application/json")
                         .content(json(polygonBody(2, "poly-area"))))
                 .andExpect(status().isOk())
@@ -123,7 +123,7 @@ class GeofenceControllerTest {
                 .andExpect(jsonPath("$.points[0].lat").value(22.0));
 
         // 列表应有 2 个
-        mockMvc.perform(get("/api/geofence/zones"))
+        mockMvc.perform(get("/api/v1/geofence/zones"))
                 .andExpect(jsonPath("$.total").value(2));
     }
 
@@ -131,27 +131,27 @@ class GeofenceControllerTest {
     @DisplayName("testDeleteZone: 删除围栏 + 404 场景")
     void testDeleteZone() throws Exception {
         // 先创建
-        mockMvc.perform(post("/api/geofence/zones")
+        mockMvc.perform(post("/api/v1/geofence/zones")
                 .contentType("application/json")
                 .content(json(circleBody(1, "to-delete"))));
 
         // DELETE 删除
-        mockMvc.perform(delete("/api/geofence/zones/1"))
+        mockMvc.perform(delete("/api/v1/geofence/zones/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.deleted").value(true))
                 .andExpect(jsonPath("$.id").value(1));
 
         // 删除后再获取应 404
-        mockMvc.perform(get("/api/geofence/zones/1"))
+        mockMvc.perform(get("/api/v1/geofence/zones/1"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").exists());
 
         // 删除不存在的围栏 404
-        mockMvc.perform(delete("/api/geofence/zones/999"))
+        mockMvc.perform(delete("/api/v1/geofence/zones/999"))
                 .andExpect(status().isNotFound());
 
         // PUT 更新不存在的围栏 404
-        mockMvc.perform(put("/api/geofence/zones/999")
+        mockMvc.perform(put("/api/v1/geofence/zones/999")
                         .contentType("application/json")
                         .content(json(circleBody(999, "nope"))))
                 .andExpect(status().isNotFound());
@@ -165,7 +165,7 @@ class GeofenceControllerTest {
     @DisplayName("testGetBreaches: 越界历史查询 + sysid/zoneId 过滤")
     void testGetBreaches() throws Exception {
         // 创建围栏
-        mockMvc.perform(post("/api/geofence/zones")
+        mockMvc.perform(post("/api/v1/geofence/zones")
                 .contentType("application/json")
                 .content(json(circleBody(1, "base-circle"))));
 
@@ -175,24 +175,24 @@ class GeofenceControllerTest {
         monitor.checkPosition(2, 22.6, 114.0);
 
         // 查询全部越界历史
-        mockMvc.perform(get("/api/geofence/breaches"))
+        mockMvc.perform(get("/api/v1/geofence/breaches"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(2))
                 .andExpect(jsonPath("$.items[0].breachType").value("EXIT"));
 
         // 按 sysid 过滤
-        mockMvc.perform(get("/api/geofence/breaches").param("sysid", "1"))
+        mockMvc.perform(get("/api/v1/geofence/breaches").param("sysid", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(1))
                 .andExpect(jsonPath("$.items[0].sysid").value(1));
 
         // 按 zoneId 过滤
-        mockMvc.perform(get("/api/geofence/breaches").param("zoneId", "1"))
+        mockMvc.perform(get("/api/v1/geofence/breaches").param("zoneId", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(2));
 
         // sysid + zoneId 同时过滤
-        mockMvc.perform(get("/api/geofence/breaches")
+        mockMvc.perform(get("/api/v1/geofence/breaches")
                         .param("sysid", "2")
                         .param("zoneId", "1"))
                 .andExpect(status().isOk())
@@ -208,7 +208,7 @@ class GeofenceControllerTest {
     @DisplayName("testManualCheck: 手动触发全量检查")
     void testManualCheck() throws Exception {
         // 创建围栏
-        mockMvc.perform(post("/api/geofence/zones")
+        mockMvc.perform(post("/api/v1/geofence/zones")
                 .contentType("application/json")
                 .content(json(circleBody(1, "base-circle"))));
 
@@ -220,7 +220,7 @@ class GeofenceControllerTest {
         d.lon = 113.95;
 
         // POST /check 手动触发
-        mockMvc.perform(post("/api/geofence/check"))
+        mockMvc.perform(post("/api/v1/geofence/check"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.count").value(1))
                 .andExpect(jsonPath("$.newEvents[0].sysid").value(1))
@@ -228,12 +228,12 @@ class GeofenceControllerTest {
                 .andExpect(jsonPath("$.timestamp").isNumber());
 
         // 再次检查：状态未变，无新事件
-        mockMvc.perform(post("/api/geofence/check"))
+        mockMvc.perform(post("/api/v1/geofence/check"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.count").value(0));
 
         // 越界历史应有 1 条
-        mockMvc.perform(get("/api/geofence/breaches"))
+        mockMvc.perform(get("/api/v1/geofence/breaches"))
                 .andExpect(jsonPath("$.total").value(1));
     }
 }

@@ -41,7 +41,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/maintenance")
+@RequestMapping("/api/v1/maintenance")
 @Tag(name = "Maintenance", description = "维护管理 REST API：维护记录 CRUD、预测性维护建议、维护计划")
 public class MaintenanceController {
 

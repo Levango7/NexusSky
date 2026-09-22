@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/delivery2")
+@RequestMapping("/api/v1/delivery2")
 @Tag(name = "Delivery2", description = "无人机物流配送 REST API：应急物资空投、医疗样本运输、偏远地区配送")
 public class DeliveryController2 {
 

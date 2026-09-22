@@ -31,7 +31,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/video-stream")
+@RequestMapping("/api/v1/video-stream")
 @Tag(name = "VideoStream", description = "视频流回传 REST API：无人机 RTSP 流 URL、启停控制、状态查询")
 public class VideoStreamController {
 

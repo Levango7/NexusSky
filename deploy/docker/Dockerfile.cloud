@@ -38,6 +38,11 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends curl \
 
 COPY --from=builder /build/cloud-backend/target/*.jar app.jar
 
+# 非 Root 用户运行（安全加固）
+RUN useradd -r -u 1001 appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8080
 
 # G1GC + 容器感知内存上限（75% RAM 留给堆，余给 metaspace/直接内存）

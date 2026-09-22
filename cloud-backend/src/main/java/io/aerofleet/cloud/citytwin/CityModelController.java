@@ -28,7 +28,7 @@ import java.util.List;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/city-twin/models")
+@RequestMapping("/api/v1/city-twin/models")
 @Tag(name = "CityTwin-Models", description = "城市三维模型管理：模型注册、查询、删除、刷新")
 public class CityModelController {
 

@@ -94,7 +94,7 @@ print_resp() {
 # 0. 前置：后端可达
 # =====================================================================
 step "前置：后端可达 $BASE_URL"
-if curl -s --max-time 5 "$BASE_URL/api/surveillance/devices" >/dev/null 2>&1; then
+if curl -s --max-time 5 "$BASE_URL/api/v1/surveillance/devices" >/dev/null 2>&1; then
   echo "   ✅ 后端可达"
 else
   echo "   ❌ 后端 $BASE_URL 未运行，中止演示"
@@ -104,10 +104,10 @@ fi
 # =====================================================================
 # 1. 布控球自动发现 + 一键注册（rapid-deploy）
 # =====================================================================
-step "1/9 布控球自动发现 + 一键注册（POST /api/surveillance/rapid-deploy）"
+step "1/9 布控球自动发现 + 一键注册（POST /api/v1/surveillance/rapid-deploy）"
 echo "   子网: $SUBNET  用户: $ONVIF_USER"
 DEPLOY_BODY="{\"subnet\":\"$SUBNET\",\"username\":\"$ONVIF_USER\",\"password\":\"$ONVIF_PASS\"}"
-api_call POST /api/surveillance/rapid-deploy "$DEPLOY_BODY"
+api_call POST /api/v1/surveillance/rapid-deploy "$DEPLOY_BODY"
 check_http "布控球快速部署" || { echo "   跳过后续步骤"; exit 1; }
 echo "   响应:"
 print_resp
@@ -117,8 +117,8 @@ check "发现并注册设备数 >= 1" "[ '${DEPLOY_COUNT:-0}' -ge 1 ] 2>/dev/nul
 # =====================================================================
 # 2. 查看已注册设备
 # =====================================================================
-step "2/9 查看已注册设备（GET /api/surveillance/devices）"
-api_call GET /api/surveillance/devices
+step "2/9 查看已注册设备（GET /api/v1/surveillance/devices）"
+api_call GET /api/v1/surveillance/devices
 check_http "查询设备列表" || exit 1
 echo "   响应:"
 print_resp
@@ -136,10 +136,10 @@ echo "   首个设备 ID: $FIRST_DEVICE_ID"
 # =====================================================================
 # 注意：后端 AlarmController.parseRule 期望字段为 matchEventType / matchSeverity
 #       （而非 eventType / minSeverity），此处与后端实现对齐。
-step "3/9 创建报警联动规则（POST /api/alarms/rules）"
+step "3/9 创建报警联动规则（POST /api/v1/alarms/rules）"
 echo "   规则: 火灾自动侦察 — FIRE+CRITICAL → DEPLOY_DRONE(2架, 半径100m, 高度60m)"
 RULE_BODY='{"name":"火灾自动侦察","matchEventType":"FIRE","matchSeverity":"CRITICAL","actionType":"DEPLOY_DRONE","droneCount":2,"targetRadiusM":100,"altitudeM":60}'
-api_call POST /api/alarms/rules "$RULE_BODY"
+api_call POST /api/v1/alarms/rules "$RULE_BODY"
 check_http "创建联动规则" || exit 1
 echo "   响应:"
 print_resp
@@ -150,10 +150,10 @@ echo "   规则 ID: $RULE_ID"
 # =====================================================================
 # 4. 模拟报警事件（触发联动）
 # =====================================================================
-step "4/9 模拟报警事件（POST /api/alarms/events）— 触发联动规则"
+step "4/9 模拟报警事件（POST /api/v1/alarms/events）— 触发联动规则"
 echo "   来源设备: $FIRST_DEVICE_ID  位置: ($EVENT_LAT, $EVENT_LON)"
 EVENT_BODY="{\"sourceDeviceId\":\"$FIRST_DEVICE_ID\",\"eventType\":\"FIRE\",\"severity\":\"CRITICAL\",\"lat\":$EVENT_LAT,\"lon\":$EVENT_LON,\"description\":\"布控球检测到火情\"}"
-api_call POST /api/alarms/events "$EVENT_BODY"
+api_call POST /api/v1/alarms/events "$EVENT_BODY"
 check_http "接收报警事件" || exit 1
 echo "   响应（含联动触发结果）:"
 print_resp
@@ -166,8 +166,8 @@ echo "   事件 ID: $EVENT_ID  匹配规则数: $MATCHED_COUNT"
 # =====================================================================
 # 5. 查看报警事件列表
 # =====================================================================
-step "5/9 查看报警事件列表（GET /api/alarms/events）"
-api_call GET /api/alarms/events
+step "5/9 查看报警事件列表（GET /api/v1/alarms/events）"
+api_call GET /api/v1/alarms/events
 check_http "查询报警事件列表" || exit 1
 echo "   响应:"
 print_resp
@@ -177,9 +177,9 @@ check "事件列表总数 >= 1" "[ '${EVENT_TOTAL:-0}' -ge 1 ] 2>/dev/null"
 # =====================================================================
 # 6. 确认报警
 # =====================================================================
-step "6/9 确认报警（POST /api/alarms/events/{eventId}/ack）"
+step "6/9 确认报警（POST /api/v1/alarms/events/{eventId}/ack）"
 echo "   事件 ID: $EVENT_ID"
-api_call POST "/api/alarms/events/$EVENT_ID/ack" '{}'
+api_call POST "/api/v1/alarms/events/$EVENT_ID/ack" '{}'
 check_http "确认报警" || exit 1
 echo "   响应:"
 print_resp
@@ -189,12 +189,12 @@ check "acknowledged == true" "[ '$ACKED' = 'True' ]"
 # =====================================================================
 # 7. 创建应急指挥命令（接报）
 # =====================================================================
-# 注意：后端路径为 /api/emergency-command（非 /api/v1/emergency/commands），
+# 注意：后端路径为 /api/v1/emergency-command（非 /api/v1/emergency/commands），
 #       字段为 incidentType / severity（非 scenarioType / radius），此处与后端对齐。
-step "7/9 创建应急指挥命令（POST /api/emergency-command）— 接报"
+step "7/9 创建应急指挥命令（POST /api/v1/emergency-command）— 接报"
 echo "   事件类型: 火灾  严重程度: CRITICAL  位置: ($EVENT_LAT, $EVENT_LON)"
 CMD_BODY="{\"incidentType\":\"火灾\",\"severity\":\"CRITICAL\",\"lat\":$EVENT_LAT,\"lon\":$EVENT_LON,\"description\":\"布控球火情侦察\",\"reporterName\":\"e2e-demo\",\"reporterContact\":\"110\"}"
-api_call POST /api/emergency-command "$CMD_BODY"
+api_call POST /api/v1/emergency-command "$CMD_BODY"
 check_http "创建应急指挥命令" || exit 1
 echo "   响应:"
 print_resp
@@ -206,10 +206,10 @@ echo "   命令 ID: $COMMAND_ID  当前阶段: $CMD_PHASE"
 # =====================================================================
 # 8. 一键应急响应（自动走完 接报→研判→部署→执行→评估→总结）
 # =====================================================================
-step "8/9 一键应急响应（POST /api/emergency-command/{id}/one-click）"
+step "8/9 一键应急响应（POST /api/v1/emergency-command/{id}/one-click）"
 echo "   命令 ID: $COMMAND_ID"
 echo "   预期阶段流转: 接报 → 研判 → 部署 → 执行 → 评估 → 总结"
-api_call POST "/api/emergency-command/$COMMAND_ID/one-click" '{}'
+api_call POST "/api/v1/emergency-command/$COMMAND_ID/one-click" '{}'
 check_http "一键应急响应" || exit 1
 echo "   响应:"
 print_resp
@@ -222,8 +222,8 @@ echo "   最终阶段: $FINAL_PHASE  转移步数: $PHASE_HIST_SIZE"
 # =====================================================================
 # 9. 查看应急指挥历史
 # =====================================================================
-step "9/9 查看应急指挥历史（GET /api/emergency-command）"
-api_call GET /api/emergency-command
+step "9/9 查看应急指挥历史（GET /api/v1/emergency-command）"
+api_call GET /api/v1/emergency-command
 check_http "查询应急指挥历史" || exit 1
 echo "   响应:"
 print_resp

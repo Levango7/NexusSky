@@ -36,6 +36,19 @@ services:
       start_period: 30s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ===== 无人机模拟器：MAVLink over UDP =====
   # drone-sim 通过 UDP HEARTBEAT 被 cloud-backend 发现，无需 HTTP 连后端。
@@ -50,6 +63,19 @@ services:
       cloud-backend:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ===== Web 地面站：Nginx 静态 + 反代 =====
   gcs-web:
@@ -63,3 +89,16 @@ services:
       cloud-backend:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

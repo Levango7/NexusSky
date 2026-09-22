@@ -79,7 +79,7 @@ class AutoDispatchControllerTest {
     void triggerWithAvailableDroneReturnsSuccess() throws Exception {
         registerDrone(1, 39.901, 116.301, 80);
 
-        mockMvc.perform(post("/api/autodispatch/trigger")
+        mockMvc.perform(post("/api/v1/autodispatch/trigger")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(triggerBody(39.9, 116.3, "alarm-1", 1))))
                 .andExpect(status().isOk())
@@ -92,7 +92,7 @@ class AutoDispatchControllerTest {
     @Test
     @DisplayName("POST /trigger 无可用无人机时返回 NO_DRONE")
     void triggerNoDroneReturnsNoDrone() throws Exception {
-        mockMvc.perform(post("/api/autodispatch/trigger")
+        mockMvc.perform(post("/api/v1/autodispatch/trigger")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(triggerBody(39.9, 116.3, "alarm-1", 1))))
                 .andExpect(status().isOk())
@@ -105,7 +105,7 @@ class AutoDispatchControllerTest {
     void triggerPartialReturnsPartial() throws Exception {
         registerDrone(1, 39.901, 116.301, 80);
 
-        mockMvc.perform(post("/api/autodispatch/trigger")
+        mockMvc.perform(post("/api/v1/autodispatch/trigger")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(triggerBody(39.9, 116.3, "alarm-1", 3))))
                 .andExpect(status().isOk())
@@ -117,11 +117,11 @@ class AutoDispatchControllerTest {
     @DisplayName("GET /history 返回出警历史列表")
     void historyReturnsRecords() throws Exception {
         registerDrone(1, 39.901, 116.301, 80);
-        mockMvc.perform(post("/api/autodispatch/trigger")
+        mockMvc.perform(post("/api/v1/autodispatch/trigger")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(triggerBody(39.9, 116.3, "alarm-1", 1))));
 
-        mockMvc.perform(get("/api/autodispatch/history").param("limit", "10"))
+        mockMvc.perform(get("/api/v1/autodispatch/history").param("limit", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(1))
                 .andExpect(jsonPath("$.items[0].alarmId").value("alarm-1"));
@@ -131,11 +131,11 @@ class AutoDispatchControllerTest {
     @DisplayName("GET /active 返回进行中的出警任务")
     void activeReturnsActiveRecords() throws Exception {
         registerDrone(1, 39.901, 116.301, 80);
-        mockMvc.perform(post("/api/autodispatch/trigger")
+        mockMvc.perform(post("/api/v1/autodispatch/trigger")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(triggerBody(39.9, 116.3, "alarm-1", 1))));
 
-        mockMvc.perform(get("/api/autodispatch/active"))
+        mockMvc.perform(get("/api/v1/autodispatch/active"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(1));
     }
@@ -143,7 +143,7 @@ class AutoDispatchControllerTest {
     @Test
     @DisplayName("GET /active 无活跃任务时返回空列表")
     void activeEmptyReturnsEmptyList() throws Exception {
-        mockMvc.perform(get("/api/autodispatch/active"))
+        mockMvc.perform(get("/api/v1/autodispatch/active"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(0));
     }
@@ -152,13 +152,13 @@ class AutoDispatchControllerTest {
     @DisplayName("POST /{dispatchId}/abort 中止存在的出警任务返回 200")
     void abortExistingDispatchReturns200() throws Exception {
         registerDrone(1, 39.901, 116.301, 80);
-        String response = mockMvc.perform(post("/api/autodispatch/trigger")
+        String response = mockMvc.perform(post("/api/v1/autodispatch/trigger")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(triggerBody(39.9, 116.3, "alarm-1", 1))))
                 .andReturn().getResponse().getContentAsString();
         String dispatchId = MAPPER.readTree(response).get("dispatchId").asText();
 
-        mockMvc.perform(post("/api/autodispatch/" + dispatchId + "/abort"))
+        mockMvc.perform(post("/api/v1/autodispatch/" + dispatchId + "/abort"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ABORTED"))
                 .andExpect(jsonPath("$.abortTime").exists());
@@ -167,14 +167,14 @@ class AutoDispatchControllerTest {
     @Test
     @DisplayName("POST /{dispatchId}/abort 不存在时返回 404")
     void abortNonExistentReturns404() throws Exception {
-        mockMvc.perform(post("/api/autodispatch/nonexistent/abort"))
+        mockMvc.perform(post("/api/v1/autodispatch/nonexistent/abort"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     @DisplayName("GET /config 返回当前配置")
     void getConfigReturnsCurrentConfig() throws Exception {
-        mockMvc.perform(get("/api/autodispatch/config"))
+        mockMvc.perform(get("/api/v1/autodispatch/config"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.enabled").value(true))
                 .andExpect(jsonPath("$.minBatteryPct").value(30))
@@ -195,7 +195,7 @@ class AutoDispatchControllerTest {
         body.put("hoverAltitudeM", 80);
         body.put("hoverDurationSec", 600);
 
-        mockMvc.perform(put("/api/autodispatch/config")
+        mockMvc.perform(put("/api/v1/autodispatch/config")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(body)))
                 .andExpect(status().isOk())
@@ -214,7 +214,7 @@ class AutoDispatchControllerTest {
         body.put("enabled", false);
         // 仅提供 enabled，其他字段保留原值
 
-        mockMvc.perform(put("/api/autodispatch/config")
+        mockMvc.perform(put("/api/v1/autodispatch/config")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(body)))
                 .andExpect(status().isOk())
@@ -232,7 +232,7 @@ class AutoDispatchControllerTest {
         body.put("lon", 116.3);
         body.put("droneCount", 1);
 
-        mockMvc.perform(post("/api/autodispatch/trigger")
+        mockMvc.perform(post("/api/v1/autodispatch/trigger")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(body)))
                 .andExpect(status().isOk())

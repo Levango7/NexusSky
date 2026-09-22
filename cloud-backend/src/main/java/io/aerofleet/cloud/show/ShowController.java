@@ -39,7 +39,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/show")
+@RequestMapping("/api/v1/show")
 @Tag(name = "Show", description = "无人机编队表演 REST API：队形管理、表演任务、动作序列、音乐同步")
 public class ShowController {
 

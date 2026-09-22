@@ -67,7 +67,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("POST /devices 合法请求返回 200 + 设备视图")
     void registerDevice_valid_returns200() throws Exception {
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(deviceBody("cam-1", "HIKVISION"))))
                 .andExpect(status().isOk())
@@ -82,7 +82,7 @@ class SurveillanceControllerTest {
     void registerDevice_missingId_returns400() throws Exception {
         Map<String, Object> body = deviceBody("cam-1", "HIKVISION");
         body.remove("id");
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(body)))
                 .andExpect(status().isBadRequest())
@@ -92,7 +92,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("POST /devices 未知厂商返回 400")
     void registerDevice_unknownVendor_returns400() throws Exception {
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(deviceBody("cam-1", "SONY"))))
                 .andExpect(status().isBadRequest())
@@ -104,7 +104,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /devices 空注册表返回 count=0")
     void listDevices_empty_returnsCountZero() throws Exception {
-        mockMvc.perform(get("/api/surveillance/devices"))
+        mockMvc.perform(get("/api/v1/surveillance/devices"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.count").value(0));
     }
@@ -112,11 +112,11 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /devices 注册后返回 count=1")
     void listDevices_afterRegister_returnsCountOne() throws Exception {
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody("cam-1", "HIKVISION"))));
 
-        mockMvc.perform(get("/api/surveillance/devices"))
+        mockMvc.perform(get("/api/v1/surveillance/devices"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.count").value(1))
                 .andExpect(jsonPath("$.devices[0].id").value("cam-1"));
@@ -127,11 +127,11 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /devices/{id} 已存在返回 200 + 设备详情")
     void getDevice_existing_returns200() throws Exception {
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody("cam-1", "DAHUA"))));
 
-        mockMvc.perform(get("/api/surveillance/devices/cam-1"))
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("cam-1"))
                 .andExpect(jsonPath("$.vendor").value("DAHUA"));
@@ -140,7 +140,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /devices/{id} 不存在返回 404")
     void getDevice_nonExisting_returns404() throws Exception {
-        mockMvc.perform(get("/api/surveillance/devices/nope"))
+        mockMvc.perform(get("/api/v1/surveillance/devices/nope"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").exists());
     }
@@ -150,22 +150,22 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("DELETE /devices/{id} 已存在返回 200 + status=ok")
     void unregisterDevice_existing_returns200() throws Exception {
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody("cam-1", "HIKVISION"))));
 
-        mockMvc.perform(delete("/api/surveillance/devices/cam-1"))
+        mockMvc.perform(delete("/api/v1/surveillance/devices/cam-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ok"));
         // 注销后再查应 404
-        mockMvc.perform(get("/api/surveillance/devices/cam-1"))
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-1"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     @DisplayName("DELETE /devices/{id} 不存在返回 404")
     void unregisterDevice_nonExisting_returns404() throws Exception {
-        mockMvc.perform(delete("/api/surveillance/devices/nope"))
+        mockMvc.perform(delete("/api/v1/surveillance/devices/nope"))
                 .andExpect(status().isNotFound());
     }
 
@@ -174,11 +174,11 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /devices/{id}/stream 返回 200 + rtspUrl")
     void getStreamUrl_existing_returns200() throws Exception {
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody("cam-1", "HIKVISION"))));
 
-        mockMvc.perform(get("/api/surveillance/devices/cam-1/stream").param("channel", "1"))
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-1/stream").param("channel", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.rtspUrl").exists())
                 .andExpect(jsonPath("$.rtspUrl").value(org.hamcrest.Matchers.startsWith("rtsp://")))
@@ -188,7 +188,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /devices/{id}/stream 不存在设备返回 404")
     void getStreamUrl_nonExistingDevice_returns404() throws Exception {
-        mockMvc.perform(get("/api/surveillance/devices/nope/stream"))
+        mockMvc.perform(get("/api/v1/surveillance/devices/nope/stream"))
                 .andExpect(status().isNotFound());
     }
 
@@ -197,11 +197,11 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("POST /devices/{id}/ptz 合法命令返回 200 + status=ok")
     void ptzControl_validCommand_returns200() throws Exception {
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody("cam-1", "HIKVISION"))));
 
-        mockMvc.perform(post("/api/surveillance/devices/cam-1/ptz")
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-1/ptz")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("cmd", "up"))))
                 .andExpect(status().isOk())
@@ -212,11 +212,11 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("POST /devices/{id}/ptz 不支持的命令返回 400")
     void ptzControl_unsupportedCommand_returns400() throws Exception {
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody("cam-1", "HIKVISION"))));
 
-        mockMvc.perform(post("/api/surveillance/devices/cam-1/ptz")
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-1/ptz")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("cmd", "rotate"))))
                 .andExpect(status().isBadRequest());
@@ -225,7 +225,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("POST /devices/{id}/ptz 不存在设备返回 404")
     void ptzControl_nonExistingDevice_returns404() throws Exception {
-        mockMvc.perform(post("/api/surveillance/devices/nope/ptz")
+        mockMvc.perform(post("/api/v1/surveillance/devices/nope/ptz")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("cmd", "up"))))
                 .andExpect(status().isNotFound());
@@ -236,7 +236,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("POST /discover 合法子网返回 200 + 设备列表")
     void discover_validSubnet_returns200() throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/surveillance/discover")
+        MvcResult result = mockMvc.perform(post("/api/v1/surveillance/discover")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("subnet", "192.168.1.0/24"))))
                 .andExpect(status().isOk())
@@ -251,7 +251,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("POST /discover 缺 subnet 返回 400")
     void discover_missingSubnet_returns400() throws Exception {
-        mockMvc.perform(post("/api/surveillance/discover")
+        mockMvc.perform(post("/api/v1/surveillance/discover")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest());
@@ -263,24 +263,24 @@ class SurveillanceControllerTest {
     @DisplayName("完整生命周期：注册 -> 查询 -> PTZ -> 注销 -> 404")
     void fullLifecycle_registerQueryPtzUnregister() throws Exception {
         // 注册
-        mockMvc.perform(post("/api/surveillance/devices")
+        mockMvc.perform(post("/api/v1/surveillance/devices")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(deviceBody("lifecycle-1", "UNIVIEW"))))
                 .andExpect(status().isOk());
         // 查询
-        mockMvc.perform(get("/api/surveillance/devices/lifecycle-1"))
+        mockMvc.perform(get("/api/v1/surveillance/devices/lifecycle-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.vendor").value("UNIVIEW"));
         // PTZ
-        mockMvc.perform(post("/api/surveillance/devices/lifecycle-1/ptz")
+        mockMvc.perform(post("/api/v1/surveillance/devices/lifecycle-1/ptz")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("cmd", "zoomIn"))))
                 .andExpect(status().isOk());
         // 注销
-        mockMvc.perform(delete("/api/surveillance/devices/lifecycle-1"))
+        mockMvc.perform(delete("/api/v1/surveillance/devices/lifecycle-1"))
                 .andExpect(status().isOk());
         // 再查 404
-        mockMvc.perform(get("/api/surveillance/devices/lifecycle-1"))
+        mockMvc.perform(get("/api/v1/surveillance/devices/lifecycle-1"))
                 .andExpect(status().isNotFound());
     }
 
@@ -289,7 +289,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /events 返回 200 + 空列表 + 分页信息")
     void listEvents_returnsEmptyListWithPagination() throws Exception {
-        mockMvc.perform(get("/api/surveillance/events"))
+        mockMvc.perform(get("/api/v1/surveillance/events"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items").isArray())
                 .andExpect(jsonPath("$.total").value(0))
@@ -300,7 +300,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /events 自定义分页参数")
     void listEvents_customPagination() throws Exception {
-        mockMvc.perform(get("/api/surveillance/events")
+        mockMvc.perform(get("/api/v1/surveillance/events")
                         .param("page", "2")
                         .param("size", "50"))
                 .andExpect(status().isOk())
@@ -312,7 +312,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /events 带 deviceId 过滤参数")
     void listEvents_withDeviceIdFilter() throws Exception {
-        mockMvc.perform(get("/api/surveillance/events")
+        mockMvc.perform(get("/api/v1/surveillance/events")
                         .param("deviceId", "cam-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.deviceId").value("cam-1"))
@@ -322,7 +322,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /events page<0 返回 400")
     void listEvents_negativePage_returns400() throws Exception {
-        mockMvc.perform(get("/api/surveillance/events")
+        mockMvc.perform(get("/api/v1/surveillance/events")
                         .param("page", "-1"))
                 .andExpect(status().isBadRequest());
     }
@@ -330,7 +330,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /events size<=0 返回 400")
     void listEvents_zeroSize_returns400() throws Exception {
-        mockMvc.perform(get("/api/surveillance/events")
+        mockMvc.perform(get("/api/v1/surveillance/events")
                         .param("size", "0"))
                 .andExpect(status().isBadRequest());
     }
@@ -338,7 +338,7 @@ class SurveillanceControllerTest {
     @Test
     @DisplayName("GET /events size>1000 返回 400")
     void listEvents_oversizedSize_returns400() throws Exception {
-        mockMvc.perform(get("/api/surveillance/events")
+        mockMvc.perform(get("/api/v1/surveillance/events")
                         .param("size", "1001"))
                 .andExpect(status().isBadRequest());
     }

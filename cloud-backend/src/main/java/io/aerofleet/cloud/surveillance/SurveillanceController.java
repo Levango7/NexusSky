@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit;
  * {@link io.aerofleet.cloud.api.ApiExceptionHandler} 风格一致。
  */
 @RestController
-@RequestMapping("/api/surveillance")
+@RequestMapping("/api/v1/surveillance")
 @Tag(name = "Surveillance", description = "安防设备 REST API：ONVIF 设备全生命周期管理、RTSP 流、PTZ 控制、事件订阅")
 public class SurveillanceController {
 

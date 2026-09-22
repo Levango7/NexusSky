@@ -29,7 +29,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/health")
+@RequestMapping("/api/v1/health")
 @Tag(name = "Health", description = "无人机健康管理 REST API：健康评分查询、机队总览、历史趋势、部件详情、告警")
 public class HealthController {
 

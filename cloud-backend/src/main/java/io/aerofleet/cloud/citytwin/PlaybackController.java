@@ -23,7 +23,7 @@ import java.util.List;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/city-twin/playback")
+@RequestMapping("/api/v1/city-twin/playback")
 @Tag(name = "CityTwin-Playback", description = "历史回放：无人机轨迹回放、告警事件回放、综合态势回放")
 public class PlaybackController {
 

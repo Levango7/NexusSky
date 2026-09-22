@@ -37,7 +37,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  */
 @Tag(name = "Drone Lock", description = "无人机远程锁定/解锁")
 @RestController
-@RequestMapping("/api/drone-lock")
+@RequestMapping("/api/v1/drone-lock")
 public class DroneLockController {
 
 

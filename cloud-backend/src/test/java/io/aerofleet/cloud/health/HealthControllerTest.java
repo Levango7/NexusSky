@@ -57,14 +57,14 @@ class HealthControllerTest {
     }
 
     // ------------------------------------------------------------------
-    // GET /api/health/{sysid}
+    // GET /api/v1/health/{sysid}
     // ------------------------------------------------------------------
 
     @Test
     @DisplayName("GET /{sysid} 返回单机健康评分")
     void getHealth_returnsScore() throws Exception {
         registerAndScore(1, healthySnapshot());
-        mockMvc.perform(get("/api/health/1"))
+        mockMvc.perform(get("/api/v1/health/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sysid").value(1))
                 .andExpect(jsonPath("$.overallScore").exists())
@@ -75,7 +75,7 @@ class HealthControllerTest {
     @Test
     @DisplayName("GET /{sysid} 未注册返回 404")
     void getHealth_unregistered_returns404() throws Exception {
-        mockMvc.perform(get("/api/health/99"))
+        mockMvc.perform(get("/api/v1/health/99"))
                 .andExpect(status().isNotFound());
     }
 
@@ -83,12 +83,12 @@ class HealthControllerTest {
     @DisplayName("GET /{sysid} 已注册但无评分返回 404")
     void getHealth_noScore_returns404() throws Exception {
         registry.registerIfAbsent(1);
-        mockMvc.perform(get("/api/health/1"))
+        mockMvc.perform(get("/api/v1/health/1"))
                 .andExpect(status().isNotFound());
     }
 
     // ------------------------------------------------------------------
-    // GET /api/health/fleet
+    // GET /api/v1/health/fleet
     // ------------------------------------------------------------------
 
     @Test
@@ -96,7 +96,7 @@ class HealthControllerTest {
     void getFleetHealth_returnsList() throws Exception {
         registerAndScore(1, healthySnapshot());
         registerAndScore(2, healthySnapshot());
-        mockMvc.perform(get("/api/health/fleet"))
+        mockMvc.perform(get("/api/v1/health/fleet"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].sysid").exists());
     }
@@ -104,13 +104,13 @@ class HealthControllerTest {
     @Test
     @DisplayName("GET /fleet 无数据返回空数组")
     void getFleetHealth_empty_returnsEmptyArray() throws Exception {
-        mockMvc.perform(get("/api/health/fleet"))
+        mockMvc.perform(get("/api/v1/health/fleet"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
     }
 
     // ------------------------------------------------------------------
-    // GET /api/health/{sysid}/history
+    // GET /api/v1/health/{sysid}/history
     // ------------------------------------------------------------------
 
     @Test
@@ -119,7 +119,7 @@ class HealthControllerTest {
         registry.registerIfAbsent(1);
         monitor.updateScore(monitor.calculateScore(1, healthySnapshot()));
         monitor.updateScore(monitor.calculateScore(1, healthySnapshot()));
-        mockMvc.perform(get("/api/health/1/history"))
+        mockMvc.perform(get("/api/v1/health/1/history"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].sysid").value(1));
     }
@@ -127,19 +127,19 @@ class HealthControllerTest {
     @Test
     @DisplayName("GET /{sysid}/history 未注册返回 404")
     void getHistory_unregistered_returns404() throws Exception {
-        mockMvc.perform(get("/api/health/99/history"))
+        mockMvc.perform(get("/api/v1/health/99/history"))
                 .andExpect(status().isNotFound());
     }
 
     // ------------------------------------------------------------------
-    // GET /api/health/{sysid}/components/{component}
+    // GET /api/v1/health/{sysid}/components/{component}
     // ------------------------------------------------------------------
 
     @Test
     @DisplayName("GET /{sysid}/components/BATTERY 返回部件详情")
     void getComponent_returnsDetail() throws Exception {
         registerAndScore(1, healthySnapshot());
-        mockMvc.perform(get("/api/health/1/components/BATTERY"))
+        mockMvc.perform(get("/api/v1/health/1/components/BATTERY"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.componentType").value("BATTERY"))
                 .andExpect(jsonPath("$.score").exists())
@@ -150,19 +150,19 @@ class HealthControllerTest {
     @DisplayName("GET /{sysid}/components/{component} 未知部件返回 404")
     void getComponent_unknownComponent_returns404() throws Exception {
         registerAndScore(1, healthySnapshot());
-        mockMvc.perform(get("/api/health/1/components/UNKNOWN"))
+        mockMvc.perform(get("/api/v1/health/1/components/UNKNOWN"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     @DisplayName("GET /{sysid}/components/{component} 未注册返回 404")
     void getComponent_unregistered_returns404() throws Exception {
-        mockMvc.perform(get("/api/health/99/components/BATTERY"))
+        mockMvc.perform(get("/api/v1/health/99/components/BATTERY"))
                 .andExpect(status().isNotFound());
     }
 
     // ------------------------------------------------------------------
-    // GET /api/health/warnings
+    // GET /api/v1/health/warnings
     // ------------------------------------------------------------------
 
     @Test
@@ -171,7 +171,7 @@ class HealthControllerTest {
         TelemetrySnapshot t = healthySnapshot();
         t.setBatteryPct(10); // CRITICAL
         registerAndScore(1, t);
-        mockMvc.perform(get("/api/health/warnings"))
+        mockMvc.perform(get("/api/v1/health/warnings"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].componentType").exists());
     }
@@ -180,7 +180,7 @@ class HealthControllerTest {
     @DisplayName("GET /warnings 无告警返回空数组")
     void getWarnings_empty_returnsEmptyArray() throws Exception {
         registerAndScore(1, healthySnapshot());
-        mockMvc.perform(get("/api/health/warnings"))
+        mockMvc.perform(get("/api/v1/health/warnings"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
     }

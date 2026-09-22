@@ -38,7 +38,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * {@link io.aerofleet.cloud.api.ApiExceptionHandler} 风格一致。
  */
 @RestController
-@RequestMapping("/api/autodispatch")
+@RequestMapping("/api/v1/autodispatch")
 @Tag(name = "AutoDispatch", description = "自动出警 REST API：报警触发无人机自动派遣、出警历史/活跃任务查询、配置管理")
 public class AutoDispatchController {
 

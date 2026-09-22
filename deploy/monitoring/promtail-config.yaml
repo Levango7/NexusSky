@@ -1,0 +1,60 @@
+# NexusSky Promtail 配置
+# 用法：通过 docker-compose-monitoring.yml 启动
+# Promtail 从 cloud-backend Pod 采集 stdout 日志，推送到 Loki
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # 从 Docker 容器采集日志（docker-compose 场景）
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=nexussky-monitoring"]
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: container
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: stream
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: service
+
+  # 从 K8s Pod 采集日志（Kubernetes 场景）
+  - job_name: kubernetes-pods
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+        target_label: component
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        target_label: container
+    pipeline_stages:
+      # 仅采集 nexussky namespace 的日志
+      - match:
+          selector: '{namespace="nexussky"}'
+          action: keep
+      # 解析 JSON 日志行（如 Spring Boot 结构化日志）
+      - json:
+          expressions:
+            level: level
+            logger: logger
+            thread: thread
+            message: message
+          source: ""
+      - labels:
+          level:
+          logger:

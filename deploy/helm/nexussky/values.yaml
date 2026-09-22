@@ -25,6 +25,14 @@ cloudBackend:
       memory: 1Gi
   # 健康检查端点（统一 /actuator/health）
   healthPath: /actuator/health
+  # HPA 自动扩缩配置
+  hpa:
+    minReplicas: 2
+    maxReplicas: 10
+    cpuUtilization: 70
+  # PDB 中断预算
+  pdb:
+    minAvailable: 1
 
 # ---- drone-sim ----
 droneSim:
@@ -54,6 +62,14 @@ gcsWeb:
     limits:
       cpu: 200m
       memory: 128Mi
+  # HPA 自动扩缩配置
+  hpa:
+    minReplicas: 2
+    maxReplicas: 5
+    cpuUtilization: 70
+  # PDB 中断预算
+  pdb:
+    minAvailable: 1
 
 # ---- 安全配置 ----
 security:
@@ -79,3 +95,7 @@ ingress:
   host: nexussky.local
   # WebSocket 长连接超时（秒）
   wsTimeout: "3600"
+# ---- 飞行日志持久化存储 ----
+flightLogs:
+  storage: 5Gi
+  storageClassName: standard

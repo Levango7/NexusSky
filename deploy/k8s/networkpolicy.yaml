@@ -1,0 +1,30 @@
+# NetworkPolicy: 限制 actuator/prometheus 端点仅集群内访问
+# cloud-backend 的 /actuator/* 和 /prometheus 端点仅允许同 namespace 的 Pod 访问
+# 外部流量（Ingress）仅允许 /api/* 和 /ws/* 路径（由 Ingress controller 层面保证）
+# 用法：kubectl apply -f deploy/k8s/networkpolicy.yaml -n nexussky
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloud-backend-actuator-restrict
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: cloud-backend
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/component: cloud-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    # 允许同 namespace 的所有 Pod 访问（集群内部监控、服务间调用）
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nexussky
+      ports:
+        - name: http
+          port: 8080
+          protocol: TCP

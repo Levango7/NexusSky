@@ -33,7 +33,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * 认证由 {@link io.aerofleet.cloud.security.SecurityConfig} 统一处理。
  */
 @RestController
-@RequestMapping("/api/tracking")
+@RequestMapping("/api/v1/tracking")
 @Tag(name = "Tracking", description = "无人机追踪 REST API：飞行轨迹查询、历史轨迹回放、遗失辅助查找")
 public class TrackingController {
 

@@ -5,7 +5,7 @@ import java.util.*;
 
 /** M13 数字孪生 REST API */
 @RestController
-@RequestMapping("/api/twin")
+@RequestMapping("/api/v1/twin")
 public class TwinController {
     private final DigitalTwinService twinService;
     private final PredictionService predictionService;

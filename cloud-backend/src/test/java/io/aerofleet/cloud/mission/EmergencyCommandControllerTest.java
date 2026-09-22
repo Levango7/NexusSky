@@ -59,7 +59,7 @@ class EmergencyCommandControllerTest {
     /** 创建命令并返回 ID。 */
     private String createCommand() throws Exception {
         String body = createBody();
-        String response = mockMvc.perform(post("/api/emergency-command")
+        String response = mockMvc.perform(post("/api/v1/emergency-command")
                         .contentType("application/json")
                         .content(body))
                 .andExpect(status().isOk())
@@ -72,9 +72,9 @@ class EmergencyCommandControllerTest {
     // =====================================================================
 
     @Test
-    @DisplayName("POST /api/emergency-command 创建命令返回 200")
+    @DisplayName("POST /api/v1/emergency-command 创建命令返回 200")
     void createReturns200() throws Exception {
-        mockMvc.perform(post("/api/emergency-command")
+        mockMvc.perform(post("/api/v1/emergency-command")
                         .contentType("application/json")
                         .content(createBody()))
                 .andExpect(status().isOk())
@@ -87,7 +87,7 @@ class EmergencyCommandControllerTest {
     @Test
     @DisplayName("POST 创建命令包含位置和报告人信息")
     void createContainsLocationAndReporter() throws Exception {
-        mockMvc.perform(post("/api/emergency-command")
+        mockMvc.perform(post("/api/v1/emergency-command")
                         .contentType("application/json")
                         .content(createBody()))
                 .andExpect(status().isOk())
@@ -102,32 +102,32 @@ class EmergencyCommandControllerTest {
     // =====================================================================
 
     @Test
-    @DisplayName("GET /api/emergency-command 列出所有命令")
+    @DisplayName("GET /api/v1/emergency-command 列出所有命令")
     void listAll() throws Exception {
         createCommand();
         createCommand();
-        mockMvc.perform(get("/api/emergency-command"))
+        mockMvc.perform(get("/api/v1/emergency-command"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(2))
                 .andExpect(jsonPath("$.commands[0].id").exists());
     }
 
     @Test
-    @DisplayName("GET /api/emergency-command?phase=RECEIVED 按阶段筛选")
+    @DisplayName("GET /api/v1/emergency-command?phase=RECEIVED 按阶段筛选")
     void listByPhase() throws Exception {
         String id = createCommand();
         // 转移到 ASSESSED
         Map<String, Object> assessBody = new LinkedHashMap<>();
         assessBody.put("assessmentResult", "需要 6 架");
         assessBody.put("operator", "op1");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/assess")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/assess")
                 .contentType("application/json")
                 .content(json.writeValueAsString(assessBody)));
 
-        mockMvc.perform(get("/api/emergency-command").param("phase", "RECEIVED"))
+        mockMvc.perform(get("/api/v1/emergency-command").param("phase", "RECEIVED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(0));
-        mockMvc.perform(get("/api/emergency-command").param("phase", "ASSESSED"))
+        mockMvc.perform(get("/api/v1/emergency-command").param("phase", "ASSESSED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(1));
     }
@@ -137,19 +137,19 @@ class EmergencyCommandControllerTest {
     // =====================================================================
 
     @Test
-    @DisplayName("GET /api/emergency-command/{id} 返回命令详情")
+    @DisplayName("GET /api/v1/emergency-command/{id} 返回命令详情")
     void getDetail() throws Exception {
         String id = createCommand();
-        mockMvc.perform(get("/api/emergency-command/" + id))
+        mockMvc.perform(get("/api/v1/emergency-command/" + id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id))
                 .andExpect(jsonPath("$.currentPhase").value("RECEIVED"));
     }
 
     @Test
-    @DisplayName("GET /api/emergency-command/{id} 不存在返回 404")
+    @DisplayName("GET /api/v1/emergency-command/{id} 不存在返回 404")
     void getNotFound() throws Exception {
-        mockMvc.perform(get("/api/emergency-command/nonexistent"))
+        mockMvc.perform(get("/api/v1/emergency-command/nonexistent"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").exists());
     }
@@ -165,7 +165,7 @@ class EmergencyCommandControllerTest {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("assessmentResult", "研判完成");
         body.put("operator", "op1");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/assess")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/assess")
                         .contentType("application/json")
                         .content(json.writeValueAsString(body)))
                 .andExpect(status().isOk())
@@ -181,12 +181,12 @@ class EmergencyCommandControllerTest {
         body.put("assessmentResult", "r1");
         body.put("operator", "op1");
         // 第一次成功
-        mockMvc.perform(post("/api/emergency-command/" + id + "/assess")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/assess")
                 .contentType("application/json")
                 .content(json.writeValueAsString(body)))
                 .andExpect(status().isOk());
         // 第二次非法
-        mockMvc.perform(post("/api/emergency-command/" + id + "/assess")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/assess")
                         .contentType("application/json")
                         .content(json.writeValueAsString(body)))
                 .andExpect(status().isBadRequest());
@@ -203,7 +203,7 @@ class EmergencyCommandControllerTest {
         Map<String, Object> assessBody = new LinkedHashMap<>();
         assessBody.put("assessmentResult", "r");
         assessBody.put("operator", "op");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/assess")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/assess")
                 .contentType("application/json")
                 .content(json.writeValueAsString(assessBody)));
 
@@ -213,7 +213,7 @@ class EmergencyCommandControllerTest {
         deployBody.put("estimatedDurationMin", 120);
         deployBody.put("communicationRelay", "mesh");
         deployBody.put("operator", "op");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/deploy")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/deploy")
                         .contentType("application/json")
                         .content(json.writeValueAsString(deployBody)))
                 .andExpect(status().isOk())
@@ -231,11 +231,11 @@ class EmergencyCommandControllerTest {
         String id = createCommand();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("operator", "op");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/assess")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/assess")
                 .contentType("application/json").content(json.writeValueAsString(body)));
-        mockMvc.perform(post("/api/emergency-command/" + id + "/deploy")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/deploy")
                 .contentType("application/json").content(json.writeValueAsString(body)));
-        mockMvc.perform(post("/api/emergency-command/" + id + "/execute")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/execute")
                         .contentType("application/json")
                         .content(json.writeValueAsString(body)))
                 .andExpect(status().isOk())
@@ -252,15 +252,15 @@ class EmergencyCommandControllerTest {
         String id = createCommand();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("operator", "op");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/assess")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/assess")
                 .contentType("application/json").content(json.writeValueAsString(body)));
-        mockMvc.perform(post("/api/emergency-command/" + id + "/deploy")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/deploy")
                 .contentType("application/json").content(json.writeValueAsString(body)));
-        mockMvc.perform(post("/api/emergency-command/" + id + "/execute")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/execute")
                 .contentType("application/json").content(json.writeValueAsString(body)));
 
         body.put("evaluationResult", "覆盖率 95%");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/evaluate")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/evaluate")
                         .contentType("application/json")
                         .content(json.writeValueAsString(body)))
                 .andExpect(status().isOk())
@@ -274,18 +274,18 @@ class EmergencyCommandControllerTest {
         String id = createCommand();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("operator", "op");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/assess")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/assess")
                 .contentType("application/json").content(json.writeValueAsString(body)));
-        mockMvc.perform(post("/api/emergency-command/" + id + "/deploy")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/deploy")
                 .contentType("application/json").content(json.writeValueAsString(body)));
-        mockMvc.perform(post("/api/emergency-command/" + id + "/execute")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/execute")
                 .contentType("application/json").content(json.writeValueAsString(body)));
         body.put("evaluationResult", "good");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/evaluate")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/evaluate")
                 .contentType("application/json").content(json.writeValueAsString(body)));
 
         body.put("summary", "任务完成");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/close")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/close")
                         .contentType("application/json")
                         .content(json.writeValueAsString(body)))
                 .andExpect(status().isOk())
@@ -304,10 +304,10 @@ class EmergencyCommandControllerTest {
         String id = createCommand();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("operator", "op");
-        mockMvc.perform(post("/api/emergency-command/" + id + "/assess")
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/assess")
                 .contentType("application/json").content(json.writeValueAsString(body)));
 
-        mockMvc.perform(get("/api/emergency-command/" + id + "/history"))
+        mockMvc.perform(get("/api/v1/emergency-command/" + id + "/history"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.commandId").value(id))
                 .andExpect(jsonPath("$.currentPhase").value("ASSESSED"))
@@ -319,7 +319,7 @@ class EmergencyCommandControllerTest {
     @Test
     @DisplayName("GET /{id}/history 不存在返回 404")
     void historyNotFound() throws Exception {
-        mockMvc.perform(get("/api/emergency-command/nonexistent/history"))
+        mockMvc.perform(get("/api/v1/emergency-command/nonexistent/history"))
                 .andExpect(status().isNotFound());
     }
 
@@ -331,7 +331,7 @@ class EmergencyCommandControllerTest {
     @DisplayName("POST /{id}/one-click 一键应急响应成功")
     void oneClickSuccess() throws Exception {
         String id = createCommand();
-        mockMvc.perform(post("/api/emergency-command/" + id + "/one-click"))
+        mockMvc.perform(post("/api/v1/emergency-command/" + id + "/one-click"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.currentPhase").value("EXECUTING"))
                 .andExpect(jsonPath("$.assessmentResult").exists())
@@ -341,7 +341,7 @@ class EmergencyCommandControllerTest {
     @Test
     @DisplayName("POST /{id}/one-click 命令不存在返回 400")
     void oneClickNotFound() throws Exception {
-        mockMvc.perform(post("/api/emergency-command/nonexistent/one-click"))
+        mockMvc.perform(post("/api/v1/emergency-command/nonexistent/one-click"))
                 .andExpect(status().isBadRequest());
     }
 }

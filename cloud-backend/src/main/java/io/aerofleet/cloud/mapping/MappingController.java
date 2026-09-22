@@ -46,7 +46,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/mapping")
+@RequestMapping("/api/v1/mapping")
 @Tag(name = "Mapping", description = "无人机航拍测绘 REST API：灾害区域快速测绘，生成正射影像/三维模型/DEM")
 public class MappingController {
 

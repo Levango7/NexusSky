@@ -36,7 +36,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/voice-cmd")
+@RequestMapping("/api/v1/voice-cmd")
 @Tag(name = "Voice Command", description = "语音/自然语言指挥 REST API：语音解析、指令执行、语音播报")
 public class VoiceCommandController {
 

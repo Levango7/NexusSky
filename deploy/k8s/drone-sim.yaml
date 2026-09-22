@@ -23,10 +23,22 @@ spec:
         app.kubernetes.io/name: nexussky
         app.kubernetes.io/component: drone-sim
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
       containers:
         - name: drone-sim
           image: nexussky/drone-sim:0.1.0
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           # drone-sim 不支持 --cloud-host；通过 UDP 被 cloud-backend 发现
           # 多副本时需用 StatefulSet + 不同 --sysid，此处单副本用 --sysid=1
           command: ["java", "-jar", "app.jar", "--sysid=1", "--port=14540"]

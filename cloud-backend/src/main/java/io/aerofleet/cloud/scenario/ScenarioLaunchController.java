@@ -35,7 +35,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/scenarios/launch")
+@RequestMapping("/api/v1/scenarios/launch")
 @Tag(name = "ScenarioLaunch", description = "应急救援场景一键启动、状态查询与中止")
 public class ScenarioLaunchController {
 

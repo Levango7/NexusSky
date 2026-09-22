@@ -43,18 +43,18 @@ class CityModelControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/city-twin/models 列出所有城市模型")
+    @DisplayName("GET /api/v1/city-twin/models 列出所有城市模型")
     void listModels_returnsAllModels() throws Exception {
-        mockMvc.perform(get("/api/city-twin/models"))
+        mockMvc.perform(get("/api/v1/city-twin/models"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value("m1"))
                 .andExpect(jsonPath("$[0].name").value("Downtown"));
     }
 
     @Test
-    @DisplayName("GET /api/city-twin/models/{id} 获取模型详情")
+    @DisplayName("GET /api/v1/city-twin/models/{id} 获取模型详情")
     void getModel_returnsModelById() throws Exception {
-        mockMvc.perform(get("/api/city-twin/models/m1"))
+        mockMvc.perform(get("/api/v1/city-twin/models/m1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("m1"))
                 .andExpect(jsonPath("$.name").value("Downtown"))
@@ -62,13 +62,13 @@ class CityModelControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/city-twin/models 注册新模型")
+    @DisplayName("POST /api/v1/city-twin/models 注册新模型")
     void registerModel_createsNewModel() throws Exception {
         CityModel newModel = new CityModel(null, "Uptown", "2.0", "Uptown model",
                 CityModel.ModelType.OSGB, 15.0, 3.0, "https://example.com/uptown",
                 0, 0, CityModel.ModelStatus.PROCESSING);
 
-        mockMvc.perform(post("/api/city-twin/models")
+        mockMvc.perform(post("/api/v1/city-twin/models")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(newModel)))
                 .andExpect(status().isOk())
@@ -78,16 +78,16 @@ class CityModelControllerTest {
     }
 
     @Test
-    @DisplayName("DELETE /api/city-twin/models/{id} 删除模型")
+    @DisplayName("DELETE /api/v1/city-twin/models/{id} 删除模型")
     void deleteModel_returnsOk() throws Exception {
-        mockMvc.perform(delete("/api/city-twin/models/m1"))
+        mockMvc.perform(delete("/api/v1/city-twin/models/m1"))
                 .andExpect(status().isOk());
     }
 
     @Test
-    @DisplayName("PUT /api/city-twin/models/{id}/refresh 刷新模型数据")
+    @DisplayName("PUT /api/v1/city-twin/models/{id}/refresh 刷新模型数据")
     void refreshModel_returnsUpdatedModel() throws Exception {
-        mockMvc.perform(put("/api/city-twin/models/m1/refresh"))
+        mockMvc.perform(put("/api/v1/city-twin/models/m1/refresh"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("m1"))
                 .andExpect(jsonPath("$.status").value("LOADED"));

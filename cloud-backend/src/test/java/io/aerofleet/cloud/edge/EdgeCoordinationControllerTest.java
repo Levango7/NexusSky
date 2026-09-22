@@ -15,6 +15,6 @@ class EdgeCoordinationControllerTest {
 
     @Test
     void testGetAllTasks() throws Exception {
-        mockMvc.perform(get("/api/edge/tasks")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/edge/tasks")).andExpect(status().isOk());
     }
 }

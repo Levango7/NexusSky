@@ -40,7 +40,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/comm-adapt")
+@RequestMapping("/api/v1/comm-adapt")
 @Tag(name = "CommAdapt", description = "多模态通信自适应 REST API：通信质量监控、链路切换建议、故障切换管理、拓扑可视化")
 public class CommSituationController {
 

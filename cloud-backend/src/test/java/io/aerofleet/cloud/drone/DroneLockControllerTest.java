@@ -69,7 +69,7 @@ class DroneLockControllerTest {
     void testLockEndpoint() throws Exception {
         registry.registerIfAbsent(1);
 
-        mockMvc.perform(post("/api/drone-lock/1/lock")
+        mockMvc.perform(post("/api/v1/drone-lock/1/lock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(lockBody("被盗", "admin", "FORCE_LAND"))))
                 .andExpect(status().isOk())
@@ -85,7 +85,7 @@ class DroneLockControllerTest {
     @Test
     @DisplayName("POST /lock 未注册无人机返回 404")
     void lockUnregistered_returns404() throws Exception {
-        mockMvc.perform(post("/api/drone-lock/99/lock")
+        mockMvc.perform(post("/api/v1/drone-lock/99/lock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(lockBody("test", "admin", "DISARM"))))
                 .andExpect(status().isNotFound())
@@ -97,7 +97,7 @@ class DroneLockControllerTest {
     void lockMissingLockedBy_returns400() throws Exception {
         registry.registerIfAbsent(1);
 
-        mockMvc.perform(post("/api/drone-lock/1/lock")
+        mockMvc.perform(post("/api/v1/drone-lock/1/lock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("reason", "test", "action", "DISARM"))))
                 .andExpect(status().isBadRequest())
@@ -109,7 +109,7 @@ class DroneLockControllerTest {
     void lockInvalidAction_returns400() throws Exception {
         registry.registerIfAbsent(1);
 
-        mockMvc.perform(post("/api/drone-lock/1/lock")
+        mockMvc.perform(post("/api/v1/drone-lock/1/lock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(lockBody("test", "admin", "EXPLODE"))))
                 .andExpect(status().isBadRequest())
@@ -122,12 +122,12 @@ class DroneLockControllerTest {
         registry.registerIfAbsent(1);
 
         // 第一次锁定
-        mockMvc.perform(post("/api/drone-lock/1/lock")
+        mockMvc.perform(post("/api/v1/drone-lock/1/lock")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(lockBody("被盗", "admin", "DISARM"))));
 
         // 第二次锁定（不同参数）— 幂等返回首次状态
-        mockMvc.perform(post("/api/drone-lock/1/lock")
+        mockMvc.perform(post("/api/v1/drone-lock/1/lock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(lockBody("遗失", "admin2", "FORCE_LAND"))))
                 .andExpect(status().isOk())
@@ -145,7 +145,7 @@ class DroneLockControllerTest {
         registry.registerIfAbsent(1);
         lockService.lock(1, "test", "admin", LockState.Action.DISARM);
 
-        mockMvc.perform(post("/api/drone-lock/1/unlock")
+        mockMvc.perform(post("/api/v1/drone-lock/1/unlock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(unlockBody("admin2"))))
                 .andExpect(status().isOk())
@@ -159,7 +159,7 @@ class DroneLockControllerTest {
     void unlockNotLocked_returns400() throws Exception {
         registry.registerIfAbsent(1);
 
-        mockMvc.perform(post("/api/drone-lock/1/unlock")
+        mockMvc.perform(post("/api/v1/drone-lock/1/unlock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(unlockBody("admin"))))
                 .andExpect(status().isBadRequest())
@@ -169,7 +169,7 @@ class DroneLockControllerTest {
     @Test
     @DisplayName("POST /unlock 未注册无人机返回 404")
     void unlockUnregistered_returns404() throws Exception {
-        mockMvc.perform(post("/api/drone-lock/99/unlock")
+        mockMvc.perform(post("/api/v1/drone-lock/99/unlock")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(unlockBody("admin"))))
                 .andExpect(status().isNotFound());
@@ -183,7 +183,7 @@ class DroneLockControllerTest {
         registry.registerIfAbsent(1);
         lockService.lock(1, "被盗", "admin", LockState.Action.RETURN_TO_LAUNCH);
 
-        mockMvc.perform(get("/api/drone-lock/1"))
+        mockMvc.perform(get("/api/v1/drone-lock/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sysid").value(1))
                 .andExpect(jsonPath("$.locked").value(true))
@@ -195,7 +195,7 @@ class DroneLockControllerTest {
     void getLockStatus_notLocked() throws Exception {
         registry.registerIfAbsent(1);
 
-        mockMvc.perform(get("/api/drone-lock/1"))
+        mockMvc.perform(get("/api/v1/drone-lock/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sysid").value(1))
                 .andExpect(jsonPath("$.locked").value(false));
@@ -204,7 +204,7 @@ class DroneLockControllerTest {
     @Test
     @DisplayName("GET /{sysid} 未注册返回 404")
     void getLockStatus_unregistered_returns404() throws Exception {
-        mockMvc.perform(get("/api/drone-lock/99"))
+        mockMvc.perform(get("/api/v1/drone-lock/99"))
                 .andExpect(status().isNotFound());
     }
 
@@ -218,7 +218,7 @@ class DroneLockControllerTest {
         lockService.lock(1, "r1", "op", LockState.Action.DISARM);
         lockService.lock(2, "r2", "op", LockState.Action.FORCE_LAND);
 
-        mockMvc.perform(get("/api/drone-lock/locked"))
+        mockMvc.perform(get("/api/v1/drone-lock/locked"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].sysid").value(1))
                 .andExpect(jsonPath("$[1].sysid").value(2));
@@ -227,7 +227,7 @@ class DroneLockControllerTest {
     @Test
     @DisplayName("GET /locked 无锁定返回空数组")
     void getLockedDrones_empty() throws Exception {
-        mockMvc.perform(get("/api/drone-lock/locked"))
+        mockMvc.perform(get("/api/v1/drone-lock/locked"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
     }
@@ -243,7 +243,7 @@ class DroneLockControllerTest {
         lockService.lock(2, "r2", "op", LockState.Action.FORCE_LAND);
         lockService.unlock(2, "op");
 
-        mockMvc.perform(get("/api/drone-lock/all"))
+        mockMvc.perform(get("/api/v1/drone-lock/all"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].sysid").value(1))
                 .andExpect(jsonPath("$[0].locked").value(true))
@@ -259,13 +259,13 @@ class DroneLockControllerTest {
         registry.registerIfAbsent(1);
         lockService.lock(1, "test", "op", LockState.Action.DISARM);
 
-        mockMvc.perform(delete("/api/drone-lock/1"))
+        mockMvc.perform(delete("/api/v1/drone-lock/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ok"))
                 .andExpect(jsonPath("$.sysid").value(1));
 
         // 清除后查询返回未锁定
-        mockMvc.perform(get("/api/drone-lock/1"))
+        mockMvc.perform(get("/api/v1/drone-lock/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.locked").value(false));
     }
@@ -273,7 +273,7 @@ class DroneLockControllerTest {
     @Test
     @DisplayName("DELETE /{sysid} 未注册返回 404")
     void clearLockState_unregistered_returns404() throws Exception {
-        mockMvc.perform(delete("/api/drone-lock/99"))
+        mockMvc.perform(delete("/api/v1/drone-lock/99"))
                 .andExpect(status().isNotFound());
     }
 }

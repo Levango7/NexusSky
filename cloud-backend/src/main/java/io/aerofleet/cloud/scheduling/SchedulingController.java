@@ -13,7 +13,7 @@ import java.util.Map;
 
 /** M10 集群调度 REST API */
 @RestController
-@RequestMapping("/api/scheduling")
+@RequestMapping("/api/v1/scheduling")
 public class SchedulingController {
     private static final Logger log = LoggerFactory.getLogger(SchedulingController.class);
 

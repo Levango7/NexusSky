@@ -41,7 +41,7 @@ import static io.aerofleet.cloud.api.ApiExceptionHandler.NotFoundException;
  * 自定义模板通过 POST 创建，运行期保存在内存中。
  */
 @RestController
-@RequestMapping("/api/scenarios/templates")
+@RequestMapping("/api/v1/scenarios/templates")
 @Tag(name = "ScenarioTemplate", description = "应急救援场景模板管理：CRUD 与按灾害类型筛选")
 public class ScenarioTemplateController {
 

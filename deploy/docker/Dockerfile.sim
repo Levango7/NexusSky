@@ -29,6 +29,11 @@ WORKDIR /app
 
 COPY --from=builder /build/drone-sim/target/*.jar app.jar
 
+# 非 Root 用户运行（安全加固）
+RUN useradd -r -u 1001 appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
 # UDP MAVLink 端口（默认 14540，与 cloud-backend 的 aerofleet.drone-port 对齐）
 EXPOSE 14540/udp
 
