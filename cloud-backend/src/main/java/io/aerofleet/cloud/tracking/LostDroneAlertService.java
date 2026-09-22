@@ -2,6 +2,7 @@ package io.aerofleet.cloud.tracking;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -82,9 +83,20 @@ public class LostDroneAlertService {
         return newlyOffline;
     }
 
-    /** 获取所有失联告警列表（按 sysid 升序）。 */
+    /** 获取所有失联告警列表（按 sysid 升序），自动按当前租户过滤。 */
     public List<LostAlert> getLostAlerts() {
-        List<LostAlert> list = new ArrayList<>(lostAlerts.values());
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        List<LostAlert> list = new ArrayList<>();
+        for (LostAlert alert : lostAlerts.values()) {
+            if (tenantId == null) {
+                list.add(alert);
+            } else {
+                DroneSnapshot snapshot = registry.get(alert.sysid);
+                if (snapshot != null && snapshot.tenantId != null && tenantId.equals(snapshot.tenantId)) {
+                    list.add(alert);
+                }
+            }
+        }
         list.sort((a, b) -> Integer.compare(a.sysid, b.sysid));
         return list;
     }

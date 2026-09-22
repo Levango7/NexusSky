@@ -57,6 +57,10 @@ public class GeofenceZoneEntity {
     @Column(name = "created_at_ms")
     private long createdAtMs;
 
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     /** JPA 要求的无参构造器。 */
     public GeofenceZoneEntity() {
     }
@@ -92,6 +96,9 @@ public class GeofenceZoneEntity {
 
     public long getCreatedAtMs() { return createdAtMs; }
     public void setCreatedAtMs(long createdAtMs) { this.createdAtMs = createdAtMs; }
+
+    public Integer getTenantId() { return tenantId; }
+    public void setTenantId(Integer tenantId) { this.tenantId = tenantId; }
 
     // --- 与值对象的转换 ---
 

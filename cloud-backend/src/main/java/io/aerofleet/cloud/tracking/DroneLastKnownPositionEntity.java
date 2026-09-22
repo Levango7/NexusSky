@@ -46,6 +46,10 @@ public class DroneLastKnownPositionEntity {
     @Column(name = "battery_pct")
     private double batteryPct;
 
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     /** JPA 无参构造器（必需）。 */
     public DroneLastKnownPositionEntity() {
     }
@@ -128,6 +132,14 @@ public class DroneLastKnownPositionEntity {
 
     public void setBatteryPct(double batteryPct) {
         this.batteryPct = batteryPct;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Integer tenantId) {
+        this.tenantId = tenantId;
     }
 
     /**

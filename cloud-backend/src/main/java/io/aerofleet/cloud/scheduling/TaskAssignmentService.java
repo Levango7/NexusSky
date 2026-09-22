@@ -2,6 +2,7 @@ package io.aerofleet.cloud.scheduling;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,8 @@ public class TaskAssignmentService {
     private final Map<String, AssignmentResult> assignments = new ConcurrentHashMap<>();
     /** 无人机 → 正在执行的任务ID集合（反向映射，用于负载跟踪） */
     private final Map<Integer, Set<String>> droneToTaskIds = new ConcurrentHashMap<>();
+    /** taskId → tenantId（租户隔离映射） */
+    private final Map<String, Integer> taskTenantMap = new ConcurrentHashMap<>();
 
     // --- GA 参数（M10 调度算法优化）---
     /** 任务数低于此值时回退到简单评分，避免 GA 开销无收益 */
@@ -99,6 +102,10 @@ public class TaskAssignmentService {
         AssignmentResult result = new AssignmentResult(req.getTaskId(), best.sysid, bestScore,
                 String.format("sysid=%d score=%.1f", best.sysid, bestScore), true);
         assignments.put(req.getTaskId(), result);
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null) {
+            taskTenantMap.put(req.getTaskId(), tenantId);
+        }
         taskQueue.offer(req);
         log.info("Task {} assigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
         return result;
@@ -136,6 +143,7 @@ public class TaskAssignmentService {
                 : greedyAssign(requests, drones);
 
         String algo = useGa ? "GA" : "SCORE";
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         for (int i = 0; i < nTasks; i++) {
             int di = mapping[i];
             DroneSnapshot d = drones.get(di);
@@ -143,6 +151,9 @@ public class TaskAssignmentService {
             AssignmentResult r = new AssignmentResult(requests.get(i).getTaskId(), d.sysid, score,
                     String.format("%s sysid=%d score=%.1f", algo, d.sysid, score), true);
             assignments.put(requests.get(i).getTaskId(), r);
+            if (tenantId != null) {
+                taskTenantMap.put(requests.get(i).getTaskId(), tenantId);
+            }
             taskQueue.offer(requests.get(i));
             results.add(r);
         }
@@ -390,15 +401,34 @@ public class TaskAssignmentService {
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // 米
     }
 
-    /** 查询所有分配 */
+    /** 查询所有分配，自动按当前租户过滤。 */
     public Map<String, AssignmentResult> getAllAssignments() {
-        return Collections.unmodifiableMap(assignments);
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null) {
+            return Collections.unmodifiableMap(assignments);
+        }
+        Map<String, AssignmentResult> filtered = new LinkedHashMap<>();
+        for (Map.Entry<String, AssignmentResult> entry : assignments.entrySet()) {
+            Integer taskTenant = taskTenantMap.get(entry.getKey());
+            if (taskTenant == null || tenantId.equals(taskTenant)) {
+                filtered.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return Collections.unmodifiableMap(filtered);
     }
 
-    /** 取消任务 */
+    /** 取消任务（验证租户归属）。 */
     public synchronized boolean cancelTask(String taskId) {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null) {
+            Integer taskTenant = taskTenantMap.get(taskId);
+            if (taskTenant != null && !tenantId.equals(taskTenant)) {
+                return false;
+            }
+        }
         AssignmentResult removed = assignments.remove(taskId);
         if (removed != null) {
+            taskTenantMap.remove(taskId);
             // 从正在执行映射中移除（任务可能已被 poll 开始执行）
             Set<String> activeTasks = droneToTaskIds.get(removed.getAssignedSysid());
             if (activeTasks != null) {

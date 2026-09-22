@@ -37,6 +37,26 @@ public final class TenantContext {
     }
 
     /**
+     * 获取当前请求的有效租户 ID（优先 ApiKeyContext，降级 TenantContext）。
+     * <p>
+     * 查找顺序：
+     * <ol>
+     *   <li>{@link ApiKeyContext#getTenantId()} — API Key 认证时设置的租户 ID</li>
+     *   <li>{@link #getTenantId()} — JWT 认证时由 TenantFilter 设置的租户 ID</li>
+     * </ol>
+     * 返回 null 表示全局管理员或未认证（不进行租户过滤）。
+     *
+     * @return 有效租户 ID，null 表示全局管理员或未设置
+     */
+    public static Integer getEffectiveTenantId() {
+        Integer apiKeyTenantId = ApiKeyContext.getTenantId();
+        if (apiKeyTenantId != null) {
+            return apiKeyTenantId;
+        }
+        return TENANT_ID.get();
+    }
+
+    /**
      * 清理当前线程的租户上下文。
      * <p>
      * 必须在请求结束时调用（通常在 filter 的 finally 块中），

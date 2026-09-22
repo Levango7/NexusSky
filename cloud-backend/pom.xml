@@ -61,7 +61,7 @@
       <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
       <version>2.8.6</version>
     </dependency>
-    <!-- 设备注册持久化：JPA + H2 -->
+    <!-- 设备注册持久化：JPA + H2(dev/test) + PostgreSQL(prod) -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -71,10 +71,30 @@
       <artifactId>h2</artifactId>
       <scope>runtime</scope>
     </dependency>
+    <!-- PostgreSQL JDBC 驱动 -->
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
     <!-- 数据库迁移：Flyway -->
     <dependency>
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-core</artifactId>
+    </dependency>
+    <!-- Redis 缓存：Spring Data Redis + Lettuce 连接池 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-pool2</artifactId>
+    </dependency>
+    <!-- Spring Boot 缓存抽象 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-cache</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -95,6 +115,15 @@
 
   <build>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <spring.profiles.active>test</spring.profiles.active>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>

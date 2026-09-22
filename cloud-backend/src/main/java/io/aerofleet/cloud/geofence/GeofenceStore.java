@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.geofence;
 
+import io.aerofleet.cloud.security.TenantContext;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +40,9 @@ public class GeofenceStore {
     /** zoneId -> 围栏区域（内存缓存，并发读）。 */
     private final Map<Integer, GeofenceZone> zones = new ConcurrentHashMap<>();
 
+    /** zoneId -> tenantId（租户隔离映射）。 */
+    private final Map<Integer, Integer> zoneTenantMap = new ConcurrentHashMap<>();
+
     /** 越界事件历史（最新在队尾，内存缓存）。 */
     private final ConcurrentLinkedDeque<GeofenceBreachEvent> breachHistory = new ConcurrentLinkedDeque<>();
 
@@ -71,6 +75,9 @@ public class GeofenceStore {
                 for (GeofenceZoneEntity entity : zoneEntities) {
                     try {
                         zones.put(entity.getId(), entity.toZone());
+                        if (entity.getTenantId() != null) {
+                            zoneTenantMap.put(entity.getId(), entity.getTenantId());
+                        }
                     } catch (Exception e) {
                         log.warn("Failed to load geofence zone from DB: id={} err={}",
                                 entity.getId(), e.getMessage());
@@ -119,36 +126,49 @@ public class GeofenceStore {
         if (zone.getId() <= 0) {
             throw new IllegalArgumentException("Geofence zone ID must be > 0, got " + zone.getId());
         }
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         // 先写数据库，成功后再更新内存，保证一致性
         if (zoneRepository != null) {
             try {
-                zoneRepository.save(GeofenceZoneEntity.fromZone(zone));
+                GeofenceZoneEntity entity = GeofenceZoneEntity.fromZone(zone);
+                if (tenantId != null) {
+                    entity.setTenantId(tenantId);
+                }
+                zoneRepository.save(entity);
             } catch (Exception e) {
                 log.error("Failed to persist geofence zone, skipping memory update: id={} err={}",
                         zone.getId(), e.getMessage());
                 return null;
             }
         }
+        if (tenantId != null) {
+            zoneTenantMap.put(zone.getId(), tenantId);
+        }
         GeofenceZone previous = zones.put(zone.getId(), zone);
         if (previous != null) {
             log.info("Geofence zone replaced: id={} name='{}'", zone.getId(), zone.getName());
         } else {
-            log.info("Geofence zone added: id={} name='{}' type={}",
-                    zone.getId(), zone.getName(), zone.getType());
+            log.info("Geofence zone added: id={} name='{}' type={} tenantId={}",
+                    zone.getId(), zone.getName(), zone.getType(), tenantId);
         }
         return previous;
     }
 
-    /** 更新围栏区域；若不存在返回 null（不新增）。 */
+    /** 更新围栏区域；若不存在或不可访问返回 null（不新增）。 */
     @Transactional
     public GeofenceZone updateZone(GeofenceZone zone) {
-        if (!zones.containsKey(zone.getId())) {
+        if (!zones.containsKey(zone.getId()) || !isZoneAccessible(zone.getId())) {
             return null;
         }
         // 先写数据库，成功后再更新内存，保证一致性
         if (zoneRepository != null) {
             try {
-                zoneRepository.save(GeofenceZoneEntity.fromZone(zone));
+                GeofenceZoneEntity entity = GeofenceZoneEntity.fromZone(zone);
+                Integer tenantId = zoneTenantMap.get(zone.getId());
+                if (tenantId != null) {
+                    entity.setTenantId(tenantId);
+                }
+                zoneRepository.save(entity);
             } catch (Exception e) {
                 log.error("Failed to persist geofence zone update, skipping memory update: id={} err={}",
                         zone.getId(), e.getMessage());
@@ -163,6 +183,9 @@ public class GeofenceStore {
     /** 删除围栏区域；返回被删除的围栏，不存在返回 null。 */
     @Transactional
     public GeofenceZone removeZone(int zoneId) {
+        if (!isZoneAccessible(zoneId)) {
+            return null;
+        }
         GeofenceZone removed = zones.get(zoneId);
         if (removed == null) {
             return null;
@@ -178,18 +201,28 @@ public class GeofenceStore {
             }
         }
         zones.remove(zoneId);
+        zoneTenantMap.remove(zoneId);
         log.info("Geofence zone removed: id={} name='{}'", zoneId, removed.getName());
         return removed;
     }
 
-    /** 获取指定围栏；不存在返回 null。 */
+    /** 获取指定围栏；不存在或不属于当前租户返回 null。 */
     public GeofenceZone getZone(int zoneId) {
+        if (!isZoneAccessible(zoneId)) {
+            return null;
+        }
         return zones.get(zoneId);
     }
 
-    /** 列出所有围栏（按 zoneId 升序）。 */
+    /** 列出所有围栏（按 zoneId 升序），自动按当前租户过滤。 */
     public List<GeofenceZone> getAllZones() {
-        List<GeofenceZone> list = new ArrayList<>(zones.values());
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        List<GeofenceZone> list = new ArrayList<>();
+        for (GeofenceZone z : zones.values()) {
+            if (tenantId == null || isZoneForTenant(z.getId(), tenantId)) {
+                list.add(z);
+            }
+        }
         list.sort((a, b) -> Integer.compare(a.getId(), b.getId()));
         return list;
     }
@@ -225,24 +258,35 @@ public class GeofenceStore {
                 event.getBreachType(), event.getLat(), event.getLon());
     }
 
-    /** 获取全部越界历史（按时间升序，最新在末尾）。 */
+    /** 获取全部越界历史（按时间升序，最新在末尾），自动按当前租户过滤。 */
     public List<GeofenceBreachEvent> getBreachHistory() {
-        return new ArrayList<>(breachHistory);
-    }
-
-    /** 获取指定无人机的越界历史。 */
-    public List<GeofenceBreachEvent> getBreachesForDrone(int sysid) {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         List<GeofenceBreachEvent> result = new ArrayList<>();
         for (GeofenceBreachEvent e : breachHistory) {
-            if (e.getSysid() == sysid) {
+            if (tenantId == null || isZoneForTenant(e.getZoneId(), tenantId)) {
                 result.add(e);
             }
         }
         return result;
     }
 
-    /** 获取指定围栏的越界历史。 */
+    /** 获取指定无人机的越界历史，自动按当前租户过滤。 */
+    public List<GeofenceBreachEvent> getBreachesForDrone(int sysid) {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        List<GeofenceBreachEvent> result = new ArrayList<>();
+        for (GeofenceBreachEvent e : breachHistory) {
+            if (e.getSysid() == sysid && (tenantId == null || isZoneForTenant(e.getZoneId(), tenantId))) {
+                result.add(e);
+            }
+        }
+        return result;
+    }
+
+    /** 获取指定围栏的越界历史，自动按当前租户过滤。 */
     public List<GeofenceBreachEvent> getBreachesForZone(int zoneId) {
+        if (!isZoneAccessible(zoneId)) {
+            return new ArrayList<>();
+        }
         List<GeofenceBreachEvent> result = new ArrayList<>();
         for (GeofenceBreachEvent e : breachHistory) {
             if (e.getZoneId() == zoneId) {
@@ -293,5 +337,24 @@ public class GeofenceStore {
         }
         breachHistory.clear();
         log.info("Geofence breach history cleared: count={}", n);
+    }
+
+    // ------------------------------------------------------------------
+    // 租户隔离辅助方法
+    // ------------------------------------------------------------------
+
+    /** 判断围栏是否属于当前租户（或全局管理员可访问）。 */
+    private boolean isZoneAccessible(int zoneId) {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null) {
+            return true;
+        }
+        return isZoneForTenant(zoneId, tenantId);
+    }
+
+    /** 判断围栏是否属于指定租户。 */
+    private boolean isZoneForTenant(int zoneId, Integer tenantId) {
+        Integer zoneTenant = zoneTenantMap.get(zoneId);
+        return zoneTenant == null || tenantId.equals(zoneTenant);
     }
 }

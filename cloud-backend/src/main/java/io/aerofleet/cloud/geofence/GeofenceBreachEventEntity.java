@@ -47,6 +47,10 @@ public class GeofenceBreachEventEntity {
     @Column(name = "timestamp_ms")
     private long timestampMs;
 
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     /** JPA 要求的无参构造器。 */
     public GeofenceBreachEventEntity() {
     }
@@ -76,6 +80,9 @@ public class GeofenceBreachEventEntity {
 
     public long getTimestampMs() { return timestampMs; }
     public void setTimestampMs(long timestampMs) { this.timestampMs = timestampMs; }
+
+    public Integer getTenantId() { return tenantId; }
+    public void setTenantId(Integer tenantId) { this.tenantId = tenantId; }
 
     // --- 与值对象的转换 ---
 
