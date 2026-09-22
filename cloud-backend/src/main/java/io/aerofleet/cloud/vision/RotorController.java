@@ -1,9 +1,11 @@
 package io.aerofleet.cloud.vision;
 
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.mission.DroneCommandService;
 import io.aerofleet.mavlink.messages.RotorTelemetryMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -95,6 +97,15 @@ public class RotorController {
     /** 所有配置（供查询）。 */
     public Map<Integer, RotorConfig> allConfigs() {
         return Collections.unmodifiableMap(configs);
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自行处理旋翼消息
+    // =====================================================================
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.RotorTelemetryMsg).ID")
+    public void onRotorTelemetryEvent(MavlinkMessageEvent event) {
+        onRotorTelemetry((RotorTelemetryMsg) event.getMessage());
     }
 
     // =====================================================================

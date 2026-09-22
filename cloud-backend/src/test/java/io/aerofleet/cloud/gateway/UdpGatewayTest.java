@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
@@ -25,7 +26,7 @@ import static org.mockito.Mockito.*;
 /**
  * UdpGateway 单元测试：使用真实 UDP 端口 + Mockito mock 的 TelemetryIngestService/PendingAcks。
  *
- * <p>策略说明：UdpGateway 构造时直接 {@code new UdpMavlinkTransport(udpPort)} 绑定真实
+ * <p>策略说明：UdpGateway 构造时直接 {@code new UdpMavlinkTransport(bindAddress, udpPort)} 绑定真实
  * DatagramSocket，无法注入 mock transport。因此采用"真实端口 + mock 下游"方案：
  * <ul>
  *   <li>每个测试用独立高端口（{@link #BASE_PORT} + offset）避免与其他测试/默认 14550 冲突</li>
@@ -64,11 +65,24 @@ class UdpGatewayTest {
         }
     }
 
-    /** 构造一个绑定指定端口的 UdpGateway。 */
+    /** 构造一个绑定指定端口的 UdpGateway（白名单关闭，频率限制 100/s）。 */
     private UdpGateway newGateway(int udpPort) throws Exception {
+        return newGateway(udpPort, false, 100);
+    }
+
+    /** 构造一个绑定指定端口的 UdpGateway，可指定白名单和频率限制参数。 */
+    private UdpGateway newGateway(int udpPort, boolean whitelistEnabled, int maxRate) throws Exception {
         currentPort = udpPort;
-        gateway = new UdpGateway(udpPort, "127.0.0.1", DRONE_PORT, "", ingest, pendings);
+        gateway = new UdpGateway(udpPort, "127.0.0.1", DRONE_PORT, "", "0.0.0.0",
+                whitelistEnabled, maxRate, ingest, pendings);
         return gateway;
+    }
+
+    /** 通过反射注入 DeviceRegistry（模拟 @Autowired(required=false) 字段注入）。 */
+    private void injectDeviceRegistry(DeviceRegistry registry) throws Exception {
+        Field field = UdpGateway.class.getDeclaredField("deviceRegistry");
+        field.setAccessible(true);
+        field.set(gateway, registry);
     }
 
     /** 构造一个 drone HEARTBEAT 帧（type=2 四旋翼, autopilot=6 PX4, sysid=1）。 */
@@ -203,8 +217,8 @@ class UdpGatewayTest {
         int port = BASE_PORT + 8;
         // 先占用端口
         try (DatagramSocket occupier = new DatagramSocket(new InetSocketAddress(port))) {
-            assertThatThrownBy(() -> new UdpGateway(port, "127.0.0.1", DRONE_PORT, "",
-                    ingest, pendings))
+            assertThatThrownBy(() -> new UdpGateway(port, "127.0.0.1", DRONE_PORT, "", "0.0.0.0",
+                    false, 100, ingest, pendings))
                     .isInstanceOf(java.io.IOException.class);
         }
     }
@@ -369,5 +383,140 @@ class UdpGatewayTest {
         // 额外等待确保没有多余调用
         Thread.sleep(300);
         verify(ingest, times(n)).handle(any(MavlinkFrame.class));
+    }
+
+    // ===== 设备白名单 (P1-3) =====
+
+    @Test
+    @DisplayName("16. 白名单启用 + DeviceRegistry 中已注册的 sysid 帧正常转发")
+    void whitelistEnabled_registeredSysid_forwards() throws Exception {
+        int port = BASE_PORT + 16;
+        gateway = newGateway(port, true, 100);
+        Thread.sleep(100);
+
+        // mock DeviceRegistry：sysid=1 已注册
+        DeviceRegistry registry = mock(DeviceRegistry.class);
+        when(registry.get(1)).thenReturn(new DroneSnapshot(1));
+        injectDeviceRegistry(registry);
+
+        sendFrame(port, droneHeartbeat(1, 0));
+        awaitHandleCount(1);
+        verify(ingest, timeout(2000)).handle(any(MavlinkFrame.class));
+    }
+
+    @Test
+    @DisplayName("17. 白名单启用 + 未注册 sysid 帧被丢弃")
+    void whitelistEnabled_unregisteredSysid_dropped() throws Exception {
+        int port = BASE_PORT + 17;
+        gateway = newGateway(port, true, 100);
+        Thread.sleep(100);
+
+        // mock DeviceRegistry：sysid=1 未注册（返回 null）
+        DeviceRegistry registry = mock(DeviceRegistry.class);
+        when(registry.get(1)).thenReturn(null);
+        injectDeviceRegistry(registry);
+
+        sendFrame(port, droneHeartbeat(1, 0));
+        Thread.sleep(500);
+
+        verify(ingest, never()).handle(any(MavlinkFrame.class));
+    }
+
+    @Test
+    @DisplayName("18. 白名单启用 + DeviceRegistry 为 null 时所有非 GCS sysid 帧被丢弃")
+    void whitelistEnabled_nullRegistry_allDropped() throws Exception {
+        int port = BASE_PORT + 18;
+        gateway = newGateway(port, true, 100);
+        Thread.sleep(100);
+
+        // 不注入 DeviceRegistry，字段保持 null
+
+        sendFrame(port, droneHeartbeat(1, 0));
+        Thread.sleep(500);
+
+        verify(ingest, never()).handle(any(MavlinkFrame.class));
+    }
+
+    @Test
+    @DisplayName("19. 白名单启用 + GCS sysid(255) 帧始终放行（不受白名单限制）")
+    void whitelistEnabled_gcsSysid_alwaysAllowed() throws Exception {
+        int port = BASE_PORT + 19;
+        gateway = newGateway(port, true, 100);
+        Thread.sleep(100);
+
+        // 不注入 DeviceRegistry，字段保持 null，但 GCS_SYSID 应始终放行
+        sendFrame(port, droneHeartbeat(UdpGateway.GCS_SYSID, 0));
+        awaitHandleCount(1);
+        verify(ingest, timeout(2000)).handle(any(MavlinkFrame.class));
+    }
+
+    @Test
+    @DisplayName("20. 白名单关闭 + 未注册 sysid 帧正常转发（dev 模式）")
+    void whitelistDisabled_unregisteredSysid_forwards() throws Exception {
+        int port = BASE_PORT + 20;
+        gateway = newGateway(port, false, 100);
+        Thread.sleep(100);
+
+        // 不注入 DeviceRegistry，白名单关闭时所有 sysid 都应放行
+        sendFrame(port, droneHeartbeat(1, 0));
+        awaitHandleCount(1);
+        verify(ingest, timeout(2000)).handle(any(MavlinkFrame.class));
+    }
+
+    // ===== 频率限制 (P1-3) =====
+
+    @Test
+    @DisplayName("21. 频率限制：超过 maxRate 的帧被丢弃")
+    void rateLimit_exceedMax_dropped() throws Exception {
+        int port = BASE_PORT + 21;
+        int maxRate = 5;
+        gateway = newGateway(port, false, maxRate);
+        Thread.sleep(100);
+
+        // 发送 maxRate + 3 帧，只有 maxRate 帧应被转发
+        for (int i = 0; i < maxRate + 3; i++) {
+            sendFrame(port, droneHeartbeat(1, i));
+        }
+
+        awaitHandleCount(maxRate);
+        Thread.sleep(500);
+        // 恰好 maxRate 帧被转发，超出部分被丢弃
+        verify(ingest, times(maxRate)).handle(any(MavlinkFrame.class));
+    }
+
+    @Test
+    @DisplayName("22. 频率限制：GCS sysid 不受频率限制")
+    void rateLimit_gcsSysid_notLimited() throws Exception {
+        int port = BASE_PORT + 22;
+        int maxRate = 3;
+        gateway = newGateway(port, false, maxRate);
+        Thread.sleep(100);
+
+        // GCS sysid 不受频率限制，发送 maxRate + 5 帧都应转发
+        int total = maxRate + 5;
+        for (int i = 0; i < total; i++) {
+            sendFrame(port, droneHeartbeat(UdpGateway.GCS_SYSID, i));
+        }
+
+        awaitHandleCount(total);
+        verify(ingest, timeout(2000).times(total)).handle(any(MavlinkFrame.class));
+    }
+
+    @Test
+    @DisplayName("23. 频率限制：不同 sysid 独立计数")
+    void rateLimit_differentSysids_independent() throws Exception {
+        int port = BASE_PORT + 23;
+        int maxRate = 3;
+        gateway = newGateway(port, false, maxRate);
+        Thread.sleep(100);
+
+        // sysid=1 发 maxRate 帧，sysid=2 也发 maxRate 帧，都应全部转发
+        for (int i = 0; i < maxRate; i++) {
+            sendFrame(port, droneHeartbeat(1, i));
+            sendFrame(port, droneHeartbeat(2, i));
+        }
+
+        awaitHandleCount(maxRate * 2);
+        verify(ingest, timeout(2000).times(maxRate * 2)).handle(any(MavlinkFrame.class));
     }
 }

@@ -1,10 +1,15 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.orch.event.EmergencyStartEvent;
 import io.aerofleet.cloud.orch.event.EmergencyEndEvent;
+import io.aerofleet.mavlink.messages.CoverageOptimizationMsg;
+import io.aerofleet.mavlink.messages.EmergencyMissionPlanMsg;
+import io.aerofleet.mavlink.messages.EmergencyPriorityMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -395,6 +400,40 @@ public class EmergencyOrchService {
         pushData.put("action", actionName(action));
         pushData.put("reason", reason);
         pushPriority(planId, pushData);
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自行处理应急消息
+    // =====================================================================
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.EmergencyMissionPlanMsg).ID")
+    public void onEmergencyMissionPlanEvent(MavlinkMessageEvent event) {
+        EmergencyMissionPlanMsg msg = (EmergencyMissionPlanMsg) event.getMessage();
+        onEmergencyMissionPlan(
+                msg.planId, msg.scenarioType, msg.phase, msg.phaseStatus,
+                msg.droneCount, msg.coverageRate, msg.connectRate, msg.priority);
+        log.debug("EMERGENCY_MISSION_PLAN sysid={} planId={} phase={} status={}",
+                event.getSysid(), msg.planId, msg.phase, msg.phaseStatus);
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.CoverageOptimizationMsg).ID")
+    public void onCoverageOptimizationEvent(MavlinkMessageEvent event) {
+        CoverageOptimizationMsg msg = (CoverageOptimizationMsg) event.getMessage();
+        onCoverageOptimization(
+                msg.planId, msg.droneId, msg.cellType, msg.relayRole,
+                msg.txPower, msg.expectedCoverage, msg.batteryBudget);
+        log.debug("COVERAGE_OPTIMIZATION sysid={} planId={} drone={} cell={} cov={}%",
+                event.getSysid(), msg.planId, msg.droneId, msg.cellType, msg.expectedCoverage);
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.EmergencyPriorityMsg).ID")
+    public void onEmergencyPriorityEvent(MavlinkMessageEvent event) {
+        EmergencyPriorityMsg msg = (EmergencyPriorityMsg) event.getMessage();
+        onEmergencyPriority(
+                msg.planId, msg.taskId, msg.priority, msg.action,
+                msg.preemptedTaskId, msg.reason);
+        log.debug("EMERGENCY_PRIORITY sysid={} planId={} task={} pri={} action={}",
+                event.getSysid(), msg.planId, msg.taskId, msg.priority, msg.action);
     }
 
     // =====================================================================

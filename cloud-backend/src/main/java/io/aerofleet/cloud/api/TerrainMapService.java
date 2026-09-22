@@ -1,10 +1,12 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.mavlink.messages.FlightRestrictionMsg;
 import io.aerofleet.mavlink.messages.TerrainTypeMapMsg;
 import io.aerofleet.mavlink.messages.TerrainUpdateMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -133,6 +135,25 @@ public class TerrainMapService {
     /** 当前地形版本号。 */
     public long currentVersion() {
         return version.get();
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自行处理地形消息
+    // =====================================================================
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.TerrainTypeMapMsg).ID")
+    public void onTerrainTypeMapEvent(MavlinkMessageEvent event) {
+        onTerrainTypeMap(event.getSysid(), (TerrainTypeMapMsg) event.getMessage());
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.TerrainUpdateMsg).ID")
+    public void onTerrainUpdateEvent(MavlinkMessageEvent event) {
+        onTerrainUpdate(event.getSysid(), (TerrainUpdateMsg) event.getMessage());
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.FlightRestrictionMsg).ID")
+    public void onFlightRestrictionEvent(MavlinkMessageEvent event) {
+        onFlightRestriction(event.getSysid(), (FlightRestrictionMsg) event.getMessage());
     }
 
     /** 地形图快照。 */

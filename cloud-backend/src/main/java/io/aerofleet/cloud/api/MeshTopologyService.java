@@ -2,9 +2,11 @@ package io.aerofleet.cloud.api;
 
 import io.aerofleet.cloud.api.dto.MeshNodeSnapshot;
 import io.aerofleet.cloud.api.dto.MeshNodeSnapshot.NeighborDto;
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.mavlink.messages.MeshNeighborTableMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -66,6 +68,15 @@ public class MeshTopologyService {
     /** 当前拓扑版本号。 */
     public long currentVersion() {
         return version.get();
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自行处理 mesh 消息
+    // =====================================================================
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.MeshNeighborTableMsg).ID")
+    public void onNeighborTableEvent(MavlinkMessageEvent event) {
+        onNeighborTable(event.getSysid(), (MeshNeighborTableMsg) event.getMessage());
     }
 
     /**

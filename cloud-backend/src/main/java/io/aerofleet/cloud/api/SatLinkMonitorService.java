@@ -1,11 +1,13 @@
 package io.aerofleet.cloud.api;
 
 import io.aerofleet.cloud.gateway.BoundedHistory;
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.mavlink.messages.HierarchicalRouteDecisionMsg;
 import io.aerofleet.mavlink.messages.SatLinkStatusMsg;
 import io.aerofleet.mavlink.messages.SatPassScheduleMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -158,5 +160,24 @@ public class SatLinkMonitorService {
         version.incrementAndGet();
         log.info("sat-link strategy set to: {}", upper);
         return true;
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自行处理卫星链路消息
+    // =====================================================================
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.SatLinkStatusMsg).ID")
+    public void onSatLinkStatusEvent(MavlinkMessageEvent event) {
+        onSatLinkStatus(event.getSysid(), (SatLinkStatusMsg) event.getMessage());
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.SatPassScheduleMsg).ID")
+    public void onSatPassScheduleEvent(MavlinkMessageEvent event) {
+        onSatPassSchedule(event.getSysid(), (SatPassScheduleMsg) event.getMessage());
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.HierarchicalRouteDecisionMsg).ID")
+    public void onHierarchicalRouteDecisionEvent(MavlinkMessageEvent event) {
+        onHierarchicalRouteDecision(event.getSysid(), (HierarchicalRouteDecisionMsg) event.getMessage());
     }
 }

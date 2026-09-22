@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.api;
 
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.vision.RadarController;
@@ -9,6 +10,7 @@ import io.aerofleet.mavlink.messages.ImuDataMsg;
 import io.aerofleet.mavlink.messages.LidarDataMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
 
+import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -216,6 +218,20 @@ public class HardwareDataController {
     /** 接收 ImuDataMsg 并缓存（供 REST 查询）。 */
     public void onImuData(ImuDataMsg msg) {
         imuCache.put(msg.sysid, msg);
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自行处理硬件消息
+    // =====================================================================
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.LidarDataMsg).ID")
+    public void onLidarDataEvent(MavlinkMessageEvent event) {
+        onLidarData((LidarDataMsg) event.getMessage());
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.ImuDataMsg).ID")
+    public void onImuDataEvent(MavlinkMessageEvent event) {
+        onImuData((ImuDataMsg) event.getMessage());
     }
 
     // ===== 视图辅助 =====

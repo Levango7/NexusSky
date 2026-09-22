@@ -2,11 +2,13 @@ package io.aerofleet.cloud.api;
 
 import io.aerofleet.cloud.api.dto.CellTowerSnapshot;
 import io.aerofleet.cloud.api.dto.CellTowerSnapshot.TerminalInfo;
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.mavlink.messages.CellHandoverMsg;
 import io.aerofleet.mavlink.messages.CellTowerStatusMsg;
 import io.aerofleet.mavlink.messages.GroundTerminalRegisterMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -138,6 +140,25 @@ public class CellTowerTopologyService {
     /** 当前拓扑版本号。 */
     public long currentVersion() {
         return version.get();
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自行处理业务消息
+    // =====================================================================
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.CellTowerStatusMsg).ID")
+    public void onCellTowerStatusEvent(MavlinkMessageEvent event) {
+        onCellTowerStatus(event.getSysid(), (CellTowerStatusMsg) event.getMessage());
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.GroundTerminalRegisterMsg).ID")
+    public void onTerminalRegisterEvent(MavlinkMessageEvent event) {
+        onTerminalRegister(event.getSysid(), (GroundTerminalRegisterMsg) event.getMessage());
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.CellHandoverMsg).ID")
+    public void onHandoverEvent(MavlinkMessageEvent event) {
+        onHandover(event.getSysid(), (CellHandoverMsg) event.getMessage());
     }
 
     /**

@@ -150,4 +150,20 @@ public class JwtTokenProvider {
             return null;
         }
     }
+
+    /**
+     * 从令牌中提取租户 ID（tenant_id claim）。
+     *
+     * @param token JWT 令牌
+     * @return 租户 ID，令牌无效或不含 tenant_id 时返回 null
+     */
+    public Integer getTenantId(String token) {
+        try {
+            Jwt jwt = decoder.decode(token);
+            return jwt.getClaim("tenant_id");
+        } catch (JwtException e) {
+            log.debug("JWT 解析失败: {}", e.getMessage());
+            return null;
+        }
+    }
 }

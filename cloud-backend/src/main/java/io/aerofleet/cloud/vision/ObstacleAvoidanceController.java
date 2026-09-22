@@ -1,12 +1,15 @@
 package io.aerofleet.cloud.vision;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.mission.DroneCommandService;
 import io.aerofleet.mavlink.enums.AvoidanceMode;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.enums.ThreatLevel;
+import io.aerofleet.mavlink.messages.ObstacleReportMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -208,5 +211,26 @@ public class ObstacleAvoidanceController {
     /** 所有避障配置（供查询）。 */
     public java.util.Map<Integer, ObstacleConfig> allConfigs() {
         return java.util.Collections.unmodifiableMap(configs);
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自行处理障碍物消息
+    // =====================================================================
+
+    /**
+     * M3 障碍物报告路由（FR-15/FR-16）：将 ObstacleReportMsg 解码后按威胁等级
+     * 执行避障命令下发。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.ObstacleReportMsg).ID")
+    public void onObstacleReportEvent(MavlinkMessageEvent event) {
+        ObstacleReportMsg msg = (ObstacleReportMsg) event.getMessage();
+        ThreatLevel threat = msg.threat >= 0 && msg.threat < ThreatLevel.values().length
+                ? ThreatLevel.values()[msg.threat]
+                : ThreatLevel.NONE;
+        onObstacleReport(
+                msg.sysid > 0 ? msg.sysid : event.getSysid(),
+                msg.distance, msg.direction, threat);
+        log.debug("OBSTACLE_REPORT sysid={} distance={}m direction={}° threat={}",
+                event.getSysid(), msg.distance, msg.direction, threat);
     }
 }

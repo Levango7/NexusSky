@@ -1,11 +1,19 @@
 package io.aerofleet.cloud.tracking;
 
+import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
+import io.aerofleet.mavlink.enums.MavEnums;
+import io.aerofleet.mavlink.messages.GlobalPositionInt;
+import io.aerofleet.mavlink.messages.GpsRawInt;
+import io.aerofleet.mavlink.messages.SysStatus;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -48,6 +56,10 @@ public class FlightTrackStore {
     /** 最后已知位置持久化 Repository。 */
     @Autowired(required = false)
     private DroneLastKnownPositionRepository repository;
+
+    /** DeviceRegistry 用于获取 DroneSnapshot 的跨消息状态（如 battery）。 */
+    @Autowired(required = false)
+    private DeviceRegistry deviceRegistry;
 
     /** per-drone addPoint 计数器，用于节流每架无人机的持久化写入频率。 */
     private final Map<Integer, AtomicInteger> droneAddCounters = new ConcurrentHashMap<>();
@@ -135,6 +147,78 @@ public class FlightTrackStore {
         } catch (Exception e) {
             log.warn("Failed to persist last known position for sysid={}: {}", sysid, e.getMessage());
         }
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 写入轨迹点
+    // =====================================================================
+
+    /**
+     * 飞行轨迹存储：电量更新时同步写入轨迹点（仅当已有位置时）。
+     * <p>
+     * 从 TelemetryIngestService.onSysStatus 迁移。SYS_STATUS 含电量但无位置，
+     * 需从 DeviceRegistry 获取 DroneSnapshot 的已有位置/速度/航向状态。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.SysStatus).ID")
+    public void onSysStatus(MavlinkMessageEvent event) {
+        if (deviceRegistry == null) return;
+        int sysid = event.getSysid();
+        DroneSnapshot s = deviceRegistry.get(sysid);
+        if (s == null || Double.isNaN(s.lat) || Double.isNaN(s.lon)) return;
+        long now = System.currentTimeMillis();
+        addPoint(sysid, new TrackPoint(
+                sysid, now, s.lat, s.lon,
+                Double.isNaN(s.relativeAlt) ? 0.0 : s.relativeAlt,
+                Double.isNaN(s.vx) ? Double.NaN : s.vx,
+                Double.isNaN(s.vy) ? Double.NaN : s.vy,
+                Double.isNaN(s.vz) ? Double.NaN : s.vz,
+                Double.isNaN(s.heading) ? Double.NaN : s.heading,
+                s.battery >= 0 ? s.battery : -1.0));
+    }
+
+    /**
+     * 飞行轨迹存储：GPS 修复时记录轨迹点。
+     * <p>
+     * 从 TelemetryIngestService.onGps 迁移。GPS_RAW_INT 含 alt 但无 vx/vy，
+     * battery 从 DeviceRegistry 获取。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.GpsRawInt).ID")
+    public void onGps(MavlinkMessageEvent event) {
+        if (deviceRegistry == null) return;
+        int sysid = event.getSysid();
+        GpsRawInt g = (GpsRawInt) event.getMessage();
+        DroneSnapshot s = deviceRegistry.get(sysid);
+        if (s == null || !s.gpsHealthy || g.latE7 == 0 || g.lonE7 == 0) return;
+        long now = System.currentTimeMillis();
+        double lat = g.latE7 / 1e7;
+        double lon = g.lonE7 / 1e7;
+        double altM = g.altMm / 1000.0;
+        addPoint(sysid, new TrackPoint(
+                sysid, now, lat, lon, altM,
+                Double.NaN, Double.NaN, Double.NaN,
+                g.yaw > 0 ? g.yaw / 100.0 : Double.NaN,
+                s.battery >= 0 ? s.battery : -1.0));
+    }
+
+    /**
+     * 飞行轨迹存储：GLOBAL_POSITION_INT 是最完整的遥测源，写入完整轨迹点。
+     * <p>
+     * 从 TelemetryIngestService.onPosition 迁移。battery 从 DeviceRegistry 获取。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.GlobalPositionInt).ID")
+    public void onPosition(MavlinkMessageEvent event) {
+        if (deviceRegistry == null) return;
+        int sysid = event.getSysid();
+        GlobalPositionInt p = (GlobalPositionInt) event.getMessage();
+        if (p.latE7 == 0 && p.lonE7 == 0) return;
+        DroneSnapshot s = deviceRegistry.get(sysid);
+        double battery = (s != null && s.battery >= 0) ? s.battery : -1.0;
+        long now = System.currentTimeMillis();
+        addPoint(sysid, new TrackPoint(
+                sysid, now, p.lat(), p.lon(), p.relativeAltM(),
+                p.vx / 100.0, p.vy / 100.0, p.vz / 100.0,
+                p.hdg != MavEnums.HDG_UNKNOWN ? p.hdg / 100.0 : Double.NaN,
+                battery));
     }
 
     /**

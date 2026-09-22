@@ -9,14 +9,19 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * 1Hz WebSocket pusher: once per second, every online drone's full snapshot
- * is broadcast as {"type":"telemetry",...} plus a small "status" frame, so the
- * browser is never flooded by the 10-50Hz raw MAVLink stream.
+ * is broadcast as a single batch frame containing all telemetry+status entries,
+ * so the browser is never flooded by the 10-50Hz raw MAVLink stream.
  * STATUSTEXT alerts are pushed immediately via {@link AlertBus}.
+ * <p>
+ * 批量优化：N 台无人机的 telemetry+status 组装为单个 JSON 批量帧，
+ * 一次序列化一次广播（从 2N 次序列化降为 1 次）。
  */
 @Component
 public class TelemetryPusher {
@@ -44,6 +49,9 @@ public class TelemetryPusher {
 
     @Scheduled(fixedDelay = 1000)
     public void pushOnce() {
+        // Collect all online drone entries into a single batch frame.
+        // Flight log persistence happens regardless of WS viewer count.
+        List<Map<String, Object>> items = new ArrayList<>();
         for (DroneSnapshot s : registry.all()) {
             if (!s.online) {
                 continue;
@@ -51,15 +59,24 @@ public class TelemetryPusher {
             // Persist every online drone even with no WS viewers: the flight
             // log must not depend on somebody having the GCS page open.
             flightLog.telemetry(s);
-            if (handler.connectionCount() == 0) {
-                continue;
+            if (handler.connectionCount() > 0) {
+                items.add(frameMap("telemetry", s.sysid, DroneViews.telemetry(s)));
+                items.add(frameMap("status", s.sysid, DroneViews.status(s)));
             }
-            try {
-                handler.broadcast(frame("telemetry", s.sysid, DroneViews.telemetry(s)), mapper);
-                handler.broadcast(frame("status", s.sysid, DroneViews.status(s)), mapper);
-            } catch (RuntimeException e) {
-                log.warn("Failed to serialize telemetry for sysid={}: {}", s.sysid, e.getMessage());
-            }
+        }
+
+        // Skip serialization entirely when no WS viewers or no online drones
+        if (items.isEmpty()) {
+            return;
+        }
+
+        try {
+            Map<String, Object> batch = new HashMap<>();
+            batch.put("type", "batch");
+            batch.put("items", items);
+            handler.broadcast(mapper.writeValueAsString(batch), mapper);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            log.warn("Failed to serialize batch telemetry frame: {}", e.getMessage());
         }
     }
 
@@ -75,13 +92,19 @@ public class TelemetryPusher {
         }
     }
 
+    /** Build a single frame as a Map (for batch assembly, avoids intermediate serialization). */
+    private Map<String, Object> frameMap(String type, int sysid, Object data) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("type", type);
+        m.put("sysid", sysid);
+        m.put("data", data);
+        return m;
+    }
+
+    /** Serialize a single frame to JSON string (for immediate alert push). */
     private String frame(String type, int sysid, Object data) {
         try {
-            Map<String, Object> m = new HashMap<>();
-            m.put("type", type);
-            m.put("sysid", sysid);
-            m.put("data", data);
-            return mapper.writeValueAsString(m);
+            return mapper.writeValueAsString(frameMap(type, sysid, data));
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new IllegalStateException("json encode failed", e);
         }
