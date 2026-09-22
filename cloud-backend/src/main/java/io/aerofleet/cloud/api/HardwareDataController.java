@@ -8,8 +8,7 @@ import io.aerofleet.mavlink.enums.ScanMode;
 import io.aerofleet.mavlink.messages.ImuDataMsg;
 import io.aerofleet.mavlink.messages.LidarDataMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -46,7 +45,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequestMapping("/api/v1")
 public class HardwareDataController {
 
-    private static final Logger log = LoggerFactory.getLogger(HardwareDataController.class);
 
     private final RadarController radarController;
     private final RotorController rotorController;

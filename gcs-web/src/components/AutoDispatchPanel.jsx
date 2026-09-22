@@ -14,6 +14,7 @@ import {
   stopVoiceIntercom,
   broadcastVoice,
 } from '../api.js'
+import { toArray } from '../utils/panelUtils.js'
 
 // 自动出警面板（P0）
 // 自动出警配置 + 手动触发出警 + 出警历史 + 进行中任务 + 视频流管理 + 语音对讲
@@ -32,17 +33,6 @@ function pick(obj, ...keys) {
   return null
 }
 
-// 规范化列表数据：兼容裸数组 / {items:[]} / {list:[]} 等后端返回结构
-function toArray(data, fallbackKey) {
-  if (Array.isArray(data)) return data
-  if (data && Array.isArray(data[fallbackKey])) return data[fallbackKey]
-  if (data && typeof data === 'object') {
-    for (const k of Object.keys(data)) {
-      if (Array.isArray(data[k])) return data[k]
-    }
-  }
-  return []
-}
 
 // 格式化时间戳
 function fmtTime(ts) {

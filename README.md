@@ -22,10 +22,10 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/16 种消息编解码/UDP 传输，M0a–M9 扩展消息 420–467），**185 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–M9 扩展消息 420–479），**185 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
-| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API、WebSocket 推送 | 不需要换 |
-| `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流 | 不需要换 |
+| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（155+ 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
+| `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 39 个功能面板 | 不需要换 |
 
 > **M0a–M4 能力扩展**：组网/环境/编队/喷洒/成像/硬件抽象均在上述四模块内叠加，
 > 未新增顶层模块——详见下文 [能力扩展（M0a–M4）](#能力扩展m0am4) 章节。
@@ -459,6 +459,29 @@ REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进�
 - `POST /drones/{id}/joystick` 手动控制 `{"x","y","z","r"}`（MANUAL_CONTROL 透传）
 - `POST /vision/drones/{id}/capture` 一发全链拍照定位 · `POST /vision/drones/{id}/orbit` 环绕闭环 · `GET /vision/drones/{id}/tracks` 航迹查询
 - `GET /flightlog` 飞行日志查询 · WebSocket `/ws/telemetry`：`{"type":"telemetry"|"status"|"alert", ...}`（1Hz 快照节流）
+- `POST /auth/login` 登录获取 JWT · `POST /auth/refresh` 刷新令牌
+- `GET /geofence/zones` 围栏区域 CRUD · `POST /geofence/check` 手动围栏检查
+- `POST /drone-lock/{id}/lock` 远程锁机 · `POST /drone-lock/{id}/unlock` 解锁
+- `POST /alarms/events` 报警事件接收 · `GET /alarms/stream` SSE 实时报警推送
+- `POST /emergency-command` 应急指挥 · `POST /emergency-command/{id}/one-click` 一键应急响应
+- `GET /v1/emergency/orch/*` 应急编排 · `GET /v1/emergency/scenarios` 场景预设
+- `POST /v1/formation` 编队创建 · `POST /v1/formation/{id}/transition` 队形变换 · `POST /v1/formation/{id}/lights` 灯光控制
+- `POST /v1/spray` 喷洒任务 · `POST /v1/delivery` 配送任务
+- `GET /v1/mesh/topology` Mesh 拓扑 · `GET /v1/celltowers` 基站状态 · `GET /v1/sat-link/status` 卫星链路
+- `GET /v1/terrain/map` 地形图 · `POST /v1/terrain/build` 地形建图
+- `POST /scheduling/tasks` 集群调度 · `GET /v1/squad/roles` 角色状态
+- `GET /ai/decisions` AI 决策监控 · `POST /edge/results` 边缘计算结果提交
+- `GET /twin/state/{id}` 数字孪生 · `GET /twin/predict/{id}` 轨迹预测
+- `GET /v1/env-alerts` 环境告警查询 · `GET /audit/logs` 审计日志（需 ADMIN）
+- `GET /license/info` License 信息 · `POST /license/activate` 激活 License
+- `GET /surveillance/devices` 安防设备 · `POST /surveillance/rapid-deploy` 一键布控
+- `GET /tracking/{id}/track` 飞行追踪 · `GET /tracking/lost` 失联无人机列表
+- `GET /health` 健康监控 · `POST /inspection` 巡检任务
+- `GET /mapping` 测绘任务 · `POST /show` 表演管理
+- `POST /voicecmd` 语音指令 · `GET /citytwin` 城市孪生
+- `GET /scenario/templates` 场景模板 · `POST /scenario/launch` 场景启动
+
+> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 54 个 Controller、155+ REST 端点。
 
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
@@ -498,17 +521,24 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 ## 代码结构
 
 ```
-aerofleet/
+NexusSky/
 ├── mavlink-core/        协议栈（无依赖，可直接复用到任何 Java 项目）
 │   ├── MavlinkFrame / MavlinkParser / MavlinkCrc / MavlinkMessageInfo
-│   ├── messages/        16 种消息（HEARTBEAT…STATUSTEXT）
+│   ├── messages/        标准 MAVLink 消息 + 扩展消息（420–479 段）
 │   ├── enums/MavEnums  官方枚举常量
 │   └── transport/      UDP 传输
-├── drone-sim/           虚拟无人机（状态机 + 任务协议服务端）
-├── cloud-backend/       Spring Boot 单体（网关/机队/任务/推送）
-├── gcs-web/             React GCS
-├── scripts/             start-all.cmd / e2e-smoke.sh
+├── drone-sim/           虚拟无人机（状态机 + 任务协议服务端 + 物理引擎 v2）
+├── link-sim/            链路损伤代理（延迟/丢包/带宽/分区 + Mesh 中继）
+├── cloud-backend/       Spring Boot 单体（网关/机队/任务/推送/安全/编排）
+│   └── 33 个功能包：api, security, alarm, surveillance, mission, orch,
+│       scheduling, twin, edge, ai, geofence, drone, health, inspection,
+│       scenario, mapping, show, voicecmd, citytwin, commadapt, autodispatch,
+│       tracking, flightlog, telemetry, gateway, config, metrics, tenant,
+│       audit, license, delivery2, vision
+├── gcs-web/             React GCS（39 个前端组件）
+├── scripts/             start-all.cmd / e2e-smoke.sh / 23 个脚本
 ├── docker-compose.yml   Linux 下一键编排
+├── docs/                14 篇技术文档
 └── .github/workflows/   CI（单测 + 前端构建 + E2E 冒烟）
 ```
 
@@ -516,17 +546,17 @@ aerofleet/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 87 |
-| `drone-sim` | 182 |
-| `link-sim` | 16 |
-| `cloud-backend` | 150 |
-| **总计** | **435（全部通过）** |
+| `mavlink-core` | 185 |
+| `drone-sim` | 350+ |
+| `link-sim` | 20+ |
+| `cloud-backend` | 1030+ |
+| **总计** | **1587（全部通过，0 failures）** |
 
 ## 已知边界（骨架的诚实声明）
 
-- 无鉴权、无持久化（内存态）、无真飞控的气动模型（匀速直线飞行）——这些都是刻意裁剪
+- 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
 - 微服务/K8s 暂不引入：模块化单体已够当前规模，拆分时机见设计文档讨论
-- MAVLink 核心消息 + 相机协议族（259/260/262/263/271）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
+- MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（420–479）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
 - 链路签名（MAVLink v2 signing）未实现，模拟器与真机的 UDP 通信在局域网内是明文
 - **检测器是投影可见性**（简化是有意的）：接入真实 CV 模型的替换点在
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
@@ -536,7 +566,10 @@ aerofleet/
   限制挡住（EPERM），本地用 `gcs-web/scripts/check-frontend.cjs`
   （Babel 语法 + import 图）把关；**真实构建在 CI 跑**（`npm run build`）。
   改前端后推 CI 验证，别信本地静态检查的"绿"就万事大吉。
-- 单机骨架：命令通道走 UDP lastPeer 学习（TODO 已标注多机改造点：systemId→SocketAddress 路由表）
+- **安全认证已实现**：JWT 令牌 + Spring Security + 多租户隔离 + 审计日志 + License 管理；
+  dev-mode 白名单便于本地开发
+- **持久化已部分实现**：飞行日志 JSONL 落盘、围栏/追踪/安防设备等支持持久化测试；
+  主数据仍为内存态，换数据库是包内替换
 
 ## 集成过程中踩过的坑（对后来者有价值）
 

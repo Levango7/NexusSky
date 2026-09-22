@@ -10,6 +10,7 @@ import {
   getInspectionAnomalies,
   getInspectionPhotos,
 } from '../api.js'
+import { toArray } from '../utils/panelUtils.js'
 
 // 智能巡检面板（P1）
 // 任务创建 + 任务列表 + 任务详情 + 巡检报告 + 异常详情 + 行业预设模板
@@ -63,17 +64,6 @@ function pick(obj, ...keys) {
   return null
 }
 
-// 规范化列表数据
-function toArray(data, fallbackKey) {
-  if (Array.isArray(data)) return data
-  if (data && Array.isArray(data[fallbackKey])) return data[fallbackKey]
-  if (data && typeof data === 'object') {
-    for (const k of Object.keys(data)) {
-      if (Array.isArray(data[k])) return data[k]
-    }
-  }
-  return []
-}
 
 // 格式化时间戳
 function fmtTime(ts) {

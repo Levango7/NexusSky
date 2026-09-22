@@ -2,7 +2,7 @@ package io.aerofleet.cloud.vision;
 
 import io.aerofleet.cloud.mission.DroneCommandService;
 import io.aerofleet.mavlink.enums.ScanMode;
-import io.aerofleet.mavlink.enums.TrackState;
+
 import io.aerofleet.mavlink.messages.RadarScanMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
 import org.slf4j.Logger;

@@ -21,7 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
+
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -57,8 +57,6 @@ public class FormationService {
     /** 地球半径（m），等距矩形近似（与 drone-sim GeoUtil 一致）。 */
     private static final double EARTH_R = 6371000.0;
 
-    /** 命令扇出并发超时（ms），单机超时不阻塞其余（DFX 4.2）。 */
-    private static final long FANOUT_TIMEOUT_MS = 6_000;
 
     private final ConcurrentHashMap<Integer, Formation> formations = new ConcurrentHashMap<>();
     private final AtomicInteger nextFormationId = new AtomicInteger(0);

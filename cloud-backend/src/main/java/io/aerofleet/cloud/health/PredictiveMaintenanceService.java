@@ -1,7 +1,6 @@
 package io.aerofleet.cloud.health;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -25,7 +24,6 @@ import java.util.Map;
 @Component
 public class PredictiveMaintenanceService {
 
-    private static final Logger log = LoggerFactory.getLogger(PredictiveMaintenanceService.class);
 
     /** 电池循环次数阈值。 */
     private static final int BATTERY_CYCLES_CRITICAL = 300;

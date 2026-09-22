@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.mission.DroneCommandService;
 import io.aerofleet.cloud.mission.MissionItemRequest;
 import io.aerofleet.cloud.mission.MissionUploadResult;
-import io.aerofleet.mavlink.enums.MavEnums;
+
 import io.aerofleet.mavlink.messages.MissionItemInt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -35,8 +35,7 @@ public class MappingRoutePlanner {
 
     private static final Logger log = LoggerFactory.getLogger(MappingRoutePlanner.class);
 
-    /** 地球半径 m。 */
-    private static final double EARTH_R = 6371000.0;
+
     /** 默认相机水平 FOV（度）。 */
     private static final double DEFAULT_FOV_DEG = 75.0;
     /** 环绕飞行默认航点数。 */

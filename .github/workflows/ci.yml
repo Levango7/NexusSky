@@ -23,6 +23,17 @@ jobs:
           cache: maven
       - name: Build & test
         run: mvn -B -pl ${{ matrix.module }} -am package
+      - name: Upload JaCoCo coverage report
+        if: matrix.module == 'cloud-backend'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report-${{ matrix.module }}
+          path: ${{ matrix.module }}/target/site/jacoco/
+          retention-days: 14
+      - name: Coverage gate check (line >= 50%)
+        if: matrix.module == 'cloud-backend'
+        continue-on-error: true
+        run: mvn -B -pl ${{ matrix.module }} -am verify -DskipTests
 
   frontend:
     name: GCS Web

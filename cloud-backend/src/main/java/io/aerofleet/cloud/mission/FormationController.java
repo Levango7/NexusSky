@@ -2,8 +2,7 @@ package io.aerofleet.cloud.mission;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,7 +36,6 @@ import java.util.Map;
 @RequestMapping("/api/v1/formation")
 public class FormationController {
 
-    private static final Logger log = LoggerFactory.getLogger(FormationController.class);
 
     private final FormationService formationService;
     private final DeviceRegistry registry;

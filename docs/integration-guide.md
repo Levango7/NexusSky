@@ -23,7 +23,7 @@ aerofleet.heartbeat-timeout-seconds=10  # 心跳超时
 
 ### 1.2 扩展消息注册
 
-NexusSky 已注册 57 条扩展消息（msgId 420-476）。如需新增：
+NexusSky 已注册 60 条扩展消息（msgId 420-479）。如需新增：
 
 1. 创建消息类（继承 MavlinkMessage）
 2. 在 `MavlinkMessage.java` decode switch 添加 case

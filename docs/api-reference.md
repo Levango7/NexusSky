@@ -1,10 +1,12 @@
 # NexusSky API 参考
 
-> 自动生成于 2026-09-20，共 33 个 Controller 文件（30 个 @RestController + 3 个 @Service 辅助类）、155 个 REST API 端点
+> 自动生成于 2026-09-22，共 54 个 Controller 文件（30 个已文档化 @RestController + 3 个 @Service 辅助类 + 21 个新增 Controller 待补充文档）、155+ 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0 注解
 >
 > 认证方式：除 `/api/auth/login` 外，所有端点要求 `Authorization: Bearer <JWT>` 请求头；部分端点额外要求 `ADMIN` 或 `OPERATOR` 角色（通过 `@RequireRole` 注解声明）。
+>
+> **注意**：以下 21 个新增 Controller 的端点详情尚未补充到本文档：`autodispatch/`（3 个）、`citytwin/`（5 个）、`commadapt/`（1 个）、`health/`（2 个）、`inspection/`（2 个）、`mapping/`（1 个）、`orch/`（1 个）、`scenario/`（3 个）、`security/`（2 个：UserController/TenantController）、`show/`（1 个）、`voicecmd/`（1 个）。完整端点信息请启动后访问 Swagger UI。
 
 ## 目录
 
@@ -1239,4 +1241,4 @@ es.onerror = (e) => {
 | 许可证 | LicenseController | /api/license | 3 |
 | **合计** | **30 个 @RestController** | | **155** |
 
-> **注**: 项目共 33 个 `*Controller.java` 文件，其中 `vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。实际暴露 REST 端点的 `@RestController` 为 30 个，共 155 个端点。
+> **注**: 项目共 54 个 `*Controller.java` 文件，其中 `vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。已文档化的 30 个 `@RestController` 共 155 个端点。另有 21 个新增 Controller（autodispatch/citytwin/commadapt/health/inspection/mapping/orch/scenario/security/show/voicecmd）的端点详情待补充，启动后可通过 Swagger UI 查看完整端点列表。

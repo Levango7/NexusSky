@@ -32,8 +32,7 @@ public class ActionSequenceService {
     private static final double DEFAULT_TAKEOFF_DURATION = 10.0;
     /** 默认移动到队形持续时间（秒）。 */
     private static final double DEFAULT_MOVE_DURATION = 20.0;
-    /** 默认队形变换持续时间（秒）。 */
-    private static final double DEFAULT_TRANSITION_DURATION = 15.0;
+
     /** 默认悬停持续时间（秒）。 */
     private static final double DEFAULT_HOVER_DURATION = 5.0;
     /** 默认灯光操作持续时间（秒）。 */

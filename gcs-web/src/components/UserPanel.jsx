@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api, getCurrentUser } from '../api.js'
+import { fmtTime, toArray } from '../utils/panelUtils.js'
 
 // 用户管理面板
 // 列出用户 + 创建/编辑/删除用户
@@ -18,27 +19,6 @@ const ROLE_COLORS = {
   OBSERVER: 'var(--dim)',
 }
 
-function formatTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const n = Number(ts)
-  if (!Number.isFinite(n)) return String(ts)
-  try {
-    return new Date(n).toLocaleString('zh-CN', { hour12: false })
-  } catch (e) {
-    return '--'
-  }
-}
-
-function toArray(data, fallbackKey) {
-  if (Array.isArray(data)) return data
-  if (data && Array.isArray(data[fallbackKey])) return data[fallbackKey]
-  if (data && typeof data === 'object') {
-    for (const k of Object.keys(data)) {
-      if (Array.isArray(data[k])) return data[k]
-    }
-  }
-  return []
-}
 
 export default function UserPanel() {
   const [users, setUsers] = useState([])
@@ -357,7 +337,7 @@ export default function UserPanel() {
                     </span>
                   </td>
                   <td style={{ padding: '8px 12px', fontFamily: 'var(--mono)', color: 'var(--dim)', fontSize: 11 }}>
-                    {formatTime(u.createdAt || u.created_at)}
+                    {fmtTime(u.createdAt || u.created_at)}
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'right' }}>
                     <button

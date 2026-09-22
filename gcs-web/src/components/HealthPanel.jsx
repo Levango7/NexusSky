@@ -10,6 +10,7 @@ import {
   getMaintenancePredictions,
   getMaintenanceSchedule,
 } from '../api.js'
+import { toArray } from '../utils/panelUtils.js'
 
 // 健康管理面板（P1）
 // 机队健康总览 + 单机健康详情 + 健康告警 + 预测性维护 + 维护记录 + 维护计划
@@ -59,17 +60,6 @@ function pick(obj, ...keys) {
   return null
 }
 
-// 规范化列表数据
-function toArray(data, fallbackKey) {
-  if (Array.isArray(data)) return data
-  if (data && Array.isArray(data[fallbackKey])) return data[fallbackKey]
-  if (data && typeof data === 'object') {
-    for (const k of Object.keys(data)) {
-      if (Array.isArray(data[k])) return data[k]
-    }
-  }
-  return []
-}
 
 // 格式化时间戳
 function fmtTime(ts) {

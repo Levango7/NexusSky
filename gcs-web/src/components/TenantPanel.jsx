@@ -1,32 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../api.js'
+import { fmtTime, toArray } from '../utils/panelUtils.js'
 
 // 租户管理面板
 // 列出所有租户 + 创建/编辑/删除租户
 // 风格与 AlarmPanel / DroneLockPanel 一致：卡片布局 + CSS 变量
 
-function formatTime(ts) {
-  if (ts == null || ts === '') return '--'
-  const n = Number(ts)
-  if (!Number.isFinite(n)) return String(ts)
-  try {
-    return new Date(n).toLocaleString('zh-CN', { hour12: false })
-  } catch (e) {
-    return '--'
-  }
-}
-
-// 规范化列表数据
-function toArray(data, fallbackKey) {
-  if (Array.isArray(data)) return data
-  if (data && Array.isArray(data[fallbackKey])) return data[fallbackKey]
-  if (data && typeof data === 'object') {
-    for (const k of Object.keys(data)) {
-      if (Array.isArray(data[k])) return data[k]
-    }
-  }
-  return []
-}
 
 export default function TenantPanel() {
   const [tenants, setTenants] = useState([])
@@ -273,7 +252,7 @@ export default function TenantPanel() {
                   </span>
                 </td>
                 <td style={{ padding: '8px 12px', fontFamily: 'var(--mono)', color: 'var(--dim)', fontSize: 11 }}>
-                  {formatTime(t.createdAt || t.created_at)}
+                  {fmtTime(t.createdAt || t.created_at)}
                 </td>
                 <td style={{ padding: '8px 12px', textAlign: 'right' }}>
                   <button

@@ -7,6 +7,7 @@ import {
   getAllLockStates,
   clearLockState,
 } from '../api.js'
+import { fmtTime, toArray } from '../utils/panelUtils.js'
 
 // 无人机远程锁定/解锁面板（安全防盗功能）
 // 锁定状态总览 + 已锁定无人机列表 + 锁定操作表单 + 解锁操作 + 清除锁定记录
@@ -17,7 +18,6 @@ import {
 
 const POLL_MS = 5000
 
-// 锁定动作类型（与后端枚举对齐：DISARM / FORCE_LAND / RETURN_TO_LAUNCH）
 const LOCK_ACTIONS = [
   { key: 'DISARM', label: '解除武装(DISARM)' },
   { key: 'FORCE_LAND', label: '强制降落(FORCE_LAND)' },
@@ -31,30 +31,6 @@ const ACTION_COLOR = {
   RETURN_TO_LAUNCH: 'var(--cyan)',
 }
 
-// 格式化时间戳（ms → 本地可读时间）
-function formatTime(ms) {
-  if (ms == null || ms === '') return '--'
-  const n = Number(ms)
-  if (!Number.isFinite(n)) return String(ms)
-  try {
-    return new Date(n).toLocaleString('zh-CN', { hour12: false })
-  } catch (e) {
-    return '--'
-  }
-}
-
-// 规范化列表数据：兼容裸数组 / {states:[]} / {drones:[]} 等后端返回结构
-function toArray(data, fallbackKey) {
-  if (Array.isArray(data)) return data
-  if (data && Array.isArray(data[fallbackKey])) return data[fallbackKey]
-  if (data && typeof data === 'object') {
-    // 兜底：取第一个数组属性
-    for (const k of Object.keys(data)) {
-      if (Array.isArray(data[k])) return data[k]
-    }
-  }
-  return []
-}
 
 export default function DroneLockPanel() {
   // ---- 状态 ----
@@ -287,7 +263,7 @@ export default function DroneLockPanel() {
                       }}>
                         <span>原因：{s.reason || '--'}</span>
                         <span>锁定人：{s.lockedBy || '--'}</span>
-                        <span>锁定时间：{formatTime(s.lockedAtMs)}</span>
+                        <span>锁定时间：{fmtTime(s.lockedAtMs)}</span>
                       </div>
                     </div>
                   )

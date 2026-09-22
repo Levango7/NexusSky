@@ -28,8 +28,7 @@ public class RoutePlannerService {
 
     private static final Logger log = LoggerFactory.getLogger(RoutePlannerService.class);
 
-    /** 地球半径 m。 */
-    private static final double EARTH_R = 6371000.0;
+
     /** 默认相机水平 FOV（度），用于推算地面覆盖宽度。 */
     private static final double DEFAULT_FOV_DEG = 75.0;
     /** ORBIT 默认航点数。 */

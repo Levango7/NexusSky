@@ -6,8 +6,7 @@ import io.aerofleet.cloud.vision.ObstacleAvoidanceController;
 import io.aerofleet.cloud.vision.ObstacleConfig;
 import io.aerofleet.cloud.vision.ObstacleStatus;
 import io.aerofleet.mavlink.enums.AvoidanceMode;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,7 +35,6 @@ import java.util.Map;
 @RequestMapping("/api/v1/obstacle")
 public class ObstacleController {
 
-    private static final Logger log = LoggerFactory.getLogger(ObstacleController.class);
 
     private final ObstacleAvoidanceController controller;
 

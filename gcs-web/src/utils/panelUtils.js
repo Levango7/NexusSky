@@ -12,6 +12,18 @@ export function fmtTime(ts) {
   return new Date(n).toLocaleString('zh-CN', { hour12: false })
 }
 
+// 规范化列表数据：兼容裸数组 / {key:[]} / 其他对象包裹的数组结构
+export function toArray(data, fallbackKey) {
+  if (Array.isArray(data)) return data
+  if (data && Array.isArray(data[fallbackKey])) return data[fallbackKey]
+  if (data && typeof data === 'object') {
+    for (const k of Object.keys(data)) {
+      if (Array.isArray(data[k])) return data[k]
+    }
+  }
+  return []
+}
+
 // 字段兼容提取（从对象中按优先级取第一个非null值）
 export function pick(obj, ...keys) {
   if (!obj) return null

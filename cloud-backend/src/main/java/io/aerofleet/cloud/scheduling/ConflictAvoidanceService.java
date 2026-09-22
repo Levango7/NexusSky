@@ -30,7 +30,6 @@ public class ConflictAvoidanceService {
 
     private static final double MIN_HORIZONTAL_SEP = 50.0;  // 最小水平间隔 50m
     private static final double MIN_VERTICAL_SEP = 10.0;    // 最小垂直间隔 10m
-    private static final double TIME_WINDOW_SEC = 30.0;     // 时间窗口 30s
 
     /** 地球半径(m)，用于经纬度↔米换算 */
     private static final double EARTH_RADIUS_M = 6371000.0;

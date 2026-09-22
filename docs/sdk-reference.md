@@ -1,6 +1,8 @@
 # NexusSky SDK 参考
 
-> **版本**：v1.0 | 完整 API 文档：启动后访问 http://localhost:8080/swagger-ui.html
+> **版本**：v1.1 | 完整 API 文档：启动后访问 http://localhost:8080/swagger-ui.html
+>
+> **注意**：本文档为快速参考，完整端点详情请见 [api-reference.md](api-reference.md)
 
 ---
 
@@ -16,14 +18,17 @@
 
 **响应：**
 ```json
-{"token": "eyJhbG...", "expiry": 3600}
+{"token": "eyJhbG...", "expiresIn": 3600, "username": "admin"}
 ```
+
+### POST /api/auth/refresh
+刷新 JWT 令牌（需携带当前有效令牌）。
 
 ---
 
 ## 二、设备管理 API
 
-### GET /api/drones
+### GET /api/v1/drones
 查询所有无人机状态。
 
 **响应：**
@@ -46,39 +51,60 @@
 ]
 ```
 
-### GET /api/drones/{sysid}
+### GET /api/v1/drones/{sysid}
 查询单个无人机详情。
+
+### GET /api/v1/drones/{sysid}/telemetry
+获取遥测数据快照。
+
+### GET /api/v1/drones/{sysid}/track
+获取飞行轨迹（最近 200 点）。
+
+### GET /api/v1/drones/{sysid}/mission
+下载当前机载任务（MAVLink mission download 协议）。
 
 ---
 
 ## 三、任务管理 API
 
-### POST /api/mission/upload
-上传航点任务。
+### POST /api/v1/drones/{sysid}/mission
+上传航点任务（完整 MAVLink mission 协议）。
 
 **请求：**
 ```json
 {
-  "sysid": 1,
-  "waypoints": [
-    {"seq": 0, "lat": 39.9042, "lon": 116.4074, "alt": 50, "command": 16},
-    {"seq": 1, "lat": 39.9050, "lon": 116.4080, "alt": 50, "command": 16}
+  "items": [
+    {"cmd": "waypoint", "lat": 39.9042, "lon": 116.4074, "alt": 50, "holdTime": 2},
+    {"cmd": "takeoff", "alt": 30},
+    {"cmd": "rtl"}
   ]
 }
 ```
 
-### POST /api/mission/start
-启动任务。`{"sysid": 1}`
+### POST /api/v1/drones/{sysid}/commands
+发送飞行命令。
 
-### POST /api/mission/rtl
-返航。`{"sysid": 1}`
+**请求：**
+```json
+{"type": "arm"}
+```
+
+支持的命令类型：`arm` / `disarm` / `start_mission` / `rtl` / `takeoff` / `raw`
+
+### POST /api/v1/drones/{sysid}/joystick
+虚拟摇杆手动控制（MANUAL_CONTROL 透传）。
+
+**请求：**
+```json
+{"x": 0, "y": 700, "z": 500, "r": 0}
+```
 
 ---
 
 ## 四、集群调度 API
 
-### POST /api/scheduling/assign
-分配任务到最优无人机。
+### POST /api/scheduling/tasks
+创建调度任务（综合评分：能力匹配 40% + 电量 30% + 距离 20% + 优先级 10%）。
 
 **请求：**
 ```json
@@ -98,22 +124,27 @@
   "taskId": "task-001",
   "assignedSysid": 1,
   "score": 85.3,
-  "detail": "sysid=1 score=85.3",
   "success": true
 }
 ```
 
-### GET /api/scheduling/assignments
-查询所有分配结果。
+### GET /api/scheduling/tasks
+查询所有调度任务。
 
-### DELETE /api/scheduling/cancel/{taskId}
-取消任务分配。
+### DELETE /api/scheduling/tasks/{id}
+取消调度任务。
+
+### GET /api/v1/squad/roles
+查询角色状态（Leader/Worker/Relay 状态机）。
+
+### POST /api/v1/squad/assign
+重计算并分派环绕任务。
 
 ---
 
 ## 五、编队 API
 
-### POST /api/formation/create
+### POST /api/v1/formation
 创建编队。
 
 **请求：**
@@ -126,13 +157,22 @@
 }
 ```
 
-### POST /api/formation/{id}/led
+### POST /api/v1/formation/{id}/lights
 控制编队灯光。
 
 **请求：**
 ```json
-{"pattern": "BLINK", "color": "RED", "frequency": 2}
+{"on": true, "pattern": "BLINK", "brightness": 80, "colorR": 255}
 ```
+
+### POST /api/v1/formation/{id}/transition
+队形变换。
+
+### POST /api/v1/formation/{id}/command
+下发编队命令（TAKEOFF/TRANSITION/LIGHTS/RTL/DISSOLVE）。
+
+### POST /api/v1/formation/{id}/dissolve
+解散编队。
 
 ---
 
@@ -141,7 +181,7 @@
 ### GET /api/twin/state/{sysid}
 查询数字孪生状态。
 
-### GET /api/twin/predict/{sysid}?horizonSeconds=30
+### GET /api/twin/predict/{sysid}?horizon=30
 轨迹预测（未来 30 秒）。
 
 **响应：**
@@ -155,48 +195,58 @@
 }
 ```
 
-### POST /api/twin/replay
-场景回放。
-
-**请求：**
-```json
-{"startTime": "2026-09-17T00:00:00Z", "endTime": "2026-09-17T01:00:00Z"}
-```
+### GET /api/twin/compare/{sysid}
+虚实对比（实测态 vs 模型预测态）。
 
 ---
 
 ## 七、边缘计算 API
 
-### POST /api/edge/task
-下发边缘任务。
+### POST /api/edge/results
+提交边缘计算结果。
 
 **请求：**
 ```json
 {
-  "taskType": "VIDEO_ANALYSIS",
   "sysid": 1,
-  "params": {"model": "yolov8", "confidence": 0.5}
+  "taskId": "task-001",
+  "type": "DETECTION",
+  "result": "person"
 }
 ```
 
 ### GET /api/edge/tasks
-查询边缘任务状态。
+获取所有边缘任务。
+
+### GET /api/edge/fusion/{sysid}
+获取传感器融合数据。
 
 ---
 
 ## 八、应急编排 API
 
-### POST /api/v1/emergency/orchestrate
-启动应急编排。
+### POST /api/v1/emergency/orch/start
+启动应急编排计划。
 
 **请求：**
 ```json
 {
-  "scenario": "EARTHQUAKE",
-  "disasterArea": {"centerLat": 30.0, "centerLon": 103.0, "radiusKm": 10},
-  "availableDrones": [1, 2, 3, 4, 5]
+  "scenarioType": 3,
+  "centerLat": 225900000,
+  "centerLon": 1139300000,
+  "radius": 1000,
+  "droneIds": [1, 2, 3]
 }
 ```
+
+### POST /api/emergency-command
+创建应急指挥命令（接报阶段）。
+
+### POST /api/emergency-command/{id}/one-click
+一键应急响应（自动走完接报→研判→部署→执行）。
+
+### GET /api/v1/emergency/scenarios
+查询场景预设列表。
 
 ---
 
@@ -221,6 +271,13 @@
 |---|---|---|
 | `telemetry` | 每秒推送 | `{sysid, battery, lat, lon, alt, ...}` |
 | `alert` | 告警触发 | `{sysid, type, severity, message}` |
-| `formation` | 编队状态变更 | `{formationId, state, members[]}` |
-| `scheduling` | 调度结果 | `{taskId, sysid, score}` |
-| `decision` | AI 决策 | `{sysid, decisionType, reason}` |
+| `status` | 设备状态变更 | `{sysid, online, mode, ...}` |
+
+---
+
+## 十一、SSE 事件流
+
+| 端点 | 事件名 | 心跳间隔 |
+|---|---|---|
+| GET /api/alarms/stream | `alarm-event` | 15 秒 |
+| GET /api/surveillance/devices/{id}/events | `surveillance-event` | 15 秒 |

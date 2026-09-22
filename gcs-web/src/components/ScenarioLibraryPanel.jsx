@@ -12,6 +12,7 @@ import {
   getScenarioDrillResult,
   getScenarioDrillHistory,
 } from '../api.js'
+import { toArray } from '../utils/panelUtils.js'
 
 // 应急场景库面板（P1）
 // 场景模板列表 + 模板详情 + 一键启动 + 进行中场景 + 场景历史 + 演练模式
@@ -54,17 +55,6 @@ function pick(obj, ...keys) {
   return null
 }
 
-// 规范化列表数据
-function toArray(data, fallbackKey) {
-  if (Array.isArray(data)) return data
-  if (data && Array.isArray(data[fallbackKey])) return data[fallbackKey]
-  if (data && typeof data === 'object') {
-    for (const k of Object.keys(data)) {
-      if (Array.isArray(data[k])) return data[k]
-    }
-  }
-  return []
-}
 
 // 格式化时间戳
 function fmtTime(ts) {
