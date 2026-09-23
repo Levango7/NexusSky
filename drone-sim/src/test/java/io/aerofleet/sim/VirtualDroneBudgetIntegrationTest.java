@@ -41,7 +41,7 @@ class VirtualDroneBudgetIntegrationTest {
     @DisplayName("toy 模式：自动装配 UltrasonicSource 作为 DepthSource")
     void toyMode_assemblesUltrasonicAsDepthSource() throws Exception {
         try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT))) {
-            assertEquals("toy", drone.getBudgetMode());
+            assertEquals(BudgetMode.TOY, drone.getBudgetMode());
             assertNotNull(drone.getUltrasonicSource(),
                     "toy 模式应自动实例化 UltrasonicSource");
             assertNotNull(drone.getDepthSource(),
@@ -121,7 +121,7 @@ class VirtualDroneBudgetIntegrationTest {
     @DisplayName("standard 模式：自动装配 UltrasonicSource 作为 DepthSource（双冗余避障）")
     void standardMode_assemblesUltrasonicAsDepthSource() throws Exception {
         try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard", BASE_PORT + 10))) {
-            assertEquals("standard", drone.getBudgetMode());
+            assertEquals(BudgetMode.STANDARD, drone.getBudgetMode());
             assertNotNull(drone.getUltrasonicSource(),
                     "standard 模式应自动实例化 UltrasonicSource");
             assertNotNull(drone.getDepthSource(),
@@ -184,7 +184,7 @@ class VirtualDroneBudgetIntegrationTest {
     @DisplayName("advanced 模式：不实例化任何丐版传感器")
     void advancedMode_noBudgetSensors() throws Exception {
         try (VirtualDrone drone = new VirtualDrone(configWithBudget("advanced", BASE_PORT + 20))) {
-            assertEquals("advanced", drone.getBudgetMode());
+            assertEquals(BudgetMode.ADVANCED, drone.getBudgetMode());
             assertNull(drone.getUltrasonicSource(),
                     "advanced 模式不实例化 UltrasonicSource");
             assertNull(drone.getBudgetThermalSource(),

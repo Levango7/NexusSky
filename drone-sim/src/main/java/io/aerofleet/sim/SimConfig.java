@@ -74,8 +74,10 @@ public final class SimConfig {
     /** 应急任务编排配置（--orch 开关 + 子参数）。enabled=false 时 VirtualDrone.orchEngine=null，既有行为不变（DFX 4.5）。 */
     public final OrchestrationConfig orchConfig;
     // ---- 丐版模式参数（budget）----
-    /** 丐版模式："toy"(百元级) | "standard"(千元级) | "advanced"(进阶) | null(完整版，既有行为不变 DFX 4.5)。 */
-    public final String budgetMode;
+    /** 丐版模式枚举：TOY/STANDARD/ADVANCED/EMERGENCY_TOY/EMERGENCY_STANDARD，null=完整版（既有行为不变 DFX 4.5）。 */
+    public final BudgetMode budgetMode;
+    /** 灾害应急配置（仅 budgetMode 为 EMERGENCY_TOY/EMERGENCY_STANDARD 时非 null）。 */
+    public final EmergencyBudgetConfig emergencyBudgetConfig;
 
     private SimConfig(int port, int sysid, double lat, double lon, double speed,
                       String name, String scenario, String bindIp, boolean failsafe,
@@ -90,7 +92,8 @@ public final class SimConfig {
                          boolean terrainAdaptEnabled, double terrainGridResolution,
                           io.aerofleet.sim.celltower.CellTowerSimConfig cellTowerConfig,
                           OrchestrationConfig orchConfig,
-                          String budgetMode) {
+                          BudgetMode budgetMode,
+                          EmergencyBudgetConfig emergencyBudgetConfig) {
         this.port = port;
         this.sysid = sysid;
         this.lat = lat;
@@ -123,6 +126,7 @@ public final class SimConfig {
         this.cellTowerConfig = cellTowerConfig;
         this.orchConfig = orchConfig;
         this.budgetMode = budgetMode;
+        this.emergencyBudgetConfig = emergencyBudgetConfig;
     }
 
     /** Defaults: Shenzhen University Town area, 8 m/s cruise, port 14540, sysid 1. */
@@ -136,6 +140,7 @@ public final class SimConfig {
                 false, 100.0,
                 io.aerofleet.sim.celltower.CellTowerSimConfig.defaults(),
                 OrchestrationConfig.defaults(),
+                null,
                 null);
     }
 
@@ -191,7 +196,7 @@ public final class SimConfig {
         double cellLoadBalanceThreshold = 0.8;
         long cellHeartbeatTimeoutMs = 30_000L;
         // 丐版模式默认值：null = 完整版（既有行为不变，DFX 4.5）
-        String budgetMode = null;
+        BudgetMode budgetMode = null;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -282,10 +287,12 @@ public final class SimConfig {
                     case "cell-heartbeat-timeout-ms" -> cellHeartbeatTimeoutMs = Long.parseLong(value);
                     // 丐版模式参数（budget，DFX 4.4 配置可追溯）
                     case "budget" -> {
-                        if ("toy".equals(value) || "standard".equals(value) || "advanced".equals(value)) {
-                            budgetMode = value;
+                        BudgetMode parsed = BudgetMode.fromCliValue(value);
+                        if (parsed != null) {
+                            budgetMode = parsed;
                         } else {
-                            SimLog.warn("Invalid --budget: " + value + " (expected toy|standard|advanced, ignoring)");
+                            SimLog.warn("Invalid --budget: " + value
+                                + " (expected toy|standard|advanced|emergency-toy|emergency-standard, ignoring)");
                         }
                     }
                     default -> {
@@ -326,6 +333,8 @@ public final class SimConfig {
         SatRelayConfig satRelayConfig = satRelayEnabled
                 ? SatRelayConfig.parse(satRelayArgs.toArray(new String[0]))
                 : SatRelayConfig.defaults();
+        // 灾害应急配置：仅 EMERGENCY_TOY/EMERGENCY_STANDARD 时创建，否则 null
+        EmergencyBudgetConfig emergencyBudgetConfig = EmergencyBudgetConfig.forMode(budgetMode);
         return new SimConfig(port, sysid, lat, lon, speed, name, scenario, bindIp,
                 failsafe, terrain, fence, targets, httpPort,
                 envEnabled, envScenario, envSeed, envWindMax, envTempRange,
@@ -339,7 +348,8 @@ public final class SimConfig {
                         cellSignalThreshold, cellHandoverThreshold,
                         cellLoadBalanceThreshold, cellHeartbeatTimeoutMs),
                 OrchestrationConfig.defaults(),
-                budgetMode);
+                budgetMode,
+                emergencyBudgetConfig);
     }
 
     public static void printUsage() {
@@ -412,8 +422,10 @@ public final class SimConfig {
         System.out.println("[sim]   --cell-load-balance-threshold   load balance threshold (default 0.8)");
         System.out.println("[sim]   --cell-heartbeat-timeout-ms     heartbeat timeout ms (default 30000)");
         // 丐版模式参数说明（budget，DFX 4.4 配置可追溯）
-        System.out.println("[sim]   --budget              budget mode: toy|standard|advanced (default off = full)");
+        System.out.println("[sim]   --budget              budget mode: toy|standard|advanced|emergency-toy|emergency-standard (default off = full)");
         System.out.println("[sim]              toy=ultrasonic+WiFi only, standard=GPS+ToF+LoRa, advanced=all sensors");
+        System.out.println("[sim]              emergency-toy=~74yuan WiFi ESP-NOW+ultrasonic+LED+buzzer (disaster rescue)");
+        System.out.println("[sim]              emergency-standard=~429yuan LoRa Mesh+ToF+GPS+AMG8833+LED+buzzer (disaster rescue)");
     }
 }
 

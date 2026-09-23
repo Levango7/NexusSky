@@ -7,30 +7,30 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * SimConfig 丐版模式（--budget）参数解析单测。
  * <p>
- * 验证 --budget=toy|standard|advanced 三档丐版模式解析，
+ * 验证 --budget=toy|standard|advanced|emergency-toy|emergency-standard 五档丐版模式解析，
  * 以及 budgetMode=null 时既有行为完全不变（DFX 4.5 向下兼容）。
  */
 class SimConfigBudgetTest {
 
     @Test
     void budget_toy_parsedCorrectly() {
-        // --budget=toy 解析为 "toy"
+        // --budget=toy 解析为 BudgetMode.TOY
         SimConfig cfg = SimConfig.parse(new String[]{"--budget=toy"});
-        assertEquals("toy", cfg.budgetMode);
+        assertEquals(BudgetMode.TOY, cfg.budgetMode);
     }
 
     @Test
     void budget_standard_parsedCorrectly() {
-        // --budget=standard 解析为 "standard"
+        // --budget=standard 解析为 BudgetMode.STANDARD
         SimConfig cfg = SimConfig.parse(new String[]{"--budget=standard"});
-        assertEquals("standard", cfg.budgetMode);
+        assertEquals(BudgetMode.STANDARD, cfg.budgetMode);
     }
 
     @Test
     void budget_advanced_parsedCorrectly() {
-        // --budget=advanced 解析为 "advanced"
+        // --budget=advanced 解析为 BudgetMode.ADVANCED
         SimConfig cfg = SimConfig.parse(new String[]{"--budget=advanced"});
-        assertEquals("advanced", cfg.budgetMode);
+        assertEquals(BudgetMode.ADVANCED, cfg.budgetMode);
     }
 
     @Test
@@ -62,7 +62,7 @@ class SimConfigBudgetTest {
         SimConfig cfg = SimConfig.parse(new String[]{
                 "--budget=toy", "--port=14542", "--sysid=3", "--speed=5.0"
         });
-        assertEquals("toy", cfg.budgetMode);
+        assertEquals(BudgetMode.TOY, cfg.budgetMode);
         assertEquals(14542, cfg.port);
         assertEquals(3, cfg.sysid);
         assertEquals(5.0, cfg.speed, 0.0001);
@@ -77,9 +77,9 @@ class SimConfigBudgetTest {
 
     @Test
     void budget_toy_space_form() {
-        // --budget toy（空格形式）也正确解析为 "toy"
+        // --budget toy（空格形式）也正确解析为 BudgetMode.TOY
         SimConfig cfg = SimConfig.parse(new String[]{"--budget", "toy"});
-        assertEquals("toy", cfg.budgetMode);
+        assertEquals(BudgetMode.TOY, cfg.budgetMode);
     }
 
     @Test
@@ -96,7 +96,7 @@ class SimConfigBudgetTest {
         SimConfig cfg = SimConfig.parse(new String[]{
                 "--budget=standard", "--env=on", "--actuators=on", "--mesh=on"
         });
-        assertEquals("standard", cfg.budgetMode);
+        assertEquals(BudgetMode.STANDARD, cfg.budgetMode);
         assertTrue(cfg.envEnabled);
         assertTrue(cfg.actuatorsEnabled);
         assertTrue(cfg.meshEnabled);
