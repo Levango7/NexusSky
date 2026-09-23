@@ -9,7 +9,20 @@ mvn -B -DskipTests package
 
 # 2. 启动 cloud-backend（后台）
 echo "[2/4] Starting cloud-backend..."
-java -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar &
+# 2026-09-22 修复：必须**显式激活 dev profile**（H2）。
+# 根因：application.properties 的默认数据源已改为 PostgreSQL
+#   spring.datasource.url=${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/aerofleet_prod}
+# 而本 CI job **没有 PostgreSQL 服务容器** —— 应用启动时 Hikari/Flyway 连库被拒：
+#   Caused by: java.net.ConnectException: Connection refused
+#     at org.postgresql.core.PGStream.createSocket(...)
+#   → 进程直接退出（此前被 `sleep 5` + 单次 curl 掩盖成"健康检查失败"）。
+# 旧的运行中 Flyway 实际跑在 H2 上（日志 Database version: 2.3.232），
+# 即默认值是后来才改成 Postgres 的。
+# 选 dev 而非 test：test profile 会 `springdoc.*=false` 关闭 OpenAPI/Swagger，
+# 而本脚本后续要校验 /v3/api-docs 与 /swagger-ui.html。
+# dev profile：H2 + Flyway 启用 + springdoc 启用 + dev-mode=true。
+java -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+    --spring.profiles.active=dev &
 CLOUD_PID=$!
 
 # 2026-09-22 修复：原为固定 `sleep 5` 后**单次** curl 健康检查 ——

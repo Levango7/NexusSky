@@ -65,9 +65,25 @@ jobs:
       - name: Build all
         run: mvn -B -DskipTests package
       - name: Start backend
+        # 2026-09-22 修复：必须**显式激活 dev profile**（H2）。
+        # application.properties 的默认数据源已改为 PostgreSQL
+        # （jdbc:postgresql://localhost:5432/aerofleet_prod），
+        # 而本 job **没有 PostgreSQL 服务容器** → 启动时 Hikari/Flyway 连库被拒、
+        # 进程直接退出（原 `sleep 12` 后不做任何校验，失败被推迟到后续 smoke 步骤）。
+        # 详见 scripts/ci-integration-test.sh 中的同名注释。
         run: |
-          java -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar &
-          sleep 12
+          java -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+            --spring.profiles.active=dev &
+          # 就绪等待：轮询 /actuator/health 至多 120s（原为固定 sleep 12，无校验）
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/actuator/health 2>/dev/null | grep -q '"status":"UP"'; then
+              echo "backend ready (${i} probes)"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::backend failed to become ready within 120s"
+          curl -s -m 5 http://localhost:8080/actuator/health || echo "(no response)"
+          exit 1
       - name: Normal flight smoke (sim -> mission -> RTL + flightlog + joystick)
         run: |
           java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT.jar &
