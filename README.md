@@ -321,7 +321,7 @@ ARM → startMission → 逐站拍照 → 逐站逆解算定位 → 喂跟踪器
 
 十二个里程碑在骨架之上叠加了组网、环境、编队、喷洒、成像、硬件抽象、灾害应急通讯组网
 与空地一体化应急指挥能力，均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按
-420–467、477–479 段分配。
+420–467、477–483 段分配。
 
 ### M0a — Mesh 组网落地
 
@@ -427,7 +427,62 @@ REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进�
 **应急指挥工作流**：六阶段（接报 → 研判 → 部署 → 执行 → 评估 → 总结），
 一键应急响应自动走完全流程。
 
-### MAVLink 消息 ID 分配（420–467、477–479 段）
+### P2 — 灾害应急通讯组网扩展
+
+在 M5–M9 与 4a 应急能力之上，P2 进一步扩展灾害场景下的通讯组网与搜救指挥能力，
+覆盖 QoS 保障、分簇路由、异构链路桥接、Budget 模式、丐版 Mesh、热源搜救等 11 个子模块，
+均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按 480–483 段分配。
+
+**QoS 优先级队列 + 分簇路由**：灾害场景下通讯资源极度受限，QoS 引擎按业务优先级
+（搜救 > 指挥 > 测绘 > 常规）分配带宽与转发资源；分簇路由将无人机群按地理/拓扑
+自动分簇，簇头负责簇内聚合与簇间转发，减少全局路由开销。MAVLink 消息
+`QoSRouteDecisionMsg`(480) / `ClusterFormationMsg`(481) 下发路由决策与簇 formation。
+
+**异构链路桥接 + 灾区通信隔离**：灾害现场往往存在 WiFi/LTE/LoRa/卫星等多种链路
+碎片化覆盖，异构链路桥接层自动探测可用链路并按策略切换/聚合；灾区通信隔离确保
+灾区内部通讯不被外部干扰，同时允许指定通道对外回传。LoRa 回传通道作为窄带备用链路，
+在主链路全部中断时保障最低限度指令传达。
+
+**灾害通信监控 + 灾害态势面板**：实时监控灾区链路质量、节点存活、带宽利用率等指标，
+统一态势感知面板在 GCS 端以可视化方式呈现灾区通讯拓扑、链路状态、节点健康度，
+为指挥决策提供数据支撑。
+
+**厂商协议适配层（海康/大华/宇视/ONVIF）**：统一适配主流安防硬件厂商协议，
+通过 ONVIF 标准接口 + 厂商私有协议扩展，实现设备发现、视频拉取、PTZ 控制、
+事件订阅的统一抽象，灾害场景下快速接入现有安防基础设施。
+
+**Emergency Budget 模式**：针对灾害应急资源受限场景，定义两级预算模式：
+- **EMERGENCY_TOY（应急百元级）**：极低成本配置，ESP-NOW + AMG8833 + LED/蜂鸣器，
+  适合快速部署的小规模搜救
+- **EMERGENCY_STANDARD（应急千元级）**：标准成本配置，LoRa Mesh + 多链路桥接 +
+  卫星中继，适合中等规模灾区持续通讯保障
+
+**复杂地形飞行约束**：在 M8 地形适配基础上增强灾害场景特有约束——地震后建筑倒塌
+导致遮挡模型动态更新、泥石流改变地形高程、火灾烟尘影响能见度与传感器精度，
+飞行约束检查器实时感知地形变更并调整限飞区/安全高度。
+
+**卫星中继增强（天通/铱星/星链）**：在 M7 多层级中继基础上扩展三类卫星中继：
+天通卫星（高轨，稳定覆盖但高延迟）、铱星（低轨，低延迟但需过境窗口）、
+星链（低轨星座，带宽最优但需终端适配），按灾区位置与可用窗口自动选择最优卫星链路。
+
+**空地协同指挥流程**：六阶段指挥流程（接报 → 研判 → 部署 → 执行 → 评估 → 总结）
+在 4a 基础上深化，支持空（无人机侦察/中继）地（安防设备/地面终端）协同，
+一键应急响应自动编排全流程。
+
+**丐版 Mesh 路由（ESP-NOW/LoRa）**：针对 Budget 模式的极简 Mesh 实现，
+ESP-NOW 用于近距离低延迟机间通讯（百元级），LoRa 用于远距离窄带通讯（千元级），
+均支持多跳转发与自愈重构，是 M5 AODV-lite 的轻量化替代方案。
+
+**AMG8833 热源搜救 + LED/蜂鸣器控制**：AMG8833 红外热传感器阵列（8×8 像素）
+用于灾害废墟下热源检测与人员搜救；LED/蜂鸣器控制提供机载声光指引，
+帮助地面搜救人员定位无人机与标记发现的目标。MAVLink 消息 `BuzzerControlMsg`(483)
+下发蜂鸣器开关/频率/时长指令。
+
+**GCS Emergency UI 适配**：前端 Emergency UI 适配 Budget 模式与灾害态势面板，
+在 `EmergencyOrchPanel` 基础上扩展 Budget 模式切换、丐版 Mesh 拓扑可视化、
+热源搜救标记、声光控制面板等交互组件。
+
+### MAVLink 消息 ID 分配（420–467、477–483 段）
 
 | 范围 | 里程碑 | 消息 |
 |---|---|---|
@@ -442,6 +497,10 @@ REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进�
 | 462–464 | M8 | TerrainTypeMap, TerrainUpdate, FlightRestriction |
 | 465–467 | M9 | EmergencyMissionPlan, CoverageOptimization, EmergencyPriority |
 | 477–479 | 4a | AlarmTriggerMsg, AlarmAckMsg, SurveillanceStatusMsg |
+| 480 | P2 | QoSRouteDecisionMsg |
+| 481 | P2 | ClusterFormationMsg |
+| 482 | P2 | DisasterModeStatusMsg |
+| 483 | P2 | BuzzerControlMsg |
 
 ## 飞行日志（flightlog，JSONL 落盘）
 
@@ -480,6 +539,10 @@ REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进�
 - `GET /mapping` 测绘任务 · `POST /show` 表演管理
 - `POST /voicecmd` 语音指令 · `GET /citytwin` 城市孪生
 - `GET /scenario/templates` 场景模板 · `POST /scenario/launch` 场景启动
+- `GET /v1/qos/decisions` QoS 路由决策 · `POST /v1/qos/priority` 优先级设置
+- `GET /v1/cluster/formation` 分簇拓扑 · `POST /v1/cluster/reconfigure` 簇重构
+- `GET /v1/disaster/status` 灾害模式状态 · `POST /v1/disaster/budget` Budget 模式切换
+- `POST /v1/buzzer/control` 蜂鸣器控制 · `GET /v1/thermal/search` 热源搜救
 
 > 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 54 个 Controller、155+ REST 端点。
 
@@ -524,7 +587,7 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 NexusSky/
 ├── mavlink-core/        协议栈（无依赖，可直接复用到任何 Java 项目）
 │   ├── MavlinkFrame / MavlinkParser / MavlinkCrc / MavlinkMessageInfo
-│   ├── messages/        标准 MAVLink 消息 + 扩展消息（420–479 段）
+│   ├── messages/        标准 MAVLink 消息 + 扩展消息（420–483 段）
 │   ├── enums/MavEnums  官方枚举常量
 │   └── transport/      UDP 传输
 ├── drone-sim/           虚拟无人机（状态机 + 任务协议服务端 + 物理引擎 v2）
@@ -556,7 +619,7 @@ NexusSky/
 
 - 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
 - 微服务/K8s 暂不引入：模块化单体已够当前规模，拆分时机见设计文档讨论
-- MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（420–479）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
+- MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（420–483）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
 - 链路签名（MAVLink v2 signing）未实现，模拟器与真机的 UDP 通信在局域网内是明文
 - **检测器是投影可见性**（简化是有意的）：接入真实 CV 模型的替换点在
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
