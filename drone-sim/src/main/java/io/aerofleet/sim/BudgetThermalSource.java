@@ -5,25 +5,44 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * 红外阵列热源（丐版热成像替代）。
- * 模拟 MLX90640 32×24 红外阵列，
- * 温度范围 -40~300°C，精度 ±1°C。
+ * AMG8833 红外热源阵列传感器模拟（千元级灾害应急配置）。
  * <p>
- * 实现 {@link ThermalSource} 接口，使热成像处理链可直接使用丐版红外阵列
+ * 模拟 AMG8833 8×8 像素红外热源阵列传感器：
+ * <ul>
+ *   <li>分辨率：8×8 像素（64 像素）</li>
+ *   <li>温度范围：0~80°C</li>
+ *   <li>精度：±2.5°C（典型值）</li>
+ *   <li>检测距离：最远 7m（人体热源）</li>
+ * </ul>
+ * 用于灾害应急场景下废墟人员搜救：检测温度 >37°C 的人体热源，
+ * 输出热源位置（像素坐标 + 温度 + 置信度）。
+ * <p>
+ * 实现 {@link ThermalSource} 接口，使热成像处理链可直接使用 AMG8833
  * 替代昂贵的热成像相机。接口方法 {@link #analyze}/{@link #detectHotspots}
  * 对任意温度场矩阵工作（不限于本类 {@link #generateFrame} 的输出）。
  */
-public class BudgetThermalSource implements ThermalSource {
-    public static final int WIDTH = 32;
-    public static final int HEIGHT = 24;
+public final class BudgetThermalSource implements ThermalSource {
 
-    private final double minTempC;   // -40
-    private final double maxTempC;   // 300
-    private final double accuracyC;  // 1.0
+    /** AMG8833 阵列宽度（像素）。 */
+    public static final int WIDTH = 8;
+    /** AMG8833 阵列高度（像素）。 */
+    public static final int HEIGHT = 8;
+    /** AMG8833 最低检测温度（°C）。 */
+    public static final double MIN_TEMP_C = 0.0;
+    /** AMG8833 最高检测温度（°C）。 */
+    public static final double MAX_TEMP_C = 80.0;
+    /** AMG8833 典型精度（±°C）。 */
+    public static final double ACCURACY_C = 2.5;
+    /** 人体热源检测阈值（°C），高于此值视为人体热源。 */
+    public static final double HUMAN_TEMP_THRESHOLD = 37.0;
+
+    private final double minTempC;
+    private final double maxTempC;
+    private final double accuracyC;
     private final Random rng;
 
     public BudgetThermalSource() {
-        this(-40, 300, 1.0, new Random());
+        this(MIN_TEMP_C, MAX_TEMP_C, ACCURACY_C, new Random());
     }
 
     public BudgetThermalSource(double min, double max, double acc) {
@@ -45,11 +64,11 @@ public class BudgetThermalSource implements ThermalSource {
     }
 
     /**
-     * 生成温度矩阵：给定环境温度和热源列表，返回 32×24 温度数组。
+     * 生成 AMG8833 8×8 温度矩阵：给定环境温度和热源列表，返回 8×8 温度数组。
      * <p>
      * heatSources 每行格式：[cx, cy, intensity, sigma]
      * <ul>
-     *   <li>cx, cy：热源中心像素坐标</li>
+     *   <li>cx, cy：热源中心像素坐标（0~7）</li>
      *   <li>intensity：热源强度（°C，叠加到环境温度）</li>
      *   <li>sigma：高斯衰减标准差（像素）</li>
      * </ul>
@@ -89,7 +108,7 @@ public class BudgetThermalSource implements ThermalSource {
     }
 
     /**
-     * 检测热源位置：返回最热像素坐标 [x, y] 和温度，无热源返回 null。
+     * 检测最热像素位置：返回最热像素坐标 [x, y] 和温度，无热源返回 null。
      *
      * @param frame          温度矩阵
      * @param thresholdTempC 热点阈值（°C），最热像素温度须超过此值
@@ -116,6 +135,64 @@ public class BudgetThermalSource implements ThermalSource {
         return null;
     }
 
+    /**
+     * 检测人体热源：扫描 8×8 温度矩阵，返回温度 >37°C 的热源列表。
+     * <p>
+     * 每个热源包含像素坐标、温度和置信度。置信度基于温度超出阈值的程度计算：
+     * <ul>
+     *   <li>温度 = 37°C → 置信度 ≈ 0.0</li>
+     *   <li>温度 = 42°C → 置信度 ≈ 0.5</li>
+     *   <li>温度 = 47°C → 置信度 ≈ 1.0</li>
+     * </ul>
+     * 相邻超阈值像素（4 邻域连通）聚合为同一热源，取峰值温度和中心坐标。
+     *
+     * @param frame 8×8 温度矩阵（°C）
+     * @return 热源列表（空列表表示无人体热源）
+     */
+    public List<HeatSource> detectHeatSources(double[][] frame) {
+        return detectHeatSources(frame, HUMAN_TEMP_THRESHOLD);
+    }
+
+    /**
+     * 检测热源：扫描温度矩阵，返回温度超过指定阈值的熱源列表。
+     * <p>
+     * 相邻超阈值像素（4 邻域连通）聚合为同一热源，取峰值温度和质心坐标。
+     * 置信度 = clamp((峰值温度 - 阈值) / 10, 0, 1)。
+     *
+     * @param frame          温度矩阵（°C）
+     * @param thresholdTempC 热源阈值（°C）
+     * @return 热源列表（空列表表示无热源）
+     */
+    public List<HeatSource> detectHeatSources(double[][] frame, double thresholdTempC) {
+        List<HeatSource> out = new ArrayList<>();
+        if (frame == null || frame.length == 0 || frame[0].length == 0) {
+            return out;
+        }
+        int h = frame.length;
+        int w = frame[0].length;
+        boolean[][] visited = new boolean[h][w];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                if (visited[y][x] || frame[y][x] <= thresholdTempC) {
+                    continue;
+                }
+                // 聚合连通的超阈值像素为热源（4 邻域 flood fill）
+                int[] area = {0};
+                double[] peakTemp = {frame[y][x]};
+                double[] sumX = {0};
+                double[] sumY = {0};
+                floodHeatSource(frame, visited, x, y, w, h, thresholdTempC, area, peakTemp, sumX, sumY);
+                // 质心坐标
+                double cx = sumX[0] / area[0];
+                double cy = sumY[0] / area[0];
+                // 置信度：温度超出阈值越多，置信度越高
+                double confidence = clamp((peakTemp[0] - thresholdTempC) / 10.0, 0.0, 1.0);
+                out.add(new HeatSource(cx, cy, peakTemp[0], confidence));
+            }
+        }
+        return out;
+    }
+
     public int width() {
         return WIDTH;
     }
@@ -124,8 +201,13 @@ public class BudgetThermalSource implements ThermalSource {
         return HEIGHT;
     }
 
-    private static double clamp(double v, double lo, double hi) {
-        return Math.max(lo, Math.min(hi, v));
+    /** AMG8833 热源检测结果（像素坐标 + 温度 + 置信度）。 */
+    public record HeatSource(double pixelX, double pixelY, double tempC, double confidence) {
+        public HeatSource {
+            if (confidence < 0.0 || confidence > 1.0) {
+                throw new IllegalArgumentException("confidence must be in [0, 1]");
+            }
+        }
     }
 
     // ===== ThermalSource 接口实现 =====
@@ -221,7 +303,7 @@ public class BudgetThermalSource implements ThermalSource {
 
     /** 8 邻域 flood fill 聚合超阈值像素（简化热点面积计算）。 */
     private void floodFillHotspot(double[][] m, boolean[][] visited, int sx, int sy,
-                                  int w, int h, double threshold, int[] area, double[] peak) {
+                                   int w, int h, double threshold, int[] area, double[] peak) {
         java.util.ArrayDeque<int[]> stack = new java.util.ArrayDeque<>();
         stack.push(new int[]{sx, sy});
         while (!stack.isEmpty()) {
@@ -240,5 +322,33 @@ public class BudgetThermalSource implements ThermalSource {
                 }
             }
         }
+    }
+
+    /** 4 邻域 flood fill 聚合超阈值像素为热源（计算质心 + 峰值温度）。 */
+    private void floodHeatSource(double[][] m, boolean[][] visited, int sx, int sy,
+                                  int w, int h, double threshold,
+                                  int[] area, double[] peak, double[] sumX, double[] sumY) {
+        java.util.ArrayDeque<int[]> stack = new java.util.ArrayDeque<>();
+        stack.push(new int[]{sx, sy});
+        while (!stack.isEmpty()) {
+            int[] p = stack.pop();
+            int x = p[0], y = p[1];
+            if (x < 0 || x >= w || y < 0 || y >= h || visited[y][x]) continue;
+            if (m[y][x] <= threshold) continue;
+            visited[y][x] = true;
+            area[0]++;
+            sumX[0] += x;
+            sumY[0] += y;
+            if (m[y][x] > peak[0]) peak[0] = m[y][x];
+            // 4 邻域
+            stack.push(new int[]{x + 1, y});
+            stack.push(new int[]{x - 1, y});
+            stack.push(new int[]{x, y + 1});
+            stack.push(new int[]{x, y - 1});
+        }
+    }
+
+    private static double clamp(double v, double lo, double hi) {
+        return Math.max(lo, Math.min(hi, v));
     }
 }

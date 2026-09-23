@@ -88,20 +88,20 @@ class BudgetSensorTest {
     // ===== BudgetThermalSource =====
 
     @Test
-    @DisplayName("热源帧尺寸 32×24")
+    @DisplayName("热源帧尺寸 8×8（AMG8833）")
     void thermal_generateFrame_correctDimensions() {
         BudgetThermalSource src = new BudgetThermalSource(-40, 300, 1.0, new Random(42));
         double[][] frame = src.generateFrame(25.0, null);
-        assertEquals(24, frame.length, "高度应为 24");
-        assertEquals(32, frame[0].length, "宽度应为 32");
+        assertEquals(8, frame.length, "高度应为 8");
+        assertEquals(8, frame[0].length, "宽度应为 8");
     }
 
     @Test
     @DisplayName("热源有热点时检测到")
     void thermal_detectHotspot_found() {
         BudgetThermalSource src = new BudgetThermalSource(-40, 300, 1.0, new Random(42));
-        // 热源在中心 (16, 12)，强度 60°C，sigma 3
-        double[][] heatSources = {{16.0, 12.0, 60.0, 3.0}};
+        // 热源在中心 (4, 4)，强度 60°C，sigma 2
+        double[][] heatSources = {{4.0, 4.0, 60.0, 2.0}};
         double[][] frame = src.generateFrame(25.0, heatSources);
         double[] hotspot = src.detectHotspot(frame, 50.0);
         assertNotNull(hotspot, "应检测到热点");

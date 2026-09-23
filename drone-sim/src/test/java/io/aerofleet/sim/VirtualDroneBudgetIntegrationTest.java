@@ -283,11 +283,11 @@ class VirtualDroneBudgetIntegrationTest {
             BudgetThermalSource thermal = drone.getBudgetThermalSource();
             assertNotNull(thermal);
 
-            // 生成温度帧并分析
-            double[][] heatSources = {{16.0, 12.0, 60.0, 3.0}};
+            // 生成温度帧并分析（AMG8833 8×8）
+            double[][] heatSources = {{4.0, 4.0, 60.0, 2.0}};
             double[][] frame = thermal.generateFrame(25.0, heatSources);
-            assertEquals(BudgetThermalSource.HEIGHT, frame.length, "帧高度应为 24");
-            assertEquals(BudgetThermalSource.WIDTH, frame[0].length, "帧宽度应为 32");
+            assertEquals(BudgetThermalSource.HEIGHT, frame.length, "帧高度应为 8");
+            assertEquals(BudgetThermalSource.WIDTH, frame[0].length, "帧宽度应为 8");
 
             ThermalSource.ThermalResult result = thermal.analyze(frame);
             assertTrue(result.max() > 25.0, "有热源时最高温度应高于环境温度 25°C");

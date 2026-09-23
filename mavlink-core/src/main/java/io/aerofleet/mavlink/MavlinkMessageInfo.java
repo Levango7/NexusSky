@@ -116,6 +116,8 @@ public final class MavlinkMessageInfo {
         INFOS[480] = new Info(12, 264);   // QOS_ROUTE_DECISION
         INFOS[481] = new Info(18, 265);   // CLUSTER_FORMATION
         INFOS[482] = new Info(8, 266);    // DISASTER_MODE_STATUS
+        // ---- NexusSky 自定义扩展消息（P3 灾害应急搜救信号，msgId=483）----
+        INFOS[483] = new Info(7, 267);    // BUZZER_CONTROL
     }
 
     private MavlinkMessageInfo() {

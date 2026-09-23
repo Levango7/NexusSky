@@ -187,6 +187,9 @@ public abstract class MavlinkMessage {
                 return ClusterFormationMsg.decode(frame);
             case DisasterModeStatusMsg.ID:
                 return DisasterModeStatusMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（P3 灾害应急搜救信号，msgId=483）----
+            case BuzzerControlMsg.ID:
+                return BuzzerControlMsg.decode(frame);
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }
