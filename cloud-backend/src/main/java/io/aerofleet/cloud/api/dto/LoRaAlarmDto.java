@@ -1,5 +1,12 @@
 package io.aerofleet.cloud.api.dto;
 
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
+
 /**
  * LoRa 回传报警 DTO（布控球 → 无人机 mesh → 指挥中心）。
  * <p>
@@ -9,16 +16,24 @@ package io.aerofleet.cloud.api.dto;
 public final class LoRaAlarmDto {
 
     /** 布控球设备 ID。 */
+    @Positive
     private int deviceId;
     /** 报警类型（FIRE/INTRUSION/MOTION/UNKNOWN）。 */
+    @NotBlank
     private String alarmType;
     /** 报警位置纬度（WGS84，度）。 */
+    @DecimalMin("-90.0")
+    @DecimalMax("90.0")
     private double lat;
     /** 报警位置经度（WGS84，度）。 */
+    @DecimalMin("-180.0")
+    @DecimalMax("180.0")
     private double lon;
     /** 报警时间戳（毫秒）。 */
     private long timestamp;
     /** 严重程度（1-5，5 最严重）。 */
+    @Min(1)
+    @Max(5)
     private int severity;
     /** 中继无人机 sysid。 */
     private int relayDroneSysid;

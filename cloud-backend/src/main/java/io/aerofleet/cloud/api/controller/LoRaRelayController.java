@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,8 +37,12 @@ import java.util.Map;
 @Tag(name = "LoRaRelay", description = "LoRa 回传报警 REST API：接收布控球经无人机 mesh 路由的回传告警")
 public class LoRaRelayController {
 
-    @Autowired(required = false)
-    private LoRaRelayService loRaRelayService;
+    private final LoRaRelayService loRaRelayService;
+
+    @Autowired
+    public LoRaRelayController(@Autowired(required = false) LoRaRelayService loRaRelayService) {
+        this.loRaRelayService = loRaRelayService;
+    }
 
     /**
      * 接收 LoRa 回传告警。
@@ -53,7 +58,7 @@ public class LoRaRelayController {
             @ApiResponse(responseCode = "503", description = "LoRa 回传服务不可用（依赖未注入）")
     })
     @PostMapping("/alarm")
-    public ResponseEntity<Map<String, Object>> receiveLoRaAlarm(@RequestBody LoRaAlarmDto dto) {
+    public ResponseEntity<Map<String, Object>> receiveLoRaAlarm(@RequestBody @Valid LoRaAlarmDto dto) {
         if (loRaRelayService == null) {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("status", "UNAVAILABLE");

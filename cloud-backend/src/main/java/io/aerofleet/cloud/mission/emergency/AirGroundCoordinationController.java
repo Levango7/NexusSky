@@ -1,12 +1,13 @@
 package io.aerofleet.cloud.mission.emergency;
 
 import io.aerofleet.cloud.alarm.AlarmEvent;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.surveillance.SurveillanceDevice;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,8 +40,11 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestExc
 @Tag(name = "AirGroundCoordination", description = "空地协同指挥 REST API：态势融合、报警触发侦察、PTZ 联动追踪")
 public class AirGroundCoordinationController {
 
-    @Autowired
-    private AirGroundCoordinationService coordinationService;
+    private final AirGroundCoordinationService coordinationService;
+
+    public AirGroundCoordinationController(AirGroundCoordinationService coordinationService) {
+        this.coordinationService = coordinationService;
+    }
 
     // =====================================================================
     // 端点 1：空地态势融合
@@ -92,6 +96,7 @@ public class AirGroundCoordinationController {
             @ApiResponse(responseCode = "400", description = "参数非法")
     })
     @PostMapping("/recon")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> triggerRecon(@RequestBody Map<String, Object> body) {
         AlarmEvent event = parseAlarmEvent(body);
         long planId = coordinationService.triggerReconFromAlarm(event);
@@ -132,6 +137,7 @@ public class AirGroundCoordinationController {
             @ApiResponse(responseCode = "400", description = "参数非法")
     })
     @PostMapping("/ptz-track")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> triggerPtzTrack(@RequestBody Map<String, Object> body) {
         GeoTarget target = parseGeoTarget(body);
         String trackResult = coordinationService.triggerPtzTracking(target);

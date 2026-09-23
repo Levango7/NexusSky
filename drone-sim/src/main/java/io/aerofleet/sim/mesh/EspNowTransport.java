@@ -222,9 +222,13 @@ public final class EspNowTransport implements AutoCloseable {
         }
         channel.unsubscribe(sourceId, receiveQueue);
         // C1: 当最后一个订阅者退出后，从静态 CHANNELS 中移除该 channel 条目，防止内存泄漏
-        if (channel.subscriberCount() == 0) {
-            CHANNELS.remove(channelKey, channel);
-        }
+        // 使用 computeIfPresent 原子操作，避免 check-then-remove 竞态导致 channel 泄漏
+        CHANNELS.computeIfPresent(channelKey, (k, v) -> {
+            if (v == channel && v.subscriberCount() == 0) {
+                return null; // 移除条目
+            }
+            return v; // 保留条目
+        });
         SimLog.info("EspNowTransport closed: sourceId=" + sourceId);
     }
 
