@@ -187,11 +187,18 @@ public class OfflineAlarmController {
         }
 
         int uploaded = offlineAlarmCache.flushToStore(null);
+        int remaining = offlineAlarmCache.pendingCount();
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("status", "ok");
         result.put("uploaded", uploaded);
-        result.put("remaining", offlineAlarmCache.pendingCount());
-        log.info("手动触发批量上传: 成功 {} 条, 剩余 {} 条", uploaded, offlineAlarmCache.pendingCount());
+        result.put("remaining", remaining);
+        log.info("手动触发批量上传: 成功 {} 条, 剩余 {} 条", uploaded, remaining);
+
+        if (uploaded == 0 && remaining > 0) {
+            result.put("status", "degraded");
+            return ResponseEntity.status(503).body(result);
+        }
+
+        result.put("status", "ok");
         return ResponseEntity.ok(result);
     }
 

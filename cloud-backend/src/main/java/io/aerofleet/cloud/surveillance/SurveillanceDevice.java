@@ -23,7 +23,9 @@ public class SurveillanceDevice {
         /** 大华。 */
         DAHUA,
         /** 宇视。 */
-        UNIVIEW
+        UNIVIEW,
+        /** ONVIF 标准协议（fallback，适用于所有支持 ONVIF 的设备）。 */
+        ONVIF
     }
 
     /** 设备在线状态。 */

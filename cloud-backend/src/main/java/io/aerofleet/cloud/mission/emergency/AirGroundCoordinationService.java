@@ -403,7 +403,7 @@ public class AirGroundCoordinationService {
      * @param coordinationId 协同指挥 ID
      * @return 评估结果；若协同指挥不存在返回 null
      */
-    public CoordinationEvaluation evaluateCoordination(String coordinationId) {
+    public synchronized CoordinationEvaluation evaluateCoordination(String coordinationId) {
         CoordinationRecord record = coordinationRecords.get(coordinationId);
         if (record == null) {
             log.warn("空地协同：评估失败，协同指挥不存在 coordinationId={}", coordinationId);
@@ -461,7 +461,7 @@ public class AirGroundCoordinationService {
      * @param coordinationId 协同指挥 ID
      * @return 指挥报告；若协同指挥不存在返回 null
      */
-    public CoordinationReport summarizeCoordination(String coordinationId) {
+    public synchronized CoordinationReport summarizeCoordination(String coordinationId) {
         CoordinationRecord record = coordinationRecords.get(coordinationId);
         if (record == null) {
             log.warn("空地协同：总结失败，协同指挥不存在 coordinationId={}", coordinationId);
@@ -550,10 +550,6 @@ public class AirGroundCoordinationService {
 
     /** 从报警事件创建应急指挥命令（接报阶段）。 */
     private EmergencyCommand createCommandFromAlarm(AlarmEvent alarmEvent) {
-        if (workflow == null) {
-            log.warn("空地协同：EmergencyCommandWorkflow 未注入，无法创建指挥命令");
-            return null;
-        }
         EmergencyCommand.IncidentType incidentType = mapIncidentType(alarmEvent.getEventType());
         EmergencyCommand.Severity severity = mapSeverity(alarmEvent.getSeverity());
         EmergencyCommand.Location location = new EmergencyCommand.Location(
@@ -565,6 +561,11 @@ public class AirGroundCoordinationService {
                 alarmEvent.getDescription(),
                 alarmEvent.getSourceDeviceName(), "",
                 alarmEvent.getTimestampMs());
+        if (workflow == null) {
+            log.warn("空地协同：EmergencyCommandWorkflow 未注入，降级为直接创建指挥命令");
+            // 降级模式：直接返回 cmd（id 为 null），不通过 workflow.createCommand
+            return cmd;
+        }
         return workflow.createCommand(cmd);
     }
 
@@ -683,9 +684,9 @@ public class AirGroundCoordinationService {
         long deployMs = record.getDeployTimeMs();
         long executeMs = record.getExecuteTimeMs();
 
-        long receiveToAssess = assessMs > 0 ? (assessMs - receiveMs) / 1000 : 0;
-        long assessToDeploy = deployMs > 0 ? (deployMs - assessMs) / 1000 : 0;
-        long deployToExecute = executeMs > 0 ? (executeMs - deployMs) / 1000 : 0;
+        long receiveToAssess = (assessMs > 0 && receiveMs > 0) ? (assessMs - receiveMs) / 1000 : 0;
+        long assessToDeploy = (deployMs > 0 && assessMs > 0) ? (deployMs - assessMs) / 1000 : 0;
+        long deployToExecute = (executeMs > 0 && deployMs > 0) ? (executeMs - deployMs) / 1000 : 0;
         long totalResponse = executeMs > 0 ? (executeMs - receiveMs) / 1000 : (now - receiveMs) / 1000;
 
         return new ResponseTiming(receiveToAssess, assessToDeploy, deployToExecute, totalResponse);

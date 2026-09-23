@@ -114,7 +114,7 @@ public class CoverageOptimizer {
      * @param scenarioType 场景类型（0=地震, 1=泥石流, 2=火灾）
      * @return 最优部署方案
      */
-    public DeploymentPlan optimize(double centerLat, double centerLon, double radius,
+    public synchronized DeploymentPlan optimize(double centerLat, double centerLon, double radius,
                                    List<DroneInfo> drones, int scenarioType) {
         if (drones == null || drones.isEmpty()) {
             return new DeploymentPlan(Collections.emptyList(), 0.0, 0.0, 0L);
@@ -704,7 +704,7 @@ public class CoverageOptimizer {
      * @param constraints 预算约束，不能为 null
      * @return 预算感知部署方案
      */
-    public BudgetAwareDeploymentPlan optimizeWithConstraints(
+    public synchronized BudgetAwareDeploymentPlan optimizeWithConstraints(
             List<DroneInfo> drones, double centerLat, double centerLon,
             double radiusKm, OrchestrationConfig.BudgetConstraints constraints) {
         if (drones == null || drones.isEmpty()) {

@@ -64,6 +64,7 @@ public class AirGroundCoordinationController {
     @Operation(summary = "获取空地协同态势融合视图", description = "融合安防设备、无人机、报警事件和 mesh 拓扑信息")
     @ApiResponse(responseCode = "200", description = "态势融合视图")
     @GetMapping("/situation")
+    @RequireRole(Role.OBSERVER)
     public ResponseEntity<Map<String, Object>> getSituation() {
         AirGroundSituation situation = coordinationService.fuseAirGroundSituation();
         return ResponseEntity.ok(situationToMap(situation));
@@ -225,6 +226,7 @@ public class AirGroundCoordinationController {
             @ApiResponse(responseCode = "404", description = "协同指挥不存在")
     })
     @GetMapping("/evaluate/{coordinationId}")
+    @RequireRole(Role.OBSERVER)
     public ResponseEntity<Map<String, Object>> evaluateCoordination(
             @PathVariable String coordinationId) {
         AirGroundCoordinationService.CoordinationEvaluation evaluation =
@@ -276,6 +278,7 @@ public class AirGroundCoordinationController {
             @ApiResponse(responseCode = "404", description = "协同指挥不存在")
     })
     @GetMapping("/report/{coordinationId}")
+    @RequireRole(Role.OBSERVER)
     public ResponseEntity<Map<String, Object>> getCoordinationReport(
             @PathVariable String coordinationId) {
         AirGroundCoordinationService.CoordinationReport report =
