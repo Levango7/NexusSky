@@ -47,7 +47,8 @@ class AirGroundCoordinationServiceTest {
         AlarmEventStore eventStore = new AlarmEventStore();
         AlarmToOrchBridge bridge = new AlarmToOrchBridge(orchService);
         linkageEngine = new AlarmLinkageEngine(eventStore, bridge);
-        service = new AirGroundCoordinationService(orchService, deviceRegistry, onvifClient, linkageEngine);
+        service = new AirGroundCoordinationService(orchService, deviceRegistry, onvifClient, linkageEngine,
+                eventStore, null, null, null);
     }
 
     // =====================================================================
@@ -87,7 +88,8 @@ class AirGroundCoordinationServiceTest {
     @DisplayName("triggerReconFromAlarm 无联动引擎时直接启动编排")
     void triggerReconFromAlarmWithoutLinkageEngine() {
         AirGroundCoordinationService svc = new AirGroundCoordinationService(
-                orchService, deviceRegistry, onvifClient, null);
+                orchService, deviceRegistry, onvifClient, null,
+                null, null, null, null);
 
         AlarmEvent event = AlarmEvent.from("dev-003", "宇视摄像头", "MOTION",
                 39.8, 116.2, "移动侦测");
@@ -167,7 +169,8 @@ class AirGroundCoordinationServiceTest {
     @DisplayName("triggerPtzTracking 无设备注册表返回 NO_DEVICE")
     void triggerPtzTrackingNoRegistry() {
         AirGroundCoordinationService svc = new AirGroundCoordinationService(
-                orchService, null, onvifClient, null);
+                orchService, null, onvifClient, null,
+                null, null, null, null);
 
         GeoTarget target = new GeoTarget(39.9, 116.3, 50.0,
                 GeoTarget.TargetType.PERSON, 0.85, 1);
@@ -228,7 +231,8 @@ class AirGroundCoordinationServiceTest {
     @DisplayName("fuseAirGroundSituation 无设备注册表时仍可生成视图")
     void fuseAirGroundSituationNoRegistry() {
         AirGroundCoordinationService svc = new AirGroundCoordinationService(
-                orchService, null, null, null);
+                orchService, null, null, null,
+                null, null, null, null);
 
         AirGroundSituation situation = svc.fuseAirGroundSituation();
 
