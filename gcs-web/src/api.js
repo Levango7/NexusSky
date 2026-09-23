@@ -1216,6 +1216,33 @@ export async function listLinkageLogs(params = {}) {
   const qs = new URLSearchParams(params).toString()
   return jsonFetch(`${ALARM_BASE}/linkage-logs${qs ? '?' + qs : ''}`)
 }
+// ---- AirGroundCoordination (空地一体化协同 P2) ----
+// base 路径 /api/v1/air-ground（独立于 v1 BASE）
+const AIR_GROUND_BASE = '/api/v1/air-ground'
+
+// 获取空地一体化融合态势（安防设备 + 无人机 + Mesh + 灾区边界等综合数据）
+export async function getAirGroundSituation() {
+  return jsonFetch(`${AIR_GROUND_BASE}/situation`)
+}
+
+// 报警事件触发无人机侦察（安防检测目标 → 无人机航拍确认）
+export async function triggerReconFromAlarm(eventId, payload = {}) {
+  return jsonFetch(`${AIR_GROUND_BASE}/recon/alarm/${eventId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+// PTZ 跟踪联动（安防摄像头 PTZ 自动跟踪检测目标）
+export async function triggerPtzTracking(deviceId, payload = {}) {
+  return jsonFetch(`${AIR_GROUND_BASE}/ptz-tracking/${deviceId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
 // ---- 命名导出：tracking / geofence / droneLock / autodispatch / videostream / voiceintercom / scenarios / inspection / health / maintenance / commAdapt / mapping / voiceCmd / cityTwin / delivery / show（供面板组件 import）----
 export const {
   getFlightTrack, replayTrack, getLastKnown, getLostDrones, getSearchGuide, scanLostDrones,
