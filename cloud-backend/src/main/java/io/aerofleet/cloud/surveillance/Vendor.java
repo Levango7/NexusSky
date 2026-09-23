@@ -15,5 +15,7 @@ public enum Vendor {
     /** 宇视（UNIVIEW SDK + ONVIF 私有协议）。 */
     UNIVIEW,
     /** ONVIF 标准协议（fallback，适用于所有支持 ONVIF 的设备）。 */
-    ONVIF
+    ONVIF,
+    /** 通用/未知厂商（当设备厂商无法识别时使用，自动降级到 ONVIF fallback）。 */
+    GENERIC
 }

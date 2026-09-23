@@ -1,10 +1,12 @@
 package io.aerofleet.cloud.mission.emergency;
 
 import io.aerofleet.cloud.alarm.AlarmEvent;
+import io.aerofleet.cloud.alarm.AlarmEventStore;
 import io.aerofleet.cloud.alarm.AlarmLinkageEngine;
-import io.aerofleet.cloud.alarm.AlarmLinkageRule;
+
 import io.aerofleet.cloud.api.service.EmergencyOrchService;
 import io.aerofleet.cloud.surveillance.OnvifClient;
+import io.aerofleet.cloud.surveillance.RapidDeployService;
 import io.aerofleet.cloud.surveillance.SurveillanceDevice;
 import io.aerofleet.cloud.surveillance.SurveillanceDeviceRegistry;
 import org.slf4j.Logger;
@@ -13,24 +15,34 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Comparator;
+
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 空地协同指挥服务。
  * <p>
- * 整合安防报警与无人机侦察，实现空地协同指挥三大核心能力：
+ * 整合安防报警与无人机侦察，实现空地协同指挥六阶段完整流程：
  * <ol>
- *   <li>{@link #triggerReconFromAlarm(AlarmEvent)} — 安防报警触发无人机自动侦察</li>
- *   <li>{@link #triggerPtzTracking(GeoTarget)} — 无人机发现目标触发安防 PTZ 联动</li>
- *   <li>{@link #fuseAirGroundSituation()} — 空地态势融合（统一态势感知）</li>
+ *   <li>接报 — 安防设备报警 + 人工报警 → 统一进入 AlarmEventStore</li>
+ *   <li>研判 — 空地态势融合 + 威胁等级评定 + 资源可用性评估 + 自动推荐响应方案</li>
+ *   <li>部署 — 无人机部署 + 安防设备部署 + 联合部署 + 优先级分配</li>
+ *   <li>执行 — 实时监控 + 动态调整 + QoS保障 + 空地协同（安防检测→无人机确认→PTZ跟踪）</li>
+ *   <li>评估 — 覆盖率评估 + 连通率评估 + 响应时效评估 + 资源消耗评估</li>
+ *   <li>总结 — 自动生成报告 + 事件时间线归档 + 联动规则优化建议</li>
  * </ol>
  * <p>
- * 协同流程：
+ * 核心能力：
  * <pre>
- * 安防设备检测异常 → AlarmEvent → triggerReconFromAlarm → EmergencyOrchService 启动无人机侦察
- * 无人机航拍发现目标 → GeoTarget → triggerPtzTracking → OnvifClient PTZ 转向联动
- * 安防视频流 + 无人机航拍 + 地图 → fuseAirGroundSituation → 统一态势感知视图
+ * {@link #triggerReconFromAlarm(AlarmEvent)} — 安防报警触发无人机自动侦察
+ * {@link #triggerPtzTracking(GeoTarget)} — 无人机发现目标触发安防 PTZ 联动
+ * {@link #fuseAirGroundSituation()} — 空地态势融合（统一态势感知）
+ * {@link #startAirGroundCoordination(String)} — 启动空地协同指挥六阶段流程
+ * {@link #evaluateCoordination(String)} — 评估阶段：覆盖率/连通率/响应时效/资源消耗
+ * {@link #summarizeCoordination(String)} — 总结阶段：生成报告 + 时间线归档
+ * {@link #getCoordinationReport(String)} — 获取指挥报告
  * </pre>
  * <p>
  * 依赖注入采用 {@code @Autowired(required=false)} + null 检查模式，
@@ -58,24 +70,47 @@ public class AirGroundCoordinationService {
     private final OnvifClient onvifClient;
     /** 报警联动引擎（可选依赖，用于规则匹配）。 */
     private final AlarmLinkageEngine linkageEngine;
+    /** 报警事件存储（可选依赖，用于查询报警事件）。 */
+    private final AlarmEventStore alarmEventStore;
+    /** 应急指挥工作流引擎（可选依赖，用于六阶段状态机管理）。 */
+    private final EmergencyCommandWorkflow workflow;
+    /** 布控球快速部署服务（可选依赖，用于安防设备部署）。 */
+    private final RapidDeployService rapidDeployService;
+    /** 空地协同 WebSocket 推送（可选依赖，用于态势推送）。 */
+    private final AirGroundCoordinationPusher pusher;
+
+    /** 空地协同指挥记录存储：coordinationId → CoordinationRecord。 */
+    private final ConcurrentHashMap<String, CoordinationRecord> coordinationRecords = new ConcurrentHashMap<>();
 
     /**
      * 构造空地协同服务。
      *
-     * @param orchService     应急编排服务（必需）
-     * @param deviceRegistry  安防设备注册表（可选）
-     * @param onvifClient     ONVIF 客户端（可选，PTZ 控制需要）
-     * @param linkageEngine   报警联动引擎（可选，规则匹配需要）
+     * @param orchService         应急编排服务（必需）
+     * @param deviceRegistry      安防设备注册表（可选）
+     * @param onvifClient         ONVIF 客户端（可选，PTZ 控制需要）
+     * @param linkageEngine       报警联动引擎（可选，规则匹配需要）
+     * @param alarmEventStore     报警事件存储（可选，接报阶段需要）
+     * @param workflow            应急指挥工作流引擎（可选，六阶段状态机需要）
+     * @param rapidDeployService  布控球快速部署服务（可选，部署阶段需要）
+     * @param pusher              空地协同推送（可选，态势推送需要）
      */
     @Autowired
     public AirGroundCoordinationService(EmergencyOrchService orchService,
                                         @Autowired(required = false) SurveillanceDeviceRegistry deviceRegistry,
                                         @Autowired(required = false) OnvifClient onvifClient,
-                                        @Autowired(required = false) AlarmLinkageEngine linkageEngine) {
+                                        @Autowired(required = false) AlarmLinkageEngine linkageEngine,
+                                        @Autowired(required = false) AlarmEventStore alarmEventStore,
+                                        @Autowired(required = false) EmergencyCommandWorkflow workflow,
+                                        @Autowired(required = false) RapidDeployService rapidDeployService,
+                                        @Autowired(required = false) AirGroundCoordinationPusher pusher) {
         this.orchService = orchService;
         this.deviceRegistry = deviceRegistry;
         this.onvifClient = onvifClient;
         this.linkageEngine = linkageEngine;
+        this.alarmEventStore = alarmEventStore;
+        this.workflow = workflow;
+        this.rapidDeployService = rapidDeployService;
+        this.pusher = pusher;
     }
 
     // =====================================================================
@@ -259,7 +294,509 @@ public class AirGroundCoordinationService {
     }
 
     // =====================================================================
-    // 内部辅助
+    // 六阶段流程：接报 → 研判 → 部署 → 执行 → 评估 → 总结
+    // =====================================================================
+
+    /**
+     * 启动空地协同指挥流程（接报→研判→部署→执行）。
+     * <p>
+     * 从报警事件 ID 开始，自动执行前四个阶段：
+     * <ol>
+     *   <li>接报：从 AlarmEventStore 获取报警事件，创建 EmergencyCommand</li>
+     *   <li>研判：空地态势融合 + 威胁等级评定 + 资源可用性评估 + 自动推荐响应方案</li>
+     *   <li>部署：无人机部署 + 安防设备部署 + 联合部署 + 优先级分配</li>
+     *   <li>执行：启动编排任务 + 空地协同监控</li>
+     * </ol>
+     * 评估和总结阶段需分别调用 {@link #evaluateCoordination(String)} 和
+     * {@link #summarizeCoordination(String)} 完成。
+     *
+     * @param alarmEventId 报警事件 ID
+     * @return 空地协同指挥记录（含 coordinationId、cmdId、planId）；若启动失败返回 null
+     */
+    public CoordinationRecord startAirGroundCoordination(String alarmEventId) {
+        if (alarmEventId == null || alarmEventId.isBlank()) {
+            log.warn("空地协同：启动失败，alarmEventId 为空");
+            return null;
+        }
+
+        log.info("空地协同：启动指挥流程 alarmEventId={}", alarmEventId);
+
+        // ── 阶段 1：接报 ──
+        AlarmEvent alarmEvent = retrieveAlarmEvent(alarmEventId);
+        if (alarmEvent == null) {
+            log.warn("空地协同：报警事件不存在 alarmEventId={}", alarmEventId);
+            return null;
+        }
+
+        EmergencyCommand cmd = createCommandFromAlarm(alarmEvent);
+        if (cmd == null) {
+            log.warn("空地协同：创建指挥命令失败 alarmEventId={}", alarmEventId);
+            return null;
+        }
+
+        String coordinationId = "AGC-" + cmd.getId();
+        CoordinationRecord record = new CoordinationRecord(coordinationId, alarmEventId, cmd.getId());
+        record.setAlarmEvent(alarmEvent);
+        record.setPhase(EmergencyCommandPhase.RECEIVED);
+        coordinationRecords.put(coordinationId, record);
+        pushProgress(coordinationId, "接报", "报警事件已接收", cmd.getId());
+
+        // ── 阶段 2：研判 ──
+        String assessment = performAssessment(alarmEvent);
+        EmergencyCommand assessedCmd = workflow == null ? null
+                : workflow.assess(cmd.getId(), assessment, "air-ground-assess");
+        if (assessedCmd == null) {
+            log.warn("空地协同：研判阶段失败，降级为直接部署 coordinationId={}", coordinationId);
+            // 降级：跳过研判，直接进入部署
+        } else {
+            record.setPhase(EmergencyCommandPhase.ASSESSED);
+            record.setAssessmentResult(assessment);
+            pushProgress(coordinationId, "研判", assessment, cmd.getId());
+        }
+
+        // ── 阶段 3：部署 ──
+        DeploymentInfo deployInfo = performDeployment(alarmEvent, coordinationId);
+        EmergencyCommand deployedCmd = workflow == null ? null
+                : workflow.deploy(cmd.getId(), deployInfo.toDeploymentPlan(), "air-ground-deploy");
+        if (deployedCmd == null) {
+            log.warn("空地协同：部署阶段失败，降级为直接执行 coordinationId={}", coordinationId);
+            // 降级：跳过部署，直接进入执行
+        } else {
+            record.setPhase(EmergencyCommandPhase.DEPLOYED);
+            record.setDeploymentInfo(deployInfo);
+            pushProgress(coordinationId, "部署", deployInfo.summary(), cmd.getId());
+        }
+
+        // ── 阶段 4：执行 ──
+        EmergencyCommand executingCmd = workflow == null ? null
+                : workflow.startExecution(cmd.getId(), "air-ground-execute");
+        if (executingCmd == null) {
+            log.warn("空地协同：执行阶段失败 coordinationId={}", coordinationId);
+        } else {
+            record.setPhase(EmergencyCommandPhase.EXECUTING);
+            pushProgress(coordinationId, "执行", "空地协同监控已启动", cmd.getId());
+        }
+
+        // 启动无人机编排
+        long planId = triggerReconFromAlarm(alarmEvent);
+        record.setPlanId(planId);
+
+        // 触发空地协同态势推送
+        pushSituationUpdate(coordinationId);
+
+        log.info("空地协同：指挥流程已启动 coordinationId={} cmdId={} planId={}",
+                coordinationId, cmd.getId(), planId);
+        return record;
+    }
+
+    /**
+     * 评估阶段：覆盖率/连通率/响应时效/资源消耗评估。
+     * <p>
+     * 执行四维度评估：
+     * <ul>
+     *   <li>覆盖率评估 — 无人机+安防设备对事件区域的覆盖比例</li>
+     *   <li>连通率评估 — mesh 网络连通性 + 安防设备在线率</li>
+     *   <li>响应时效评估 — 从接报到执行各阶段耗时</li>
+     *   <li>资源消耗评估 — 无人机架次、安防设备数、电池消耗等</li>
+     * </ul>
+     *
+     * @param coordinationId 协同指挥 ID
+     * @return 评估结果；若协同指挥不存在返回 null
+     */
+    public CoordinationEvaluation evaluateCoordination(String coordinationId) {
+        CoordinationRecord record = coordinationRecords.get(coordinationId);
+        if (record == null) {
+            log.warn("空地协同：评估失败，协同指挥不存在 coordinationId={}", coordinationId);
+            return null;
+        }
+
+        log.info("空地协同：执行评估 coordinationId={}", coordinationId);
+
+        // 覆盖率评估
+        AirGroundSituation situation = fuseAirGroundSituation();
+        int coverageRate = situation.getMeshTopology().coverageRate;
+        int deviceCoverageRate = computeDeviceCoverageRate(situation);
+
+        // 连通率评估
+        int connectivityRate = computeConnectivityRate(situation);
+
+        // 响应时效评估
+        ResponseTiming timing = computeResponseTiming(record);
+
+        // 资源消耗评估
+        ResourceConsumption consumption = computeResourceConsumption(record, situation);
+
+        CoordinationEvaluation evaluation = new CoordinationEvaluation(
+                coverageRate, deviceCoverageRate, connectivityRate, timing, consumption);
+
+        record.setEvaluation(evaluation);
+        record.setPhase(EmergencyCommandPhase.EVALUATED);
+
+        // 通过工作流引擎推进评估阶段
+        if (workflow != null) {
+            String evalText = String.format(
+                    "覆盖率=%d%%, 设备覆盖率=%d%%, 连通率=%d%%, 响应时效=%ds, 资源消耗=%s",
+                    coverageRate, deviceCoverageRate, connectivityRate,
+                    timing.totalResponseSec, consumption.summary());
+            workflow.evaluate(record.getCmdId(), evalText, "air-ground-evaluate");
+        }
+
+        pushEvaluationResult(coordinationId, evaluation);
+        log.info("空地协同：评估完成 coordinationId={} coverage={} connectivity={} timing={}s",
+                coordinationId, coverageRate, connectivityRate, timing.totalResponseSec);
+        return evaluation;
+    }
+
+    /**
+     * 总结阶段：生成报告 + 时间线归档 + 联动规则优化建议。
+     * <p>
+     * 自动生成指挥报告，包含：
+     * <ul>
+     *   <li>事件概述（报警事件信息 + 指挥命令信息）</li>
+     *   <li>六阶段时间线（各阶段时间戳和耗时）</li>
+     *   <li>评估结果（覆盖率/连通率/响应时效/资源消耗）</li>
+     *   <li>联动规则优化建议（基于评估结果推荐改进措施）</li>
+     * </ul>
+     *
+     * @param coordinationId 协同指挥 ID
+     * @return 指挥报告；若协同指挥不存在返回 null
+     */
+    public CoordinationReport summarizeCoordination(String coordinationId) {
+        CoordinationRecord record = coordinationRecords.get(coordinationId);
+        if (record == null) {
+            log.warn("空地协同：总结失败，协同指挥不存在 coordinationId={}", coordinationId);
+            return null;
+        }
+
+        log.info("空地协同：执行总结 coordinationId={}", coordinationId);
+
+        // 若未评估，先执行评估
+        if (record.getEvaluation() == null) {
+            evaluateCoordination(coordinationId);
+        }
+
+        // 生成报告
+        CoordinationReport report = buildCoordinationReport(record);
+        record.setReport(report);
+        record.setPhase(EmergencyCommandPhase.CLOSED);
+
+        // 通过工作流引擎推进总结阶段
+        if (workflow != null) {
+            workflow.close(record.getCmdId(), report.getSummary(), "air-ground-summarize");
+        }
+
+        pushProgress(coordinationId, "总结", "指挥报告已生成", record.getCmdId());
+        log.info("空地协同：总结完成 coordinationId={}", coordinationId);
+        return report;
+    }
+
+    /**
+     * 获取指挥报告。
+     *
+     * @param coordinationId 协同指挥 ID
+     * @return 指挥报告；若不存在或未生成返回 null
+     */
+    public CoordinationReport getCoordinationReport(String coordinationId) {
+        CoordinationRecord record = coordinationRecords.get(coordinationId);
+        if (record == null) {
+            return null;
+        }
+        return record.getReport();
+    }
+
+    /**
+     * 获取空地协同指挥记录。
+     *
+     * @param coordinationId 协同指挥 ID
+     * @return 协同指挥记录；不存在返回 null
+     */
+    public CoordinationRecord getCoordinationRecord(String coordinationId) {
+        return coordinationRecords.get(coordinationId);
+    }
+
+    // =====================================================================
+    // 六阶段流程内部辅助
+    // =====================================================================
+
+    /** 从 AlarmEventStore 获取报警事件。 */
+    private AlarmEvent retrieveAlarmEvent(String alarmEventId) {
+        if (alarmEventStore == null) {
+            log.warn("空地协同：AlarmEventStore 未注入，无法查询报警事件");
+            return null;
+        }
+        try {
+            return alarmEventStore.getById(alarmEventId);
+        } catch (Exception e) {
+            log.warn("空地协同：查询报警事件失败 alarmEventId={} error={}", alarmEventId, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 从报警事件创建应急指挥命令（接报阶段）。 */
+    private EmergencyCommand createCommandFromAlarm(AlarmEvent alarmEvent) {
+        if (workflow == null) {
+            log.warn("空地协同：EmergencyCommandWorkflow 未注入，无法创建指挥命令");
+            return null;
+        }
+        EmergencyCommand.IncidentType incidentType = mapIncidentType(alarmEvent.getEventType());
+        EmergencyCommand.Severity severity = mapSeverity(alarmEvent.getSeverity());
+        EmergencyCommand.Location location = new EmergencyCommand.Location(
+                clamp(alarmEvent.getLat(), -90.0, 90.0),
+                clamp(alarmEvent.getLon(), -180.0, 180.0),
+                alarmEvent.getAlt());
+        EmergencyCommand cmd = new EmergencyCommand(
+                null, incidentType, severity, location,
+                alarmEvent.getDescription(),
+                alarmEvent.getSourceDeviceName(), "",
+                alarmEvent.getTimestampMs());
+        return workflow.createCommand(cmd);
+    }
+
+    /** 执行研判：空地态势融合 + 威胁等级评定 + 资源可用性评估。 */
+    private String performAssessment(AlarmEvent alarmEvent) {
+        AirGroundSituation situation = fuseAirGroundSituation();
+        int threatLevel = assessThreatLevel(alarmEvent);
+        int resourceAvailability = assessResourceAvailability(situation);
+        String recommendedPlan = recommendResponsePlan(alarmEvent, threatLevel, resourceAvailability);
+
+        return String.format(
+                "威胁等级：%d/3，资源可用性：%d%%。%s。在线安防设备 %d 台，在线无人机 %d 架，mesh 覆盖率 %d%%。",
+                threatLevel, resourceAvailability, recommendedPlan,
+                situation.onlineDeviceCount(), situation.onlineDroneCount(),
+                situation.getMeshTopology().coverageRate);
+    }
+
+    /** 威胁等级评定（1~3）。 */
+    private int assessThreatLevel(AlarmEvent alarmEvent) {
+        if (alarmEvent.getSeverity() == AlarmEvent.Severity.CRITICAL) {
+            return 3;
+        } else if (alarmEvent.getSeverity() == AlarmEvent.Severity.WARN) {
+            return 2;
+        }
+        return 1;
+    }
+
+    /** 资源可用性评估（0~100）。 */
+    private int assessResourceAvailability(AirGroundSituation situation) {
+        int score = 0;
+        // 安防设备在线率
+        if (!situation.getSurveillanceDevices().isEmpty()) {
+            score += situation.onlineDeviceCount() * 25 / situation.getSurveillanceDevices().size();
+        }
+        // 无人机在线率
+        if (!situation.getDroneStatuses().isEmpty()) {
+            score += situation.onlineDroneCount() * 25 / situation.getDroneStatuses().size();
+        }
+        // mesh 覆盖率
+        score += situation.getMeshTopology().coverageRate / 4;
+        // 报警确认率
+        if (!situation.getAlarmEvents().isEmpty()) {
+            long acked = situation.getAlarmEvents().stream()
+                    .filter(AlarmEvent::isAcknowledged).count();
+            score += (int) (acked * 25 / situation.getAlarmEvents().size());
+        }
+        return Math.min(100, score);
+    }
+
+    /** 自动推荐响应方案。 */
+    private String recommendResponsePlan(AlarmEvent alarmEvent, int threatLevel, int resourceAvailability) {
+        String basePlan = switch (alarmEvent.getEventType()) {
+            case FIRE -> "火灾监控方案：优先部署指挥中继无人机，建立通信链路";
+            case INTRUSION -> "入侵监控方案：优先部署监控无人机，目标区域实时视频回传";
+            case MOTION -> "移动侦测方案：部署侦察无人机确认目标性质";
+            case DOOR -> "门禁异常方案：部署监控无人机巡查门禁区域";
+            case CUSTOM -> "常规响应方案：根据现场情况灵活部署";
+        };
+        if (threatLevel >= 3 && resourceAvailability < 50) {
+            basePlan += "。建议增派无人机和安防设备，提升覆盖能力";
+        } else if (threatLevel >= 2 && resourceAvailability < 30) {
+            basePlan += "。建议补充安防设备部署";
+        }
+        return basePlan;
+    }
+
+    /** 执行部署：无人机部署 + 安防设备部署 + 联合部署。 */
+    private DeploymentInfo performDeployment(AlarmEvent alarmEvent, String coordinationId) {
+        DeploymentInfo info = new DeploymentInfo();
+        info.setScenarioType(mapScenarioType(alarmEvent.getEventType()));
+        info.setCenterLat(toE7(clamp(alarmEvent.getLat(), -90.0, 90.0)));
+        info.setCenterLon(toE7(clamp(alarmEvent.getLon(), -180.0, 180.0)));
+        info.setRadius(1000);
+
+        // 无人机部署：默认 2 架
+        List<Integer> droneIds = List.of(1, 2);
+        info.setDroneIds(droneIds);
+
+        // 安防设备部署：若 RapidDeployService 可用，记录部署信息
+        if (rapidDeployService != null) {
+            info.setGroundDeployAvailable(true);
+            info.setGroundDeploySummary("布控球快速部署服务可用，可按需部署便携式监控设备");
+        } else {
+            info.setGroundDeployAvailable(false);
+            info.setGroundDeploySummary("布控球快速部署服务未注入，仅依赖现有安防设备");
+        }
+
+        // 优先级分配
+        info.setPriority(alarmEvent.getSeverity() == AlarmEvent.Severity.CRITICAL ? "HIGH"
+                : alarmEvent.getSeverity() == AlarmEvent.Severity.WARN ? "MEDIUM" : "LOW");
+
+        return info;
+    }
+
+    /** 计算安防设备覆盖率。 */
+    private int computeDeviceCoverageRate(AirGroundSituation situation) {
+        if (situation.getSurveillanceDevices().isEmpty()) {
+            return 0;
+        }
+        return (int) ((double) situation.onlineDeviceCount()
+                / situation.getSurveillanceDevices().size() * 100);
+    }
+
+    /** 计算连通率（mesh 覆盖率 + 安防设备在线率加权）。 */
+    private int computeConnectivityRate(AirGroundSituation situation) {
+        int meshRate = situation.getMeshTopology().coverageRate;
+        int deviceRate = computeDeviceCoverageRate(situation);
+        return (meshRate + deviceRate) / 2;
+    }
+
+    /** 计算响应时效。 */
+    private ResponseTiming computeResponseTiming(CoordinationRecord record) {
+        long now = System.currentTimeMillis();
+        long receiveMs = record.getStartTimeMs();
+        long assessMs = record.getAssessTimeMs();
+        long deployMs = record.getDeployTimeMs();
+        long executeMs = record.getExecuteTimeMs();
+
+        long receiveToAssess = assessMs > 0 ? (assessMs - receiveMs) / 1000 : 0;
+        long assessToDeploy = deployMs > 0 ? (deployMs - assessMs) / 1000 : 0;
+        long deployToExecute = executeMs > 0 ? (executeMs - deployMs) / 1000 : 0;
+        long totalResponse = executeMs > 0 ? (executeMs - receiveMs) / 1000 : (now - receiveMs) / 1000;
+
+        return new ResponseTiming(receiveToAssess, assessToDeploy, deployToExecute, totalResponse);
+    }
+
+    /** 计算资源消耗。 */
+    private ResourceConsumption computeResourceConsumption(CoordinationRecord record,
+                                                           AirGroundSituation situation) {
+        int droneCount = record.getDeploymentInfo() != null
+                ? record.getDeploymentInfo().getDroneIds().size() : 0;
+        int deviceCount = situation.onlineDeviceCount();
+        int avgBattery = (int) situation.getDroneStatuses().stream()
+                .filter(AirGroundSituation.DroneStatus::isOnline)
+                .mapToInt(d -> d.batteryPct)
+                .average().orElse(0);
+        int meshNodes = situation.getMeshTopology().nodeCount;
+
+        return new ResourceConsumption(droneCount, deviceCount, avgBattery, meshNodes);
+    }
+
+    /** 生成指挥报告。 */
+    private CoordinationReport buildCoordinationReport(CoordinationRecord record) {
+        AlarmEvent alarmEvent = record.getAlarmEvent();
+        CoordinationEvaluation evaluation = record.getEvaluation();
+
+        // 事件概述
+        String overview = String.format(
+                "事件类型：%s，严重程度：%s，来源设备：%s，描述：%s",
+                alarmEvent != null ? alarmEvent.getEventType() : "UNKNOWN",
+                alarmEvent != null ? alarmEvent.getSeverity() : "UNKNOWN",
+                alarmEvent != null ? alarmEvent.getSourceDeviceId() : "",
+                alarmEvent != null ? alarmEvent.getDescription() : "");
+
+        // 评估摘要
+        String evalSummary = evaluation != null
+                ? String.format("覆盖率=%d%%, 连通率=%d%%, 响应时效=%ds, 无人机=%d架, 安防设备=%d台",
+                        evaluation.coverageRate, evaluation.connectivityRate,
+                        evaluation.timing.totalResponseSec,
+                        evaluation.consumption.droneCount, evaluation.consumption.deviceCount)
+                : "未执行评估";
+
+        // 联动规则优化建议
+        List<String> recommendations = generateRecommendations(evaluation);
+
+        // 总结
+        String summary = String.format(
+                "空地协同指挥已完成。%s。%s。建议：%s",
+                overview, evalSummary,
+                recommendations.isEmpty() ? "无" : String.join("；", recommendations));
+
+        return new CoordinationReport(
+                record.getCoordinationId(), record.getAlarmEventId(),
+                record.getCmdId(), record.getPlanId(),
+                overview, evalSummary, summary, recommendations,
+                record.getPhaseHistory(), System.currentTimeMillis());
+    }
+
+    /** 基于评估结果生成联动规则优化建议。 */
+    private List<String> generateRecommendations(CoordinationEvaluation evaluation) {
+        List<String> recs = new ArrayList<>();
+        if (evaluation == null) {
+            return recs;
+        }
+        if (evaluation.coverageRate < 50) {
+            recs.add("覆盖率不足，建议增加无人机部署数量或调整飞行航线");
+        }
+        if (evaluation.connectivityRate < 50) {
+            recs.add("连通率不足，建议增加 mesh 中继节点或优化通信链路");
+        }
+        if (evaluation.timing.totalResponseSec > 300) {
+            recs.add("响应时效较长，建议优化接报到执行的自动化流程");
+        }
+        if (evaluation.consumption.avgBatteryPct < 30) {
+            recs.add("无人机电池消耗较大，建议增加备用无人机轮换");
+        }
+        if (evaluation.deviceCoverageRate < 50) {
+            recs.add("安防设备覆盖率不足，建议增加布控球快速部署");
+        }
+        if (recs.isEmpty()) {
+            recs.add("各项指标良好，维持当前联动策略");
+        }
+        return recs;
+    }
+
+    // =====================================================================
+    // WebSocket 推送辅助
+    // =====================================================================
+
+    /** 推送态势更新。 */
+    private void pushSituationUpdate(String coordinationId) {
+        if (pusher == null) {
+            return;
+        }
+        try {
+            AirGroundSituation situation = fuseAirGroundSituation();
+            pusher.pushSituationUpdate(coordinationId, situation);
+        } catch (Exception e) {
+            log.warn("空地协同：推送态势更新失败 coordinationId={} error={}", coordinationId, e.getMessage());
+        }
+    }
+
+    /** 推送指挥进度。 */
+    private void pushProgress(String coordinationId, String phase, String message, String cmdId) {
+        if (pusher == null) {
+            return;
+        }
+        try {
+            pusher.pushCoordinationProgress(coordinationId, phase, message, cmdId);
+        } catch (Exception e) {
+            log.warn("空地协同：推送进度失败 coordinationId={} error={}", coordinationId, e.getMessage());
+        }
+    }
+
+    /** 推送评估结果。 */
+    private void pushEvaluationResult(String coordinationId, CoordinationEvaluation evaluation) {
+        if (pusher == null) {
+            return;
+        }
+        try {
+            pusher.pushEvaluationResult(coordinationId, evaluation);
+        } catch (Exception e) {
+            log.warn("空地协同：推送评估结果失败 coordinationId={} error={}", coordinationId, e.getMessage());
+        }
+    }
+
+    // =====================================================================
+    // 内部辅助（原有）
     // =====================================================================
 
     /**
@@ -356,20 +893,24 @@ public class AirGroundCoordinationService {
     }
 
     /**
-     * 从联动引擎中收集报警事件。
+     * 从报警事件存储中收集最近的报警事件。
      * <p>
-     * 若联动引擎可用，从联动日志中提取关联的报警事件 ID。
-     * 简化实现：返回空列表，真实实现应从 AlarmEventStore 中查询。
+     * 若 AlarmEventStore 可用，查询最近的未确认报警事件。
+     * 否则返回空列表。
      *
      * @return 报警事件列表
      */
     private List<AlarmEvent> collectAlarmEvents() {
-        if (linkageEngine == null) {
+        if (alarmEventStore == null) {
             return List.of();
         }
-        // 简化实现：联动日志不直接包含 AlarmEvent 对象
-        // 生产环境应从 AlarmEventStore 中查询最近事件
-        return List.of();
+        try {
+            AlarmEventStore.PageResult result = alarmEventStore.query(0, 20, null, null);
+            return result.getItems();
+        } catch (Exception e) {
+            log.warn("空地协同：查询最近报警事件失败 error={}", e.getMessage());
+            return List.of();
+        }
     }
 
     /**
@@ -432,5 +973,258 @@ public class AirGroundCoordinationService {
             return max;
         }
         return value;
+    }
+
+    /** 报警事件类型 → EmergencyCommand 事件类型映射。 */
+    private static EmergencyCommand.IncidentType mapIncidentType(AlarmEvent.EventType eventType) {
+        return switch (eventType) {
+            case FIRE -> EmergencyCommand.IncidentType.FIRE;
+            case INTRUSION -> EmergencyCommand.IncidentType.SECURITY_ALARM;
+            case MOTION -> EmergencyCommand.IncidentType.SECURITY_ALARM;
+            case DOOR -> EmergencyCommand.IncidentType.SECURITY_ALARM;
+            case CUSTOM -> EmergencyCommand.IncidentType.OTHER;
+        };
+    }
+
+    /** AlarmEvent.Severity → EmergencyCommand.Severity 映射。 */
+    private static EmergencyCommand.Severity mapSeverity(AlarmEvent.Severity severity) {
+        return switch (severity) {
+            case INFO -> EmergencyCommand.Severity.INFO;
+            case WARN -> EmergencyCommand.Severity.WARN;
+            case CRITICAL -> EmergencyCommand.Severity.CRITICAL;
+        };
+    }
+
+    // =====================================================================
+    // 数据类
+    // =====================================================================
+
+    /** 空地协同指挥记录。 */
+    public static final class CoordinationRecord {
+        private final String coordinationId;
+        private final String alarmEventId;
+        private final String cmdId;
+        private volatile EmergencyCommandPhase phase;
+        private volatile AlarmEvent alarmEvent;
+        private volatile String assessmentResult;
+        private volatile DeploymentInfo deploymentInfo;
+        private volatile long planId;
+        private volatile CoordinationEvaluation evaluation;
+        private volatile CoordinationReport report;
+        private final long startTimeMs;
+        private volatile long assessTimeMs;
+        private volatile long deployTimeMs;
+        private volatile long executeTimeMs;
+
+        public CoordinationRecord(String coordinationId, String alarmEventId, String cmdId) {
+            this.coordinationId = coordinationId;
+            this.alarmEventId = alarmEventId;
+            this.cmdId = cmdId;
+            this.phase = EmergencyCommandPhase.RECEIVED;
+            this.startTimeMs = System.currentTimeMillis();
+            this.planId = -1;
+        }
+
+        public String getCoordinationId() { return coordinationId; }
+        public String getAlarmEventId() { return alarmEventId; }
+        public String getCmdId() { return cmdId; }
+        public EmergencyCommandPhase getPhase() { return phase; }
+        public void setPhase(EmergencyCommandPhase phase) {
+            this.phase = phase;
+            long now = System.currentTimeMillis();
+            if (phase == EmergencyCommandPhase.ASSESSED) this.assessTimeMs = now;
+            else if (phase == EmergencyCommandPhase.DEPLOYED) this.deployTimeMs = now;
+            else if (phase == EmergencyCommandPhase.EXECUTING) this.executeTimeMs = now;
+        }
+        public AlarmEvent getAlarmEvent() { return alarmEvent; }
+        public void setAlarmEvent(AlarmEvent alarmEvent) { this.alarmEvent = alarmEvent; }
+        public String getAssessmentResult() { return assessmentResult; }
+        public void setAssessmentResult(String assessmentResult) { this.assessmentResult = assessmentResult; }
+        public DeploymentInfo getDeploymentInfo() { return deploymentInfo; }
+        public void setDeploymentInfo(DeploymentInfo deploymentInfo) { this.deploymentInfo = deploymentInfo; }
+        public long getPlanId() { return planId; }
+        public void setPlanId(long planId) { this.planId = planId; }
+        public CoordinationEvaluation getEvaluation() { return evaluation; }
+        public void setEvaluation(CoordinationEvaluation evaluation) { this.evaluation = evaluation; }
+        public CoordinationReport getReport() { return report; }
+        public void setReport(CoordinationReport report) { this.report = report; }
+        public long getStartTimeMs() { return startTimeMs; }
+        public long getAssessTimeMs() { return assessTimeMs; }
+        public long getDeployTimeMs() { return deployTimeMs; }
+        public long getExecuteTimeMs() { return executeTimeMs; }
+
+        /** 返回阶段历史时间线。 */
+        public List<String> getPhaseHistory() {
+            List<String> history = new ArrayList<>();
+            history.add(String.format("接报: %dms", startTimeMs));
+            if (assessTimeMs > 0) {
+                history.add(String.format("研判: %dms (+%ds)", assessTimeMs, (assessTimeMs - startTimeMs) / 1000));
+            }
+            if (deployTimeMs > 0) {
+                history.add(String.format("部署: %dms (+%ds)", deployTimeMs, (deployTimeMs - assessTimeMs) / 1000));
+            }
+            if (executeTimeMs > 0) {
+                history.add(String.format("执行: %dms (+%ds)", executeTimeMs, (executeTimeMs - deployTimeMs) / 1000));
+            }
+            return history;
+        }
+    }
+
+    /** 部署信息。 */
+    public static final class DeploymentInfo {
+        private int scenarioType;
+        private int centerLat;
+        private int centerLon;
+        private int radius;
+        private List<Integer> droneIds;
+        private boolean groundDeployAvailable;
+        private String groundDeploySummary;
+        private String priority;
+
+        public int getScenarioType() { return scenarioType; }
+        public void setScenarioType(int scenarioType) { this.scenarioType = scenarioType; }
+        public int getCenterLat() { return centerLat; }
+        public void setCenterLat(int centerLat) { this.centerLat = centerLat; }
+        public int getCenterLon() { return centerLon; }
+        public void setCenterLon(int centerLon) { this.centerLon = centerLon; }
+        public int getRadius() { return radius; }
+        public void setRadius(int radius) { this.radius = radius; }
+        public List<Integer> getDroneIds() { return droneIds; }
+        public void setDroneIds(List<Integer> droneIds) { this.droneIds = droneIds; }
+        public boolean isGroundDeployAvailable() { return groundDeployAvailable; }
+        public void setGroundDeployAvailable(boolean groundDeployAvailable) { this.groundDeployAvailable = groundDeployAvailable; }
+        public String getGroundDeploySummary() { return groundDeploySummary; }
+        public void setGroundDeploySummary(String groundDeploySummary) { this.groundDeploySummary = groundDeploySummary; }
+        public String getPriority() { return priority; }
+        public void setPriority(String priority) { this.priority = priority; }
+
+        /** 转换为 EmergencyCommand.DeploymentPlan。 */
+        public EmergencyCommand.DeploymentPlan toDeploymentPlan() {
+            String strategy = switch (scenarioType) {
+                case 0 -> "SEARCH_RESCUE";
+                case 1 -> "MAPPING";
+                case 2 -> "COMMAND_RELAY";
+                default -> "SURVEILLANCE";
+            };
+            return new EmergencyCommand.DeploymentPlan(
+                    "air-ground-" + priority,
+                    strategy, 60, "mesh");
+        }
+
+        public String summary() {
+            return String.format("无人机 %d 架，场景类型 %d，半径 %dm，优先级 %s。%s",
+                    droneIds != null ? droneIds.size() : 0,
+                    scenarioType, radius, priority, groundDeploySummary);
+        }
+    }
+
+    /** 协同指挥评估结果。 */
+    public static final class CoordinationEvaluation {
+        /** 无人机覆盖率（0~100）。 */
+        public final int coverageRate;
+        /** 安防设备覆盖率（0~100）。 */
+        public final int deviceCoverageRate;
+        /** 连通率（0~100）。 */
+        public final int connectivityRate;
+        /** 响应时效。 */
+        public final ResponseTiming timing;
+        /** 资源消耗。 */
+        public final ResourceConsumption consumption;
+
+        public CoordinationEvaluation(int coverageRate, int deviceCoverageRate,
+                                       int connectivityRate, ResponseTiming timing,
+                                       ResourceConsumption consumption) {
+            this.coverageRate = Math.max(0, Math.min(100, coverageRate));
+            this.deviceCoverageRate = Math.max(0, Math.min(100, deviceCoverageRate));
+            this.connectivityRate = Math.max(0, Math.min(100, connectivityRate));
+            this.timing = timing;
+            this.consumption = consumption;
+        }
+    }
+
+    /** 响应时效评估。 */
+    public static final class ResponseTiming {
+        /** 接报到研判耗时（秒）。 */
+        public final long receiveToAssessSec;
+        /** 研判到部署耗时（秒）。 */
+        public final long assessToDeploySec;
+        /** 部署到执行耗时（秒）。 */
+        public final long deployToExecuteSec;
+        /** 总响应耗时（秒）。 */
+        public final long totalResponseSec;
+
+        public ResponseTiming(long receiveToAssessSec, long assessToDeploySec,
+                              long deployToExecuteSec, long totalResponseSec) {
+            this.receiveToAssessSec = receiveToAssessSec;
+            this.assessToDeploySec = assessToDeploySec;
+            this.deployToExecuteSec = deployToExecuteSec;
+            this.totalResponseSec = totalResponseSec;
+        }
+    }
+
+    /** 资源消耗评估。 */
+    public static final class ResourceConsumption {
+        /** 投入无人机数量。 */
+        public final int droneCount;
+        /** 投入安防设备数量。 */
+        public final int deviceCount;
+        /** 平均电池剩余百分比。 */
+        public final int avgBatteryPct;
+        /** mesh 节点数。 */
+        public final int meshNodes;
+
+        public ResourceConsumption(int droneCount, int deviceCount, int avgBatteryPct, int meshNodes) {
+            this.droneCount = droneCount;
+            this.deviceCount = deviceCount;
+            this.avgBatteryPct = avgBatteryPct;
+            this.meshNodes = meshNodes;
+        }
+
+        public String summary() {
+            return String.format("无人机=%d架, 安防设备=%d台, 平均电池=%d%%, mesh节点=%d",
+                    droneCount, deviceCount, avgBatteryPct, meshNodes);
+        }
+    }
+
+    /** 协同指挥报告。 */
+    public static final class CoordinationReport {
+        private final String coordinationId;
+        private final String alarmEventId;
+        private final String cmdId;
+        private final long planId;
+        private final String overview;
+        private final String evaluationSummary;
+        private final String summary;
+        private final List<String> recommendations;
+        private final List<String> phaseTimeline;
+        private final long generatedAtMs;
+
+        public CoordinationReport(String coordinationId, String alarmEventId,
+                                  String cmdId, long planId,
+                                  String overview, String evaluationSummary,
+                                  String summary, List<String> recommendations,
+                                  List<String> phaseTimeline, long generatedAtMs) {
+            this.coordinationId = coordinationId;
+            this.alarmEventId = alarmEventId;
+            this.cmdId = cmdId;
+            this.planId = planId;
+            this.overview = overview;
+            this.evaluationSummary = evaluationSummary;
+            this.summary = summary;
+            this.recommendations = recommendations == null ? List.of() : List.copyOf(recommendations);
+            this.phaseTimeline = phaseTimeline == null ? List.of() : List.copyOf(phaseTimeline);
+            this.generatedAtMs = generatedAtMs;
+        }
+
+        public String getCoordinationId() { return coordinationId; }
+        public String getAlarmEventId() { return alarmEventId; }
+        public String getCmdId() { return cmdId; }
+        public long getPlanId() { return planId; }
+        public String getOverview() { return overview; }
+        public String getEvaluationSummary() { return evaluationSummary; }
+        public String getSummary() { return summary; }
+        public List<String> getRecommendations() { return recommendations; }
+        public List<String> getPhaseTimeline() { return phaseTimeline; }
+        public long getGeneratedAtMs() { return generatedAtMs; }
     }
 }

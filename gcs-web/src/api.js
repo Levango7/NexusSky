@@ -1070,7 +1070,7 @@ export const ADVANCED_PANELS = [...STANDARD_PANELS, 'thermal', 'opticalflow', 's
 // 应急百元级可用的面板：基础操控 + mesh通信 + 应急编排 + 热源搜救
 export const EMERGENCY_TOY_PANELS = ['telemetry', 'camera', 'map', 'status', 'mesh', 'emergency', 'thermal']
 // 应急千元级可用的面板：千元级 + 灾害应急全能力
-export const EMERGENCY_STANDARD_PANELS = [...STANDARD_PANELS, 'thermal', 'surveillance', 'alarm', 'disastercomm', 'unifiedcmd']
+export const EMERGENCY_STANDARD_PANELS = [...STANDARD_PANELS, 'thermal', 'surveillance', 'alarm', 'disastercomm', 'unifiedcmd', 'videofusion']
 
 // 根据预算档位返回可用面板列表；null 表示全部可用（完整版）
 // 传入未知 budgetMode 会 fallback 到 'standard' 并告警
@@ -1251,7 +1251,32 @@ export async function triggerPtzTracking(deviceId, payload = {}) {
   })
 }
 
-// ---- 命名导出：tracking / geofence / droneLock / autodispatch / videostream / voiceintercom / scenarios / inspection / health / maintenance / commAdapt / mapping / voiceCmd / cityTwin / delivery / show（供面板组件 import）----
+// ---- VideoFusion (视频融合 P1) ----
+// base 路径 /api/v1/video-fusion（独立于 v1 BASE）
+// 安防 RTSP 流 + 无人机航拍画面同屏显示，支持画中画、录制
+const VIDEO_FUSION_BASE = '/api/v1/video-fusion'
+
+// 获取安防摄像头流列表（返回 deviceId, name, rtspUrl, online）
+export async function getSurveillanceStreams() {
+  return jsonFetch(`${VIDEO_FUSION_BASE}/surveillance/streams`)
+}
+
+// 获取无人机航拍画面列表（返回 sysid, name, feedUrl, online）
+export async function getDroneVideoFeeds() {
+  return jsonFetch(`${VIDEO_FUSION_BASE}/drone/feeds`)
+}
+
+// 开始录制（deviceId 为安防摄像头 ID 或无人机 sysid）
+export async function startRecording(deviceId) {
+  return jsonFetch(`${VIDEO_FUSION_BASE}/recording/${deviceId}/start`, { method: 'POST' })
+}
+
+// 停止录制
+export async function stopRecording(deviceId) {
+  return jsonFetch(`${VIDEO_FUSION_BASE}/recording/${deviceId}/stop`, { method: 'POST' })
+}
+
+// ---- 命名导出：tracking / geofence / droneLock / autodispatch / videostream / voiceintercom / scenarios / inspection / health / maintenance / commAdapt / mapping / voiceCmd / cityTwin / delivery / show / videoFusion（供面板组件 import）----
 export const {
   getFlightTrack, replayTrack, getLastKnown, getLostDrones, getSearchGuide, scanLostDrones,
   createGeofenceZone, listGeofenceZones, getGeofenceZone, updateGeofenceZone, deleteGeofenceZone, getGeofenceBreaches, checkGeofence,
@@ -1269,6 +1294,7 @@ export const {
   createCityModel, listCityModels, getCityModel, getCitySituation, createCitySimulation, getCitySimulation, createCityMarker, listCityMarkers,
   createDeliveryTask, listDeliveryTasks, getDeliveryTask, startDeliveryTask, abortDeliveryTask, optimizeDeliveryRoute, deliverDeliveryTask, getDeliveryStatus, confirmDeliveryTask, searchLandingSites,
   createShowFormation, listShowFormations, getShowFormation, calculateShowPositions, createShowTask, listShowTasks, getShowTask, startShowTask, abortShowTask, getShowActions, configureShowMusicSync,
+  getSurveillanceStreams, getDroneVideoFeeds, startRecording, stopRecording,
   login, refreshToken,
   listTenants, getTenant, createTenant, updateTenant, deleteTenant,
   listUsers, getUser, createUser, updateUser, deleteUser,

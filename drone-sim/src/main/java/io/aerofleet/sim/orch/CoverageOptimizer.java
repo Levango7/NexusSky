@@ -1,5 +1,7 @@
 package io.aerofleet.sim.orch;
 
+import io.aerofleet.sim.BudgetMode;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -652,5 +654,388 @@ public class CoverageOptimizer {
             }
         }
         return (long) minBudget * SERVICE_MS_PER_PERCENT;
+    }
+
+    // ==================== M9 丐版约束感知 ====================
+
+    /**
+     * 带预算约束的覆盖优化入口（M9 丐版约束感知）。
+     * <p>
+     * 在原有 optimize 流程基础上，根据 {@link OrchestrationConfig.BudgetConstraints}
+     * 调整覆盖优化参数：
+     * <ul>
+     *   <li>根据 maxNodes 限制参与编排的无人机数量（截取电量最高的前 N 架）</li>
+     *   <li>根据 maxCoverageRadiusKm 限制覆盖半径（取 min(请求半径, 约束半径)）</li>
+     *   <li>根据 maxEnduranceMin 计算轮换需求</li>
+     *   <li>根据 orchestrationComplexity 决定编排层级</li>
+     *   <li>根据 searchRescueCapability 推荐搜救策略</li>
+     * </ul>
+     *
+     * @param drones     可用无人机列表
+     * @param centerLat  灾区中心纬度（度）
+     * @param centerLon  灾区中心经度（度）
+     * @param radiusKm   请求覆盖半径（km），必须 &gt; 0
+     * @param constraints 预算约束，不能为 null
+     * @return 预算感知部署方案
+     */
+    public BudgetAwareDeploymentPlan optimizeWithConstraints(
+            List<DroneInfo> drones, double centerLat, double centerLon,
+            double radiusKm, OrchestrationConfig.BudgetConstraints constraints) {
+        if (drones == null || drones.isEmpty()) {
+            return new BudgetAwareDeploymentPlan(
+                    Collections.emptyList(), 0.0, 0.0, 0L,
+                    constraints, null, "无可用无人机");
+        }
+        if (radiusKm <= 0) {
+            return new BudgetAwareDeploymentPlan(
+                    Collections.emptyList(), 0.0, 0.0, 0L,
+                    constraints, null, "覆盖半径必须 > 0");
+        }
+        if (constraints == null) {
+            throw new IllegalArgumentException("constraints must not be null");
+        }
+
+        // 1. 限制参与编排的无人机数量：按电量降序截取前 maxNodes 架
+        List<DroneInfo> selectedDrones = selectDronesByBudget(drones, constraints.maxNodes);
+
+        // 2. 限制覆盖半径：取 min(请求半径, 约束最大半径)
+        double effectiveRadiusKm = Math.min(radiusKm, constraints.maxCoverageRadiusKm);
+        double effectiveRadiusM = effectiveRadiusKm * 1000.0;
+
+        // 3. 根据编排复杂度调整 meshRangeM
+        double effectiveMeshRangeM = adjustMeshRangeByComplexity(constraints);
+
+        // 4. 根据编排复杂度决定是否跳过连通性修复（MINIMAL 模式跳过）
+        boolean skipConnectivityFix =
+                constraints.orchestrationComplexity
+                        == OrchestrationConfig.BudgetConstraints.OrchestrationComplexity.MINIMAL;
+
+        // 5. 执行核心优化流程（复用现有逻辑）
+        this.currentScenarioType = 0; // 默认地震场景
+        distanceCache.clear();
+
+        List<DroneDeployment> greedy =
+                greedyDeploy(centerLat, centerLon, effectiveRadiusM, selectedDrones);
+        List<DroneDeployment> optimized =
+                localOptimize(greedy, centerLat, centerLon, effectiveRadiusM);
+
+        List<DroneDeployment> finalDeployments;
+        if (skipConnectivityFix) {
+            // MINIMAL 模式：WiFi 单跳，不做连通性修复
+            finalDeployments = optimized;
+        } else {
+            // FULL / SIMPLIFIED 模式：执行连通性修复
+            finalDeployments = fixConnectivity(optimized);
+        }
+
+        // 6. 计算指标
+        double coverageRate =
+                calculateCoverage(finalDeployments, centerLat, centerLon, effectiveRadiusM);
+        double connectRate = calculateConnectivity(finalDeployments);
+        long expectedServiceMs = estimateServiceMs(finalDeployments);
+
+        // 7. 推荐轮换调度方案
+        RotationSchedule rotation =
+                recommendRotationSchedule(selectedDrones, constraints);
+
+        // 8. 推荐搜救策略
+        String searchRescueStrategy = recommendSearchRescueStrategy(constraints);
+
+        // 9. 生成约束说明
+        String constraintSummary = buildConstraintSummary(
+                constraints, effectiveRadiusKm, selectedDrones.size(), skipConnectivityFix);
+
+        return new BudgetAwareDeploymentPlan(
+                finalDeployments, coverageRate, connectRate, expectedServiceMs,
+                constraints, rotation, searchRescueStrategy + "; " + constraintSummary);
+    }
+
+    /**
+     * 推荐轮换调度方案（基于续航约束）。
+     * <p>
+     * 根据约束中的 maxEnduranceMin 计算轮换需求：
+     * <ul>
+     *   <li>每架无人机的预期服务时长 = batteryPercent × 60s</li>
+     *   <li>若预期服务时长 &gt; maxEnduranceMin，则需要轮换</li>
+     *   <li>轮换批次 = ceil(总任务时长 / 单批最大续航)</li>
+     *   <li>每批所需无人机数 = 部署位置数</li>
+     *   <li>总无人机需求 = 部署位置数 × 轮换批次</li>
+     * </ul>
+     *
+     * @param drones      可用无人机列表
+     * @param constraints 预算约束
+     * @return 轮换调度方案
+     */
+    public RotationSchedule recommendRotationSchedule(
+            List<DroneInfo> drones, OrchestrationConfig.BudgetConstraints constraints) {
+        if (drones == null || drones.isEmpty()) {
+            return new RotationSchedule(0, 0, 0, 0, "无可用无人机");
+        }
+        if (constraints == null) {
+            throw new IllegalArgumentException("constraints must not be null");
+        }
+
+        int maxEnduranceMin = constraints.maxEnduranceMin;
+        long maxEnduranceMs = (long) maxEnduranceMin * 60_000L;
+
+        // 计算每架无人机的预期服务时长（batteryPercent × 60s）
+        long minServiceMs = Long.MAX_VALUE;
+        for (DroneInfo drone : drones) {
+            long serviceMs = (long) drone.batteryPercent * SERVICE_MS_PER_PERCENT;
+            if (serviceMs < minServiceMs) {
+                minServiceMs = serviceMs;
+            }
+        }
+
+        // 若最低电量无人机续航已超过约束最大续航，需要轮换
+        if (minServiceMs <= maxEnduranceMs) {
+            // 无需轮换
+            return new RotationSchedule(
+                    1, drones.size(), 0, maxEnduranceMin,
+                    "当前无人机续航满足约束，无需轮换");
+        }
+
+        // 计算轮换批次
+        int rotationBatches = (int) Math.ceil((double) minServiceMs / maxEnduranceMs);
+        // 每批所需无人机数 = 约束最大节点数
+        int dronesPerBatch = Math.min(constraints.maxNodes, drones.size());
+        // 总无人机需求
+        int totalDronesNeeded = dronesPerBatch * rotationBatches;
+        // 可用无人机是否足够
+        boolean sufficient = drones.size() >= totalDronesNeeded;
+
+        String description;
+        if (sufficient) {
+            description = String.format(Locale.ROOT,
+                    "需 %d 批轮换，每批 %d 架，共需 %d 架（当前可用 %d 架，满足需求）",
+                    rotationBatches, dronesPerBatch, totalDronesNeeded, drones.size());
+        } else {
+            description = String.format(Locale.ROOT,
+                    "需 %d 批轮换，每批 %d 架，共需 %d 架（当前可用 %d 架，不足 %d 架）",
+                    rotationBatches, dronesPerBatch, totalDronesNeeded,
+                    drones.size(), totalDronesNeeded - drones.size());
+        }
+
+        return new RotationSchedule(
+                rotationBatches, dronesPerBatch,
+                totalDronesNeeded - drones.size(),
+                maxEnduranceMin, description);
+    }
+
+    /**
+     * 获取预算感知的部署方案（便捷入口）。
+     * <p>
+     * 从 BudgetMode 字符串创建约束，然后调用 {@link #optimizeWithConstraints}。
+     *
+     * @param drones       可用无人机列表
+     * @param centerLat    灾区中心纬度（度）
+     * @param centerLon    灾区中心经度（度）
+     * @param radiusKm     请求覆盖半径（km）
+     * @param budgetModeCli BudgetMode CLI 值（如 "emergency-toy"）
+     * @return 预算感知部署方案
+     */
+    public BudgetAwareDeploymentPlan getBudgetAwareDeploymentPlan(
+            List<DroneInfo> drones, double centerLat, double centerLon,
+            double radiusKm, String budgetModeCli) {
+        OrchestrationConfig.BudgetConstraints constraints =
+                OrchestrationConfig.BudgetConstraints.fromBudgetMode(budgetModeCli);
+        return optimizeWithConstraints(drones, centerLat, centerLon, radiusKm, constraints);
+    }
+
+    /**
+     * 获取预算感知的部署方案（从 BudgetMode 枚举创建约束）。
+     *
+     * @param drones       可用无人机列表
+     * @param centerLat    灾区中心纬度（度）
+     * @param centerLon    灾区中心经度（度）
+     * @param radiusKm     请求覆盖半径（km）
+     * @param budgetMode   BudgetMode 枚举
+     * @return 预算感知部署方案
+     */
+    public BudgetAwareDeploymentPlan getBudgetAwareDeploymentPlan(
+            List<DroneInfo> drones, double centerLat, double centerLon,
+            double radiusKm, BudgetMode budgetMode) {
+        OrchestrationConfig.BudgetConstraints constraints =
+                OrchestrationConfig.BudgetConstraints.fromBudgetMode(budgetMode);
+        return optimizeWithConstraints(drones, centerLat, centerLon, radiusKm, constraints);
+    }
+
+    // ==================== 丐版约束感知 - 内部辅助方法 ====================
+
+    /**
+     * 按电量降序选择前 maxNodes 架无人机。
+     *
+     * @param drones   可用无人机列表
+     * @param maxNodes 最大节点数
+     * @return 截取后的无人机列表
+     */
+    private List<DroneInfo> selectDronesByBudget(List<DroneInfo> drones, int maxNodes) {
+        List<DroneInfo> sorted = new ArrayList<>(drones);
+        sorted.sort((a, b) -> Integer.compare(b.batteryPercent, a.batteryPercent));
+        if (sorted.size() <= maxNodes) {
+            return sorted;
+        }
+        return sorted.subList(0, maxNodes);
+    }
+
+    /**
+     * 根据编排复杂度调整 mesh 一跳范围。
+     * <p>
+     * FULL: 保持默认 meshRangeM（2000m）<br>
+     * SIMPLIFIED: LoRa Mesh 5000m<br>
+     * MINIMAL: WiFi ESP-NOW 500m
+     *
+     * @param constraints 预算约束
+     * @return 调整后的 mesh 一跳范围（m）
+     */
+    private double adjustMeshRangeByComplexity(OrchestrationConfig.BudgetConstraints constraints) {
+        return switch (constraints.orchestrationComplexity) {
+            case FULL -> meshRangeM;
+            case SIMPLIFIED -> Math.max(meshRangeM, 5000.0); // LoRa Mesh 5km
+            case MINIMAL -> Math.min(meshRangeM, 500.0);     // WiFi ESP-NOW ~500m
+        };
+    }
+
+    /**
+     * 根据搜救能力枚举推荐搜救策略描述。
+     *
+     * @param constraints 预算约束
+     * @return 搜救策略描述
+     */
+    private String recommendSearchRescueStrategy(
+            OrchestrationConfig.BudgetConstraints constraints) {
+        return switch (constraints.searchRescueCapability) {
+            case THERMAL_HIGH_RES ->
+                    "搜救策略：高分辨率热成像（640×480），可远距离识别人体热源，适合大面积搜索";
+            case THERMAL_LOW_RES ->
+                    "搜救策略：低分辨率热源检测（8×8 AMG8833），近距离热源定位，适合小范围确认";
+            case LED_BUZZER ->
+                    "搜救策略：LED 信号灯 + 蜂鸣器声光报警，仅适合近距离引导，无主动搜索能力";
+        };
+    }
+
+    /**
+     * 构建约束应用摘要说明。
+     *
+     * @param constraints       预算约束
+     * @param effectiveRadiusKm 实际使用的覆盖半径（km）
+     * @param selectedDroneCount 选中的无人机数量
+     * @param skipConnectivityFix 是否跳过连通性修复
+     * @return 约束摘要
+     */
+    private String buildConstraintSummary(
+            OrchestrationConfig.BudgetConstraints constraints,
+            double effectiveRadiusKm, int selectedDroneCount,
+            boolean skipConnectivityFix) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("约束应用：");
+        sb.append("覆盖半径=").append(String.format(Locale.ROOT, "%.2f", effectiveRadiusKm))
+                .append("km");
+        sb.append(", 节点数=").append(selectedDroneCount)
+                .append("/").append(constraints.maxNodes);
+        sb.append(", 续航上限=").append(constraints.maxEnduranceMin).append("min");
+        sb.append(", 避障距离=").append(constraints.obstacleAvoidanceDistanceM).append("m");
+        sb.append(", 编排复杂度=").append(constraints.orchestrationComplexity);
+        if (skipConnectivityFix) {
+            sb.append("（跳过连通性修复）");
+        }
+        return sb.toString();
+    }
+
+    // ==================== 丐版约束感知 - 数据类 ====================
+
+    /**
+     * 轮换调度方案。
+     * <p>
+     * 当无人机续航无法满足任务时长时，需要分批轮换部署。
+     */
+    public static final class RotationSchedule {
+        /** 轮换批次总数。 */
+        public final int rotationBatches;
+        /** 每批所需无人机数。 */
+        public final int dronesPerBatch;
+        /** 不足的无人机数（0 表示满足需求）。 */
+        public final int dronesShortfall;
+        /** 单批最大续航（分钟）。 */
+        public final int maxEndurancePerBatchMin;
+        /** 方案描述。 */
+        public final String description;
+
+        public RotationSchedule(int rotationBatches, int dronesPerBatch,
+                                 int dronesShortfall, int maxEndurancePerBatchMin,
+                                 String description) {
+            this.rotationBatches = rotationBatches;
+            this.dronesPerBatch = dronesPerBatch;
+            this.dronesShortfall = dronesShortfall;
+            this.maxEndurancePerBatchMin = maxEndurancePerBatchMin;
+            this.description = description;
+        }
+
+        /** 是否需要轮换（rotationBatches > 1）。 */
+        public boolean needsRotation() {
+            return rotationBatches > 1;
+        }
+
+        /** 无人机数量是否充足（dronesShortfall <= 0）。 */
+        public boolean isSufficient() {
+            return dronesShortfall <= 0;
+        }
+
+        @Override
+        public String toString() {
+            return "RotationSchedule{batches=" + rotationBatches
+                    + ", dronesPerBatch=" + dronesPerBatch
+                    + ", shortfall=" + dronesShortfall
+                    + ", maxEndurance=" + maxEndurancePerBatchMin + "min"
+                    + ", " + description + "}";
+        }
+    }
+
+    /**
+     * 预算感知部署方案。
+     * <p>
+     * 在 {@link DeploymentPlan} 基础上扩展，包含预算约束信息、轮换调度方案和搜救策略。
+     */
+    public static final class BudgetAwareDeploymentPlan {
+        /** 部署列表。 */
+        public final List<DroneDeployment> deployments;
+        /** 覆盖率（0-100）。 */
+        public final double coverageRate;
+        /** 连通率（0-100）。 */
+        public final double connectRate;
+        /** 预期服务时长（ms）。 */
+        public final long expectedServiceMs;
+        /** 应用的预算约束。 */
+        public final OrchestrationConfig.BudgetConstraints constraints;
+        /** 轮换调度方案。 */
+        public final RotationSchedule rotationSchedule;
+        /** 策略说明（搜救策略 + 约束摘要）。 */
+        public final String strategyNotes;
+
+        public BudgetAwareDeploymentPlan(
+                List<DroneDeployment> deployments,
+                double coverageRate, double connectRate, long expectedServiceMs,
+                OrchestrationConfig.BudgetConstraints constraints,
+                RotationSchedule rotationSchedule,
+                String strategyNotes) {
+            this.deployments = deployments;
+            this.coverageRate = coverageRate;
+            this.connectRate = connectRate;
+            this.expectedServiceMs = expectedServiceMs;
+            this.constraints = constraints;
+            this.rotationSchedule = rotationSchedule;
+            this.strategyNotes = strategyNotes;
+        }
+
+        @Override
+        public String toString() {
+            return "BudgetAwareDeploymentPlan{deployments=" + deployments.size()
+                    + ", coverage=" + String.format(Locale.ROOT, "%.1f", coverageRate) + "%"
+                    + ", connectivity=" + String.format(Locale.ROOT, "%.1f", connectRate) + "%"
+                    + ", serviceMs=" + expectedServiceMs
+                    + ", constraints=" + constraints
+                    + ", rotation=" + rotationSchedule
+                    + ", notes=" + strategyNotes + "}";
+        }
     }
 }

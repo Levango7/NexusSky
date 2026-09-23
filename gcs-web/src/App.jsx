@@ -31,6 +31,7 @@ import DeliveryPanel from './components/DeliveryPanel.jsx'
 import ShowPanel from './components/ShowPanel.jsx'
 import DisasterCommPanel from './components/DisasterCommPanel.jsx'
 import UnifiedCommandPanel from './components/UnifiedCommandPanel.jsx'
+import VideoFusionPanel from './components/VideoFusionPanel.jsx'
 import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
@@ -178,6 +179,7 @@ export default function App() {
               { key: 'show', label: '编队表演' },
               { key: 'disastercomm', label: '灾害通信' },
               { key: 'unifiedcmd', label: '空地指挥' },
+              { key: 'videofusion', label: '视频融合' },
               ...(isAdmin ? [
                 { key: 'tenants', label: '租户管理' },
                 { key: 'users', label: '用户管理' },
@@ -376,6 +378,10 @@ export default function App() {
       ) : view === 'unifiedcmd' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <UnifiedCommandPanel />
+        </div>
+      ) : view === 'videofusion' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <VideoFusionPanel />
         </div>
       ) : view === 'tenants' ? (
         <div className="gcs-body" style={{ display: 'block' }}>

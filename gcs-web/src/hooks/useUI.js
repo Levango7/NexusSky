@@ -32,6 +32,7 @@ export const VIEW_PANEL_MAP = {
   show: 'formation',       // 编队表演归入编队范畴（千元级可用）
   disastercomm: 'mesh',    // 灾害通信归入通信范畴（千元级可用）
   unifiedcmd: 'unifiedcmd',  // 空地指挥独立面板（千元级可用）
+  videofusion: 'videofusion', // 视频融合独立面板（千元级可用）
   tenants: 'status',       // 租户管理归入状态管理（百元级可用）
   users: 'status',         // 用户管理归入状态管理（百元级可用）
 }

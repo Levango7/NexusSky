@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,20 +25,24 @@ import java.util.Map;
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 
 /**
- * 空地协同指挥 REST 端点（空地协同三大核心能力）。
+ * 空地协同指挥 REST 端点（空地协同六阶段指挥流程）。
  * <p>
- * 独立路径前缀 /api/v1/air-ground/*，提供空地协同态势感知、报警触发侦察、PTZ 联动追踪。
+ * 独立路径前缀 /api/v1/air-ground/*，提供空地协同态势感知、报警触发侦察、PTZ 联动追踪、
+ * 六阶段指挥流程（启动/评估/报告）。
  * <p>
  * 端点清单：
  * <pre>
- * GET  /api/v1/air-ground/situation   获取空地协同态势融合视图
- * POST /api/v1/air-ground/recon        从安防告警触发无人机自动侦察
- * POST /api/v1/air-ground/ptz-track    无人机发现目标触发安防 PTZ 联动追踪
+ * GET  /api/v1/air-ground/situation           获取空地协同态势融合视图
+ * POST /api/v1/air-ground/recon                从安防告警触发无人机自动侦察
+ * POST /api/v1/air-ground/ptz-track            无人机发现目标触发安防 PTZ 联动追踪
+ * POST /api/v1/air-ground/start                启动空地协同指挥六阶段流程
+ * GET  /api/v1/air-ground/evaluate/{id}        执行评估阶段并获取评估结果
+ * GET  /api/v1/air-ground/report/{id}          执行总结阶段并获取指挥报告
  * </pre>
  */
 @RestController
 @RequestMapping("/api/v1/air-ground")
-@Tag(name = "AirGroundCoordination", description = "空地协同指挥 REST API：态势融合、报警触发侦察、PTZ 联动追踪")
+@Tag(name = "AirGroundCoordination", description = "空地协同指挥 REST API：态势融合、报警触发侦察、PTZ 联动追踪、六阶段指挥流程")
 public class AirGroundCoordinationController {
 
     private final AirGroundCoordinationService coordinationService;
@@ -148,6 +153,148 @@ public class AirGroundCoordinationController {
         result.put("confidence", target.confidence);
         result.put("sourceSysid", target.sourceSysid);
         result.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.ok(result);
+    }
+
+    // =====================================================================
+    // 端点 4：启动空地协同指挥流程
+    // =====================================================================
+
+    /**
+     * 启动空地协同指挥六阶段流程（接报→研判→部署→执行）。
+     * <p>
+     * 从报警事件 ID 开始，自动执行前四个阶段。评估和总结阶段需分别调用
+     * {@code /evaluate/{coordinationId}} 和 {@code /report/{coordinationId}} 完成。
+     * <p>
+     * body 示例：
+     * <pre>
+     * {"alarmEventId": "evt-uuid-001"}
+     * </pre>
+     */
+    @Operation(summary = "启动空地协同指挥六阶段流程", description = "从报警事件启动接报→研判→部署→执行全流程")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "指挥流程启动结果（含 coordinationId）"),
+            @ApiResponse(responseCode = "400", description = "参数非法"),
+            @ApiResponse(responseCode = "404", description = "报警事件不存在")
+    })
+    @PostMapping("/start")
+    @RequireRole(Role.OPERATOR)
+    public ResponseEntity<Map<String, Object>> startCoordination(@RequestBody Map<String, Object> body) {
+        String alarmEventId = str(body, "alarmEventId", "");
+        if (alarmEventId.isBlank()) {
+            throw new BadRequestException("alarmEventId is required");
+        }
+
+        AirGroundCoordinationService.CoordinationRecord record =
+                coordinationService.startAirGroundCoordination(alarmEventId);
+        if (record == null) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("status", "FAILED");
+            err.put("message", "报警事件不存在或启动失败");
+            err.put("alarmEventId", alarmEventId);
+            return ResponseEntity.ok(err);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", "RUNNING");
+        result.put("coordinationId", record.getCoordinationId());
+        result.put("cmdId", record.getCmdId());
+        result.put("planId", record.getPlanId());
+        result.put("phase", record.getPhase().displayName());
+        result.put("alarmEventId", record.getAlarmEventId());
+        result.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.ok(result);
+    }
+
+    // =====================================================================
+    // 端点 5：获取评估结果
+    // =====================================================================
+
+    /**
+     * 执行评估阶段并返回评估结果。
+     * <p>
+     * 评估四维度：覆盖率、连通率、响应时效、资源消耗。
+     * 若协同指挥尚未进入评估阶段，将自动推进。
+     */
+    @Operation(summary = "执行评估阶段并获取评估结果", description = "覆盖率/连通率/响应时效/资源消耗评估")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "评估结果"),
+            @ApiResponse(responseCode = "404", description = "协同指挥不存在")
+    })
+    @GetMapping("/evaluate/{coordinationId}")
+    public ResponseEntity<Map<String, Object>> evaluateCoordination(
+            @PathVariable String coordinationId) {
+        AirGroundCoordinationService.CoordinationEvaluation evaluation =
+                coordinationService.evaluateCoordination(coordinationId);
+        if (evaluation == null) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("status", "NOT_FOUND");
+            err.put("coordinationId", coordinationId);
+            return ResponseEntity.ok(err);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("coordinationId", coordinationId);
+        result.put("coverageRate", evaluation.coverageRate);
+        result.put("deviceCoverageRate", evaluation.deviceCoverageRate);
+        result.put("connectivityRate", evaluation.connectivityRate);
+
+        Map<String, Object> timing = new LinkedHashMap<>();
+        timing.put("receiveToAssessSec", evaluation.timing.receiveToAssessSec);
+        timing.put("assessToDeploySec", evaluation.timing.assessToDeploySec);
+        timing.put("deployToExecuteSec", evaluation.timing.deployToExecuteSec);
+        timing.put("totalResponseSec", evaluation.timing.totalResponseSec);
+        result.put("timing", timing);
+
+        Map<String, Object> consumption = new LinkedHashMap<>();
+        consumption.put("droneCount", evaluation.consumption.droneCount);
+        consumption.put("deviceCount", evaluation.consumption.deviceCount);
+        consumption.put("avgBatteryPct", evaluation.consumption.avgBatteryPct);
+        consumption.put("meshNodes", evaluation.consumption.meshNodes);
+        result.put("consumption", consumption);
+
+        result.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.ok(result);
+    }
+
+    // =====================================================================
+    // 端点 6：获取指挥报告
+    // =====================================================================
+
+    /**
+     * 执行总结阶段并获取指挥报告。
+     * <p>
+     * 若尚未评估，将自动执行评估后再生成报告。
+     * 报告包含：事件概述、评估摘要、联动规则优化建议、阶段时间线。
+     */
+    @Operation(summary = "执行总结阶段并获取指挥报告", description = "自动生成报告 + 时间线归档 + 联动规则优化建议")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "指挥报告"),
+            @ApiResponse(responseCode = "404", description = "协同指挥不存在")
+    })
+    @GetMapping("/report/{coordinationId}")
+    public ResponseEntity<Map<String, Object>> getCoordinationReport(
+            @PathVariable String coordinationId) {
+        AirGroundCoordinationService.CoordinationReport report =
+                coordinationService.summarizeCoordination(coordinationId);
+        if (report == null) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("status", "NOT_FOUND");
+            err.put("coordinationId", coordinationId);
+            return ResponseEntity.ok(err);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("coordinationId", report.getCoordinationId());
+        result.put("alarmEventId", report.getAlarmEventId());
+        result.put("cmdId", report.getCmdId());
+        result.put("planId", report.getPlanId());
+        result.put("overview", report.getOverview());
+        result.put("evaluationSummary", report.getEvaluationSummary());
+        result.put("summary", report.getSummary());
+        result.put("recommendations", new ArrayList<>(report.getRecommendations()));
+        result.put("phaseTimeline", new ArrayList<>(report.getPhaseTimeline()));
+        result.put("generatedAtMs", report.getGeneratedAtMs());
         return ResponseEntity.ok(result);
     }
 
