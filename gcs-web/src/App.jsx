@@ -218,6 +218,9 @@ export default function App() {
             <option value={BUDGET_MODES.TOY}>丐版·百元级</option>
             <option value={BUDGET_MODES.STANDARD}>丐版·千元级</option>
             <option value={BUDGET_MODES.ADVANCED}>丐版·进阶</option>
+            <option disabled>────────</option>
+            <option value={BUDGET_MODES.EMERGENCY_TOY}>应急·百元级</option>
+            <option value={BUDGET_MODES.EMERGENCY_STANDARD}>应急·千元级</option>
           </select>
           <BudgetBadge mode={budgetMode} />
           <span className={`ws-badge ${wsState === 'open' ? 'ok' : 'bad'}`}>

@@ -1041,14 +1041,16 @@ export const wsUrl = getWsUrl()
 // 根据预算档位限制可见面板，用于在低成本硬件上裁剪功能。
 // 经验来源：2026-09-17-react-mount-existing-components-export-signature-dialog-wrap（命名导出用法）
 export const BUDGET_MODES = {
-  FULL: null,            // 完整版（默认，全部面板可用）
-  TOY: 'toy',            // 百元级：仅遥测+航拍+简易地图+状态
-  STANDARD: 'standard',  // 千元级：+编队+Mesh+航点+应急
-  ADVANCED: 'advanced',  // 进阶版：+光流+红外
+  FULL: null,                       // 完整版（默认，全部面板可用）
+  TOY: 'toy',                       // 百元级：仅遥测+航拍+简易地图+状态
+  STANDARD: 'standard',             // 千元级：+编队+Mesh+航点+应急
+  ADVANCED: 'advanced',             // 进阶版：+光流+红外
+  EMERGENCY_TOY: 'emergency-toy',         // 应急百元级：百元级+mesh通信+应急编排+热源搜救
+  EMERGENCY_STANDARD: 'emergency-standard', // 应急千元级：千元级+安防监控+报警联动+空地指挥+灾害通信
 }
 
 // 合法预算档位列表（不含 FULL/null，null 表示完整版单独处理）
-const VALID_BUDGET_MODES = ['toy', 'standard', 'advanced']
+const VALID_BUDGET_MODES = ['toy', 'standard', 'advanced', 'emergency-toy', 'emergency-standard']
 
 // 规范化 budgetMode：未知值 fallback 到 'standard' 并 console.warn 告警
 // null/undefined 原样返回（表示完整版）；合法值原样返回
@@ -1064,7 +1066,11 @@ export const TOY_PANELS = ['telemetry', 'camera', 'map', 'status']
 // 千元级可用的面板
 export const STANDARD_PANELS = [...TOY_PANELS, 'formation', 'mesh', 'mission', 'emergency']
 // 进阶版可用的面板
-export const ADVANCED_PANELS = [...STANDARD_PANELS, 'thermal', 'opticalflow']
+export const ADVANCED_PANELS = [...STANDARD_PANELS, 'thermal', 'opticalflow', 'surveillance']
+// 应急百元级可用的面板：基础操控 + mesh通信 + 应急编排 + 热源搜救
+export const EMERGENCY_TOY_PANELS = ['telemetry', 'camera', 'map', 'status', 'mesh', 'emergency', 'thermal']
+// 应急千元级可用的面板：千元级 + 灾害应急全能力
+export const EMERGENCY_STANDARD_PANELS = [...STANDARD_PANELS, 'thermal', 'surveillance', 'alarm', 'disastercomm', 'unifiedcmd']
 
 // 根据预算档位返回可用面板列表；null 表示全部可用（完整版）
 // 传入未知 budgetMode 会 fallback 到 'standard' 并告警
@@ -1074,6 +1080,8 @@ export function getAvailablePanels(budgetMode) {
   if (mode === BUDGET_MODES.TOY) return TOY_PANELS
   if (mode === BUDGET_MODES.STANDARD) return STANDARD_PANELS
   if (mode === BUDGET_MODES.ADVANCED) return ADVANCED_PANELS
+  if (mode === BUDGET_MODES.EMERGENCY_TOY) return EMERGENCY_TOY_PANELS
+  if (mode === BUDGET_MODES.EMERGENCY_STANDARD) return EMERGENCY_STANDARD_PANELS
   return null
 }
 

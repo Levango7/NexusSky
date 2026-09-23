@@ -15,7 +15,7 @@ export const VIEW_PANEL_MAP = {
   satlink: 'mesh',         // 星地中继属于通信（千元级可用）
   terrain: 'mission',      // 地形属于任务规划（千元级可用）
   emergency: 'emergency',  // 应急编排（千元级可用）
-  surveillance: 'mission', // 安防监控归入任务范畴（千元级可用）
+  surveillance: 'surveillance', // 安防监控（千元级以上可用，独立面板）
   alarm: 'emergency',      // 报警联动归入应急范畴（千元级可用）
   tracking: 'mission',     // 飞行追踪/遗失查找归入任务范畴（千元级可用）
   geofence: 'mission',     // 电子围栏归入任务范畴（千元级可用）
@@ -45,7 +45,7 @@ export default function useUI() {
   const [now, setNow] = useState(Date.now())
   const [view, setView] = useState('control')
   const [mobileRail, setMobileRail] = useState(null) // null | 'left' | 'right'
-  const [budgetMode, setBudgetMode] = useState(null) // null=完整版 | 'toy' | 'standard' | 'advanced'
+  const [budgetMode, setBudgetMode] = useState(null) // null=完整版 | 'toy' | 'standard' | 'advanced' | 'emergency-toy' | 'emergency-standard'
 
   // 时钟
   useEffect(() => {
