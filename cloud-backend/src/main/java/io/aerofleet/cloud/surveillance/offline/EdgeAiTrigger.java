@@ -166,9 +166,12 @@ public class EdgeAiTrigger {
         if (deviceId == null) {
             return;
         }
-        Set<AiDetectType> types = enabledTypes != null
-                ? Collections.unmodifiableSet(EnumSet.copyOf(enabledTypes))
-                : Collections.emptySet();
+        Set<AiDetectType> types;
+        if (enabledTypes == null || enabledTypes.isEmpty()) {
+            types = Collections.emptySet();
+        } else {
+            types = Collections.unmodifiableSet(EnumSet.copyOf(enabledTypes));
+        }
         deviceDetectionConfig.put(deviceId, types);
         log.info("设备 {} 的边缘 AI 检测配置已更新: {}", deviceId, types);
     }

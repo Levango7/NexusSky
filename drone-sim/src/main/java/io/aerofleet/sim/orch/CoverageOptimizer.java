@@ -297,6 +297,20 @@ public class CoverageOptimizer {
      * @return 修复后部署列表
      */
     List<DroneDeployment> fixConnectivity(List<DroneDeployment> deployments) {
+        return fixConnectivity(deployments, this.meshRangeM);
+    }
+
+    /**
+     * 修复连通性（使用指定的 mesh 范围）。
+     * <p>
+     * 当 effectiveMeshRangeM 与实例字段 meshRangeM 不同时（如 SIMPLIFIED/MINIMAL 模式），
+     * 使用传入的 effectiveMeshRangeM 进行连通性判断和位置调整。
+     *
+     * @param deployments        部署列表
+     * @param effectiveMeshRangeM 实际生效的 mesh 一跳范围（m）
+     * @return 修复后部署列表
+     */
+    List<DroneDeployment> fixConnectivity(List<DroneDeployment> deployments, double effectiveMeshRangeM) {
         if (deployments.size() <= 1) {
             return new ArrayList<>(deployments);
         }
@@ -304,7 +318,7 @@ public class CoverageOptimizer {
         List<DroneDeployment> result = new ArrayList<>(deployments);
         int n = result.size();
 
-        int[] component = computeComponents(result);
+        int[] component = computeComponents(result, effectiveMeshRangeM);
         int numComponents = 0;
         for (int c : component) {
             if (c >= numComponents) {
@@ -358,10 +372,10 @@ public class CoverageOptimizer {
                 }
 
                 DroneDeployment d = result.get(i);
-                if (minDist < meshRangeM * 1.5) {
+                if (minDist < effectiveMeshRangeM * 1.5) {
                     // 调整位置向主连通分量移动
                     DroneDeployment target = result.get(nearestJ);
-                    double ratio = (meshRangeM * 0.9) / minDist;
+                    double ratio = (effectiveMeshRangeM * 0.9) / minDist;
                     double moveRatio = 1.0 - ratio;
                     double newLat = d.targetLat + (target.targetLat - d.targetLat) * moveRatio;
                     double newLon = d.targetLon + (target.targetLon - d.targetLon) * moveRatio;
@@ -602,13 +616,24 @@ public class CoverageOptimizer {
      * @return 连通分量数组，component[i] = 无人机 i 所属分量编号
      */
     private int[] computeComponents(List<DroneDeployment> deployments) {
+        return computeComponents(deployments, this.meshRangeM);
+    }
+
+    /**
+     * 计算连通分量（使用指定的 mesh 范围）。
+     *
+     * @param deployments        部署列表
+     * @param effectiveMeshRangeM 实际生效的 mesh 一跳范围（m）
+     * @return 连通分量数组，component[i] = 无人机 i 所属分量编号
+     */
+    private int[] computeComponents(List<DroneDeployment> deployments, double effectiveMeshRangeM) {
         int n = deployments.size();
         int[] component = new int[n];
         Arrays.fill(component, -1);
         int numComponents = 0;
         for (int i = 0; i < n; i++) {
             if (component[i] == -1) {
-                dfs(i, numComponents, deployments, component);
+                dfs(i, numComponents, deployments, component, effectiveMeshRangeM);
                 numComponents++;
             }
         }
@@ -623,7 +648,8 @@ public class CoverageOptimizer {
      * @param deployments 部署列表
      * @param component   分量数组
      */
-    private void dfs(int node, int comp, List<DroneDeployment> deployments, int[] component) {
+    private void dfs(int node, int comp, List<DroneDeployment> deployments, int[] component,
+                     double effectiveMeshRangeM) {
         component[node] = comp;
         for (int j = 0; j < deployments.size(); j++) {
             if (component[j] != -1) {
@@ -631,8 +657,8 @@ public class CoverageOptimizer {
             }
             double dist = haversineMeters(deployments.get(node).targetLat, deployments.get(node).targetLon,
                     deployments.get(j).targetLat, deployments.get(j).targetLon);
-            if (dist <= meshRangeM) {
-                dfs(j, comp, deployments, component);
+            if (dist <= effectiveMeshRangeM) {
+                dfs(j, comp, deployments, component, effectiveMeshRangeM);
             }
         }
     }
@@ -725,7 +751,7 @@ public class CoverageOptimizer {
             finalDeployments = optimized;
         } else {
             // FULL / SIMPLIFIED 模式：执行连通性修复
-            finalDeployments = fixConnectivity(optimized);
+            finalDeployments = fixConnectivity(optimized, effectiveMeshRangeM);
         }
 
         // 6. 计算指标

@@ -204,12 +204,23 @@ export default function VideoFusionPanel() {
         ])
         if (cancelled) return
 
+        // 检查 allSettled 的 rejected 状态，避免 API 错误被静默吞掉
+        let hasError = false
+        let errorMsg = ''
+
         const survList = survData.status === 'fulfilled'
           ? (Array.isArray(survData.value) ? survData.value : (survData.value && survData.value.streams) || [])
-          : []
+          : (() => { hasError = true; errorMsg = survData.reason?.message || '安防流列表加载失败'; return [] })()
+
         const droneList = droneData.status === 'fulfilled'
           ? (Array.isArray(droneData.value) ? droneData.value : (droneData.value && droneData.value.feeds) || [])
-          : []
+          : (() => { hasError = true; errorMsg = errorMsg || droneData.reason?.message || '无人机视频流加载失败'; return [] })()
+
+        if (hasError) {
+          setError(errorMsg)
+        } else {
+          setError(null)
+        }
 
         setSurveillanceStreams(survList)
         setDroneFeeds(droneList)

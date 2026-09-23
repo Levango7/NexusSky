@@ -111,6 +111,9 @@ public class AirGroundCoordinationController {
         result.put("status", planId > 0 ? "RUNNING" : "FAILED");
         result.put("eventId", event.getId());
         result.put("timestamp", System.currentTimeMillis());
+        if (planId <= 0) {
+            return ResponseEntity.status(503).body(result);
+        }
         return ResponseEntity.ok(result);
     }
 
@@ -192,7 +195,7 @@ public class AirGroundCoordinationController {
             err.put("status", "FAILED");
             err.put("message", "报警事件不存在或启动失败");
             err.put("alarmEventId", alarmEventId);
-            return ResponseEntity.ok(err);
+            return ResponseEntity.status(404).body(err);
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -230,7 +233,7 @@ public class AirGroundCoordinationController {
             Map<String, Object> err = new LinkedHashMap<>();
             err.put("status", "NOT_FOUND");
             err.put("coordinationId", coordinationId);
-            return ResponseEntity.ok(err);
+            return ResponseEntity.status(404).body(err);
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -281,7 +284,7 @@ public class AirGroundCoordinationController {
             Map<String, Object> err = new LinkedHashMap<>();
             err.put("status", "NOT_FOUND");
             err.put("coordinationId", coordinationId);
-            return ResponseEntity.ok(err);
+            return ResponseEntity.status(404).body(err);
         }
 
         Map<String, Object> result = new LinkedHashMap<>();

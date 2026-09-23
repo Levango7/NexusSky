@@ -487,6 +487,22 @@ public class AirGroundCoordinationService {
 
         pushProgress(coordinationId, "总结", "指挥报告已生成", record.getCmdId());
         log.info("空地协同：总结完成 coordinationId={}", coordinationId);
+
+        // 总结完成后清理该协同指挥记录，防止 coordinationRecords 无限增长导致 OOM
+        coordinationRecords.remove(coordinationId);
+        log.info("空地协同：已清理 CLOSED 状态记录 coordinationId={} remaining={}",
+                coordinationId, coordinationRecords.size());
+
+        // 清理阈值保护：超过 1000 条时批量清理所有 CLOSED 状态记录
+        if (coordinationRecords.size() > 1000) {
+            int before = coordinationRecords.size();
+            coordinationRecords.entrySet().removeIf(entry ->
+                    entry.getValue().getPhase() == EmergencyCommandPhase.CLOSED);
+            int removed = before - coordinationRecords.size();
+            log.warn("空地协同：清理阈值触发，批量清理 CLOSED 状态记录 removed={} remaining={}",
+                    removed, coordinationRecords.size());
+        }
+
         return report;
     }
 

@@ -111,20 +111,29 @@ public class OfflineAlarmCache {
         }
 
         int successCount = 0;
+        int consecutiveFailures = 0;
+        int maxConsecutiveFailures = 10;
         OfflineAlarmEvent event;
         while ((event = queue.poll()) != null) {
             try {
                 AlarmEvent alarmEvent = convertToAlarmEvent(event);
                 target.store(alarmEvent);
                 successCount++;
+                consecutiveFailures = 0;
             } catch (Exception e) {
                 log.error("离线报警上传失败: deviceId={} eventType={}",
                         event.deviceId, event.eventType, e);
                 // 上传失败的事件重新放回队列，等待下次重试
                 queue.offer(event);
+                consecutiveFailures++;
+                if (consecutiveFailures >= maxConsecutiveFailures) {
+                    log.warn("连续上传失败 {} 次，停止本次批量上传，剩余 {} 条事件未上传",
+                            consecutiveFailures, queue.size());
+                    break;
+                }
             }
         }
-        log.info("离线报警批量上传完成: 成功 {} 条", successCount);
+        log.info("离线报警批量上传完成: 成功 {} 条，剩余未上传 {} 条", successCount, queue.size());
         return successCount;
     }
 
