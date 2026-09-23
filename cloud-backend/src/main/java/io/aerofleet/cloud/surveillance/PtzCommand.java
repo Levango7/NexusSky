@@ -94,7 +94,7 @@ public class PtzCommand {
         if (cmd == null || cmd.isBlank()) {
             throw new IllegalArgumentException("cmd must not be blank");
         }
-        return switch (cmd.toLowerCase()) {
+        return switch (cmd.toLowerCase(java.util.Locale.ROOT)) {
             case "up" -> continuous(Direction.UP);
             case "down" -> continuous(Direction.DOWN);
             case "left" -> continuous(Direction.LEFT);

@@ -124,7 +124,7 @@ public class OneClickEmergencyResponse {
         cmd.assignDrones(new java.util.LinkedHashSet<>(drones));
 
         EmergencyCommand.DeploymentPlan plan = new EmergencyCommand.DeploymentPlan(
-                "auto-" + cmd.getIncidentType().name().toLowerCase(),
+                "auto-" + cmd.getIncidentType().name().toLowerCase(java.util.Locale.ROOT),
                 preset.strategy,
                 preset.estimatedDurationMin,
                 preset.communicationRelay);

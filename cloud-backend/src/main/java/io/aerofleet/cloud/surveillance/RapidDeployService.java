@@ -134,10 +134,10 @@ public class RapidDeployService {
         if (vendorFilter == null || vendorFilter.isBlank()) {
             return all;
         }
-        String filter = vendorFilter.trim().toUpperCase();
+        String filter = vendorFilter.trim().toUpperCase(java.util.Locale.ROOT);
         List<DeployResult> filtered = new ArrayList<>();
         for (DeployResult r : all) {
-            if (r.getVendor() != null && r.getVendor().toUpperCase().equals(filter)) {
+            if (r.getVendor() != null && r.getVendor().toUpperCase(java.util.Locale.ROOT).equals(filter)) {
                 filtered.add(r);
             }
         }

@@ -35,10 +35,18 @@ public class SurveillanceDeviceRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(SurveillanceDeviceRegistry.class);
 
-    @Autowired(required = false)
     private SurveillanceDeviceRepository repository;
 
     private final Map<String, SurveillanceDevice> devices = new ConcurrentHashMap<>();
+
+    public SurveillanceDeviceRegistry() {
+        this.repository = null;
+    }
+
+    @Autowired
+    public SurveillanceDeviceRegistry(@Autowired(required = false) SurveillanceDeviceRepository repository) {
+        this.repository = repository;
+    }
 
     /**
      * 启动时从数据库加载设备到内存缓存。
