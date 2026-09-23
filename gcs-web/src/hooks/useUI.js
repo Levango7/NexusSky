@@ -31,7 +31,7 @@ export const VIEW_PANEL_MAP = {
   delivery: 'mission',     // 物流配送归入任务范畴（千元级可用）
   show: 'formation',       // 编队表演归入编队范畴（千元级可用）
   disastercomm: 'mesh',    // 灾害通信归入通信范畴（千元级可用）
-  unifiedcmd: 'emergency',  // 空地指挥归入应急范畴（千元级可用）
+  unifiedcmd: 'unifiedcmd',  // 空地指挥独立面板（千元级可用）
   tenants: 'status',       // 租户管理归入状态管理（百元级可用）
   users: 'status',         // 用户管理归入状态管理（百元级可用）
 }

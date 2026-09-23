@@ -91,6 +91,7 @@ public final class LoRaTransportAdapter implements AutoCloseable {
         }
     }
 
+    private final Object channelKey;
     private final LoRaAirChannel channel;
     private final int sourceId;
     private final ConcurrentLinkedQueue<Consumer<MavlinkFrame>> frameListeners = new ConcurrentLinkedQueue<>();
@@ -101,8 +102,9 @@ public final class LoRaTransportAdapter implements AutoCloseable {
     /** 帧序号生成器，0-255 循环。 */
     private final AtomicInteger frameIdSeq = new AtomicInteger(0);
 
-    /** 重组缓冲：frameId → 分片数组（按 fragIndex 槽位存放）。 */
-    private final ConcurrentHashMap<Integer, byte[][]> reassemblyBuffer = new ConcurrentHashMap<>();
+    /** 重组缓冲：frameId → 分片数组（按 fragIndex 槽位存放）。使用 LinkedHashMap 保持插入顺序，淘汰最旧帧。 */
+    private final java.util.Map<Integer, byte[][]> reassemblyBuffer =
+            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>());
 
     /** 累计发送帧数。 */
     private final AtomicInteger totalSentFrames = new AtomicInteger(0);
@@ -122,6 +124,7 @@ public final class LoRaTransportAdapter implements AutoCloseable {
             throw new IllegalArgumentException("channelKey must not be null");
         }
         this.sourceId = sourceId;
+        this.channelKey = channelKey;
         this.channel = CHANNELS.computeIfAbsent(channelKey, k -> new LoRaAirChannel());
         this.receiveQueue = channel.subscribe(sourceId);
         this.receiveThread = new Thread(this::receiveLoop, "lora-budget-recv-" + sourceId);
@@ -325,11 +328,11 @@ public final class LoRaTransportAdapter implements AutoCloseable {
                 SimLog.warn("LoRaBudget reassemble: total mismatch for frameId=" + frameId
                         + " reinitializing");
             }
-            // 检查缓冲上限
+            // 检查缓冲上限：淘汰最旧帧（LinkedHashMap 按插入顺序迭代）
             if (reassemblyBuffer.size() >= MAX_REASSEMBLY_FRAMES) {
-                Integer oldest = reassemblyBuffer.keys().nextElement();
+                Integer oldest = reassemblyBuffer.keySet().iterator().next();
                 reassemblyBuffer.remove(oldest);
-                SimLog.warn("LoRaBudget reassemble: buffer full, evicted frameId=" + oldest);
+                SimLog.warn("LoRaBudget reassemble: buffer full, evicted oldest frameId=" + oldest);
             }
             frags = new byte[total][];
             reassemblyBuffer.put(frameId, frags);
@@ -363,8 +366,18 @@ public final class LoRaTransportAdapter implements AutoCloseable {
     public void close() {
         running = false;
         receiveThread.interrupt();
+        // M4: join 等待接收线程退出，防止线程仍在运行时资源被释放
+        try {
+            receiveThread.join(2000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         channel.unsubscribe(sourceId, receiveQueue);
         reassemblyBuffer.clear();
+        // C2: 当最后一个订阅者退出后，从静态 CHANNELS 中移除该 channel 条目，防止内存泄漏
+        if (channel.subscriberCount() == 0) {
+            CHANNELS.remove(channelKey, channel);
+        }
         SimLog.info("LoRaTransportAdapter (budget) closed: sourceId=" + sourceId);
     }
 

@@ -52,6 +52,7 @@ public final class EspNowTransport implements AutoCloseable {
     /** 信道标识符 → 共享 ESP-NOW 广播信道的全局映射。 */
     private static final ConcurrentHashMap<Object, EspNowChannel> CHANNELS = new ConcurrentHashMap<>();
 
+    private final Object channelKey;
     private final EspNowChannel channel;
     private final int sourceId;
     private final ConcurrentLinkedQueue<Consumer<MavlinkFrame>> frameListeners = new ConcurrentLinkedQueue<>();
@@ -77,12 +78,15 @@ public final class EspNowTransport implements AutoCloseable {
             throw new IllegalArgumentException("channelKey must not be null");
         }
         this.sourceId = sourceId;
+        this.channelKey = channelKey;
         this.channel = CHANNELS.computeIfAbsent(channelKey, k -> new EspNowChannel());
-        // 检查节点数限制
+        // 检查节点数限制：超限时拒绝加入
         if (channel.subscriberCount() >= MAX_NODES) {
             this.totalNodeLimitRejects.incrementAndGet();
             SimLog.warn("EspNowTransport: node limit (" + MAX_NODES + ") reached, "
-                    + "new node " + sourceId + " may experience degraded performance");
+                    + "new node " + sourceId + " rejected");
+            throw new IllegalStateException("EspNowTransport: node limit (" + MAX_NODES
+                    + ") reached, cannot join channel");
         }
         this.receiveQueue = channel.subscribe(sourceId);
         this.receiveThread = new Thread(this::receiveLoop, "espnow-recv-" + sourceId);
@@ -210,7 +214,17 @@ public final class EspNowTransport implements AutoCloseable {
     public void close() {
         running = false;
         receiveThread.interrupt();
+        // M4: join 等待接收线程退出，防止线程仍在运行时资源被释放
+        try {
+            receiveThread.join(2000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         channel.unsubscribe(sourceId, receiveQueue);
+        // C1: 当最后一个订阅者退出后，从静态 CHANNELS 中移除该 channel 条目，防止内存泄漏
+        if (channel.subscriberCount() == 0) {
+            CHANNELS.remove(channelKey, channel);
+        }
         SimLog.info("EspNowTransport closed: sourceId=" + sourceId);
     }
 

@@ -2,6 +2,7 @@ package io.aerofleet.mavlink.messages;
 
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.PayloadCodec;
+import io.aerofleet.mavlink.enums.BuzzerPattern;
 
 import java.nio.ByteBuffer;
 
@@ -33,11 +34,40 @@ public final class BuzzerControlMsg extends MavlinkMessage {
     public final int durationSec;    // 0=持续到关机
 
     public BuzzerControlMsg(int sysid, boolean on, int pattern, int volume, int durationSec) {
+        validateVolume(volume);
+        validatePattern(pattern);
         this.sysid = sysid;
         this.on = on;
         this.pattern = pattern;
         this.volume = volume;
         this.durationSec = durationSec;
+    }
+
+    /**
+     * 验证 volume 范围（0-100）。
+     *
+     * @param volume 音量等级
+     * @throws IllegalArgumentException 如果 volume 超出 0-100 范围
+     */
+    private static void validateVolume(int volume) {
+        if (volume < 0 || volume > 100) {
+            throw new IllegalArgumentException(
+                    "volume must be in range [0, 100], got: " + volume);
+        }
+    }
+
+    /**
+     * 验证 pattern 值是否在 BuzzerPattern 枚举的有效范围内。
+     *
+     * @param pattern 报警模式枚举序号
+     * @throws IllegalArgumentException 如果 pattern 超出有效枚举范围
+     */
+    private static void validatePattern(int pattern) {
+        int maxOrdinal = BuzzerPattern.values().length - 1;
+        if (pattern < 0 || pattern > maxOrdinal) {
+            throw new IllegalArgumentException(
+                    "pattern must be in range [0, " + maxOrdinal + "], got: " + pattern);
+        }
     }
 
     @Override
@@ -47,6 +77,8 @@ public final class BuzzerControlMsg extends MavlinkMessage {
 
     @Override
     public byte[] encode() {
+        validateVolume(volume);
+        validatePattern(pattern);
         byte[] buf = PayloadCodec.alloc(LEN);
         PayloadCodec.putU8(buf, 0, sysid);
         PayloadCodec.putU8(buf, 1, on ? 1 : 0);
@@ -59,10 +91,12 @@ public final class BuzzerControlMsg extends MavlinkMessage {
 
     public static BuzzerControlMsg decode(MavlinkFrame f) {
         ByteBuffer b = le(f.getPayload());
+        int pattern = PayloadCodec.u8(b, 2);
+        validatePattern(pattern);
         return new BuzzerControlMsg(
                 PayloadCodec.u8(b, 0),
                 PayloadCodec.u8(b, 1) != 0,
-                PayloadCodec.u8(b, 2),
+                pattern,
                 PayloadCodec.u8(b, 3),
                 PayloadCodec.u16(b, 4));
     }

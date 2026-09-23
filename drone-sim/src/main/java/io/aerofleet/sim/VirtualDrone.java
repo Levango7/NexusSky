@@ -396,6 +396,34 @@ public final class VirtualDrone implements AutoCloseable {
             this.budgetThermalSource = null;
             this.opticalFlowSource = null;
             SimLog.info("Budget mode: advanced (all sensors)");
+        } else if (BudgetMode.EMERGENCY_TOY == budgetMode) {
+            // EMERGENCY_TOY 模式（百元级灾害应急）：超声波避障 + 红外阵列热源 + 光流定位
+            // 与 TOY 模式类似但适配灾区断网、废墟飞行、搜救信号等应急场景
+            // 传感器配置：HC-SR04 超声波(2m) + AMG8833 红外阵列 + 光流定位（无GPS）
+            // 通信方式：WiFi ESP-NOW Mesh（由 BudgetMeshRouter 管理）
+            this.ultrasonicSource = new UltrasonicSource();
+            this.budgetThermalSource = new BudgetThermalSource();
+            this.opticalFlowSource = new OpticalFlowSource();
+            // 自动装配：ObstacleDetector 使用超声波作为 DepthSource
+            // safety=2.0m, emergency=0.5m（适配 HC-SR04 超声波 2m 量程）
+            this.depthSource = this.ultrasonicSource;
+            this.obstacleDetector = new ObstacleDetector(this.ultrasonicSource, 2.0, 0.5);
+            this.thermalSource = this.budgetThermalSource;
+            SimLog.info("Budget mode: emergency-toy (ultrasonic+opticalflow+budget-thermal, ESP-NOW mesh)");
+        } else if (BudgetMode.EMERGENCY_STANDARD == budgetMode) {
+            // EMERGENCY_STANDARD 模式（千元级灾害应急）：超声波避障 + 红外阵列热源
+            // 与 STANDARD 模式类似但适配灾区 LoRa Mesh 5km 通信
+            // 传感器配置：VL53L0X ToF(4m) + AMG8833 8×8 红外阵列 + NEO-M8N GPS
+            // 通信方式：LoRa Mesh 5km（由 BudgetMeshRouter 管理）
+            this.ultrasonicSource = new UltrasonicSource();
+            this.budgetThermalSource = new BudgetThermalSource();
+            this.opticalFlowSource = null;
+            // 自动装配：ObstacleDetector 使用超声波作为 DepthSource
+            // safety=4.0m, emergency=1.0m（适配 VL53L0X ToF 4m 量程，比 TOY/STANDARD 更远）
+            this.depthSource = this.ultrasonicSource;
+            this.obstacleDetector = new ObstacleDetector(this.ultrasonicSource, 4.0, 1.0);
+            this.thermalSource = this.budgetThermalSource;
+            SimLog.info("Budget mode: emergency-standard (ultrasonic+budget-thermal+GPS+LoRa mesh)");
         } else {
             // null = 完整版（既有行为不变，DFX 4.5）
             this.ultrasonicSource = null;

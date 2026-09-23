@@ -13,6 +13,9 @@ import {
   triggerEmergencyResponse,
   listLinkageLogs,
   alarmStreamUrl,
+  getAirGroundSituation,
+  triggerReconFromAlarm,
+  triggerPtzTracking,
 } from '../api.js'
 
 // 空地一体化应急指挥面板（UnifiedCommandPanel）
@@ -402,6 +405,23 @@ export default function UnifiedCommandPanel() {
     return () => { cancelled = true; clearInterval(timer) }
   }, [])
 
+  // ===== 轮询空地态势融合数据 =====
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const data = await getAirGroundSituation()
+        if (cancelled) return
+        setAirGroundSituation(data)
+      } catch (e) {
+        // 静默失败
+      }
+    }
+    load()
+    const timer = setInterval(load, POLL_MS)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [])
+
   // ===== 加载场景预设 =====
   useEffect(() => {
     let cancelled = false
@@ -546,6 +566,33 @@ export default function UnifiedCommandPanel() {
       setError('应急响应触发失败：' + e.message)
     } finally {
       setResponding(false)
+    }
+  }, [])
+
+  // ===== 报警触发无人机侦察 =====
+  const handleTriggerRecon = useCallback(async (eventId) => {
+    setResponding(true)
+    setError(null)
+    try {
+      await triggerReconFromAlarm(eventId)
+      setAlarmEvents((prev) => prev.map((e) => ((e.id || e.eventId) === eventId ? { ...e, reconTriggered: true } : e)))
+    } catch (e) {
+      setError('触发无人机侦察失败：' + e.message)
+    } finally {
+      setResponding(false)
+    }
+  }, [])
+
+  // ===== PTZ 自动跟踪联动 =====
+  const handleTriggerPtzTracking = useCallback(async (deviceId, targetLat, targetLon) => {
+    setPtzBusy(true)
+    setError(null)
+    try {
+      await triggerPtzTracking(deviceId, { targetLat, targetLon })
+    } catch (e) {
+      setError('PTZ 跟踪联动失败：' + e.message)
+    } finally {
+      setPtzBusy(false)
     }
   }, [])
 
@@ -780,6 +827,21 @@ export default function UnifiedCommandPanel() {
                   </button>
                 ))}
               </div>
+              {/* PTZ 自动跟踪联动按钮 */}
+              <button
+                onClick={() => handleTriggerPtzTracking(selectedSurvDeviceId, centerLat, centerLon)}
+                disabled={ptzBusy}
+                title="PTZ 自动跟踪检测目标"
+                style={{
+                  width: '100%', height: 22, fontSize: 9, marginTop: 4,
+                  cursor: ptzBusy ? 'not-allowed' : 'pointer',
+                  border: '1px solid var(--cyan)', background: 'var(--bg-3)',
+                  color: ptzBusy ? 'var(--dim)' : 'var(--cyan)', borderRadius: 3,
+                  opacity: ptzBusy ? 0.5 : 1,
+                }}
+              >
+                PTZ 跟踪联动
+              </button>
             </div>
           )}
         </div>
@@ -989,6 +1051,19 @@ export default function UnifiedCommandPanel() {
                           >
                             应急响应
                           </button>
+                          <button
+                            onClick={(ev) => { ev.stopPropagation(); handleTriggerRecon(eid) }}
+                            disabled={responding}
+                            style={{
+                              ...miniBtnStyle, fontSize: 9, padding: '1px 6px',
+                              border: '1px solid var(--cyan)',
+                              color: responding ? 'var(--dim)' : 'var(--cyan)',
+                              cursor: responding ? 'not-allowed' : 'pointer',
+                              opacity: responding ? 0.5 : 1,
+                            }}
+                          >
+                            触发侦察
+                          </button>
                         </div>
                       )}
                     </div>
@@ -1061,7 +1136,7 @@ export default function UnifiedCommandPanel() {
           <span style={{ fontSize: 9, color: 'var(--dim-2)' }}>半径(km)</span>
           <input
             type="number" step="0.1" min="0" value={radiusKm}
-            onChange={(e) => setRadiusKm(e.target.value)}
+            onChange={(e) => setRadiusKm(Number(e.target.value))}
             style={{ width: 60, padding: '3px 5px', fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--text)', background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 3, outline: 'none' }}
           />
         </label>
@@ -1269,6 +1344,85 @@ export default function UnifiedCommandPanel() {
           </div>
         </div>
       </div>
+
+      {/* ===== 空地态势融合数据展示 ===== */}
+      {airGroundSituation && (
+        <div style={{ ...cardStyle, padding: 8 }}>
+          <div style={labelStyle}>空地协同态势</div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr 1fr',
+            gap: 8,
+            marginTop: 4,
+          }}>
+            {/* 地面人员/设备位置 */}
+            <div>
+              <div style={{ fontSize: 9, color: 'var(--ok)', fontWeight: 'bold', marginBottom: 2 }}>地面单位</div>
+              {(airGroundSituation.groundUnits || airGroundSituation.groundPersonnel || []).length === 0 ? (
+                <div style={{ fontSize: 9, color: 'var(--dim-2)' }}>暂无地面单位</div>
+              ) : (
+                (airGroundSituation.groundUnits || airGroundSituation.groundPersonnel || []).slice(0, 5).map((u, i) => (
+                  <div key={u.id || i} style={{
+                    fontSize: 9, color: 'var(--dim)', padding: '2px 4px',
+                    borderBottom: '1px solid var(--line-2)',
+                    display: 'flex', justifyContent: 'space-between',
+                  }}>
+                    <span>{u.name || u.unitName || u.id || '--'}</span>
+                    <span style={{ color: u.status === 'active' || u.online ? 'var(--ok)' : 'var(--dim-2)' }}>
+                      {u.status || (u.online ? '在线' : '离线')}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* 空中无人机状态 */}
+            <div>
+              <div style={{ fontSize: 9, color: 'var(--cyan)', fontWeight: 'bold', marginBottom: 2 }}>空中单位</div>
+              {(airGroundSituation.aerialUnits || airGroundSituation.drones || []).length === 0 ? (
+                <div style={{ fontSize: 9, color: 'var(--dim-2)' }}>暂无空中单位</div>
+              ) : (
+                (airGroundSituation.aerialUnits || airGroundSituation.drones || []).slice(0, 5).map((u, i) => {
+                  const sysid = u.sysid || u.id || i
+                  const status = String(u.status || u.state || (u.online ? 'ONLINE' : 'OFFLINE')).toUpperCase()
+                  const statusColor = DRONE_STATUS_COLOR[status] || (u.online ? 'var(--ok)' : 'var(--dim)')
+                  return (
+                    <div key={sysid} style={{
+                      fontSize: 9, color: 'var(--dim)', padding: '2px 4px',
+                      borderBottom: '1px solid var(--line-2)',
+                      display: 'flex', justifyContent: 'space-between',
+                    }}>
+                      <span>UAV-{sysid}</span>
+                      <span style={{ color: statusColor }}>{status}</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            {/* 协同任务列表 */}
+            <div>
+              <div style={{ fontSize: 9, color: 'var(--warn)', fontWeight: 'bold', marginBottom: 2 }}>协同任务</div>
+              {(airGroundSituation.coordinationTasks || airGroundSituation.tasks || []).length === 0 ? (
+                <div style={{ fontSize: 9, color: 'var(--dim-2)' }}>暂无协同任务</div>
+              ) : (
+                (airGroundSituation.coordinationTasks || airGroundSituation.tasks || []).slice(0, 5).map((t, i) => (
+                  <div key={t.id || t.taskId || i} style={{
+                    fontSize: 9, color: 'var(--dim)', padding: '2px 4px',
+                    borderBottom: '1px solid var(--line-2)',
+                    display: 'flex', justifyContent: 'space-between',
+                  }}>
+                    <span>{t.name || t.description || t.type || '--'}</span>
+                    <span style={{ color: t.status === 'COMPLETED' || t.status === 'DONE' ? 'var(--ok)' : t.status === 'FAILED' ? 'var(--crit)' : 'var(--cyan)' }}>
+                      {t.status || t.state || '--'}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== 联动日志（最新 5 条） ===== */}
       {linkageLogs.length > 0 && (
