@@ -8,7 +8,12 @@
 # 所有 docker-compose / k8s probe / helm probe 统一引用该端点。
 
 # ===== 阶段 1：Maven 构建 =====
-FROM eclipse-temurin:17-jdk AS builder
+# 2026-09-22 修复：原基础镜像 `eclipse-temurin:17-jdk` **不含 Maven**，
+# 构建阶段 `mvn` 以 **exit code 127（command not found）** 失败，
+# 与 Dockerfile.sim 同一根因（详见该文件注释）。
+# 改用 Maven 官方镜像 maven:3.9-eclipse-temurin-17（含 Maven + JDK 17），
+# 标签经 docker-library/repo-info 核实存在。
+FROM maven:3.9-eclipse-temurin-17 AS builder
 WORKDIR /build
 
 # 先拷 pom 与子模块 pom，利用层缓存加速依赖解析
