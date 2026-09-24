@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -36,7 +37,11 @@ public class TenantInterceptor implements HandlerInterceptor {
     private final int rateLimitPerMinute;
     private final ObjectMapper objectMapper;
 
-    /** 租户限流计数器：tenantId → [windowStartMs, count] */
+    /** 分布式限流器（Redis 可用时启用，不可用时为 null，回退到内存限流） */
+    @Autowired(required = false)
+    private RedisRateLimiter redisRateLimiter;
+
+    /** 租户限流计数器：tenantId → [windowStartMs, count]（内存 fallback） */
     private final ConcurrentHashMap<String, RateWindow> rateWindows = new ConcurrentHashMap<>();
 
     public TenantInterceptor(@Value("${aerofleet.security.dev-mode:true}") boolean devMode,
@@ -98,9 +103,22 @@ public class TenantInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 滑动窗口限流：每分钟重置计数。
+     * 限流校验：优先使用 Redis 分布式限流，Redis 不可用时回退到内存滑动窗口限流。
      */
     private boolean checkRateLimit(String tenantId) {
+        // 优先使用 Redis 分布式限流（多实例共享计数）
+        if (redisRateLimiter != null) {
+            return redisRateLimiter.tryAcquire(tenantId, rateLimitPerMinute);
+        }
+
+        // 回退到内存滑动窗口限流（单机模式）
+        return checkRateLimitInMemory(tenantId);
+    }
+
+    /**
+     * 内存滑动窗口限流：每分钟重置计数（fallback）。
+     */
+    private boolean checkRateLimitInMemory(String tenantId) {
         long now = System.currentTimeMillis();
         RateWindow window = rateWindows.computeIfAbsent(tenantId, k -> new RateWindow(now));
 

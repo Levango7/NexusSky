@@ -3,6 +3,7 @@ package io.aerofleet.cloud.metrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.actuate.autoconfigure.metrics.MeterRegistryCustomizer;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -31,5 +32,17 @@ public class MetricsConfig {
             @Value("${spring.application.name:aerofleet-cloud}") String appName,
             @Value("${aerofleet.instance-id:unknown}") String instanceId) {
         return registry -> registry.config().commonTags("app", appName, "instance", instanceId);
+    }
+
+    /**
+     * 注册 API 计量 Filter，设置 order=1 确保最先执行。
+     *
+     * @param apiMetricsFilter 由 {@link ApiMetricsFilter @Component} 自动注入
+     */
+    @Bean
+    FilterRegistrationBean<ApiMetricsFilter> apiMetricsFilterRegistration(ApiMetricsFilter apiMetricsFilter) {
+        FilterRegistrationBean<ApiMetricsFilter> registration = new FilterRegistrationBean<>(apiMetricsFilter);
+        registration.setOrder(1);
+        return registration;
     }
 }

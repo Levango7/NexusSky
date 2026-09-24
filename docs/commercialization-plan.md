@@ -647,13 +647,13 @@ MetricsCollector
 | ~~2~~ | ~~License 签名弱~~ | ✅ 已修复：RSA签名 + 旧Base64兼容 | — | ~~P0~~ | ~~2 人周~~ |
 | ~~3~~ | ~~数据无租户隔离~~ | ✅ 已修复：5域(Formation/Orch/Surveillance/Mapping/Show/Delivery)添加tenantId + 租户过滤 | — | ~~P0~~ | ~~5 人周~~ |
 | ~~4~~ | ~~API 路径不统一~~ | ✅ 已修复：api.js BASE 变量 `/api/v1` | — | ~~P0~~ | ~~1 人周~~ |
-| 5 | **无 API 计量采集** | 无调用统计 | 无法按量计费 | P1 | 2 人周 |
-| 6 | **限流单机内存** | ConcurrentHashMap | 多实例不共享 | P1 | 2 人周 |
-| 7 | **无 Webhook 机制** | 仅 SSE 轮询 | 客户集成不便 | P1 | 2 人周 |
+| ~~5~~ | ~~无 API 计量采集~~ | ✅ 已修复：ApiMetricsFilter(OncePerRequestFilter) + MetricsConfig FilterRegistrationBean | — | ~~P1~~ | ~~2 人周~~ |
+| ~~6~~ | ~~限流单机内存~~ | ✅ 已修复：RedisRateLimiter(Redis INCR+EXPIRE) + TenantInterceptor @Autowired(required=false) 无Redis回退内存 | — | ~~P1~~ | ~~2 人周~~ |
+| ~~7~~ | ~~无 Webhook 机制~~ | ✅ 已修复：WebhookEntity+Repository+Service+Controller + V17迁移 + tenantId隔离 | — | ~~P1~~ | ~~2 人周~~ |
 | ~~8~~ | ~~持久化缺失~~ | ✅ 已修复：SprayTaskEntity/DeliverySequenceEntity新建 + FormationService改为Repository持久化 + V12-V16迁移 | — | ~~P0~~ | ~~5 人周~~ |
-| 9 | **无 OpenAPI 规范导出** | Swagger UI 有但无 spec 导出 | SDK 自动生成困难 | P1 | 1 人周 |
+| ~~9~~ | ~~无 OpenAPI 规范导出~~ | ✅ 已修复：OpenApiConfig ApiKeyAuth安全方案 + OpenApiExportController(json/yaml导出) + application-prod.properties | — | ~~P1~~ | ~~1 人周~~ |
 | 10 | **MAVLink 签名未实现** | 明文通信 | 安全合规风险 | P2 | 2 人周 |
-| 11 | **无 SDK 包发布** | 无 Maven/PyPI 包 | 客户集成门槛高 | P1 | 3 人周 |
+| ~~11~~ | ~~无 SDK 包发布~~ | ✅ 已修复：sdk-java(NexusSkyClient JDK HttpClient) + sdk-python(aerofleet_sdk包) 骨架 | — | ~~P1~~ | ~~3 人周~~ |
 | 12 | **JWT 对称签名** | HMAC-SHA256 | 多实例密钥共享风险 | P2 | 1 人周 |
 
 #### 4.1.1 已解决差距
@@ -667,6 +667,11 @@ MetricsCollector
 | 3 | **数据无租户隔离** | 5业务域(Formation/Orchestration/Surveillance/Mapping/Show/Delivery2)添加tenantId + Repository查询方法 + Service层租户过滤 + V12/V14/V15/V16迁移 | b65b582 |
 | 4 | **API 路径不统一** | api.js BASE 变量 `/api/v1/v1` → `/api/v1` | f794588 |
 | 8 | **持久化缺失** | SprayTaskEntity+Repository/DeliverySequenceEntity+Repository新建 + FormationService改为Repository持久化 + SprayTaskService/DeliveryService改为混合模式(缓存+Repository) + V12/V13迁移 | b65b582 |
+| 5 | **无 API 计量采集** | ApiMetricsFilter(OncePerRequestFilter Counter/Timer) + MetricsConfig FilterRegistrationBean | (本轮提交) |
+| 6 | **限流单机内存** | RedisRateLimiter(Redis INCR+EXPIRE滑动窗口) + TenantInterceptor @Autowired(required=false) 无Redis回退内存 | (本轮提交) |
+| 7 | **无 Webhook 机制** | WebhookEntity+Repository+Service+Controller(POST/GET/DELETE /api/v1/webhooks) + V17迁移 + tenantId隔离 | (本轮提交) |
+| 9 | **无 OpenAPI 规范导出** | OpenApiConfig ApiKeyAuth安全方案 + OpenApiExportController(json/yaml导出) + application-prod.properties启用api-docs | (本轮提交) |
+| 11 | **无 SDK 包发布** | sdk-java(NexusSkyClient JDK HttpClient + ApiKey认证) + sdk-python(aerofleet_sdk包) 骨架 | (本轮提交) |
 | P3-1 | **动态 MAX_HOPS 集成** | Mesh 组网支持动态调整最大跳数，适应不同网络拓扑 | 93b1058 |
 | P3-2 | **真实卫星接入预留** | 卫星中继模块预留真实硬件接入接口，支持后续对接真实卫星链路 | 93b1058 |
 
@@ -679,12 +684,12 @@ MetricsCollector
 4. ✅ API 路径统一（1 人周）— commit f794588
 5. ✅ 持久化（5 人周）— commit b65b582
 
-**P1（商用后 1-2 月内完成，约 10 人周）**：
-6. API 计量采集（2 人周）
-7. 分布式限流（2 人周）
-8. Webhook 机制（2 人周）
-9. OpenAPI spec 导出（1 人周）
-10. SDK 包发布（3 人周）
+**P1（商用后 1-2 月内完成，约 10 人周 ✅ 全部完成）**：
+6. ✅ API 计量采集（2 人周）— ApiMetricsFilter + MetricsConfig
+7. ✅ 分布式限流（2 人周）— RedisRateLimiter + TenantInterceptor 回退机制
+8. ✅ Webhook 机制（2 人周）— WebhookEntity/Repository/Service/Controller + V17迁移
+9. ✅ OpenAPI spec 导出（1 人周）— OpenApiConfig + OpenApiExportController
+10. ✅ SDK 包发布（3 人周）— sdk-java + sdk-python 骨架
 
 **P2（商用后 3-6 月内完成，约 3 人周）**：
 11. MAVLink 签名（2 人周）
