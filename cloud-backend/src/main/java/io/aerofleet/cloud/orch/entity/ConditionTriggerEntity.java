@@ -48,6 +48,10 @@ public class ConditionTriggerEntity {
 
     private Long targetPlanId;
 
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     /** JPA 无参构造器（必需）。 */
     public ConditionTriggerEntity() {
     }
@@ -106,5 +110,13 @@ public class ConditionTriggerEntity {
 
     public void setTargetPlanId(Long targetPlanId) {
         this.targetPlanId = targetPlanId;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Integer tenantId) {
+        this.tenantId = tenantId;
     }
 }

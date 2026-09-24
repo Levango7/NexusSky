@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.alarm;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -96,6 +97,9 @@ public class AlarmEvent {
     private long timestampMs;
     /** 是否已被确认。 */
     private volatile boolean acknowledged;
+    /** 租户 ID（用于租户隔离，null 表示全局管理员或未设置）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
 
     /** JPA 无参构造器。 */
     public AlarmEvent() {
@@ -248,6 +252,14 @@ public class AlarmEvent {
 
     public void setAcknowledged(boolean acknowledged) {
         this.acknowledged = acknowledged;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Integer tenantId) {
+        this.tenantId = tenantId;
     }
 
     /** 标记事件为已确认。 */

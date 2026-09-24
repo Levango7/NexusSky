@@ -3,6 +3,7 @@ package io.aerofleet.cloud.delivery2;
 import java.time.Instant;
 
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -54,6 +55,10 @@ public class DeliveryTask2 {
     private Instant estimatedDeliveryTime;
     private Instant actualDeliveryTime;
     private double routeDistanceKm;
+
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
 
     public DeliveryTask2() {
     }
@@ -194,5 +199,13 @@ public class DeliveryTask2 {
 
     public void setRouteDistanceKm(double routeDistanceKm) {
         this.routeDistanceKm = routeDistanceKm;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Integer tenantId) {
+        this.tenantId = tenantId;
     }
 }

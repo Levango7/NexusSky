@@ -5,6 +5,7 @@ import io.aerofleet.cloud.api.pusher.EmergencyOrchPusher;
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.orch.event.EmergencyStartEvent;
 import io.aerofleet.cloud.orch.event.EmergencyEndEvent;
+import io.aerofleet.cloud.security.TenantContext;
 import io.aerofleet.mavlink.messages.CoverageOptimizationMsg;
 import io.aerofleet.mavlink.messages.EmergencyMissionPlanMsg;
 import io.aerofleet.mavlink.messages.EmergencyPriorityMsg;
@@ -40,6 +41,8 @@ public class EmergencyOrchService {
 
     /** 编排计划状态：planId → plan 状态 map。 */
     private final ConcurrentHashMap<Long, Map<String, Object>> plans = new ConcurrentHashMap<>();
+    /** planId → tenantId（租户隔离映射）。 */
+    private final Map<Long, Integer> planTenantMap = new ConcurrentHashMap<>();
     /** planId 生成器起始值。 */
     private static final long PLAN_ID_START = 10000L;
     /** 默认优先级（常规）。 */
@@ -84,6 +87,10 @@ public class EmergencyOrchService {
         Map<String, Object> plan = newPlanMap(planId, scenarioType, centerLat, centerLon, radius,
                 droneIds, now);
         plans.put(planId, plan);
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null) {
+            planTenantMap.put(planId, tenantId);
+        }
         log.info("emergency plan started: planId={} scenario={} drones={} radius={}m",
                 planId, scenarioName(scenarioType), droneIds.size(), radius);
         pushPlan(planId, plan);
@@ -98,6 +105,9 @@ public class EmergencyOrchService {
      * @return true 若计划存在并已中止
      */
     public boolean abort(long planId) {
+        if (!checkTenantAccess(planId)) {
+            return false;
+        }
         Map<String, Object> plan = plans.get(planId);
         if (plan == null) {
             return false;
@@ -116,6 +126,9 @@ public class EmergencyOrchService {
      * 获取计划状态 map；不存在返回 null。
      */
     public Map<String, Object> getPlan(long planId) {
+        if (!checkTenantAccess(planId)) {
+            return null;
+        }
         return plans.get(planId);
     }
 
@@ -126,6 +139,9 @@ public class EmergencyOrchService {
      * （phases 元素为 ConcurrentHashMap，浅拷贝保留阶段状态的并发更新）。
      */
     public Map<String, Object> getProgress(long planId) {
+        if (!checkTenantAccess(planId)) {
+            return null;
+        }
         Map<String, Object> plan = plans.get(planId);
         if (plan == null) {
             return null;
@@ -143,6 +159,9 @@ public class EmergencyOrchService {
      * 内部 synchronizedList 的保护直接修改内部状态。
      */
     public Map<String, Object> getCoverage(long planId) {
+        if (!checkTenantAccess(planId)) {
+            return null;
+        }
         Map<String, Object> plan = plans.get(planId);
         if (plan == null) {
             return null;
@@ -163,6 +182,9 @@ public class EmergencyOrchService {
      * @return 新 planId，若原计划不存在返回 -1
      */
     public long replan(long planId, String reason) {
+        if (!checkTenantAccess(planId)) {
+            return -1;
+        }
         Map<String, Object> old = plans.get(planId);
         if (old == null) {
             return -1;
@@ -189,6 +211,9 @@ public class EmergencyOrchService {
      * @return 调整结果 map（含 oldPriority/newPriority/preemptedTaskId），若计划不存在返回 null
      */
     public Map<String, Object> adjustPriority(long planId, long taskId, int priority, String reason) {
+        if (!checkTenantAccess(planId)) {
+            return null;
+        }
         Map<String, Object> plan = plans.get(planId);
         if (plan == null) {
             return null;
@@ -245,6 +270,9 @@ public class EmergencyOrchService {
      * 获取优先级队列。
      */
     public Map<String, Object> getPriorityQueue(long planId) {
+        if (!checkTenantAccess(planId)) {
+            return null;
+        }
         Map<String, Object> plan = plans.get(planId);
         if (plan == null) {
             return null;
@@ -441,6 +469,27 @@ public class EmergencyOrchService {
     // =====================================================================
     // 内部辅助
     // =====================================================================
+
+    /**
+     * 验证当前请求的租户是否有权访问指定计划。
+     * <p>
+     * 若当前请求未设置租户上下文（全局管理员），或计划的 tenantId 与当前请求的 tenantId 匹配，则允许访问。
+     * 若计划的 tenantId 为 null（历史数据未分配租户），也允许访问。
+     *
+     * @param planId 编排计划 ID
+     * @return true 若允许访问，false 若拒绝
+     */
+    private boolean checkTenantAccess(long planId) {
+        Integer currentTenantId = TenantContext.getEffectiveTenantId();
+        if (currentTenantId == null) {
+            return true; // 全局管理员，允许访问所有计划
+        }
+        Integer planTenantId = planTenantMap.get(planId);
+        if (planTenantId == null) {
+            return true; // 历史数据未分配租户，允许访问
+        }
+        return currentTenantId.equals(planTenantId);
+    }
 
     /** 创建新计划状态 map。 */
     private Map<String, Object> newPlanMap(long planId, int scenarioType, int centerLat, int centerLon,

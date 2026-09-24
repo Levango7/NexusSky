@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.surveillance;
 
+import io.aerofleet.cloud.security.TenantContext;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,10 +85,12 @@ public class SurveillanceDeviceRegistry {
         if (device == null) {
             throw new IllegalArgumentException("device must not be null");
         }
+        // 设置租户 ID（从当前请求上下文获取）
+        device.tenantId = TenantContext.getEffectiveTenantId();
         devices.put(device.id, device);
         persistDevice(device);
-        log.info("Surveillance device registered: id={} vendor={} ip={}:{}",
-                device.id, device.vendor, device.ip, device.port);
+        log.info("Surveillance device registered: id={} vendor={} ip={}:{} tenantId={}",
+                device.id, device.vendor, device.ip, device.port, device.tenantId);
         return device;
     }
 
@@ -111,38 +114,60 @@ public class SurveillanceDeviceRegistry {
     }
 
     /**
-     * 获取设备。
+     * 获取设备（按租户隔离过滤）。
+     * <p>
+     * 若当前请求的 tenantId 为 null（全局管理员），则不做过滤；
+     * 否则仅返回属于当前租户或未分配租户的设备。
      *
      * @param deviceId 设备 ID
-     * @return 设备；若不存在返回 null
+     * @return 设备；若不存在或不属于当前租户返回 null
      */
     public SurveillanceDevice getDevice(String deviceId) {
         if (deviceId == null) return null;
-        return devices.get(deviceId);
+        SurveillanceDevice device = devices.get(deviceId);
+        if (device == null) return null;
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null) {
+            return device;
+        }
+        if (device.tenantId == null || tenantId.equals(device.tenantId)) {
+            return device;
+        }
+        return null;
     }
 
     /**
-     * 列出所有设备（按 id 字典序排序）。
+     * 列出所有设备（按租户隔离过滤，按 id 字典序排序）。
+     * <p>
+     * 若当前请求的 tenantId 为 null（全局管理员），则返回全部设备；
+     * 否则仅返回属于当前租户或未分配租户的设备。
      *
      * @return 设备列表（不可变副本）
      */
     public List<SurveillanceDevice> listDevices() {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         List<SurveillanceDevice> snapshot = devices.values().stream()
+                .filter(d -> tenantId == null || d.tenantId == null || tenantId.equals(d.tenantId))
                 .sorted(Comparator.comparing(d -> d.id))
                 .collect(Collectors.toCollection(ArrayList::new));
         return Collections.unmodifiableList(snapshot);
     }
 
     /**
-     * 按厂商筛选设备。
+     * 按厂商筛选设备（按租户隔离过滤）。
+     * <p>
+     * 若当前请求的 tenantId 为 null（全局管理员），则不做租户过滤；
+     * 否则仅返回属于当前租户或未分配租户的设备。
      *
      * @param vendor 厂商
-     * @return 该厂商的所有设备列表
+     * @return 该厂商的所有设备列表（当前租户可见）
      */
     public List<SurveillanceDevice> listDevicesByVendor(SurveillanceDevice.Vendor vendor) {
         if (vendor == null) return new ArrayList<>();
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         return devices.values().stream()
                 .filter(d -> d.vendor == vendor)
+                .filter(d -> tenantId == null || d.tenantId == null || tenantId.equals(d.tenantId))
                 .sorted(Comparator.comparing(d -> d.id))
                 .collect(Collectors.toCollection(ArrayList::new));
     }

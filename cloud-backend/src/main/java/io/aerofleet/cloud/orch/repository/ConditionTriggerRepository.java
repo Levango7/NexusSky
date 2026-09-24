@@ -22,4 +22,12 @@ public interface ConditionTriggerRepository extends JpaRepository<ConditionTrigg
      * @return 属于该计划的触发器列表
      */
     List<ConditionTriggerEntity> findByPlanId(Long planId);
+
+    /**
+     * 按租户 ID 查询条件触发器列表。
+     *
+     * @param tenantId 租户 ID
+     * @return 属于该租户的触发器列表
+     */
+    List<ConditionTriggerEntity> findByTenantId(Integer tenantId);
 }

@@ -23,4 +23,12 @@ public interface OrchestrationPlanRepository extends JpaRepository<Orchestration
      * @return 匹配状态的编排计划列表
      */
     List<OrchestrationPlanEntity> findByStatus(PlanStatus status);
+
+    /**
+     * 按租户 ID 查询编排计划列表。
+     *
+     * @param tenantId 租户 ID
+     * @return 属于该租户的编排计划列表
+     */
+    List<OrchestrationPlanEntity> findByTenantId(Integer tenantId);
 }

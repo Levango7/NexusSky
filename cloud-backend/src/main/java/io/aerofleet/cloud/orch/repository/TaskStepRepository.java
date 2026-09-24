@@ -32,4 +32,12 @@ public interface TaskStepRepository extends JpaRepository<TaskStepEntity, Long> 
      * @return 匹配条件的步骤列表
      */
     List<TaskStepEntity> findByPlanIdAndStatus(Long planId, StepStatus status);
+
+    /**
+     * 按租户 ID 查询任务步骤列表。
+     *
+     * @param tenantId 租户 ID
+     * @return 属于该租户的步骤列表
+     */
+    List<TaskStepEntity> findByTenantId(Integer tenantId);
 }

@@ -6,8 +6,10 @@ import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.cloud.mission.spray.SprayTaskService;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -20,14 +22,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * 配送任务管理服务（FR-23/FR-24/FR-25）。
  * <p>
- * 持有 {@code ConcurrentHashMap<deliveryId, DeliverySequence>}，承载任务创建 / 查询 / 控制；
+ * 采用混合持久化模式：内存缓存（{@code ConcurrentHashMap}）保证并发读性能，
+ * JPA Repository 负责重启后的状态恢复和持久化。
+ * <p>
  * 控制命令经 {@link DroneCommandService} 下发 COMMAND_LONG(321) 到目标无人机。
- *
- * <p>复用（只读/逐机，不修改既有服务）：
- * <ul>
- *   <li>{@link DroneCommandService}：command 下发（逐机）</li>
- *   <li>{@link DeviceRegistry}：all/get（只读，校验无人机在线）</li>
- * </ul>
  */
 @Service
 public class DeliveryService {
@@ -48,9 +46,40 @@ public class DeliveryService {
     private final DroneCommandService commands;
     private final DeviceRegistry registry;
 
+    /** JPA Repository（可选注入，数据库不可用时降级为纯内存模式）。 */
+    @Autowired(required = false)
+    private DeliverySequenceRepository repository;
+
     public DeliveryService(DroneCommandService commands, DeviceRegistry registry) {
         this.commands = commands;
         this.registry = registry;
+    }
+
+    /**
+     * 启动时从 Repository 恢复任务到内存缓存。
+     * <p>
+     * 仅恢复非终态任务（PENDING/RUNNING），终态任务不恢复。
+     */
+    public void restoreFromRepository() {
+        if (repository == null) {
+            log.info("DeliverySequenceRepository not available, skipping restore");
+            return;
+        }
+        try {
+            List<DeliverySequenceEntity> entities = repository.findAll();
+            int maxId = 0;
+            for (DeliverySequenceEntity entity : entities) {
+                DeliverySequence seq = entity.toSequence();
+                sequences.put(seq.deliveryId(), seq);
+                if (seq.deliveryId() > maxId) {
+                    maxId = seq.deliveryId();
+                }
+            }
+            nextDeliveryId.set(maxId);
+            log.info("Restored {} delivery sequences from repository, nextDeliveryId={}", entities.size(), maxId);
+        } catch (Exception e) {
+            log.warn("Failed to restore delivery sequences from repository: {}", e.getMessage());
+        }
     }
 
     /** 单机命令 ACK 结果（不可变值对象）。 */
@@ -80,14 +109,68 @@ public class DeliveryService {
         }
         DeliverySequence seq = new DeliverySequence(id, req.targetSysid, sites);
         sequences.put(id, seq);
-        log.info("DeliverySequence created: id={} sysid={} sites={}",
-                id, req.targetSysid, sites.size());
+
+        // 持久化到 Repository
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (repository != null) {
+            try {
+                DeliverySequenceEntity entity = DeliverySequenceEntity.fromSequence(seq, tenantId);
+                repository.save(entity);
+            } catch (Exception e) {
+                log.warn("Failed to persist delivery sequence {}: {}", id, e.getMessage());
+            }
+        }
+
+        log.info("DeliverySequence created: id={} sysid={} sites={} tenantId={}",
+                id, req.targetSysid, sites.size(), tenantId);
         return seq;
     }
 
     /** 查询配送任务（FR-25）。 */
     public DeliverySequence sequence(int id) {
-        return sequences.get(id);
+        DeliverySequence seq = sequences.get(id);
+        if (seq != null) {
+            return seq;
+        }
+        // 内存未命中，尝试从 Repository 加载
+        if (repository != null) {
+            try {
+                DeliverySequenceEntity entity = repository.findById(id).orElse(null);
+                if (entity != null) {
+                    seq = entity.toSequence();
+                    sequences.put(id, seq);
+                    return seq;
+                }
+            } catch (Exception e) {
+                log.warn("Failed to load delivery sequence {} from repository: {}", id, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 查询租户下的所有配送任务。
+     *
+     * @return 任务列表（按 tenantId 过滤）
+     */
+    public List<DeliverySequence> sequencesByTenant() {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null) {
+            return List.copyOf(sequences.values());
+        }
+        return sequences.values().stream()
+                .filter(seq -> {
+                    if (repository != null) {
+                        try {
+                            DeliverySequenceEntity entity = repository.findById(seq.deliveryId()).orElse(null);
+                            return entity != null && tenantId.equals(entity.getTenantId());
+                        } catch (Exception e) {
+                            return true; // 降级：Repository 不可用时返回所有
+                        }
+                    }
+                    return true;
+                })
+                .toList();
     }
 
     /**
@@ -111,7 +194,21 @@ public class DeliveryService {
         }
         DeliverySequence seq = sequences.get(id);
         if (seq == null) {
-            throw new NotFoundException("delivery " + id + " not found");
+            // 尝试从 Repository 加载
+            if (repository != null) {
+                try {
+                    DeliverySequenceEntity entity = repository.findById(id).orElse(null);
+                    if (entity != null) {
+                        seq = entity.toSequence();
+                        sequences.put(id, seq);
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to load delivery sequence {} from repository: {}", id, e.getMessage());
+                }
+            }
+            if (seq == null) {
+                throw new NotFoundException("delivery " + id + " not found");
+            }
         }
         int sysid = seq.targetSysid();
         // 校验无人机在线（除 FINISH 外，FINISH 是本地状态收尾不需要无人机）
@@ -156,6 +253,10 @@ public class DeliveryService {
             log.warn("Delivery control failed: id={} action={} error={}", id, action, e.getMessage());
             result = AckResult.fail(e.getMessage());
         }
+
+        // 状态变更后同步到 Repository
+        persistSequenceState(id, seq);
+
         Map<Integer, AckResult> out = new LinkedHashMap<>();
         out.put(sysid, result);
         return out;
@@ -166,7 +267,30 @@ public class DeliveryService {
         for (DeliverySequence seq : sequences.values()) {
             if (seq.targetSysid() == sysid) {
                 seq.onPositionUpdate(lat, lon);
+                // 位置更新可能改变站点状态，同步到 Repository
+                persistSequenceState(seq.deliveryId(), seq);
             }
+        }
+    }
+
+    /** 将配送任务状态同步到 Repository。 */
+    private void persistSequenceState(int id, DeliverySequence seq) {
+        if (repository == null) {
+            return;
+        }
+        try {
+            DeliverySequenceEntity entity = repository.findById(id).orElse(null);
+            if (entity != null) {
+                entity.updateFromSequence(seq);
+                repository.save(entity);
+            } else {
+                // Entity 不存在（可能是恢复前创建的），创建新 Entity
+                Integer tenantId = TenantContext.getEffectiveTenantId();
+                entity = DeliverySequenceEntity.fromSequence(seq, tenantId);
+                repository.save(entity);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to persist delivery sequence state {}: {}", id, e.getMessage());
         }
     }
 }

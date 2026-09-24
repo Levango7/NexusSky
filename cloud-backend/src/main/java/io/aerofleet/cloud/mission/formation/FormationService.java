@@ -7,6 +7,7 @@ import io.aerofleet.cloud.mission.squad.SquadRoleService;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.UdpGateway;
+import io.aerofleet.cloud.security.TenantContext;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.LedControlMsg;
 import org.slf4j.Logger;
@@ -61,6 +62,7 @@ public class FormationService {
 
 
     private final ConcurrentHashMap<Integer, Formation> formations = new ConcurrentHashMap<>();
+    private final Map<Integer, Integer> formationTenantMap = new ConcurrentHashMap<>();
     private final AtomicInteger nextFormationId = new AtomicInteger(0);
     private final AtomicInteger nextSeq = new AtomicInteger(0);
 
@@ -70,7 +72,7 @@ public class FormationService {
     private final UdpGateway gateway;
     private final FormationClock formationClock;
 
-    @Autowired
+    @Autowired(required = false)
     private FormationRepository repository;
 
     public FormationService(SquadRoleService roles,
@@ -87,13 +89,26 @@ public class FormationService {
 
     @PostConstruct
     void restoreFormations() {
-        List<FormationEntity> entities = repository.findAll();
+        if (repository == null) {
+            log.info("FormationService: 纯内存模式（无 JPA repository）");
+            return;
+        }
+        List<FormationEntity> entities;
+        try {
+            entities = repository.findAll();
+        } catch (Exception e) {
+            log.warn("Failed to load formations from database: {}", e.getMessage());
+            return;
+        }
         if (entities.isEmpty()) {
             return;
         }
         int maxId = 0;
         for (FormationEntity entity : entities) {
             maxId = Math.max(maxId, entity.getFormationId());
+            if (entity.getTenantId() != null) {
+                formationTenantMap.put(entity.getFormationId(), entity.getTenantId());
+            }
             if (entity.getState() == Formation.FormationState.DISSOLVED) {
                 continue;
             }
@@ -108,8 +123,9 @@ public class FormationService {
             f.state = entity.getState();
             f.version.incrementAndGet();
             formations.put(entity.getFormationId(), f);
-            log.info("formation {} restored: members={}, shape={}, state={}",
-                    entity.getFormationId(), f.sortedMembers(), entity.getShape(), entity.getState());
+            log.info("formation {} restored: members={}, shape={}, state={}, tenantId={}",
+                    entity.getFormationId(), f.sortedMembers(), entity.getShape(), entity.getState(),
+                    entity.getTenantId());
         }
         nextFormationId.set(maxId);
         log.info("restored {} formations from database (nextFormationId={})",
@@ -225,11 +241,27 @@ public class FormationService {
         f.version.incrementAndGet();
         formations.put(formationId, f);
 
+        // 设置租户隔离映射
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null) {
+            formationTenantMap.put(formationId, tenantId);
+        }
+
         // 持久化编队配置到数据库（只保存核心配置数据，不保存运行时数据）
-        repository.save(new FormationEntity(formationId, req.shape,
-                req.spacing, req.heading, req.refLat, req.refLon, req.refAlt,
-                leader, Formation.FormationState.FORMING,
-                new ArrayList<>(req.members)));
+        if (repository != null) {
+            try {
+                FormationEntity entity = new FormationEntity(formationId, req.shape,
+                        req.spacing, req.heading, req.refLat, req.refLon, req.refAlt,
+                        leader, Formation.FormationState.FORMING,
+                        new ArrayList<>(req.members));
+                if (tenantId != null) {
+                    entity.setTenantId(tenantId);
+                }
+                repository.save(entity);
+            } catch (Exception e) {
+                log.error("Failed to persist formation {}: {}", formationId, e.getMessage());
+            }
+        }
 
         // 轮询 Leader 心跳以建立队内时钟基准（零修改 TelemetryIngestService）
         formationClock.pollLeaderHeartbeat(leader);
@@ -404,11 +436,13 @@ public class FormationService {
             f.version.incrementAndGet();
 
             // 同步更新持久化实体的状态和队形
-            repository.findById(formationId).ifPresent(entity -> {
-                entity.setState(Formation.FormationState.TRANSITIONING);
-                entity.setShape(newShape);
-                repository.save(entity);
-            });
+            if (repository != null) {
+                repository.findById(formationId).ifPresent(entity -> {
+                    entity.setState(Formation.FormationState.TRANSITIONING);
+                    entity.setShape(newShape);
+                    repository.save(entity);
+                });
+            }
         }
 
         // 逐机逐点下发 DO_REPOSITION（即时机动引导，线性插值路径单调趋近目标，无折返）
@@ -534,11 +568,13 @@ public class FormationService {
                 f.version.incrementAndGet();
 
                 // 同步更新持久化实体状态为 DISSOLVED
-                repository.findById(formationId).ifPresent(entity -> {
-                    entity.setState(Formation.FormationState.DISSOLVED);
-                    entity.setMembers(new ArrayList<>(f.members));
-                    repository.save(entity);
-                });
+                if (repository != null) {
+                    repository.findById(formationId).ifPresent(entity -> {
+                        entity.setState(Formation.FormationState.DISSOLVED);
+                        entity.setMembers(new ArrayList<>(f.members));
+                        repository.save(entity);
+                    });
+                }
 
                 log.info("formation {} dissolved: < 2 members after removal of sysid={}",
                         formationId, sysid);
@@ -570,12 +606,14 @@ public class FormationService {
 
             // 同步更新持久化实体的状态和队形
             final FormationGeometry.Shape finalShape = effectiveShape;
-            repository.findById(formationId).ifPresent(entity -> {
-                entity.setState(Formation.FormationState.TRANSITIONING);
-                entity.setShape(finalShape);
-                entity.setMembers(new ArrayList<>(f.members));
-                repository.save(entity);
-            });
+            if (repository != null) {
+                repository.findById(formationId).ifPresent(entity -> {
+                    entity.setState(Formation.FormationState.TRANSITIONING);
+                    entity.setShape(finalShape);
+                    entity.setMembers(new ArrayList<>(f.members));
+                    repository.save(entity);
+                });
+            }
 
             // 下发调整命令（逐机 DO_REPOSITION）
             for (var e : newTargets.entrySet()) {
@@ -622,10 +660,12 @@ public class FormationService {
         f.version.incrementAndGet();
 
         // 同步更新持久化实体状态为 DISSOLVED
-        repository.findById(f.formationId).ifPresent(entity -> {
-            entity.setState(Formation.FormationState.DISSOLVED);
-            repository.save(entity);
-        });
+        if (repository != null) {
+            repository.findById(f.formationId).ifPresent(entity -> {
+                entity.setState(Formation.FormationState.DISSOLVED);
+                repository.save(entity);
+            });
+        }
 
         log.info("formation {} dissolved", f.formationId);
         return results;
@@ -638,35 +678,68 @@ public class FormationService {
         if (f == null) {
             return;
         }
-        repository.findById(formationId).ifPresent(entity -> {
-            entity.setState(f.state);
-            repository.save(entity);
-        });
+        if (repository != null) {
+            repository.findById(formationId).ifPresent(entity -> {
+                entity.setState(f.state);
+                repository.save(entity);
+            });
+        }
     }
 
     // =====================================================================
     // 查询方法
     // =====================================================================
 
-    /** 获取编队（只读视图）。 */
+    /** 获取编队（只读视图），按当前租户过滤。 */
     public Formation formation(int id) {
+        if (!isFormationAccessible(id)) {
+            return null;
+        }
         return formations.get(id);
     }
 
-    /** 所有活跃编队（非 DISSOLVED）。 */
+    /** 所有活跃编队（非 DISSOLVED），按当前租户过滤。 */
     public List<Formation> activeFormations() {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         List<Formation> out = new ArrayList<>();
         for (Formation f : formations.values()) {
-            if (f.state != Formation.FormationState.DISSOLVED) {
+            if (f.state != Formation.FormationState.DISSOLVED
+                    && (tenantId == null || isFormationForTenant(f.formationId, tenantId))) {
                 out.add(f);
             }
         }
         return out;
     }
 
-    /** 所有编队（含已解散）。 */
+    /** 所有编队（含已解散），按当前租户过滤。 */
     public List<Formation> allFormations() {
-        return new ArrayList<>(formations.values());
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        List<Formation> out = new ArrayList<>();
+        for (Formation f : formations.values()) {
+            if (tenantId == null || isFormationForTenant(f.formationId, tenantId)) {
+                out.add(f);
+            }
+        }
+        return out;
+    }
+
+    // =====================================================================
+    // 租户隔离辅助方法
+    // =====================================================================
+
+    /** 判断编队是否属于当前租户（或全局管理员可访问）。 */
+    private boolean isFormationAccessible(int formationId) {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null) {
+            return true;
+        }
+        return isFormationForTenant(formationId, tenantId);
+    }
+
+    /** 判断编队是否属于指定租户。 */
+    private boolean isFormationForTenant(int formationId, Integer tenantId) {
+        Integer formationTenant = formationTenantMap.get(formationId);
+        return formationTenant == null || tenantId.equals(formationTenant);
     }
 
     // =====================================================================

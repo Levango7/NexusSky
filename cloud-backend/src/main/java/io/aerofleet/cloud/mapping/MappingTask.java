@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.mapping;
 
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -68,6 +69,9 @@ public class MappingTask {
     private int photosCaptured;
     /** 进度百分比（0~100）。 */
     private double progressPct;
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
 
     public MappingTask() {
     }
@@ -138,4 +142,7 @@ public class MappingTask {
 
     public double getProgressPct() { return progressPct; }
     public void setProgressPct(double progressPct) { this.progressPct = progressPct; }
+
+    public Integer getTenantId() { return tenantId; }
+    public void setTenantId(Integer tenantId) { this.tenantId = tenantId; }
 }

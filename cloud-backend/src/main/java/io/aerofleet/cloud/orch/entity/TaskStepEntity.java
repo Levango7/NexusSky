@@ -68,6 +68,10 @@ public class TaskStepEntity {
     /** 模块返回的任务 ID */
     private String moduleTaskId;
 
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     /** JPA 无参构造器（必需）。 */
     public TaskStepEntity() {
     }
@@ -190,5 +194,13 @@ public class TaskStepEntity {
 
     public void setModuleTaskId(String moduleTaskId) {
         this.moduleTaskId = moduleTaskId;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Integer tenantId) {
+        this.tenantId = tenantId;
     }
 }

@@ -48,6 +48,10 @@ public class OrchestrationPlanEntity {
     @Enumerated(EnumType.STRING)
     private PauseReason pauseReason;
 
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     /** 步骤列表（非持久化，由 Service 层通过 Repository 查询） */
     @Transient
     private List<TaskStepEntity> steps = new ArrayList<>();
@@ -122,6 +126,14 @@ public class OrchestrationPlanEntity {
 
     public void setPauseReason(PauseReason pauseReason) {
         this.pauseReason = pauseReason;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Integer tenantId) {
+        this.tenantId = tenantId;
     }
 
     public List<TaskStepEntity> getSteps() {

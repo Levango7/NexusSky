@@ -56,6 +56,8 @@ public class SurveillanceDevice {
     public volatile String rtspUrl;
     /** 最近一次心跳时间戳（System.currentTimeMillis()）。 */
     public volatile long lastHeartbeatMs;
+    /** 租户 ID（用于租户隔离，null 表示全局管理员或未设置）。 */
+    public volatile Integer tenantId;
 
     public SurveillanceDevice(String id, String name, Vendor vendor, String ip, int port,
                               String username, String password) {

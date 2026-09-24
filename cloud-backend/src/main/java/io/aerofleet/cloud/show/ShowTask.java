@@ -49,6 +49,10 @@ public class ShowTask {
     private double centerLat;
     private double centerLon;
 
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     /** JPA 无参构造器。 */
     public ShowTask() {
     }
@@ -94,6 +98,9 @@ public class ShowTask {
     public void setAltitudeM(double altitudeM) { this.altitudeM = altitudeM; }
     public void setCenterLat(double centerLat) { this.centerLat = centerLat; }
     public void setCenterLon(double centerLon) { this.centerLon = centerLon; }
+
+    public Integer getTenantId() { return tenantId; }
+    public void setTenantId(Integer tenantId) { this.tenantId = tenantId; }
 
     /** 启动部署：CREATED → DEPLOYING。 */
     public synchronized void deploy() {

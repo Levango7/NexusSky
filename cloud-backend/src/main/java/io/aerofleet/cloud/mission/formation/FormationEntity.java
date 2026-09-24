@@ -45,6 +45,10 @@ public class FormationEntity {
     @Enumerated(EnumType.STRING)
     private Formation.FormationState state;
 
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     /** JPA 无参构造器（必需）。 */
     public FormationEntity() {
     }
@@ -140,5 +144,13 @@ public class FormationEntity {
 
     public void setState(Formation.FormationState state) {
         this.state = state;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Integer tenantId) {
+        this.tenantId = tenantId;
     }
 }

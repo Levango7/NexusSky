@@ -62,6 +62,9 @@ public class SurveillanceDeviceEntity {
     @Column(name = "last_heartbeat_ms")
     private Long lastHeartbeatMs;
 
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     /** JPA 无参构造器（必需）。 */
     public SurveillanceDeviceEntity() {
     }
@@ -87,6 +90,7 @@ public class SurveillanceDeviceEntity {
                 : new LinkedHashSet<>(device.getCapabilities());
         entity.rtspUrl = device.rtspUrl;
         entity.lastHeartbeatMs = device.lastHeartbeatMs;
+        entity.tenantId = device.tenantId;
         return entity;
     }
 
@@ -105,6 +109,7 @@ public class SurveillanceDeviceEntity {
         device.setCapabilities(this.capabilities);
         device.rtspUrl = this.rtspUrl;
         device.lastHeartbeatMs = this.lastHeartbeatMs != null ? this.lastHeartbeatMs : 0L;
+        device.tenantId = this.tenantId;
         return device;
     }
 
@@ -196,5 +201,13 @@ public class SurveillanceDeviceEntity {
 
     public void setLastHeartbeatMs(Long lastHeartbeatMs) {
         this.lastHeartbeatMs = lastHeartbeatMs;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Integer tenantId) {
+        this.tenantId = tenantId;
     }
 }
