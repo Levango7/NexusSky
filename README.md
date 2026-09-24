@@ -609,11 +609,23 @@ NexusSky/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 185 |
-| `drone-sim` | 350+ |
-| `link-sim` | 20+ |
-| `cloud-backend` | 1030+ |
-| **总计** | **1587（全部通过，0 failures）** |
+| `mavlink-core` | 221 |
+| `drone-sim` | 1222 |
+| `link-sim` | 105+ |
+| `cloud-backend` | 1682 |
+| **总计** | **3230（全部通过，0 failures）** |
+
+## 代码审查修复记录
+
+5 轮收敛性审查（3 轮全量 + 2 轮验证），累计修复 21 个问题（4 Critical + 12 Major + 5 Minor）：
+
+| 轮次 | Commit | 修复 | 要点 |
+|---|---|---|---|
+| Round 1 | `9364636` | 3C + 3M | AirGroundCoordinationService 内存清理/HTTP 状态码/无限循环；EdgeAiTrigger 空集合；CoverageOptimizer 参数传递；VideoFusionPanel 错误捕获 |
+| Round 2 | `234fc8c` | 7M | 竞态条件 synchronized；时间差双操作数检查；降级矛盾；@RequireRole；flush 503；ONVIF 枚举映射；CoverageOptimizer synchronized |
+| Round 3 | `920ab87` | 5m | 4 个 toLowerCase/toUpperCase 添加 Locale.ROOT；SurveillanceDeviceRegistry 构造器注入 |
+| Round 4 | `7dd8014` | 1C + 2M | 降级模式 coordinationId="AGC-null" 记录互相覆盖；startAirGroundCoordination 竞态条件；阈值清理内存泄漏 |
+| Round 5 | — | 验证收敛 | 无新发现，审查收敛结束 |
 
 ## 已知边界（骨架的诚实声明）
 

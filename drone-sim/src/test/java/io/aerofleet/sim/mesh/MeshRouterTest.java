@@ -167,4 +167,132 @@ class MeshRouterTest {
         MeshRouter router = newRouter(42);
         assertThat(router.selfSysid()).isEqualTo(42);
     }
+
+    // ===== 动态 MAX_HOPS 调整测试（FR-18）=====
+
+    private static MeshRouter newRouterWithDynamicMaxHops(int selfSysid) {
+        MeshRouterConfig config = MeshRouterConfig.defaults(true);
+        return new MeshRouter(selfSysid, config, (io.aerofleet.mavlink.transport.UdpMavlinkTransport) null);
+    }
+
+    @Test
+    @DisplayName("dynamicMaxHopsEnabled=false 时 adjustMaxHops 为空操作，currentMaxHops 不变")
+    void adjustMaxHopsNoOpWhenDisabled() {
+        MeshRouter router = newRouter(1);
+        router.start();
+        int initialMaxHops = router.getCurrentMaxHops();
+        assertThat(initialMaxHops).isEqualTo(15);
+
+        router.adjustMaxHops(100); // 大网络应调整为 25，但 disabled 所以不变
+        assertThat(router.getCurrentMaxHops()).isEqualTo(15);
+    }
+
+    @Test
+    @DisplayName("adjustMaxHops 小网络(≤20) → MAX_HOPS=15")
+    void adjustMaxHopsSmallNetwork() {
+        MeshRouter router = newRouterWithDynamicMaxHops(1);
+        router.start();
+
+        router.adjustMaxHops(10);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(15);
+    }
+
+    @Test
+    @DisplayName("adjustMaxHops 中网络(21-50) → MAX_HOPS=20")
+    void adjustMaxHopsMediumNetwork() {
+        MeshRouter router = newRouterWithDynamicMaxHops(1);
+        router.start();
+
+        router.adjustMaxHops(30);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(20);
+    }
+
+    @Test
+    @DisplayName("adjustMaxHops 大网络(>50) → MAX_HOPS=25")
+    void adjustMaxHopsLargeNetwork() {
+        MeshRouter router = newRouterWithDynamicMaxHops(1);
+        router.start();
+
+        router.adjustMaxHops(100);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(25);
+    }
+
+    @Test
+    @DisplayName("adjustMaxHops 跨阈值调整后 forwardFrame 使用新 MAX_HOPS")
+    void forwardFrameUsesAdjustedMaxHops() {
+        MeshRouter router = newRouterWithDynamicMaxHops(1);
+        router.start();
+
+        // 初始 MAX_HOPS=15，hopCount=16 应被丢弃
+        assertThat(router.forwardFrame(new byte[]{1}, 16).result())
+                .isEqualTo(MeshRouter.SendResult.DROPPED_HOP_LIMIT);
+
+        // 调整到中网络 → MAX_HOPS=20
+        router.adjustMaxHops(30);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(20);
+
+        // 现在 hopCount=16 应正常转发（16 ≤ 20）
+        MeshRouter.ForwardOutcome outcome = router.forwardFrame(new byte[]{1}, 16);
+        assertThat(outcome.result()).isEqualTo(MeshRouter.SendResult.SENT);
+        assertThat(outcome.newHopCount()).isEqualTo(15);
+
+        // hopCount=21 仍应被丢弃（21 > 20）
+        assertThat(router.forwardFrame(new byte[]{1}, 21).result())
+                .isEqualTo(MeshRouter.SendResult.DROPPED_HOP_LIMIT);
+    }
+
+    @Test
+    @DisplayName("adjustMaxHops 跨阈值调整后 forwardFrame 大网络 → MAX_HOPS=25")
+    void forwardFrameUsesAdjustedMaxHopsLargeNetwork() {
+        MeshRouter router = newRouterWithDynamicMaxHops(1);
+        router.start();
+
+        // 调整到大网络 → MAX_HOPS=25
+        router.adjustMaxHops(60);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(25);
+
+        // hopCount=25 应正常转发（25 ≤ 25）
+        MeshRouter.ForwardOutcome outcome = router.forwardFrame(new byte[]{1}, 25);
+        assertThat(outcome.result()).isEqualTo(MeshRouter.SendResult.SENT);
+        assertThat(outcome.newHopCount()).isEqualTo(24);
+
+        // hopCount=26 应被丢弃（26 > 25）
+        assertThat(router.forwardFrame(new byte[]{1}, 26).result())
+                .isEqualTo(MeshRouter.SendResult.DROPPED_HOP_LIMIT);
+    }
+
+    @Test
+    @DisplayName("adjustMaxHops 同阈值内节点数变化不调整 MAX_HOPS")
+    void adjustMaxHopsSameScaleNoChange() {
+        MeshRouter router = newRouterWithDynamicMaxHops(1);
+        router.start();
+
+        router.adjustMaxHops(10); // 小网络 → 15
+        assertThat(router.getCurrentMaxHops()).isEqualTo(15);
+
+        router.adjustMaxHops(20); // 仍在小网络范围 → 不变
+        assertThat(router.getCurrentMaxHops()).isEqualTo(15);
+    }
+
+    @Test
+    @DisplayName("adjustMaxHops 连续调整：小→中→大→中→小")
+    void adjustMaxHopsSequentialTransitions() {
+        MeshRouter router = newRouterWithDynamicMaxHops(1);
+        router.start();
+
+        router.adjustMaxHops(5);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(15);
+
+        router.adjustMaxHops(25);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(20);
+
+        router.adjustMaxHops(75);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(25);
+
+        router.adjustMaxHops(40);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(20);
+
+        router.adjustMaxHops(15);
+        assertThat(router.getCurrentMaxHops()).isEqualTo(15);
+    }
 }

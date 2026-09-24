@@ -77,6 +77,8 @@ public final class MeshRouterConfig {
     public final int loRaTxPowerDbm;
     /** LoRa 单帧最大载荷（字节，含 3 字节分片头），仅 transportType=LORA 时生效。 */
     public final int loRaMaxPayloadBytes;
+    /** 是否启用动态 MAX_HOPS 调整（FR-18），默认 false 保持向后兼容。 */
+    public final boolean dynamicMaxHopsEnabled;
 
     public MeshRouterConfig(long helloIntervalMs, long neighborTimeoutMs, long routeLifetimeMs,
                             int maxHops, double metricW1, double metricW2, double metricW3,
@@ -85,7 +87,7 @@ public final class MeshRouterConfig {
         this(helloIntervalMs, neighborTimeoutMs, routeLifetimeMs, maxHops,
                 metricW1, metricW2, metricW3, metricReevalThreshold, topologyReportIntervalMs,
                 meshGroupAddress, cloudBackendAddress,
-                TransportType.UDP, 433.0, 7, 125, 5, 20, 50);
+                TransportType.UDP, 433.0, 7, 125, 5, 20, 50, false);
     }
 
     /**
@@ -106,6 +108,26 @@ public final class MeshRouterConfig {
                             TransportType transportType, double loRaFrequencyMHz,
                             int loRaSpreadingFactor, int loRaBandwidthKHz, int loRaCodingRate,
                             int loRaTxPowerDbm, int loRaMaxPayloadBytes) {
+        this(helloIntervalMs, neighborTimeoutMs, routeLifetimeMs, maxHops,
+                metricW1, metricW2, metricW3, metricReevalThreshold, topologyReportIntervalMs,
+                meshGroupAddress, cloudBackendAddress,
+                transportType, loRaFrequencyMHz, loRaSpreadingFactor, loRaBandwidthKHz,
+                loRaCodingRate, loRaTxPowerDbm, loRaMaxPayloadBytes, false);
+    }
+
+    /**
+     * 全参数构造（含传输层类型、LoRa 物理层参数与动态 MAX_HOPS 开关）。
+     *
+     * @param dynamicMaxHopsEnabled  是否启用动态 MAX_HOPS 调整（FR-18），默认 false
+     */
+    public MeshRouterConfig(long helloIntervalMs, long neighborTimeoutMs, long routeLifetimeMs,
+                            int maxHops, double metricW1, double metricW2, double metricW3,
+                            double metricReevalThreshold, long topologyReportIntervalMs,
+                            InetSocketAddress meshGroupAddress, InetSocketAddress cloudBackendAddress,
+                            TransportType transportType, double loRaFrequencyMHz,
+                            int loRaSpreadingFactor, int loRaBandwidthKHz, int loRaCodingRate,
+                            int loRaTxPowerDbm, int loRaMaxPayloadBytes,
+                            boolean dynamicMaxHopsEnabled) {
         // P1-fix(Major 11): 参数验证，非法值抛 IllegalArgumentException
         if (helloIntervalMs <= 0) {
             throw new IllegalArgumentException("helloIntervalMs must be > 0, got " + helloIntervalMs);
@@ -167,6 +189,7 @@ public final class MeshRouterConfig {
         this.loRaCodingRate = loRaCodingRate;
         this.loRaTxPowerDbm = loRaTxPowerDbm;
         this.loRaMaxPayloadBytes = loRaMaxPayloadBytes;
+        this.dynamicMaxHopsEnabled = dynamicMaxHopsEnabled;
     }
 
     /** 默认配置。 */
@@ -177,6 +200,18 @@ public final class MeshRouterConfig {
                 2000L,
                 new InetSocketAddress("239.0.0.1", 14550),
                 null);
+    }
+
+    /** 默认配置（含动态 MAX_HOPS 开关）。 */
+    public static MeshRouterConfig defaults(boolean dynamicMaxHopsEnabled) {
+        return new MeshRouterConfig(
+                1000L, 5000L, 10000L, 15,
+                1.0, 0.5, 0.1, 0.5,
+                2000L,
+                new InetSocketAddress("239.0.0.1", 14550),
+                null,
+                TransportType.UDP, 433.0, 7, 125, 5, 20, 50,
+                dynamicMaxHopsEnabled);
     }
 
     /**
@@ -214,6 +249,7 @@ public final class MeshRouterConfig {
         int loRaCodingRate = defaults.loRaCodingRate;
         int loRaTxPowerDbm = defaults.loRaTxPowerDbm;
         int loRaMaxPayloadBytes = defaults.loRaMaxPayloadBytes;
+        boolean dynamicMaxHopsEnabled = defaults.dynamicMaxHopsEnabled;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -255,6 +291,7 @@ public final class MeshRouterConfig {
                     case "lora-cr" -> loRaCodingRate = Integer.parseInt(value);
                     case "lora-tx-power" -> loRaTxPowerDbm = Integer.parseInt(value);
                     case "lora-max-payload" -> loRaMaxPayloadBytes = Integer.parseInt(value);
+                    case "mesh-dynamic-max-hops" -> dynamicMaxHopsEnabled = Boolean.parseBoolean(value);
                     default -> { /* 忽略非 mesh 参数 */ }
                 }
             } catch (NumberFormatException e) {
@@ -313,7 +350,7 @@ public final class MeshRouterConfig {
                 maxHops, metricW1, metricW2, metricW3, metricReevalThreshold,
                 topologyReportIntervalMs, meshGroupAddress, cloudBackendAddress,
                 transportType, loRaFrequencyMHz, loRaSpreadingFactor, loRaBandwidthKHz,
-                loRaCodingRate, loRaTxPowerDbm, loRaMaxPayloadBytes);
+                loRaCodingRate, loRaTxPowerDbm, loRaMaxPayloadBytes, dynamicMaxHopsEnabled);
     }
 
     /** 解析 host:port 为 InetSocketAddress。 */
@@ -341,6 +378,7 @@ public final class MeshRouterConfig {
                 + ", loRa=[freq=" + loRaFrequencyMHz + "MHz, SF=" + loRaSpreadingFactor
                 + ", BW=" + loRaBandwidthKHz + "kHz, CR=4/" + loRaCodingRate
                 + ", txPower=" + loRaTxPowerDbm + "dBm, maxPayload=" + loRaMaxPayloadBytes + "B]"
+                + ", dynamicMaxHops=" + dynamicMaxHopsEnabled
                 + "}";
     }
 }
