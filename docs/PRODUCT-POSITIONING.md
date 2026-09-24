@@ -1,6 +1,6 @@
 # NexusSky · 产品定位白皮书
 
-> **文档版本**：v1.0  |  **日期**：2026-09-19  |  **阶段**：PoC → 中间件化定位转换
+> **文档版本**：v2.0  |  **日期**：2026-09-24  |  **阶段**：PoC → 中间件化定位转换
 
 > **产品代号**：NexusSky（天枢）—— 多机协同调度云平台中间件
 
@@ -74,6 +74,9 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
 - **实现状态**：模拟器 + link-sim 多跳中继下 e2e 通过；RERR 处理遵循
   RFC 3561 §6.5 语义（`findAffectedTargets` → `removeByNextHop`）。
 - **边界**：未在真实多架次无线环境下验证；路由表为内存态，重启即丢。
+- **P3 新增 — 动态 MAX_HOPS（FR-18）**：MeshRouter 根据网络节点数动态
+  调整最大跳数（≤20节点→15跳, 21-50→20跳, >50→25跳, 上限30），通过
+  `dynamicMaxHopsEnabled` 配置项控制（默认 false，向后兼容）。
 
 ### 2.2 移动基站 + 卫星中继（多层级通信）— M6 + M7
 
@@ -89,6 +92,10 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
   Starlink 画像（25s 通 / 2.5s 黑洞，9.6% 丢包）下完整任务流 PASS。
 - **边界**：未对接真实卫星过境数据源；基站载荷为软件模型，未在真实
   通信载荷硬件上验证。
+- **P3 新增 — 真实卫星接入预留**：为天通/铱星/星链三种卫星通信系统
+  创建了占位实现类（TiantongSatLinkProvider/IridiumSatLinkProvider/
+  StarlinkSatLinkProvider），connect/disconnect/send 抛
+  UnsupportedOperationException，为未来真实卫星硬件接入预留接口。
 
 ### 2.3 地形适配（RF 信号建模）— M8
 
@@ -375,7 +382,7 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
 ### 6.1 多厂商协议兼容（MAVLink 中立）
 
 - **事实**：`mavlink-core` 模块纯 Java 17 实现 MAVLink v1/v2 协议栈，
-  185 个单测，CRC 与官方 c_library_v2 逐字节一致；已消化 PX4 真固件
+  221 个单测，CRC 与官方 c_library_v2 逐字节一致；已消化 PX4 真固件
   协议差异（MISSION_REQUEST 拉取、MISSION_COUNT 拒绝 broadcast、
   MISSION_START 回退、nav_state 映射）。
 - **差异化**：大疆 Cloud API 仅兼容大疆设备；纵横 CW / 极飞均绑自家整机。
@@ -520,4 +527,4 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
 
 ---
 
-> **文档结束** | 维护者：NexusSky 团队 | 修订记录：v1.0 (2026-09-19) 初版
+> **文档结束** | 维护者：NexusSky 团队 | 修订记录：v1.0 (2026-09-19) 初版, v2.0 (2026-09-24) P3 能力更新

@@ -482,6 +482,20 @@ ESP-NOW 用于近距离低延迟机间通讯（百元级），LoRa 用于远距�
 在 `EmergencyOrchPanel` 基础上扩展 Budget 模式切换、丐版 Mesh 拓扑可视化、
 热源搜救标记、声光控制面板等交互组件。
 
+### P3 — 动态 MAX_HOPS 集成与真实卫星接入预留
+
+**动态 MAX_HOPS 集成（FR-18）**：`DynamicMaxHops` 根据网络节点数动态调整最大跳数，
+避免小网络过度广播、大网络路由不足——≤20 节点 → 15 跳, 21–50 节点 → 20 跳,
+>50 节点 → 25 跳, 硬上限 30 跳。通过 `dynamicMaxHopsEnabled` 配置项控制
+（默认 `false`，向后兼容），开启后 mesh 路由的 TTL/hopCount 上限随网络规模
+自适应伸缩，而非固定值。
+
+**真实卫星接入预留**：为天通（高轨稳定覆盖）、铱星（低轨低延迟）、星链（低轨星座
+带宽最优）三种卫星通信系统创建了占位实现类（`TiantongSatellitePlaceholder`/
+`IridiumSatellitePlaceholder`/`StarlinkSatellitePlaceholder`），实现统一的
+`SatelliteLink` 接口框架，为未来真实卫星硬件接入预留接口——替换占位为真实驱动时，
+上层路由/中继/链路切换逻辑零改动。
+
 ### MAVLink 消息 ID 分配（420–467、477–483 段）
 
 | 范围 | 里程碑 | 消息 |

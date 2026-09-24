@@ -1,6 +1,6 @@
 # NexusSky 端到端演示场景设计文档
 
-> **文档版本**：v1.0 | **日期**：2026-09-22 | **作者**：演示场景调研组
+> **文档版本**：v1.1 | **日期**：2026-09-24 | **作者**：演示场景调研组
 >
 > **定位**：本文档为客户演示与自助体验提供完整的场景设计、操作流程与技术支撑。
 > 所有场景基于 NexusSky PoC 阶段已实现的 e2e 脚本与模拟能力，如实标注边界。
@@ -52,6 +52,8 @@
 - ❌ 应急编排完整演示 —— M9 应急编排（灾区测绘→覆盖规划→组网部署→自愈重构）无独立 e2e 脚本
 - ❌ 多机协同调度演示 —— M10 集群调度无 e2e 脚本
 - ❌ 星地中继演示 —— M7 层级路由无独立 e2e 脚本
+- ⚠️ P3 动态 MAX_HOPS —— 已实现（`DynamicMaxHops` + `--mesh-dynamic-max-hops` CLI 参数 + REST API），但无独立 e2e 脚本验证动态跳数调整过程
+- ⚠️ P3 真实卫星接入预留 —— 已实现占位接口（`TiantongSatLinkProvider` / `IridiumSatLinkProvider` / `StarlinkSatLinkProvider`，均抛出 `UnsupportedOperationException`），但无独立 e2e 脚本验证占位行为
 
 ### 1.3 脚本运行依赖矩阵
 
@@ -69,6 +71,32 @@
 | e2e-network.ps1 | link-sim, drone-sim, cloud-backend | cloud-backend 需运行 | ≥17 | Windows |
 | e2e-fault.ps1 | drone-sim, cloud-backend | cloud-backend 需运行 | ≥17 | Windows |
 | ci-integration-test.sh | 全部模块 | 无（脚本自构建自启动） | ≥17 | Linux |
+
+### 1.4 测试基线
+
+当前项目测试基线：**3230 tests，0 failures**（全部通过）。
+
+| 模块 | 测试数 | 说明 |
+|---|---|---|
+| mavlink-core | 185 | MAVLink 协议编解码、CRC 一致性 |
+| drone-sim | 1222 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
+| cloud-backend | ~1823 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **3230** | **全部通过，0 failures** |
+
+> 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
+
+### 1.5 P3 能力实现状态
+
+P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
+
+| P3 功能 | 实现位置 | 实现状态 | e2e 覆盖 |
+|---|---|---|---|
+| 动态 MAX_HOPS | `DynamicMaxHops` + `MeshRouter.adjustMaxHops()` + `--mesh-dynamic-max-hops` CLI | ✅ 已实现（含单测） | ❌ 无独立 e2e 脚本 |
+| 真实卫星接入预留 | `TiantongSatLinkProvider` / `IridiumSatLinkProvider` / `StarlinkSatLinkProvider` | ✅ 占位实现（抛 `UnsupportedOperationException`） | ❌ 无独立 e2e 脚本 |
+
+**建议新增 e2e 脚本**：
+- `e2e-dynamic-max-hops.ps1` —— 验证节点数变化时 MAX_HOPS 动态调整（SMALL→MEDIUM→LARGE 跨阈值场景）
+- `e2e-sat-providers.ps1` —— 验证卫星提供商列表查询及占位连接的 501 响应
 
 ---
 
@@ -461,6 +489,8 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e-failsafe.ps1
 | `e2e-spray.ps1` | 喷洒物流自启版（当前 .sh 依赖外部环境） | 高 | drone-sim, cloud-backend |
 | `e2e-orchestration.ps1` | M9 应急编排完整演示（灾区测绘→覆盖规划→组网部署→自愈重构） | 中 | drone-sim, cloud-backend |
 | `e2e-security.ps1` | 安防监控独立演示（监控→告警→追踪→处置闭环） | 中 | cloud-backend |
+| `e2e-dynamic-max-hops.ps1` | P3 动态 MAX_HOPS 验证（节点数跨阈值时跳数自动调整） | 中 | drone-sim, cloud-backend |
+| `e2e-sat-providers.ps1` | P3 卫星接入预留验证（提供商列表 + 占位连接 501 响应） | 低 | cloud-backend |
 
 ### 4.3 演示环境一键启动建议
 

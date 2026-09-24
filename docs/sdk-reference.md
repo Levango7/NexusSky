@@ -250,7 +250,93 @@
 
 ---
 
-## 九、License API
+## 九、Mesh 网络 API
+
+### GET /api/v1/mesh/topology
+获取全网拓扑（节点数、邻居关系、链路质量）。
+
+### GET /api/v1/mesh/topology/{sysid}
+获取单节点拓扑；不存在返回 404。
+
+### GET /api/v1/mesh/neighbors/{sysid}
+获取单节点邻居表（含 RSSI 与质量分级）。
+
+### GET /api/v1/mesh/links
+获取所有链路及质量分级（A-B 与 B-A 合并）。
+
+### POST /api/v1/mesh/adjust-max-hops
+根据当前网络节点数动态调整 MAX_HOPS（FR-18）。
+
+**请求：**
+```json
+{"nodeCount": 35}
+```
+
+**响应：**
+```json
+{
+  "previousMaxHops": 15,
+  "currentMaxHops": 20,
+  "nodeCount": 35,
+  "networkScale": "MEDIUM",
+  "adjusted": true
+}
+```
+
+**动态调整规则（`DynamicMaxHops`）：**
+
+| 网络规模 | 节点数 | MAX_HOPS |
+|---|---|---|
+| SMALL | ≤ 20 | 15 |
+| MEDIUM | 21-50 | 20 |
+| LARGE | > 50 | 25（绝对上限 30） |
+
+### GET /api/v1/mesh/max-hops
+查询当前生效的 MAX_HOPS 值。
+
+**响应：**
+```json
+{"currentMaxHops": 20, "nodeCount": 35, "networkScale": "MEDIUM"}
+```
+
+---
+
+## 十、卫星接入 API（预留）
+
+> **注意**：以下接口为真实卫星接入预留占位，当前实现抛出 `UnsupportedOperationException`。
+> 仿真环境请使用 `SimulatedSatLinkProvider`，卫星链路监控请使用 `/api/v1/sat-link/*` 端点。
+
+### GET /api/v1/sat/providers
+列出可用卫星提供商及体制信息。
+
+**响应：**
+```json
+[
+  {"type": "TIANTONG", "label": "天通", "band": "S", "status": "PLACEHOLDER"},
+  {"type": "IRIDIUM", "label": "铱星", "band": "L", "status": "PLACEHOLDER"},
+  {"type": "STARLINK", "label": "星链", "band": "Ku/Ka", "status": "PLACEHOLDER"}
+]
+```
+
+### POST /api/v1/sat/providers/{type}/connect
+连接指定体制的卫星链路。`{type}` 取值：`TIANTONG` / `IRIDIUM` / `STARLINK`。
+
+> **当前状态**：所有 provider 的 `connect()` 方法抛出 `UnsupportedOperationException`，
+> 返回 HTTP 501（Not Implemented）。真实卫星接入待后续版本实现。
+
+**请求：**
+```json
+{"satId": "TIANTONG-1"}
+```
+
+**响应（当前）：**
+```json
+{"error": "真实卫星接入尚未实现，请使用 SimulatedSatLinkProvider", "status": 501}
+```
+
+---
+
+## 十一、License API
 
 ### GET /api/license/info
 查询 License 信息。
@@ -263,7 +349,7 @@
 
 ---
 
-## 十、WebSocket 事件
+## 十二、WebSocket 事件
 
 连接：`ws://localhost:8080/ws/telemetry`
 
@@ -275,9 +361,23 @@
 
 ---
 
-## 十一、SSE 事件流
+## 十三、SSE 事件流
 
 | 端点 | 事件名 | 心跳间隔 |
 |---|---|---|
 | GET /api/alarms/stream | `alarm-event` | 15 秒 |
 | GET /api/surveillance/devices/{id}/events | `surveillance-event` | 15 秒 |
+---
+
+## 十四、MAVLink 扩展消息
+
+NexusSky 已注册 **60 条扩展消息**（msgId 420-479），覆盖 M0a-M13 及 4a 安防报警等里程碑能力。
+
+| msgId 区间 | 里程碑 | 说明 |
+|---|---|---|
+| 420-441 | M0a-M4 | Mesh 中继、编队协同、喷洒物流、硬件抽象 |
+| 450-467 | M5-M9 | 应急 mesh、星地中继、数字孪生、边缘计算、应急编排 |
+| 468-476 | M10-M13 | 集群调度、故障检测、视觉感知、链路韧性 |
+| 477-479 | 4a | 安防报警联动 |
+
+> 扩展消息注册与编解码细节请参见 [integration-guide.md](integration-guide.md#12-扩展消息注册)。
