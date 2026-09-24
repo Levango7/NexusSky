@@ -8,25 +8,37 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.Optional;
 
 /**
  * API Key 认证过滤器。
  * <p>
- * 从 {@code X-API-Key} Header 读取 API Key，查询 {@link ApiKeyEntity} 验证有效性
- * （未撤销、未过期），设置 {@link TenantContext} 和 {@link ApiKeyContext}（ThreadLocal），
- * 并记录 lastUsedAt。
+ * 从 {@code X-API-Key} Header 读取 API Key，计算 SHA-256 哈希后查询 {@link ApiKeyEntity}
+ * 验证有效性（未撤销、未过期），设置 {@link SecurityContextHolder}（ApiKeyAuthenticationToken）、
+ * {@link TenantContext} 和 {@link ApiKeyContext}（ThreadLocal），并记录 lastUsedAt。
+ * <p>
+ * 安全设计：
+ * <ul>
+ *   <li>数据库中只存储 API Key 的 SHA-256 哈希（keyHash），不存储明文</li>
+ *   <li>认证时从 Header 提取明文 Key，计算哈希后用哈希值查询数据库</li>
+ *   <li>即使数据库泄露，攻击者也无法还原明文 Key</li>
+ * </ul>
  * <p>
  * 行为规则：
  * <ul>
  *   <li>开发模式（{@code dev-mode=true}）：跳过，不处理 API Key</li>
  *   <li>无 X-API-Key Header：跳过，交由后续 JWT 认证链处理</li>
  *   <li>API Key 无效（不存在、已撤销、已过期）：跳过，交由后续 JWT 认证链处理</li>
- *   <li>API Key 有效：设置 TenantContext + ApiKeyContext，记录 lastUsedAt</li>
+ *   <li>API Key 有效：设置 SecurityContext + TenantContext + ApiKeyContext，记录 lastUsedAt</li>
  * </ul>
  * <p>
  * 在 finally 中始终清理 {@link ApiKeyContext} 和 {@link TenantContext}，
@@ -80,8 +92,9 @@ public class ApiKeyFilter extends OncePerRequestFilter {
                 return;
             }
 
-            // 查询 API Key 实体（仅查找未撤销的）
-            Optional<ApiKeyEntity> entityOpt = apiKeyRepository.findByKeyIdAndRevokedFalse(apiKey);
+            // 计算 API Key 的 SHA-256 哈希，用哈希值查询数据库
+            String keyHash = sha256Hex(apiKey);
+            Optional<ApiKeyEntity> entityOpt = apiKeyRepository.findByKeyHashAndRevokedFalse(keyHash);
             if (entityOpt.isEmpty()) {
                 log.debug("API Key 不存在或已撤销: {}", maskForLog(apiKey));
                 filterChain.doFilter(request, response);
@@ -97,7 +110,12 @@ public class ApiKeyFilter extends OncePerRequestFilter {
                 return;
             }
 
-            // 设置 TenantContext 和 ApiKeyContext
+            // 设置 SecurityContext（ApiKeyAuthenticationToken），使 Spring Security 授权链识别 API Key 认证
+            ApiKeyAuthenticationToken authToken = new ApiKeyAuthenticationToken(
+                    entity.getKeyId(), entity.getTenantId(), entity.getScopes());
+            SecurityContextHolder.getContext().setAuthentication(authToken);
+
+            // 设置 TenantContext 和 ApiKeyContext（ThreadLocal，供业务代码使用）
             TenantContext.setTenantId(entity.getTenantId());
             ApiKeyContext.set(entity.getKeyId(), entity.getTenantId(), entity.getScopes());
 
@@ -118,6 +136,23 @@ public class ApiKeyFilter extends OncePerRequestFilter {
             // 始终清理，防止线程池复用时上下文泄漏
             ApiKeyContext.clear();
             TenantContext.clear();
+            // SecurityContext 由 Spring Security 框架在请求结束时自动清理
+        }
+    }
+
+    /**
+     * 计算字符串的 SHA-256 哈希，返回 Hex 编码的哈希值。
+     *
+     * @param input 待哈希的字符串
+     * @return Hex 编码的 SHA-256 哈希（64 字符）
+     */
+    private static String sha256Hex(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hashBytes);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 算法不可用", e);
         }
     }
 

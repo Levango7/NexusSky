@@ -11,11 +11,13 @@ import java.time.Instant;
  * API Key 的 JPA 持久化实体。
  * <p>
  * 存储 API Key 的元数据和认证信息，支持与 JWT 并行的 API Key 认证机制。
- * keyId 为字符串主键，格式为 {@code ns-{tenantId}-{random32chars}}。
+ * keyId 为字符串主键（展示标识），keyHash 存储 API Key 的 SHA-256 哈希值用于认证查询。
+ * 明文 API Key 仅在创建时返回一次，数据库中不存储明文。
  * <p>
+ * API Key 格式：{@code nsk_<32位随机hex>}（NexusSky Key 前缀）。
  * scopes 字段存储 JSON 数组字符串（如 {@code ["read","write"]}），
  * 用于细粒度权限控制。maskedKey 存储脱敏后的 Key（仅保留前4后4字符），
- * 供列表展示使用，完整 Key 仅在创建时返回一次。
+ * 供列表展示使用。
  */
 @Entity
 @Table(name = "api_keys")
@@ -24,6 +26,10 @@ public class ApiKeyEntity {
     @Id
     @Column(name = "key_id", length = 80)
     private String keyId;
+
+    /** API Key 的 SHA-256 哈希（Hex 编码），用于认证时查询，不存储明文 Key。 */
+    @Column(name = "key_hash", nullable = false, length = 128)
+    private String keyHash;
 
     @Column(name = "tenant_id")
     private Integer tenantId;
@@ -50,7 +56,7 @@ public class ApiKeyEntity {
     @Column(name = "revoked", nullable = false)
     private boolean revoked = false;
 
-    /** 脱敏 Key，格式如 ns-1-xxxx****yyyy，供列表展示。 */
+    /** 脱敏 Key，格式如 nsk_****yyyy，供列表展示。 */
     @Column(name = "masked_key", length = 80)
     private String maskedKey;
 
@@ -59,10 +65,11 @@ public class ApiKeyEntity {
     }
 
     /** 全参构造器。 */
-    public ApiKeyEntity(String keyId, Integer tenantId, Integer userId, String name,
+    public ApiKeyEntity(String keyId, String keyHash, Integer tenantId, Integer userId, String name,
                         String scopes, Instant createdAt, Instant expiresAt,
                         Instant lastUsedAt, boolean revoked, String maskedKey) {
         this.keyId = keyId;
+        this.keyHash = keyHash;
         this.tenantId = tenantId;
         this.userId = userId;
         this.name = name;
@@ -78,6 +85,9 @@ public class ApiKeyEntity {
 
     public String getKeyId() { return keyId; }
     public void setKeyId(String keyId) { this.keyId = keyId; }
+
+    public String getKeyHash() { return keyHash; }
+    public void setKeyHash(String keyHash) { this.keyHash = keyHash; }
 
     public Integer getTenantId() { return tenantId; }
     public void setTenantId(Integer tenantId) { this.tenantId = tenantId; }
@@ -108,7 +118,7 @@ public class ApiKeyEntity {
 
     @Override
     public String toString() {
-        return "ApiKeyEntity{keyId='" + keyId + "', tenantId=" + tenantId
+        return "ApiKeyEntity{keyId='" + keyId + "', keyHash='[present]', tenantId=" + tenantId
                 + ", userId=" + userId + ", name='" + name + "', scopes='" + scopes
                 + "', createdAt=" + createdAt + ", expiresAt=" + expiresAt
                 + ", lastUsedAt=" + lastUsedAt + ", revoked=" + revoked

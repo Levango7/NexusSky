@@ -506,3 +506,100 @@ java -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar &
 # 3. 仅 Python 端到端往返
 python3 scripts/mavlink-compatibility-check.py --roundtrip
 ```
+---
+
+## 10. PX4 SITL 协议兼容性验证
+
+> **本章覆盖**：使用 `scripts/e2e-px4-sitl.ps1` 在 Windows PowerShell 下对 PX4 SITL
+> 进行全链路协议验证，证明 NexusSky 的 MAVLink 协议栈与真实 PX4 固件完全兼容。
+
+### 10.1 验证脚本
+
+**脚本路径**：`scripts/e2e-px4-sitl.ps1`
+
+**运行方式**：
+
+```powershell
+# 全流程验证（自动检测 PX4 SITL 并启动）
+.\scripts\e2e-px4-sitl.ps1
+
+# 如 PX4 SITL 已在 WSL2 中运行，脚本会自动检测并连接
+```
+
+**脚本特点**：
+
+- 自动检测 PX4 SITL 安装（Windows PATH / WSL2 / 常见目录）
+- 未安装时打印详细安装指引，不自动安装
+- 支持 WSL2 模式启动 PX4 SITL（无头模式）
+- 自动检测并启动 cloud-backend（如未运行）
+- 每步输出 PASS/FAIL，最终汇总结果
+- 异常时自动清理 SITL 和 cloud-backend 进程
+
+### 10.2 验证步骤清单
+
+| 步骤 | 验证项 | 验证方法 | 预期结果 |
+|------|--------|---------|----------|
+| 0 | 前置检查 | 检测 `px4` 命令 / WSL2 PX4 目录 / Windows 安装路径 | 检测到安装或打印安装指引 |
+| 1 | PX4 SITL 启动 | WSL2 无头模式启动，等待日志出现 "Starting commander" | SITL 进程就绪，60s 内完成 |
+| 2 | cloud-backend 启动 | 检测 health endpoint 或自动启动 JAR | health UP，30s 内完成 |
+| 3a | 心跳交换 | 查询 `/api/v1/drones` 等待无人机上线 | 收到 PX4 SITL 的 HEARTBEAT |
+| 3b | 设备注册 | 查询 `/api/v1/drones/{sysid}` | PX4 SITL 出现在设备列表，含 sysid/mode/armed |
+| 3c | 任务上传 | POST `/api/v1/drones/{sysid}/mission`（5 航点方形任务） | status=ok，PX4 通过 MISSION_REQUEST 拉取 |
+| 3d | ARM 命令 | POST `/api/v1/drones/{sysid}/commands` type=arm | status=ok，PX4 进入 ARMED 状态 |
+| 3e | 遥测接收 | GET `/api/v1/drones/{sysid}/telemetry` 和 `/track` | 收到 ATTITUDE、GLOBAL_POSITION_INT 等 |
+| 3f | RTL 命令 | POST `/api/v1/drones/{sysid}/commands` type=rtl | status=ok，PX4 执行返航 |
+
+### 10.3 预期结果
+
+全流程通过时输出：
+
+```
+ALL PX4 SITL TESTS PASSED
+```
+
+验证结果汇总示例：
+
+```
+   PX4 SITL:     已启动
+   cloud-backend: 已连接
+   心跳交换:      PASS
+   设备注册:      PASS
+   任务上传:      PASS
+   ARM 命令:      PASS
+   遥测接收:      PASS
+   RTL 命令:      PASS
+```
+
+### 10.4 已知限制
+
+| 限制 | 说明 | 影响 |
+|------|------|------|
+| WSL2 依赖 | PX4 SITL 在 WSL2 内运行，需预先安装 Ubuntu-24.04 | 首次配置耗时约 30-60 分钟 |
+| 编译时间 | PX4 SITL 首次编译约 20-40 分钟 | 仅首次需要 |
+| GPS 解锁 | SITL 的 GPS 信号依赖 EKF，ARM 前可能需等待 GPS 3D fix | 可设 `COM_ARM_WO_GPS=1` 绕过 |
+| Datalink Failsafe | PX4 在链路静默 ~15s 后触发 RTL | cloud-backend 的 1Hz GCS 心跳应维持链路 |
+| 扩展消息 | PX4 SITL 不发送 NexusSky 扩展消息（420-476） | 扩展消息通过离线自检和 drone-sim 验证 |
+| 无硬件链路 | SITL 无法验证串口 / CAN / I2C 等硬件接口 | 需真机测试覆盖 |
+| 实时性 | SITL 非硬实时，高负载时仿真步长可能抖动 | 不影响协议验证，影响时序敏感场景 |
+
+### 10.5 与 drone-sim 验证的区别
+
+| 维度 | drone-sim 验证 | PX4 SITL 验证 |
+|------|---------------|---------------|
+| 飞控代码 | NexusSky 自研模拟逻辑 | PX4 真实固件代码 |
+| MAVLink 实现 | drone-sim 内置 MAVLink 编码 | PX4 uORB → MAVLink 真实链路 |
+| 任务状态机 | 简化模拟 | PX4 完整状态机（Preflight→Standby→Armed→Mission→RTL） |
+| 协议边界 | 已知兼容（同源代码） | 真实兼容性验证（第三方实现） |
+| 发现价值 | 功能逻辑验证 | 协议兼容性、边界条件、异常处理验证 |
+| 适用场景 | 日常开发、CI/CD | 发布前兼容性确认、协议变更验证 |
+
+### 10.6 故障排查
+
+| 症状 | 可能原因 | 解决方案 |
+|------|---------|---------|
+| SITL 60s 内未就绪 | PX4 未编译或编译不完整 | `cd ~/PX4-Autopilot && make px4_sitl_default` |
+| 心跳未收到 | WSL2 网络不通 / 端口未开放 | 检查 WSL2 NAT 模式，确认 localhost 互通 |
+| ARM 失败 | GPS 未解锁 / Pre-arm 检查未通过 | 等待 GPS 3D fix 或设 `COM_ARM_WO_GPS=1` |
+| 任务上传失败 | PX4 用 MISSION_REQUEST(43) 拉取 | cloud-backend 已兼容双消息 ID（43+51） |
+| ARM 后立即 RTL | Datalink failsafe 触发 | cloud-backend GCS 心跳维持链路，或调大 `NAV_DLLC_ACT` |
+| 遥测为空 | SITL 未起飞 / 位置数据未积累 | 先 ARM + start_mission，等待 5s 后查询 |

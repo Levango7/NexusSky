@@ -1,4 +1,4 @@
-const BASE = '/api/v1/v1'
+const BASE = '/api/v1'
 
 // ---- Token management ----
 // Token 持久化到 sessionStorage，页面刷新后可恢复，关闭浏览器即清除

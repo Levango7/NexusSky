@@ -16,10 +16,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,8 +38,11 @@ import java.util.Map;
  *   <li>GET /api/v1/auth/api-key — 列出当前用户的 API Key（脱敏显示）</li>
  * </ul>
  * <p>
- * API Key 格式：{@code ns-{tenantId}-{random32chars}}，
+ * API Key 格式：{@code nsk_<32位随机hex>}（NexusSky Key 前缀），
  * 使用 {@link SecureRandom} 生成随机部分，确保不可预测。
+ * <p>
+ * 安全设计：数据库中只存储 API Key 的 SHA-256 哈希（keyHash），
+ * 明文 API Key 仅在创建时返回一次，后续不可查看。
  */
 @RestController
 @RequestMapping("/api/v1/auth/api-key")
@@ -43,15 +50,11 @@ public class ApiKeyController {
 
     private static final Logger log = LoggerFactory.getLogger(ApiKeyController.class);
 
-    /** 随机字符池，用于生成 API Key 的随机部分。 */
-    private static final char[] RANDOM_CHARS =
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
+    /** API Key 前缀，格式为 nsk_（NexusSky Key）。 */
+    private static final String KEY_PREFIX = "nsk_";
 
-    /** API Key 随机部分长度。 */
-    private static final int RANDOM_LENGTH = 32;
-
-    /** API Key 前缀。 */
-    private static final String KEY_PREFIX = "ns-";
+    /** API Key 随机部分的字节长度（32 字节 = 64 hex 字符）。 */
+    private static final int RANDOM_BYTES = 32;
 
     /** 默认有效期：365 天。 */
     private static final long DEFAULT_EXPIRY_DAYS = 365;
@@ -70,6 +73,7 @@ public class ApiKeyController {
      * POST /api/v1/auth/api-key {name, scopes?, expiresAt?} → {keyId, apiKey, maskedKey, ...}
      * <p>
      * 完整 API Key 仅在创建时返回一次，后续不可查看。
+     * 数据库中只存储 SHA-256 哈希，不存储明文。
      */
     @PostMapping
     public ResponseEntity<Map<String, Object>> createApiKey(@RequestBody Map<String, Object> body) {
@@ -121,18 +125,24 @@ public class ApiKeyController {
             expiresAt = Instant.now().plus(DEFAULT_EXPIRY_DAYS, ChronoUnit.DAYS);
         }
 
-        // 生成 keyId 和完整 API Key
-        String randomPart = generateRandomString(RANDOM_LENGTH);
-        String tenantPart = tenantId != null ? String.valueOf(tenantId) : "0";
-        String keyId = KEY_PREFIX + tenantPart + "-" + randomPart;
+        // 生成完整 API Key：nsk_<32位随机hex>
+        String randomHex = generateRandomHex(RANDOM_BYTES);
+        String apiKey = KEY_PREFIX + randomHex;
+
+        // 生成 keyId（展示标识，不含完整 Key）
+        String keyId = KEY_PREFIX + tenantId + "_" + randomHex.substring(0, 8);
+
+        // 计算 SHA-256 哈希，数据库只存储哈希
+        String keyHash = sha256Hex(apiKey);
 
         // 生成脱敏 Key（仅保留前4后4字符）
-        String maskedKey = maskKey(keyId);
+        String maskedKey = maskKey(apiKey);
 
         // 创建并保存实体
         Instant now = Instant.now();
         ApiKeyEntity entity = new ApiKeyEntity();
         entity.setKeyId(keyId);
+        entity.setKeyHash(keyHash);
         entity.setTenantId(tenantId);
         entity.setUserId(userId);
         entity.setName(name);
@@ -151,7 +161,7 @@ public class ApiKeyController {
         // 返回完整 API Key（仅此一次）
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("keyId", keyId);
-        resp.put("apiKey", keyId);
+        resp.put("apiKey", apiKey);
         resp.put("maskedKey", maskedKey);
         resp.put("name", name);
         resp.put("scopes", scopes);
@@ -270,13 +280,22 @@ public class ApiKeyController {
         }
     }
 
-    /** 使用 SecureRandom 生成指定长度的随机字符串。 */
-    private String generateRandomString(int length) {
-        char[] buf = new char[length];
-        for (int i = 0; i < length; i++) {
-            buf[i] = RANDOM_CHARS[secureRandom.nextInt(RANDOM_CHARS.length)];
+    /** 使用 SecureRandom 生成指定字节数的随机 hex 字符串。 */
+    private String generateRandomHex(int numBytes) {
+        byte[] bytes = new byte[numBytes];
+        secureRandom.nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
+    }
+
+    /** 计算字符串的 SHA-256 哈希，返回 Hex 编码的哈希值。 */
+    private static String sha256Hex(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hashBytes);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 算法不可用", e);
         }
-        return new String(buf);
     }
 
     /** 生成脱敏 Key，仅保留前4后4字符，中间用 **** 替代。 */
