@@ -643,36 +643,41 @@ MetricsCollector
 
 | # | 差距 | 现状 | 商用影响 | 修复优先级 | 工作量估算 |
 |---|---|---|---|---|---|
-| 1 | **API Key 认证缺失** | 仅 JWT 登录认证 | SDK 无法长期集成 | P0 | 3 人周 |
-| 2 | **License 签名弱** | Base64 JSON 无签名 | License 可被篡改 | P0 | 2 人周 |
-| 3 | **数据无租户隔离** | DeviceRegistry 等无 tenantId | 多租户数据泄露 | P0 | 5 人周 |
-| 4 | **API 路径不统一** | 部分路径无 v1 前缀 | SDK 封装困难 | P0 | 1 人周 |
+| ~~1~~ | ~~API Key 认证缺失~~ | ✅ 已修复：X-API-Key + SHA-256 hash + ApiKeyFilter | — | ~~P0~~ | ~~3 人周~~ |
+| ~~2~~ | ~~License 签名弱~~ | ✅ 已修复：RSA签名 + 旧Base64兼容 | — | ~~P0~~ | ~~2 人周~~ |
+| ~~3~~ | ~~数据无租户隔离~~ | ✅ 已修复：5域(Formation/Orch/Surveillance/Mapping/Show/Delivery)添加tenantId + 租户过滤 | — | ~~P0~~ | ~~5 人周~~ |
+| ~~4~~ | ~~API 路径不统一~~ | ✅ 已修复：api.js BASE 变量 `/api/v1` | — | ~~P0~~ | ~~1 人周~~ |
 | 5 | **无 API 计量采集** | 无调用统计 | 无法按量计费 | P1 | 2 人周 |
 | 6 | **限流单机内存** | ConcurrentHashMap | 多实例不共享 | P1 | 2 人周 |
 | 7 | **无 Webhook 机制** | 仅 SSE 轮询 | 客户集成不便 | P1 | 2 人周 |
-| 8 | **持久化缺失** | 内存态为主 | 重启数据丢失 | P0 | 5 人周 |
+| ~~8~~ | ~~持久化缺失~~ | ✅ 已修复：SprayTaskEntity/DeliverySequenceEntity新建 + FormationService改为Repository持久化 + V12-V16迁移 | — | ~~P0~~ | ~~5 人周~~ |
 | 9 | **无 OpenAPI 规范导出** | Swagger UI 有但无 spec 导出 | SDK 自动生成困难 | P1 | 1 人周 |
 | 10 | **MAVLink 签名未实现** | 明文通信 | 安全合规风险 | P2 | 2 人周 |
 | 11 | **无 SDK 包发布** | 无 Maven/PyPI 包 | 客户集成门槛高 | P1 | 3 人周 |
 | 12 | **JWT 对称签名** | HMAC-SHA256 | 多实例密钥共享风险 | P2 | 1 人周 |
 
-#### 4.1.1 已解决差距（P3 已完成）
+#### 4.1.1 已解决差距
 
-以下 P3 差距已通过代码审查修复解决，不再列入待办差距清单：
+以下差距已通过代码修复解决，不再列入待办差距清单：
 
-| # | 差距 | 解决方式 |
-|---|---|---|
-| P3-1 | **动态 MAX_HOPS 集成** | Mesh 组网支持动态调整最大跳数，适应不同网络拓扑 |
-| P3-2 | **真实卫星接入预留** | 卫星中继模块预留真实硬件接入接口，支持后续对接真实卫星链路 |
+| # | 差距 | 解决方式 | commit |
+|---|---|---|---|
+| 1 | **API Key 认证缺失** | X-API-Key header + SHA-256 hash + ApiKeyFilter + V11迁移 | f794588 |
+| 2 | **License 签名弱** | RSA签名 + 旧Base64兼容模式 | f794588 |
+| 3 | **数据无租户隔离** | 5业务域(Formation/Orchestration/Surveillance/Mapping/Show/Delivery2)添加tenantId + Repository查询方法 + Service层租户过滤 + V12/V14/V15/V16迁移 | b65b582 |
+| 4 | **API 路径不统一** | api.js BASE 变量 `/api/v1/v1` → `/api/v1` | f794588 |
+| 8 | **持久化缺失** | SprayTaskEntity+Repository/DeliverySequenceEntity+Repository新建 + FormationService改为Repository持久化 + SprayTaskService/DeliveryService改为混合模式(缓存+Repository) + V12/V13迁移 | b65b582 |
+| P3-1 | **动态 MAX_HOPS 集成** | Mesh 组网支持动态调整最大跳数，适应不同网络拓扑 | 93b1058 |
+| P3-2 | **真实卫星接入预留** | 卫星中继模块预留真实硬件接入接口，支持后续对接真实卫星链路 | 93b1058 |
 
 ### 4.2 优先级排序
 
-**P0（商用前必须完成，约 16 人周）**：
-1. API Key 认证（3 人周）
-2. License 签名强化（2 人周）
-3. 数据租户隔离（5 人周）
-4. API 路径统一（1 人周）
-5. 持久化（PostgreSQL + Redis）（5 人周）
+**P0（商用前必须完成 ✅ 全部完成）**：
+1. ✅ API Key 认证（3 人周）— commit f794588
+2. ✅ License 签名强化（2 人周）— commit f794588
+3. ✅ 数据租户隔离（5 人周）— commit b65b582
+4. ✅ API 路径统一（1 人周）— commit f794588
+5. ✅ 持久化（5 人周）— commit b65b582
 
 **P1（商用后 1-2 月内完成，约 10 人周）**：
 6. API 计量采集（2 人周）
