@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 空地协同指挥服务。
@@ -313,7 +314,7 @@ public class AirGroundCoordinationService {
      * @param alarmEventId 报警事件 ID
      * @return 空地协同指挥记录（含 coordinationId、cmdId、planId）；若启动失败返回 null
      */
-    public CoordinationRecord startAirGroundCoordination(String alarmEventId) {
+    public synchronized CoordinationRecord startAirGroundCoordination(String alarmEventId) {
         if (alarmEventId == null || alarmEventId.isBlank()) {
             log.warn("空地协同：启动失败，alarmEventId 为空");
             return null;
@@ -334,7 +335,9 @@ public class AirGroundCoordinationService {
             return null;
         }
 
-        String coordinationId = "AGC-" + cmd.getId();
+        String coordinationId = (workflow == null || cmd.getId() == null)
+                ? "AGC-" + alarmEvent.getId()
+                : "AGC-" + cmd.getId();
         CoordinationRecord record = new CoordinationRecord(coordinationId, alarmEventId, cmd.getId());
         record.setAlarmEvent(alarmEvent);
         record.setPhase(EmergencyCommandPhase.RECEIVED);
@@ -493,14 +496,14 @@ public class AirGroundCoordinationService {
         log.info("空地协同：已清理 CLOSED 状态记录 coordinationId={} remaining={}",
                 coordinationId, coordinationRecords.size());
 
-        // 清理阈值保护：超过 1000 条时批量清理所有 CLOSED 状态记录
+        // 清理阈值保护：超过 1000 条时批量清理 CLOSED 状态记录和超过 24 小时的旧记录
         if (coordinationRecords.size() > 1000) {
-            int before = coordinationRecords.size();
+            long cutoff = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(24);
             coordinationRecords.entrySet().removeIf(entry ->
-                    entry.getValue().getPhase() == EmergencyCommandPhase.CLOSED);
-            int removed = before - coordinationRecords.size();
-            log.warn("空地协同：清理阈值触发，批量清理 CLOSED 状态记录 removed={} remaining={}",
-                    removed, coordinationRecords.size());
+                    entry.getValue().getPhase() == EmergencyCommandPhase.CLOSED
+                    || entry.getValue().getStartTimeMs() < cutoff);
+            log.warn("空地协同：清理阈值触发，批量清理 CLOSED 状态及超时记录 remaining={}",
+                    coordinationRecords.size());
         }
 
         return report;
