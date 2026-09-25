@@ -17,6 +17,7 @@
     <module>drone-sim</module>
     <module>link-sim</module>
     <module>cloud-backend</module>
+    <module>sdk-java</module>
   </modules>
 
   <properties>
