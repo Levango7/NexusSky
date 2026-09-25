@@ -796,7 +796,51 @@ MetricsCollector
 
 **测试验证**：cloud-backend 1692 tests 0 failures + mavlink-core 235 tests 0 failures
 
-**待修复**：P1 审查问题（后端12条 + SDK13条）尚未修复，列为后续迭代项。
+**P1 修复详情**（commit a94c199）：
+
+**后端 P1 修复（12条）**：
+
+| # | 问题 | 修复方式 | 文件 |
+|---|---|---|---|
+| P1-1 | Prometheus基数爆炸 — URI标签含路径变量 | URI模板化(BEST_MATCHING_PATTERN+正则归一化) | ApiMetricsFilter.java |
+| P1-2 | Redis INCR+EXPIRE竞态 — key可能永不过期 | Lua脚本原子化INCR+EXPIRE | RedisRateLimiter.java |
+| P1-3 | 内存限流器Map无限增长 | @Scheduled定时清理过期限流窗口 | TenantInterceptor.java |
+| P1-4 | HMAC密钥明文存储 — 数据库泄露可伪造签名 | AES-GCM加密存储+读取时解密 | WebhookService.java |
+| P1-5 | RestTemplate无超时 — 线程长时间阻塞 | SimpleClientHttpRequestFactory超时配置(5s/10s) | WebhookService.java |
+| P1-6 | HMAC签名失败返回空字符串 — 安全机制静默绕过 | 签名失败抛异常+pushToWebhook catch跳过+WARN日志 | WebhookService.java |
+| P1-7 | serializeBody JSON不转义 — 签名与实际body不一致 | ObjectMapper.writeValueAsString替代自定义序列化 | WebhookService.java |
+| P1-8 | WebhookController URL验证缺失 | URL格式校验(http/https+合法URI+host非空) | WebhookController.java |
+| P1-9 | MavlinkSigner secretKey null导致NPE | enabled=true时secretKey空值校验抛IllegalArgumentException | MavlinkSigner.java |
+| P1-10 | MavlinkSignatureConfig默认空密钥不安全 | InitializingBean启动校验+enabled=true空密钥抛异常 | MavlinkSignatureConfig.java |
+| P1-11 | JwtTokenProvider getBytes()不指定字符集 | 4处getBytes()统一替换为getBytes(StandardCharsets.UTF_8) | JwtTokenProvider.java |
+| P1-12 | generateKeys生产环境无运行时阻止 | profile包含prod时抛IllegalStateException | JwtTokenProvider.java |
+
+**Java SDK P1 修复（7条）**：
+
+| # | 问题 | 修复方式 | 文件 |
+|---|---|---|---|
+| P1-01 | baseUrl未强制HTTPS — API Key明文传输 | Builder模式+allowInsecureHttp标志默认false | NexusSkyClient.java |
+| P1-02 | baseUrl/apiKey未做null验证 | Objects.requireNonNull+明确错误信息 | NexusSkyClient.java |
+| P1-03 | requestList/requestMap不检查isOk() | 先解析ApiResponse检查isOk()再取data | NexusSkyClient.java |
+| P1-04 | 空响应体错误处理不明确 | readValue前检查null/空字符串抛明确异常 | NexusSkyClient.java |
+| P1-05 | FlightLogApi.get logId未做null验证 | Objects.requireNonNull(logId) | FlightLogApi.java |
+| P1-06 | MissionApi.upload waypoints未做null/空验证 | null检查+空列表检查 | MissionApi.java |
+| P1-07 | FlightLogApi.get logId未做URL编码 | URLEncoder.encode(logId, UTF_8) | FlightLogApi.java |
+
+**Python SDK P1 修复（6条）**：
+
+| # | 问题 | 修复方式 | 文件 |
+|---|---|---|---|
+| P1-08 | base_url未强制HTTPS | allow_insecure_http参数默认False | client.py |
+| P1-09 | base_url/api_key未做None验证 | None检查抛ValueError | client.py |
+| P1-10 | requests.Session非线程安全 | docstring明确声明不可跨线程共享 | client.py |
+| P1-11 | FlightLogApi.get log_id未做None验证 | None检查抛SdkException | flightlog.py |
+| P1-12 | MissionApi.upload mission参数类型不安全 | 类型检查只允许Mission/list | mission.py |
+| P1-13 | 空响应体resp.json()失败 | resp.text空检查抛SdkException | client.py |
+
+**测试验证**：cloud-backend 1692 + mavlink-core 235 + sdk-java 7 = 1934 tests, 0 failures, 0 errors
+
+**待修复**：P2 审查问题（后端5条 + SDK6条）为可选改进，列为后续迭代项。
 
 ### 6.3 技术指标更新
 
@@ -902,4 +946,4 @@ MetricsCollector
 
 ---
 
-> **文档结束** | 维护者：产品架构师 | 修订记录：v1.0 (2026-09-22) 初版，v1.1 (2026-09-24) P3 完成 + 代码审查收敛 + 技术指标更新，v1.2 (2026-09-25) P1/P2审查P0修复 + commit e196d61
+> **文档结束** | 维护者：产品架构师 | 修订记录：v1.0 (2026-09-22) 初版，v1.1 (2026-09-24) P3 完成 + 代码审查收敛 + 技术指标更新，v1.2 (2026-09-25) P1/P2审查P0修复 + commit e196d61，v1.3 (2026-09-25) P1审查修复25条 + commit a94c199
