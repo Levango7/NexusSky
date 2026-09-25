@@ -13,6 +13,9 @@ import org.springframework.web.client.RestTemplate;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -59,6 +62,9 @@ public class WebhookService {
             log.warn("WebhookRepository not available, cannot register webhook");
             return null;
         }
+
+        // P0-fix: SSRF 防护 — 校验 webhook URL 合法性
+        validateWebhookUrl(url);
 
         Integer tenantId = TenantContext.getEffectiveTenantId();
         Instant now = Instant.now();
@@ -146,7 +152,15 @@ public class WebhookService {
             return;
         }
 
-        List<WebhookEntity> webhooks = webhookRepository.findByEnabledTrueAndEventsContaining(event);
+        // P0-fix: 租户隔离 — 仅查询当前租户的 webhook，防止跨租户数据泄露
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        List<WebhookEntity> webhooks;
+        if (tenantId != null) {
+            webhooks = webhookRepository.findByEnabledTrueAndEventsContainingAndTenantId(event, tenantId);
+        } else {
+            // 全局管理员：查询所有租户的 webhook
+            webhooks = webhookRepository.findByEnabledTrueAndEventsContaining(event);
+        }
         if (webhooks.isEmpty()) {
             return;
         }
@@ -161,6 +175,72 @@ public class WebhookService {
                         webhook.getId(), webhook.getUrl(), e.getMessage());
             }
         }
+    }
+
+    /**
+     * 校验 webhook URL 合法性，防止 SSRF 攻击。
+     * <p>
+     * 校验规则：
+     * <ul>
+     *   <li>必须以 http:// 或 https:// 开头</li>
+     *   <li>禁止解析到私有 IP 段：10.x.x.x、172.16-31.x.x、192.168.x.x、127.x.x.x、169.254.x.x</li>
+     *   <li>禁止 localhost 主机名</li>
+     * </ul>
+     *
+     * @param url 待校验的 URL
+     * @throws IllegalArgumentException 校验失败时抛出
+     */
+    private void validateWebhookUrl(String url) {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("Webhook URL is required");
+        }
+
+        // 必须以 http:// 或 https:// 开头
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            throw new IllegalArgumentException("Webhook URL must start with http:// or https://");
+        }
+
+        URI uri;
+        try {
+            uri = new URI(url);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid webhook URL: " + e.getMessage());
+        }
+
+        String host = uri.getHost();
+        if (host == null || host.isBlank()) {
+            throw new IllegalArgumentException("Webhook URL must have a valid host");
+        }
+
+        // 禁止 localhost 主机名
+        if ("localhost".equalsIgnoreCase(host)) {
+            throw new IllegalArgumentException("Webhook URL must not use localhost");
+        }
+
+        // 解析 host 为 IP 地址，检查是否为私有地址
+        InetAddress address;
+        try {
+            address = InetAddress.getByName(host);
+        } catch (java.net.UnknownHostException e) {
+            throw new IllegalArgumentException("Cannot resolve webhook URL host: " + host);
+        }
+
+        if (isPrivateAddress(address)) {
+            throw new IllegalArgumentException("Webhook URL must not point to a private/internal address");
+        }
+    }
+
+    /**
+     * 检查 IP 地址是否属于私有或内部保留地址段。
+     *
+     * @param address 待检查的 IP 地址
+     * @return true 表示是私有地址
+     */
+    private static boolean isPrivateAddress(InetAddress address) {
+        return address.isSiteLocalAddress()   // 10.x.x.x, 172.16-31.x.x, 192.168.x.x
+                || address.isLoopbackAddress() // 127.x.x.x
+                || address.isLinkLocalAddress() // 169.254.x.x
+                || address.isAnyLocalAddress(); // 0.0.0.0
     }
 
     /**

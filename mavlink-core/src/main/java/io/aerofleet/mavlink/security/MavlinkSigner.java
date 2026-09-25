@@ -89,7 +89,10 @@ public class MavlinkSigner {
         if (!enabled) {
             return true;
         }
-        if (signature == null || signature.length != SIGNATURE_LENGTH) {
+        if (signature == null) {
+            throw new IllegalStateException("签名验证启用但消息不包含签名数据");
+        }
+        if (signature.length != SIGNATURE_LENGTH) {
             return false;
         }
         byte[] expected = sign(msgId, payload);

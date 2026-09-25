@@ -31,4 +31,16 @@ public interface WebhookRepository extends JpaRepository<WebhookEntity, Long> {
      * @return 已启用且订阅了该事件的 webhook 列表
      */
     List<WebhookEntity> findByEnabledTrueAndEventsContaining(String event);
+
+    /**
+     * 查找指定租户下已启用且订阅了指定事件的 webhook。
+     * <p>
+     * 租户隔离查询，防止跨租户数据泄露。events 字段为逗号分隔的事件类型列表，
+     * 使用 LIKE %event% 匹配。
+     *
+     * @param event    事件类型
+     * @param tenantId 租户 ID
+     * @return 当前租户下已启用且订阅了该事件的 webhook 列表
+     */
+    List<WebhookEntity> findByEnabledTrueAndEventsContainingAndTenantId(String event, Integer tenantId);
 }

@@ -75,8 +75,10 @@ class MavlinkSignerTest {
         MavlinkSigner signer = new MavlinkSigner(true, TEST_SECRET);
         byte[] payload = new Heartbeat(4, 2, 12, 209, 3).encode();
 
-        boolean valid = signer.verify(0, payload, null);
-        assertFalse(valid, "null 签名应验证失败");
+        // 签名启用但 signature 为 null 时，应抛出 IllegalStateException
+        assertThrows(IllegalStateException.class,
+                () -> signer.verify(0, payload, null),
+                "null 签名在签名启用时应抛出 IllegalStateException");
     }
 
     @Test

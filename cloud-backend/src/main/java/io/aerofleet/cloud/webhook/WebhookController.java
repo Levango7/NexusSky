@@ -74,7 +74,13 @@ public class WebhookController {
             return errorResponse(HttpStatus.BAD_REQUEST, "events is required");
         }
 
-        WebhookEntity entity = webhookService.register(url, secret, events);
+        WebhookEntity entity;
+        try {
+            entity = webhookService.register(url, secret, events);
+        } catch (IllegalArgumentException e) {
+            // P0-fix: SSRF 防护 — URL 校验失败返回 400
+            return errorResponse(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
         if (entity == null) {
             return errorResponse(HttpStatus.SERVICE_UNAVAILABLE,
                     "Webhook repository not available");
