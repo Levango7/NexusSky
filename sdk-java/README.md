@@ -6,18 +6,44 @@ NexusSky Java SDK 是 NexusSky 无人机智能飞控中间件的 Java 客户端 
 
 ### Maven
 
+首先在 `pom.xml` 中添加 JitPack 仓库：
+
+```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+```
+
+然后添加依赖：
+
 ```xml
 <dependency>
-    <groupId>io.aerofleet</groupId>
-    <artifactId>nexussky-sdk-java</artifactId>
-    <version>1.0.0</version>
+    <groupId>com.github.Levango7</groupId>
+    <artifactId>NexusSky</artifactId>
+    <version>v1.0.3</version>
 </dependency>
 ```
 
 ### Gradle
 
+在 `settings.gradle` 中添加 JitPack 仓库：
+
 ```groovy
-implementation 'io.aerofleet:nexussky-sdk-java:1.0.0'
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+}
+```
+
+然后添加依赖：
+
+```groovy
+implementation 'com.github.Levango7:NexusSky:v1.0.3'
 ```
 
 ### 环境要求
