@@ -840,14 +840,49 @@ MetricsCollector
 
 **测试验证**：cloud-backend 1692 + mavlink-core 235 + sdk-java 7 = 1934 tests, 0 failures, 0 errors
 
-**待修复**：P2 审查问题（后端5条 + SDK6条）为可选改进，列为后续迭代项。
+**P2 审查修复已完成**（commit 90b3496）：
+
+**后端 P2 修复（5条）**：
+
+| # | 问题 | 修复方式 | 文件 |
+|---|---|---|---|
+| P2-1 | ApiMetricsFilter 排除列表冗余 | 移除 EXCLUDED_PREFIXES，简化 shouldRecord() | ApiMetricsFilter.java |
+| P2-2 | MavlinkSigner 签名比较非恒定时间 | Arrays.equals → MessageDigest.isEqual | MavlinkSigner.java |
+| P2-3 | JwtTokenProvider 公钥打印到 INFO 日志 | log.info → log.debug | JwtTokenProvider.java |
+| P2-4 | application.properties JWT secret 硬编码 | 默认值改为空字符串 | application.properties |
+| P2-5 | application.properties 默认用户 admin:admin | 默认值改为空字符串 | application.properties |
+
+**SDK P2 修复（5条，第6条已在P1修复中处理）**：
+
+| # | 问题 | 修复方式 | 文件 |
+|---|---|---|---|
+| P2-1 | getInt() 返回 -1 可能掩盖错误 | 改为抛出 SdkException | ApiResponse.java |
+| P2-2 | Waypoint 未验证 lat/lon/alt 范围 | 构造函数添加范围验证 | MissionApi.java |
+| P2-3 | drones()/missions()/flightLogs() 每次创建新实例 | 改为 double-checked locking 懒加载 | NexusSkyClient.java |
+| P2-4 | 测试缺少错误场景 | 新增5个错误场景测试 | DroneApiTest.java |
+| P2-5 | Python Waypoint 未验证 lat/lon/alt 范围 | __post_init__ 添加范围验证 | mission.py |
+
+**SDK 文档编写**：
+- `sdk-java/README.md` — Java SDK 完整文档（安装/快速开始/API参考/示例）
+- `sdk-python/README.md` — Python SDK 完整文档（安装/快速开始/API参考/示例）
+- `docs/sdk-api-reference.md` — 统一 REST API 参考文档
+
+**Maven/PyPI 发布准备**：
+- `pom.xml` — artifactId 改为 nexussky-sdk-java，version 升至 1.0.0，添加发布元数据
+- `setup.py` — version 升至 1.0.0，添加 PyPI 发布元数据
+- `docs/RELEASE.md` — 发布说明文档
+
+**测试验证**：3266 tests (1692+235+1222+105+12), 0 failures, 0 errors
 
 ### 6.3 技术指标更新
 
 | 指标 | 更新前 | 更新后 |
 |---|---|---|
 | 扩展消息数量 | 57 条 | 60 条 (msgId 420-479) |
-| 测试基线 | — | 3230 tests |
+| 测试基线 | 3230 tests | 3266 tests |
+| SDK 版本 | 0.1.0 | 1.0.0 |
+| SDK 文档 | 无 | 3份完整文档 |
+| 发布配置 | 无 | Maven + PyPI 发布就绪 |
 
 ---
 
@@ -946,4 +981,4 @@ MetricsCollector
 
 ---
 
-> **文档结束** | 维护者：产品架构师 | 修订记录：v1.0 (2026-09-22) 初版，v1.1 (2026-09-24) P3 完成 + 代码审查收敛 + 技术指标更新，v1.2 (2026-09-25) P1/P2审查P0修复 + commit e196d61，v1.3 (2026-09-25) P1审查修复25条 + commit a94c199
+> **文档结束** | 维护者：产品架构师 | 修订记录：v1.0 (2026-09-22) 初版，v1.1 (2026-09-24) P3 完成 + 代码审查收敛 + 技术指标更新，v1.2 (2026-09-25) P1/P2审查P0修复 + commit e196d61，v1.3 (2026-09-25) P1审查修复25条 + commit a94c199，v1.4 (2026-09-25) P2审查修复10条 + SDK文档 + 发布准备 + commit 90b3496
