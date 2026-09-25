@@ -1294,7 +1294,7 @@ export const {
   createCityModel, listCityModels, getCityModel, getCitySituation, createCitySimulation, getCitySimulation, createCityMarker, listCityMarkers,
   createDeliveryTask, listDeliveryTasks, getDeliveryTask, startDeliveryTask, abortDeliveryTask, optimizeDeliveryRoute, deliverDeliveryTask, getDeliveryStatus, confirmDeliveryTask, searchLandingSites,
   createShowFormation, listShowFormations, getShowFormation, calculateShowPositions, createShowTask, listShowTasks, getShowTask, startShowTask, abortShowTask, getShowActions, configureShowMusicSync,
-  getSurveillanceStreams, getDroneVideoFeeds, startRecording, stopRecording,
+
   login, refreshToken,
   listTenants, getTenant, createTenant, updateTenant, deleteTenant,
   listUsers, getUser, createUser, updateUser, deleteUser,
