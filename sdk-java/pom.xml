@@ -111,11 +111,6 @@
                     </execution>
                 </executions>
             </plugin>
-            <!--
-                maven-gpg-plugin: 发布时取消注释启用 GPG 签名
-                配置 gpgArguments 需添加 pinentry-mode loopback 参数
-            -->
-            <!--
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-gpg-plugin</artifactId>
@@ -127,14 +122,15 @@
                         <goals>
                             <goal>sign</goal>
                         </goals>
+                        <configuration>
+                            <gpgArguments>
+                                <arg>--pinentry-mode</arg>
+                                <arg>loopback</arg>
+                            </gpgArguments>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
-            -->
-            <!--
-                nexus-staging-maven-plugin: 发布时取消注释启用 Sonatype OSSRH 发布
-            -->
-            <!--
             <plugin>
                 <groupId>org.sonatype.plugins</groupId>
                 <artifactId>nexus-staging-maven-plugin</artifactId>
@@ -146,14 +142,9 @@
                     <autoReleaseAfterClose>true</autoReleaseAfterClose>
                 </configuration>
             </plugin>
-            -->
         </plugins>
     </build>
 
-    <!--
-        distributionManagement: 发布时取消注释配置 Sonatype OSSRH 仓库
-    -->
-    <!--
     <distributionManagement>
         <snapshotRepository>
             <id>ossrh</id>
@@ -164,5 +155,4 @@
             <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
         </repository>
     </distributionManagement>
-    -->
 </project>

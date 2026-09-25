@@ -1,0 +1,7 @@
+%no-protection
+Key-Type: RSA
+Key-Length: 3072
+Name-Real: NexusSky SDK
+Name-Email: support@nexussky.io
+Expire-Date: 0
+%commit
