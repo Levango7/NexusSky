@@ -6,17 +6,42 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>io.aerofleet</groupId>
-    <artifactId>aerofleet-sdk-java</artifactId>
-    <version>0.1.0</version>
+    <artifactId>nexussky-sdk-java</artifactId>
+    <version>1.0.0</version>
     <packaging>jar</packaging>
 
     <name>NexusSky SDK for Java</name>
-    <description>Java SDK for NexusSky cloud platform API</description>
+    <description>NexusSky UAV intelligent flight control middleware - Java SDK</description>
+    <url>https://github.com/Levango7/NexusSky</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>NexusSky Team</name>
+            <email>support@nexussky.io</email>
+            <organization>NexusSky</organization>
+            <organizationUrl>https://github.com/Levango7/NexusSky</organizationUrl>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/Levango7/NexusSky.git</connection>
+        <developerConnection>scm:git:https://github.com/Levango7/NexusSky.git</developerConnection>
+        <url>https://github.com/Levango7/NexusSky</url>
+    </scm>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <jackson.version>2.16.1</jackson.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
     <dependencies>
@@ -54,6 +79,90 @@
                     </includes>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>3.3.0</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.6.3</version>
+                <configuration>
+                    <doclint>none</doclint>
+                    <failOnError>false</failOnError>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
+                maven-gpg-plugin: 发布时取消注释启用 GPG 签名
+                配置 gpgArguments 需添加 pinentry-mode loopback 参数
+            -->
+            <!--
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>sign-artifacts</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            -->
+            <!--
+                nexus-staging-maven-plugin: 发布时取消注释启用 Sonatype OSSRH 发布
+            -->
+            <!--
+            <plugin>
+                <groupId>org.sonatype.plugins</groupId>
+                <artifactId>nexus-staging-maven-plugin</artifactId>
+                <version>1.6.13</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <serverId>ossrh</serverId>
+                    <nexusUrl>https://s01.oss.sonatype.org/</nexusUrl>
+                    <autoReleaseAfterClose>true</autoReleaseAfterClose>
+                </configuration>
+            </plugin>
+            -->
         </plugins>
     </build>
+
+    <!--
+        distributionManagement: 发布时取消注释配置 Sonatype OSSRH 仓库
+    -->
+    <!--
+    <distributionManagement>
+        <snapshotRepository>
+            <id>ossrh</id>
+            <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
+        </snapshotRepository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
+    </distributionManagement>
+    -->
 </project>

@@ -161,7 +161,7 @@ public class JwtTokenProvider {
                 KeyPair keyPair = generateRsaKeyPair();
                 RSAPrivateKey privKey = (RSAPrivateKey) keyPair.getPrivate();
                 RSAPublicKey pubKey = (RSAPublicKey) keyPair.getPublic();
-                log.info("自动生成的 RSA 公钥（Base64 X.509）: {}",
+                log.debug("自动生成的 RSA 公钥（Base64 X.509）: {}",
                         Base64.getEncoder().encodeToString(pubKey.getEncoded()));
                 RSAKey rsaKey = new RSAKey.Builder(pubKey)
                         .privateKey(privKey)

@@ -15,7 +15,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.IOException;
-import java.util.Set;
+
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -28,8 +28,7 @@ import java.util.regex.Pattern;
  *   <li>{@code aerofleet.api.request.duration} — Timer，标签：method, uri, tenant_id</li>
  * </ul>
  *
- * <p>仅统计 {@code /api/} 路径下的请求，跳过 {@code /actuator/}、{@code /swagger-ui/}、
- * {@code /v3/api-docs} 等基础设施路径。租户 ID 通过 {@link TenantContext#getEffectiveTenantId()}
+ * <p>仅统计 {@code /api/} 路径下的请求。租户 ID 通过 {@link TenantContext#getEffectiveTenantId()}
  * 获取，为 null 时记为 "global"。
  */
 @Component
@@ -40,9 +39,7 @@ public class ApiMetricsFilter extends OncePerRequestFilter {
     private static final String COUNTER_NAME = "aerofleet.api.requests";
     private static final String TIMER_NAME = "aerofleet.api.request.duration";
     private static final String API_PATH_PREFIX = "/api/";
-    private static final Set<String> EXCLUDED_PREFIXES = Set.of(
-            "/actuator/", "/swagger-ui/", "/v3/api-docs"
-    );
+
     private static final String GLOBAL_TENANT = "global";
 
     /** 匹配纯数字路径段，用于 URI 归一化 */
@@ -95,18 +92,10 @@ public class ApiMetricsFilter extends OncePerRequestFilter {
     }
 
     /**
-     * 判断请求路径是否应被计量：必须以 {@code /api/} 开头，且不在排除列表中。
+     * 判断请求路径是否应被计量：仅 {@code /api/} 路径下的请求被记录。
      */
     private boolean shouldRecord(String uri) {
-        if (!uri.startsWith(API_PATH_PREFIX)) {
-            return false;
-        }
-        for (String excluded : EXCLUDED_PREFIXES) {
-            if (uri.startsWith(excluded)) {
-                return false;
-            }
-        }
-        return true;
+        return uri.startsWith(API_PATH_PREFIX);
     }
 
     /**

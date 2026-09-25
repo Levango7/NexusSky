@@ -41,6 +41,11 @@ public class NexusSkyClient {
     private final String apiKey;
     private final HttpClient httpClient;
 
+    // 懒加载缓存的 API 模块实例（double-checked locking 确保线程安全）
+    private volatile DroneApi droneApi;
+    private volatile MissionApi missionApi;
+    private volatile FlightLogApi flightLogApi;
+
     /**
      * 构造一个 NexusSky API 客户端。
      * <p>
@@ -149,30 +154,51 @@ public class NexusSkyClient {
     // ===================================================================
 
     /**
-     * 获取无人机 API 模块。
+     * 获取无人机 API 模块（懒加载缓存，线程安全）。
      *
      * @return DroneApi 实例
      */
     public DroneApi drones() {
-        return new DroneApi(this);
+        if (droneApi == null) {
+            synchronized (this) {
+                if (droneApi == null) {
+                    droneApi = new DroneApi(this);
+                }
+            }
+        }
+        return droneApi;
     }
 
     /**
-     * 获取任务 API 模块。
+     * 获取任务 API 模块（懒加载缓存，线程安全）。
      *
      * @return MissionApi 实例
      */
     public MissionApi missions() {
-        return new MissionApi(this);
+        if (missionApi == null) {
+            synchronized (this) {
+                if (missionApi == null) {
+                    missionApi = new MissionApi(this);
+                }
+            }
+        }
+        return missionApi;
     }
 
     /**
-     * 获取飞行日志 API 模块。
+     * 获取飞行日志 API 模块（懒加载缓存，线程安全）。
      *
      * @return FlightLogApi 实例
      */
     public FlightLogApi flightLogs() {
-        return new FlightLogApi(this);
+        if (flightLogApi == null) {
+            synchronized (this) {
+                if (flightLogApi == null) {
+                    flightLogApi = new FlightLogApi(this);
+                }
+            }
+        }
+        return flightLogApi;
     }
 
     // ===================================================================

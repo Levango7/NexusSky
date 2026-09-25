@@ -8,11 +8,28 @@ from .exceptions import SdkException
 
 @dataclass
 class Waypoint:
-    """航点数据对象。"""
+    """航点数据对象。
+
+    Args:
+        lat: 纬度，有效范围 [-90, 90]。
+        lon: 经度，有效范围 [-180, 180]。
+        alt: 高度（米），必须 >= 0。
+
+    Raises:
+        ValueError: 如果 lat/lon/alt 超出有效范围。
+    """
 
     lat: float
     lon: float
     alt: float
+
+    def __post_init__(self):
+        if not (-90 <= self.lat <= 90):
+            raise ValueError(f"lat must be in [-90, 90], got: {self.lat}")
+        if not (-180 <= self.lon <= 180):
+            raise ValueError(f"lon must be in [-180, 180], got: {self.lon}")
+        if self.alt < 0:
+            raise ValueError(f"alt must be >= 0, got: {self.alt}")
 
     def to_dict(self):
         """转换为字典格式。"""

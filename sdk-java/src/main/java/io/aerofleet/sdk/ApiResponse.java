@@ -109,13 +109,17 @@ public class ApiResponse {
      * 从数据体中获取指定字段并转换为整数。
      *
      * @param key 字段名
-     * @return 字段值的整数表示，不存在或无法转换时返回 -1
+     * @return 字段值的整数表示
+     * @throws SdkException 如果字段不存在或无法转换为整数
      */
-    public int getInt(String key) {
+    public int getInt(String key) throws SdkException {
         Object val = get(key);
+        if (val == null) {
+            throw new SdkException("字段不存在或类型不匹配: " + key);
+        }
         if (val instanceof Number) {
             return ((Number) val).intValue();
         }
-        return -1;
+        throw new SdkException("字段不存在或类型不匹配: " + key);
     }
 }

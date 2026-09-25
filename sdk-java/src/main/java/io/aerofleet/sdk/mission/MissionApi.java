@@ -88,11 +88,21 @@ public class MissionApi {
         /**
          * 构造一个航点。
          *
-         * @param lat 纬度
-         * @param lon 经度
-         * @param alt 高度（米）
+         * @param lat 纬度，有效范围 [-90, 90]
+         * @param lon 经度，有效范围 [-180, 180]
+         * @param alt 高度（米），必须 >= 0
+         * @throws IllegalArgumentException 如果 lat/lon/alt 超出有效范围
          */
         public Waypoint(double lat, double lon, double alt) {
+            if (lat < -90 || lat > 90) {
+                throw new IllegalArgumentException("lat must be in [-90, 90], got: " + lat);
+            }
+            if (lon < -180 || lon > 180) {
+                throw new IllegalArgumentException("lon must be in [-180, 180], got: " + lon);
+            }
+            if (alt < 0) {
+                throw new IllegalArgumentException("alt must be >= 0, got: " + alt);
+            }
             this.lat = lat;
             this.lon = lon;
             this.alt = alt;

@@ -153,4 +153,126 @@ class DroneApiTest {
         assertNotNull(lastBody.get());
         assertTrue(lastBody.get().contains("\"type\":\"start_mission\""));
     }
+
+    // ===================================================================
+    // 错误场景测试
+    // ===================================================================
+
+    @Test
+    void test404ResponseThrowsSdkException() {
+        HttpServer errorServer = null;
+        try {
+            errorServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            int port = errorServer.getAddress().getPort();
+            errorServer.createContext("/api/v1", exchange -> {
+                byte[] respBytes = "{\"status\":\"error\",\"error\":\"not found\"}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(404, respBytes.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(respBytes);
+                }
+            });
+            errorServer.start();
+
+            NexusSkyClient errClient = NexusSkyClient.builder()
+                    .baseUrl("http://127.0.0.1:" + port)
+                    .apiKey("test-key")
+                    .allowInsecureHttp(true)
+                    .build();
+            DroneApi errDroneApi = errClient.drones();
+
+            SdkException ex = assertThrows(SdkException.class, () -> errDroneApi.list());
+            assertEquals(404, ex.getStatusCode());
+        } catch (IOException e) {
+            fail("Failed to create error server: " + e.getMessage());
+        } finally {
+            if (errorServer != null) {
+                errorServer.stop(0);
+            }
+        }
+    }
+
+    @Test
+    void test500ResponseThrowsSdkException() {
+        HttpServer errorServer = null;
+        try {
+            errorServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            int port = errorServer.getAddress().getPort();
+            errorServer.createContext("/api/v1", exchange -> {
+                byte[] respBytes = "{\"status\":\"error\",\"error\":\"internal server error\"}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(500, respBytes.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(respBytes);
+                }
+            });
+            errorServer.start();
+
+            NexusSkyClient errClient = NexusSkyClient.builder()
+                    .baseUrl("http://127.0.0.1:" + port)
+                    .apiKey("test-key")
+                    .allowInsecureHttp(true)
+                    .build();
+            DroneApi errDroneApi = errClient.drones();
+
+            SdkException ex = assertThrows(SdkException.class, () -> errDroneApi.list());
+            assertEquals(500, ex.getStatusCode());
+        } catch (IOException e) {
+            fail("Failed to create error server: " + e.getMessage());
+        } finally {
+            if (errorServer != null) {
+                errorServer.stop(0);
+            }
+        }
+    }
+
+    @Test
+    void testEmptyResponseBodyThrowsSdkException() {
+        HttpServer emptyServer = null;
+        try {
+            emptyServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            int port = emptyServer.getAddress().getPort();
+            emptyServer.createContext("/api/v1", exchange -> {
+                exchange.sendResponseHeaders(200, -1);
+                exchange.getResponseBody().close();
+            });
+            emptyServer.start();
+
+            NexusSkyClient errClient = NexusSkyClient.builder()
+                    .baseUrl("http://127.0.0.1:" + port)
+                    .apiKey("test-key")
+                    .allowInsecureHttp(true)
+                    .build();
+            DroneApi errDroneApi = errClient.drones();
+
+            assertThrows(SdkException.class, () -> errDroneApi.list());
+        } catch (IOException e) {
+            fail("Failed to create empty server: " + e.getMessage());
+        } finally {
+            if (emptyServer != null) {
+                emptyServer.stop(0);
+            }
+        }
+    }
+
+    @Test
+    void testNullBaseUrlThrowsIllegalArgumentException() {
+        assertThrows(NullPointerException.class, () ->
+                NexusSkyClient.builder()
+                        .baseUrl(null)
+                        .apiKey("test-key")
+                        .allowInsecureHttp(true)
+                        .build()
+        );
+    }
+
+    @Test
+    void testHttpUrlNotAllowedThrowsIllegalArgumentException() {
+        assertThrows(IllegalArgumentException.class, () ->
+                NexusSkyClient.builder()
+                        .baseUrl("http://cloud.example.com")
+                        .apiKey("test-key")
+                        .build()
+        );
+    }
 }

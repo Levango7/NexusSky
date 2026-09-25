@@ -4,6 +4,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 
@@ -108,7 +109,7 @@ public class MavlinkSigner {
             return false;
         }
         byte[] expected = sign(msgId, payload);
-        return Arrays.equals(expected, signature);
+        return MessageDigest.isEqual(expected, signature);
     }
 
     /**
