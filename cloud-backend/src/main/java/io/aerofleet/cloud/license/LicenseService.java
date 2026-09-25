@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.license;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -68,17 +68,17 @@ public class LicenseService {
             @Value("${aerofleet.license.key:}") String licenseKeyConfig,
             @Value("${aerofleet.security.jwt-secret:aerofleet-dev-secret-change-in-production-at-least-32-chars}") String hmacSecret,
             @Value("${aerofleet.security.dev-mode:false}") boolean devMode,
-            @Value("${aerofleet.license.public-key:}") String publicKeyConfig) {
+            @Value("${aerofleet.license.public-key:}") String publicKeyConfig,
+            ObjectMapper objectMapper) {
         this.licenseKeyConfig = licenseKeyConfig;
         this.hmacSecret = hmacSecret;
         this.devMode = devMode;
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.registerModule(new JavaTimeModule());
+        this.objectMapper = objectMapper;
         // 初始化签名工具：生产模式从配置读取公钥，开发模式自动生成密钥对
         if (publicKeyConfig != null && !publicKeyConfig.isBlank()) {
-            this.licenseSigner = new LicenseSigner(publicKeyConfig);
+            this.licenseSigner = new LicenseSigner(publicKeyConfig, objectMapper);
         } else {
-            this.licenseSigner = new LicenseSigner();
+            this.licenseSigner = new LicenseSigner(objectMapper);
         }
         // 启动时解析一次；解析失败则降级为开发版，避免启动崩溃影响现有测试
         this.currentLicense = loadLicense();

@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.gateway;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.flightlog.FlightLogService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,7 @@ class HeartbeatWatchdogTest {
 
     /** 构造一个指向临时目录的 FlightLogService。 */
     private FlightLogService flightLog() {
-        return new FlightLogService(tmp.toString(), 1000L);
+        return new FlightLogService(tmp.toString(), 1000L, new ObjectMapper());
     }
 
     @Test

@@ -49,10 +49,11 @@ public class TenantInterceptor implements HandlerInterceptor {
     private static final long WINDOW_TTL_MS = 60_000;
 
     public TenantInterceptor(@Value("${aerofleet.security.dev-mode:true}") boolean devMode,
-                             @Value("${aerofleet.tenant.rate-limit:100}") int rateLimitPerMinute) {
+                             @Value("${aerofleet.tenant.rate-limit:100}") int rateLimitPerMinute,
+                             ObjectMapper objectMapper) {
         this.devMode = devMode;
         this.rateLimitPerMinute = rateLimitPerMinute;
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = objectMapper;
     }
 
     @Override

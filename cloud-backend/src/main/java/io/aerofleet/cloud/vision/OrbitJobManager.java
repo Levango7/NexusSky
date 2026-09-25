@@ -29,6 +29,7 @@ import java.util.concurrent.Executors;
 public class OrbitJobManager {
 
     private static final Logger log = LoggerFactory.getLogger(OrbitJobManager.class);
+    private static final int MAX_JOBS = 1000;
 
     public enum JobState { STARTED, RUNNING, DONE, FAILED, TIMEOUT }
 
@@ -91,6 +92,9 @@ public class OrbitJobManager {
         }
         if (photos < 2 || photos > 12) {
             throw new IllegalArgumentException("photos must be in [2, 12]");
+        }
+        if (jobs.size() >= MAX_JOBS) {
+            throw new IllegalStateException("orbit job queue full (" + MAX_JOBS + " jobs)");
         }
         OrbitJob job = new OrbitJob(sysid, lat, lon, radiusM, altM, photos);
         OrbitJob prev = inFlight.putIfAbsent(sysid, job);

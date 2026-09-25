@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.license;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,9 +44,8 @@ public class LicenseSigner {
     /**
      * 开发模式构造器：自动生成 RSA-2048 密钥对。
      */
-    public LicenseSigner() {
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.registerModule(new JavaTimeModule());
+    public LicenseSigner(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
         this.devMode = true;
         KeyPair keyPair = generateKeyPair();
         this.publicKey = keyPair.getPublic();
@@ -59,9 +58,8 @@ public class LicenseSigner {
      *
      * @param publicKeyBase64 Base64 编码的 X.509 公钥
      */
-    public LicenseSigner(String publicKeyBase64) {
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.registerModule(new JavaTimeModule());
+    public LicenseSigner(String publicKeyBase64, ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
         this.devMode = false;
         this.privateKey = null;
         this.publicKey = decodePublicKey(publicKeyBase64);

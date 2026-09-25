@@ -191,12 +191,23 @@ public class ApiKeyController {
                     "JWT authentication required to revoke API Key");
         }
 
+        Jwt jwt = (Jwt) auth.getPrincipal();
+        Integer currentTenantId = extractClaimAsInteger(jwt, "tenant_id");
+        String currentUsername = jwt.getSubject();
+
         var entityOpt = apiKeyRepository.findByKeyId(keyId);
         if (entityOpt.isEmpty()) {
             return errorResponse(HttpStatus.NOT_FOUND, "API Key not found");
         }
 
         ApiKeyEntity entity = entityOpt.get();
+        if (currentTenantId != null && entity.getTenantId() != null
+                && !currentTenantId.equals(entity.getTenantId())) {
+            log.warn("API Key 撤销被拒绝（租户不匹配）: keyId={} keyTenantId={} currentTenantId={}",
+                    keyId, entity.getTenantId(), currentTenantId);
+            return errorResponse(HttpStatus.FORBIDDEN, "API Key does not belong to your tenant");
+        }
+
         entity.setRevoked(true);
         apiKeyRepository.save(entity);
 
@@ -231,24 +242,21 @@ public class ApiKeyController {
         String username = jwt.getSubject();
         Integer tenantId = extractClaimAsInteger(jwt, "tenant_id");
 
-        // 查找当前用户或租户的 API Key
+        Integer userId = null;
+        if (userRepository != null) {
+            var userOpt = userRepository.findByUsername(username);
+            if (userOpt.isPresent()) {
+                userId = userOpt.get().getId();
+            }
+        }
+
         List<ApiKeyEntity> keys;
-        if (tenantId != null) {
+        if (userId != null) {
+            keys = apiKeyRepository.findByUserId(userId);
+        } else if (tenantId != null) {
             keys = apiKeyRepository.findByTenantId(tenantId);
         } else {
-            // 全局管理员：查找 userId 关联的 Key
-            Integer userId = null;
-            if (userRepository != null) {
-                var userOpt = userRepository.findByUsername(username);
-                if (userOpt.isPresent()) {
-                    userId = userOpt.get().getId();
-                }
-            }
-            if (userId != null) {
-                keys = apiKeyRepository.findByUserId(userId);
-            } else {
-                keys = List.of();
-            }
+            keys = List.of();
         }
 
         // 脱敏返回

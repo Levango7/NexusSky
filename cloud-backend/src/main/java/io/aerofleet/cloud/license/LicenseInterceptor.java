@@ -46,11 +46,12 @@ public class LicenseInterceptor implements HandlerInterceptor {
 
     public LicenseInterceptor(LicenseService licenseService,
                               @Value("${aerofleet.license.enabled:false}") boolean enabled,
-                              @Value("${aerofleet.security.dev-mode:false}") boolean devMode) {
+                              @Value("${aerofleet.security.dev-mode:false}") boolean devMode,
+                              ObjectMapper objectMapper) {
         this.licenseService = licenseService;
         this.enabled = enabled;
         this.devMode = devMode;
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = objectMapper;
     }
 
     @Override

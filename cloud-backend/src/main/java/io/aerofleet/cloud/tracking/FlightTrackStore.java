@@ -48,7 +48,7 @@ public class FlightTrackStore {
 
     /** 每架无人机保留的轨迹点上限，可通过配置覆盖。 */
     @Value("${aerofleet.tracking.max-points:3600}")
-    private int maxPoints = 3600;
+    private volatile int maxPoints = 3600;
 
     /** sysid -> 轨迹双端队列（最新点在队尾）。 */
     private final Map<Integer, Deque<TrackPoint>> tracks = new ConcurrentHashMap<>();

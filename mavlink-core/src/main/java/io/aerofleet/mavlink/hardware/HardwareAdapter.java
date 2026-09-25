@@ -21,7 +21,7 @@ import java.util.List;
  *   <li>sim:// — 模拟连接（无需真实硬件）</li>
  * </ul>
  */
-public interface HardwareAdapter {
+public interface HardwareAdapter extends AutoCloseable {
 
     // ====== 连接管理 ======
 
@@ -167,4 +167,9 @@ public interface HardwareAdapter {
      * @return 系统 ID（MAVLink sysId），未连接时返回 -1
      */
     int getSystemId();
+
+    @Override
+    default void close() throws Exception {
+        disconnect();
+    }
 }

@@ -53,12 +53,11 @@ public class AuthController {
     private boolean trustForwardedFor;
     /** 登录频率限制：IP -> 窗口内尝试时间戳列表。 */
     private final ConcurrentHashMap<String, RateBucket> loginRateBuckets = new ConcurrentHashMap<>();
-    /** 由 isRateLimited 的同步锁保护。 */
-    private long lastRateBucketCleanup;
+
 
     public AuthController(JwtTokenProvider tokenProvider,
                           PasswordEncoder passwordEncoder,
-                          @Value("${aerofleet.security.users:admin:admin}") String usersConfig,
+                          @Value("${aerofleet.security.users}") String usersConfig,
                           @Value("${aerofleet.security.jwt-expiry:3600}") long expirySeconds,
                           @Autowired(required = false) UserRepository userRepository) {
         this.tokenProvider = tokenProvider;
@@ -66,6 +65,11 @@ public class AuthController {
         this.expirySeconds = expirySeconds;
         this.users = parseUsers(usersConfig);
         this.userRepository = userRepository;
+        if (this.users.isEmpty() && userRepository == null) {
+            throw new IllegalStateException(
+                    "aerofleet.security.users is not configured and UserRepository is not available. "
+                    + "Set aerofleet.security.users environment variable (format: username:password)");
+        }
     }
 
     /**
@@ -225,36 +229,31 @@ public class AuthController {
         return remoteAddr == null || remoteAddr.isBlank() ? "unknown" : remoteAddr;
     }
 
-    /** 检查并记录本次尝试；同步保证容量检查与新增桶不会并发突破上限。 */
-    private synchronized boolean isRateLimited(String ip) {
+    private boolean isRateLimited(String ip) {
         long now = System.currentTimeMillis();
-        if (now - lastRateBucketCleanup >= WINDOW_MS) {
-            // 同时回收不再访问的 IP；只清理当前 IP 无法解决历史桶持续累积。
-            loginRateBuckets.keySet().forEach(key -> removeExpiredRateBucket(key, now));
-            lastRateBucketCleanup = now;
-        }
-        removeExpiredRateBucket(ip, now);
         if (!loginRateBuckets.containsKey(ip) && loginRateBuckets.size() >= MAX_RATE_BUCKETS) {
             return true;
         }
-        boolean[] rateLimited = {false};
-        loginRateBuckets.compute(ip, (key, bucket) -> {
-            RateBucket current = bucket == null ? new RateBucket() : bucket;
-            if (current.timestamps.size() >= MAX_ATTEMPTS_PER_MINUTE) {
-                rateLimited[0] = true;
-            } else {
-                current.timestamps.add(now);
+        RateBucket bucket = loginRateBuckets.computeIfAbsent(ip, k -> new RateBucket());
+        synchronized (bucket) {
+            bucket.timestamps.removeIf(ts -> now - ts > WINDOW_MS);
+            if (bucket.timestamps.size() >= MAX_ATTEMPTS_PER_MINUTE) {
+                return true;
             }
-            return current;
-        });
-        return rateLimited[0];
+            bucket.timestamps.add(now);
+            return false;
+        }
     }
 
-    /** 原子清理并移除空桶，避免移除操作误删并发请求正在使用的桶。 */
-    private void removeExpiredRateBucket(String ip, long now) {
-        loginRateBuckets.computeIfPresent(ip, (key, bucket) -> {
-            bucket.timestamps.removeIf(ts -> now - ts > WINDOW_MS);
-            return bucket.timestamps.isEmpty() ? null : bucket;
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 60_000)
+    public void cleanupRateBuckets() {
+        long now = System.currentTimeMillis();
+        loginRateBuckets.entrySet().removeIf(entry -> {
+            RateBucket bucket = entry.getValue();
+            synchronized (bucket) {
+                bucket.timestamps.removeIf(ts -> now - ts > WINDOW_MS);
+                return bucket.timestamps.isEmpty();
+            }
         });
     }
 

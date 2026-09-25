@@ -176,16 +176,14 @@ public class UdpGateway {
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 300_000, initialDelay = 300_000)
     public void pruneStaleRateLimitWindows() {
         long cutoff = System.currentTimeMillis() - 120_000;
-        int removed = 0;
-        for (var entry : rateLimitWindows.entrySet()) {
+        int before = rateLimitWindows.size();
+        rateLimitWindows.entrySet().removeIf(entry -> {
             Deque<Long> window = entry.getValue();
             synchronized (window) {
-                if (window.isEmpty() || window.peekLast() < cutoff) {
-                    rateLimitWindows.remove(entry.getKey());
-                    removed++;
-                }
+                return window.isEmpty() || window.peekLast() < cutoff;
             }
-        }
+        });
+        int removed = before - rateLimitWindows.size();
         if (removed > 0) {
             log.debug("Pruned {} stale rate-limit windows", removed);
         }

@@ -49,7 +49,7 @@ public class OrbitService {
     private final DroneCommandService commands;
     private final GeolocationSolver solver;
     private final TargetTracker tracker;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2)).build();
     private final String simTruthBase;
@@ -57,11 +57,12 @@ public class OrbitService {
     public OrbitService(DroneCommandService commands,
                         GeolocationSolver solver,
                         TargetTracker tracker,
-                        @Value("${aerofleet.sim-truth-base:http://127.0.0.1:18080}")
-                        String simTruthBase) {
+                        ObjectMapper objectMapper,
+                        @Value("${aerofleet.sim-truth-base:http://127.0.0.1:18080}") String simTruthBase) {
         this.commands = commands;
         this.solver = solver;
         this.tracker = tracker;
+        this.mapper = objectMapper;
         this.simTruthBase = simTruthBase;
     }
 

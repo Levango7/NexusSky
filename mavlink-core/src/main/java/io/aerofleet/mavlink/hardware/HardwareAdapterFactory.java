@@ -2,6 +2,10 @@ package io.aerofleet.mavlink.hardware;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.DisposableBean;
+import org.springframework.stereotype.Component;
+
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * 硬件适配器工厂：根据连接字符串前缀自动选择适配器类型。
@@ -16,11 +20,18 @@ import org.slf4j.LoggerFactory;
  * <p>
  * 对于 tcp:// 连接，可通过参数显式指定 PX4 或 ArduPilot。
  */
-public final class HardwareAdapterFactory {
+@Component
+public final class HardwareAdapterFactory implements DisposableBean {
 
     private static final Logger log = LoggerFactory.getLogger(HardwareAdapterFactory.class);
+    private static final ConcurrentLinkedQueue<HardwareAdapter> createdAdapters = new ConcurrentLinkedQueue<>();
 
     private HardwareAdapterFactory() {
+    }
+
+    private static <T extends HardwareAdapter> T track(T adapter) {
+        createdAdapters.add(adapter);
+        return adapter;
     }
 
     /**
@@ -37,22 +48,22 @@ public final class HardwareAdapterFactory {
 
         if (connectionUrl.startsWith("sim://")) {
             log.info("创建 SimulatedHardwareAdapter（模拟模式）");
-            return new SimulatedHardwareAdapter();
+            return track(new SimulatedHardwareAdapter());
         }
 
         if (connectionUrl.startsWith("udp://")) {
             log.info("创建 Px4Adapter（UDP 连接）");
-            return new Px4Adapter();
+            return track(new Px4Adapter());
         }
 
         if (connectionUrl.startsWith("tcp://")) {
             log.info("创建 ArduPilotAdapter（TCP 连接）");
-            return new ArduPilotAdapter();
+            return track(new ArduPilotAdapter());
         }
 
         if (connectionUrl.startsWith("serial://")) {
             log.info("创建 ArduPilotAdapter（串口连接）");
-            return new ArduPilotAdapter();
+            return track(new ArduPilotAdapter());
         }
 
         throw new IllegalArgumentException(
@@ -75,18 +86,30 @@ public final class HardwareAdapterFactory {
         return switch (adapterType.toUpperCase()) {
             case "PX4" -> {
                 log.info("显式创建 Px4Adapter");
-                yield new Px4Adapter();
+                yield track(new Px4Adapter());
             }
             case "ARDUPILOT", "APM" -> {
                 log.info("显式创建 ArduPilotAdapter");
-                yield new ArduPilotAdapter();
+                yield track(new ArduPilotAdapter());
             }
             case "SIMULATED", "SIM" -> {
                 log.info("显式创建 SimulatedHardwareAdapter");
-                yield new SimulatedHardwareAdapter();
+                yield track(new SimulatedHardwareAdapter());
             }
             default -> throw new IllegalArgumentException(
                     "不支持的适配器类型: " + adapterType + "。支持: PX4, ArduPilot, Simulated");
         };
+    }
+
+    @Override
+    public void destroy() {
+        HardwareAdapter adapter;
+        while ((adapter = createdAdapters.poll()) != null) {
+            try {
+                adapter.close();
+            } catch (Exception e) {
+                log.warn("Failed to close hardware adapter: {}", e.getMessage());
+            }
+        }
     }
 }

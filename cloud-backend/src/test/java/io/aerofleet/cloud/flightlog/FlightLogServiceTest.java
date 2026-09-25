@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.flightlog;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.gateway.AlertEntry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class FlightLogServiceTest {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     @TempDir
     Path tmp;
 
@@ -38,7 +41,7 @@ class FlightLogServiceTest {
 
     @Test
     void telemetryRoundTripsThroughFile() throws Exception {
-        FlightLogService svc = new FlightLogService(tmp.toString(), 0);
+        FlightLogService svc = new FlightLogService(tmp.toString(), 0, MAPPER);
         svc.telemetry(snap(1, 22.5907, 113.9345, 42.0));
         Path f = tmp.resolve("flight-" + LocalDate.now() + ".jsonl");
         assertTrue(Files.exists(f), "daily file created");
@@ -51,7 +54,7 @@ class FlightLogServiceTest {
 
     @Test
     void telemetryThrottleDropsRapidDuplicates() {
-        FlightLogService svc = new FlightLogService(tmp.toString(), 60_000);
+        FlightLogService svc = new FlightLogService(tmp.toString(), 60_000, MAPPER);
         svc.telemetry(snap(1, 22.5, 113.9, 10));
         svc.telemetry(snap(1, 22.6, 113.9, 20));   // within the window: dropped
         svc.telemetry(snap(2, 22.7, 113.9, 30));   // other drone: written
@@ -63,7 +66,7 @@ class FlightLogServiceTest {
 
     @Test
     void alertAndMissionAlwaysWritten() {
-        FlightLogService svc = new FlightLogService(tmp.toString(), 60_000);
+        FlightLogService svc = new FlightLogService(tmp.toString(), 60_000, MAPPER);
         svc.alert(3, new AlertEntry(6, "low battery", System.currentTimeMillis()));
         svc.mission(3, "uploaded 4 items");
         assertEquals(1, svc.query(LocalDate.now(), "alert", 3, 0).size());
@@ -74,7 +77,7 @@ class FlightLogServiceTest {
 
     @Test
     void limitReturnsNewestTail() {
-        FlightLogService svc = new FlightLogService(tmp.toString(), 0);
+        FlightLogService svc = new FlightLogService(tmp.toString(), 0, MAPPER);
         for (int i = 0; i < 10; i++) {
             svc.mission(1, "event " + i);
         }
@@ -85,7 +88,7 @@ class FlightLogServiceTest {
 
     @Test
     void trackForRebuildsFromTelemetryLines() {
-        FlightLogService svc = new FlightLogService(tmp.toString(), 0);
+        FlightLogService svc = new FlightLogService(tmp.toString(), 0, MAPPER);
         svc.telemetry(snap(1, 22.5907, 113.9345, 10));
         svc.telemetry(snap(1, 22.5917, 113.9355, 20));
         svc.alert(1, new AlertEntry(6, "noise", System.currentTimeMillis()));   // not a track point
@@ -96,7 +99,7 @@ class FlightLogServiceTest {
 
     @Test
     void nanFieldsSerializeAsNullAndSkippedInTrack() {
-        FlightLogService svc = new FlightLogService(tmp.toString(), 0);
+        FlightLogService svc = new FlightLogService(tmp.toString(), 0, MAPPER);
         DroneSnapshot s = new DroneSnapshot(4);   // lat/lon stay NaN
         svc.telemetry(s);
         List<Map<String, Object>> rows = svc.query(LocalDate.now(), "telemetry", 4, 0);
@@ -108,7 +111,7 @@ class FlightLogServiceTest {
 
     @Test
     void missingDayYieldsEmpty() {
-        FlightLogService svc = new FlightLogService(tmp.toString(), 0);
+        FlightLogService svc = new FlightLogService(tmp.toString(), 0, MAPPER);
         assertTrue(svc.query(LocalDate.of(2020, 1, 1), null, null, 0).isEmpty());
         assertTrue(svc.trackFor(LocalDate.of(2020, 1, 1), 1).isEmpty());
     }

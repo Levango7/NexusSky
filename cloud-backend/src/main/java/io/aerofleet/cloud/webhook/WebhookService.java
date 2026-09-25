@@ -62,7 +62,6 @@ public class WebhookService {
     private static final String AES_TRANSFORMATION = "AES/GCM/NoPadding";
     private static final int GCM_TAG_LENGTH_BITS = 128;
     private static final int GCM_IV_LENGTH_BYTES = 12;
-    private static final String DEFAULT_ENCRYPTION_KEY = "aerofleet-dev-encryption-key";
 
     @Autowired(required = false)
     private WebhookRepository webhookRepository;
@@ -70,7 +69,7 @@ public class WebhookService {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @Value("${aerofleet.encryption.key:" + DEFAULT_ENCRYPTION_KEY + "}")
+    @Value("${aerofleet.encryption.key}")
     private String encryptionKey;
 
     private final SecureRandom secureRandom = new SecureRandom();
@@ -441,9 +440,12 @@ public class WebhookService {
      * @throws Exception 密钥派生失败时抛出
      */
     private SecretKeySpec deriveAesKey() throws Exception {
+        if (encryptionKey == null || encryptionKey.isBlank()) {
+            throw new IllegalStateException("aerofleet.encryption.key is not configured");
+        }
         MessageDigest sha = MessageDigest.getInstance("SHA-256");
         byte[] keyBytes = sha.digest(encryptionKey.getBytes(StandardCharsets.UTF_8));
-        keyBytes = Arrays.copyOf(keyBytes, 16); // AES-128 需要 16 字节密钥
+        keyBytes = Arrays.copyOf(keyBytes, 16);
         return new SecretKeySpec(keyBytes, AES_ALGORITHM);
     }
 }

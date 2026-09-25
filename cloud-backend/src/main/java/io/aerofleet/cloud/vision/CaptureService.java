@@ -54,7 +54,7 @@ public class CaptureService {
     private final DeviceRegistry registry;
     private final GeolocationSolver solver;
     private final BlobDetector detector = new BlobDetector();
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2)).build();
 
@@ -70,13 +70,13 @@ public class CaptureService {
     public CaptureService(DroneCommandService commands,
                           DeviceRegistry registry,
                           GeolocationSolver solver,
-                          @Value("${aerofleet.sim-truth-base:http://127.0.0.1:18080}")
-                          String simTruthBase,
-                          @Value("${aerofleet.vision.source:truth}")
-                          String source) {
+                          ObjectMapper objectMapper,
+                          @Value("${aerofleet.sim-truth-base:http://127.0.0.1:18080}") String simTruthBase,
+                          @Value("${aerofleet.vision.source:truth}") String source) {
         this.commands = commands;
         this.registry = registry;
         this.solver = solver;
+        this.mapper = objectMapper;
         this.simTruthBase = simTruthBase;
         this.source = source;
         // FR-03 投影简化切换：truth→ProjectionVisionSource / vision-source→SimulatedVisionSource / pixels→null
