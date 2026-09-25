@@ -14,6 +14,9 @@
 """
 
 from .client import NexusSkyClient
+from .drones import DroneApi
+from .mission import MissionApi, Mission, Waypoint
+from .flightlog import FlightLogApi
 from .exceptions import (
     SdkException,
     AuthenticationError,
@@ -24,6 +27,11 @@ from .exceptions import (
 
 __all__ = [
     "NexusSkyClient",
+    "DroneApi",
+    "MissionApi",
+    "Mission",
+    "Waypoint",
+    "FlightLogApi",
     "SdkException",
     "AuthenticationError",
     "NotFoundError",

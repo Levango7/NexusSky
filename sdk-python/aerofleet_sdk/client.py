@@ -46,6 +46,49 @@ class NexusSkyClient:
             "X-API-Key": api_key,
             "Accept": "application/json",
         })
+        self._drones = None
+        self._missions = None
+        self._flight_logs = None
+
+    # ===================================================================
+    # API 模块属性（lazy init）
+    # ===================================================================
+
+    @property
+    def drones(self):
+        """获取无人机 API 模块。
+
+        Returns:
+            DroneApi: 无人机 API 实例。
+        """
+        if self._drones is None:
+            from .drones import DroneApi
+            self._drones = DroneApi(self)
+        return self._drones
+
+    @property
+    def missions(self):
+        """获取任务 API 模块。
+
+        Returns:
+            MissionApi: 任务 API 实例。
+        """
+        if self._missions is None:
+            from .mission import MissionApi
+            self._missions = MissionApi(self)
+        return self._missions
+
+    @property
+    def flight_logs(self):
+        """获取飞行日志 API 模块。
+
+        Returns:
+            FlightLogApi: 飞行日志 API 实例。
+        """
+        if self._flight_logs is None:
+            from .flightlog import FlightLogApi
+            self._flight_logs = FlightLogApi(self)
+        return self._flight_logs
 
     # ===================================================================
     # 无人机 API

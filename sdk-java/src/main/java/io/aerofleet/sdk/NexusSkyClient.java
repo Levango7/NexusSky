@@ -3,6 +3,10 @@ package io.aerofleet.sdk;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import io.aerofleet.sdk.drone.DroneApi;
+import io.aerofleet.sdk.flightlog.FlightLogApi;
+import io.aerofleet.sdk.mission.MissionApi;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -47,6 +51,77 @@ public class NexusSkyClient {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
+    }
+
+    // ===================================================================
+    // API 模块工厂方法
+    // ===================================================================
+
+    /**
+     * 获取无人机 API 模块。
+     *
+     * @return DroneApi 实例
+     */
+    public DroneApi drones() {
+        return new DroneApi(this);
+    }
+
+    /**
+     * 获取任务 API 模块。
+     *
+     * @return MissionApi 实例
+     */
+    public MissionApi missions() {
+        return new MissionApi(this);
+    }
+
+    /**
+     * 获取飞行日志 API 模块。
+     *
+     * @return FlightLogApi 实例
+     */
+    public FlightLogApi flightLogs() {
+        return new FlightLogApi(this);
+    }
+
+    // ===================================================================
+    // 供 API 模块使用的请求方法
+    // ===================================================================
+
+    /**
+     * 发送 GET 请求并返回 ApiResponse。
+     *
+     * @param path API 路径（不含 /api/v1 前缀）
+     * @return ApiResponse 对象
+     * @throws SdkException 如果请求失败
+     */
+    public ApiResponse get(String path) throws SdkException {
+        return requestApiResponse(path, "GET", null);
+    }
+
+    /**
+     * 发送 POST 请求并返回 ApiResponse。
+     *
+     * @param path API 路径（不含 /api/v1 前缀）
+     * @param body 请求体
+     * @return ApiResponse 对象
+     * @throws SdkException 如果请求失败
+     */
+    public ApiResponse post(String path, Map<String, Object> body) throws SdkException {
+        return requestApiResponse(path, "POST", body);
+    }
+
+    private ApiResponse requestApiResponse(String path, String method, Map<String, Object> body)
+            throws SdkException {
+        try {
+            HttpResponse<String> resp = doRequest(path, method, body);
+            checkStatus(resp);
+            return MAPPER.readValue(resp.body(), ApiResponse.class);
+        } catch (SdkException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SdkException("请求失败: " + path, e);
+        }
     }
 
     // ===================================================================
