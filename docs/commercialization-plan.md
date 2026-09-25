@@ -775,7 +775,30 @@ MetricsCollector
 
 5 轮收敛性审查，累计修复 21 个问题（4C + 12M + 5m）。
 
-### 6.2 技术指标更新
+### 6.2 P1/P2 代码审查 — P0 修复
+
+**审查范围**：P1 差距补齐代码（API计量/分布式限流/Webhook/OpenAPI导出）+ P2 差距补齐代码（MAVLink签名/JWT非对称签名）+ SDK完善代码（Java/Python）
+
+**审查结果**：
+
+| 审查对象 | P0 | P1 | P2 | 状态 |
+|---|---|---|---|---|
+| 后端（P1+P2代码） | 3 条 | 12 条 | 5 条 | P0已修复 ✅ |
+| SDK（Java+Python） | 0 条 | 13 条 | 6 条 | P0无问题 ✅ |
+
+**P0 修复详情**（commit e196d61）：
+
+| # | 问题 | 修复方式 | 文件 |
+|---|---|---|---|
+| P0-1 | **SSRF漏洞** — WebhookService.register() 未校验回调URL，攻击者可注册内网地址触发服务端请求 | 新增 validateWebhookUrl() + isPrivateAddress()，禁止私有IP段(10.x/172.16-31.x/192.168.x/127.x/169.254.x)和localhost | WebhookService.java, WebhookController.java |
+| P0-2 | **Webhook租户隔离缺失** — trigger() 查询所有租户的Webhook，导致跨租户事件泄露 | 新增 findByEnabledTrueAndEventsContainingAndTenantId()，trigger()使用TenantContext.getEffectiveTenantId()按租户过滤 | WebhookService.java, WebhookRepository.java |
+| P0-3 | **MAVLink签名验证逻辑错误** — verify()在signature为null时返回false而非抛异常，decode()在签名缺失时直接拒绝消息 | verify()在signature==null时抛IllegalStateException，decode()在签名缺失时log warning并放行(签名传输机制待实现) | MavlinkSigner.java, MavlinkMessage.java, MavlinkSignerTest.java |
+
+**测试验证**：cloud-backend 1692 tests 0 failures + mavlink-core 235 tests 0 failures
+
+**待修复**：P1 审查问题（后端12条 + SDK13条）尚未修复，列为后续迭代项。
+
+### 6.3 技术指标更新
 
 | 指标 | 更新前 | 更新后 |
 |---|---|---|
@@ -879,4 +902,4 @@ MetricsCollector
 
 ---
 
-> **文档结束** | 维护者：产品架构师 | 修订记录：v1.0 (2026-09-22) 初版，v1.1 (2026-09-24) P3 完成 + 代码审查收敛 + 技术指标更新
+> **文档结束** | 维护者：产品架构师 | 修订记录：v1.0 (2026-09-22) 初版，v1.1 (2026-09-24) P3 完成 + 代码审查收敛 + 技术指标更新，v1.2 (2026-09-25) P1/P2审查P0修复 + commit e196d61
