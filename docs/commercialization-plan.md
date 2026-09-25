@@ -652,9 +652,9 @@ MetricsCollector
 | ~~7~~ | ~~无 Webhook 机制~~ | ✅ 已修复：WebhookEntity+Repository+Service+Controller + V17迁移 + tenantId隔离 | — | ~~P1~~ | ~~2 人周~~ |
 | ~~8~~ | ~~持久化缺失~~ | ✅ 已修复：SprayTaskEntity/DeliverySequenceEntity新建 + FormationService改为Repository持久化 + V12-V16迁移 | — | ~~P0~~ | ~~5 人周~~ |
 | ~~9~~ | ~~无 OpenAPI 规范导出~~ | ✅ 已修复：OpenApiConfig ApiKeyAuth安全方案 + OpenApiExportController(json/yaml导出) + application-prod.properties | — | ~~P1~~ | ~~1 人周~~ |
-| 10 | **MAVLink 签名未实现** | 明文通信 | 安全合规风险 | P2 | 2 人周 |
+| ~~10~~ | ~~MAVLink 签名未实现~~ | ✅ 已修复：MavlinkSigner(HMAC-SHA256) + MavlinkSignatureConfig(配置开关) + MavlinkMessage签名字段 | — | ~~P2~~ | ~~2 人周~~ |
 | ~~11~~ | ~~无 SDK 包发布~~ | ✅ 已修复：sdk-java(NexusSkyClient JDK HttpClient) + sdk-python(aerofleet_sdk包) 骨架 | — | ~~P1~~ | ~~3 人周~~ |
-| 12 | **JWT 对称签名** | HMAC-SHA256 | 多实例密钥共享风险 | P2 | 1 人周 |
+| ~~12~~ | ~~JWT 对称签名~~ | ✅ 已修复：JwtTokenProvider RS256非对称签名 + RSA密钥对配置 + 兼容HS256回退 + 自动生成密钥对 | — | ~~P2~~ | ~~1 人周~~ |
 
 #### 4.1.1 已解决差距
 
@@ -672,6 +672,8 @@ MetricsCollector
 | 7 | **无 Webhook 机制** | WebhookEntity+Repository+Service+Controller(POST/GET/DELETE /api/v1/webhooks) + V17迁移 + tenantId隔离 | (本轮提交) |
 | 9 | **无 OpenAPI 规范导出** | OpenApiConfig ApiKeyAuth安全方案 + OpenApiExportController(json/yaml导出) + application-prod.properties启用api-docs | (本轮提交) |
 | 11 | **无 SDK 包发布** | sdk-java(NexusSkyClient JDK HttpClient + ApiKey认证) + sdk-python(aerofleet_sdk包) 骨架 | (本轮提交) |
+| 10 | **MAVLink 签名未实现** | MavlinkSigner(HMAC-SHA256 8字节截断签名) + MavlinkSignatureConfig(配置开关默认关闭) + MavlinkMessage signature字段+签名感知编解码 | (本轮提交) |
+| 12 | **JWT 对称签名** | JwtTokenProvider RS256非对称签名 + RSA密钥对配置(jwt.private-key/jwt.public-key) + 兼容HS256回退 + jwt.generate-keys自动生成 | (本轮提交) |
 | P3-1 | **动态 MAX_HOPS 集成** | Mesh 组网支持动态调整最大跳数，适应不同网络拓扑 | 93b1058 |
 | P3-2 | **真实卫星接入预留** | 卫星中继模块预留真实硬件接入接口，支持后续对接真实卫星链路 | 93b1058 |
 
@@ -691,9 +693,9 @@ MetricsCollector
 9. ✅ OpenAPI spec 导出（1 人周）— OpenApiConfig + OpenApiExportController
 10. ✅ SDK 包发布（3 人周）— sdk-java + sdk-python 骨架
 
-**P2（商用后 3-6 月内完成，约 3 人周）**：
-11. MAVLink 签名（2 人周）
-12. JWT 非对称签名升级（1 人周）
+**P2（商用后 3-6 月内完成，约 3 人周 ✅ 全部完成）**：
+11. ✅ MAVLink 签名（2 人周）— MavlinkSigner + MavlinkSignatureConfig + MavlinkMessage签名字段
+12. ✅ JWT 非对称签名升级（1 人周）— JwtTokenProvider RS256 + 兼容HS256回退 + 自动生成密钥对
 
 **P3（已完成 ✅）**：
 - ✅ 动态 MAX_HOPS 集成
