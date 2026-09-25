@@ -1,6 +1,7 @@
 package io.aerofleet.mavlink.security;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Component;
 
 /**
@@ -13,7 +14,7 @@ import org.springframework.stereotype.Component;
  * </ul>
  */
 @Component
-public class MavlinkSignatureConfig {
+public class MavlinkSignatureConfig implements InitializingBean {
 
     @Value("${mavlink.signing.enabled:false}")
     private boolean enabled;
@@ -35,5 +36,14 @@ public class MavlinkSignatureConfig {
 
     public void setSecretKey(String secretKey) {
         this.secretKey = secretKey;
+    }
+
+    // P1-fix: 启动时校验，enabled=true 且密钥为空则应用启动失败，避免运行时不安全
+    @Override
+    public void afterPropertiesSet() {
+        if (enabled && (secretKey == null || secretKey.isEmpty())) {
+            throw new IllegalStateException(
+                    "mavlink.signing.enabled=true but mavlink.signing.secret-key is empty");
+        }
     }
 }

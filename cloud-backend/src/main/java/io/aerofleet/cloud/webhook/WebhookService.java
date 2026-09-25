@@ -1,23 +1,32 @@
 package io.aerofleet.cloud.webhook;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
+import javax.crypto.Cipher;
 import javax.crypto.Mac;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +40,13 @@ import java.util.Map;
  * 租户隔离：所有操作基于 {@link TenantContext#getEffectiveTenantId()} 自动过滤，
  * 注册时绑定当前租户 ID，查询和推送时仅访问当前租户的 webhook。
  * <p>
+ * 安全措施：
+ * <ul>
+ *   <li>HMAC 密钥（secret）在存储前经过 AES-GCM 加密，读取时解密（P1-4）</li>
+ *   <li>RestTemplate 配置了连接超时（5s）和读取超时（10s），防止线程长时间阻塞（P1-5）</li>
+ *   <li>HMAC 签名失败时抛出异常并跳过推送，不返回空签名（P1-6）</li>
+ *   <li>JSON 序列化使用 Jackson ObjectMapper，确保特殊字符正确转义（P1-7）</li>
+ * </ul>
  * 推送失败时记录日志但不抛异常，确保不阻塞主流程。
  */
 @Component
@@ -41,15 +57,39 @@ public class WebhookService {
     /** HMAC-SHA256 算法名称。 */
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
+    /** AES-GCM 加密配置。 */
+    private static final String AES_ALGORITHM = "AES";
+    private static final String AES_TRANSFORMATION = "AES/GCM/NoPadding";
+    private static final int GCM_TAG_LENGTH_BITS = 128;
+    private static final int GCM_IV_LENGTH_BYTES = 12;
+    private static final String DEFAULT_ENCRYPTION_KEY = "aerofleet-dev-encryption-key";
+
     @Autowired(required = false)
     private WebhookRepository webhookRepository;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Value("${aerofleet.encryption.key:" + DEFAULT_ENCRYPTION_KEY + "}")
+    private String encryptionKey;
+
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    private final RestTemplate restTemplate;
+
+    public WebhookService() {
+        // P1-5: 配置 RestTemplate 超时，防止目标 URL 响应缓慢时线程长时间阻塞
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5000);   // 5 秒连接超时
+        factory.setReadTimeout(10000);     // 10 秒读取超时
+        this.restTemplate = new RestTemplate(factory);
+    }
 
     /**
      * 注册 webhook。
      * <p>
      * 将回调 URL、签名密钥和事件类型列表持久化，绑定当前租户 ID。
+     * secret 字段在存储前经过 AES-GCM 加密（P1-4）。
      *
      * @param url    回调 URL
      * @param secret HMAC 签名密钥（可为 null，表示不签名）
@@ -71,7 +111,8 @@ public class WebhookService {
 
         WebhookEntity entity = new WebhookEntity();
         entity.setUrl(url);
-        entity.setSecret(secret);
+        // P1-4: secret 加密后存储，防止数据库泄露时攻击者伪造 webhook 签名
+        entity.setSecret(encryptSecret(secret));
         entity.setEvents(events != null ? String.join(",", events) : "");
         entity.setTenantId(tenantId);
         entity.setEnabled(true);
@@ -248,6 +289,9 @@ public class WebhookService {
      * <p>
      * 使用 RestTemplate 发送 POST 请求，payload 为 JSON 格式。
      * 若 webhook 配置了 secret，则计算 HMAC-SHA256 签名并放入 Header。
+     * <p>
+     * P1-6: HMAC 签名失败时抛出异常，此方法内 catch 并跳过推送，记录 WARN 日志。
+     * P1-7: 使用 Jackson ObjectMapper 序列化 body，确保特殊字符正确转义。
      */
     private void pushToWebhook(WebhookEntity webhook, String event, Map<String, Object> payload) {
         HttpHeaders headers = new HttpHeaders();
@@ -260,13 +304,28 @@ public class WebhookService {
         body.put("timestamp", Instant.now().toString());
         body.put("data", payload);
 
-        // 序列化 body 用于签名计算
-        String bodyJson = serializeBody(body);
+        // P1-7: 使用 Jackson ObjectMapper 序列化 body，确保特殊字符正确转义
+        String bodyJson;
+        try {
+            bodyJson = objectMapper.writeValueAsString(body);
+        } catch (Exception e) {
+            log.warn("Webhook body 序列化失败，跳过推送: id={} url={} err={}",
+                    webhook.getId(), webhook.getUrl(), e.getMessage());
+            return;
+        }
 
-        // HMAC-SHA256 签名
-        if (webhook.getSecret() != null && !webhook.getSecret().isBlank()) {
-            String signature = hmacSha256Hex(webhook.getSecret(), bodyJson);
-            headers.set("X-Webhook-Signature", signature);
+        // P1-4: 读取时解密 secret，然后用于 HMAC 签名
+        // P1-6: HMAC 签名失败时跳过推送，记录 WARN 日志
+        String decryptedSecret = decryptSecret(webhook.getSecret());
+        if (decryptedSecret != null && !decryptedSecret.isBlank()) {
+            try {
+                String signature = hmacSha256Hex(decryptedSecret, bodyJson);
+                headers.set("X-Webhook-Signature", signature);
+            } catch (Exception e) {
+                log.warn("Webhook HMAC 签名失败，跳过推送: id={} url={} err={}",
+                        webhook.getId(), webhook.getUrl(), e.getMessage());
+                return;
+            }
         }
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
@@ -276,7 +335,17 @@ public class WebhookService {
                 webhook.getId(), webhook.getUrl(), event);
     }
 
-    /** 计算 HMAC-SHA256 签名，返回 Hex 编码。 */
+    /**
+     * 计算 HMAC-SHA256 签名，返回 Hex 编码。
+     * <p>
+     * P1-6: 签名失败时抛出 RuntimeException，而非返回空字符串。
+     * 调用方应 catch 异常并跳过推送，记录 WARN 日志。
+     *
+     * @param secret HMAC 密钥
+     * @param data   待签名的数据
+     * @return Hex 编码的 HMAC-SHA256 签名
+     * @throws RuntimeException 签名计算失败时抛出
+     */
     private static String hmacSha256Hex(String secret, String data) {
         try {
             Mac mac = Mac.getInstance(HMAC_ALGORITHM);
@@ -286,31 +355,95 @@ public class WebhookService {
             byte[] hmacBytes = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(hmacBytes);
         } catch (Exception e) {
-            log.error("HMAC-SHA256 签名失败: {}", e.getMessage());
-            return "";
+            throw new RuntimeException("HMAC-SHA256 签名计算失败: " + e.getMessage(), e);
         }
     }
 
-    /** 简易 JSON 序列化（用于签名计算，不依赖 Jackson）。 */
-    private static String serializeBody(Map<String, Object> body) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, Object> entry : body.entrySet()) {
-            if (!first) {
-                sb.append(",");
-            }
-            first = false;
-            sb.append("\"").append(entry.getKey()).append("\":");
-            Object val = entry.getValue();
-            if (val == null) {
-                sb.append("null");
-            } else if (val instanceof String) {
-                sb.append("\"").append(val).append("\"");
-            } else {
-                sb.append(val);
-            }
+    // ===== P1-4: AES-GCM 加密/解密方法 =====
+
+    /**
+     * 加密 webhook secret（AES-GCM）。
+     * <p>
+     * 使用配置的 {@code aerofleet.encryption.key} 派生 AES 密钥，
+     * 采用 AES/GCM/NoPadding 模式加密，IV 随机生成并附在密文前。
+     * 密文以 Base64 编码存储。
+     *
+     * @param plainSecret 明文 secret（可为 null 或空）
+     * @return 加密后的 Base64 字符串，或原值（null/空时不加密）
+     */
+    private String encryptSecret(String plainSecret) {
+        if (plainSecret == null || plainSecret.isEmpty()) {
+            return plainSecret;
         }
-        sb.append("}");
-        return sb.toString();
+        try {
+            byte[] iv = new byte[GCM_IV_LENGTH_BYTES];
+            secureRandom.nextBytes(iv);
+
+            Cipher cipher = Cipher.getInstance(AES_TRANSFORMATION);
+            GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv);
+            cipher.init(Cipher.ENCRYPT_MODE, deriveAesKey(), gcmSpec);
+
+            byte[] encrypted = cipher.doFinal(plainSecret.getBytes(StandardCharsets.UTF_8));
+
+            // 将 IV 和密文拼接后 Base64 编码：IV(12 bytes) + ciphertext + GCM tag
+            byte[] combined = new byte[iv.length + encrypted.length];
+            System.arraycopy(iv, 0, combined, 0, iv.length);
+            System.arraycopy(encrypted, 0, combined, iv.length, encrypted.length);
+
+            return Base64.getEncoder().encodeToString(combined);
+        } catch (Exception e) {
+            log.error("Failed to encrypt webhook secret: {}", e.getMessage());
+            throw new RuntimeException("Webhook secret 加密失败", e);
+        }
+    }
+
+    /**
+     * 解密 webhook secret（AES-GCM）。
+     * <p>
+     * 从 Base64 编码的密文中提取 IV 和加密数据，使用配置的密钥解密。
+     * 解密失败时返回原值（兼容旧明文数据）。
+     *
+     * @param encryptedSecret 加密后的 Base64 字符串（可为 null 或空）
+     * @return 解密后的明文 secret，或原值（null/空/解密失败时）
+     */
+    private String decryptSecret(String encryptedSecret) {
+        if (encryptedSecret == null || encryptedSecret.isEmpty()) {
+            return encryptedSecret;
+        }
+        try {
+            byte[] combined = Base64.getDecoder().decode(encryptedSecret);
+            if (combined.length < GCM_IV_LENGTH_BYTES) {
+                // 数据太短，可能是旧明文数据，直接返回
+                return encryptedSecret;
+            }
+
+            byte[] iv = Arrays.copyOf(combined, GCM_IV_LENGTH_BYTES);
+            byte[] encrypted = Arrays.copyOfRange(combined, GCM_IV_LENGTH_BYTES, combined.length);
+
+            Cipher cipher = Cipher.getInstance(AES_TRANSFORMATION);
+            GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv);
+            cipher.init(Cipher.DECRYPT_MODE, deriveAesKey(), gcmSpec);
+
+            byte[] decrypted = cipher.doFinal(encrypted);
+            return new String(decrypted, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            // 解密失败可能是明文数据（旧数据未加密），直接返回原值
+            log.warn("Failed to decrypt webhook secret, returning raw value (may be legacy plaintext): {}",
+                    e.getMessage());
+            return encryptedSecret;
+        }
+    }
+
+    /**
+     * 从配置密钥派生 AES 密钥：SHA-256 哈希后取前 16 字节（AES-128）。
+     *
+     * @return AES SecretKeySpec
+     * @throws Exception 密钥派生失败时抛出
+     */
+    private SecretKeySpec deriveAesKey() throws Exception {
+        MessageDigest sha = MessageDigest.getInstance("SHA-256");
+        byte[] keyBytes = sha.digest(encryptionKey.getBytes(StandardCharsets.UTF_8));
+        keyBytes = Arrays.copyOf(keyBytes, 16); // AES-128 需要 16 字节密钥
+        return new SecretKeySpec(keyBytes, AES_ALGORITHM);
     }
 }

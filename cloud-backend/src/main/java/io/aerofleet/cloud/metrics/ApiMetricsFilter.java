@@ -12,10 +12,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.IOException;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * API 请求计量 Filter，基于 Micrometer 记录每个 API 请求的调用计数和耗时。
@@ -43,6 +45,9 @@ public class ApiMetricsFilter extends OncePerRequestFilter {
     );
     private static final String GLOBAL_TENANT = "global";
 
+    /** 匹配纯数字路径段，用于 URI 归一化 */
+    private static final Pattern NUMERIC_SEGMENT_PATTERN = Pattern.compile("/\\d+(?=/|$)");
+
     private final MeterRegistry meterRegistry;
 
     public ApiMetricsFilter(MeterRegistry meterRegistry) {
@@ -68,11 +73,12 @@ public class ApiMetricsFilter extends OncePerRequestFilter {
             long durationNanos = System.nanoTime() - startTime;
             int status = response.getStatus();
             String tenantId = resolveTenantId();
+            String normalizedUri = resolveNormalizedUri(request, uri);
 
             Counter.builder(COUNTER_NAME)
                     .description("API 请求计数")
                     .tag("method", method)
-                    .tag("uri", uri)
+                    .tag("uri", normalizedUri)
                     .tag("status", String.valueOf(status))
                     .tag("tenant_id", tenantId)
                     .register(meterRegistry)
@@ -81,7 +87,7 @@ public class ApiMetricsFilter extends OncePerRequestFilter {
             Timer.builder(TIMER_NAME)
                     .description("API 请求耗时")
                     .tag("method", method)
-                    .tag("uri", uri)
+                    .tag("uri", normalizedUri)
                     .tag("tenant_id", tenantId)
                     .register(meterRegistry)
                     .record(durationNanos, TimeUnit.NANOSECONDS);
@@ -109,5 +115,25 @@ public class ApiMetricsFilter extends OncePerRequestFilter {
     private String resolveTenantId() {
         Integer tenantId = TenantContext.getEffectiveTenantId();
         return tenantId != null ? String.valueOf(tenantId) : GLOBAL_TENANT;
+    }
+
+    /**
+     * 解析归一化 URI，避免路径变量导致 Prometheus 指标基数爆炸。
+     * <p>
+     * 优先从 Spring 的 {@link HandlerMapping#BEST_MATCHING_PATTERN_ATTRIBUTE} 获取匹配的 URI 模板
+     * （如 {@code /api/v1/drones/{id}}）。如果获取不到（如 Filter 链中尚未设置该属性），
+     * 则使用简单归一化：将路径中的纯数字段替换为 {@code {id}}。
+     * <p>
+     * 示例：{@code /api/v1/drones/123} → {@code /api/v1/drones/{id}}
+     */
+    private String resolveNormalizedUri(HttpServletRequest request, String originalUri) {
+        // 优先使用 Spring 匹配的 URI 模板
+        Object bestMatchingPattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        if (bestMatchingPattern instanceof String pattern && !pattern.isBlank()) {
+            return pattern;
+        }
+
+        // 回退到简单归一化：将数字路径段替换为 {id}
+        return NUMERIC_SEGMENT_PATTERN.matcher(originalUri).replaceAll("/{id}");
     }
 }

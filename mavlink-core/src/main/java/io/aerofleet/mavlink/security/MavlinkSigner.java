@@ -34,7 +34,13 @@ public class MavlinkSigner {
      */
     public MavlinkSigner(MavlinkSignatureConfig config) {
         this.enabled = config.isEnabled();
-        this.secretKeyBytes = config.getSecretKey().getBytes(StandardCharsets.UTF_8);
+        // P1-fix: 校验 secretKey，防止 enabled=true 时密钥为空导致 NPE 或不安全签名
+        if (this.enabled && (config.getSecretKey() == null || config.getSecretKey().isEmpty())) {
+            throw new IllegalArgumentException("MAVLink signing enabled but secret key is empty");
+        }
+        this.secretKeyBytes = config.getSecretKey() == null
+                ? new byte[0]
+                : config.getSecretKey().getBytes(StandardCharsets.UTF_8);
     }
 
     /**
@@ -45,7 +51,13 @@ public class MavlinkSigner {
      */
     public MavlinkSigner(boolean enabled, String secretKey) {
         this.enabled = enabled;
-        this.secretKeyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
+        // P1-fix: 校验 secretKey，防止 enabled=true 时密钥为空导致 NPE 或不安全签名
+        if (this.enabled && (secretKey == null || secretKey.isEmpty())) {
+            throw new IllegalArgumentException("MAVLink signing enabled but secret key is empty");
+        }
+        this.secretKeyBytes = secretKey == null
+                ? new byte[0]
+                : secretKey.getBytes(StandardCharsets.UTF_8);
     }
 
     /**

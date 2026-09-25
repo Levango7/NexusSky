@@ -69,7 +69,11 @@ class DroneApiTest {
         });
 
         server.start();
-        client = new NexusSkyClient("http://127.0.0.1:" + port, "test-key");
+        client = NexusSkyClient.builder()
+                .baseUrl("http://127.0.0.1:" + port)
+                .apiKey("test-key")
+                .allowInsecureHttp(true)
+                .build();
         droneApi = client.drones();
     }
 

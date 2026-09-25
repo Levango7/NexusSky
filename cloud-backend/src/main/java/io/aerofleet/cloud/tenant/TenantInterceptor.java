@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -44,6 +45,9 @@ public class TenantInterceptor implements HandlerInterceptor {
     /** 租户限流计数器：tenantId → [windowStartMs, count]（内存 fallback） */
     private final ConcurrentHashMap<String, RateWindow> rateWindows = new ConcurrentHashMap<>();
 
+    /** 内存限流窗口 TTL（毫秒），与滑动窗口时长一致 */
+    private static final long WINDOW_TTL_MS = 60_000;
+
     public TenantInterceptor(@Value("${aerofleet.security.dev-mode:true}") boolean devMode,
                              @Value("${aerofleet.tenant.rate-limit:100}") int rateLimitPerMinute) {
         this.devMode = devMode;
@@ -76,6 +80,19 @@ public class TenantInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         TenantContext.clear();
+    }
+
+    /**
+     * 定时清理过期的内存限流窗口，防止 rateWindows Map 无限增长。
+     * <p>
+     * 每 60 秒执行一次，移除窗口起始时间已超过 TTL 的条目。
+     */
+    @Scheduled(fixedRate = 60000)
+    public void cleanupExpiredRateWindows() {
+        long now = System.currentTimeMillis();
+        rateWindows.entrySet().removeIf(entry ->
+                now - entry.getValue().windowStartMs > WINDOW_TTL_MS
+        );
     }
 
     private String extractTenantId(HttpServletRequest request) {
@@ -123,7 +140,7 @@ public class TenantInterceptor implements HandlerInterceptor {
         RateWindow window = rateWindows.computeIfAbsent(tenantId, k -> new RateWindow(now));
 
         synchronized (window) {
-            if (now - window.windowStartMs > 60_000) {
+            if (now - window.windowStartMs > WINDOW_TTL_MS) {
                 // 窗口过期，重置
                 window.windowStartMs = now;
                 window.count.set(0);

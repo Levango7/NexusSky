@@ -27,6 +27,7 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -74,11 +75,11 @@ public class JwtTokenProvider {
      * @param secret HMAC-SHA256 密钥（≥32 字节）
      */
     public JwtTokenProvider(String secret) {
-        if (secret == null || secret.getBytes().length < MIN_SECRET_BYTES) {
+        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < MIN_SECRET_BYTES) {
             throw new IllegalArgumentException(
                     "jwt secret must be at least " + MIN_SECRET_BYTES + " bytes for HMAC-SHA256");
         }
-        SecretKey key = new SecretKeySpec(secret.getBytes(), "HmacSHA256");
+        SecretKey key = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         JWK jwk = new OctetSequenceKey.Builder(key)
                 .keyID("aerofleet")
                 .algorithm(JWSAlgorithm.HS256)
@@ -129,7 +130,8 @@ public class JwtTokenProvider {
             @Value("${jwt.public-key:}") String publicKeyPem,
             @Value("${jwt.secret:}") String secret,
             @Value("${aerofleet.security.jwt-secret:}") String legacySecret,
-            @Value("${jwt.generate-keys:false}") boolean generateKeys
+            @Value("${jwt.generate-keys:false}") boolean generateKeys,
+            @Value("${spring.profiles.active:}") String activeProfiles
     ) {
         if ("RS256".equalsIgnoreCase(algorithm)) {
             if (isNotEmpty(privateKeyPem) && isNotEmpty(publicKeyPem)) {
@@ -149,6 +151,11 @@ public class JwtTokenProvider {
                 this.decoder = NimbusJwtDecoder.withPublicKey(pubKey).build();
                 this.header = JwsHeader.with(SignatureAlgorithm.RS256).keyId("aerofleet").build();
             } else if (generateKeys) {
+                // P1-fix: 生产环境禁止自动生成密钥对，防止重启后所有 JWT token 失效
+                if (activeProfiles != null && activeProfiles.contains("prod")) {
+                    throw new IllegalStateException(
+                            "jwt.generate-keys=true is not allowed in production profile");
+                }
                 // 自动生成 RSA 密钥对（开发环境）
                 log.warn("jwt.generate-keys=true: 自动生成 RSA 密钥对（仅适用于开发环境，生产环境必须配置 jwt.private-key/jwt.public-key）");
                 KeyPair keyPair = generateRsaKeyPair();
@@ -183,11 +190,11 @@ public class JwtTokenProvider {
     // ───────────────────────── 私有初始化方法 ─────────────────────────
 
     private void initHs256(String effectiveSecret) {
-        if (effectiveSecret == null || effectiveSecret.getBytes().length < MIN_SECRET_BYTES) {
+        if (effectiveSecret == null || effectiveSecret.getBytes(StandardCharsets.UTF_8).length < MIN_SECRET_BYTES) {
             throw new IllegalArgumentException(
                     "jwt secret must be at least " + MIN_SECRET_BYTES + " bytes for HMAC-SHA256");
         }
-        SecretKey key = new SecretKeySpec(effectiveSecret.getBytes(), "HmacSHA256");
+        SecretKey key = new SecretKeySpec(effectiveSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         JWK jwk = new OctetSequenceKey.Builder(key)
                 .keyID("aerofleet")
                 .algorithm(JWSAlgorithm.HS256)

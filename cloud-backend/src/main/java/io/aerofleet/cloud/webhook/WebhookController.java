@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,6 +66,23 @@ public class WebhookController {
         String url = (String) body.get("url");
         if (url == null || url.isBlank()) {
             return errorResponse(HttpStatus.BAD_REQUEST, "url is required");
+        }
+
+        // P1-8: URL 格式校验 — 必须以 http:// 或 https:// 开头，且是合法 URL
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            return errorResponse(HttpStatus.BAD_REQUEST,
+                    "url must start with http:// or https://");
+        }
+        try {
+            URI uri = new URI(url);
+            String host = uri.getHost();
+            if (host == null || host.isBlank()) {
+                return errorResponse(HttpStatus.BAD_REQUEST,
+                        "url must have a valid host");
+            }
+        } catch (URISyntaxException e) {
+            return errorResponse(HttpStatus.BAD_REQUEST,
+                    "url format is invalid: " + e.getMessage());
         }
 
         String secret = (String) body.get("secret");

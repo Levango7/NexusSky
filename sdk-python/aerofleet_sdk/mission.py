@@ -76,8 +76,9 @@ class MissionApi:
                 wp.to_dict() if isinstance(wp, Waypoint) else wp
                 for wp in mission
             ]}
+
         else:
-            body = mission
+            raise SdkException("mission must be Mission object or list of waypoints")
 
         return self._client._request("POST", f"/drones/{sysid}/mission", json=body)
 

@@ -5,10 +5,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collections;
 
 /**
  * 基于 Redis 的分布式限流器。
@@ -28,6 +30,20 @@ public class RedisRateLimiter {
 
     private static final String KEY_PREFIX = "rate_limit:";
     private static final Duration WINDOW_TTL = Duration.ofMinutes(1);
+
+    /**
+     * Lua 脚本：原子化 INCR + EXPIRE，避免竞态条件导致 key 永不过期。
+     * 当 INCR 返回 1（首次递增）时设置 EXPIRE，整个过程在 Redis 单线程中原子执行。
+     */
+    private static final String RATE_LIMIT_SCRIPT =
+            "local current = redis.call('INCR', KEYS[1]) " +
+            "if current == 1 then " +
+            "  redis.call('EXPIRE', KEYS[1], ARGV[1]) " +
+            "end " +
+            "return current";
+
+    private static final DefaultRedisScript<Long> RATE_LIMIT_REDIS_SCRIPT =
+            new DefaultRedisScript<>(RATE_LIMIT_SCRIPT, Long.class);
 
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
@@ -52,12 +68,11 @@ public class RedisRateLimiter {
 
         try {
             String key = buildKey(tenantId);
-            Long current = redisTemplate.opsForValue().increment(key);
-
-            if (current != null && current == 1L) {
-                // 首次请求，设置过期时间（1 分钟后自动清理）
-                redisTemplate.expire(key, WINDOW_TTL);
-            }
+            Long current = redisTemplate.execute(
+                    RATE_LIMIT_REDIS_SCRIPT,
+                    Collections.singletonList(key),
+                    String.valueOf(WINDOW_TTL.getSeconds())
+            );
 
             return current != null && current <= limitPerMinute;
         } catch (Exception e) {

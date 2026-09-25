@@ -38,6 +38,8 @@ class FlightLogApi:
             dict: 日志详情。
 
         Raises:
-            SdkException: 如果请求失败。
+            SdkException: 如果请求失败或 log_id 为 None。
         """
+        if log_id is None:
+            raise SdkException("log_id must not be None")
         return self._client._request("GET", f"/flightlog/{log_id}")

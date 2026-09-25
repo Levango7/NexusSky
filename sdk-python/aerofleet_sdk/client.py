@@ -27,9 +27,14 @@ _API_PREFIX = "/api/v1"
 
 
 class NexusSkyClient:
-    """NexusSky 平台 API 客户端。"""
+    """NexusSky 平台 API 客户端。
 
-    def __init__(self, base_url, api_key, timeout=30):
+    .. warning::
+        NexusSkyClient 实例不可跨线程共享，每个线程应创建独立实例。
+        requests.Session 不是线程安全的，共享实例可能导致请求异常或数据错乱。
+    """
+
+    def __init__(self, base_url, api_key, timeout=30, allow_insecure_http=False):
         """
         构造一个 NexusSky API 客户端。
 
@@ -37,7 +42,18 @@ class NexusSkyClient:
             base_url: 后端服务基础地址（如 "https://cloud.example.com"）。
             api_key: API 密钥，用于 X-API-Key 认证头。
             timeout: 请求超时时间（秒），默认 30。
+            allow_insecure_http: 是否允许使用 HTTP（非 HTTPS）协议，默认 False。
+
+        Raises:
+            ValueError: 如果 base_url 或 api_key 为 None，或 base_url 未使用 HTTPS 协议。
         """
+        if base_url is None:
+            raise ValueError("base_url must not be None")
+        if api_key is None:
+            raise ValueError("api_key must not be None")
+        if not allow_insecure_http and not base_url.startswith("https://"):
+            raise ValueError("base_url must use HTTPS protocol")
+
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
@@ -288,6 +304,9 @@ class NexusSkyClient:
             raise SdkException(f"请求失败: {path}", cause=e)
 
         self._check_status(resp, path)
+
+        if not resp.text:
+            raise SdkException("空响应体: " + path, status_code=resp.status_code)
 
         try:
             return resp.json()

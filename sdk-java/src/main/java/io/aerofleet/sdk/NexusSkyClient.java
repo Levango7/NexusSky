@@ -12,9 +12,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * NexusSky 平台 API 客户端。
@@ -41,16 +43,105 @@ public class NexusSkyClient {
 
     /**
      * 构造一个 NexusSky API 客户端。
+     * <p>
+     * 默认强制 HTTPS，如需使用 HTTP 请通过 {@link Builder#allowInsecureHttp(boolean)} 开启。
      *
      * @param baseUrl 后端服务基础地址（如 "https://cloud.example.com"）
      * @param apiKey  API 密钥，用于 X-API-Key 认证头
+     * @throws IllegalArgumentException 如果 baseUrl 不使用 HTTPS 且未开启 allowInsecureHttp
      */
     public NexusSkyClient(String baseUrl, String apiKey) {
+        this(baseUrl, apiKey, false);
+    }
+
+    /**
+     * 构造一个 NexusSky API 客户端（内部使用，可控制是否允许 HTTP）。
+     *
+     * @param baseUrl            后端服务基础地址
+     * @param apiKey             API 密钥
+     * @param allowInsecureHttp  是否允许使用 HTTP（非 HTTPS）
+     * @throws NullPointerException     如果 baseUrl 或 apiKey 为 null
+     * @throws IllegalArgumentException 如果 baseUrl 不使用 HTTPS 且 allowInsecureHttp 为 false
+     */
+    NexusSkyClient(String baseUrl, String apiKey, boolean allowInsecureHttp) {
+        Objects.requireNonNull(baseUrl, "baseUrl must not be null");
+        Objects.requireNonNull(apiKey, "apiKey must not be null");
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.apiKey = apiKey;
+        if (!allowInsecureHttp && !this.baseUrl.startsWith("https://")) {
+            throw new IllegalArgumentException(
+                    "baseUrl must use HTTPS; set allowInsecureHttp=true to allow HTTP");
+        }
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
+    }
+
+    /**
+     * 创建一个 Builder 用于构造 NexusSkyClient 实例。
+     *
+     * @return 新的 Builder 实例
+     */
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /**
+     * NexusSkyClient 构建器，支持链式配置。
+     * <p>
+     * 默认强制 HTTPS，如需使用 HTTP（如本地测试场景），请调用
+     * {@link #allowInsecureHttp(boolean)} 设置为 true。
+     */
+    public static class Builder {
+        private String baseUrl;
+        private String apiKey;
+        private boolean allowInsecureHttp = false;
+
+        /**
+         * 设置后端服务基础地址。
+         *
+         * @param baseUrl 后端服务基础地址（如 "https://cloud.example.com"）
+         * @return 当前 Builder 实例
+         */
+        public Builder baseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+            return this;
+        }
+
+        /**
+         * 设置 API 密钥。
+         *
+         * @param apiKey API 密钥，用于 X-API-Key 认证头
+         * @return 当前 Builder 实例
+         */
+        public Builder apiKey(String apiKey) {
+            this.apiKey = apiKey;
+            return this;
+        }
+
+        /**
+         * 设置是否允许使用 HTTP（非 HTTPS）。
+         * <p>
+         * 默认 false（强制 HTTPS）。仅在本地测试等可信环境中设置为 true。
+         *
+         * @param allow 是否允许 HTTP
+         * @return 当前 Builder 实例
+         */
+        public Builder allowInsecureHttp(boolean allow) {
+            this.allowInsecureHttp = allow;
+            return this;
+        }
+
+        /**
+         * 构建 NexusSkyClient 实例。
+         *
+         * @return 新的 NexusSkyClient 实例
+         * @throws NullPointerException     如果 baseUrl 或 apiKey 为 null
+         * @throws IllegalArgumentException 如果 baseUrl 不使用 HTTPS 且 allowInsecureHttp 为 false
+         */
+        public NexusSkyClient build() {
+            return new NexusSkyClient(baseUrl, apiKey, allowInsecureHttp);
+        }
     }
 
     // ===================================================================
@@ -116,7 +207,11 @@ public class NexusSkyClient {
         try {
             HttpResponse<String> resp = doRequest(path, method, body);
             checkStatus(resp);
-            return MAPPER.readValue(resp.body(), ApiResponse.class);
+            String responseBody = resp.body();
+            if (responseBody == null || responseBody.isEmpty()) {
+                throw new SdkException("空响应体: " + path);
+            }
+            return MAPPER.readValue(responseBody, ApiResponse.class);
         } catch (SdkException e) {
             throw e;
         } catch (Exception e) {
@@ -305,7 +400,27 @@ public class NexusSkyClient {
         try {
             HttpResponse<String> resp = doRequest(path, "GET", null);
             checkStatus(resp);
-            return MAPPER.readValue(resp.body(), new TypeReference<List<Map<String, Object>>>() {});
+            String responseBody = resp.body();
+            if (responseBody == null || responseBody.isEmpty()) {
+                throw new SdkException("空响应体: " + path);
+            }
+            ApiResponse apiResp = MAPPER.readValue(responseBody, ApiResponse.class);
+            if (!apiResp.isOk()) {
+                throw new SdkException("API返回错误: " + apiResp.getStatus(), resp.statusCode());
+            }
+            List<Object> rawList = apiResp.getDataAsList();
+            if (rawList == null) {
+                throw new SdkException("响应数据不是列表: " + path);
+            }
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (Object item : rawList) {
+                if (item instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> map = (Map<String, Object>) item;
+                    result.add(map);
+                }
+            }
+            return result;
         } catch (SdkException e) {
             throw e;
         } catch (Exception e) {
@@ -322,7 +437,19 @@ public class NexusSkyClient {
         try {
             HttpResponse<String> resp = doRequest(path, method, body);
             checkStatus(resp);
-            return MAPPER.readValue(resp.body(), new TypeReference<Map<String, Object>>() {});
+            String responseBody = resp.body();
+            if (responseBody == null || responseBody.isEmpty()) {
+                throw new SdkException("空响应体: " + path);
+            }
+            ApiResponse apiResp = MAPPER.readValue(responseBody, ApiResponse.class);
+            if (!apiResp.isOk()) {
+                throw new SdkException("API返回错误: " + apiResp.getStatus(), resp.statusCode());
+            }
+            Map<String, Object> result = apiResp.getDataAsMap();
+            if (result == null) {
+                throw new SdkException("响应数据不是Map: " + path);
+            }
+            return result;
         } catch (SdkException e) {
             throw e;
         } catch (Exception e) {

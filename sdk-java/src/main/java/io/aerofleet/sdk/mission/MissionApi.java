@@ -33,9 +33,15 @@ public class MissionApi {
      * @param sysid     无人机系统 ID
      * @param waypoints 航点列表
      * @return 上传结果的 API 响应
-     * @throws SdkException 如果请求失败
+     * @throws SdkException 如果 waypoints 为 null 或空列表
      */
     public ApiResponse upload(int sysid, List<Waypoint> waypoints) throws SdkException {
+        if (waypoints == null) {
+            throw new SdkException("waypoints must not be null");
+        }
+        if (waypoints.isEmpty()) {
+            throw new SdkException("waypoints must not be empty");
+        }
         List<Map<String, Object>> wpList = new ArrayList<>();
         for (Waypoint wp : waypoints) {
             Map<String, Object> m = new LinkedHashMap<>();
