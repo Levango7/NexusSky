@@ -8,6 +8,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -35,6 +36,8 @@ public final class TargetStateServer {
     /** JPEG bytes per frameSeq (E2: real image payload). */
     private final Function<Long, byte[]> jpegSource;
     private HttpServer server;
+    /** P3-fix(Minor): 保存 executor 引用以便优雅关闭，避免线程泄漏 */
+    private ExecutorService executor;
     private final int port;
 
     public TargetStateServer(TargetSimulator targets, int port,
@@ -61,7 +64,12 @@ public final class TargetStateServer {
 
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
-        server.setExecutor(Executors.newSingleThreadExecutor());
+        executor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "target-state-http");
+            t.setDaemon(true);
+            return t;
+        });
+        server.setExecutor(executor);
         server.createContext("/targets", ex -> respond(ex, targets.snapshotJson()));
         server.createContext("/camera/shots", this::shotsOrJpeg);
         server.createContext("/radio", ex -> respond(ex,
@@ -102,6 +110,10 @@ public final class TargetStateServer {
     public void stop() {
         if (server != null) {
             server.stop(0);
+        }
+        // P3-fix(Minor): 优雅关闭 executor，避免线程泄漏
+        if (executor != null) {
+            executor.shutdownNow();
         }
     }
 

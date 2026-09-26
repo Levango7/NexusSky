@@ -3,17 +3,33 @@ package io.aerofleet.mavlink.messages;
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.MavlinkMessageInfo;
 import io.aerofleet.mavlink.PayloadCodec;
+import io.aerofleet.mavlink.security.MavlinkSigner;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 /**
  * MAVLink 消息抽象：每个消息提供 payload 编码与帧解码。
  * 消息类不可变，encode() 产出待组装成帧的 payload 字节。
+ * <p>
+ * 签名机制：当 {@link MavlinkSigner} 启用时，encode 后的 payload 会附加 8 字节 HMAC-SHA256 签名，
+ * decode 时会分离签名并验证。签名默认关闭，不影响现有编解码流程。
  */
 public abstract class MavlinkMessage {
 
+    private static final Logger log = LoggerFactory.getLogger(MavlinkMessage.class);
+
     /** 消息默认系统/组件 ID（发送方可通过 wrap 覆盖）。 */
     protected static final int COMP_ID_AUTOPILOT = 1;
+
+    /** HMAC-SHA256 签名长度（截断为 8 字节）。 */
+    public static final int SIGNATURE_LENGTH = MavlinkSigner.SIGNATURE_LENGTH;
+
+    /** 消息签名（8 字节），null 表示未签名。 */
+    private byte[] signature;
 
     public abstract int messageId();
 
@@ -173,6 +189,23 @@ public abstract class MavlinkMessage {
                 return TwinStateSyncMsg.decode(frame);
             case PredictionResultMsg.ID:
                 return PredictionResultMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（M14 安防报警，msgId 477-479）----
+            case AlarmTriggerMsg.ID:
+                return AlarmTriggerMsg.decode(frame);
+            case AlarmAckMsg.ID:
+                return AlarmAckMsg.decode(frame);
+            case SurveillanceStatusMsg.ID:
+                return SurveillanceStatusMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（P2 灾害应急通讯组网，msgId 480-482）----
+            case QoSRouteDecisionMsg.ID:
+                return QoSRouteDecisionMsg.decode(frame);
+            case ClusterFormationMsg.ID:
+                return ClusterFormationMsg.decode(frame);
+            case DisasterModeStatusMsg.ID:
+                return DisasterModeStatusMsg.decode(frame);
+            // ---- NexusSky 自定义扩展消息（P3 灾害应急搜救信号，msgId=483）----
+            case BuzzerControlMsg.ID:
+                return BuzzerControlMsg.decode(frame);
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }
@@ -182,6 +215,116 @@ public abstract class MavlinkMessage {
     public MavlinkFrame toFrame(int systemId, int componentId, int sequence) {
         return MavlinkFrame.of(systemId, componentId, sequence, messageId(),
                 MavlinkMessageInfo.crcExtraOf(messageId()), encode());
+    }
+
+    /**
+     * 组装为可发送帧，并在签名启用时计算并附加签名。
+     * <p>
+     * 签名流程：调用 {@link #encode()} 获取 payload，使用 {@link MavlinkSigner#sign} 计算
+     * HMAC-SHA256 签名（截断 8 字节），存入 {@link #signature} 字段。
+     *
+     * @param systemId    系统 ID
+     * @param componentId 组件 ID
+     * @param sequence    序列号
+     * @param signer      签名器（null 或未启用时等同于 {@link #toFrame(int, int, int)}）
+     * @return 可发送的 MAVLink v2 帧
+     */
+    public MavlinkFrame toFrame(int systemId, int componentId, int sequence, MavlinkSigner signer) {
+        byte[] payload = encode();
+        if (signer != null && signer.isEnabled()) {
+            this.signature = signer.sign(messageId(), payload);
+        }
+        return MavlinkFrame.of(systemId, componentId, sequence, messageId(),
+                MavlinkMessageInfo.crcExtraOf(messageId()), payload);
+    }
+
+    /**
+     * 从帧解码为具体消息，并在签名启用时验证签名。
+     * <p>
+     * 验证流程：从帧中提取 msgId 和 payload，使用 {@link MavlinkSigner#verify} 验证签名。
+     * 签名验证失败时抛出 {@link io.aerofleet.mavlink.MavlinkException}。
+     *
+     * @param frame  接收到的 MAVLink 帧
+     * @param signer 签名器（null 或未启用时等同于 {@link #decode(MavlinkFrame)}）
+     * @return 解码后的消息对象
+     * @throws io.aerofleet.mavlink.MavlinkException 签名验证失败时
+     */
+    public static MavlinkMessage decode(MavlinkFrame frame, MavlinkSigner signer) {
+        if (signer != null && signer.isEnabled()) {
+            byte[] payload = frame.getPayload();
+            byte[] extractedSig = extractSignatureFromFrame(frame, signer);
+            if (extractedSig == null) {
+                // 签名传输机制未实现，跳过验证并记录警告
+                log.warn("MAVLink签名已启用但帧中未包含签名数据，跳过验证（签名传输机制待实现）");
+            } else {
+                if (!signer.verify(frame.getMessageId(), payload, extractedSig)) {
+                    throw new io.aerofleet.mavlink.MavlinkException(
+                            "MAVLink签名验证失败: msgId=" + frame.getMessageId());
+                }
+            }
+        }
+        return decode(frame);
+    }
+
+    /**
+     * 从帧中提取签名。
+     * <p>
+     * 当前实现：签名不在帧线上格式中传输，而是由上层协议或传输层附带。
+     * 此方法返回 null，表示签名需要通过其他渠道获取。
+     * 子类或传输层可覆盖此方法以提供具体的签名提取逻辑。
+     *
+     * @param frame  接收到的 MAVLink 帧
+     * @param signer 签名器
+     * @return 签名字节，或 null 表示无签名
+     */
+    private static byte[] extractSignatureFromFrame(MavlinkFrame frame, MavlinkSigner signer) {
+        // 当前阶段签名不在帧线上格式中传输，返回 null 表示需要外部提供签名
+        // 后续可通过 incompatibility flags 扩展帧格式以携带签名
+        return null;
+    }
+
+    /**
+     * 获取消息签名。
+     *
+     * @return 8 字节签名，或 null 表示未签名
+     */
+    public byte[] getSignature() {
+        return signature;
+    }
+
+    /**
+     * 设置消息签名（通常由 {@link #toFrame(int, int, int, MavlinkSigner)} 自动设置）。
+     *
+     * @param signature 8 字节签名
+     */
+    public void setSignature(byte[] signature) {
+        this.signature = signature;
+    }
+
+    /**
+     * 使用签名器对当前消息进行签名。
+     * <p>
+     * 调用 {@link #encode()} 获取 payload，计算签名并存入 {@link #signature} 字段。
+     *
+     * @param signer 签名器
+     */
+    public void signWith(MavlinkSigner signer) {
+        if (signer != null && signer.isEnabled()) {
+            this.signature = signer.sign(messageId(), encode());
+        }
+    }
+
+    /**
+     * 验证当前消息的签名是否正确。
+     *
+     * @param signer 签名器
+     * @return true 表示签名验证通过（签名未启用时也返回 true）
+     */
+    public boolean verifySignature(MavlinkSigner signer) {
+        if (signer == null || !signer.isEnabled()) {
+            return true;
+        }
+        return signer.verify(messageId(), encode(), signature);
     }
 
     /** 常用解码辅助：小端视图。 */

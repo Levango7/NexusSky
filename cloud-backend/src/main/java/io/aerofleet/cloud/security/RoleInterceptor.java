@@ -42,7 +42,7 @@ public class RoleInterceptor implements HandlerInterceptor {
     private final boolean rbacEnabled;
 
     public RoleInterceptor(JwtDecoder jwtDecoder,
-                           @Value("${aerofleet.security.dev-mode:true}") boolean devMode,
+                           @Value("${aerofleet.security.dev-mode:false}") boolean devMode,
                            @Value("${aerofleet.security.rbac-enabled:false}") boolean rbacEnabled) {
         this.jwtDecoder = jwtDecoder;
         this.devMode = devMode;

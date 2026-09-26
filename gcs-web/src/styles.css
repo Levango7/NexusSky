@@ -2,6 +2,7 @@
 
 :root {
   --bg: #0b0e14;
+  --bg-1: #0b0e14;
   --bg-2: #10141d;
   --panel: #141926;
   --panel-2: #1a2130;
@@ -371,6 +372,10 @@ body {
 .signal-bars.bars-crit i.on { background: #ff6e6e; }
 .mini-cell b.dim { color: var(--dim); }
 
+/* 移动端侧栏切换按钮：默认（桌面端）隐藏，仅在小屏媒体查询中显示 */
+.mobile-rail-toggle { display: none !important; }
+.mobile-rail-mask { display: none; }
+
 /* ---------- 视觉闭环面板（D2） ---------- */
 .vision-panel { display: flex; flex-direction: column; gap: 10px; }
 .vision-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -568,9 +573,24 @@ body {
     max-width: 320px;
     z-index: 30;
     box-shadow: 0 0 24px rgba(0, 0, 0, .6);
+    overflow-y: auto;
   }
   .rail.left.mobile-open { left: 0; border-right: 1px solid var(--line); }
   .rail.right.mobile-open { right: 0; border-left: 1px solid var(--line); }
+
+  /* 移动端侧栏遮罩 */
+  .mobile-rail-mask {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, .5);
+    z-index: 25;
+  }
+  /* 移动端侧栏切换按钮：仅在小屏可见 */
+  .mobile-rail-toggle {
+    display: inline-flex !important;
+    min-height: 36px !important;
+    padding: 4px 10px !important;
+    font-size: 16px !important;
+  }
 
   /* stage 占满宽度 */
   .stage { width: 100%; flex: 1 1 auto; min-height: 50vh; }
@@ -724,4 +744,62 @@ body {
   .scene3d-layout { flex-direction: column; }
   .scene3d-side { width: 100%; flex: 1; min-height: 300px; }
   .scene3d-main { min-height: 320px; }
+}
+/* P3-fix(Minor): ErrorBoundary 降级 UI 样式 */
+.error-boundary-fallback {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  margin: 12px;
+  border: 1px solid #ff6b6b;
+  border-radius: 8px;
+  background: rgba(255, 107, 107, 0.08);
+  color: #ff6b6b;
+}
+.error-boundary-icon { font-size: 24px; }
+.error-boundary-text { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.error-boundary-detail { font-size: 12px; opacity: 0.8; }
+/* ============ 可视化增强 — 多机态势感知 ============ */
+
+/* 多机标记容器（HTML Marker） */
+.drone-marker-multi {
+  cursor: pointer;
+  filter: drop-shadow(0 0 6px rgba(0, 0, 0, .5));
+  transition: transform .15s;
+}
+.drone-marker-multi:hover {
+  transform: scale(1.15);
+  z-index: 10;
+}
+
+/* 回放标记容器（HTML Marker） */
+.replay-marker {
+  filter: drop-shadow(0 0 10px rgba(255, 51, 51, .8));
+  z-index: 20;
+}
+
+/* 轨迹着色模式切换按钮组 */
+.track-color-mode-btns {
+  background: rgba(13, 17, 26, .82);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 4px;
+}
+.track-color-mode-btns .btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+.track-color-mode-btns .btn.primary {
+  border-color: rgba(0, 212, 255, .5);
+  color: var(--cyan);
+  background: var(--cyan-dim);
+}
+
+/* 编队标签（MapLibre symbol layer 文字） */
+.maplibregl-canvas-container .formation-labels {
+  font-family: var(--mono);
+  font-weight: 700;
 }

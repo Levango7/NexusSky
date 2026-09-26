@@ -1,0 +1,50 @@
+# HorizontalPodAutoscaler: cloud-backend + gcs-web
+# 参数化 min/max/CPU阈值，通过 values.yaml 配置
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cloud-backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: cloud-backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cloud-backend
+  minReplicas: {{ .Values.cloudBackend.hpa.minReplicas }}
+  maxReplicas: {{ .Values.cloudBackend.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.cloudBackend.hpa.cpuUtilization }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gcs-web
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: gcs-web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gcs-web
+  minReplicas: {{ .Values.gcsWeb.hpa.minReplicas }}
+  maxReplicas: {{ .Values.gcsWeb.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.gcsWeb.hpa.cpuUtilization }}

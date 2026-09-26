@@ -2,6 +2,7 @@ package io.aerofleet.cloud.scheduling;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,10 @@ public class TaskAssignmentService {
     private final PriorityBlockingQueue<TaskRequest> taskQueue = new PriorityBlockingQueue<>(100,
             Comparator.comparingInt(TaskRequest::getPriority).reversed());
     private final Map<String, AssignmentResult> assignments = new ConcurrentHashMap<>();
+    /** 无人机 → 正在执行的任务ID集合（反向映射，用于负载跟踪） */
+    private final Map<Integer, Set<String>> droneToTaskIds = new ConcurrentHashMap<>();
+    /** taskId → tenantId（租户隔离映射） */
+    private final Map<String, Integer> taskTenantMap = new ConcurrentHashMap<>();
 
     // --- GA 参数（M10 调度算法优化）---
     /** 任务数低于此值时回退到简单评分，避免 GA 开销无收益 */
@@ -35,25 +40,58 @@ public class TaskAssignmentService {
     private static final int GA_ELITE = 2;
     private static final int GA_TOURNAMENT_K = 3;
 
+    // --- 评分权重与基础分 ---
+    /** 综合评分权重：能力匹配 40%、电量 30%、距离 20%、优先级 10% */
+    private static final double WEIGHT_CAPABILITY = 0.4;
+    private static final double WEIGHT_BATTERY = 0.3;
+    private static final double WEIGHT_DISTANCE = 0.2;
+    private static final double WEIGHT_PRIORITY = 0.1;
+    /** 基础能力分（0-100） */
+    private static final double BASE_CAPABILITY_SCORE = 50.0;
+    /** 默认距离满分（无位置数据时） */
+    private static final double DEFAULT_DISTANCE_SCORE = 100.0;
+    /** 优先级乘数：priority 0-10 → 0-100 */
+    private static final double PRIORITY_MULTIPLIER = 10.0;
+    /** 距离得分线性递减的基准距离（m），100km 内得分线性递减 */
+    private static final double DISTANCE_SCORE_BASE_M = 100_000.0;
+    /** 地球半径（m），用于 haversine 距离计算 */
+    private static final double EARTH_RADIUS_M = 6371000.0;
+
     public TaskAssignmentService(DeviceRegistry registry) {
         this.registry = registry;
     }
 
     /** 分配任务到最优无人机 */
-    public AssignmentResult assignTask(TaskRequest req) {
+    public synchronized AssignmentResult assignTask(TaskRequest req) {
         List<DroneSnapshot> drones = registry.all();
         if (drones.isEmpty()) {
             log.warn("No drones available for task {}", req.getTaskId());
             return new AssignmentResult(req.getTaskId(), -1, 0, "无可用无人机", false);
         }
 
+        // 优先选择没有正在执行任务的空闲无人机
         DroneSnapshot best = null;
         double bestScore = -1;
         for (DroneSnapshot d : drones) {
+            Set<String> activeTasks = droneToTaskIds.get(d.sysid);
+            if (activeTasks != null && !activeTasks.isEmpty()) {
+                continue; // 跳过有正在执行任务的无人机
+            }
             double score = scoreDrone(d, req);
             if (score > bestScore) {
                 bestScore = score;
                 best = d;
+            }
+        }
+
+        // 所有无人机都有正在执行的任务时，回退到选择评分最高的无人机（允许排队）
+        if (best == null) {
+            for (DroneSnapshot d : drones) {
+                double score = scoreDrone(d, req);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = d;
+                }
             }
         }
 
@@ -64,6 +102,10 @@ public class TaskAssignmentService {
         AssignmentResult result = new AssignmentResult(req.getTaskId(), best.sysid, bestScore,
                 String.format("sysid=%d score=%.1f", best.sysid, bestScore), true);
         assignments.put(req.getTaskId(), result);
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null) {
+            taskTenantMap.put(req.getTaskId(), tenantId);
+        }
         taskQueue.offer(req);
         log.info("Task {} assigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
         return result;
@@ -78,7 +120,7 @@ public class TaskAssignmentService {
      * @param requests 待分配任务列表
      * @return 与输入顺序对应的分配结果列表
      */
-    public List<AssignmentResult> assignTasks(List<TaskRequest> requests) {
+    public synchronized List<AssignmentResult> assignTasks(List<TaskRequest> requests) {
         List<DroneSnapshot> drones = registry.all();
         List<AssignmentResult> results = new ArrayList<>();
         if (drones.isEmpty()) {
@@ -101,6 +143,7 @@ public class TaskAssignmentService {
                 : greedyAssign(requests, drones);
 
         String algo = useGa ? "GA" : "SCORE";
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         for (int i = 0; i < nTasks; i++) {
             int di = mapping[i];
             DroneSnapshot d = drones.get(di);
@@ -108,6 +151,9 @@ public class TaskAssignmentService {
             AssignmentResult r = new AssignmentResult(requests.get(i).getTaskId(), d.sysid, score,
                     String.format("%s sysid=%d score=%.1f", algo, d.sysid, score), true);
             assignments.put(requests.get(i).getTaskId(), r);
+            if (tenantId != null) {
+                taskTenantMap.put(requests.get(i).getTaskId(), tenantId);
+            }
             taskQueue.offer(requests.get(i));
             results.add(r);
         }
@@ -332,47 +378,158 @@ public class TaskAssignmentService {
 
     /** 综合评分：能力(40%) + 电量(30%) + 距离(20%) + 优先级(10%) */
     private double scoreDrone(DroneSnapshot d, TaskRequest req) {
-        double capabilityScore = 50.0; // 基础能力分
-        double batteryScore = d.battery > 0 ? d.battery * 100 : 0;
-        double distanceScore = 100.0; // 默认满分，有位置时计算距离
+        double capabilityScore = BASE_CAPABILITY_SCORE;
+        double batteryScore = d.battery > 0 ? d.battery : 0;
+        double distanceScore = DEFAULT_DISTANCE_SCORE;
         if (!Double.isNaN(d.lat) && !Double.isNaN(d.lon) && d.lat != 0 && d.lon != 0) {
             double dist = haversine(d.lat, d.lon, req.getTargetLat(), req.getTargetLon());
-            distanceScore = Math.max(0, 100 - dist / 100); // 100km 内得分线性递减
+            distanceScore = Math.max(0, 100 - dist / (DISTANCE_SCORE_BASE_M / 100));
         }
-        double priorityScore = req.getPriority() * 10.0;
+        double priorityScore = req.getPriority() * PRIORITY_MULTIPLIER;
 
-        return capabilityScore * 0.4 + batteryScore * 0.3 + distanceScore * 0.2 + priorityScore * 0.1;
+        return capabilityScore * WEIGHT_CAPABILITY + batteryScore * WEIGHT_BATTERY
+                + distanceScore * WEIGHT_DISTANCE + priorityScore * WEIGHT_PRIORITY;
     }
 
     private double haversine(double lat1, double lon1, double lat2, double lon2) {
-        double R = 6371000;
+        double R = EARTH_RADIUS_M;
         double dLat = Math.toRadians(lat2 - lat1);
         double dLon = Math.toRadians(lon2 - lon1);
         double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
                 Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
                         Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) / 1000; // km
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // 米
     }
 
-    /** 查询所有分配 */
+    /** 查询所有分配，自动按当前租户过滤。 */
     public Map<String, AssignmentResult> getAllAssignments() {
-        return Collections.unmodifiableMap(assignments);
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null) {
+            return Collections.unmodifiableMap(assignments);
+        }
+        Map<String, AssignmentResult> filtered = new LinkedHashMap<>();
+        for (Map.Entry<String, AssignmentResult> entry : assignments.entrySet()) {
+            Integer taskTenant = taskTenantMap.get(entry.getKey());
+            if (taskTenant == null || tenantId.equals(taskTenant)) {
+                filtered.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return Collections.unmodifiableMap(filtered);
     }
 
-    /** 取消任务 */
-    public boolean cancelTask(String taskId) {
+    /** 取消任务（验证租户归属）。 */
+    public synchronized boolean cancelTask(String taskId) {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null) {
+            Integer taskTenant = taskTenantMap.get(taskId);
+            if (taskTenant != null && !tenantId.equals(taskTenant)) {
+                return false;
+            }
+        }
         AssignmentResult removed = assignments.remove(taskId);
+        if (removed != null) {
+            taskTenantMap.remove(taskId);
+            // 从正在执行映射中移除（任务可能已被 poll 开始执行）
+            Set<String> activeTasks = droneToTaskIds.get(removed.getAssignedSysid());
+            if (activeTasks != null) {
+                activeTasks.remove(taskId);
+                if (activeTasks.isEmpty()) {
+                    droneToTaskIds.remove(removed.getAssignedSysid());
+                }
+            }
+            // 同步从任务队列移除，避免队列只增不减
+            taskQueue.removeIf(req -> req.getTaskId().equals(taskId));
+        }
         return removed != null;
     }
 
-    /** 全量重新分配（无人机损毁后触发） */
-    public void reassignAll() {
-        log.info("Reassigning all tasks, count={}", assignments.size());
-        Map<String, AssignmentResult> old = new LinkedHashMap<>(assignments);
-        assignments.clear();
-        for (Map.Entry<String, AssignmentResult> e : old.entrySet()) {
-            // 重新分配逻辑可在此扩展
-            log.debug("Task {} needs reassignment", e.getKey());
+    /** 从任务队列取出下一个待执行任务（消费队列，避免只增不减）。 */
+    public synchronized TaskRequest pollNextTask() {
+        TaskRequest task = taskQueue.poll();
+        if (task != null) {
+            // 标记任务为正在执行，加入无人机负载映射
+            AssignmentResult assignment = assignments.get(task.getTaskId());
+            if (assignment != null && assignment.isSuccess()) {
+                droneToTaskIds.computeIfAbsent(assignment.getAssignedSysid(), k -> ConcurrentHashMap.newKeySet())
+                        .add(task.getTaskId());
+            }
+        }
+        return task;
+    }
+
+    /** 标记任务完成，从无人机负载映射中移除。 */
+    public synchronized void completeTask(String taskId) {
+        AssignmentResult assignment = assignments.get(taskId);
+        if (assignment != null && assignment.isSuccess()) {
+            Set<String> activeTasks = droneToTaskIds.get(assignment.getAssignedSysid());
+            if (activeTasks != null) {
+                activeTasks.remove(taskId);
+                if (activeTasks.isEmpty()) {
+                    droneToTaskIds.remove(assignment.getAssignedSysid());
+                }
+            }
+            log.info("Task {} completed, removed from drone {} load tracking",
+                    taskId, assignment.getAssignedSysid());
+        }
+    }
+
+    /**
+     * 全量重新分配（无人机损毁后触发）。
+     * <p>
+     * 线程安全说明：使用 synchronized 与 assignTask/assignTasks/cancelTask/pollNextTask 对共享状态
+     * （taskQueue、assignments）的访问保持互斥，消除 drainTo 与并发 offer/poll 之间的竞态。
+     * 重分配策略：仅重分配 taskQueue 中待执行的任务；正在执行中的任务（已从队列消费、
+     * 仅有 assignments 记录）不受影响，其分配记录被保留。
+     */
+    public synchronized void reassignAll() {
+        log.info("Reassigning all tasks, pendingQueueCount={}", taskQueue.size());
+        // 从队列取出所有待重分配任务（不加 assignments.clear()，保留执行中任务的分配记录）
+        List<TaskRequest> pending = new ArrayList<>();
+        taskQueue.drainTo(pending);
+        // 重新分配：仅对在线无人机分配（损毁无人机已离线）
+        List<DroneSnapshot> drones = registry.all();
+        for (TaskRequest req : pending) {
+            DroneSnapshot best = null;
+            double bestScore = -1;
+            // 优先选择没有正在执行任务的在线无人机
+            for (DroneSnapshot d : drones) {
+                if (!d.online) {
+                    continue; // 跳过离线无人机
+                }
+                Set<String> activeTasks = droneToTaskIds.get(d.sysid);
+                if (activeTasks != null && !activeTasks.isEmpty()) {
+                    continue; // 跳过有正在执行任务的无人机
+                }
+                double score = scoreDrone(d, req);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = d;
+                }
+            }
+            // 所有在线无人机都有正在执行的任务时，回退到选择评分最高的在线无人机
+            if (best == null) {
+                for (DroneSnapshot d : drones) {
+                    if (!d.online) {
+                        continue;
+                    }
+                    double score = scoreDrone(d, req);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = d;
+                    }
+                }
+            }
+            if (best != null) {
+                AssignmentResult result = new AssignmentResult(req.getTaskId(), best.sysid, bestScore,
+                        String.format("sysid=%d score=%.1f", best.sysid, bestScore), true);
+                assignments.put(req.getTaskId(), result); // 覆盖旧分配记录
+                taskQueue.offer(req);
+                log.info("Task {} reassigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
+            } else {
+                // 无在线无人机时将任务放回队列，等待下次有无人机上线时再分配。
+                taskQueue.offer(req);
+                log.warn("Task {} cannot be reassigned: no online drone available, re-queued", req.getTaskId());
+            }
         }
     }
 }

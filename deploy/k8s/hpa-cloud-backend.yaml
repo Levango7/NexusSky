@@ -1,0 +1,26 @@
+# HorizontalPodAutoscaler for cloud-backend
+# 自动扩缩：min=2, max=10, CPU>70% 触发扩容
+# 用法：kubectl apply -f deploy/k8s/hpa-cloud-backend.yaml -n nexussky
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cloud-backend
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: cloud-backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cloud-backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

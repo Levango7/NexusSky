@@ -11,6 +11,9 @@ public final class DroneSnapshot {
 
     public final int sysid;
 
+    // --- tenant isolation ---
+    public volatile Integer tenantId;
+
     // --- heartbeat / liveness ---
     public volatile long lastHeartbeatMs;      // epoch ms of last HEARTBEAT
     public volatile boolean online;

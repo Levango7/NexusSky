@@ -28,8 +28,10 @@ export default function AlertFeed({ alerts }) {
           <ul className="alert-list">
             {alerts.map((a, i) => {
               const meta = SEV_META[a.severity ?? 6] || SEV_META[6]
+              // 同毫秒内告警可能重复，索引仅用于业务字段组合仍冲突时兜底。
+              const key = `${a.id ?? ''}-${a.ts}-${a.sysid}-${i}`
               return (
-                <li key={i} style={{ borderLeftColor: meta.color }}>
+                <li key={key} style={{ borderLeftColor: meta.color }}>
                   <span className="sev" style={{ color: meta.color }}>[{meta.label}]</span>
                   {a.text}
                   <time>{new Date(a.ts).toLocaleTimeString('zh-CN', { hour12: false })}</time>

@@ -1,9 +1,13 @@
 package io.aerofleet.cloud.telemetry;
 
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.mavlink.messages.CommandAck;
 import io.aerofleet.mavlink.messages.MissionAckMsg;
+import io.aerofleet.mavlink.messages.MissionCountMsg;
+import io.aerofleet.mavlink.messages.MissionItemInt;
 import io.aerofleet.mavlink.messages.MissionRequest;
 import io.aerofleet.mavlink.messages.MissionRequestInt;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -87,6 +91,58 @@ public class PendingAcks {
 
     public int size() {
         return pendings.size();
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自动完成 pending futures
+    // =====================================================================
+
+    /**
+     * COMMAND_ACK (msgId 77)：完成等待中的命令确认 future。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.CommandAck).ID")
+    public void onCommandAck(MavlinkMessageEvent event) {
+        offer(CommandAck.ID, event.getMessage(), event.getSysid());
+    }
+
+    /**
+     * MISSION_REQUEST_INT (msgId 51)：完成等待中的任务请求 future。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.MissionRequestInt).ID")
+    public void onMissionRequestInt(MavlinkMessageEvent event) {
+        offer(MissionRequestInt.ID, event.getMessage(), event.getSysid());
+    }
+
+    /**
+     * MISSION_REQUEST (msgId 40)：完成等待中的任务请求 future。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.MissionRequest).ID")
+    public void onMissionRequest(MavlinkMessageEvent event) {
+        offer(MissionRequest.ID, event.getMessage(), event.getSysid());
+    }
+
+    /**
+     * MISSION_ACK (msgId 46)：完成等待中的任务确认 future。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.MissionAckMsg).ID")
+    public void onMissionAck(MavlinkMessageEvent event) {
+        offer(MissionAckMsg.ID, event.getMessage(), event.getSysid());
+    }
+
+    /**
+     * MISSION_COUNT (msgId 44)：完成等待中的任务计数 future（任务下载方向）。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.MissionCountMsg).ID")
+    public void onMissionCount(MavlinkMessageEvent event) {
+        offer(MissionCountMsg.ID, event.getMessage(), event.getSysid());
+    }
+
+    /**
+     * MISSION_ITEM_INT (msgId 39)：完成等待中的任务条目 future（任务下载方向）。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.MissionItemInt).ID")
+    public void onMissionItemInt(MavlinkMessageEvent event) {
+        offer(MissionItemInt.ID, event.getMessage(), event.getSysid());
     }
 
     // ---- typed helpers for the response kinds we correlate ----

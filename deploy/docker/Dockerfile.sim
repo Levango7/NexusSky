@@ -7,13 +7,29 @@
 # 无需 --cloud-host/--cloud-port 参数；运行时仅指定 --sysid 与 --port 即可。
 
 # ===== 阶段 1：Maven 构建 =====
-FROM eclipse-temurin:17-jdk AS builder
+# 2026-09-22 修复：原基础镜像为 `eclipse-temurin:17-jdk`，**不含 Maven**，
+# 构建阶段执行 `mvn` 直接以 **exit code 127（command not found）** 失败：
+#   ERROR: process "/bin/sh -c mvn -q -pl drone-sim -am package -DskipTests"
+#     did not complete successfully: exit code: 127
+# （同类 Dockerfile.web 用 node:20-alpine 故不受影响——"同类 job 一成一败"
+#   是定位此问题的关键线索。）
+# 改用 Maven 官方镜像 maven:3.9-eclipse-temurin-17（含 Maven + JDK 17）。
+# 该标签经 docker-library/repo-info 核实存在，对应
+# maven:3.9.16-eclipse-temurin-17-noble。
+FROM maven:3.9-eclipse-temurin-17 AS builder
 WORKDIR /build
 
 COPY pom.xml ./
 COPY mavlink-core/pom.xml ./mavlink-core/pom.xml
 COPY drone-sim/pom.xml ./drone-sim/pom.xml
 COPY link-sim/pom.xml ./link-sim/pom.xml
+# 2026-09-22 修复：原先只拷 3 个模块 pom，但根 pom.xml 的 <modules> 声明了
+# **4 个**（mavlink-core / drone-sim / link-sim / **cloud-backend**）。
+# Maven 读取聚合 pom 时会尝试加载全部模块，找不到 cloud-backend/pom.xml 即抛
+#   ProjectBuildingException（exit code 1）
+# —— 与 Dockerfile.cloud（4 个全拷，故能解析）形成对照。
+# 只需其 pom 用于解析模块结构，**不需要**其源码（-am 只构建 drone-sim 所需）。
+COPY cloud-backend/pom.xml ./cloud-backend/pom.xml
 
 COPY mavlink-core/src ./mavlink-core/src
 COPY drone-sim/src ./drone-sim/src
@@ -27,7 +43,12 @@ RUN --mount=type=cache,target=/root/.m2 \
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 
-COPY --from=builder /build/drone-sim/target/*.jar app.jar
+COPY --from=builder /build/drone-sim/target/aerofleet-drone-sim-*.jar app.jar
+
+# 非 Root 用户运行（安全加固）
+RUN useradd -r -u 1001 appuser && \
+    chown -R appuser:appuser /app
+USER appuser
 
 # UDP MAVLink 端口（默认 14540，与 cloud-backend 的 aerofleet.drone-port 对齐）
 EXPOSE 14540/udp

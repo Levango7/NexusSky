@@ -1,0 +1,36 @@
+# PodDisruptionBudget: cloud-backend + gcs-web
+# 保证至少 minAvailable 个副本可用
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cloud-backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: cloud-backend
+spec:
+  minAvailable: {{ .Values.cloudBackend.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: cloud-backend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gcs-web
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: gcs-web
+spec:
+  minAvailable: {{ .Values.gcsWeb.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: gcs-web

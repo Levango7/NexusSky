@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.gateway;
 
+import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,13 +44,17 @@ public class DeviceRegistry {
         return drones.computeIfAbsent(sysid, id -> {
             DroneSnapshot s = new DroneSnapshot(id);
             s.online = true;
-            log.info("Drone registered: sysid={}", id);
+            s.tenantId = TenantContext.getEffectiveTenantId();
+            log.info("Drone registered: sysid={} tenantId={}", id, s.tenantId);
             if (persist && repository != null) {
                 try {
                     DeviceEntity entity = repository.findById(id)
                             .orElseGet(() -> new DeviceEntity(id));
                     entity.setOnline(true);
                     entity.setLastSeen(java.time.Instant.now());
+                    if (s.tenantId != null) {
+                        entity.setTenantId(s.tenantId);
+                    }
                     repository.save(entity);
                 } catch (Exception e) {
                     log.warn("设备持久化失败 sysid={}: {}", id, e.getMessage());
@@ -60,12 +65,25 @@ public class DeviceRegistry {
     }
 
     public DroneSnapshot get(int sysid) {
-        return drones.get(sysid);
+        DroneSnapshot snapshot = drones.get(sysid);
+        if (snapshot == null) {
+            return null;
+        }
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null) {
+            return snapshot;
+        }
+        if (snapshot.tenantId == null || tenantId.equals(snapshot.tenantId)) {
+            return snapshot;
+        }
+        return null;
     }
 
     /** All known drones, sorted by sysid. Includes offline ones. */
     public List<DroneSnapshot> all() {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         return drones.values().stream()
+                .filter(s -> tenantId == null || s.tenantId == null || tenantId.equals(s.tenantId))
                 .sorted(Comparator.comparingInt(s -> s.sysid))
                 .collect(Collectors.toList());
     }

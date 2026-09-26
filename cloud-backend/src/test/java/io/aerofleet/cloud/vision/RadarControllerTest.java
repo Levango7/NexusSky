@@ -1,6 +1,6 @@
 package io.aerofleet.cloud.vision;
 
-import io.aerofleet.cloud.mission.DroneCommandService;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.mavlink.enums.ScanMode;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
 import org.junit.jupiter.api.BeforeEach;

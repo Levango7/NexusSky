@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.vision;
 
-import io.aerofleet.cloud.mission.MissionItemRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aerofleet.cloud.mission.common.MissionItemRequest;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -13,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class OrbitServiceTest {
 
-    private final OrbitService svc = new OrbitService(null, null, null, "http://127.0.0.1:18080");
+    private final OrbitService svc = new OrbitService(null, null, null, new ObjectMapper(), "http://127.0.0.1:18080");
 
     private static final double LAT = 22.5907;
     private static final double LON = 113.9345;

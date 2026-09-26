@@ -43,7 +43,7 @@ public class FlightLogService {
     private static final Logger log = LoggerFactory.getLogger(FlightLogService.class);
     private static final DateTimeFormatter TS = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
     private final Path dir;
     /** Track points are written at most this often per drone (ms). */
     private final long trackMinIntervalMs;
@@ -53,9 +53,11 @@ public class FlightLogService {
 
     public FlightLogService(
             @Value("${aerofleet.flightlog.dir:./flight-logs}") String dir,
-            @Value("${aerofleet.flightlog.track-interval-ms:1000}") long trackMinIntervalMs) {
+            @Value("${aerofleet.flightlog.track-interval-ms:1000}") long trackMinIntervalMs,
+            ObjectMapper objectMapper) {
         this.dir = Path.of(dir);
         this.trackMinIntervalMs = trackMinIntervalMs;
+        this.mapper = objectMapper;
         try {
             Files.createDirectories(this.dir);
             log.info("flight log directory: {}", this.dir.toAbsolutePath());

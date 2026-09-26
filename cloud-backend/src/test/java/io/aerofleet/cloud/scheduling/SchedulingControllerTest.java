@@ -15,7 +15,7 @@ class SchedulingControllerTest {
 
     @Test
     void testStatusEndpoint() throws Exception {
-        mockMvc.perform(get("/api/scheduling/status"))
+        mockMvc.perform(get("/api/v1/scheduling/status"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ACTIVE"));
     }

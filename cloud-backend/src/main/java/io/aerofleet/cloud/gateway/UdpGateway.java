@@ -8,12 +8,16 @@ import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.net.SocketAddress;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.concurrent.ConcurrentHashMap;
+
 import java.util.function.BiConsumer;
 
 /**
@@ -24,6 +28,18 @@ import java.util.function.BiConsumer;
  * arrive from, so COMMAND/MISSION traffic is directed per-drone even when
  * several drones (or several link-sim proxies, one per "network segment")
  * share this gateway. lastPeer remains only as a discovery bootstrap.
+ *
+ * <p>Security (P1-3):
+ * <ul>
+ *   <li><b>Device whitelist</b>: when {@code aerofleet.udp.device-whitelist-enabled=true}
+ *       (prod default), only frames from sysids registered in {@link DeviceRegistry}
+ *       are accepted. Dev mode ({@code false}) accepts all sysids.</li>
+ *   <li><b>Rate limiting</b>: per-sysid sliding-window rate limit
+ *       ({@code aerofleet.udp.max-frame-rate-per-sysid}, default 100 fps).
+ *       Excess frames are dropped with a WARN log.</li>
+ *   <li><b>Bind address</b>: {@code aerofleet.udp.bind-address} (default 0.0.0.0;
+ *       prod should bind to an internal NIC).</li>
+ * </ul>
  */
 @Component
 public class UdpGateway {
@@ -41,15 +57,33 @@ public class UdpGateway {
     /** sysid routes with aging (D3): see {@link RouteTable}. */
     private final RouteTable droneRoutes = new RouteTable();
 
+    /** 设备白名单是否启用（prod=true, dev=false）。 */
+    private final boolean deviceWhitelistEnabled;
+
+    /** 单 sysid 每秒最大帧数（默认 100）。 */
+    private final int maxFrameRatePerSysid;
+
+    /** 设备注册表，用于白名单校验；可选注入（dev 模式下可能为 null）。 */
+    @Autowired(required = false)
+    private DeviceRegistry deviceRegistry;
+
+    /** 每 sysid 滑动窗口频率限制器：key=sysid, value=最近1秒内的时间戳队列。 */
+    private final ConcurrentHashMap<Integer, Deque<Long>> rateLimitWindows = new ConcurrentHashMap<>();
+
     public UdpGateway(@Value("${aerofleet.udp-port:14550}") int udpPort,
                       @Value("${aerofleet.drone-host:127.0.0.1}") String droneHost,
                       @Value("${aerofleet.drone-port:14540}") int dronePort,
                       @Value("${aerofleet.drone-extra-ports:}") String extraPorts,
+                      @Value("${aerofleet.udp.bind-address:0.0.0.0}") String bindAddress,
+                      @Value("${aerofleet.udp.device-whitelist-enabled:false}") boolean deviceWhitelistEnabled,
+                      @Value("${aerofleet.udp.max-frame-rate-per-sysid:100}") int maxFrameRatePerSysid,
                       TelemetryIngestService ingest,
                       PendingAcks pendings) throws IOException {
         this.ingest = ingest;
         this.pendings = pendings;
-        this.transport = new UdpMavlinkTransport(udpPort);
+        this.deviceWhitelistEnabled = deviceWhitelistEnabled;
+        this.maxFrameRatePerSysid = maxFrameRatePerSysid;
+        this.transport = new UdpMavlinkTransport(bindAddress, udpPort);
         // 带源地址的监听器：路由表的学习与分发都靠它
         transport.addFrameListener((BiConsumer<MavlinkFrame, SocketAddress>) this::onFrame);
 
@@ -68,20 +102,59 @@ public class UdpGateway {
                 }
             }
         }
-        log.info("MAVLink UDP gateway listening on port {}, discovery -> {} (+{})",
-                transport.getLocalPort(), droneAddr, extraPorts);
+        log.info("MAVLink UDP gateway listening on {}:{}, discovery -> {} (+{}), whitelist={}, maxRate={}/s",
+                bindAddress, transport.getLocalPort(), droneAddr, extraPorts,
+                deviceWhitelistEnabled, maxFrameRatePerSysid);
     }
 
-    /** Frame + source address entry: ingest, and remember the sysid route. */
+    /** Frame + source address entry: whitelist check, rate limit, ingest, and route learning. */
     private void onFrame(MavlinkFrame frame, SocketAddress source) {
-        if (frame.getSystemId() > 0 && frame.getSystemId() != GCS_SYSID) {
-            SocketAddress prev = droneRoutes.get(frame.getSystemId());
-            droneRoutes.learn(frame.getSystemId(), source);
+        int sysid = frame.getSystemId();
+
+        // 白名单校验：prod 模式下只接受已注册 sysid（GCS_SYSID 始终放行）
+        if (deviceWhitelistEnabled && sysid > 0 && sysid != GCS_SYSID) {
+            if (deviceRegistry == null || deviceRegistry.get(sysid) == null) {
+                log.warn("Rejected frame from unregistered sysid={} (device whitelist enabled)", sysid);
+                return;
+            }
+        }
+
+        // 频率限制：滑动窗口算法（GCS_SYSID 不受限）
+        if (sysid > 0 && sysid != GCS_SYSID && !rateLimitAllow(sysid)) {
+            log.warn("Rate limit exceeded for sysid={}, dropping frame (max {}/s)",
+                    sysid, maxFrameRatePerSysid);
+            return;
+        }
+
+        if (sysid > 0 && sysid != GCS_SYSID) {
+            SocketAddress prev = droneRoutes.get(sysid);
+            droneRoutes.learn(sysid, source);
             if (prev == null || !prev.equals(source)) {
-                log.debug("Route sysid={} -> {}", frame.getSystemId(), source);
+                log.debug("Route sysid={} -> {}", sysid, source);
             }
         }
         ingest.handle(frame);
+    }
+
+    /**
+     * 滑动窗口频率限制：检查 sysid 在最近 1 秒内的帧数是否超限。
+     *
+     * @return true=允许通过, false=超限需丢弃
+     */
+    private boolean rateLimitAllow(int sysid) {
+        long now = System.currentTimeMillis();
+        Deque<Long> window = rateLimitWindows.computeIfAbsent(sysid, k -> new ArrayDeque<>());
+        synchronized (window) {
+            // 移除超过 1 秒的旧时间戳
+            while (!window.isEmpty() && now - window.peekFirst() > 1000) {
+                window.pollFirst();
+            }
+            if (window.size() >= maxFrameRatePerSysid) {
+                return false;
+            }
+            window.addLast(now);
+            return true;
+        }
     }
 
     /**
@@ -93,6 +166,26 @@ public class UdpGateway {
     public void pruneStaleRoutes() {
         for (Integer sysid : droneRoutes.prune()) {
             log.info("pruning stale route sysid={} (silent >5min)", sysid);
+        }
+    }
+
+    /**
+     * 频率限制窗口清理：移除长时间（2 分钟）无活动的 sysid 窗口，防止内存泄漏。
+     * 每 5 分钟运行一次。
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 300_000, initialDelay = 300_000)
+    public void pruneStaleRateLimitWindows() {
+        long cutoff = System.currentTimeMillis() - 120_000;
+        int before = rateLimitWindows.size();
+        rateLimitWindows.entrySet().removeIf(entry -> {
+            Deque<Long> window = entry.getValue();
+            synchronized (window) {
+                return window.isEmpty() || window.peekLast() < cutoff;
+            }
+        });
+        int removed = before - rateLimitWindows.size();
+        if (removed > 0) {
+            log.debug("Pruned {} stale rate-limit windows", removed);
         }
     }
 

@@ -25,7 +25,7 @@ import java.util.Map;
  * 且非 dev-mode 时由 {@link io.aerofleet.cloud.security.RoleInterceptor} 拦截校验。
  */
 @RestController
-@RequestMapping("/api/audit")
+@RequestMapping("/api/v1/audit")
 public class AuditController {
 
     private final AuditService auditService;

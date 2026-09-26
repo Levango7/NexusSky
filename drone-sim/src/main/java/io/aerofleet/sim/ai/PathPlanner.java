@@ -1,6 +1,8 @@
 package io.aerofleet.sim.ai;
 
 import io.aerofleet.sim.GeoUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,9 +26,11 @@ import java.util.Random;
  * 扩展固定步长 → 碰撞检测 → 加入树；到目标距离小于阈值时连接目标。
  * 适合高维 / 复杂障碍 / 动态环境，不保证最优但收敛快。
  * <p>
- * 注意：drone-sim 模块未引入 slf4j，统一使用 {@code System.out.println} 输出日志。
+ * 注意：drone-sim 模块使用 SLF4J Logger 输出日志。
  */
 public class PathPlanner {
+
+    private static final Logger log = LoggerFactory.getLogger(PathPlanner.class);
 
     // ====== 公共参数 ======
     private static final double DEFAULT_GRID_RESOLUTION = 5.0;   // A* 默认网格分辨率 5m
@@ -166,7 +170,7 @@ public class PathPlanner {
 
         // 起点或终点被障碍物覆盖 → 无可行路径
         if (blocked[sn][se] || blocked[gn][ge]) {
-            System.out.println("[PathPlanner] A*: start or goal blocked, no path");
+            log.debug("[PathPlanner] A*: start or goal blocked, no path");
             return Collections.emptyList();
         }
 
@@ -223,7 +227,7 @@ public class PathPlanner {
         }
 
         if (!found) {
-            System.out.println("[PathPlanner] A*: no path found");
+            log.debug("[PathPlanner] A*: no path found");
             return Collections.emptyList();
         }
 
@@ -393,7 +397,7 @@ public class PathPlanner {
         }
 
         if (goalNodeIdx == -1) {
-            System.out.println("[PathPlanner] RRT: did not reach goal, nearest dist=" + goalNearestDist);
+            log.debug("[PathPlanner] RRT: did not reach goal, nearest dist={}", goalNearestDist);
             return Collections.emptyList();
         }
 

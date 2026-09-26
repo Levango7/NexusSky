@@ -147,7 +147,7 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
           <button className="btn rtl" disabled={busy || !drone} onClick={() => cmd('rtl')}>
             <span className="icon">⟲</span>返航
           </button>
-          <button className="btn kill" disabled={busy || !drone} onClick={() => cmd('disarm')} title="紧急上锁">
+          <button className="btn kill" disabled={busy || !drone} onClick={() => cmd('kill')} title="紧急终止">
             <span className="icon">✋</span>急停
           </button>
         </div>

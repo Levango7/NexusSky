@@ -1,12 +1,14 @@
 package io.aerofleet.cloud.vision;
 
-import io.aerofleet.cloud.mission.DroneCommandService;
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.mavlink.enums.ScanMode;
-import io.aerofleet.mavlink.enums.TrackState;
+
 import io.aerofleet.mavlink.messages.RadarScanMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -35,6 +37,9 @@ public class RadarController {
 
     /** 自定义命令 ID：雷达扫描配置（NexusSky 扩展，不与 MAVLink common 冲突）。 */
     private static final int MAV_CMD_NEXUS_RADAR_CONFIG = 420;
+
+    /** 每架机维护的目标列表上限，超过时淘汰最旧目标。 */
+    private static final int MAX_TARGETS_PER_DRONE = 64;
 
     private final ConcurrentHashMap<Integer, RadarScanConfig> configs = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, RadarScanStatus> statuses = new ConcurrentHashMap<>();
@@ -113,7 +118,7 @@ public class RadarController {
             List<RadarTargetMsg> list = existing == null
                     ? new ArrayList<>() : new ArrayList<>(existing);
             list.add(msg);
-            while (list.size() > 64) {
+            while (list.size() > MAX_TARGETS_PER_DRONE) {
                 list.remove(0);
             }
             return list;
@@ -128,6 +133,20 @@ public class RadarController {
     /** 所有配置（供查询）。 */
     public Map<Integer, RadarScanConfig> allConfigs() {
         return Collections.unmodifiableMap(configs);
+    }
+
+    // =====================================================================
+    // @EventListener：监听 MavlinkMessageEvent 自行处理雷达消息
+    // =====================================================================
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.RadarScanMsg).ID")
+    public void onRadarScanEvent(MavlinkMessageEvent event) {
+        onRadarScan((RadarScanMsg) event.getMessage());
+    }
+
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.RadarTargetMsg).ID")
+    public void onRadarTargetEvent(MavlinkMessageEvent event) {
+        onRadarTarget((RadarTargetMsg) event.getMessage());
     }
 
     // =====================================================================

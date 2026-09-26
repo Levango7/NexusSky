@@ -8,6 +8,10 @@ import io.aerofleet.mavlink.messages.MeshRouteReplyMsg;
 import io.aerofleet.mavlink.messages.MeshRouteRequestMsg;
 import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
 import io.aerofleet.sim.SimLog;
+import io.aerofleet.sim.comm.LoRaMavlinkTransport;
+import io.aerofleet.sim.comm.LoRaTransportAdapter;
+import io.aerofleet.sim.comm.MavlinkTransport;
+import io.aerofleet.sim.comm.UdpTransportAdapter;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -18,8 +22,10 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * AODV-lite mesh 路由引擎核心（M5 应急 mesh，FR-01~22a）。
@@ -68,7 +74,8 @@ public final class MeshRouter implements AutoCloseable {
     // ===== 核心字段 =====
     private final int selfSysid;
     private final MeshRouterConfig config;
-    private final UdpMavlinkTransport transport;
+    /** 通用传输层（UDP 或 LoRa），null 表示无网络 IO（单测用）。 */
+    private final MavlinkTransport transport;
     private final NeighborTable neighbors;
     private final RouteTable routes;
     private final RreqCache rreqCache;
@@ -101,14 +108,96 @@ public final class MeshRouter implements AutoCloseable {
     private volatile int batteryPercent = 100;
 
     private volatile boolean closed = false;
+    /** transport 是否由本 router 内部创建（createWithLoRa），close() 时需关闭。 */
+    private final boolean ownsTransport;
 
-    public MeshRouter(int selfSysid, MeshRouterConfig config, UdpMavlinkTransport transport) {
+    // ===== 动态 MAX_HOPS（FR-18）=====
+    /** 当前生效的 MAX_HOPS，初始值为 config.maxHops，可通过 adjustMaxHops 动态调整。 */
+    private volatile int currentMaxHops;
+    /** 上次调整时的节点数，用于判断是否需要重新调整。 */
+    private volatile int lastNodeCount = -1;
+
+    /**
+     * 构造 MeshRouter，使用通用 {@link MavlinkTransport}（UDP 或 LoRa）。
+     * <p>
+     * 3d 集成：根据 {@link MeshRouterConfig#transportType} 选择传输层实现。
+     * transport 为 null 时 sendFrame 静默跳过（单测用）。
+     *
+     * @param selfSysid 本节点 sysid（1-255）
+     * @param config    路由配置
+     * @param transport 通用传输层，null 表示无网络 IO
+     */
+    public MeshRouter(int selfSysid, MeshRouterConfig config, MavlinkTransport transport) {
+        this(selfSysid, config, transport, false);
+    }
+
+    /**
+     * 内部构造函数，指定 transport 所有权。
+     *
+     * @param ownsTransport true 表示 transport 由本 router 内部创建，close() 时需关闭
+     */
+    MeshRouter(int selfSysid, MeshRouterConfig config, MavlinkTransport transport, boolean ownsTransport) {
         this.selfSysid = selfSysid;
         this.config = config;
         this.transport = transport;
+        this.ownsTransport = ownsTransport;
         this.neighbors = new NeighborTable();
         this.routes = new RouteTable(config.routeLifetimeMs);
         this.rreqCache = new RreqCache();
+        this.currentMaxHops = config.maxHops;
+    }
+
+    /**
+     * 构造 MeshRouter，使用 {@link UdpMavlinkTransport}（向后兼容）。
+     * <p>
+     * 内部包装为 {@link UdpTransportAdapter}，mesh 组播地址作为默认发送目标。
+     *
+     * @param selfSysid 本节点 sysid
+     * @param config    路由配置
+     * @param transport UDP 传输，null 表示无网络 IO
+     */
+    public MeshRouter(int selfSysid, MeshRouterConfig config, UdpMavlinkTransport transport) {
+        this(selfSysid, config,
+                transport != null ? new UdpTransportAdapter(transport, config.meshGroupAddress) : null);
+    }
+
+    /**
+     * 工厂方法：创建使用 LoRa 传输的 MeshRouter。
+     * <p>
+     * 3d 集成：多个 MeshRouter 实例共享同一个 {@code channel}（BlockingQueue）即可通过
+     * LoRa 信道互通。内部创建 {@link LoRaTransportAdapter}，绑定到共享信道。
+     *
+     * @param selfSysid     本节点 sysid
+     * @param config        路由配置（transportType 应为 LORA）
+     * @param loRaTransport LoRa 帧适配器
+     * @param channel       共享空中信道标识（BlockingQueue），同一 channel 实例共享同一物理信道
+     * @return 新建的 MeshRouter
+     */
+    public static MeshRouter createWithLoRa(int selfSysid, MeshRouterConfig config,
+                                            LoRaMavlinkTransport loRaTransport,
+                                            BlockingQueue<byte[]> channel) {
+        LoRaTransportAdapter adapter = new LoRaTransportAdapter(
+                loRaTransport, channel, selfSysid, config.loRaMaxPayloadBytes);
+        return new MeshRouter(selfSysid, config, adapter, true);
+    }
+
+    /**
+     * 注册帧监听器：收到完整 MAVLink 帧时回调（委托到 transport）。
+     * <p>
+     * 3d 集成：供上层（如 VirtualDrone）接收并分发 mesh 消息。
+     * transport 为 null 时静默忽略。
+     *
+     * @param listener 帧回调
+     */
+    public void addFrameListener(Consumer<MavlinkFrame> listener) {
+        if (transport != null) {
+            transport.addFrameListener(listener);
+        }
+    }
+
+    /** 当前传输层（供诊断与测试）。 */
+    public MavlinkTransport transport() {
+        return transport;
     }
 
     // ------------------------------------------------------------------
@@ -142,6 +231,11 @@ public final class MeshRouter implements AutoCloseable {
             }
             routes.clear();
             neighbors.clear();
+        }
+        // 3d 集成：关闭内部创建的 transport（如 LoRaTransportAdapter），避免接收线程泄漏。
+        // 外部传入的 transport（如 VirtualDrone 的 UdpMavlinkTransport）由外部管理生命周期。
+        if (ownsTransport && transport != null) {
+            transport.close();
         }
         SimLog.info("[mesh] router closed: sysid=" + selfSysid);
     }
@@ -375,7 +469,7 @@ public final class MeshRouter implements AutoCloseable {
             return;
         }
         // 1) hopCount 检查（FR-08）
-        if (msg.hopCount >= config.maxHops) {
+        if (msg.hopCount >= currentMaxHops) {
             return;
         }
         // 2) RREQ 去重（FR-05）
@@ -501,7 +595,7 @@ public final class MeshRouter implements AutoCloseable {
             return ForwardOutcome.dropped(SendResult.DROPPED_NO_ROUTE, hopCount);
         }
         // FR-08：hopCount > MAX_HOPS 丢弃
-        if (hopCount > config.maxHops) {
+        if (hopCount > currentMaxHops) {
             return ForwardOutcome.dropped(SendResult.DROPPED_HOP_LIMIT, hopCount);
         }
         // FR-07：hopCount <= 0 丢弃
@@ -603,6 +697,52 @@ public final class MeshRouter implements AutoCloseable {
     }
 
     // ------------------------------------------------------------------
+    // 动态 MAX_HOPS 调整（FR-18）
+    // ------------------------------------------------------------------
+
+    /**
+     * 根据网络节点数动态调整 MAX_HOPS（FR-18）。
+     * <p>
+     * 当 {@link MeshRouterConfig#dynamicMaxHopsEnabled} 为 true 时，根据节点数调用
+     * {@link DynamicMaxHops#calculateMaxHopsCapped(int)} 更新 {@link #currentMaxHops}。
+     * 若 {@link DynamicMaxHops#needsAdjustment(int, int)} 返回 true，记录日志说明调整原因。
+     * <p>
+     * 当 {@code dynamicMaxHopsEnabled} 为 false 时，此方法为空操作，保持向后兼容。
+     *
+     * @param nodeCount 当前网络节点数
+     */
+    public void adjustMaxHops(int nodeCount) {
+        if (!config.dynamicMaxHopsEnabled) {
+            return;
+        }
+        int oldNodeCount = this.lastNodeCount;
+        int newMaxHops = DynamicMaxHops.calculateMaxHopsCapped(nodeCount);
+        if (oldNodeCount < 0) {
+            // 首次调用：直接设置并记录
+            this.currentMaxHops = newMaxHops;
+            this.lastNodeCount = nodeCount;
+            SimLog.info("[mesh] MAX_HOPS initialized: " + newMaxHops
+                    + " (nodeCount=" + nodeCount + ", scale="
+                    + DynamicMaxHops.getNetworkScale(nodeCount) + ")");
+        } else if (DynamicMaxHops.needsAdjustment(oldNodeCount, nodeCount)) {
+            int oldMaxHops = this.currentMaxHops;
+            this.currentMaxHops = newMaxHops;
+            this.lastNodeCount = nodeCount;
+            SimLog.info("[mesh] MAX_HOPS adjusted: " + oldMaxHops + " -> " + newMaxHops
+                    + " (nodeCount=" + nodeCount + ", scale="
+                    + DynamicMaxHops.getNetworkScale(nodeCount) + ")");
+        } else {
+            // 节点数变化但未跨阈值，更新 lastNodeCount 但不调整 MAX_HOPS
+            this.lastNodeCount = nodeCount;
+        }
+    }
+
+    /** 获取当前生效的 MAX_HOPS 值。 */
+    public int getCurrentMaxHops() {
+        return currentMaxHops;
+    }
+
+    // ------------------------------------------------------------------
     // 查询方法（供 REST/快照用）
     // ------------------------------------------------------------------
 
@@ -630,7 +770,13 @@ public final class MeshRouter implements AutoCloseable {
     // 内部辅助
     // ------------------------------------------------------------------
 
-    /** 发送帧到指定地址。 */
+    /**
+     * 发送帧到指定地址。
+     * <p>
+     * 3d 集成：通过通用 {@link MavlinkTransport#send(MavlinkFrame)} 发送。
+     * UDP 模式下 dest 用于选择对端（由 UdpTransportAdapter 内部处理）；
+     * LoRa 模式下 dest 被忽略（广播到共享空中信道）。
+     */
     private void sendFrame(io.aerofleet.mavlink.messages.MavlinkMessage msg,
                            InetSocketAddress dest) {
         if (transport == null || dest == null) {
@@ -638,7 +784,7 @@ public final class MeshRouter implements AutoCloseable {
         }
         try {
             MavlinkFrame frame = msg.toFrame(selfSysid, 1, frameSeq.incrementAndGet() & 0xFF);
-            transport.send(frame, dest);
+            transport.send(frame);
         } catch (IOException e) {
             SimLog.warn("[mesh] send failed: " + e.getMessage());
         }

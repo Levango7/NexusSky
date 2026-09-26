@@ -1,5 +1,8 @@
 package io.aerofleet.sim.scheduling;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -8,6 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class TaskExecutor {
 
+    private static final Logger log = LoggerFactory.getLogger(TaskExecutor.class);
     private final int sysid;
     private volatile String currentTaskId;
     private volatile String taskStatus = "IDLE";
@@ -21,13 +25,13 @@ public class TaskExecutor {
         this.currentTaskId = taskId;
         this.taskStatus = "ASSIGNED";
         this.progressPercent.set(0);
-        System.out.println("[scheduling] sysid=" + sysid + " task " + taskId + " assigned");
+        log.info("[scheduling] sysid={} task {} assigned", sysid, taskId);
     }
 
     public void startTask() {
         if ("ASSIGNED".equals(taskStatus)) {
             taskStatus = "IN_PROGRESS";
-            System.out.println("[scheduling] sysid=" + sysid + " task " + currentTaskId + " started");
+            log.info("[scheduling] sysid={} task {} started", sysid, currentTaskId);
         }
     }
 
@@ -36,14 +40,14 @@ public class TaskExecutor {
             int p = progressPercent.incrementAndGet();
             if (p >= 100) {
                 taskStatus = "COMPLETED";
-                System.out.println("[scheduling] sysid=" + sysid + " task " + currentTaskId + " completed");
+                log.info("[scheduling] sysid={} task {} completed", sysid, currentTaskId);
             }
         }
     }
 
     public void abortTask() {
         taskStatus = "ABORTED";
-        System.out.println("[scheduling] sysid=" + sysid + " task " + currentTaskId + " aborted");
+        log.warn("[scheduling] sysid={} task {} aborted", sysid, currentTaskId);
     }
 
     public String getTaskId() { return currentTaskId; }

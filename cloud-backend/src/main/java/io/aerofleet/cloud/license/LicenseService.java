@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.license;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,18 +12,27 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * License 核心服务。
  * <p>
  * 职责：
  * <ul>
- *   <li>从 {@code aerofleet.license.key} 读取 Base64 编码的 license key 并解析为 {@link LicenseInfo}；</li>
+ *   <li>从 {@code aerofleet.license.key} 读取 license key 并解析为 {@link LicenseInfo}；</li>
+ *   <li>支持新格式（签名验证）和旧格式（向后兼容，dev 模式）；</li>
  *   <li>校验 license 的过期与设备数量；</li>
  *   <li>生成 / 验证激活码（HMAC-SHA256，基于租户 + 机器指纹）；</li>
  *   <li>未配置 license key 时返回永久有效的开发版 License，确保不破坏现有测试。</li>
+ * </ul>
+ * <p>
+ * License Key 格式：
+ * <ul>
+ *   <li>新格式（签名版）：{@code Base64(JSON(payload)) + "." + Base64(RSA-SHA256(JSON(payload)))}</li>
+ *   <li>旧格式（无签名）：{@code Base64(JSON(payload))}（仅 dev 模式可用）</li>
  * </ul>
  * <p>
  * 激活码格式：{@code Base64(hmacSHA256(secret, tenantId + "|" + machineId))}。
@@ -42,40 +51,128 @@ public class LicenseService {
     public static final String DEV_TENANT_ID = "dev";
     /** 开发版被授权方 */
     public static final String DEV_ISSUED_TO = "AeroFleet Developer";
+    /** 全部模块集合 */
+    public static final Set<String> ALL_MODULES = Set.of("core", "fleet", "emergency", "network", "advanced");
+
+    /** License Key 中 payload 和 signature 的分隔符 */
+    private static final String KEY_SEPARATOR = ".";
 
     private final ObjectMapper objectMapper;
     private final String licenseKeyConfig;
     private final String hmacSecret;
+    private final boolean devMode;
+    private final LicenseSigner licenseSigner;
     private final LicenseInfo currentLicense;
 
     public LicenseService(
             @Value("${aerofleet.license.key:}") String licenseKeyConfig,
-            @Value("${aerofleet.security.jwt-secret:aerofleet-dev-secret-change-in-production-at-least-32-chars}") String hmacSecret) {
+            @Value("${aerofleet.security.jwt-secret:aerofleet-dev-secret-change-in-production-at-least-32-chars}") String hmacSecret,
+            @Value("${aerofleet.security.dev-mode:false}") boolean devMode,
+            @Value("${aerofleet.license.public-key:}") String publicKeyConfig,
+            ObjectMapper objectMapper) {
         this.licenseKeyConfig = licenseKeyConfig;
         this.hmacSecret = hmacSecret;
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.registerModule(new JavaTimeModule());
+        this.devMode = devMode;
+        this.objectMapper = objectMapper;
+        // 初始化签名工具：生产模式从配置读取公钥，开发模式自动生成密钥对
+        if (publicKeyConfig != null && !publicKeyConfig.isBlank()) {
+            this.licenseSigner = new LicenseSigner(publicKeyConfig, objectMapper);
+        } else {
+            this.licenseSigner = new LicenseSigner(objectMapper);
+        }
         // 启动时解析一次；解析失败则降级为开发版，避免启动崩溃影响现有测试
         this.currentLicense = loadLicense();
     }
 
     /**
-     * 解析 Base64 编码的 license key 为 {@link LicenseInfo}。
+     * 解析 license key 为 {@link LicenseInfo}。
      * <p>
-     * 解析失败时返回 null，由调用方决定降级策略。
+     * 支持两种格式：
+     * <ul>
+     *   <li>新格式（签名版）：{@code Base64(JSON(payload)) + "." + Base64(RSA-SHA256(JSON(payload)))}</li>
+     *   <li>旧格式（无签名）：{@code Base64(JSON(payload))}（仅 dev 模式可用）</li>
+     * </ul>
+     * <p>
+     * 新格式会验证签名，验证失败抛出 {@link LicenseInvalidException}。
+     * 旧格式在非 dev 模式下抛出 {@link LicenseInvalidException}。
      *
-     * @param key Base64 编码的 license key
-     * @return 解析成功返回 LicenseInfo，否则 null
+     * @param key license key 字符串
+     * @return 解析成功返回 LicenseInfo
+     * @throws LicenseInvalidException 签名验证失败或格式不合法
      */
     public LicenseInfo parseLicense(String key) {
         if (key == null || key.isBlank()) {
             return null;
         }
+
+        String trimmedKey = key.trim();
+
+        // 判断是否为新格式（含分隔符）
+        int separatorIndex = trimmedKey.indexOf(KEY_SEPARATOR);
+        if (separatorIndex > 0) {
+            return parseSignedLicense(trimmedKey, separatorIndex);
+        }
+
+        // 旧格式（无签名）
+        return parseLegacyLicense(trimmedKey);
+    }
+
+    /**
+     * 解析新格式（签名版）的 license key。
+     * <p>
+     * 格式：{@code Base64(JSON(payload)) + "." + Base64(RSA-SHA256(JSON(payload)))}
+     *
+     * @param key             license key
+     * @param separatorIndex  分隔符位置
+     * @return 解析成功返回 LicenseInfo
+     * @throws LicenseInvalidException 签名验证失败
+     */
+    private LicenseInfo parseSignedLicense(String key, int separatorIndex) {
         try {
-            byte[] decoded = Base64.getDecoder().decode(key.trim());
+            String payloadBase64 = key.substring(0, separatorIndex);
+            String signatureBase64 = key.substring(separatorIndex + KEY_SEPARATOR.length());
+
+            byte[] payloadBytes = Base64.getDecoder().decode(payloadBase64);
+            String payloadJson = new String(payloadBytes, StandardCharsets.UTF_8);
+
+            LicenseInfo info = objectMapper.readValue(payloadJson, LicenseInfo.class);
+            info.setLicenseKey(key);
+            info.setSignature(signatureBase64);
+
+            // 验证签名
+            if (!licenseSigner.verify(info, signatureBase64)) {
+                throw new LicenseInvalidException("License 签名验证失败");
+            }
+
+            log.info("License 签名验证通过: tenant={}", info.getTenantId());
+            return info;
+        } catch (LicenseInvalidException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("签名版 License 解析失败: {}", e.getMessage());
+            throw new LicenseInvalidException("License 解析失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 解析旧格式（无签名）的 license key。
+     * <p>
+     * 旧格式仅在 dev 模式下允许使用，非 dev 模式抛出 {@link LicenseInvalidException}。
+     *
+     * @param key Base64 编码的 license key
+     * @return 解析成功返回 LicenseInfo
+     * @throws LicenseInvalidException 非 dev 模式下使用旧格式
+     */
+    private LicenseInfo parseLegacyLicense(String key) {
+        if (!devMode) {
+            throw new LicenseInvalidException("非开发模式下不允许使用无签名的旧格式 License");
+        }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(key);
             String json = new String(decoded, StandardCharsets.UTF_8);
             LicenseInfo info = objectMapper.readValue(json, LicenseInfo.class);
-            info.setLicenseKey(key.trim());
+            info.setLicenseKey(key);
+            log.warn("使用旧格式（无签名）License，仅开发模式允许: tenant={}", info.getTenantId());
             return info;
         } catch (Exception e) {
             log.warn("License key 解析失败: {}", e.getMessage());
@@ -185,6 +282,24 @@ public class LicenseService {
         return DEV_PRODUCT_NAME.equals(currentLicense.getProductName());
     }
 
+    /**
+     * 判断当前是否为开发模式（配置项 aerofleet.security.dev-mode=true）。
+     *
+     * @return 开发模式返回 true
+     */
+    public boolean isDevMode() {
+        return devMode;
+    }
+
+    /**
+     * 获取 License 签名工具实例。
+     *
+     * @return LicenseSigner 实例
+     */
+    public LicenseSigner getLicenseSigner() {
+        return licenseSigner;
+    }
+
     // ===== 内部方法 =====
 
     /**
@@ -196,23 +311,30 @@ public class LicenseService {
             log.info("未配置 aerofleet.license.key，使用开发版 License");
             return buildDevLicense();
         }
-        LicenseInfo parsed = parseLicense(licenseKeyConfig);
-        if (parsed == null) {
-            log.warn("License key 解析失败，降级为开发版 License");
+        try {
+            LicenseInfo parsed = parseLicense(licenseKeyConfig);
+            if (parsed == null) {
+                log.warn("License key 解析失败，降级为开发版 License");
+                return buildDevLicense();
+            }
+            log.info("License 加载成功: tenant={}, product={}, maxDevices={}, modules={}, expiry={}",
+                    parsed.getTenantId(), parsed.getProductName(), parsed.getMaxDevices(),
+                    parsed.getModules(), parsed.getExpiryDate());
+            return parsed;
+        } catch (LicenseInvalidException e) {
+            log.error("License 签名验证失败，降级为开发版 License: {}", e.getMessage());
             return buildDevLicense();
         }
-        log.info("License 加载成功: tenant={}, product={}, maxDevices={}, expiry={}",
-                parsed.getTenantId(), parsed.getProductName(), parsed.getMaxDevices(), parsed.getExpiryDate());
-        return parsed;
     }
 
     /**
      * 构造永久有效的开发版 License。
      * <p>
      * maxDevices=0 表示无限制，expiryDate=null 表示永不过期，active=true。
+     * 开发版包含全部模块授权。
      */
     private LicenseInfo buildDevLicense() {
-        return new LicenseInfo(
+        LicenseInfo dev = new LicenseInfo(
                 null,
                 DEV_TENANT_ID,
                 DEV_PRODUCT_NAME,
@@ -222,33 +344,66 @@ public class LicenseService {
                 DEV_ISSUED_TO,
                 true
         );
+        dev.setLicenseId("dev-license");
+        dev.setModules(new HashSet<>(ALL_MODULES));
+        dev.setMaxApiCallsPerDay(0);          // 无限制
+        dev.setMaxConcurrentDrones(0);        // 无限制
+        return dev;
     }
 
     /**
-     * 生成一个 license key（Base64 编码的 JSON），供管理脚本/测试使用。
+     * 生成一个签名版 license key，供管理脚本/测试使用。
      * <p>
-     * 这不是核心商用化逻辑，但便于离线签发 license。
+     * 新格式：{@code Base64(JSON(payload)) + "." + Base64(RSA-SHA256(JSON(payload)))}
+     * 仅在开发模式（LicenseSigner 有私钥）下可用。
      *
      * @param tenantId    租户 ID
      * @param productName 产品名
      * @param maxDevices  设备上限
      * @param expiryDate  过期时间（null=永久）
      * @param issuedTo    被授权方
-     * @return Base64 编码的 license key
+     * @return 签名版 license key
      */
     public String generateLicenseKey(String tenantId, String productName, int maxDevices,
                                      Instant expiryDate, String issuedTo) {
+        return generateLicenseKey(tenantId, productName, maxDevices, expiryDate, issuedTo,
+                new HashSet<>(ALL_MODULES), 0, 0);
+    }
+
+    /**
+     * 生成一个签名版 license key（含模块授权字段），供管理脚本/测试使用。
+     *
+     * @param tenantId           租户 ID
+     * @param productName        产品名
+     * @param maxDevices         设备上限
+     * @param expiryDate         过期时间（null=永久）
+     * @param issuedTo           被授权方
+     * @param modules            授权模块集合
+     * @param maxApiCallsPerDay  每日 API 调用上限（<=0 无限制）
+     * @param maxConcurrentDrones 最大并发无人机数（<=0 无限制）
+     * @return 签名版 license key
+     */
+    public String generateLicenseKey(String tenantId, String productName, int maxDevices,
+                                     Instant expiryDate, String issuedTo,
+                                     Set<String> modules, int maxApiCallsPerDay,
+                                     int maxConcurrentDrones) {
         try {
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("tenantId", tenantId);
-            body.put("productName", productName);
-            body.put("maxDevices", maxDevices);
-            body.put("expiryDate", expiryDate);
-            body.put("issuedAt", Instant.now());
-            body.put("issuedTo", issuedTo);
-            body.put("active", true);
-            String json = objectMapper.writeValueAsString(body);
-            return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+            LicenseInfo info = new LicenseInfo(
+                    null, tenantId, productName, maxDevices, expiryDate,
+                    Instant.now(), issuedTo, true,
+                    "lic-" + tenantId + "-" + System.currentTimeMillis(),
+                    modules, maxApiCallsPerDay, maxConcurrentDrones,
+                    null, null
+            );
+
+            // 序列化 payload（不含 signature/signerCert）
+            String payloadJson = objectMapper.writeValueAsString(info);
+            String payloadBase64 = Base64.getEncoder().encodeToString(payloadJson.getBytes(StandardCharsets.UTF_8));
+
+            // 签名
+            String signature = licenseSigner.sign(info);
+
+            return payloadBase64 + KEY_SEPARATOR + signature;
         } catch (Exception e) {
             log.error("生成 license key 失败: {}", e.getMessage());
             return null;

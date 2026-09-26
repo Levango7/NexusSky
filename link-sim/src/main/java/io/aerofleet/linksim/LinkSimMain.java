@@ -1,6 +1,8 @@
 package io.aerofleet.linksim;
 
 import io.aerofleet.mavlink.MavlinkFrame;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -25,15 +27,15 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class LinkSimMain {
 
+    private static final Logger log = LoggerFactory.getLogger(LinkSimMain.class);
+
     public static void main(String[] args) throws Exception {
         // 预扫描 --relay：命中走中继路径，否则原点对点路径逐行不变（FR-01, DFX 4.5）
         if (containsFlag(args, "--relay")) {
             RelayConfig cfg = RelayConfig.parse(args); // 内部校验失败 exit(1)
-            System.out.println("[mesh-relay] mode=relay gcs-port=" + cfg.gcsPort
-                    + " relay-port=" + cfg.relayPort
-                    + " uplink=" + cfg.uplink.name
-                    + " downlink=" + cfg.downlink.name);
-            System.out.println("[mesh-relay] gcsAddr=unlearned droneAddr=unlearned");
+            log.info("[mesh-relay] mode=relay gcs-port={} relay-port={} uplink={} downlink={}",
+                    cfg.gcsPort, cfg.relayPort, cfg.uplink.name, cfg.downlink.name);
+            log.info("[mesh-relay] gcsAddr=unlearned droneAddr=unlearned");
             new RelayNode(cfg).run();
             return;
         }
@@ -55,7 +57,7 @@ public final class LinkSimMain {
             } else if (a.equals("--drone-port") && i + 1 < args.length) {
                 dronePort = Integer.parseInt(args[++i]);
             } else if (a.equals("--list")) {
-                System.out.println("profiles: " + LinkProfile.names());
+                log.info("profiles: {}", LinkProfile.names());
                 return;
             } else if (a.equals("--help")) {
                 usage();
@@ -67,36 +69,34 @@ public final class LinkSimMain {
 
         LinkProfile profile = LinkProfile.of(profileName);
         if (profile == null) {
-            System.out.println("[link-sim] unknown profile: " + profileName);
+            log.warn("[link-sim] unknown profile: {}", profileName);
             usage();
             System.exit(1);
             return;
         }
 
-        System.out.println("[link-sim] AeroFleet link simulator");
-        System.out.println("[link-sim] profile=" + profile.name
-                + " delay=" + profile.delayMs + "+/-" + profile.jitterMs + "ms"
-                + " drop(g/b)=" + profile.pGoodDrop + "/" + profile.pBadDrop
-                + " rate=" + (long) profile.rateBytesPerSec + "B/s"
-                + (profile.partitionDownSec > 0
+        log.info("[link-sim] AeroFleet link simulator");
+        log.info("[link-sim] profile={} delay={}+/-{}ms drop(g/b)={}/{} rate={}B/s{}",
+                profile.name, profile.delayMs, profile.jitterMs, profile.pGoodDrop, profile.pBadDrop,
+                (long) profile.rateBytesPerSec,
+                profile.partitionDownSec > 0
                         ? " partition=" + profile.partitionUpSec + "s/" + profile.partitionDownSec + "s"
-                        : ""));
-        System.out.println("[link-sim] proxy=" + proxyPort
-                + " -> drone=" + droneIp + ":" + dronePort);
+                        : "");
+        log.info("[link-sim] proxy={} -> drone={}:{}", proxyPort, droneIp, dronePort);
         if (envCoupled) {
-            System.out.println("[link-sim] env-coupled: ON (rain attenuation overlay enabled)");
+            log.info("[link-sim] env-coupled: ON (rain attenuation overlay enabled)");
         }
 
         new LinkSimMain(profile, proxyPort, new InetSocketAddress(droneIp, dronePort), envCoupled).run();
     }
 
     private static void usage() {
-        System.out.println("[link-sim] usage: link-sim --profile P [--port N] [--drone-ip IP] [--drone-port N]");
-        System.out.println("[link-sim]   --profile   " + LinkProfile.names());
-        System.out.println("[link-sim]   --port      proxy bind port (default 14600)");
-        System.out.println("[link-sim]   --drone-ip  drone side address (default 127.0.0.1)");
-        System.out.println("[link-sim]   --drone-port drone side port (default 14540)");
-        System.out.println("[link-sim]   --env-coupled  enable rain attenuation overlay (M0b)");
+        log.info("[link-sim] usage: link-sim --profile P [--port N] [--drone-ip IP] [--drone-port N]");
+        log.info("[link-sim]   --profile   {}", LinkProfile.names());
+        log.info("[link-sim]   --port      proxy bind port (default 14600)");
+        log.info("[link-sim]   --drone-ip  drone side address (default 127.0.0.1)");
+        log.info("[link-sim]   --drone-port drone side port (default 14540)");
+        log.info("[link-sim]   --env-coupled  enable rain attenuation overlay (M0b)");
         // 追加 relay 模式参数说明（FR-01, DFX 4.4 配置可追溯）
         RelayConfig.usage();
     }
@@ -164,7 +164,7 @@ public final class LinkSimMain {
 
             byte[] buf = new byte[2048];
             DatagramPacket packet = new DatagramPacket(buf, buf.length);
-            System.out.println("[link-sim] running (Ctrl+C to stop)");
+            log.info("[link-sim] running (Ctrl+C to stop)");
             while (true) {
                 packet.setLength(buf.length);
                 socket.receive(packet);
@@ -228,11 +228,11 @@ public final class LinkSimMain {
             } catch (InterruptedException e) {
                 return;
             }
-            System.out.println("[link-sim] up(gcs->drone)   " + up.stats());
-            System.out.println("[link-sim] down(drone->gcs) " + down.stats());
+            log.info("[link-sim] up(gcs->drone)   {}", up.stats());
+            log.info("[link-sim] down(drone->gcs) {}", down.stats());
             if (upEnv != null) {
-                System.out.println("[link-sim] up rain   " + upEnv.rainStats());
-                System.out.println("[link-sim] down rain " + downEnv.rainStats());
+                log.info("[link-sim] up rain   {}", upEnv.rainStats());
+                log.info("[link-sim] down rain {}", downEnv.rainStats());
             }
         }
     }

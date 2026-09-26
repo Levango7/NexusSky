@@ -1,5 +1,8 @@
 package io.aerofleet.sim.ai;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Collections;
 import java.util.List;
 
@@ -17,9 +20,11 @@ import java.util.List;
  *   <li>RRT 路径做平滑处理</li>
  * </ol>
  * <p>
- * 注意：drone-sim 模块未引入 slf4j，统一使用 {@code System.out.println} 输出日志。
+ * 注意：drone-sim 模块使用 SLF4J Logger 输出日志。
  */
 public class ObstacleAvoidanceStrategy {
+
+    private static final Logger log = LoggerFactory.getLogger(ObstacleAvoidanceStrategy.class);
 
     private static final double DEFAULT_GRID_RESOLUTION = 5.0; // A* 默认网格分辨率 5m
     private static final double DEFAULT_BOUNDARY_RADIUS  = 500.0; // RRT 默认边界半径 500m
@@ -84,7 +89,7 @@ public class ObstacleAvoidanceStrategy {
         try {
             path = planner.planAStar(curLat, curLon, goalLat, goalLon, obstacles, DEFAULT_GRID_RESOLUTION);
         } catch (Exception e) {
-            System.out.println("[ObstacleAvoidance] A* failed: " + e.getMessage());
+            log.warn("[ObstacleAvoidance] A* failed: {}", e.getMessage());
         }
 
         String method = "A*";
@@ -92,7 +97,7 @@ public class ObstacleAvoidanceStrategy {
 
         // 2. A* 失败 → 降级 RRT
         if (path == null || path.isEmpty()) {
-            System.out.println("[ObstacleAvoidance] A* no path, falling back to RRT");
+            log.debug("[ObstacleAvoidance] A* no path, falling back to RRT");
             double boundaryLat = curLat;
             double boundaryLon = curLon;
             // 边界半径：覆盖起点到终点距离 + 障碍物 + 余量
@@ -104,7 +109,7 @@ public class ObstacleAvoidanceStrategy {
                 path = planner.planRRT(curLat, curLon, curAlt, goalLat, goalLon, goalAlt,
                         obstacles, boundaryLat, boundaryLon, boundaryRadius);
             } catch (Exception e) {
-                System.out.println("[ObstacleAvoidance] RRT failed: " + e.getMessage());
+                log.warn("[ObstacleAvoidance] RRT failed: {}", e.getMessage());
             }
             method = "RRT";
             confidence = 0.7;
@@ -117,7 +122,7 @@ public class ObstacleAvoidanceStrategy {
 
         // 4. 构造决策结果
         if (path == null || path.isEmpty()) {
-            System.out.println("[ObstacleAvoidance] no path found by A* or RRT");
+            log.warn("[ObstacleAvoidance] no path found by A* or RRT");
             return new DecisionResult("AVOID", "obstacle ahead, no path", 0, 0.3,
                     Collections.emptyList());
         }
@@ -125,9 +130,8 @@ public class ObstacleAvoidanceStrategy {
         // 路径高度填充：A* 路径 alt=0，这里用起点/终点高度线性插值覆盖
         path = fillAltitude(path, curAlt, goalAlt);
 
-        System.out.println("[ObstacleAvoidance] path planned: method=" + method
-                + " points=" + path.size()
-                + " length=" + String.format("%.2f", PathPlanner.pathLength(path)) + "m");
+        log.debug("[ObstacleAvoidance] path planned: method={} points={} length={}m",
+                method, path.size(), String.format("%.2f", PathPlanner.pathLength(path)));
         return new DecisionResult("AVOID", "obstacle ahead, reroute via " + method, 0, confidence, path);
     }
 

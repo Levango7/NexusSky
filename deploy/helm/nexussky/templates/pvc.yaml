@@ -1,0 +1,19 @@
+# PersistentVolumeClaim: flight-logs
+# cloud-backend 飞行日志持久化存储
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flight-logs
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: cloud-backend
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.flightLogs.storage }}
+  storageClassName: {{ .Values.flightLogs.storageClassName }}

@@ -15,11 +15,11 @@ class DecisionMonitorControllerTest {
 
     @Test
     void testGetAllDecisions() throws Exception {
-        mockMvc.perform(get("/api/ai/decisions")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/ai/decisions")).andExpect(status().isOk());
     }
 
     @Test
     void testGetDroneDecisions() throws Exception {
-        mockMvc.perform(get("/api/ai/decisions/1")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/ai/decisions/1")).andExpect(status().isOk());
     }
 }

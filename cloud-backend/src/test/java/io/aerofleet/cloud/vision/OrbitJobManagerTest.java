@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.vision;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -61,7 +62,7 @@ class OrbitJobManagerTest {
         // Real OrbitService against the fake truth base; commands is not
         // exercised by these tests (submit() validation + job map semantics
         // do not need a flight).
-        OrbitService svc = new OrbitService(null, null, null, "http://127.0.0.1:18099");
+        OrbitService svc = new OrbitService(null, null, null, new ObjectMapper(), "http://127.0.0.1:18099");
         manager = new OrbitJobManager(svc, 2);
         return manager;
     }
@@ -126,7 +127,7 @@ class OrbitJobManagerTest {
         // the state machine directly: submit, then mark terminal via run()
         // failure - uploadMission with null commands throws instantly.
         startTruth("[]");
-        OrbitService svc = new OrbitService(null, null, null, "http://127.0.0.1:18099");
+        OrbitService svc = new OrbitService(null, null, null, new ObjectMapper(), "http://127.0.0.1:18099");
         manager = new OrbitJobManager(svc, 1);
         OrbitJobManager.OrbitJob j = manager.submit(12, 22.59, 113.93, 25, 60, 2);
         // null DroneCommandService -> uploadMission NPEs -> job FAILED fast

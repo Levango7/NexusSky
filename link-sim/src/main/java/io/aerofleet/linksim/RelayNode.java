@@ -1,5 +1,8 @@
 package io.aerofleet.linksim;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.net.BindException;
 import java.net.DatagramPacket;
@@ -35,6 +38,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * multiHopEnabled=true 时在帧尾部追加/解析 1 字节 hopCount（FR-06/07/08）。
  */
 final class RelayNode {
+
+    private static final Logger log = LoggerFactory.getLogger(RelayNode.class);
 
     /** hopCount 扩展点占位（FR-21）：M0a 旧帧兼容标记，收到未携带 hopCount 的旧帧时按 MAX_HOPS=15 处理。 */
     static final int HOP_COUNT_DISABLED = -1;
@@ -88,7 +93,7 @@ final class RelayNode {
         try {
             return new DatagramSocket(new InetSocketAddress(port));
         } catch (BindException e) {
-            System.out.println("[mesh-relay] bind failed for " + label + "=" + port + ": " + e.getMessage());
+            log.error("[mesh-relay] bind failed for {}={}: {}", label, port, e.getMessage());
             System.exit(1);
             return null; // 不可达
         }
@@ -110,7 +115,7 @@ final class RelayNode {
         stats.setDaemon(true);
         stats.start();
 
-        System.out.println("[mesh-relay] running (Ctrl+C to stop)");
+        log.info("[mesh-relay] running (Ctrl+C to stop)");
         downlinkLoop(); // 主线程阻塞下行接收
     }
 
@@ -284,8 +289,8 @@ final class RelayNode {
             } catch (InterruptedException e) {
                 return;
             }
-            System.out.println("[mesh-relay] up(gcs->drone)   " + uplink.stats());
-            System.out.println("[mesh-relay] down(drone->gcs) " + downlink.stats());
+            log.info("[mesh-relay] up(gcs->drone)   {}", uplink.stats());
+            log.info("[mesh-relay] down(drone->gcs) {}", downlink.stats());
         }
     }
 

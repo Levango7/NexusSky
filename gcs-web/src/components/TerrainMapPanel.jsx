@@ -66,6 +66,9 @@ export default function TerrainMapPanel({ terrainData }) {
     gridResolution: 50,
   })
   const timerRef = useRef(null)
+  // 建图消息自动消失的 timer，组件卸载时需清理，避免内存泄漏
+  // 经验来源：2026-09-16-react-side-effect-cleanup-timeout-ref-callback-leak
+  const buildTimerRef = useRef(null)
 
   // 初始加载 + 周期刷新
   const refresh = useCallback(async () => {
@@ -99,16 +102,25 @@ export default function TerrainMapPanel({ terrainData }) {
     }
   }, [terrainData, refresh])
 
+  // 组件卸载时清理建图消息 timer，防止 setState 作用于已卸载组件
+  useEffect(() => {
+    return () => {
+      if (buildTimerRef.current) clearTimeout(buildTimerRef.current)
+    }
+  }, [])
+
   // 触发建图
   const handleBuild = async () => {
     try {
       const res = await api.buildTerrainMap(buildForm)
       setBuildMsg(`建图已触发：${res.message || 'accepted'}`)
-      setTimeout(() => setBuildMsg(null), 4000)
+      if (buildTimerRef.current) clearTimeout(buildTimerRef.current)
+      buildTimerRef.current = setTimeout(() => setBuildMsg(null), 4000)
       refresh()
     } catch (e) {
       setBuildMsg(`建图失败：${e.message}`)
-      setTimeout(() => setBuildMsg(null), 4000)
+      if (buildTimerRef.current) clearTimeout(buildTimerRef.current)
+      buildTimerRef.current = setTimeout(() => setBuildMsg(null), 4000)
     }
   }
 
@@ -120,11 +132,17 @@ export default function TerrainMapPanel({ terrainData }) {
   const changeList = changes?.changes || []
 
   // 渲染地形分区色块（canvas 网格）
+  // 简单窗口化：限制最大渲染单元格数量，避免大网格全量渲染导致性能问题
+  const MAX_RENDER_CELLS = 4000
   const renderTerrainGrid = () => {
     if (!mapAvailable || gridCells.length === 0) return null
     const cellSize = Math.max(4, Math.min(20, 400 / Math.max(mapWidth, mapHeight)))
     const canvasW = mapWidth * cellSize
     const canvasH = mapHeight * cellSize
+    // 虚拟化：单元格过多时只渲染前 MAX_RENDER_CELLS 个，其余提示
+    const totalCells = gridCells.length
+    const truncated = totalCells > MAX_RENDER_CELLS
+    const visibleCells = truncated ? gridCells.slice(0, MAX_RENDER_CELLS) : gridCells
     return (
       <div style={{
         background: 'var(--bg-2)', borderRadius: 6, padding: 12, marginBottom: 12,
@@ -135,13 +153,13 @@ export default function TerrainMapPanel({ terrainData }) {
         </h3>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <svg width={canvasW} height={canvasH} style={{ border: '1px solid var(--line-2)', borderRadius: 3 }}>
-            {gridCells.map((cellType, idx) => {
+            {visibleCells.map((cellType, idx) => {
               const row = Math.floor(idx / mapWidth)
               const col = idx % mapWidth
               const color = TERRAIN_COLORS[cellType] || '#333'
               return (
                 <rect
-                  key={idx}
+                  key={`${row}-${col}`}
                   x={col * cellSize}
                   y={row * cellSize}
                   width={cellSize}
@@ -166,6 +184,11 @@ export default function TerrainMapPanel({ terrainData }) {
             ))}
           </div>
         </div>
+        {truncated && (
+          <div style={{ fontSize: 10, color: 'var(--warn)', marginTop: 6 }}>
+            ⚠ 网格过大（{totalCells} 格），仅渲染前 {MAX_RENDER_CELLS} 格以保证性能，完整数据请缩小建图范围或提高分辨率。
+          </div>
+        )}
         <div style={{ fontSize: 10, color: 'var(--dim-2)', marginTop: 6 }}>
           版本 v{mapData?.version ?? '--'} · 原点 ({mapData?.originLat?.toFixed(5) ?? '--'}, {mapData?.originLon?.toFixed(5) ?? '--'})
         </div>
@@ -194,7 +217,8 @@ export default function TerrainMapPanel({ terrainData }) {
           </thead>
           <tbody>
             {restrictionList.map((r, i) => (
-              <tr key={i}>
+              // 优先使用业务标识；缺失时，无行内状态的静态展示行允许前缀索引兜底。
+              <tr key={r.id ?? r.name ?? r.timestamp ?? `r-${i}`}>
                 <td style={{ ...tdStyle, color: r.restrictionType === 0 ? 'var(--crit)' : 'var(--warn)' }}>
                   {RESTRICTION_LABELS[r.restrictionType] || `类型${r.restrictionType}`}
                 </td>
@@ -234,7 +258,9 @@ export default function TerrainMapPanel({ terrainData }) {
           </thead>
           <tbody>
             {changeList.slice().reverse().map((c, i) => (
-              <tr key={i}>
+              // 优先使用记录标识或地形版本，避免倒序展示时新增记录改变已有行的 key。
+              // 缺失业务标识时，无行内状态的静态展示行允许前缀索引兜底。
+              <tr key={c.id ?? c.terrainVersion ?? c.timestamp ?? `ch-${i}`}>
                 <td style={tdStyle}>v{c.terrainVersion}</td>
                 <td style={{ ...tdStyle, color: c.changeReason === 3 ? 'var(--crit)' : 'var(--text)' }}>
                   {CHANGE_REASON_LABELS[c.changeReason] || `原因${c.changeReason}`}

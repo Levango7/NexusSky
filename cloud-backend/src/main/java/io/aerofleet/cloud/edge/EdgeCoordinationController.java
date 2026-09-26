@@ -5,7 +5,7 @@ import java.util.*;
 
 /** M12 边缘协同 REST API */
 @RestController
-@RequestMapping("/api/edge")
+@RequestMapping("/api/v1/edge")
 public class EdgeCoordinationController {
     private final EdgeCoordinationService service;
 

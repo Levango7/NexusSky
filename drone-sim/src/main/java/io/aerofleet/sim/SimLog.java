@@ -1,31 +1,29 @@
 package io.aerofleet.sim;
 
-/**
- * Minimal ASCII-only console logger with [sim] prefix.
- * Keeps output safe for Windows GBK consoles (no localized characters).
- */
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public final class SimLog {
+
+    private static final Logger log = LoggerFactory.getLogger("sim");
 
     private SimLog() {
     }
 
-    private static String ts() {
-        return java.time.LocalTime.now().withNano(0).toString();
-    }
-
     public static void info(String msg) {
-        System.out.println("[sim] " + ts() + " INFO  " + msg);
+        log.info(msg);
     }
 
     public static void warn(String msg) {
-        System.out.println("[sim] " + ts() + " WARN  " + msg);
+        log.warn(msg);
     }
 
     public static void error(String msg) {
-        System.out.println("[sim] " + ts() + " ERROR " + msg);
+        log.error(msg);
     }
 
     public static void error(String msg, Throwable t) {
-        System.out.println("[sim] " + ts() + " ERROR " + msg + ": " + t);
+        log.error(msg, t);
     }
 }
+

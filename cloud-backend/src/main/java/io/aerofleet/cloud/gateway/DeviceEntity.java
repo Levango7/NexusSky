@@ -41,6 +41,10 @@ public class DeviceEntity {
     @Column(name = "device_token")
     private String deviceToken;
 
+    /** 租户 ID（数据隔离）。 */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     public DeviceEntity() {
     }
 
@@ -104,5 +108,13 @@ public class DeviceEntity {
 
     public void setDeviceToken(String deviceToken) {
         this.deviceToken = deviceToken;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Integer tenantId) {
+        this.tenantId = tenantId;
     }
 }

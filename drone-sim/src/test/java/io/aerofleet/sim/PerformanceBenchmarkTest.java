@@ -8,6 +8,8 @@ import io.aerofleet.sim.orch.DroneInfo;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * </ul>
  */
 class PerformanceBenchmarkTest {
+
+    private static final Logger log = LoggerFactory.getLogger(PerformanceBenchmarkTest.class);
 
     /** 基准测试通用预热迭代次数。 */
     private static final int WARMUP = 100_000;
@@ -57,8 +61,8 @@ class PerformanceBenchmarkTest {
         long elapsed = System.nanoTime() - start;
         long totalOps = (long) iterations * msgIds.length;
         double opsPerSec = totalOps / (elapsed / 1e9);
-        System.out.printf("P1-1 MavlinkMessageInfo.isKnown: %.0f ops/sec (%.2f ns/op)%n",
-                opsPerSec, elapsed / (double) totalOps);
+        log.info("P1+ MavlinkMessageInfo.isKnown: {} ops/sec ({} ns/op)",
+                String.format("%.0f", opsPerSec), String.format("%.2f", elapsed / (double) totalOps));
         assertTrue(opsPerSec > 0);
     }
 
@@ -84,8 +88,8 @@ class PerformanceBenchmarkTest {
         long elapsed = System.nanoTime() - start;
         long totalOps = (long) iterations * msgIds.length;
         double opsPerSec = totalOps / (elapsed / 1e9);
-        System.out.printf("P1-1 MavlinkMessageInfo.lengthOf: %.0f ops/sec (%.2f ns/op)%n",
-                opsPerSec, elapsed / (double) totalOps);
+        log.info("P1+ MavlinkMessageInfo.lengthOf: {} ops/sec ({} ns/op)",
+                String.format("%.0f", opsPerSec), String.format("%.2f", elapsed / (double) totalOps));
         assertTrue(opsPerSec > 0);
     }
 
@@ -111,8 +115,8 @@ class PerformanceBenchmarkTest {
         long elapsed = System.nanoTime() - start;
         long totalOps = (long) iterations * msgIds.length;
         double opsPerSec = totalOps / (elapsed / 1e9);
-        System.out.printf("P1-1 MavlinkMessageInfo.crcExtraOf: %.0f ops/sec (%.2f ns/op)%n",
-                opsPerSec, elapsed / (double) totalOps);
+        log.info("P1+ MavlinkMessageInfo.crcExtraOf: {} ops/sec ({} ns/op)",
+                String.format("%.0f", opsPerSec), String.format("%.2f", elapsed / (double) totalOps));
         assertTrue(opsPerSec > 0);
     }
 
@@ -137,8 +141,8 @@ class PerformanceBenchmarkTest {
         }
         long elapsed = System.nanoTime() - start;
         double opsPerSec = iterations / (elapsed / 1e9);
-        System.out.printf("P1-3 RouteTable.upsert: %.0f ops/sec (%.2f ns/op)%n",
-                opsPerSec, elapsed / (double) iterations);
+        log.info("P1+ RouteTable.upsert: {} ops/sec ({} ns/op)",
+                String.format("%.0f", opsPerSec), String.format("%.2f", elapsed / (double) iterations));
         assertTrue(opsPerSec > 0);
     }
 
@@ -172,9 +176,8 @@ class PerformanceBenchmarkTest {
         }
         long elapsed = System.nanoTime() - start;
         double opsPerSec = rounds / (elapsed / 1e9);
-        System.out.printf("P1-3 RouteTable.removeByNextHop (100 targets, 50 nextHops): "
-                        + "%.0f rounds/sec (%.3f ms/round)%n",
-                opsPerSec, elapsed / 1e6 / rounds);
+        log.info("P1+ RouteTable.removeByNextHop (100 targets, 50 nextHops): {} rounds/sec ({} ms/round)",
+                String.format("%.0f", opsPerSec), String.format("%.3f", elapsed / 1e6 / rounds));
         assertTrue(opsPerSec > 0);
     }
 
@@ -207,8 +210,8 @@ class PerformanceBenchmarkTest {
         }
         long elapsed = System.nanoTime() - start;
         double opsPerSec = iterations / (elapsed / 1e9);
-        System.out.printf("P1-3 RouteTable.promoteBackup: %.0f ops/sec (%.2f ns/op)%n",
-                opsPerSec, elapsed / (double) iterations);
+        log.info("P1+ RouteTable.promoteBackup: {} ops/sec ({} ns/op)",
+                String.format("%.0f", opsPerSec), String.format("%.2f", elapsed / (double) iterations));
         assertTrue(opsPerSec > 0);
     }
 
@@ -242,11 +245,10 @@ class PerformanceBenchmarkTest {
         }
         long elapsed = System.nanoTime() - start;
         double opsPerSec = iterations / (elapsed / 1e9);
-        System.out.printf("P2-1 CoverageOptimizer.optimize (10 drones, r=3000m): "
-                        + "%.2f ops/sec (%.2f ms/op, coverage=%.2f%%, connect=%.2f%%)%n",
-                opsPerSec, elapsed / 1e6 / iterations,
-                lastPlan != null ? lastPlan.getCoverageRate() : 0.0,
-                lastPlan != null ? lastPlan.getConnectRate() : 0.0);
+        log.info("P2+ CoverageOptimizer.optimize (10 drones, r=3000m): {} ops/sec ({} ms/op, coverage={}%, connect={}%)",
+                String.format("%.2f", opsPerSec), String.format("%.2f", elapsed / 1e6 / iterations),
+                String.format("%.2f", lastPlan != null ? lastPlan.getCoverageRate() : 0.0),
+                String.format("%.2f", lastPlan != null ? lastPlan.getConnectRate() : 0.0));
         assertTrue(opsPerSec > 0);
     }
 }

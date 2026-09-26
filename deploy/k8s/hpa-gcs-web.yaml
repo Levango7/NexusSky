@@ -1,0 +1,26 @@
+# HorizontalPodAutoscaler for gcs-web
+# 自动扩缩：min=2, max=5, CPU>70% 触发扩容
+# 用法：kubectl apply -f deploy/k8s/hpa-gcs-web.yaml -n nexussky
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gcs-web
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: gcs-web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gcs-web
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

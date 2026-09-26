@@ -2,7 +2,11 @@ package io.aerofleet.sim.orch;
 
 import io.aerofleet.sim.SimLog;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -240,17 +244,38 @@ public class OrchestrationEngine {
     }
 
     /**
-     * 阶段 1：覆盖规划。简化实现：生成基础部署方案占位。
-     * 不调用 CoverageOptimizer（由 T5 集成时连接）。
+     * 阶段 1：覆盖规划。调用 {@link CoverageOptimizer} 生成最优部署方案。
+     * <p>
+     * 用配置参数构造 CoverageOptimizer，将参与无人机 ID 列表转换为 DroneInfo
+     * （编排引擎仅有 ID，电量/位置/基站类型用默认值填充），执行覆盖优化后
+     * 将 DeploymentPlan 与覆盖率写入 plan。
      */
     private void doCoveragePlanning(OrchestrationPlan plan) {
-        // 占位部署方案：用 String 表示，T3/T5 会替换为 DeploymentPlan
-        Object placeholderPlan = "CoveragePlan(planId=" + plan.getPlanId()
-                + ", drones=" + plan.getDroneIds().size()
-                + ", radius=" + plan.getDisasterRadius() + ")";
-        plan.setDeploymentPlan(placeholderPlan);
-        plan.setCoverageRate(0);
-        logEvent(plan, "CoveragePlanning done (placeholder)");
+        double centerLat = plan.getDisasterCenterLat() / 1e7;
+        double centerLon = plan.getDisasterCenterLon() / 1e7;
+        int radius = plan.getDisasterRadius();
+        List<Integer> droneIds = plan.getDroneIds();
+
+        // 构建 DroneInfo 列表：编排引擎仅有 droneId，用默认属性填充
+        // 电量默认 100%（满电），位置默认灾区中心，基站类型默认 LTE + WiFi
+        Set<Integer> defaultCellTypes = new HashSet<>(Arrays.asList(1, 2));
+        List<DroneInfo> drones = new ArrayList<>();
+        for (int id : droneIds) {
+            drones.add(new DroneInfo(id, 100, centerLat, centerLon, defaultCellTypes));
+        }
+
+        // 用配置参数构造 CoverageOptimizer 并执行覆盖优化
+        CoverageOptimizer optimizer = new CoverageOptimizer(
+                config.coverageOptStepM, config.localOptRangeM,
+                config.localOptIterations, config.meshOneHopRangeM);
+        DeploymentPlan deploymentPlan = optimizer.optimize(
+                centerLat, centerLon, radius, drones, plan.getScenarioType());
+
+        plan.setDeploymentPlan(deploymentPlan);
+        int coveragePct = (int) Math.round(deploymentPlan.getCoverageRate());
+        plan.setCoverageRate(coveragePct);
+        logEvent(plan, "CoveragePlanning done (drones=" + deploymentPlan.getDeployments().size()
+                + ", coverage=" + coveragePct + "%)");
     }
 
     /**

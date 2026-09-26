@@ -33,7 +33,15 @@ export default function DroneList({ drones, selectedSysid, onSelect }) {
               className={`drone-item ${d.sysid === selectedSysid ? 'selected' : ''} ${
                 d.online ? 'online' : 'offline'
               }`}
+              role="button"
+              tabIndex={0}
               onClick={() => onSelect(d.sysid)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onSelect(d.sysid)
+                }
+              }}
             >
               <span className="dot" />
               <span className="name">{d.callsign || `Drone-${d.sysid}`}</span>

@@ -1,5 +1,8 @@
 package io.aerofleet.sim.ai;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -23,9 +26,11 @@ import java.util.List;
  *   <li><b>决策日志</b>：记录每次评估的输入、权重、决策树路径与选择结果，便于回溯分析。</li>
  * </ol>
  * <p>
- * 注意：drone-sim 模块未引入 slf4j，统一使用 {@code System.out.println} 输出日志。
+ * 注意：drone-sim 模块使用 SLF4J Logger 输出日志。
  */
 public class DecisionEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(DecisionEngine.class);
 
     private final ReturnToHomeStrategy rtlStrategy = new ReturnToHomeStrategy();
     private final ObstacleAvoidanceStrategy avoidStrategy = new ObstacleAvoidanceStrategy();
@@ -135,10 +140,8 @@ public class DecisionEngine {
 
         // 9. 控制台输出（替代 slf4j）
         if (!ranked.isEmpty()) {
-            System.out.println("[ai] Decisions triggered: count=" + ranked.size()
-                    + " top=" + primary.decisionType
-                    + " tree=" + treeResult.path
-                    + " w=[rtl=" + rtlWeight + ",avoid=" + avoidWeight + ",adapt=" + adaptWeight + "]");
+            log.debug("[ai] Decisions triggered: count={} top={} tree={} w=[rtl={},avoid={},adapt={}]",
+                    ranked.size(), primary.decisionType, treeResult.path, rtlWeight, avoidWeight, adaptWeight);
         }
 
         return new FusedDecision(primary, ranked, rtlWeight, avoidWeight, adaptWeight,

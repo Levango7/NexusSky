@@ -1,6 +1,7 @@
 package io.aerofleet.sim;
 
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Virtual drone physical state and simplified kinematics.
@@ -25,31 +26,43 @@ public final class DronePhysics {
     private final double cruiseSpeed;
 
     // --- state ---
-    private double north;      // m from home, +N
-    private double east;       // m from home, +E
-    private double alt;       // m relative to home
-    private double yawRad;      // heading, 0 = north, CW positive
-    private double groundSpeed; // m/s horizontal
-    private double vz;         // m/s vertical, +up
-    private double rollRad;
-    private double pitchRad;
+    // volatile: tick 线程写，其他线程通过 getter 读取，保证跨线程可见性
+    private volatile double north;      // m from home, +N
+    private volatile double east;       // m from home, +E
+    private volatile double alt;       // m relative to home
+    private volatile double yawRad;      // heading, 0 = north, CW positive
+    private volatile double groundSpeed; // m/s horizontal
+    private volatile double vz;         // m/s vertical, +up
+    private volatile double rollRad;
+    private volatile double pitchRad;
 
-    private double targetNorth = Double.NaN;
-    private double targetEast = Double.NaN;
-    private double targetAlt = Double.NaN;
-    private double targetSpeed = Double.NaN;
+    // AtomicReference: 命令线程写（setTarget/holdAt/clearTarget），tick 线程读
+    // 保证 4 个 target 字段的原子读写，避免 volatile 多字段写的部分更新问题。
+    private static final class TargetState {
+        final double north, east, alt, speed;
+        TargetState(double north, double east, double alt, double speed) {
+            this.north = north;
+            this.east = east;
+            this.alt = alt;
+            this.speed = speed;
+        }
+        static final TargetState NONE = new TargetState(Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+        boolean hasTarget() { return !Double.isNaN(north); }
+    }
+    private final AtomicReference<TargetState> target = new AtomicReference<>(TargetState.NONE);
 
     private final long bootMillis;
-    private long lastTickMs;
-    private double airborneSeconds;
+    private volatile long lastTickMs;
+    private volatile double airborneSeconds;
     /** Mode-weighted energy seconds (E4): hover/climb cost more, drift drains battery via batteryVoltage(). */
-    private double drainSeconds;
+    private volatile double drainSeconds;
     /**
      * 温度影响电池能耗的乘性因子（FR-11，M0b 环境气象）。
      * 默认 1.0（常温行为不变，DFX 4.5）；由 {@link EnvironmentModel#tempDrainFactor()} 注入。
      * T < 5°C → 1.3（低温电池内阻增大）；T > 40°C → 1.15（高温散热负荷）；常温 → 1.0。
+     * <p>volatile: 外部线程（EnvironmentModel）写，tick 线程读，保证可见性。
      */
-    private double tempDrainFactor = 1.0;
+    private volatile double tempDrainFactor = 1.0;
 
     /** Energy multipliers: cruise=1.0 baseline, hover/climb above, descent below. */
     private static final double HOVER_DRAIN = 1.3;
@@ -97,50 +110,39 @@ public final class DronePhysics {
 
     /** Fly toward the given local target at the cruise speed. */
     public void setTarget(double north, double east, double alt) {
-        this.targetNorth = north;
-        this.targetEast = east;
-        this.targetAlt = alt;
-        this.targetSpeed = cruiseSpeed;
+        target.set(new TargetState(north, east, alt, cruiseSpeed));
     }
 
     /** Same target but with an explicit speed override (e.g. RTL approach). */
     public void setTarget(double north, double east, double alt, double speed) {
-        this.targetNorth = north;
-        this.targetEast = east;
-        this.targetAlt = alt;
-        this.targetSpeed = speed;
+        target.set(new TargetState(north, east, alt, speed));
     }
 
     /** Hold position at current spot at the given altitude (hover / takeoff / land). */
     public void holdAt(double alt) {
-        this.targetNorth = north;
-        this.targetEast = east;
-        this.targetAlt = alt;
-        this.targetSpeed = 0;
+        target.set(new TargetState(north, east, alt, 0));
     }
 
     public void clearTarget() {
-        this.targetNorth = Double.NaN;
-        this.targetEast = Double.NaN;
-        this.targetAlt = Double.NaN;
-        this.targetSpeed = Double.NaN;
+        target.set(TargetState.NONE);
         // v2: no target means "stop where we are" - kill residual velocity.
         this.velN = 0;
         this.velE = 0;
     }
 
     public boolean hasTarget() {
-        return !Double.isNaN(targetNorth);
+        return target.get().hasTarget();
     }
 
     /** True when within acceptance radius of the current target. */
     public boolean targetReached() {
-        if (!hasTarget()) {
+        TargetState ts = target.get();
+        if (!ts.hasTarget()) {
             return true;
         }
-        double dn = targetNorth - north;
-        double de = targetEast - east;
-        double dz = targetAlt - alt;
+        double dn = ts.north - north;
+        double de = ts.east - east;
+        double dz = ts.alt - alt;
         return Math.hypot(dn, de) < ACCEPT_XY && Math.abs(dz) < ACCEPT_Z;
     }
 
@@ -169,15 +171,16 @@ public final class DronePhysics {
     }
 
     /** Wind displacement applied this tick (excluded from the attitude solve). */
-    private double windDriftN;
-    private double windDriftE;
+    private volatile double windDriftN;
+    private volatile double windDriftE;
 
     // ---- MANUAL_CONTROL steering state (body frame) ----
-    private boolean manualActive;
-    private double manualFwd;
-    private double manualRight;
-    private double manualUp;
-    private double manualYawRate;
+    // volatile: 命令线程写（setManualVelocity/clearManual），tick 线程读
+    private volatile boolean manualActive;
+    private volatile double manualFwd;
+    private volatile double manualRight;
+    private volatile double manualUp;
+    private volatile double manualYawRate;
 
     // ---- simulation step ----
 
@@ -202,13 +205,17 @@ public final class DronePhysics {
 
         if (manualActive) {
             stepManual(dt);
-        } else if (hasTarget()) {
-            stepTowardTarget(dt);
         } else {
-            velN = 0;
-            velE = 0;
-            groundSpeed = 0;
-            vz = 0;
+            // 读取一次 TargetState 快照，避免 hasTarget() 与 stepTowardTarget() 之间的 TOCTOU 竞态
+            TargetState ts = target.get();
+            if (ts.hasTarget()) {
+                stepTowardTarget(dt, ts);
+            } else {
+                velN = 0;
+                velE = 0;
+                groundSpeed = 0;
+                vz = 0;
+            }
         }
 
         // Battery drains only while off the ground, at a mode-weighted rate
@@ -246,8 +253,8 @@ public final class DronePhysics {
     }
 
     /** Velocity components kept across ticks (v2: acceleration-limited motion). */
-    private double velN;
-    private double velE;
+    private volatile double velN;
+    private volatile double velE;
 
     /** Mode-dependent power draw multiplier (E4). */
     private double drainFactor() {
@@ -333,13 +340,13 @@ public final class DronePhysics {
         groundSpeed = Math.hypot(velN, velE);
     }
 
-    private void stepTowardTarget(double dt) {
-        double dn = targetNorth - north;
-        double de = targetEast - east;
-        double dz = targetAlt - alt;
+    private void stepTowardTarget(double dt, TargetState ts) {
+        double dn = ts.north - north;
+        double de = ts.east - east;
+        double dz = ts.alt - alt;
         double distXy = Math.hypot(dn, de);
 
-        double speedCmd = Double.isNaN(targetSpeed) ? cruiseSpeed : Math.max(0, targetSpeed);
+        double speedCmd = Double.isNaN(ts.speed) ? cruiseSpeed : Math.max(0, ts.speed);
 
         if (distXy > ACCEPT_XY) {
             // ---- v2: acceleration-limited velocity steering ----
@@ -384,15 +391,15 @@ public final class DronePhysics {
             // Inside acceptance: come to a stop at the target point.
             velN = 0;
             velE = 0;
-            north = targetNorth;
-            east = targetEast;
+            north = ts.north;
+            east = ts.east;
         }
 
         if (Math.abs(dz) > 0.02) {
             double stepZ = Math.min(Math.abs(dz), VERT_SPEED * dt);
             alt += Math.signum(dz) * stepZ;
         } else {
-            alt = targetAlt;
+            alt = ts.alt;
         }
     }
 
@@ -438,8 +445,14 @@ public final class DronePhysics {
         if (noiseRadius <= 0) {
             return lon;
         }
+        // P1: 极点附近 cos(homeLat)=0 会导致除零产生 Infinity；
+        // 极点处经度无意义，直接返回原经度不添加噪声。
+        double cosLat = Math.cos(Math.toRadians(homeLat));
+        if (Math.abs(cosLat) < 1e-6) {
+            return lon;
+        }
         return lon + (ThreadLocalRandom.current().nextDouble(-1, 1) * noiseRadius)
-                / (111_320.0 * Math.cos(Math.toRadians(homeLat)));
+                / (111_320.0 * cosLat);
     }
 
     public double lat() {
@@ -464,7 +477,7 @@ public final class DronePhysics {
 
     /** Current target altitude (NaN when no target). */
     public double targetAlt() {
-        return targetAlt;
+        return target.get().alt;
     }
 
     public double yawRad() {

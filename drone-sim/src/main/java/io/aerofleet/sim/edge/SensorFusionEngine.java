@@ -1,5 +1,8 @@
 package io.aerofleet.sim.edge;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * M12 传感器融合引擎：基于扩展卡尔曼滤波（EKF）的 GPS + IMU + 视觉 + LiDAR 异步融合。
  *
@@ -31,6 +34,8 @@ package io.aerofleet.sim.edge;
  * <p>矩阵统一用 {@code double[][]} 表示，向量用 {@code double[]} 表示。
  */
 public class SensorFusionEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(SensorFusionEngine.class);
 
     // ===================== 状态维度与索引 =====================
     private static final int N = 9;
@@ -77,7 +82,7 @@ public class SensorFusionEngine {
      * @param imuAccelY 北向加速度（米/秒²）
      * @param imuAccelZ 垂直加速度（米/秒²，向上为正）
      */
-    public void predict(double dt, double imuAccelX, double imuAccelY, double imuAccelZ) {
+    public synchronized void predict(double dt, double imuAccelX, double imuAccelY, double imuAccelZ) {
         if (!initialized || dt <= 0) {
             return;
         }
@@ -127,7 +132,7 @@ public class SensorFusionEngine {
      * @param alt      高度（米）
      * @param accuracy GPS 精度（米，1σ，典型 3-5m）
      */
-    public void updateGps(double lat, double lon, double alt, double accuracy) {
+    public synchronized void updateGps(double lat, double lon, double alt, double accuracy) {
         if (!initialized) {
             init(lat, lon, alt);
         }
@@ -150,7 +155,7 @@ public class SensorFusionEngine {
      * @param lon      经度（度）
      * @param accuracy 视觉精度（米，1σ，典型 0.5-2m）
      */
-    public void updateVision(double lat, double lon, double accuracy) {
+    public synchronized void updateVision(double lat, double lon, double accuracy) {
         if (!initialized) {
             init(lat, lon, 0.0);
         }
@@ -171,7 +176,7 @@ public class SensorFusionEngine {
      * @param alt      高度（米）
      * @param accuracy LiDAR 精度（米，1σ，典型 0.1m）
      */
-    public void updateLidar(double alt, double accuracy) {
+    public synchronized void updateLidar(double alt, double accuracy) {
         if (!initialized) {
             init(0.0, 0.0, alt);
         }
@@ -188,7 +193,7 @@ public class SensorFusionEngine {
      *
      * @return 融合状态（位置、航向、速度、精度、传感器掩码）
      */
-    public FusedState getFusedState() {
+    public synchronized FusedState getFusedState() {
         double heading = computeHeading();
         double velocity = computeSpeedMps();
         // 位置不确定度（米，1σ）：水平 + 垂直
@@ -203,12 +208,12 @@ public class SensorFusionEngine {
     /**
      * 返回当前状态协方差矩阵（9×9，深拷贝）。
      */
-    public double[][] getCovariance() {
+    public synchronized double[][] getCovariance() {
         return cloneMat(P);
     }
 
     /** 是否已初始化（已收到首个位置观测） */
-    public boolean isInitialized() {
+    public synchronized boolean isInitialized() {
         return initialized;
     }
 
@@ -228,7 +233,7 @@ public class SensorFusionEngine {
      *
      * @return 融合状态
      */
-    public FusedState fuse(double gpsLat, double gpsLon, double gpsAlt,
+    public synchronized FusedState fuse(double gpsLat, double gpsLon, double gpsAlt,
                            double imuHeading, double imuVelocity,
                            double visionLat, double visionLon,
                            double lidarAlt,
@@ -292,7 +297,7 @@ public class SensorFusionEngine {
      * <p>
      * 观测 [vLat, vLon]，测量噪声由 IMU 速度精度决定。
      */
-    private void updateImuVelocity(double headingDeg, double velocityMps, double accuracyMps) {
+    private synchronized void updateImuVelocity(double headingDeg, double velocityMps, double accuracyMps) {
         if (!initialized) {
             return;
         }
@@ -317,10 +322,14 @@ public class SensorFusionEngine {
      *   S = H·P·Hᵀ + R
      *   K = P·Hᵀ·S⁻¹
      *   x = x + K·y
-     *   P = (I - K·H)·P
+     *   P = (I - K·H)·P·(I - K·H)ᵀ + K·R·Kᵀ   （Joseph 形式，数值稳定）
      * </pre>
+     * <p>协方差更新采用 Joseph 形式以保证正定性与对称性，
+     * 避免简化形式 P=(I-KH)P 在有限精度下数值漂移导致失去正定。
+     * <p>矩阵 S 求逆时若奇异（观测信息冗余/数值退化），
+     * 捕获 {@link ArithmeticException} 跳过本次更新并记录日志，不抛出。
      */
-    private void update(double[] z, double[][] H, double[][] R) {
+    private synchronized void update(double[] z, double[][] H, double[][] R) {
         int m = z.length;
         double[] Hx = matVec(H, x);
         double[] y = new double[m];
@@ -329,14 +338,27 @@ public class SensorFusionEngine {
         }
         double[][] Ht = transpose(H);
         double[][] S = matAdd(matMul(matMul(H, P), Ht), R);   // m×m
-        double[][] K = matMul(matMul(P, Ht), inverse(S));      // n×m
+        double[][] Sinv;
+        try {
+            Sinv = inverse(S);
+        } catch (ArithmeticException e) {
+            // 奇异矩阵：观测信息冗余或数值退化，跳过本次更新避免状态污染
+            log.warn("[SensorFusionEngine] update skipped (singular S): {}", e.getMessage());
+            return;
+        }
+        double[][] K = matMul(matMul(P, Ht), Sinv);      // n×m
         double[] Ky = matVec(K, y);
         for (int i = 0; i < N; i++) {
             x[i] += Ky[i];
         }
+        // Joseph 形式协方差更新：P = (I-KH)·P·(I-KH)ᵀ + K·R·Kᵀ
+        // 相比简化形式 P=(I-KH)P，Joseph 形式在有限精度下能保证 P 的正定性与对称性
         double[][] KH = matMul(K, H);
         double[][] IKH = matSub(identity(N), KH);
-        P = matMul(IKH, P);
+        double[][] IKHt = transpose(IKH);
+        double[][] KR = matMul(K, R);
+        double[][] KRKt = matMul(KR, transpose(K));
+        P = matAdd(matMul(matMul(IKH, P), IKHt), KRKt);
     }
 
     /** 由速度状态计算航向（度，正北 0，顺时针为正） */

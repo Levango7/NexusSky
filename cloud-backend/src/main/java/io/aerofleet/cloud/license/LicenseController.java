@@ -1,10 +1,9 @@
 package io.aerofleet.cloud.license;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import org.springframework.web.bind.annotation.*;
 
-import java.time.Instant;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -16,10 +15,9 @@ import java.util.Map;
  * @author AeroFleet Cloud Team
  */
 @RestController
-@RequestMapping("/api/license")
+@RequestMapping("/api/v1/license")
 public class LicenseController {
 
-    private static final Logger log = LoggerFactory.getLogger(LicenseController.class);
 
     private final LicenseService licenseService;
 

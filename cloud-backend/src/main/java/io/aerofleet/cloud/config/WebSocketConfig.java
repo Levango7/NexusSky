@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.config;
 
-import io.aerofleet.cloud.api.TelemetryWebSocketHandler;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aerofleet.cloud.api.ws.TelemetryWebSocketHandler;
 import io.aerofleet.cloud.security.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -14,12 +15,16 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
  * directly; the Vite dev server proxies ws:// to us).
  * <p>
  * 允许的源通过 {@code aerofleet.security.allowed-origins} 配置，默认 {@code http://localhost:5173}。
+ * <p>
+ * 连接数限制通过 {@code aerofleet.ws.max-connections-per-ip} 和
+ * {@code aerofleet.ws.max-connections-per-tenant} 配置。
  */
 @Configuration
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final ObjectMapper objectMapper;
 
     @Value("${aerofleet.security.dev-mode:true}")
     private boolean devMode;
@@ -27,13 +32,21 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Value("${aerofleet.security.allowed-origins:http://localhost:5173}")
     private String allowedOrigins;
 
-    public WebSocketConfig(JwtTokenProvider jwtTokenProvider) {
+    @Value("${aerofleet.ws.max-connections-per-ip:10}")
+    private int maxConnectionsPerIp;
+
+    @Value("${aerofleet.ws.max-connections-per-tenant:20}")
+    private int maxConnectionsPerTenant;
+
+    public WebSocketConfig(JwtTokenProvider jwtTokenProvider, ObjectMapper objectMapper) {
         this.jwtTokenProvider = jwtTokenProvider;
+        this.objectMapper = objectMapper;
     }
 
     @Bean
     public TelemetryWebSocketHandler telemetryWebSocketHandler() {
-        return new TelemetryWebSocketHandler(jwtTokenProvider, devMode);
+        return new TelemetryWebSocketHandler(jwtTokenProvider, devMode,
+                maxConnectionsPerIp, maxConnectionsPerTenant, objectMapper);
     }
 
     @Override

@@ -236,4 +236,4 @@ graph TB
 | 468-470 | TaskAssignment/ConflictAlert/TaskStatus | M10 | 集群调度 |
 | 471-472 | DecisionEvent/AdaptivePath | M11 | 自主决策 |
 | 473-474 | EdgeTaskStatus/SensorFusionData | M12 | 边缘计算 |
-| 475-476 | TwinStateSync/PredictionResult | M13 | 数字孪生 |
+| 475-476 | TwinStateSync/PredictionResult | M13 | 数字孪生 || 477-479 | AlarmTrigger/AlarmAck/SurveillanceStatus | 4a | 安防报警 |

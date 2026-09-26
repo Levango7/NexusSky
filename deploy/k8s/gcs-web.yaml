@@ -28,10 +28,20 @@ spec:
         app.kubernetes.io/name: nexussky
         app.kubernetes.io/component: gcs-web
     spec:
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 101
       containers:
         - name: gcs-web
           image: nexussky/gcs-web:0.1.0
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: 80

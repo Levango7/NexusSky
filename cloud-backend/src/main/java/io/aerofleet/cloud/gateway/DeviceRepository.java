@@ -17,6 +17,12 @@ public interface DeviceRepository extends JpaRepository<DeviceEntity, Integer> {
     /** 查找所有在线设备。 */
     List<DeviceEntity> findByOnlineTrue();
 
+    /** 查找指定租户的所有设备。 */
+    List<DeviceEntity> findByTenantId(Integer tenantId);
+
+    /** 查找指定租户的所有在线设备。 */
+    List<DeviceEntity> findByTenantIdAndOnlineTrue(Integer tenantId);
+
     /** 检查设备是否存在。 */
     boolean existsBySysid(Integer sysid);
 }

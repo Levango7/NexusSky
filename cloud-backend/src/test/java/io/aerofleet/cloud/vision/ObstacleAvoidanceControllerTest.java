@@ -1,7 +1,7 @@
 package io.aerofleet.cloud.vision;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
-import io.aerofleet.cloud.mission.DroneCommandService;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.mavlink.enums.AvoidanceMode;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.enums.ThreatLevel;

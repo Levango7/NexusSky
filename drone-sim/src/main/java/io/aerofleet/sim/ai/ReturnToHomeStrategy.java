@@ -1,6 +1,8 @@
 package io.aerofleet.sim.ai;
 
 import io.aerofleet.sim.GeoUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,9 +32,10 @@ import java.util.List;
  *   <li>滑翔比 glideRatio = 水平距离 / 下降高度（如 10:1 表示每下降 1m 飞行 10m）</li>
  * </ul>
  * <p>
- * 注意：drone-sim 模块未引入 slf4j，统一使用 {@code System.out.println} 输出日志。
+ * 注意：drone-sim 模块使用 SLF4J Logger 输出日志。
  */
 public class ReturnToHomeStrategy {
+    private static final Logger log = LoggerFactory.getLogger(ReturnToHomeStrategy.class);
     private static final double BATTERY_THRESHOLD = 25.0;
     private static final double LINK_TIMEOUT_SEC = 10.0;
 
@@ -185,9 +188,8 @@ public class ReturnToHomeStrategy {
         if (safeWindSpeed >= safeAirspeed && absAngle > 90.0) {
             double safeHeading = normalizeHeading(windDirection);
             double groundSpeed = Math.max(0.0, safeWindSpeed - safeAirspeed);
-            System.out.println("[RTL-Wind] windSpeed(" + windSpeed + ") >= airspeed(" + airspeed
-                    + ") headwind, fly downwind: heading=" + String.format("%.1f", safeHeading)
-                    + " gs=" + String.format("%.2f", groundSpeed));
+            log.warn("[RTL-Wind] windSpeed({}) >= airspeed({}) headwind, fly downwind: heading={} gs={}",
+                    windSpeed, airspeed, String.format("%.1f", safeHeading), String.format("%.2f", groundSpeed));
             return new WindAssistedHeading(safeHeading, groundSpeed);
         }
 
@@ -221,12 +223,10 @@ public class ReturnToHomeStrategy {
 
         double normHeading = normalizeHeading(heading);
         double safeGs = Math.max(0.0, groundSpeed);
-        System.out.println("[RTL-Wind] direct=" + String.format("%.1f", directHeading)
-                + " windDir=" + String.format("%.1f", windDirection)
-                + " windSpd=" + String.format("%.1f", windSpeed)
-                + " as=" + String.format("%.1f", airspeed)
-                + " -> heading=" + String.format("%.1f", normHeading)
-                + " gs=" + String.format("%.2f", safeGs));
+        log.debug("[RTL-Wind] direct={} windDir={} windSpd={} as={} -> heading={} gs={}",
+                String.format("%.1f", directHeading), String.format("%.1f", windDirection),
+                String.format("%.1f", windSpeed), String.format("%.1f", airspeed),
+                String.format("%.1f", normHeading), String.format("%.2f", safeGs));
         return new WindAssistedHeading(normHeading, safeGs);
     }
 
@@ -294,8 +294,8 @@ public class ReturnToHomeStrategy {
                     homeLat, homeLon, homeAlt, directHeading, horizontalDist);
             estimatedTime = estimatePathTime(path, windSpeed, windDirection, airspeed);
             estimatedEnergy = CRUISE_POWER_W * estimatedTime;
-            System.out.println("[RTL-Path] zigzag (headwind + sufficient battery): points=" + path.size()
-                    + " time=" + String.format("%.1f", estimatedTime) + "s");
+            log.debug("[RTL-Path] zigzag (headwind + sufficient battery): points={} time={}s",
+                    path.size(), String.format("%.1f", estimatedTime));
         } else {
             // 顺风 / 低电量 / 侧风 → 直线返回（最短路径）
             path.add(new double[]{currentLat, currentLon, currentAlt});
@@ -304,9 +304,9 @@ public class ReturnToHomeStrategy {
             double groundSpeed = Math.max(0.5, wah.groundSpeed);
             estimatedTime = directDist / groundSpeed;
             estimatedEnergy = CRUISE_POWER_W * estimatedTime;
-            System.out.println("[RTL-Path] direct (" + (isTailwind ? "tailwind" : "shortest")
-                    + "): dist=" + String.format("%.1f", directDist) + "m"
-                    + " time=" + String.format("%.1f", estimatedTime) + "s");
+            log.debug("[RTL-Path] direct ({}): dist={}m time={}s",
+                    isTailwind ? "tailwind" : "shortest",
+                    String.format("%.1f", directDist), String.format("%.1f", estimatedTime));
         }
 
         // 可达性：预估时间 ≤ 满电续航 × 电量百分比
@@ -402,15 +402,14 @@ public class ReturnToHomeStrategy {
                         obsLat, obsLon, obsAlt, obsRadius)) {
                     needsAdjustment = true;
                     requiredAlt = Math.max(requiredAlt, obsAlt + TERRAIN_CLEARANCE_M);
-                    System.out.println("[RTL-Terrain] segment " + i + " intersects obstacle at ("
-                            + obsLat + "," + obsLon + ") alt=" + obsAlt + " r=" + obsRadius
-                            + " -> raise to " + requiredAlt);
+                    log.debug("[RTL-Terrain] segment {} intersects obstacle at ({},{}) alt={} r={} -> raise to {}",
+                            i, obsLat, obsLon, obsAlt, obsRadius, requiredAlt);
                 }
             }
         }
 
         if (!needsAdjustment) {
-            System.out.println("[RTL-Terrain] no intersection, path unchanged");
+            log.debug("[RTL-Terrain] no intersection, path unchanged");
             return new ArrayList<>(path);
         }
 
@@ -491,10 +490,9 @@ public class ReturnToHomeStrategy {
         if (pureGlideReachable) {
             // 纯滑翔可达：终点高度为滑翔自然到达的高度（≥ homeAlt）
             path.add(new double[]{homeLat, homeLon, arrivalAlt});
-            System.out.println("[RTL-Glide] pure glide reachable: dist="
-                    + String.format("%.1f", horizontalDist) + "m descent="
-                    + String.format("%.1f", requiredDescent) + "m arrivalAlt="
-                    + String.format("%.1f", arrivalAlt) + " >= homeAlt=" + homeAlt);
+            log.debug("[RTL-Glide] pure glide reachable: dist={}m descent={}m arrivalAlt={} >= homeAlt={}",
+                    String.format("%.1f", horizontalDist), String.format("%.1f", requiredDescent),
+                    String.format("%.1f", arrivalAlt), homeAlt);
         } else {
             // 高度不足：需要动力辅助爬升补足高度差
             double altitudeDeficit = homeAlt - arrivalAlt;
@@ -502,8 +500,8 @@ public class ReturnToHomeStrategy {
             requiredAdditionalPower = CLIMB_POWER_W * climbTime;
             // 路径终点高度设为 homeAlt（动力辅助维持高度）
             path.add(new double[]{homeLat, homeLon, homeAlt});
-            System.out.println("[RTL-Glide] altitude deficit=" + String.format("%.1f", altitudeDeficit)
-                    + "m, need additional power=" + String.format("%.1f", requiredAdditionalPower) + "J");
+            log.debug("[RTL-Glide] altitude deficit={}m, need additional power={}J",
+                    String.format("%.1f", altitudeDeficit), String.format("%.1f", requiredAdditionalPower));
         }
 
         return new GlideResult(path, pureGlideReachable, requiredAdditionalPower);
@@ -542,8 +540,8 @@ public class ReturnToHomeStrategy {
                                          double homeLat, double homeLon, double homeAlt,
                                          double batteryPct, double windSpeed, double windDirection,
                                          double airspeed, List<double[]> terrainObstacles) {
-        System.out.println("[RTL-Plan] start: battery=" + batteryPct + " wind=" + windSpeed
-                + "m/s dir=" + windDirection + " as=" + airspeed);
+        log.debug("[RTL-Plan] start: battery={} wind={}m/s dir={} as={}",
+                batteryPct, windSpeed, windDirection, airspeed);
 
         // 1. 能耗最优返航路径
         RtlPathResult rtlResult = computeOptimalReturnPath(currentLat, currentLon, currentAlt,
@@ -564,9 +562,8 @@ public class ReturnToHomeStrategy {
         boolean reachable = rtlResult.reachable || glideResult.pureGlideReachable;
         boolean pureGlide = useGlide;
 
-        System.out.println("[RTL-Plan] done: useGlide=" + useGlide + " reachable=" + reachable
-                + " pathPoints=" + finalPath.size()
-                + " time=" + String.format("%.1f", rtlResult.estimatedTimeSec) + "s");
+        log.debug("[RTL-Plan] done: useGlide={} reachable={} pathPoints={} time={}s",
+                useGlide, reachable, finalPath.size(), String.format("%.1f", rtlResult.estimatedTimeSec));
 
         return new ReturnHomePlan(finalPath, rtlResult.estimatedTimeSec, rtlResult.estimatedEnergy,
                 reachable, pureGlide);

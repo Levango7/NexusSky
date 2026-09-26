@@ -30,7 +30,6 @@ public class ConflictAvoidanceService {
 
     private static final double MIN_HORIZONTAL_SEP = 50.0;  // 最小水平间隔 50m
     private static final double MIN_VERTICAL_SEP = 10.0;    // 最小垂直间隔 10m
-    private static final double TIME_WINDOW_SEC = 30.0;     // 时间窗口 30s
 
     /** 地球半径(m)，用于经纬度↔米换算 */
     private static final double EARTH_RADIUS_M = 6371000.0;
@@ -41,6 +40,19 @@ public class ConflictAvoidanceService {
     private static final double SPEED_ADJUST_DELTA = 2.0;
     /** 等待盘旋机动：默认等待时间(s) */
     private static final double HOLDING_TIME_SEC = 20.0;
+
+    /** 4D 冲突检测：时间对齐容差(s)，超过则视为未对齐 */
+    private static final double TIME_ALIGN_TOLERANCE_SEC = 0.5;
+    /** 冲突类型判定：HEAD-ON 航向差阈值(°) */
+    private static final double HEAD_ON_HEADING_DIFF = 135.0;
+    /** 冲突类型判定：OVERTAKE 航向差阈值(°) */
+    private static final double OVERTAKE_HEADING_DIFF = 45.0;
+    /** 冲突类型判定：OVERTAKE 速度差阈值(m/s) */
+    private static final double OVERTAKE_SPEED_DIFF = 1.0;
+    /** 高纬度保护：cos(lat) 下限，避免除零/数值爆炸 */
+    private static final double MIN_COS_LAT = 0.01;
+    /** 紧急冲突时间阈值(s)，低于此值速度调整加倍 */
+    private static final double URGENT_CONFLICT_TIME_SEC = 10.0;
 
     /**
      * 4D 空域预约表：sysid -> 该无人机已预约的 4D 区块列表。
@@ -63,7 +75,7 @@ public class ConflictAvoidanceService {
         boolean vConflict = vDist < MIN_VERTICAL_SEP;
 
         if (hConflict && vConflict) {
-            double timeToConflict = estimateTimeToConflict(hDist, v1, v2);
+            double timeToConflict = estimateTimeToConflict(hDist, v1, v2, heading1, heading2);
             log.warn("Conflict detected: hDist={}m vDist={}m timeToConflict={}s", hDist, vDist, timeToConflict);
             return new ConflictResult(true, hDist, vDist, timeToConflict, "COLLISION");
         }
@@ -113,7 +125,9 @@ public class ConflictAvoidanceService {
         double stepMeters = velocity; // 1s * velocity(m/s)
         // 经纬度每米对应的度数（近似，使用当前纬度修正经度收敛）
         double latPerMeter = 1.0 / EARTH_RADIUS_M * 180.0 / Math.PI;
-        double lonPerMeter = 1.0 / (EARTH_RADIUS_M * Math.cos(Math.toRadians(lat))) * 180.0 / Math.PI;
+        // 高纬度保护：cos(lat)→0 时避免除零/数值爆炸，下限 0.01 对应约 89.4° 纬度
+        double cosLat = Math.max(MIN_COS_LAT, Math.cos(Math.toRadians(lat)));
+        double lonPerMeter = 1.0 / (EARTH_RADIUS_M * cosLat) * 180.0 / Math.PI;
         // 北向/东向分量
         double northComponent = stepMeters * Math.cos(headingRad);
         double eastComponent = stepMeters * Math.sin(headingRad);
@@ -159,7 +173,7 @@ public class ConflictAvoidanceService {
             // 两航迹点时间应一致（按索引对齐，predictTrajectory4D 保证 t 从 0 起）
             double t1 = p1[3];
             double t2 = p2[3];
-            if (Math.abs(t1 - t2) > 0.5) {
+            if (Math.abs(t1 - t2) > TIME_ALIGN_TOLERANCE_SEC) {
                 // 时间未对齐，跳过（防御性）
                 continue;
             }
@@ -208,13 +222,13 @@ public class ConflictAvoidanceService {
         double heading2 = estimateHeadingAt(traj2, conflictIdx);
         double headingDiff = normalizeAngleDiff(heading1 - heading2);
         // headingDiff ∈ [0, 180]
-        if (headingDiff >= 135.0) {
+        if (headingDiff >= HEAD_ON_HEADING_DIFF) {
             return "HEAD-ON";
-        } else if (headingDiff < 45.0) {
+        } else if (headingDiff < OVERTAKE_HEADING_DIFF) {
             // 同向：进一步看速度差判定追击
             double v1 = estimateSpeedAt(traj1, conflictIdx);
             double v2 = estimateSpeedAt(traj2, conflictIdx);
-            if (Math.abs(v1 - v2) > 1.0) {
+            if (Math.abs(v1 - v2) > OVERTAKE_SPEED_DIFF) {
                 return "OVERTAKE";
             }
             // 速度相近的同向接近，归为交叉（边界情形）
@@ -266,14 +280,42 @@ public class ConflictAvoidanceService {
 
     /**
      * 冲突解决机动：根据策略生成具体机动建议。
+     * <p>
+     * 注意：{@link ConflictResult} 不携带冲突双方 sysid（设计上仅描述冲突几何特征），
+     * 因此本重载无法获知真实冲突双方，使用占位 sysid 0/1 仅为满足接口契约。
+     * <ul>
+     *   <li>调用方若持有 {@link DroneTrajectory}（含 sysid），应改用
+     *       {@link #resolveConflict(DroneTrajectory, DroneTrajectory, ConflictResult, ResolutionStrategy)}
+     *       或 {@link #resolveConflict(int, int, ConflictResult, ResolutionStrategy)} 传入真实 sysid。</li>
+     *   <li>若确无 sysid 信息（如仅基于裸几何参数检测），本重载返回的占位结果仅可用于策略预览，
+     *       不可直接下发执行。</li>
+     * </ul>
      *
-     * @param conflict  冲突结果（需含冲突双方信息）
+     * @param conflict  冲突结果（仅含几何特征，不含 sysid）
      * @param strategy  解决策略
-     * @return 机动建议
+     * @return 机动建议（sysid 为占位 0/1）
      */
     public ResolutionAdvice resolveConflict(ConflictResult conflict, ResolutionStrategy strategy) {
-        // ConflictResult 不携带 sysid，这里用占位 0/1；调用方可通过 DroneTrajectory.sysid 关联
+        // ConflictResult 不携带 sysid，占位 0/1 仅为满足接口契约。
+        // 调用方应优先使用带 sysid 的重载，或通过 DroneTrajectory 重载关联真实 sysid。
         return resolveConflict(0, 1, conflict, strategy);
+    }
+
+    /**
+     * 冲突解决机动（带 DroneTrajectory 重载）：从航迹中提取真实 sysid 后委托给带 sysid 的重载。
+     * <p>
+     * 适用于通过 {@link #checkAllConflicts} 或 {@link #checkConflict4D} 检测冲突后，
+     * 调用方持有冲突双方 {@link DroneTrajectory} 的场景。
+     *
+     * @param traj1    第一架无人机航迹（提供 sysid）
+     * @param traj2    第二架无人机航迹（提供 sysid）
+     * @param conflict 冲突结果
+     * @param strategy 解决策略
+     * @return 机动建议（携带真实 sysid）
+     */
+    public ResolutionAdvice resolveConflict(DroneTrajectory traj1, DroneTrajectory traj2,
+                                            ConflictResult conflict, ResolutionStrategy strategy) {
+        return resolveConflict(traj1.sysid, traj2.sysid, conflict, strategy);
     }
 
     /**
@@ -298,7 +340,7 @@ public class ConflictAvoidanceService {
             case SPEED_ADJUST: {
                 // 根据冲突时间调整速度：冲突时间越短，调整越大
                 double adjust = SPEED_ADJUST_DELTA;
-                if (conflict != null && conflict.timeToConflict > 0 && conflict.timeToConflict < 10) {
+                if (conflict != null && conflict.timeToConflict > 0 && conflict.timeToConflict < URGENT_CONFLICT_TIME_SEC) {
                     adjust = SPEED_ADJUST_DELTA * 2.0; // 紧急情况加倍
                 }
                 String desc = String.format(
@@ -346,6 +388,8 @@ public class ConflictAvoidanceService {
             throw new IllegalArgumentException("radius must be non-negative");
         }
         synchronized (reservationTable) {
+            // 顺带清理已过期的预约（endTime < 新预约 startTime），避免预约表只增不减
+            purgeExpiredReservationsInternal(startTime);
             if (checkReservationConflict(sysid, lat, lon, alt, startTime, endTime, radius)) {
                 log.warn("Reservation rejected for sysid {}: conflict with existing reservation", sysid);
                 return false;
@@ -413,6 +457,28 @@ public class ConflictAvoidanceService {
         return vDist < MIN_VERTICAL_SEP;
     }
 
+    /**
+     * 清理过期的 4D 预约（endTime &lt; currentTime），避免预约表只增不减导致内存泄漏。
+     * <p>
+     * 可由外部 ScheduledExecutorService 定期调用，或在 {@link #reserveAirspace} 时顺带触发。
+     *
+     * @param currentTime 当前时间(s)，endTime 早于此值的预约将被清理
+     */
+    public void purgeExpiredReservations(double currentTime) {
+        synchronized (reservationTable) {
+            purgeExpiredReservationsInternal(currentTime);
+        }
+    }
+
+    /** 内部清理实现（调用方需已持有 reservationTable 监视器锁）。 */
+    private void purgeExpiredReservationsInternal(double currentTime) {
+        for (List<Reservation4D> reservations : reservationTable.values()) {
+            reservations.removeIf(r -> r.endTime < currentTime);
+        }
+        // 清理空列表对应的 sysid 条目
+        reservationTable.entrySet().removeIf(e -> e.getValue().isEmpty());
+    }
+
     /** 清空所有预约（测试辅助） */
     public void clearReservations() {
         reservationTable.clear();
@@ -435,8 +501,16 @@ public class ConflictAvoidanceService {
         return RE * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    private double estimateTimeToConflict(double dist, double v1, double v2) {
-        double closingRate = (v1 + v2) / 2;
+    private double estimateTimeToConflict(double dist, double v1, double v2, double heading1, double heading2) {
+        // 航向差归一化到 [0, 180]
+        double headingDiff = Math.abs(heading1 - heading2);
+        headingDiff = Math.min(headingDiff, 360.0 - headingDiff);
+        // 航向差因子：(1 - cos(headingDiff)) / 2 ∈ [0, 1]
+        // 同向(0°)：因子=0，接近率=0（同向飞行不接近）
+        // 反向(180°)：因子=1，接近率=(v1+v2)/2（对头接近最快）
+        // 垂直(90°)：因子=0.5，接近率=(v1+v2)/4
+        double headingFactor = (1.0 - Math.cos(Math.toRadians(headingDiff))) / 2.0;
+        double closingRate = (v1 + v2) / 2.0 * headingFactor;
         return closingRate > 0 ? dist / closingRate : Double.MAX_VALUE;
     }
 

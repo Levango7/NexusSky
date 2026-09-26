@@ -5,7 +5,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -36,14 +38,22 @@ public class TenantInterceptor implements HandlerInterceptor {
     private final int rateLimitPerMinute;
     private final ObjectMapper objectMapper;
 
-    /** 租户限流计数器：tenantId → [windowStartMs, count] */
+    /** 分布式限流器（Redis 可用时启用，不可用时为 null，回退到内存限流） */
+    @Autowired(required = false)
+    private RedisRateLimiter redisRateLimiter;
+
+    /** 租户限流计数器：tenantId → [windowStartMs, count]（内存 fallback） */
     private final ConcurrentHashMap<String, RateWindow> rateWindows = new ConcurrentHashMap<>();
 
+    /** 内存限流窗口 TTL（毫秒），与滑动窗口时长一致 */
+    private static final long WINDOW_TTL_MS = 60_000;
+
     public TenantInterceptor(@Value("${aerofleet.security.dev-mode:true}") boolean devMode,
-                             @Value("${aerofleet.tenant.rate-limit:100}") int rateLimitPerMinute) {
+                             @Value("${aerofleet.tenant.rate-limit:100}") int rateLimitPerMinute,
+                             ObjectMapper objectMapper) {
         this.devMode = devMode;
         this.rateLimitPerMinute = rateLimitPerMinute;
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -73,6 +83,19 @@ public class TenantInterceptor implements HandlerInterceptor {
         TenantContext.clear();
     }
 
+    /**
+     * 定时清理过期的内存限流窗口，防止 rateWindows Map 无限增长。
+     * <p>
+     * 每 60 秒执行一次，移除窗口起始时间已超过 TTL 的条目。
+     */
+    @Scheduled(fixedRate = 60000)
+    public void cleanupExpiredRateWindows() {
+        long now = System.currentTimeMillis();
+        rateWindows.entrySet().removeIf(entry ->
+                now - entry.getValue().windowStartMs > WINDOW_TTL_MS
+        );
+    }
+
     private String extractTenantId(HttpServletRequest request) {
         // 优先从 X-Tenant-Id header 获取
         String tenantId = request.getHeader("X-Tenant-Id");
@@ -98,14 +121,27 @@ public class TenantInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 滑动窗口限流：每分钟重置计数。
+     * 限流校验：优先使用 Redis 分布式限流，Redis 不可用时回退到内存滑动窗口限流。
      */
     private boolean checkRateLimit(String tenantId) {
+        // 优先使用 Redis 分布式限流（多实例共享计数）
+        if (redisRateLimiter != null) {
+            return redisRateLimiter.tryAcquire(tenantId, rateLimitPerMinute);
+        }
+
+        // 回退到内存滑动窗口限流（单机模式）
+        return checkRateLimitInMemory(tenantId);
+    }
+
+    /**
+     * 内存滑动窗口限流：每分钟重置计数（fallback）。
+     */
+    private boolean checkRateLimitInMemory(String tenantId) {
         long now = System.currentTimeMillis();
         RateWindow window = rateWindows.computeIfAbsent(tenantId, k -> new RateWindow(now));
 
         synchronized (window) {
-            if (now - window.windowStartMs > 60_000) {
+            if (now - window.windowStartMs > WINDOW_TTL_MS) {
                 // 窗口过期，重置
                 window.windowStartMs = now;
                 window.count.set(0);

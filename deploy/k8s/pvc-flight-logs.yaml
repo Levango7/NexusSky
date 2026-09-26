@@ -1,0 +1,19 @@
+# PersistentVolumeClaim for flight-logs
+# cloud-backend 飞行日志持久化存储
+# 用法：kubectl apply -f deploy/k8s/pvc-flight-logs.yaml -n nexussky
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flight-logs
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: cloud-backend
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard

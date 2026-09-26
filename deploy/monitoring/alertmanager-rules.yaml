@@ -1,0 +1,144 @@
+# NexusSky Alertmanager 告警规则 (Prometheus 2.x 语法)
+# 用法：在 prometheus.yml 的 rule_files 中引用，或 kubectl apply 创建 PrometheusRule CRD
+---
+groups:
+  - name: nexussky-cloud-backend
+    rules:
+      - alert: CloudBackendDown
+        expr: up{job="cloud-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: cloud-backend
+        annotations:
+          summary: "Cloud Backend is down"
+          description: "cloud-backend ({{ $labels.instance }}) has been down for more than 1 minute."
+
+      - alert: CloudBackendHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_server_requests_seconds_bucket{job="cloud-backend"}[5m])) by (le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: cloud-backend
+        annotations:
+          summary: "Cloud Backend high latency (P95 > 2s)"
+          description: "cloud-backend P95 latency is {{ $value }}s, above 2s threshold for 5 minutes."
+
+      - alert: CloudBackendErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="cloud-backend", status=~"5.."}[5m]))
+          /
+          sum(rate(http_server_requests_seconds_count{job="cloud-backend"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: cloud-backend
+        annotations:
+          summary: "Cloud Backend high error rate (5xx > 5%)"
+          description: "cloud-backend 5xx error rate is {{ $value | humanizePercentage }}, above 5% threshold for 5 minutes."
+
+      - alert: JVMHeapHighUsage
+        expr: |
+          jvm_memory_used_bytes{area="heap", job="cloud-backend"}
+          /
+          jvm_memory_max_bytes{area="heap", job="cloud-backend"}
+          > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          service: cloud-backend
+        annotations:
+          summary: "JVM heap usage high (>85%)"
+          description: "cloud-backend JVM heap usage is {{ $value | humanizePercentage }}, above 85% threshold for 10 minutes."
+
+  - name: nexussky-business
+    rules:
+      - alert: DronesAllOffline
+        expr: drones_online == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: cloud-backend
+        annotations:
+          summary: "All drones are offline"
+          description: "No drones are online (drones_online == 0) for more than 2 minutes."
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: nexussky-alerts
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    release: prometheus
+spec:
+  groups:
+    - name: nexussky-cloud-backend
+      rules:
+        - alert: CloudBackendDown
+          expr: up{job="cloud-backend"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            service: cloud-backend
+          annotations:
+            summary: "Cloud Backend is down"
+            description: "cloud-backend ({{ $labels.instance }}) has been down for more than 1 minute."
+
+        - alert: CloudBackendHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_server_requests_seconds_bucket{job="cloud-backend"}[5m])) by (le)
+            ) > 2
+          for: 5m
+          labels:
+            severity: warning
+            service: cloud-backend
+          annotations:
+            summary: "Cloud Backend high latency (P95 > 2s)"
+            description: "cloud-backend P95 latency is {{ $value }}s, above 2s threshold for 5 minutes."
+
+        - alert: CloudBackendErrorRate
+          expr: |
+            sum(rate(http_server_requests_seconds_count{job="cloud-backend", status=~"5.."}[5m]))
+            /
+            sum(rate(http_server_requests_seconds_count{job="cloud-backend"}[5m]))
+            > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            service: cloud-backend
+          annotations:
+            summary: "Cloud Backend high error rate (5xx > 5%)"
+            description: "cloud-backend 5xx error rate is {{ $value | humanizePercentage }}, above 5% threshold for 5 minutes."
+
+        - alert: JVMHeapHighUsage
+          expr: |
+            jvm_memory_used_bytes{area="heap", job="cloud-backend"}
+            /
+            jvm_memory_max_bytes{area="heap", job="cloud-backend"}
+            > 0.85
+          for: 10m
+          labels:
+            severity: warning
+            service: cloud-backend
+          annotations:
+            summary: "JVM heap usage high (>85%)"
+            description: "cloud-backend JVM heap usage is {{ $value | humanizePercentage }}, above 85% threshold for 10 minutes."
+
+    - name: nexussky-business
+      rules:
+        - alert: DronesAllOffline
+          expr: drones_online == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: cloud-backend
+          annotations:
+            summary: "All drones are offline"
+            description: "No drones are online (drones_online == 0) for more than 2 minutes."
