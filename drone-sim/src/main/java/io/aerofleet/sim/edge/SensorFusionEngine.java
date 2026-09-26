@@ -1,5 +1,8 @@
 package io.aerofleet.sim.edge;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * M12 传感器融合引擎：基于扩展卡尔曼滤波（EKF）的 GPS + IMU + 视觉 + LiDAR 异步融合。
  *
@@ -31,6 +34,8 @@ package io.aerofleet.sim.edge;
  * <p>矩阵统一用 {@code double[][]} 表示，向量用 {@code double[]} 表示。
  */
 public class SensorFusionEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(SensorFusionEngine.class);
 
     // ===================== 状态维度与索引 =====================
     private static final int N = 9;
@@ -338,7 +343,7 @@ public class SensorFusionEngine {
             Sinv = inverse(S);
         } catch (ArithmeticException e) {
             // 奇异矩阵：观测信息冗余或数值退化，跳过本次更新避免状态污染
-            System.out.println("[SensorFusionEngine] update skipped (singular S): " + e.getMessage());
+            log.warn("[SensorFusionEngine] update skipped (singular S): {}", e.getMessage());
             return;
         }
         double[][] K = matMul(matMul(P, Ht), Sinv);      // n×m

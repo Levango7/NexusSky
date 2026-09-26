@@ -1,5 +1,8 @@
 package io.aerofleet.linksim;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.net.InetSocketAddress;
 
 /**
@@ -13,6 +16,8 @@ import java.net.InetSocketAddress;
  * 两个字段标记 {@code volatile} 以保证接收线程写、发送线程读之间的可见性。
  */
 final class RelayConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(RelayConfig.class);
 
     /** 中继面向 GCS/后端侧默认端口。 */
     static final int DEFAULT_GCS_PORT = 14541;
@@ -81,8 +86,8 @@ final class RelayConfig {
         validatePort(relayPort, "--relay-port");
         // 校验端口互异
         if (gcsPort == relayPort) {
-            System.out.println("[mesh-relay] gcs-port and relay-port must differ: "
-                    + "gcs-port=" + gcsPort + " relay-port=" + relayPort);
+            log.error("[mesh-relay] gcs-port and relay-port must differ: gcs-port={} relay-port={}",
+                    gcsPort, relayPort);
             usage();
             System.exit(1);
             return null; // 不可达，exit 已终止
@@ -91,16 +96,16 @@ final class RelayConfig {
         // 校验画像名（沿用现有 LinkSimMain.java:51-57 报错模式）
         LinkProfile uplink = LinkProfile.of(uplinkName);
         if (uplink == null) {
-            System.out.println("[mesh-relay] unknown profile: " + uplinkName);
-            System.out.println("[mesh-relay] available: " + LinkProfile.names());
+            log.error("[mesh-relay] unknown profile: {}", uplinkName);
+            log.error("[mesh-relay] available: {}", LinkProfile.names());
             usage();
             System.exit(1);
             return null;
         }
         LinkProfile downlink = LinkProfile.of(downlinkName);
         if (downlink == null) {
-            System.out.println("[mesh-relay] unknown profile: " + downlinkName);
-            System.out.println("[mesh-relay] available: " + LinkProfile.names());
+            log.error("[mesh-relay] unknown profile: {}", downlinkName);
+            log.error("[mesh-relay] available: {}", LinkProfile.names());
             usage();
             System.exit(1);
             return null;
@@ -114,7 +119,7 @@ final class RelayConfig {
         try {
             return Integer.parseInt(raw);
         } catch (NumberFormatException e) {
-            System.out.println("[mesh-relay] invalid " + flag + ": " + raw);
+            log.error("[mesh-relay] invalid {}: {}", flag, raw);
             usage();
             System.exit(1);
             return -1; // 不可达
@@ -124,7 +129,7 @@ final class RelayConfig {
     /** 校验端口范围 [1,65535]，失败打印 usage 并 exit(1)。 */
     private static void validatePort(int port, String flag) {
         if (port < 1 || port > 65535) {
-            System.out.println("[mesh-relay] " + flag + " out of range [1,65535]: " + port);
+            log.error("[mesh-relay] {} out of range [1,65535]: {}", flag, port);
             usage();
             System.exit(1);
         }
@@ -134,16 +139,12 @@ final class RelayConfig {
      * 完整披露所有 relay 参数及默认值（DFX 4.4 配置可追溯）。
      */
     static void usage() {
-        System.out.println("[mesh-relay] usage: link-sim --relay"
+        log.info("[mesh-relay] usage: link-sim --relay"
                 + " [--gcs-port N] [--relay-port N]"
                 + " [--uplink-profile P] [--downlink-profile P]");
-        System.out.println("[mesh-relay]   --gcs-port        relay port facing GCS/backend (default "
-                + DEFAULT_GCS_PORT + ")");
-        System.out.println("[mesh-relay]   --relay-port      relay port facing remote drone (default "
-                + DEFAULT_RELAY_PORT + ")");
-        System.out.println("[mesh-relay]   --uplink-profile  uplink (gcs->drone) profile (default "
-                + DEFAULT_PROFILE + "): " + LinkProfile.names());
-        System.out.println("[mesh-relay]   --downlink-profile downlink (drone->gcs) profile (default "
-                + DEFAULT_PROFILE + "): " + LinkProfile.names());
+        log.info("[mesh-relay]   --gcs-port        relay port facing GCS/backend (default {})", DEFAULT_GCS_PORT);
+        log.info("[mesh-relay]   --relay-port      relay port facing remote drone (default {})", DEFAULT_RELAY_PORT);
+        log.info("[mesh-relay]   --uplink-profile  uplink (gcs->drone) profile (default {}): {}", DEFAULT_PROFILE, LinkProfile.names());
+        log.info("[mesh-relay]   --downlink-profile downlink (drone->gcs) profile (default {}): {}", DEFAULT_PROFILE, LinkProfile.names());
     }
 }

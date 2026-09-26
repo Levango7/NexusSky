@@ -1,5 +1,8 @@
 package io.aerofleet.sim;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -11,32 +14,29 @@ import java.util.concurrent.TimeUnit;
  */
 public final class DroneSimMain {
 
+    private static final Logger log = LoggerFactory.getLogger(DroneSimMain.class);
+
     private DroneSimMain() {
     }
 
     public static void main(String[] args) {
         SimConfig config = SimConfig.parse(args);
 
-        System.out.println("[sim] AeroFleet virtual drone simulator starting");
-        System.out.println("[sim] config: name=" + config.name + " sysid=" + config.sysid
-                + " port=" + config.port + " bind=" + config.bindIp
-                + " lat=" + config.lat + " lon=" + config.lon
-                + " speed=" + config.speed + "m/s scenario=" + config.scenario);
-        // M0b 环境气象配置打印（FR-01/03/05，DFX 4.4 配置可追溯）
+        log.info("[sim] AeroFleet virtual drone simulator starting");
+        log.info("[sim] config: name={} sysid={} port={} bind={} lat={} lon={} speed={}m/s scenario={}",
+                config.name, config.sysid, config.port, config.bindIp, config.lat, config.lon, config.speed, config.scenario);
         if (config.envEnabled) {
-            System.out.println("[sim] env: scenario=" + config.envScenario
-                    + " seed=" + config.envSeed
-                    + " windMax=" + config.envWindMax + "m/s"
-                    + " tempRange=" + config.envTempRange[0] + ":" + config.envTempRange[1] + "C");
+            log.info("[sim] env: scenario={} seed={} windMax={}m/s tempRange={}:{}C",
+                    config.envScenario, config.envSeed, config.envWindMax, config.envTempRange[0], config.envTempRange[1]);
         } else {
-            System.out.println("[sim] env: disabled (no --env flag)");
+            log.info("[sim] env: disabled (no --env flag)");
         }
 
         try (VirtualDrone drone = new VirtualDrone(config)) {
             drone.start();
             SimLog.info("listening on UDP " + config.port
                     + " (waiting for GCS packets to learn peer address)");
-            System.out.println("[sim] running. Press Ctrl+C to stop.");
+            log.info("[sim] running. Press Ctrl+C to stop.");
 
             CountDownLatch stop = new CountDownLatch(1);
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {

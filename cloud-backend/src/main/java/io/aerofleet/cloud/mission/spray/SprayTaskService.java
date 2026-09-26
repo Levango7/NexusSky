@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -139,8 +140,9 @@ public class SprayTaskService {
         // 内存未命中，尝试从 Repository 加载
         if (repository != null) {
             try {
-                SprayTaskEntity entity = repository.findById(id).orElse(null);
-                if (entity != null) {
+                Optional<SprayTaskEntity> opt = repository.findById(id);
+                if (opt.isPresent()) {
+                    SprayTaskEntity entity = opt.get();
                     task = entity.toTask();
                     tasks.put(id, task);
                     return task;
@@ -167,8 +169,9 @@ public class SprayTaskService {
                     // 内存中无 tenantId 映射，从 Repository 查
                     if (repository != null) {
                         try {
-                            SprayTaskEntity entity = repository.findById(t.taskId()).orElse(null);
-                            return entity != null && tenantId.equals(entity.getTenantId());
+                            return repository.findById(t.taskId())
+                                    .map(entity -> tenantId.equals(entity.getTenantId()))
+                                    .orElse(false);
                         } catch (Exception e) {
                             return true; // 降级：Repository 不可用时返回所有
                         }
@@ -201,8 +204,9 @@ public class SprayTaskService {
             // 尝试从 Repository 加载
             if (repository != null) {
                 try {
-                    SprayTaskEntity entity = repository.findById(id).orElse(null);
-                    if (entity != null) {
+                    Optional<SprayTaskEntity> opt = repository.findById(id);
+                    if (opt.isPresent()) {
+                        SprayTaskEntity entity = opt.get();
                         task = entity.toTask();
                         tasks.put(id, task);
                     }
@@ -270,14 +274,14 @@ public class SprayTaskService {
             return;
         }
         try {
-            SprayTaskEntity entity = repository.findById(id).orElse(null);
-            if (entity != null) {
+            Optional<SprayTaskEntity> opt = repository.findById(id);
+            if (opt.isPresent()) {
+                SprayTaskEntity entity = opt.get();
                 entity.updateFromTask(task);
                 repository.save(entity);
             } else {
-                // Entity 不存在（可能是恢复前创建的），创建新 Entity
                 Integer tenantId = TenantContext.getEffectiveTenantId();
-                entity = SprayTaskEntity.fromTask(task, tenantId);
+                SprayTaskEntity entity = SprayTaskEntity.fromTask(task, tenantId);
                 repository.save(entity);
             }
         } catch (Exception e) {

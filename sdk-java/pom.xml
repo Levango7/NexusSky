@@ -5,9 +5,13 @@
          http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>io.aerofleet</groupId>
+    <parent>
+        <groupId>io.aerofleet</groupId>
+        <artifactId>aerofleet-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
     <artifactId>nexussky-sdk-java</artifactId>
-    <version>1.0.0</version>
     <packaging>jar</packaging>
 
     <name>NexusSky SDK for Java</name>

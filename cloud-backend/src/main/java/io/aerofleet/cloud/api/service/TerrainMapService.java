@@ -71,8 +71,10 @@ public class TerrainMapService {
         TerrainChangeRecord record = new TerrainChangeRecord(
                 msg.terrainVersion, msg.changeReason, affected, System.currentTimeMillis());
         changeHistory.add(record);
-        while (changeHistory.size() > MAX_HISTORY) {
-            changeHistory.remove(0);
+        synchronized (changeHistory) {
+            while (changeHistory.size() > MAX_HISTORY) {
+                changeHistory.remove(0);
+            }
         }
         version.set(Math.max(version.get(), msg.terrainVersion));
         log.debug("terrain update: sysid={} version={} affected={}",
@@ -117,7 +119,9 @@ public class TerrainMapService {
     public List<FlightRestrictionSnapshot> getRestrictions() {
         List<FlightRestrictionSnapshot> all = new ArrayList<>();
         for (List<FlightRestrictionSnapshot> list : restrictions.values()) {
-            all.addAll(list);
+            synchronized (list) {
+                all.addAll(list);
+            }
         }
         return all;
     }

@@ -33,6 +33,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -347,12 +348,15 @@ public class OrchestrationPlanService {
     @Transactional
     public void onPausePlan(PausePlanEvent event) {
         log.info("onPausePlan: planId={}, reason={}", event.getPlanId(), event.getReason());
-        OrchestrationPlanEntity plan = planRepository.findById(event.getPlanId()).orElse(null);
-        if (plan != null && plan.getStatus() == PlanStatus.RUNNING) {
-            plan.setStatus(PlanStatus.PAUSED);
-            plan.setPauseReason(PauseReason.EMERGENCY);
-            planRepository.save(plan);
-            log.info("计划 {} 已暂停（应急）", event.getPlanId());
+        Optional<OrchestrationPlanEntity> opt = planRepository.findById(event.getPlanId());
+        if (opt.isPresent()) {
+            OrchestrationPlanEntity plan = opt.get();
+            if (plan.getStatus() == PlanStatus.RUNNING) {
+                plan.setStatus(PlanStatus.PAUSED);
+                plan.setPauseReason(PauseReason.EMERGENCY);
+                planRepository.save(plan);
+                log.info("计划 {} 已暂停（应急）", event.getPlanId());
+            }
         }
     }
 
@@ -365,12 +369,15 @@ public class OrchestrationPlanService {
     @Transactional
     public void onResumePlan(ResumePlanEvent event) {
         log.info("onResumePlan: planId={}", event.getPlanId());
-        OrchestrationPlanEntity plan = planRepository.findById(event.getPlanId()).orElse(null);
-        if (plan != null && plan.getStatus() == PlanStatus.PAUSED) {
-            plan.setStatus(PlanStatus.RUNNING);
-            planRepository.save(plan);
-            log.info("计划 {} 已恢复", event.getPlanId());
-            advanceSteps(event.getPlanId());
+        Optional<OrchestrationPlanEntity> opt = planRepository.findById(event.getPlanId());
+        if (opt.isPresent()) {
+            OrchestrationPlanEntity plan = opt.get();
+            if (plan.getStatus() == PlanStatus.PAUSED) {
+                plan.setStatus(PlanStatus.RUNNING);
+                planRepository.save(plan);
+                log.info("计划 {} 已恢复", event.getPlanId());
+                advanceSteps(event.getPlanId());
+            }
         }
     }
 
@@ -385,10 +392,11 @@ public class OrchestrationPlanService {
      * @param planId 计划 ID
      */
     private void advanceSteps(Long planId) {
-        OrchestrationPlanEntity plan = planRepository.findById(planId).orElse(null);
-        if (plan == null || plan.getStatus() != PlanStatus.RUNNING) {
+        Optional<OrchestrationPlanEntity> opt = planRepository.findById(planId);
+        if (opt.isEmpty() || opt.get().getStatus() != PlanStatus.RUNNING) {
             return;
         }
+        OrchestrationPlanEntity plan = opt.get();
 
         List<TaskStepEntity> readySteps = getReadySteps(planId);
         for (TaskStepEntity step : readySteps) {
@@ -582,8 +590,9 @@ public class OrchestrationPlanService {
         }
 
         if (allTerminal) {
-            OrchestrationPlanEntity plan = planRepository.findById(planId).orElse(null);
-            if (plan != null && plan.getStatus() == PlanStatus.RUNNING) {
+            Optional<OrchestrationPlanEntity> opt = planRepository.findById(planId);
+            if (opt.isPresent() && opt.get().getStatus() == PlanStatus.RUNNING) {
+                OrchestrationPlanEntity plan = opt.get();
                 plan.setStatus(PlanStatus.COMPLETED);
                 plan.setEndTime(System.currentTimeMillis());
                 planRepository.save(plan);

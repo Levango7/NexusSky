@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -121,10 +122,11 @@ public class AlarmEventStore {
      */
     @Transactional
     public boolean acknowledge(String id) {
-        AlarmEvent event = repository.findById(id).orElse(null);
-        if (event == null) {
+        Optional<AlarmEvent> opt = repository.findById(id);
+        if (opt.isEmpty()) {
             return false;
         }
+        AlarmEvent event = opt.get();
         event.acknowledge();
         repository.save(event);
         log.info("alarm event acknowledged: id={}", id);

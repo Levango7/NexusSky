@@ -3,12 +3,16 @@ package io.aerofleet.sim;
 import io.aerofleet.sim.mesh.MeshRouterConfig;
 import io.aerofleet.sim.orch.OrchestrationConfig;
 import io.aerofleet.sim.satrelay.SatRelayConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Command line configuration for the virtual drone simulator.
  * Parsed from simple --key=value / --key value style arguments.
  */
 public final class SimConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(SimConfig.class);
 
     public final int port;
     public final int sysid;
@@ -353,79 +357,73 @@ public final class SimConfig {
     }
 
     public static void printUsage() {
-        System.out.println("[sim] usage: drone-sim [--port N] [--sysid N] [--lat D] [--lon D]"
+        log.info("[sim] usage: drone-sim [--port N] [--sysid N] [--lat D] [--lon D]"
                 + " [--speed M] [--name STR] [--scenario SPEC] [--bind-ip IP]"
                 + " [--failsafe on|off] [--terrain SPEC] [--fence SPEC]"
                 + " [--targets SPEC] [--http-port N]");
-        System.out.println("[sim]   --port     UDP bind port (default 14540)");
-        System.out.println("[sim]   --sysid   MAVLink system id (default 1)");
-        System.out.println("[sim]   --lat      start latitude (default 22.5907)");
-        System.out.println("[sim]   --lon      start longitude (default 113.9345)");
-        System.out.println("[sim]   --speed    cruise speed m/s (default 8.0)");
-        System.out.println("[sim]   --name     vehicle model name (default AF-SIM-01)");
-        System.out.println("[sim]   --bind-ip  local bind IP, e.g. 127.0.0.2 = own segment");
-        System.out.println("[sim]   --failsafe autopilot failsafe layer, off for A/B tests");
-        System.out.println("[sim]   --terrain  hill:northM:eastM:radiusM:heightM comma-joined");
-        System.out.println("[sim]   --fence    n,e:n,e:...[:ceilingM] polygon around home");
-        System.out.println("[sim]   --targets  kind:lat,lon[:speed[:heading[:turn]]],...");
-        System.out.println("[sim]              kinds: vehicle | pedestrian | static");
-        System.out.println("[sim]   --http-port ground-truth HTTP port (e.g. 18080)");
-        System.out.println("[sim]   --scenario fault spec: kind:offsetSec[:durationSec[:param]]");
-        System.out.println("[sim]              kinds (comma-joinable): gps-loss, link-loss,");
-        System.out.println("[sim]              battery-fault, wind, gps-noise, imu-bias,");
-        System.out.println("[sim]              baro-drift, mag-interference");
-        System.out.println("[sim]              e.g. --scenario gps-loss:30:20,wind:0:9999:6");
-        // M0b 环境气象参数说明（FR-01/03/05，DFX 4.4 配置可追溯）
-        System.out.println("[sim]   --env            enable environment meteorology model (default off)");
-        System.out.println("[sim]   --env-scenario   " + EnvScenario.names() + " (default calm)");
-        System.out.println("[sim]   --env-seed       pseudo-random seed for deterministic env (default 0)");
-        System.out.println("[sim]   --env-wind-max   wind speed cap m/s (default 50)");
-        System.out.println("[sim]   --env-temp-range low:high °C (default -40:55)");
-        // M2 执行机构参数说明（FR-01，DFX 4.4 配置可追溯）
-        System.out.println("[sim]   --actuators            enable actuator layer: SprayPump + Gripper (default off)");
-        System.out.println("[sim]   --spray-capacity       spray tank capacity L (default 20)");
-        System.out.println("[sim]   --spray-rate-max       max spray rate mL/s (default 2000)");
-        System.out.println("[sim]   --gripper-payload-max  max gripper payload kg (default 10)");
-        System.out.println("[sim]   --spray-crosswind-max  crosswind no-spray threshold m/s (default 6)");
-        // M5 mesh 路由参数说明（FR-01，DFX 4.4 配置可追溯）
-        System.out.println("[sim]   --mesh                  enable mesh routing engine (default off)");
-        System.out.println("[sim]   --mesh-hello-ms         HELLO broadcast interval ms (default 1000)");
-        System.out.println("[sim]   --mesh-neighbor-timeout-ms  neighbor timeout ms (default 5000)");
-        System.out.println("[sim]   --mesh-route-lifetime-ms    route lifetime ms (default 10000)");
-        System.out.println("[sim]   --mesh-max-hops         max hops (default 15)");
-        System.out.println("[sim]   --mesh-metric-w1        metric weight W1 hopCount (default 1.0)");
-        System.out.println("[sim]   --mesh-metric-w2        metric weight W2 RSSI (default 0.5)");
-        System.out.println("[sim]   --mesh-metric-w3        metric weight W3 delay (default 0.1)");
-        System.out.println("[sim]   --mesh-reeval-threshold metric reeval threshold (default 0.5)");
-        System.out.println("[sim]   --mesh-report-ms        topology report interval ms (default 2000)");
-        System.out.println("[sim]   --mesh-group            mesh multicast group host:port (default 239.0.0.1:14550)");
-        System.out.println("[sim]   --cloud-backend         cloud backend host:port for topology reports");
-        // M7 sat-relay 参数说明（FR-5.1，DFX 4.4 配置可追溯）
-        System.out.println("[sim]   --sat-relay                  enable sat-relay multi-layer engine (default off)");
-        System.out.println("[sim]   --sat-elevation-threshold    visibility elevation threshold deg (default 10)");
-        System.out.println("[sim]   --sat-hysteresis-ms          degradation hysteresis threshold ms (default 5000)");
-        System.out.println("[sim]   --sat-strategy               routing strategy NEAR_FIRST/DELAY_OPTIMAL/BANDWIDTH_OPTIMAL/RELIABILITY_OPTIMAL");
-        System.out.println("[sim]   --sat-constellation-size     LEO constellation size 10-100 (default 24)");
-        System.out.println("[sim]   --sat-orbit-altitude         orbit altitude km 300-1200 (default 550)");
-        System.out.println("[sim]   --sat-inclination            orbit inclination deg 0-180 (default 53)");
-        System.out.println("[sim]   --sat-window-scan-step-ms    visibility window scan step ms (default 60000)");
-        System.out.println("[sim]   --sat-link-report-ms         sat link status report interval ms (default 2000)");
-        System.out.println("[sim]   --sat-pass-horizon-ms        pass schedule horizon ms (default 86400000)");
-        // M6 移动基站载荷参数说明（FR-CT-01，DFX 4.4 配置可追溯）
-        System.out.println("[sim]   --celltower                     enable cell tower payload (default off)");
-        System.out.println("[sim]   --cell-type                     LTE/WIFI/LORA (default LTE)");
-        System.out.println("[sim]   --cell-tx-power                 tx power dBm (default 20)");
-        System.out.println("[sim]   --cell-max-terminals            max concurrent terminals (default 200)");
-        System.out.println("[sim]   --cell-freq                     frequency channel (default 1)");
-        System.out.println("[sim]   --cell-signal-threshold         access signal threshold dBm (default -80)");
-        System.out.println("[sim]   --cell-handover-threshold       handover threshold dBm (default -80)");
-        System.out.println("[sim]   --cell-load-balance-threshold   load balance threshold (default 0.8)");
-        System.out.println("[sim]   --cell-heartbeat-timeout-ms     heartbeat timeout ms (default 30000)");
-        // 丐版模式参数说明（budget，DFX 4.4 配置可追溯）
-        System.out.println("[sim]   --budget              budget mode: toy|standard|advanced|emergency-toy|emergency-standard (default off = full)");
-        System.out.println("[sim]              toy=ultrasonic+WiFi only, standard=GPS+ToF+LoRa, advanced=all sensors");
-        System.out.println("[sim]              emergency-toy=~74yuan WiFi ESP-NOW+ultrasonic+LED+buzzer (disaster rescue)");
-        System.out.println("[sim]              emergency-standard=~429yuan LoRa Mesh+ToF+GPS+AMG8833+LED+buzzer (disaster rescue)");
+        log.info("[sim]   --port     UDP bind port (default 14540)");
+        log.info("[sim]   --sysid   MAVLink system id (default 1)");
+        log.info("[sim]   --lat      start latitude (default 22.5907)");
+        log.info("[sim]   --lon      start longitude (default 113.9345)");
+        log.info("[sim]   --speed    cruise speed m/s (default 8.0)");
+        log.info("[sim]   --name     vehicle model name (default AF-SIM-01)");
+        log.info("[sim]   --bind-ip  local bind IP, e.g. 127.0.0.2 = own segment");
+        log.info("[sim]   --failsafe autopilot failsafe layer, off for A/B tests");
+        log.info("[sim]   --terrain  hill:northM:eastM:radiusM:heightM comma-joined");
+        log.info("[sim]   --fence    n,e:n,e:...[:ceilingM] polygon around home");
+        log.info("[sim]   --targets  kind:lat,lon[:speed[:heading[:turn]]],...");
+        log.info("[sim]              kinds: vehicle | pedestrian | static");
+        log.info("[sim]   --http-port ground-truth HTTP port (e.g. 18080)");
+        log.info("[sim]   --scenario fault spec: kind:offsetSec[:durationSec[:param]]");
+        log.info("[sim]              kinds (comma-joinable): gps-loss, link-loss,");
+        log.info("[sim]              battery-fault, wind, gps-noise, imu-bias,");
+        log.info("[sim]              baro-drift, mag-interference");
+        log.info("[sim]              e.g. --scenario gps-loss:30:20,wind:0:9999:6");
+        log.info("[sim]   --env            enable environment meteorology model (default off)");
+        log.info("[sim]   --env-scenario   {} (default calm)", EnvScenario.names());
+        log.info("[sim]   --env-seed       pseudo-random seed for deterministic env (default 0)");
+        log.info("[sim]   --env-wind-max   wind speed cap m/s (default 50)");
+        log.info("[sim]   --env-temp-range low:high °C (default -40:55)");
+        log.info("[sim]   --actuators            enable actuator layer: SprayPump + Gripper (default off)");
+        log.info("[sim]   --spray-capacity       spray tank capacity L (default 20)");
+        log.info("[sim]   --spray-rate-max       max spray rate mL/s (default 2000)");
+        log.info("[sim]   --gripper-payload-max  max gripper payload kg (default 10)");
+        log.info("[sim]   --spray-crosswind-max  crosswind no-spray threshold m/s (default 6)");
+        log.info("[sim]   --mesh                  enable mesh routing engine (default off)");
+        log.info("[sim]   --mesh-hello-ms         HELLO broadcast interval ms (default 1000)");
+        log.info("[sim]   --mesh-neighbor-timeout-ms  neighbor timeout ms (default 5000)");
+        log.info("[sim]   --mesh-route-lifetime-ms    route lifetime ms (default 10000)");
+        log.info("[sim]   --mesh-max-hops         max hops (default 15)");
+        log.info("[sim]   --mesh-metric-w1        metric weight W1 hopCount (default 1.0)");
+        log.info("[sim]   --mesh-metric-w2        metric weight W2 RSSI (default 0.5)");
+        log.info("[sim]   --mesh-metric-w3        metric weight W3 delay (default 0.1)");
+        log.info("[sim]   --mesh-reeval-threshold metric reeval threshold (default 0.5)");
+        log.info("[sim]   --mesh-report-ms        topology report interval ms (default 2000)");
+        log.info("[sim]   --mesh-group            mesh multicast group host:port (default 239.0.0.1:14550)");
+        log.info("[sim]   --cloud-backend         cloud backend host:port for topology reports");
+        log.info("[sim]   --sat-relay                  enable sat-relay multi-layer engine (default off)");
+        log.info("[sim]   --sat-elevation-threshold    visibility elevation threshold deg (default 10)");
+        log.info("[sim]   --sat-hysteresis-ms          degradation hysteresis threshold ms (default 5000)");
+        log.info("[sim]   --sat-strategy               routing strategy NEAR_FIRST/DELAY_OPTIMAL/BANDWIDTH_OPTIMAL/RELIABILITY_OPTIMAL");
+        log.info("[sim]   --sat-constellation-size     LEO constellation size 10-100 (default 24)");
+        log.info("[sim]   --sat-orbit-altitude         orbit altitude km 300-1200 (default 550)");
+        log.info("[sim]   --sat-inclination            orbit inclination deg 0-180 (default 53)");
+        log.info("[sim]   --sat-window-scan-step-ms    visibility window scan step ms (default 60000)");
+        log.info("[sim]   --sat-link-report-ms         sat link status report interval ms (default 2000)");
+        log.info("[sim]   --sat-pass-horizon-ms        pass schedule horizon ms (default 86400000)");
+        log.info("[sim]   --celltower                     enable cell tower payload (default off)");
+        log.info("[sim]   --cell-type                     LTE/WIFI/LORA (default LTE)");
+        log.info("[sim]   --cell-tx-power                 tx power dBm (default 20)");
+        log.info("[sim]   --cell-max-terminals            max concurrent terminals (default 200)");
+        log.info("[sim]   --cell-freq                     frequency channel (default 1)");
+        log.info("[sim]   --cell-signal-threshold         access signal threshold dBm (default -80)");
+        log.info("[sim]   --cell-handover-threshold       handover threshold dBm (default -80)");
+        log.info("[sim]   --cell-load-balance-threshold   load balance threshold (default 0.8)");
+        log.info("[sim]   --cell-heartbeat-timeout-ms     heartbeat timeout ms (default 30000)");
+        log.info("[sim]   --budget              budget mode: toy|standard|advanced|emergency-toy|emergency-standard (default off = full)");
+        log.info("[sim]              toy=ultrasonic+WiFi only, standard=GPS+ToF+LoRa, advanced=all sensors");
+        log.info("[sim]              emergency-toy=~74yuan WiFi ESP-NOW+ultrasonic+LED+buzzer (disaster rescue)");
+        log.info("[sim]              emergency-standard=~429yuan LoRa Mesh+ToF+GPS+AMG8833+LED+buzzer (disaster rescue)");
     }
 }
 

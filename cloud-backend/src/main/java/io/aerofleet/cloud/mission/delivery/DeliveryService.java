@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -135,8 +136,9 @@ public class DeliveryService {
         // 内存未命中，尝试从 Repository 加载
         if (repository != null) {
             try {
-                DeliverySequenceEntity entity = repository.findById(id).orElse(null);
-                if (entity != null) {
+                Optional<DeliverySequenceEntity> opt = repository.findById(id);
+                if (opt.isPresent()) {
+                    DeliverySequenceEntity entity = opt.get();
                     seq = entity.toSequence();
                     sequences.put(id, seq);
                     return seq;
@@ -162,8 +164,9 @@ public class DeliveryService {
                 .filter(seq -> {
                     if (repository != null) {
                         try {
-                            DeliverySequenceEntity entity = repository.findById(seq.deliveryId()).orElse(null);
-                            return entity != null && tenantId.equals(entity.getTenantId());
+                            return repository.findById(seq.deliveryId())
+                                    .map(entity -> tenantId.equals(entity.getTenantId()))
+                                    .orElse(false);
                         } catch (Exception e) {
                             return true; // 降级：Repository 不可用时返回所有
                         }
@@ -197,8 +200,9 @@ public class DeliveryService {
             // 尝试从 Repository 加载
             if (repository != null) {
                 try {
-                    DeliverySequenceEntity entity = repository.findById(id).orElse(null);
-                    if (entity != null) {
+                    Optional<DeliverySequenceEntity> opt = repository.findById(id);
+                    if (opt.isPresent()) {
+                        DeliverySequenceEntity entity = opt.get();
                         seq = entity.toSequence();
                         sequences.put(id, seq);
                     }
@@ -279,14 +283,14 @@ public class DeliveryService {
             return;
         }
         try {
-            DeliverySequenceEntity entity = repository.findById(id).orElse(null);
-            if (entity != null) {
+            Optional<DeliverySequenceEntity> opt = repository.findById(id);
+            if (opt.isPresent()) {
+                DeliverySequenceEntity entity = opt.get();
                 entity.updateFromSequence(seq);
                 repository.save(entity);
             } else {
-                // Entity 不存在（可能是恢复前创建的），创建新 Entity
                 Integer tenantId = TenantContext.getEffectiveTenantId();
-                entity = DeliverySequenceEntity.fromSequence(seq, tenantId);
+                DeliverySequenceEntity entity = DeliverySequenceEntity.fromSequence(seq, tenantId);
                 repository.save(entity);
             }
         } catch (Exception e) {

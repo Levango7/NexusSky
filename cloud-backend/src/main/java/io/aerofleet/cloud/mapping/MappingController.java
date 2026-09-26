@@ -424,11 +424,8 @@ public class MappingController {
     // ========== 内部方法 ==========
 
     private MappingTask requireTask(String id) {
-        MappingTask task = taskRepository.findById(id).orElse(null);
-        if (task == null) {
-            throw new NotFoundException("mapping task not found: " + id);
-        }
-        return task;
+        return taskRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("mapping task not found: " + id));
     }
 
     private void validateCreateRequest(CreateTaskRequest req) {

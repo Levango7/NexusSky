@@ -93,11 +93,8 @@ public class ShowTaskService {
 
     /** 获取任务详情。 */
     public ShowTask getTask(String taskId) {
-        ShowTask task = repository.findById(taskId).orElse(null);
-        if (task == null) {
-            throw new NotFoundException("show task not found: " + taskId);
-        }
-        return task;
+        return repository.findById(taskId)
+                .orElseThrow(() -> new NotFoundException("show task not found: " + taskId));
     }
 
     /** 启动表演任务：CREATED → DEPLOYING → PERFORMING。 */

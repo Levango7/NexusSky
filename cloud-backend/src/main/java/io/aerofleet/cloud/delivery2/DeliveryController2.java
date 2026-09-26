@@ -110,11 +110,8 @@ public class DeliveryController2 {
     @GetMapping("/tasks/{id}")
     @Operation(summary = "获取任务详情", description = "根据任务 ID 获取配送任务详细信息")
     public DeliveryTask2 getTask(@PathVariable("id") String id) {
-        DeliveryTask2 task = repository.findById(id).orElse(null);
-        if (task == null) {
-            throw new NotFoundException("delivery task " + id + " not found");
-        }
-        return task;
+        return repository.findById(id)
+                .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));
     }
 
     /** 启动配送。 */
@@ -122,10 +119,8 @@ public class DeliveryController2 {
     @Transactional
     @Operation(summary = "启动配送", description = "启动指定配送任务，状态从 PENDING 转为 IN_PROGRESS")
     public DeliveryTask2 startTask(@PathVariable("id") String id) {
-        DeliveryTask2 task = repository.findById(id).orElse(null);
-        if (task == null) {
-            throw new NotFoundException("delivery task " + id + " not found");
-        }
+        DeliveryTask2 task = repository.findById(id)
+                .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));
         if (task.getStatus() != DeliveryTask2.Status.PENDING) {
             throw new BadRequestException("task " + id + " is not in PENDING state");
         }
@@ -143,10 +138,8 @@ public class DeliveryController2 {
     @Transactional
     @Operation(summary = "中止配送", description = "中止指定配送任务，状态转为 ABORTED")
     public DeliveryTask2 abortTask(@PathVariable("id") String id) {
-        DeliveryTask2 task = repository.findById(id).orElse(null);
-        if (task == null) {
-            throw new NotFoundException("delivery task " + id + " not found");
-        }
+        DeliveryTask2 task = repository.findById(id)
+                .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));
         if (task.getStatus() != DeliveryTask2.Status.PENDING
                 && task.getStatus() != DeliveryTask2.Status.IN_PROGRESS) {
             throw new BadRequestException(
@@ -162,10 +155,8 @@ public class DeliveryController2 {
     @GetMapping("/tasks/{id}/route")
     @Operation(summary = "获取优化路线", description = "为指定配送任务计算优化路线")
     public OptimizedRoute getRoute(@PathVariable("id") String id) {
-        DeliveryTask2 task = repository.findById(id).orElse(null);
-        if (task == null) {
-            throw new NotFoundException("delivery task " + id + " not found");
-        }
+        DeliveryTask2 task = repository.findById(id)
+                .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));
         OptimizedRoute route = routeOptimizer.optimizeRoute(List.of(task));
         route.setTaskId(id);
         return route;
@@ -177,10 +168,8 @@ public class DeliveryController2 {
     @Operation(summary = "执行投放", description = "执行配送投放操作（空投/着陆交付/绳索降下）")
     public Map<String, Object> deliver(@PathVariable("id") String id,
                                        @RequestBody DeliverRequest body) {
-        DeliveryTask2 task = repository.findById(id).orElse(null);
-        if (task == null) {
-            throw new NotFoundException("delivery task " + id + " not found");
-        }
+        DeliveryTask2 task = repository.findById(id)
+                .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));
         if (body == null || body.method == null) {
             throw new BadRequestException("delivery method is required");
         }
@@ -236,10 +225,8 @@ public class DeliveryController2 {
     @Transactional
     @Operation(summary = "确认签收", description = "确认配送任务已签收完成")
     public Map<String, Object> confirm(@PathVariable("id") String id) {
-        DeliveryTask2 task = repository.findById(id).orElse(null);
-        if (task == null) {
-            throw new NotFoundException("delivery task " + id + " not found");
-        }
+        DeliveryTask2 task = repository.findById(id)
+                .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));
         if (task.getStatus() != DeliveryTask2.Status.DELIVERED) {
             throw new BadRequestException("task " + id + " is not DELIVERED");
         }

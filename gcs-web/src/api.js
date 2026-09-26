@@ -915,6 +915,17 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  // ---- Thermal Vision (热成像可视化) ----
+  getThermalSources: () => jsonFetch('/api/v1/vision/thermal/sources'),
+
+  // ---- Environment (气象环境) ----
+  getEnvStatus: () => jsonFetch('/api/v1/env/status'),
+  getEnvAlerts: () => jsonFetch('/api/v1/env/alerts'),
+
+  // ---- Link Simulation (链路仿真) ----
+  getLinkSimProfiles: () => jsonFetch('/api/v1/link-sim/profiles'),
+  getLinkSimStatus: () => jsonFetch('/api/v1/link-sim/status'),
+
   // ---- Auth ----
   login: (username, password) => jsonFetch('/api/v1/auth/login', {
     method: 'POST',

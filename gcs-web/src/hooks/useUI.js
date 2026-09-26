@@ -33,6 +33,10 @@ export const VIEW_PANEL_MAP = {
   disastercomm: 'mesh',    // 灾害通信归入通信范畴（千元级可用）
   unifiedcmd: 'unifiedcmd',  // 空地指挥独立面板（千元级可用）
   videofusion: 'videofusion', // 视频融合独立面板（千元级可用）
+  thermal: 'thermal',         // 热成像叠加（进阶版可用）
+  weather: 'mission',         // 气象图层归入任务范畴（千元级可用）
+  linkquality: 'mesh',        // 链路质量归入通信范畴（千元级可用）
+  trajectory3d: 'mission',    // 3D轨迹增强归入任务范畴（千元级可用）
   tenants: 'status',       // 租户管理归入状态管理（百元级可用）
   users: 'status',         // 用户管理归入状态管理（百元级可用）
 }

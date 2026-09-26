@@ -1,6 +1,8 @@
 package io.aerofleet.sim.ai;
 
 import io.aerofleet.sim.GeoUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,9 +25,11 @@ import java.util.List;
  * 综合接口 {@link #adaptPath} 串联三者，输出 {@link AdaptivePathResult}：
  * 修正路径 + 各段速度 + 各段航向 + 总能耗估算。
  * <p>
- * 注意：drone-sim 模块未引入 slf4j，统一使用 {@code System.out.println} 输出日志。
+ * 注意：drone-sim 模块使用 SLF4J Logger 输出日志。
  */
 public class AdaptivePathStrategy {
+
+    private static final Logger log = LoggerFactory.getLogger(AdaptivePathStrategy.class);
 
     private static final double WIND_THRESHOLD = 8.0; // m/s，旧接口强风阈值
 
@@ -315,10 +319,8 @@ public class AdaptivePathStrategy {
             }
         }
 
-        System.out.println("[AdaptivePath] adaptPath: segments=" + segCount
-                + " windSpeed=" + windSpeed
-                + " battery=" + batteryPct
-                + " totalEnergy=" + String.format("%.2f", totalEnergy));
+        log.debug("[AdaptivePath] adaptPath: segments={} windSpeed={} battery={} totalEnergy={}",
+                segCount, windSpeed, batteryPct, String.format("%.2f", totalEnergy));
 
         return new AdaptivePathResult(smoothedPath, segmentSpeeds,
                 correctedHeadings, totalEnergy);

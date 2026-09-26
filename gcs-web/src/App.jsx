@@ -32,6 +32,10 @@ import ShowPanel from './components/ShowPanel.jsx'
 import DisasterCommPanel from './components/DisasterCommPanel.jsx'
 import UnifiedCommandPanel from './components/UnifiedCommandPanel.jsx'
 import VideoFusionPanel from './components/VideoFusionPanel.jsx'
+import ThermalOverlayPanel from './components/ThermalOverlayPanel.jsx'
+import WeatherLayerPanel from './components/WeatherLayerPanel.jsx'
+import LinkQualityPanel from './components/LinkQualityPanel.jsx'
+import Trajectory3DPanel from './components/Trajectory3DPanel.jsx'
 import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
@@ -180,6 +184,10 @@ export default function App() {
               { key: 'disastercomm', label: '灾害通信' },
               { key: 'unifiedcmd', label: '空地指挥' },
               { key: 'videofusion', label: '视频融合' },
+              { key: 'thermal', label: '热成像' },
+              { key: 'weather', label: '气象' },
+              { key: 'linkquality', label: '链路质量' },
+              { key: 'trajectory3d', label: '3D轨迹' },
               ...(isAdmin ? [
                 { key: 'tenants', label: '租户管理' },
                 { key: 'users', label: '用户管理' },
@@ -382,6 +390,27 @@ export default function App() {
       ) : view === 'videofusion' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
           <VideoFusionPanel />
+        </div>
+      ) : view === 'thermal' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <ThermalOverlayPanel />
+        </div>
+      ) : view === 'weather' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <WeatherLayerPanel />
+        </div>
+      ) : view === 'linkquality' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <LinkQualityPanel />
+        </div>
+      ) : view === 'trajectory3d' ? (
+        <div className="gcs-body" style={{ display: 'block' }}>
+          <Trajectory3DPanel
+            track={track}
+            telemetry={telemetry}
+            selected={selected}
+            missionDraft={missionDraft}
+          />
         </div>
       ) : view === 'tenants' ? (
         <div className="gcs-body" style={{ display: 'block' }}>
