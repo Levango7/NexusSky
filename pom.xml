@@ -18,6 +18,7 @@
     <module>link-sim</module>
     <module>cloud-backend</module>
     <module>sdk-java</module>
+    <module>regulator-sim</module>
   </modules>
 
   <properties>
