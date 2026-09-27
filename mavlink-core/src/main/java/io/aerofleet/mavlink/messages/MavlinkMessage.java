@@ -4,6 +4,7 @@ import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.MavlinkMessageInfo;
 import io.aerofleet.mavlink.PayloadCodec;
 import io.aerofleet.mavlink.security.MavlinkSigner;
+import io.aerofleet.mavlink.security.TimestampTracker;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -206,6 +207,19 @@ public abstract class MavlinkMessage {
             // ---- NexusSky 自定义扩展消息（P3 灾害应急搜救信号，msgId=483）----
             case BuzzerControlMsg.ID:
                 return BuzzerControlMsg.decode(frame);
+            // ---- C2 开放无人机标识（OPEN_DRONE_ID_*，msgId=12900-12905）----
+            case OpenDroneIdBasicId.ID:
+                return OpenDroneIdBasicId.decode(frame);
+            case OpenDroneIdLocation.ID:
+                return OpenDroneIdLocation.decode(frame);
+            case OpenDroneIdSelfId.ID:
+                return OpenDroneIdSelfId.decode(frame);
+            case OpenDroneIdSystem.ID:
+                return OpenDroneIdSystem.decode(frame);
+            case OpenDroneIdOperatorId.ID:
+                return OpenDroneIdOperatorId.decode(frame);
+            case OpenDroneIdMessagePack.ID:
+                return OpenDroneIdMessagePack.decode(frame);
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }
@@ -218,10 +232,15 @@ public abstract class MavlinkMessage {
     }
 
     /**
-     * 组装为可发送帧，并在签名启用时计算并附加签名。
+     * 组装为可发送帧，并在签名启用时使用标准协议签名。
      * <p>
-     * 签名流程：调用 {@link #encode()} 获取 payload，使用 {@link MavlinkSigner#sign} 计算
-     * HMAC-SHA256 签名（截断 8 字节），存入 {@link #signature} 字段。
+     * 标准签名流程：
+     * <ol>
+     *   <li>用 {@link MavlinkFrame#ofSigned} 构造临时签名帧（占位签名）</li>
+     *   <li>调用 {@link MavlinkFrame#encodeV2()} 获取帧字节，截取帧头至 CRC 部分</li>
+     *   <li>用 {@link MavlinkSigner#sign(byte[], int, long)} 计算标准协议签名</li>
+     *   <li>用 {@link MavlinkFrame#ofSigned} 构造最终签名帧</li>
+     * </ol>
      *
      * @param systemId    系统 ID
      * @param componentId 组件 ID
@@ -231,33 +250,68 @@ public abstract class MavlinkMessage {
      */
     public MavlinkFrame toFrame(int systemId, int componentId, int sequence, MavlinkSigner signer) {
         byte[] payload = encode();
-        if (signer != null && signer.isEnabled()) {
-            this.signature = signer.sign(messageId(), payload);
+        int crcExtra = MavlinkMessageInfo.crcExtraOf(messageId());
+
+        if (signer == null || !signer.isEnabled()) {
+            return MavlinkFrame.of(systemId, componentId, sequence, messageId(), crcExtra, payload);
         }
-        return MavlinkFrame.of(systemId, componentId, sequence, messageId(),
-                MavlinkMessageInfo.crcExtraOf(messageId()), payload);
+
+        // 标准协议签名：先构造临时签名帧获取 frameBytes，再计算真正的签名
+        int linkId = signer.getLinkId();
+        long timestamp = System.currentTimeMillis() / 10; // MAVLink 时间戳单位：10ms tick
+
+        // 用占位签名构造临时帧，以获取正确的帧字节（INC=0x01 的 CRC）
+        byte[] placeholderSig = new byte[SIGNATURE_LENGTH];
+        MavlinkFrame tempFrame = MavlinkFrame.ofSigned(systemId, componentId, sequence,
+                messageId(), crcExtra, payload, linkId, timestamp, placeholderSig);
+        byte[] allBytes = tempFrame.encodeV2();
+        // 截取帧头至 CRC（不含签名数据）：12 + payloadLength 字节
+        int frameBytesLen = 12 + payload.length;
+        byte[] frameBytes = Arrays.copyOf(allBytes, frameBytesLen);
+
+        // 计算真正的签名
+        this.signature = signer.sign(frameBytes, linkId, timestamp);
+
+        // 构造最终签名帧
+        return MavlinkFrame.ofSigned(systemId, componentId, sequence,
+                messageId(), crcExtra, payload, linkId, timestamp, this.signature);
     }
 
     /**
      * 从帧解码为具体消息，并在签名启用时验证签名。
      * <p>
-     * 验证流程：从帧中提取 msgId 和 payload，使用 {@link MavlinkSigner#verify} 验证签名。
-     * 签名验证失败时抛出 {@link io.aerofleet.mavlink.MavlinkException}。
+     * 验证流程：
+     * <ul>
+     *   <li>从帧字段直接获取 signature（{@link MavlinkFrame#getSignature()}）</li>
+     *   <li>signature 为 null：按 {@link MavlinkSigner#isRejectUnsigned()} 决定拒绝或告警通过</li>
+     *   <li>signature 非 null：调用 {@link MavlinkSigner#verify(byte[], int, long, byte[])} 验证，
+     *       失败抛 {@link io.aerofleet.mavlink.MavlinkException}</li>
+     * </ul>
      *
      * @param frame  接收到的 MAVLink 帧
      * @param signer 签名器（null 或未启用时等同于 {@link #decode(MavlinkFrame)}）
      * @return 解码后的消息对象
-     * @throws io.aerofleet.mavlink.MavlinkException 签名验证失败时
+     * @throws io.aerofleet.mavlink.MavlinkException 签名验证失败或拒绝未签名消息时
      */
     public static MavlinkMessage decode(MavlinkFrame frame, MavlinkSigner signer) {
         if (signer != null && signer.isEnabled()) {
-            byte[] payload = frame.getPayload();
             byte[] extractedSig = extractSignatureFromFrame(frame, signer);
             if (extractedSig == null) {
-                // 签名传输机制未实现，跳过验证并记录警告
-                log.warn("MAVLink签名已启用但帧中未包含签名数据，跳过验证（签名传输机制待实现）");
+                // 帧中未包含签名数据
+                if (signer.isRejectUnsigned()) {
+                    throw new io.aerofleet.mavlink.MavlinkException(
+                            "MAVLink签名已启用且rejectUnsigned=true，拒绝未签名消息: msgId="
+                                    + frame.getMessageId());
+                }
+                log.warn("MAVLink签名已启用但帧中未包含签名数据，告警通过（rejectUnsigned=false）: msgId={}",
+                        frame.getMessageId());
             } else {
-                if (!signer.verify(frame.getMessageId(), payload, extractedSig)) {
+                // 获取帧字节（帧头至 CRC，不含签名数据）用于标准协议签名验证
+                byte[] allBytes = frame.encodeV2();
+                int frameBytesLen = 12 + frame.getPayloadLength();
+                byte[] frameBytes = Arrays.copyOf(allBytes, frameBytesLen);
+
+                if (!signer.verify(frameBytes, frame.getLinkId(), frame.getTimestamp(), extractedSig)) {
                     throw new io.aerofleet.mavlink.MavlinkException(
                             "MAVLink签名验证失败: msgId=" + frame.getMessageId());
                 }
@@ -267,20 +321,46 @@ public abstract class MavlinkMessage {
     }
 
     /**
-     * 从帧中提取签名。
+     * 从帧解码为具体消息，验证签名后额外校验 timestamp 单调性。
      * <p>
-     * 当前实现：签名不在帧线上格式中传输，而是由上层协议或传输层附带。
-     * 此方法返回 null，表示签名需要通过其他渠道获取。
-     * 子类或传输层可覆盖此方法以提供具体的签名提取逻辑。
+     * 在 {@link #decode(MavlinkFrame, MavlinkSigner)} 的基础上，使用 {@link TimestampTracker}
+     * 校验签名帧的 timestamp 是否满足单调性要求（防止重放攻击）。
+     * timestamp 校验失败时抛 {@link io.aerofleet.mavlink.MavlinkException}。
+     *
+     * @param frame     接收到的 MAVLink 帧
+     * @param signer    签名器
+     * @param tsTracker 时间戳跟踪器
+     * @return 解码后的消息对象
+     * @throws io.aerofleet.mavlink.MavlinkException 签名验证失败、拒绝未签名消息或 timestamp 回退时
+     */
+    public static MavlinkMessage decode(MavlinkFrame frame, MavlinkSigner signer, TimestampTracker tsTracker) {
+        // 先执行签名验证（包含 rejectUnsigned 逻辑）
+        MavlinkMessage msg = decode(frame, signer);
+
+        // 签名启用且帧包含签名数据时，额外校验 timestamp 单调性
+        if (signer != null && signer.isEnabled() && frame.isSigned()) {
+            if (tsTracker != null && !tsTracker.check(frame.getLinkId(), frame.getTimestamp())) {
+                throw new io.aerofleet.mavlink.MavlinkException(
+                        "MAVLink timestamp单调性校验失败（疑似重放攻击）: linkId="
+                                + frame.getLinkId() + ", timestamp=" + frame.getTimestamp());
+            }
+        }
+
+        return msg;
+    }
+
+    /**
+     * 从帧字段直接提取签名。
+     * <p>
+     * MAVLink v2 签名帧在 CRC 后追加 13 字节签名数据（linkId + timestamp + signature），
+     * 解析时已由 {@link MavlinkFrame#decodeV2(byte[])} 提取并存入帧字段。
      *
      * @param frame  接收到的 MAVLink 帧
      * @param signer 签名器
-     * @return 签名字节，或 null 表示无签名
+     * @return 8 字节签名，或 null 表示帧未包含签名数据
      */
     private static byte[] extractSignatureFromFrame(MavlinkFrame frame, MavlinkSigner signer) {
-        // 当前阶段签名不在帧线上格式中传输，返回 null 表示需要外部提供签名
-        // 后续可通过 incompatibility flags 扩展帧格式以携带签名
-        return null;
+        return frame.getSignature();
     }
 
     /**

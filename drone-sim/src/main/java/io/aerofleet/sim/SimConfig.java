@@ -2,6 +2,7 @@ package io.aerofleet.sim;
 
 import io.aerofleet.sim.mesh.MeshRouterConfig;
 import io.aerofleet.sim.orch.OrchestrationConfig;
+import io.aerofleet.sim.rid.RidConfig;
 import io.aerofleet.sim.satrelay.SatRelayConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,6 +83,32 @@ public final class SimConfig {
     public final BudgetMode budgetMode;
     /** 灾害应急配置（仅 budgetMode 为 EMERGENCY_TOY/EMERGENCY_STANDARD 时非 null）。 */
     public final EmergencyBudgetConfig emergencyBudgetConfig;
+    // ---- C2 RID 远程识别参数（FR-RID）----
+    /** RID 启用开关（--rid）。false 时 VirtualDrone.ridBroadcaster=null，既有行为不变（DFX 4.5）。 */
+    public final boolean ridEnabled;
+    /** RID 广播周期秒（--rid-interval，默认 1.0）。 */
+    public final double ridInterval;
+    /** 无人机序列号（--serial-no，默认 "UNKNOWN-<sysid>"）。 */
+    public final String serialNo;
+    /** 操作者注册号（--operator-id，默认空）。 */
+    public final String operatorId;
+    /** 操作者纬度（--operator-lat，默认 0.0）。 */
+    public final double operatorLat;
+    /** 操作者经度（--operator-lon，默认 0.0）。 */
+    public final double operatorLon;
+    /** 无人机类型（--ua-type，1=飞机，默认 1）。 */
+    public final int uaType;
+    /** 自描述文本（--self-id-desc，默认 "NexusSky drone"）。 */
+    public final String selfIdDesc;
+    // ---- C5 MAVLink v2 签名参数 ----
+    /** 签名密钥（--signing-key，默认空，空则不启用签名）。 */
+    public final String signingKey;
+    /** 多机密钥文件路径（--signing-key-store，默认空）。 */
+    public final String signingKeyStore;
+    /** 拒绝未签名帧（--reject-unsigned flag，默认 false）。 */
+    public final boolean rejectUnsigned;
+    /** 签名是否启用（signingKey 或 signingKeyStore 非空时启用）。 */
+    public final boolean signingEnabled;
 
     private SimConfig(int port, int sysid, double lat, double lon, double speed,
                       String name, String scenario, String bindIp, boolean failsafe,
@@ -96,8 +123,13 @@ public final class SimConfig {
                          boolean terrainAdaptEnabled, double terrainGridResolution,
                           io.aerofleet.sim.celltower.CellTowerSimConfig cellTowerConfig,
                           OrchestrationConfig orchConfig,
-                          BudgetMode budgetMode,
-                          EmergencyBudgetConfig emergencyBudgetConfig) {
+                           BudgetMode budgetMode,
+                           EmergencyBudgetConfig emergencyBudgetConfig,
+                           boolean ridEnabled, double ridInterval,
+                           String serialNo, String operatorId,
+                           double operatorLat, double operatorLon,
+                            int uaType, String selfIdDesc,
+                            String signingKey, String signingKeyStore, boolean rejectUnsigned) {
         this.port = port;
         this.sysid = sysid;
         this.lat = lat;
@@ -131,6 +163,19 @@ public final class SimConfig {
         this.orchConfig = orchConfig;
         this.budgetMode = budgetMode;
         this.emergencyBudgetConfig = emergencyBudgetConfig;
+        this.ridEnabled = ridEnabled;
+        this.ridInterval = ridInterval;
+        this.serialNo = serialNo;
+        this.operatorId = operatorId;
+        this.operatorLat = operatorLat;
+        this.operatorLon = operatorLon;
+        this.uaType = uaType;
+        this.selfIdDesc = selfIdDesc;
+        this.signingKey = signingKey;
+        this.signingKeyStore = signingKeyStore;
+        this.rejectUnsigned = rejectUnsigned;
+        this.signingEnabled = (signingKey != null && !signingKey.isEmpty())
+                || (signingKeyStore != null && !signingKeyStore.isEmpty());
     }
 
     /** Defaults: Shenzhen University Town area, 8 m/s cruise, port 14540, sysid 1. */
@@ -145,7 +190,9 @@ public final class SimConfig {
                 io.aerofleet.sim.celltower.CellTowerSimConfig.defaults(),
                 OrchestrationConfig.defaults(),
                 null,
-                null);
+                null,
+                false, 1.0, "UNKNOWN-1", "", 0.0, 0.0, 1, "NexusSky drone",
+                "", "", false);
     }
 
     /**
@@ -201,6 +248,19 @@ public final class SimConfig {
         long cellHeartbeatTimeoutMs = 30_000L;
         // 丐版模式默认值：null = 完整版（既有行为不变，DFX 4.5）
         BudgetMode budgetMode = null;
+        // C2 RID 远程识别参数默认值（FR-RID）
+        boolean ridEnabled = false;
+        double ridInterval = 1.0;
+        String serialNo = null;  // null 表示未指定，后续用 "UNKNOWN-" + sysid 填充
+        String operatorId = "";
+        double operatorLat = 0.0;
+        double operatorLon = 0.0;
+        int uaType = 1;
+        String selfIdDesc = "NexusSky drone";
+        // C5 MAVLink v2 签名参数默认值
+        String signingKey = "";
+        String signingKeyStore = "";
+        boolean rejectUnsigned = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -299,6 +359,19 @@ public final class SimConfig {
                                 + " (expected toy|standard|advanced|emergency-toy|emergency-standard, ignoring)");
                         }
                     }
+                    // C2 RID 远程识别参数（FR-RID，DFX 4.4 配置可追溯）
+                    case "rid" -> ridEnabled = true;
+                    case "rid-interval" -> ridInterval = Double.parseDouble(value);
+                    case "serial-no" -> serialNo = value;
+                    case "operator-id" -> operatorId = value;
+                    case "operator-lat" -> operatorLat = Double.parseDouble(value);
+                    case "operator-lon" -> operatorLon = Double.parseDouble(value);
+                    case "ua-type" -> uaType = Integer.parseInt(value);
+                    case "self-id-desc" -> selfIdDesc = value;
+                    // C5 MAVLink v2 签名参数
+                    case "signing-key" -> signingKey = value;
+                    case "signing-key-store" -> signingKeyStore = value;
+                    case "reject-unsigned" -> rejectUnsigned = true;
                     default -> {
                         SimLog.warn("Unknown option --" + key);
                         printUsage();
@@ -339,6 +412,10 @@ public final class SimConfig {
                 : SatRelayConfig.defaults();
         // 灾害应急配置：仅 EMERGENCY_TOY/EMERGENCY_STANDARD 时创建，否则 null
         EmergencyBudgetConfig emergencyBudgetConfig = EmergencyBudgetConfig.forMode(budgetMode);
+        // RID serialNo 默认值：用户未指定 --serial-no 时，使用 "UNKNOWN-" + sysid
+        if (serialNo == null) {
+            serialNo = "UNKNOWN-" + sysid;
+        }
         return new SimConfig(port, sysid, lat, lon, speed, name, scenario, bindIp,
                 failsafe, terrain, fence, targets, httpPort,
                 envEnabled, envScenario, envSeed, envWindMax, envTempRange,
@@ -353,7 +430,10 @@ public final class SimConfig {
                         cellLoadBalanceThreshold, cellHeartbeatTimeoutMs),
                 OrchestrationConfig.defaults(),
                 budgetMode,
-                emergencyBudgetConfig);
+                emergencyBudgetConfig,
+                ridEnabled, ridInterval, serialNo, operatorId,
+                operatorLat, operatorLon, uaType, selfIdDesc,
+                signingKey, signingKeyStore, rejectUnsigned);
     }
 
     public static void printUsage() {
@@ -424,6 +504,31 @@ public final class SimConfig {
         log.info("[sim]              toy=ultrasonic+WiFi only, standard=GPS+ToF+LoRa, advanced=all sensors");
         log.info("[sim]              emergency-toy=~74yuan WiFi ESP-NOW+ultrasonic+LED+buzzer (disaster rescue)");
         log.info("[sim]              emergency-standard=~429yuan LoRa Mesh+ToF+GPS+AMG8833+LED+buzzer (disaster rescue)");
+        log.info("[sim]   --rid              enable Remote ID broadcast (default off)");
+        log.info("[sim]   --rid-interval     RID broadcast interval seconds (default 1.0)");
+        log.info("[sim]   --serial-no        drone serial number (default UNKNOWN-<sysid>)");
+        log.info("[sim]   --operator-id      operator registration ID (default empty)");
+        log.info("[sim]   --operator-lat     operator latitude (default 0.0)");
+        log.info("[sim]   --operator-lon     operator longitude (default 0.0)");
+        log.info("[sim]   --ua-type          UA type 1=airplane (default 1)");
+        log.info("[sim]   --self-id-desc     self-description text (default \"NexusSky drone\")");
+        log.info("[sim]   --signing-key      MAVLink v2 signing secret key (default empty = disabled)");
+        log.info("[sim]   --signing-key-store path to multi-key JSON file for multi-drone signing");
+        log.info("[sim]   --reject-unsigned  reject unsigned frames when signing is enabled (flag)");
+    }
+
+    /**
+     * 从当前字段构造 {@link RidConfig} record。
+     * <p>
+     * 当 ridEnabled=false 时，仍返回一个 enabled=false 的 RidConfig，
+     * 调用方可据此判断是否创建 RID 广播器。
+     * </p>
+     *
+     * @return 包含当前 RID 参数的 RidConfig record
+     */
+    public RidConfig ridConfig() {
+        return new RidConfig(ridEnabled, ridInterval, serialNo, operatorId,
+                operatorLat, operatorLon, uaType, selfIdDesc, true);
     }
 }
 

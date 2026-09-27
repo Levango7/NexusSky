@@ -31,6 +31,14 @@ public final class DroneSimMain {
         } else {
             log.info("[sim] env: disabled (no --env flag)");
         }
+        if (config.signingEnabled) {
+            log.info("[sim] signing: enabled keyStore={} rejectUnsigned={}",
+                    config.signingKeyStore != null && !config.signingKeyStore.isEmpty()
+                            ? config.signingKeyStore : "single-key",
+                    config.rejectUnsigned);
+        } else {
+            log.info("[sim] signing: disabled (no --signing-key or --signing-key-store)");
+        }
 
         try (VirtualDrone drone = new VirtualDrone(config)) {
             drone.start();

@@ -34,8 +34,13 @@ import io.aerofleet.mavlink.messages.MeshRouteRequestMsg;
 import io.aerofleet.mavlink.messages.MeshRouteReplyMsg;
 import io.aerofleet.mavlink.messages.MeshRouteErrorMsg;
 import io.aerofleet.mavlink.enums.ScanMode;
+import io.aerofleet.mavlink.security.MavlinkSigner;
+import io.aerofleet.mavlink.security.SigningKeyManager;
+import io.aerofleet.mavlink.security.TimestampTracker;
 import io.aerofleet.sim.mesh.MeshRouter;
 import io.aerofleet.sim.orch.OrchestrationEngine;
+import io.aerofleet.sim.rid.RidBroadcaster;
+import io.aerofleet.sim.rid.RidConfig;
 import io.aerofleet.sim.satrelay.SatRelayEngine;
 
 import java.io.IOException;
@@ -218,6 +223,26 @@ public final class VirtualDrone implements AutoCloseable {
      */
     private OrchestrationEngine orchEngine;
 
+    /**
+     * C2 RID 远程识别广播器（FR-RID）：null 当 !config.ridEnabled（既有行为不变，DFX 4.5）。
+     * 由构造器创建并 start，tickOnce 每 tick 调 updateTelemetry() 传入当前遥测数据。
+     */
+    private RidBroadcaster ridBroadcaster;
+    /** RID 启用标志（config.ridEnabled 的快照，避免 tickOnce 每次读 config）。 */
+    private final boolean ridEnabled;
+
+    /**
+     * C5 MAVLink v2 签名组件：signingEnabled=false 时 signer=null，既有行为不变（DFX 4.5）。
+     * signer 用于遥测发送附加签名、命令接收验证签名。
+     */
+    private final MavlinkSigner signer;
+    /** 签名密钥管理器：单机模式或多机模式（--signing-key-store）。 */
+    private final SigningKeyManager keyManager;
+    /** 时间戳跟踪器：防止重放攻击（签名启用时使用）。 */
+    private final TimestampTracker timestampTracker;
+    /** 签名启用标志（config.signingEnabled 的快照）。 */
+    private final boolean signingEnabled;
+
     // guarded-by-this flight state
     private FlightState state = FlightState.INIT;
     private String lastStatus = null;
@@ -363,6 +388,20 @@ public final class VirtualDrone implements AutoCloseable {
         } else {
             this.orchEngine = null;
         }
+        // C2 RID 远程识别广播器创建（FR-RID）：config.ridEnabled 时创建并 start，否则 null（DFX 4.5 既有行为不变）
+        if (config.ridEnabled) {
+            RidConfig ridConfig = config.ridConfig();
+            this.ridBroadcaster = new RidBroadcaster(transport, config.sysid, ridConfig);
+            this.ridBroadcaster.start(transport, config.sysid, ridConfig);
+            this.ridEnabled = true;
+            SimLog.info("RID broadcaster enabled: sysid=" + config.sysid
+                    + " interval=" + ridConfig.broadcastInterval() + "s"
+                    + " serialNo=" + ridConfig.serialNo()
+                    + " messagePack=" + ridConfig.useMessagePack());
+        } else {
+            this.ridBroadcaster = null;
+            this.ridEnabled = false;
+        }
         // 丐版模式处理（budget）：根据 budgetMode 实例化丐版传感器并自动装配避障/热成像
         // DFX 4.5：null 或 ADVANCED 时既有行为不变（不实例化丐版传感器）
         this.budgetMode = config.budgetMode;
@@ -435,6 +474,40 @@ public final class VirtualDrone implements AutoCloseable {
             t.setDaemon(true);
             return t;
         });
+        // C5 MAVLink v2 签名组件初始化（signingEnabled=false 时 signer=null，既有行为不变）
+        if (config.signingEnabled) {
+            // 多机模式：从密钥文件加载
+            if (config.signingKeyStore != null && !config.signingKeyStore.isEmpty()) {
+                this.keyManager = new SigningKeyManager(
+                        java.nio.file.Paths.get(config.signingKeyStore),
+                        config.signingKey.isEmpty() ? null : config.signingKey);
+            } else {
+                // 单机模式：使用全局密钥
+                this.keyManager = new SigningKeyManager(config.signingKey);
+            }
+            // 从 keyManager 获取本机密钥条目，构造 signer
+            SigningKeyManager.KeyEntry keyEntry = this.keyManager.keyFor(config.sysid);
+            if (keyEntry != null) {
+                this.signer = new MavlinkSigner(true, keyEntry.key(), keyEntry.linkId(),
+                        config.rejectUnsigned);
+            } else {
+                // 无可用密钥：降级为不启用签名（安全失败）
+                SimLog.warn("signing enabled but no key for sysid=" + config.sysid
+                        + ", falling back to unsigned mode");
+                this.signer = null;
+            }
+            this.timestampTracker = new TimestampTracker();
+            this.signingEnabled = true;
+            SimLog.info("MAVLink v2 signing enabled: sysid=" + config.sysid
+                    + " linkId=" + (keyEntry != null ? keyEntry.linkId() : "N/A")
+                    + " rejectUnsigned=" + config.rejectUnsigned
+                    + " multiKey=" + this.keyManager.isMultiMode());
+        } else {
+            this.signer = null;
+            this.keyManager = null;
+            this.timestampTracker = null;
+            this.signingEnabled = false;
+        }
         transport.addFrameListener(this::onFrame);
     }
 
@@ -462,6 +535,10 @@ public final class VirtualDrone implements AutoCloseable {
         if (satRelayEnabled) {
             satRelayEngine.close();
         }
+        // C2 RID 广播器关闭（FR-RID）
+        if (ridBroadcaster != null) {
+            ridBroadcaster.close();
+        }
         scheduler.shutdownNow();
         // P0: 关闭 ground-truth HTTP sidecar，避免端口和线程泄漏
         if (truthServer != null) {
@@ -487,12 +564,18 @@ public final class VirtualDrone implements AutoCloseable {
         // Any GCS packet (heartbeat, mission traffic, commands) counts as
         // "the datalink is alive" for the failsafe layer.
         lastGcsRxMs = System.currentTimeMillis();
-        // Accept frames from any GCS sysid; decode only messages we act on.
+        // C5 签名验证：签名启用时验证帧签名 + timestamp，失败则丢弃帧 + WARN 日志
         MavlinkMessage msg;
         try {
-            msg = MavlinkMessage.decode(frame);
+            if (signingEnabled) {
+                msg = MavlinkMessage.decode(frame, signer, timestampTracker);
+            } else {
+                msg = MavlinkMessage.decode(frame);
+            }
         } catch (RuntimeException e) {
-            return; // malformed payload for its type: drop quietly
+            // 签名验证失败、timestamp 重放检测失败、或 malformed payload：丢弃帧
+            SimLog.warn("frame rejected: " + e.getMessage());
+            return;
         }
         if (msg == null) {
             return;
@@ -1168,6 +1251,23 @@ public final class VirtualDrone implements AutoCloseable {
         // orchEngine 启用时每个 tick 调 orchEngine.tick()，驱动持续服务阶段超时检查。
         if (orchEngine != null) {
             orchEngine.tick(nowMs);
+        }
+
+        // C2 RID 遥测更新（FR-RID）：ridBroadcaster 启用时每个 tick 传入当前遥测数据。
+        // emergency=true 当 failsafe 触发（RTL/HOLD）或车辆坠毁时。
+        if (ridBroadcaster != null) {
+            boolean emergency = state == FlightState.CRASHED
+                    || state == FlightState.HOLD
+                    || state == FlightState.RTL;
+            ridBroadcaster.updateTelemetry(
+                    physics.lat(), physics.lon(),
+                    physics.alt(), physics.alt(),  // altBaro = altGeo（仿真无气压偏差）
+                    physics.alt(),                 // height = 离地高度（仿真中 alt 即离地）
+                    physics.headingDeg(),
+                    physics.groundSpeed(),
+                    physics.vz(),
+                    state.flying() || physics.alt() > AIRBORNE_ALT,
+                    emergency);
         }
     }
 
@@ -2237,10 +2337,16 @@ public final class VirtualDrone implements AutoCloseable {
         return physics.groundSpeed() * Math.sin(physics.yawRad());
     }
 
-    /** Telemetry goes to the last known peer (learned from any inbound packet). */
+    /**
+     * Telemetry goes to the last known peer (learned from any inbound packet).
+     * 签名启用时使用 {@link MavlinkMessage#toFrame(int, int, int, MavlinkSigner)} 附加签名。
+     */
     private void send(MavlinkMessage msg) throws IOException {
-        MavlinkFrame frame = msg.toFrame(config.sysid, COMPONENT_ID,
-                frameSeq.getAndIncrement() & 0xFF);
+        MavlinkFrame frame = signingEnabled
+                ? msg.toFrame(config.sysid, COMPONENT_ID,
+                        frameSeq.getAndIncrement() & 0xFF, signer)
+                : msg.toFrame(config.sysid, COMPONENT_ID,
+                        frameSeq.getAndIncrement() & 0xFF);
         SocketAddress peer = transport.getLastPeer();
         if (peer != null) {
             transport.send(frame, peer);
