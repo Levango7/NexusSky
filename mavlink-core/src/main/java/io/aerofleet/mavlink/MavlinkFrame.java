@@ -3,12 +3,16 @@ package io.aerofleet.mavlink;
 /**
  * MAVLink v2.0 帧（STX=0xFD）的不可变表示。
  * 线上布局：STX | LEN | INC | COMPAT | SEQ | SID | CID | MSGID(3B LE) | PAYLOAD | CRC(2B LE)。
+ * 签名帧在 CRC 后追加 13 字节：LINK_ID(1B) | TIMESTAMP(6B BE) | SIGNATURE(8B)。
  * v1 帧（STX=0xFE，无 INC/COMPAT，MSGID 单字节）由 Parser 解析后统一为本表示。
  */
 public final class MavlinkFrame {
 
     public static final int STX_V2 = 0xFD;
     public static final int STX_V1 = 0xFE;
+
+    /** 签名数据长度：linkId(1B) + timestamp(6B) + signature(8B) = 15B */
+    public static final int SIGNATURE_DATA_LENGTH = 15;
 
     private final int payloadLength;
     private final int incompatibilityFlags;
@@ -20,9 +24,31 @@ public final class MavlinkFrame {
     private final byte[] payload;
     private final int crc;
 
+    // 签名帧扩展字段（非签名帧时 linkId=0, timestamp=0, signature=null）
+    private final int linkId;
+    private final long timestamp;
+    private final byte[] signature;
+
+    /**
+     * 全参数构造器（含签名字段）。
+     *
+     * @param payloadLength       payload 长度
+     * @param incompatibilityFlags 不兼容标志（bit 0 = 签名帧）
+     * @param compatibilityFlags  兼容标志
+     * @param sequence            序列号
+     * @param systemId            系统 ID
+     * @param componentId         组件 ID
+     * @param messageId           消息 ID
+     * @param payload             payload 字节
+     * @param crc                 CRC-16/X.25
+     * @param linkId              链路 ID（签名帧用，非签名帧为 0）
+     * @param timestamp           签名时间戳（签名帧用，非签名帧为 0）
+     * @param signature           8 字节签名（签名帧用，非签名帧为 null）
+     */
     public MavlinkFrame(int payloadLength, int incompatibilityFlags, int compatibilityFlags,
                         int sequence, int systemId, int componentId, int messageId,
-                        byte[] payload, int crc) {
+                        byte[] payload, int crc,
+                        int linkId, long timestamp, byte[] signature) {
         this.payloadLength = payloadLength;
         this.incompatibilityFlags = incompatibilityFlags;
         this.compatibilityFlags = compatibilityFlags;
@@ -32,9 +58,27 @@ public final class MavlinkFrame {
         this.messageId = messageId;
         this.payload = payload;
         this.crc = crc;
+        this.linkId = linkId;
+        this.timestamp = timestamp;
+        this.signature = signature;
     }
 
-    /** 构造发送帧：按官方 finalize 算法计算完整 CRC（头字段 + payload + CRC_EXTRA）。 */
+    /**
+     * 向后兼容构造器（不含签名字段）。
+     * 委托全参数构造器，签名相关字段取默认值。
+     */
+    public MavlinkFrame(int payloadLength, int incompatibilityFlags, int compatibilityFlags,
+                        int sequence, int systemId, int componentId, int messageId,
+                        byte[] payload, int crc) {
+        this(payloadLength, incompatibilityFlags, compatibilityFlags,
+                sequence, systemId, componentId, messageId,
+                payload, crc,
+                0, 0L, null);
+    }
+
+    /**
+     * 构造发送帧（非签名）：按官方 finalize 算法计算完整 CRC（头字段 + payload + CRC_EXTRA）。
+     */
     public static MavlinkFrame of(int systemId, int componentId, int sequence,
                                   int messageId, int crcExtra, byte[] payload) {
         if (payload != null && payload.length > 255) {
@@ -56,10 +100,59 @@ public final class MavlinkFrame {
                 messageId, payload, crc);
     }
 
-    /** 序列化为 MAVLink v2 线上字节。 */
+    /**
+     * 构造签名发送帧：CRC 计算与 {@link #of} 一致，INC=0x01。
+     *
+     * @param systemId    系统 ID
+     * @param componentId 组件 ID
+     * @param sequence    序列号
+     * @param messageId   消息 ID
+     * @param crcExtra    CRC_EXTRA 字节
+     * @param payload     payload 字节
+     * @param linkId      链路 ID
+     * @param timestamp   签名时间戳（10ms tick）
+     * @param signature   8 字节 HMAC-SHA256 签名
+     * @return 签名帧实例
+     */
+    public static MavlinkFrame ofSigned(int systemId, int componentId, int sequence,
+                                        int messageId, int crcExtra, byte[] payload,
+                                        int linkId, long timestamp, byte[] signature) {
+        if (payload != null && payload.length > 255) {
+            throw new IllegalArgumentException("MAVLink payload exceeds 255 bytes: " + payload.length);
+        }
+        if (signature != null && signature.length != 8) {
+            throw new IllegalArgumentException("Signature must be 8 bytes, got: " + signature.length);
+        }
+        int crc = MavlinkCrc.init();
+        crc = MavlinkCrc.accumulate(crc, payload.length);
+        crc = MavlinkCrc.accumulate(crc, 0x01); // INC bit 0 置位
+        crc = MavlinkCrc.accumulate(crc, 0);
+        crc = MavlinkCrc.accumulate(crc, sequence);
+        crc = MavlinkCrc.accumulate(crc, systemId);
+        crc = MavlinkCrc.accumulate(crc, componentId);
+        crc = MavlinkCrc.accumulate(crc, messageId & 0xFF);
+        crc = MavlinkCrc.accumulate(crc, (messageId >> 8) & 0xFF);
+        crc = MavlinkCrc.accumulate(crc, (messageId >> 16) & 0xFF);
+        crc = MavlinkCrc.accumulate(crc, payload, 0, payload.length);
+        crc = MavlinkCrc.accumulate(crc, crcExtra);
+        return new MavlinkFrame(payload.length, 0x01, 0, sequence, systemId, componentId,
+                messageId, payload, crc,
+                linkId, timestamp, signature);
+    }
+
+    /**
+     * 序列化为 MAVLink v2 线上字节。
+     * <p>
+     * 签名帧（INC bit 0 置位且 signature != null）：在 CRC 后追加 13 字节签名数据。
+     * 非签名帧：输出与原有逻辑逐字节一致。
+     *
+     * @return v2 线上字节序列
+     */
     public byte[] encodeV2() {
         int len = payload.length;
-        byte[] buf = new byte[len + 12];
+        boolean isSigned = (incompatibilityFlags & 0x01) != 0 && signature != null;
+        int totalLen = isSigned ? (len + 12 + SIGNATURE_DATA_LENGTH) : (len + 12);
+        byte[] buf = new byte[totalLen];
         buf[0] = (byte) STX_V2;
         buf[1] = (byte) len;
         buf[2] = (byte) incompatibilityFlags;
@@ -73,7 +166,84 @@ public final class MavlinkFrame {
         System.arraycopy(payload, 0, buf, 10, len);
         buf[10 + len] = (byte) (crc & 0xFF);
         buf[11 + len] = (byte) ((crc >> 8) & 0xFF);
+
+        if (isSigned) {
+            int sigOffset = 12 + len;
+            // linkId: 1 byte
+            buf[sigOffset] = (byte) (linkId & 0xFF);
+            // timestamp: 6 bytes big-endian
+            buf[sigOffset + 1] = (byte) ((timestamp >> 40) & 0xFF);
+            buf[sigOffset + 2] = (byte) ((timestamp >> 32) & 0xFF);
+            buf[sigOffset + 3] = (byte) ((timestamp >> 24) & 0xFF);
+            buf[sigOffset + 4] = (byte) ((timestamp >> 16) & 0xFF);
+            buf[sigOffset + 5] = (byte) ((timestamp >> 8) & 0xFF);
+            buf[sigOffset + 6] = (byte) (timestamp & 0xFF);
+            // signature: 8 bytes
+            System.arraycopy(signature, 0, buf, sigOffset + 7, 8);
+        }
         return buf;
+    }
+
+    /**
+     * 从原始字节解析 MAVLink v2 帧。
+     * <p>
+     * 解析流程：校验 STX=0xFD → 解析 LEN/INC/COMPAT/SEQ/SID/CID/MSGID/PAYLOAD/CRC →
+     * 若 INC bit 0 置位且长度足够则解析签名数据（linkId + timestamp + signature）。
+     *
+     * @param raw 原始字节序列
+     * @return 解析后的 MavlinkFrame 实例
+     * @throws IllegalArgumentException 如果 STX 不是 0xFD 或数据长度不足
+     */
+    public static MavlinkFrame decodeV2(byte[] raw) {
+        if (raw == null || raw.length < 12) {
+            throw new IllegalArgumentException("Frame too short for v2 header: " + (raw == null ? "null" : raw.length));
+        }
+        if ((raw[0] & 0xFF) != STX_V2) {
+            throw new IllegalArgumentException("Invalid STX for v2 frame: 0x" + Integer.toHexString(raw[0] & 0xFF));
+        }
+        int len = raw[1] & 0xFF;
+        int inc = raw[2] & 0xFF;
+        int compat = raw[3] & 0xFF;
+        int seq = raw[4] & 0xFF;
+        int sid = raw[5] & 0xFF;
+        int cid = raw[6] & 0xFF;
+        int msgId = (raw[7] & 0xFF) | ((raw[8] & 0xFF) << 8) | ((raw[9] & 0xFF) << 16);
+
+        int minLen = 12 + len;
+        if (raw.length < minLen) {
+            throw new IllegalArgumentException("Frame too short for declared LEN=" + len + ": " + raw.length);
+        }
+
+        byte[] payload = new byte[len];
+        System.arraycopy(raw, 10, payload, 0, len);
+
+        int crc = (raw[10 + len] & 0xFF) | ((raw[11 + len] & 0xFF) << 8);
+
+        // 签名帧长度校验：INC bit 0 置位时必须有足够的签名数据
+        if ((inc & 0x01) != 0 && raw.length < minLen + SIGNATURE_DATA_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Signed frame too short: need " + (minLen + SIGNATURE_DATA_LENGTH) + " bytes, got " + raw.length);
+        }
+
+        // 解析签名数据（INC bit 0 置位且长度足够）
+        int linkId = 0;
+        long timestamp = 0L;
+        byte[] signature = null;
+        if ((inc & 0x01) != 0) {
+            int sigOffset = 12 + len;
+            linkId = raw[sigOffset] & 0xFF;
+            timestamp = ((long) (raw[sigOffset + 1] & 0xFF) << 40)
+                    | ((long) (raw[sigOffset + 2] & 0xFF) << 32)
+                    | ((long) (raw[sigOffset + 3] & 0xFF) << 24)
+                    | ((long) (raw[sigOffset + 4] & 0xFF) << 16)
+                    | ((long) (raw[sigOffset + 5] & 0xFF) << 8)
+                    | ((long) (raw[sigOffset + 6] & 0xFF));
+            signature = new byte[8];
+            System.arraycopy(raw, sigOffset + 7, signature, 0, 8);
+        }
+
+        return new MavlinkFrame(len, inc, compat, seq, sid, cid, msgId,
+                payload, crc, linkId, timestamp, signature);
     }
 
     public int getPayloadLength() {
@@ -110,5 +280,25 @@ public final class MavlinkFrame {
 
     public int getCrc() {
         return crc;
+    }
+
+    /** 获取链路 ID（签名帧用，非签名帧为 0）。 */
+    public int getLinkId() {
+        return linkId;
+    }
+
+    /** 获取签名时间戳（签名帧用，非签名帧为 0）。 */
+    public long getTimestamp() {
+        return timestamp;
+    }
+
+    /** 获取 8 字节签名数据（签名帧用，非签名帧为 null）。 */
+    public byte[] getSignature() {
+        return signature;
+    }
+
+    /** 判断是否为签名帧。 */
+    public boolean isSigned() {
+        return (incompatibilityFlags & 0x01) != 0 && signature != null;
     }
 }

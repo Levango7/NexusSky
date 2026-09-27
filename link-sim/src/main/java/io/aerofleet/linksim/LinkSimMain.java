@@ -45,6 +45,7 @@ public final class LinkSimMain {
         int dronePort = 14540;
         String droneIp = "127.0.0.1";
         boolean envCoupled = false;  // M0b 雨衰叠加开关（FR-15）
+        double tamperRate = 1.0;     // 安全画像篡改概率（默认1.0，仅安全画像生效）
 
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
@@ -64,6 +65,8 @@ public final class LinkSimMain {
                 return;
             } else if (a.equals("--env-coupled")) {
                 envCoupled = true;
+            } else if (a.equals("--tamper-rate") && i + 1 < args.length) {
+                tamperRate = Double.parseDouble(args[++i]);
             }
         }
 
@@ -87,7 +90,7 @@ public final class LinkSimMain {
             log.info("[link-sim] env-coupled: ON (rain attenuation overlay enabled)");
         }
 
-        new LinkSimMain(profile, proxyPort, new InetSocketAddress(droneIp, dronePort), envCoupled).run();
+        new LinkSimMain(profile, proxyPort, new InetSocketAddress(droneIp, dronePort), envCoupled, tamperRate).run();
     }
 
     private static void usage() {
@@ -97,6 +100,7 @@ public final class LinkSimMain {
         log.info("[link-sim]   --drone-ip  drone side address (default 127.0.0.1)");
         log.info("[link-sim]   --drone-port drone side port (default 14540)");
         log.info("[link-sim]   --env-coupled  enable rain attenuation overlay (M0b)");
+        log.info("[link-sim]   --tamper-rate  tamper probability for security profiles (default 1.0)");
         // 追加 relay 模式参数说明（FR-01, DFX 4.4 配置可追溯）
         RelayConfig.usage();
     }
@@ -116,6 +120,8 @@ public final class LinkSimMain {
     private final InetSocketAddress droneAddr;
     /** M0b 雨衰叠加开关（FR-15）。 */
     private final boolean envCoupled;
+    /** 安全画像篡改概率（0.0~1.0，仅安全画像生效）。 */
+    private final double tamperRate;
     /** GCS/云端侧学到的对端（谁往 proxy 发过包，转发目标就是它）。 */
     private volatile InetSocketAddress gcsAddr;
     /** 延迟调度：到期任务按时间出队发送。 */
@@ -135,14 +141,21 @@ public final class LinkSimMain {
     }
 
     private LinkSimMain(LinkProfile profile, int proxyPort, InetSocketAddress droneAddr,
-                         boolean envCoupled) {
+                         boolean envCoupled, double tamperRate) {
         this.profile = profile;
         this.proxyPort = proxyPort;
         this.droneAddr = droneAddr;
         this.envCoupled = envCoupled;
+        this.tamperRate = tamperRate;
     }
 
     private void run() throws Exception {
+        // 安全画像分支：使用 SecurityImpairmentEngine 接管转发路径
+        if (profile.isSecurityProfile()) {
+            runSecurity();
+            return;
+        }
+        // === 以下原点对点路径完全不变（FR 4.5 兼容性）===
         // 上下行独立损伤：上行 = GCS -> drone（命令，小包）；下行 = drone -> GCS（遥测大头）
         ImpairmentEngine uplinkBase = profile.engine();
         ImpairmentEngine downlinkBase = profile.engine();
@@ -217,6 +230,82 @@ public final class LinkSimMain {
             } catch (IOException e) {
                 // 目标暂时不可达：丢弃该包（真实链路也是这样）
             }
+        }
+    }
+
+    /**
+     * 安全画像运行路径：使用 SecurityImpairmentEngine 对 MAVLink 帧施加安全损伤。
+     * <p>
+     * 安全画像（SIGNING_TAMPER / SIGNING_UNSIGNED）无基础链路损伤（delay=0, drop=0），
+     * 仅根据 SecurityImpairmentEngine.verdict() 的裁决决定转发动作：
+     * <ul>
+     *   <li>FORWARD：正常转发</li>
+     *   <li>TAMPER：调用 applyTamper() 篡改 payload 后转发</li>
+     *   <li>STRIP_SIGNATURE：调用 applyStripSignature() 剥离签名后转发</li>
+     * </ul>
+     */
+    private void runSecurity() throws Exception {
+        SecurityImpairmentEngine secUplink = new SecurityImpairmentEngine(profile, tamperRate);
+        SecurityImpairmentEngine secDownlink = new SecurityImpairmentEngine(profile, tamperRate);
+
+        try (DatagramSocket socket = new DatagramSocket(new InetSocketAddress(proxyPort))) {
+            Thread pump = new Thread(() -> wirePump(socket), "link-wire");
+            pump.setDaemon(true);
+            pump.start();
+
+            Thread stats = new Thread(() -> secStatsLoop(secUplink, secDownlink), "link-stats");
+            stats.setDaemon(true);
+            stats.start();
+
+            byte[] buf = new byte[2048];
+            DatagramPacket packet = new DatagramPacket(buf, buf.length);
+            log.info("[link-sim] running (Ctrl+C to stop)");
+            while (true) {
+                packet.setLength(buf.length);
+                socket.receive(packet);
+                byte[] data = java.util.Arrays.copyOf(buf, packet.getLength());
+                InetSocketAddress from = (InetSocketAddress) packet.getSocketAddress();
+                boolean fromDrone = from.equals(droneAddr);
+
+                if (fromDrone) {
+                    // 下行：drone -> gcs（转发给已学到的 GCS 对端）
+                    if (gcsAddr == null) continue;
+                    SecurityImpairmentEngine.SecurityAction action = secDownlink.verdict(data);
+                    byte[] sendData = switch (action) {
+                        case FORWARD -> data;
+                        case TAMPER -> SecurityImpairmentEngine.applyTamper(data);
+                        case STRIP_SIGNATURE -> SecurityImpairmentEngine.applyStripSignature(data);
+                    };
+                    wire.add(new ScheduledPacket(System.currentTimeMillis(),
+                            seq.incrementAndGet(), sendData, gcsAddr, false));
+                } else {
+                    // 上行：gcs -> drone；同时学习 GCS 对端地址
+                    gcsAddr = from;
+                    SecurityImpairmentEngine.SecurityAction action = secUplink.verdict(data);
+                    byte[] sendData = switch (action) {
+                        case FORWARD -> data;
+                        case TAMPER -> SecurityImpairmentEngine.applyTamper(data);
+                        case STRIP_SIGNATURE -> SecurityImpairmentEngine.applyStripSignature(data);
+                    };
+                    wire.add(new ScheduledPacket(System.currentTimeMillis(),
+                            seq.incrementAndGet(), sendData, droneAddr, true));
+                }
+            }
+        }
+    }
+
+    /**
+     * 安全画像统计循环：10s 周期输出上下行安全损伤统计。
+     */
+    private void secStatsLoop(SecurityImpairmentEngine up, SecurityImpairmentEngine down) {
+        while (true) {
+            try {
+                Thread.sleep(10_000);
+            } catch (InterruptedException e) {
+                return;
+            }
+            log.info("[link-sim] security up:   {}", up.stats());
+            log.info("[link-sim] security down: {}", down.stats());
         }
     }
 

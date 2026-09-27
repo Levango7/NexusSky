@@ -28,7 +28,13 @@ enum LinkProfile {
     RADIO_SIK("radio-sik", 60, 40, 0.02, 0.35, 0.03, 0.35, 2_000, 5_760, 0, 0),
 
     /** Starlink：低延迟好带宽，但换星/遮挡造成周期性 2-3s 中断 */
-    STARLINK("starlink", 35, 20, 0.001, 0.30, 0.005, 0.5, 128_000, 600_000, 25, 2.5);
+    STARLINK("starlink", 35, 20, 0.001, 0.30, 0.005, 0.5, 128_000, 600_000, 25, 2.5),
+
+    /** 安全篡改画像：无基础链路损伤，仅模拟签名篡改攻击 */
+    SIGNING_TAMPER("tamper", 0, 0, 0, 0, 0, 0, 1_000_000, 1_000_000, 0, 0),
+
+    /** 签名剥离画像：无基础链路损伤，仅模拟移除签名的未签名消息攻击 */
+    SIGNING_UNSIGNED("unsigned", 0, 0, 0, 0, 0, 0, 1_000_000, 1_000_000, 0, 0);
 
     final String name;
     final double delayMs;
@@ -57,6 +63,13 @@ enum LinkProfile {
         this.rateBytesPerSec = rateBytesPerSec;
         this.partitionUpSec = partitionUpSec;
         this.partitionDownSec = partitionDownSec;
+    }
+
+    /**
+     * 是否为安全测试画像（篡改或未签名）。
+     */
+    boolean isSecurityProfile() {
+        return this == SIGNING_TAMPER || this == SIGNING_UNSIGNED;
     }
 
     ImpairmentEngine engine() {

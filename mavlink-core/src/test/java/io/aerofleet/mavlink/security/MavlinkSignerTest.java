@@ -1,17 +1,163 @@
 package io.aerofleet.mavlink.security;
 
 import io.aerofleet.mavlink.messages.Heartbeat;
-import io.aerofleet.mavlink.messages.MavlinkMessage;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * MavlinkSigner 单元测试：验证 HMAC-SHA256 签名/验证流程及签名关闭时的行为。
+ * 包含标准协议签名（MAVLink v2 signing）和简化签名（已废弃，向后兼容）两种模式。
  */
 class MavlinkSignerTest {
 
     private static final String TEST_SECRET = "test-secret-key-12345";
+
+    // ========== 标准协议签名（MAVLink v2 signing） ==========
+
+    @Test
+    @DisplayName("标准签名：同一 frameBytes + linkId + timestamp + key → 签名一致")
+    void standardSignDeterministic() {
+        MavlinkSigner signer = new MavlinkSigner(true, TEST_SECRET);
+        byte[] frameBytes = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+
+        byte[] sig1 = signer.sign(frameBytes, 1, 12345L);
+        byte[] sig2 = signer.sign(frameBytes, 1, 12345L);
+
+        assertNotNull(sig1, "签名结果不应为 null");
+        assertEquals(MavlinkSigner.SIGNATURE_LENGTH, sig1.length, "签名长度应为 8 字节");
+        assertArrayEquals(sig1, sig2, "相同输入应产生相同签名");
+    }
+
+    @Test
+    @DisplayName("标准签名：frameBytes 任意字节变化 → 签名不同")
+    void standardSignDiffersOnFrameChange() {
+        MavlinkSigner signer = new MavlinkSigner(true, TEST_SECRET);
+        byte[] frameBytes1 = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+        byte[] frameBytes2 = frameBytes1.clone();
+        frameBytes2[10] ^= 0xFF; // 修改一个字节
+
+        byte[] sig1 = signer.sign(frameBytes1, 1, 12345L);
+        byte[] sig2 = signer.sign(frameBytes2, 1, 12345L);
+
+        assertFalse(java.util.Arrays.equals(sig1, sig2), "frameBytes 变化后签名应不同");
+    }
+
+    @Test
+    @DisplayName("标准签名：linkId 变化 → 签名不同")
+    void standardSignDiffersOnLinkIdChange() {
+        MavlinkSigner signer = new MavlinkSigner(true, TEST_SECRET);
+        byte[] frameBytes = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+
+        byte[] sig1 = signer.sign(frameBytes, 1, 12345L);
+        byte[] sig2 = signer.sign(frameBytes, 2, 12345L);
+
+        assertFalse(java.util.Arrays.equals(sig1, sig2), "linkId 变化后签名应不同");
+    }
+
+    @Test
+    @DisplayName("标准签名：timestamp 变化 → 签名不同")
+    void standardSignDiffersOnTimestampChange() {
+        MavlinkSigner signer = new MavlinkSigner(true, TEST_SECRET);
+        byte[] frameBytes = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+
+        byte[] sig1 = signer.sign(frameBytes, 1, 12345L);
+        byte[] sig2 = signer.sign(frameBytes, 1, 12346L);
+
+        assertFalse(java.util.Arrays.equals(sig1, sig2), "timestamp 变化后签名应不同");
+    }
+
+    @Test
+    @DisplayName("标准验证：合法签名 → true")
+    void standardVerifyCorrectSignature() {
+        MavlinkSigner signer = new MavlinkSigner(true, TEST_SECRET);
+        byte[] frameBytes = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+
+        byte[] signature = signer.sign(frameBytes, 1, 12345L);
+        assertNotNull(signature, "签名结果不应为 null");
+
+        boolean valid = signer.verify(frameBytes, 1, 12345L, signature);
+        assertTrue(valid, "合法签名应验证通过");
+    }
+
+    @Test
+    @DisplayName("标准验证：signature 任意字节修改 → false")
+    void standardVerifyTamperedSignature() {
+        MavlinkSigner signer = new MavlinkSigner(true, TEST_SECRET);
+        byte[] frameBytes = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+
+        byte[] signature = signer.sign(frameBytes, 1, 12345L);
+        assertNotNull(signature);
+
+        // 篡改签名：翻转第一个字节
+        byte[] tampered = signature.clone();
+        tampered[0] ^= 0xFF;
+
+        boolean valid = signer.verify(frameBytes, 1, 12345L, tampered);
+        assertFalse(valid, "篡改后的签名应验证失败");
+    }
+
+    @Test
+    @DisplayName("标准验证：signature=null → false")
+    void standardVerifyNullSignature() {
+        MavlinkSigner signer = new MavlinkSigner(true, TEST_SECRET);
+        byte[] frameBytes = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+
+        boolean valid = signer.verify(frameBytes, 1, 12345L, null);
+        assertFalse(valid, "null 签名应验证失败");
+    }
+
+    @Test
+    @DisplayName("标准验证：signature 长度≠8 → false")
+    void standardVerifyWrongLengthSignature() {
+        MavlinkSigner signer = new MavlinkSigner(true, TEST_SECRET);
+        byte[] frameBytes = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+
+        byte[] shortSig = new byte[4];
+        boolean valid = signer.verify(frameBytes, 1, 12345L, shortSig);
+        assertFalse(valid, "长度不足的签名应验证失败");
+
+        byte[] longSig = new byte[16];
+        valid = signer.verify(frameBytes, 1, 12345L, longSig);
+        assertFalse(valid, "长度过长的签名应验证失败");
+    }
+
+    @Test
+    @DisplayName("标准签名：enabled=false → sign() 返回 null")
+    void disabledSignReturnsNull() {
+        MavlinkSigner signer = new MavlinkSigner(false, TEST_SECRET);
+        byte[] frameBytes = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+
+        byte[] signature = signer.sign(frameBytes, 1, 12345L);
+        assertNull(signature, "签名关闭时 sign 应返回 null");
+    }
+
+    @Test
+    @DisplayName("标准验证：enabled=false → verify() 返回 true")
+    void disabledVerifyAlwaysTrue() {
+        MavlinkSigner signer = new MavlinkSigner(false, TEST_SECRET);
+        byte[] frameBytes = new byte[]{(byte)0xFD, 0x09, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00,
+                (byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0, 0x12, 0x34};
+
+        boolean valid = signer.verify(frameBytes, 1, 12345L, null);
+        assertTrue(valid, "签名关闭时 verify 应始终返回 true");
+
+        byte[] fakeSig = new byte[8];
+        valid = signer.verify(frameBytes, 1, 12345L, fakeSig);
+        assertTrue(valid, "签名关闭时 verify 应始终返回 true");
+    }
+
+    // ========== 简化签名（已废弃，向后兼容） ==========
 
     @Test
     void signAndVerifyCorrectFlow() {

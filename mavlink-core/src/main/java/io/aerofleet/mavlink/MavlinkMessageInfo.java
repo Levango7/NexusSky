@@ -1,8 +1,14 @@
 package io.aerofleet.mavlink;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * 常量表：各消息的长度与 CRC_EXTRA（对齐 MAVLink 官方 c_library_v2/common.xml 生成值）。
- * LEN 用官方定义的“完整长度”，消息发送按完整长度填满 payload；未知长度按 MIN_LEN 解析。
+ * LEN 用官方定义的"完整长度"，消息发送按完整长度填满 payload；未知长度按 MIN_LEN 解析。
+ *
+ * msgId 0-511 使用固定数组 INFOS 直接索引（零开销）；
+ * msgId ≥512（如 OPEN_DRONE_ID_* 12900-12999）使用 EXTENDED_INFOS HashMap 扩展区。
  */
 public final class MavlinkMessageInfo {
 
@@ -19,6 +25,10 @@ public final class MavlinkMessageInfo {
     // 数组直接索引替代 HashMap：msgId 范围 0-467，512 为 2 的幂预留扩展空间，
     // 消除 hash 计算与 Integer 装箱开销。
     private static final Info[] INFOS = new Info[512];
+
+    // 扩展区：msgId ≥512 使用 HashMap，避免直接扩容数组至 13000+（内存浪费）。
+    // 主要容纳 MAVLink 官方 OPEN_DRONE_ID_* 消息族（msgId 12900-12999）。
+    private static final Map<Integer, Info> EXTENDED_INFOS = new HashMap<>();
 
     static {
         // msgId -> (LEN, CRC_EXTRA)，数值提取自官方头文件（2026-09 版本）
@@ -118,22 +128,33 @@ public final class MavlinkMessageInfo {
         INFOS[482] = new Info(8, 266);    // DISASTER_MODE_STATUS
         // ---- NexusSky 自定义扩展消息（P3 灾害应急搜救信号，msgId=483）----
         INFOS[483] = new Info(7, 267);    // BUZZER_CONTROL
+        // ---- C2 开放无人机标识（OPEN_DRONE_ID_*，msgId=12900-12915）----
+        // msgId ≥512 使用 EXTENDED_INFOS HashMap 扩展区
+        EXTENDED_INFOS.put(12900, new Info(22, 223));   // OPEN_DRONE_ID_BASIC_ID
+        EXTENDED_INFOS.put(12901, new Info(36, 234));   // OPEN_DRONE_ID_LOCATION
+        EXTENDED_INFOS.put(12903, new Info(24, 200));   // OPEN_DRONE_ID_SELF_ID
+        EXTENDED_INFOS.put(12904, new Info(23, 233));   // OPEN_DRONE_ID_SYSTEM
+        EXTENDED_INFOS.put(12905, new Info(21, 225));   // OPEN_DRONE_ID_OPERATOR_ID
+        EXTENDED_INFOS.put(12915, new Info(252, 109));  // OPEN_DRONE_ID_MESSAGE_PACK
     }
 
     private MavlinkMessageInfo() {
     }
 
     public static boolean isKnown(int msgId) {
-        return msgId >= 0 && msgId < INFOS.length && INFOS[msgId] != null;
+        if (msgId >= 0 && msgId < INFOS.length) {
+            return INFOS[msgId] != null;
+        }
+        return EXTENDED_INFOS.containsKey(msgId);
     }
 
     public static int lengthOf(int msgId) {
-        Info info = (msgId >= 0 && msgId < INFOS.length) ? INFOS[msgId] : null;
+        Info info = (msgId >= 0 && msgId < INFOS.length) ? INFOS[msgId] : EXTENDED_INFOS.get(msgId);
         return info != null ? info.length : -1;
     }
 
     public static int crcExtraOf(int msgId) {
-        Info info = (msgId >= 0 && msgId < INFOS.length) ? INFOS[msgId] : null;
+        Info info = (msgId >= 0 && msgId < INFOS.length) ? INFOS[msgId] : EXTENDED_INFOS.get(msgId);
         if (info == null) {
             throw new MavlinkException("Unknown messageId " + msgId + ", no CRC_EXTRA available");
         }

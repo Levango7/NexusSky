@@ -1,9 +1,15 @@
 package io.aerofleet.cloud.gateway;
 
+import io.aerofleet.cloud.rid.RidIngestService;
 import io.aerofleet.cloud.telemetry.PendingAcks;
 import io.aerofleet.mavlink.MavlinkFrame;
+import io.aerofleet.mavlink.MavlinkMessageInfo;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.Heartbeat;
+import io.aerofleet.mavlink.security.MavlinkSignatureConfig;
+import io.aerofleet.mavlink.security.MavlinkSigner;
+import io.aerofleet.mavlink.security.SigningKeyManager;
+import io.aerofleet.mavlink.security.TimestampTracker;
 import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -67,6 +73,31 @@ public class UdpGateway {
     @Autowired(required = false)
     private DeviceRegistry deviceRegistry;
 
+    // ==================== MAVLink v2 签名组件（可选注入） ====================
+
+    /** 签名器：提供 HMAC-SHA256 签名与验证功能。 */
+    @Autowired(required = false)
+    private MavlinkSigner mavlinkSigner;
+
+    /** 密钥管理器：提供 sysid→密钥与 linkId 映射。 */
+    @Autowired(required = false)
+    private SigningKeyManager signingKeyManager;
+
+    /** 时间戳跟踪器：重放攻击防护。 */
+    @Autowired(required = false)
+    private TimestampTracker timestampTracker;
+
+    /** 签名配置：控制签名开关与策略。 */
+    @Autowired(required = false)
+    private MavlinkSignatureConfig signatureConfig;
+
+    /** RID 接入服务：可选注入，用于处理 OPEN_DRONE_ID_* 消息。 */
+    @Autowired(required = false)
+    private RidIngestService ridIngestService;
+
+    /** 签名统计计数器（60s 周期报告）。 */
+    private final SigningStats signingStats = new SigningStats();
+
     /** 每 sysid 滑动窗口频率限制器：key=sysid, value=最近1秒内的时间戳队列。 */
     private final ConcurrentHashMap<Integer, Deque<Long>> rateLimitWindows = new ConcurrentHashMap<>();
 
@@ -89,14 +120,14 @@ public class UdpGateway {
 
         // QGroundControl-style active handshake toward each configured drone port.
         java.net.InetSocketAddress droneAddr = new java.net.InetSocketAddress(droneHost, dronePort);
-        transport.enablePeerDiscovery(droneAddr, () -> gcsHeartbeat(0));
+        transport.enablePeerDiscovery(droneAddr, () -> signedGcsHeartbeat(0));
         if (extraPorts != null && !extraPorts.isBlank()) {
             for (String p : extraPorts.split(",")) {
                 try {
                     int port = Integer.parseInt(p.trim());
                     transport.enablePeerDiscovery(
                             new java.net.InetSocketAddress(droneHost, port),
-                            () -> gcsHeartbeat(0));
+                            () -> signedGcsHeartbeat(0));
                 } catch (NumberFormatException e) {
                     log.warn("Ignoring invalid extra drone port: {}", p);
                 }
@@ -110,6 +141,11 @@ public class UdpGateway {
     /** Frame + source address entry: whitelist check, rate limit, ingest, and route learning. */
     private void onFrame(MavlinkFrame frame, SocketAddress source) {
         int sysid = frame.getSystemId();
+
+        // 签名验证（签名启用时）
+        if (isSigningEnabled() && !verifyFrame(frame)) {
+            return; // 验证失败，丢弃帧
+        }
 
         // 白名单校验：prod 模式下只接受已注册 sysid（GCS_SYSID 始终放行）
         if (deviceWhitelistEnabled && sysid > 0 && sysid != GCS_SYSID) {
@@ -134,6 +170,11 @@ public class UdpGateway {
             }
         }
         ingest.handle(frame);
+
+        // RID 消息接入：当 ridIngestService 可用时，将帧传递给 RID 处理链
+        if (ridIngestService != null) {
+            ridIngestService.onFrame(frame);
+        }
     }
 
     /**
@@ -196,10 +237,21 @@ public class UdpGateway {
     /** Send one frame to the drone with the given sysid (route learned per-drone). */
     public void send(int sysid, MavlinkFrame frame) throws IOException {
         SocketAddress addr = sysid > 0 ? droneRoutes.get(sysid) : null;
+        MavlinkFrame frameToSend = frame;
+
+        // 签名启用时，对帧附加签名
+        if (isSigningEnabled()) {
+            MavlinkFrame signed = signFrame(sysid, frame);
+            if (signed != null) {
+                frameToSend = signed;
+            }
+            // signed==null 表示降级为未签名帧（signFrame 已记录 WARN 日志）
+        }
+
         if (addr != null) {
-            transport.send(frame, addr);
+            transport.send(frameToSend, addr);
         } else {
-            transport.sendToLastPeer(frame); // route unknown yet: best effort
+            transport.sendToLastPeer(frameToSend); // route unknown yet: best effort
         }
     }
 
@@ -245,6 +297,15 @@ public class UdpGateway {
             return;
         }
         MavlinkFrame hb = gcsHeartbeat(hbSeq.getAndIncrement() & 0xFF);
+
+        // 签名启用时，对 GCS 心跳帧签名（使用 GCS_SYSID 密钥）
+        if (isSigningEnabled()) {
+            MavlinkFrame signed = signFrame(GCS_SYSID, hb);
+            if (signed != null) {
+                hb = signed;
+            }
+        }
+
         for (SocketAddress addr : droneRoutes.addresses()) {
             try {
                 transport.send(hb, addr);
@@ -258,5 +319,178 @@ public class UdpGateway {
     public void shutdown() {
         transport.close();
         log.info("MAVLink UDP gateway closed");
+    }
+
+    // ==================== MAVLink v2 签名集成 ====================
+
+    /**
+     * 判断签名是否启用。
+     * 签名组件未注入或配置未启用时返回 false，所有路径与现有实现一致。
+     */
+    private boolean isSigningEnabled() {
+        return signatureConfig != null && signatureConfig.isEnabled()
+                && mavlinkSigner != null && signingKeyManager != null;
+    }
+
+    /**
+     * 发送路径签名：对帧附加 HMAC-SHA256 签名。
+     * <p>
+     * 流程：从 keyManager 获取 linkId → 计算 timestamp → 构造临时签名帧获取 frameBytes →
+     * signer.sign() 计算签名 → 构造最终签名帧。
+     * <p>
+     * 降级条件（返回 null，调用方发送未签名帧）：
+     * <ul>
+     *   <li>密钥查找失败（keyFor 返回 null）</li>
+     *   <li>签名计算返回 null（signer 未启用）</li>
+     *   <li>签名计算异常</li>
+     * </ul>
+     *
+     * @param sysid 目标系统 ID
+     * @param frame 原始未签名帧
+     * @return 签名帧，或 null（降级为未签名帧）
+     */
+    private MavlinkFrame signFrame(int sysid, MavlinkFrame frame) {
+        try {
+            SigningKeyManager.KeyEntry keyEntry = signingKeyManager.keyFor(sysid);
+            if (keyEntry == null) {
+                log.warn("签名降级：sysid={} 密钥查找失败，发送未签名帧", sysid);
+                return null;
+            }
+
+            int linkId = keyEntry.linkId();
+            long timestamp = System.currentTimeMillis() / 10;
+
+            // 获取 CRC_EXTRA（通过 msgId 查找消息定义）
+            int crcExtra = MavlinkMessageInfo.crcExtraOf(frame.getMessageId());
+
+            // 构造临时签名帧（signature=null）获取 frameBytes（帧头至 CRC，不含签名数据）
+            MavlinkFrame tempFrame = MavlinkFrame.ofSigned(
+                    frame.getSystemId(), frame.getComponentId(), frame.getSequence(),
+                    frame.getMessageId(), crcExtra, frame.getPayload(),
+                    linkId, timestamp, null);
+            byte[] frameBytes = tempFrame.encodeV2();
+
+            // 计算 HMAC-SHA256 签名
+            byte[] signature = mavlinkSigner.sign(frameBytes, linkId, timestamp);
+            if (signature == null) {
+                log.warn("签名降级：sysid={} 签名计算返回 null，发送未签名帧", sysid);
+                return null;
+            }
+
+            // 构造最终签名帧
+            return MavlinkFrame.ofSigned(
+                    frame.getSystemId(), frame.getComponentId(), frame.getSequence(),
+                    frame.getMessageId(), crcExtra, frame.getPayload(),
+                    linkId, timestamp, signature);
+        } catch (Exception e) {
+            log.warn("签名降级：sysid={} 签名计算异常：{}，发送未签名帧", sysid, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 接收路径签名验证：验证帧的签名与 timestamp。
+     * <p>
+     * 验证流程：
+     * <ol>
+     *   <li>检测 INC bit 0：未签名帧按 rejectUnsigned 配置处理</li>
+     *   <li>签名帧：验证 signature + timestamp</li>
+     *   <li>验证失败：丢弃帧 + WARN 日志</li>
+     * </ol>
+     *
+     * @param frame 接收到的帧
+     * @return true=通过验证（或未签名帧被允许），false=验证失败需丢弃
+     */
+    private boolean verifyFrame(MavlinkFrame frame) {
+        boolean isSigned = frame.isSigned();
+
+        if (!isSigned) {
+            // 未签名帧：根据 rejectUnsigned 配置处理
+            if (signatureConfig.isRejectUnsigned()) {
+                signingStats.rejected++;
+                log.warn("拒绝未签名帧：sysid={} msgId={} (rejectUnsigned=true)",
+                        frame.getSystemId(), frame.getMessageId());
+                return false;
+            } else {
+                signingStats.unsigned++;
+                return true; // 允许未签名帧通过
+            }
+        }
+
+        // 签名帧：验证签名 + timestamp
+        try {
+            // 获取 frameBytes（帧头至 CRC 的全部字节，不含签名数据）
+            byte[] fullBytes = frame.encodeV2();
+            int frameBytesLen = 12 + frame.getPayloadLength();
+            byte[] frameBytes = java.util.Arrays.copyOf(fullBytes, frameBytesLen);
+
+            int linkId = frame.getLinkId();
+            long timestamp = frame.getTimestamp();
+            byte[] signature = frame.getSignature();
+
+            // 验证签名
+            if (!mavlinkSigner.verify(frameBytes, linkId, timestamp, signature)) {
+                signingStats.rejected++;
+                log.warn("签名验证失败：sysid={} linkId={} msgId={}",
+                        frame.getSystemId(), linkId, frame.getMessageId());
+                return false;
+            }
+
+            // 验证 timestamp（重放攻击防护）
+            if (timestampTracker != null && !timestampTracker.check(linkId, timestamp)) {
+                signingStats.rejected++;
+                log.warn("Timestamp 校验失败（疑似重放）：sysid={} linkId={} timestamp={}",
+                        frame.getSystemId(), linkId, timestamp);
+                return false;
+            }
+
+            signingStats.verified++;
+            return true;
+        } catch (Exception e) {
+            signingStats.rejected++;
+            log.warn("签名验证异常：sysid={} {}", frame.getSystemId(), e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 构造签名后的 GCS 心跳帧（用于 discovery 和 heartbeatLoop）。
+     * 签名未启用或降级时返回未签名心跳帧。
+     */
+    private MavlinkFrame signedGcsHeartbeat(int seq) {
+        MavlinkFrame hb = gcsHeartbeat(seq);
+        if (isSigningEnabled()) {
+            MavlinkFrame signed = signFrame(GCS_SYSID, hb);
+            if (signed != null) {
+                return signed;
+            }
+        }
+        return hb;
+    }
+
+    /**
+     * 签名统计：每 60s 输出 verified/rejected/unsigned 计数。
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
+    public void reportSigningStats() {
+        if (!isSigningEnabled()) {
+            return;
+        }
+        log.info("signing: verified={} rejected={} unsigned={}",
+                signingStats.verified, signingStats.rejected, signingStats.unsigned);
+        signingStats.reset();
+    }
+
+    /** 签名统计计数器（周期性重置）。 */
+    private static class SigningStats {
+        volatile long verified;
+        volatile long rejected;
+        volatile long unsigned;
+
+        void reset() {
+            verified = 0;
+            rejected = 0;
+            unsigned = 0;
+        }
     }
 }

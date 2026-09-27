@@ -34,12 +34,13 @@ export default function LinkQualityPanel() {
   const canvasRef = useRef(null)
   const pollRef = useRef(null)
   const historyRef = useRef([])
+  const selectedProfileRef = useRef(null)
 
   const fetchProfiles = useCallback(async () => {
     try {
       const data = await api.getLinkSimProfiles()
       setProfiles(data.profiles || data || [])
-      if (!selectedProfile && (data.profiles || data || []).length > 0) {
+      if (!selectedProfileRef.current && (data.profiles || data || []).length > 0) {
         setSelectedProfile((data.profiles || data)[0].id || (data.profiles || data)[0].name)
       }
       setError(null)
@@ -48,7 +49,7 @@ export default function LinkQualityPanel() {
     } finally {
       setLoading(false)
     }
-  }, [selectedProfile])
+  }, [])
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -68,6 +69,18 @@ export default function LinkQualityPanel() {
       setError(e.message || '获取链路状态失败')
     }
   }, [])
+
+  useEffect(() => {
+    selectedProfileRef.current = selectedProfile
+  }, [selectedProfile])
+
+  // 损伤参数防抖提交：用户停止拖动 500ms 后才发送 API 请求，避免请求风暴
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      api.setLinkSimDamage(damageParams).catch(() => {})
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [damageParams])
 
   useEffect(() => {
     fetchProfiles()

@@ -95,10 +95,30 @@ public final class MavlinkParser {
                 continue;
             }
 
+            // 解析签名数据（v2 签名帧：INC bit 0 置位）
+            int linkId = 0;
+            long timestamp = 0L;
+            byte[] signature = null;
+            if (stx == MavlinkFrame.STX_V2 && (incompat & 0x01) != 0) {
+                int sigOffset = pos + headerLen + payloadLen + 2; // CRC 之后
+                linkId = buffer.get(sigOffset) & 0xFF;
+                timestamp = ((long) (buffer.get(sigOffset + 1) & 0xFF) << 40)
+                        | ((long) (buffer.get(sigOffset + 2) & 0xFF) << 32)
+                        | ((long) (buffer.get(sigOffset + 3) & 0xFF) << 24)
+                        | ((long) (buffer.get(sigOffset + 4) & 0xFF) << 16)
+                        | ((long) (buffer.get(sigOffset + 5) & 0xFF) << 8)
+                        | ((long) (buffer.get(sigOffset + 6) & 0xFF));
+                signature = new byte[8];
+                for (int i = 0; i < 8; i++) {
+                    signature[i] = buffer.get(sigOffset + 7 + i);
+                }
+            }
+
             buffer.position(pos + totalLen);
             framesParsed++;
             return new ParseResult(new MavlinkFrame(payloadLen, incompat, compat, seq,
-                    sysId, compId, msgId, payload, crc), stx == MavlinkFrame.STX_V2);
+                    sysId, compId, msgId, payload, crc, linkId, timestamp, signature),
+                    stx == MavlinkFrame.STX_V2);
         }
     }
 

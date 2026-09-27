@@ -52,6 +52,10 @@ final class RelayNode {
     private final DatagramSocket relaySocket;   // 面向远端飞机
     private final ImpairmentEngine uplink;      // 上行独立引擎（GCS -> 飞机）
     private final ImpairmentEngine downlink;    // 下行独立引擎（飞机 -> GCS）
+    /** 安全画像引擎（null 表示非安全画像，使用 ImpairmentEngine 路径）。 */
+    private final SecurityImpairmentEngine secUplink;
+    /** 安全画像引擎（null 表示非安全画像，使用 ImpairmentEngine 路径）。 */
+    private final SecurityImpairmentEngine secDownlink;
     /** 延迟调度：到期任务按时间出队发送（DFX 4.1 初始容量 256）。 */
     private final PriorityBlockingQueue<ScheduledPacket> wire =
             new PriorityBlockingQueue<>(256);
@@ -84,6 +88,11 @@ final class RelayNode {
         this.multiHopCfg = multiHopCfg;
         this.uplink = uplink;
         this.downlink = downlink;
+        // 安全画像：根据 cfg 画像类型创建 SecurityImpairmentEngine（非安全画像为 null）
+        this.secUplink = cfg.uplink.isSecurityProfile()
+                ? new SecurityImpairmentEngine(cfg.uplink, 1.0) : null;
+        this.secDownlink = cfg.downlink.isSecurityProfile()
+                ? new SecurityImpairmentEngine(cfg.downlink, 1.0) : null;
         this.gcsSocket = bindSocket(cfg.gcsPort, "gcs-port");
         this.relaySocket = bindSocket(cfg.relayPort, "relay-port");
     }
@@ -144,6 +153,27 @@ final class RelayNode {
                 }
                 // FR-11 上行等待期：droneAddr 未学习则不转发（静默丢弃）
                 if (cfg.droneAddr == null) continue;
+                // 安全画像：使用 SecurityImpairmentEngine.verdict() 替代 ImpairmentEngine.verdict()
+                if (secUplink != null) {
+                    SecurityImpairmentEngine.SecurityAction action = secUplink.verdict(data);
+                    if (action == SecurityImpairmentEngine.SecurityAction.TAMPER) {
+                        data = SecurityImpairmentEngine.applyTamper(data);
+                    } else if (action == SecurityImpairmentEngine.SecurityAction.STRIP_SIGNATURE) {
+                        data = SecurityImpairmentEngine.applyStripSignature(data);
+                    }
+                    // FORWARD: data 不变，正常转发
+                    // M5 多跳 hopCount 处理（FR-06/07/08）
+                    int hopCount = HOP_COUNT_DISABLED;
+                    if (multiHopCfg.multiHopEnabled) {
+                        hopCount = extractHopCount(data);
+                        if (hopCount > MAX_HOPS) continue;  // FR-08 越界丢弃
+                        if (hopCount <= 0) continue;        // FR-07 耗尽丢弃
+                        hopCount--;                          // FR-06 递减
+                    }
+                    wire.add(new ScheduledPacket(System.currentTimeMillis(),
+                            seq.incrementAndGet(), data, cfg.droneAddr, true, hopCount));
+                    continue;
+                }
                 // FR-14 上行独立引擎判决
                 long delay = uplink.verdict(data.length);
                 if (delay < 0) continue; // FR-08 丢弃
@@ -186,6 +216,27 @@ final class RelayNode {
             }
             // 对端未学习时静默丢弃（FR 5.2.3-1）
             if (cfg.gcsAddr == null) continue;
+            // 安全画像：使用 SecurityImpairmentEngine.verdict() 替代 ImpairmentEngine.verdict()
+            if (secDownlink != null) {
+                SecurityImpairmentEngine.SecurityAction action = secDownlink.verdict(data);
+                if (action == SecurityImpairmentEngine.SecurityAction.TAMPER) {
+                    data = SecurityImpairmentEngine.applyTamper(data);
+                } else if (action == SecurityImpairmentEngine.SecurityAction.STRIP_SIGNATURE) {
+                    data = SecurityImpairmentEngine.applyStripSignature(data);
+                }
+                // FORWARD: data 不变，正常转发
+                // M5 多跳 hopCount 处理（FR-06/07/08）
+                int hopCount = HOP_COUNT_DISABLED;
+                if (multiHopCfg.multiHopEnabled) {
+                    hopCount = extractHopCount(data);
+                    if (hopCount > MAX_HOPS) continue;  // FR-08 越界丢弃
+                    if (hopCount <= 0) continue;        // FR-07 耗尽丢弃
+                    hopCount--;                          // FR-06 递减
+                }
+                wire.add(new ScheduledPacket(System.currentTimeMillis(),
+                        seq.incrementAndGet(), data, cfg.gcsAddr, false, hopCount));
+                continue;
+            }
             // FR-14 下行独立引擎判决
             long delay = downlink.verdict(data.length);
             if (delay < 0) continue; // FR-08 丢弃
@@ -280,7 +331,10 @@ final class RelayNode {
     }
 
     /**
-     * 统计循环（daemon）：10s 周期输出上下行 fwd/drop/avgDelay（FR-16, DFX 4.4）。
+     * 统计循环（daemon）：10s 周期输出上下行统计（FR-16, DFX 4.4）。
+     * <p>
+     * 安全画像方向输出安全损伤统计（fwd/tampered/stripped），
+     * 非安全画像方向输出链路损伤统计（fwd/drop/avgDelay）。
      */
     private void statsLoop() {
         while (true) {
@@ -289,8 +343,16 @@ final class RelayNode {
             } catch (InterruptedException e) {
                 return;
             }
-            log.info("[mesh-relay] up(gcs->drone)   {}", uplink.stats());
-            log.info("[mesh-relay] down(drone->gcs) {}", downlink.stats());
+            if (secUplink != null) {
+                log.info("[mesh-relay] security up:   {}", secUplink.stats());
+            } else {
+                log.info("[mesh-relay] up(gcs->drone)   {}", uplink.stats());
+            }
+            if (secDownlink != null) {
+                log.info("[mesh-relay] security down: {}", secDownlink.stats());
+            } else {
+                log.info("[mesh-relay] down(drone->gcs) {}", downlink.stats());
+            }
         }
     }
 

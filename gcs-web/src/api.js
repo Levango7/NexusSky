@@ -925,6 +925,11 @@ export const api = {
   // ---- Link Simulation (链路仿真) ----
   getLinkSimProfiles: () => jsonFetch('/api/v1/link-sim/profiles'),
   getLinkSimStatus: () => jsonFetch('/api/v1/link-sim/status'),
+  setLinkSimDamage: (params) => jsonFetch('/api/v1/link-sim/damage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  }),
 
   // ---- Auth ----
   login: (username, password) => jsonFetch('/api/v1/auth/login', {
