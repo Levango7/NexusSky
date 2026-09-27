@@ -6,6 +6,7 @@ import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.TrackPoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -15,13 +16,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Flight-log persistence: JSON Lines files under a configurable directory,
@@ -48,6 +52,14 @@ public class FlightLogService {
     /** Track points are written at most this often per drone (ms). */
     private final long trackMinIntervalMs;
 
+    /** 是否将飞行日志持久化到数据库（默认 false，保持 JSONL 行为不变）。 */
+    @Value("${aerofleet.flightlog.persist-to-db:false}")
+    private boolean persistToDb;
+
+    /** JPA Repository（可选注入，数据库不可用时不影响 JSONL 路径）。 */
+    @Autowired(required = false)
+    private FlightLogRepository flightLogRepository;
+
     /** sysid -> last track-point write, for the telemetry throttle. */
     private final Map<Integer, Long> lastTrackWrite = new HashMap<>();
 
@@ -73,6 +85,17 @@ public class FlightLogService {
     }
 
     private void append(Map<String, Object> event) {
+        // 优先尝试数据库持久化路径
+        if (persistToDb && flightLogRepository != null) {
+            try {
+                flightLogRepository.save(FlightLogEntity.from(event));
+                return; // 数据库写入成功，跳过 JSONL
+            } catch (Exception e) {
+                log.warn("flight log DB persist failed, falling back to JSONL: {}", e.getMessage());
+                // 回退到 JSONL 路径
+            }
+        }
+        // JSONL 文件持久化路径（默认或 DB 失败回退）
         try {
             String line = mapper.writeValueAsString(event) + "\n";
             Files.writeString(fileFor(LocalDate.now()), line, StandardCharsets.UTF_8,
@@ -150,6 +173,34 @@ public class FlightLogService {
      * sysid, limited to the most recent {@code limit} entries.
      */
     public List<Map<String, Object>> query(LocalDate day, String type, Integer sysid, int limit) {
+        // DB 查询路径：persistToDb && repository 可用时优先从数据库查询
+        if (persistToDb && flightLogRepository != null) {
+            try {
+                Instant start = day.atStartOfDay(ZoneId.systemDefault()).toInstant();
+                Instant end = day.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant();
+                List<FlightLogEntity> entities;
+                if (type != null && sysid != null) {
+                    entities = flightLogRepository.findByTypeAndSysidAndTimestampBetween(type, sysid, start, end);
+                } else if (type != null) {
+                    entities = flightLogRepository.findByTypeAndTimestampBetween(type, start, end);
+                } else if (sysid != null) {
+                    entities = flightLogRepository.findBySysidAndTimestampBetween(sysid, start, end);
+                } else {
+                    entities = flightLogRepository.findByTimestampBetween(start, end);
+                }
+                List<Map<String, Object>> out = entities.stream()
+                        .map(FlightLogEntity::toMap)
+                        .collect(Collectors.toList());
+                if (limit > 0 && out.size() > limit) {
+                    return out.subList(out.size() - limit, out.size());
+                }
+                return out;
+            } catch (Exception e) {
+                log.warn("flight log DB query failed, falling back to JSONL: {}", e.getMessage());
+                // 回退到 JSONL 路径
+            }
+        }
+        // JSONL 文件查询路径（默认或 DB 失败回退）
         Path f = fileFor(day);
         if (!Files.isReadable(f)) {
             return List.of();
@@ -186,6 +237,27 @@ public class FlightLogService {
 
     /** Track points for a drone on a day, reconstructed from telemetry lines. */
     public List<TrackPoint> trackFor(LocalDate day, int sysid) {
+        // DB 查询路径：persistToDb && repository 可用时优先从数据库查询
+        if (persistToDb && flightLogRepository != null) {
+            try {
+                Instant start = day.atStartOfDay(ZoneId.systemDefault()).toInstant();
+                Instant end = day.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant();
+                List<FlightLogEntity> entities = flightLogRepository
+                        .findByTypeAndSysidAndTimestampBetween("telemetry", sysid, start, end);
+                List<TrackPoint> pts = new ArrayList<>();
+                for (FlightLogEntity e : entities) {
+                    if (e.getLat() != null && e.getLon() != null) {
+                        double alt = e.getRelativeAlt() != null ? e.getRelativeAlt() : 0;
+                        pts.add(new TrackPoint(e.getLat(), e.getLon(), alt, 0));
+                    }
+                }
+                return pts;
+            } catch (Exception e) {
+                log.warn("flight log DB track query failed, falling back to JSONL: {}", e.getMessage());
+                // 回退到 JSONL 路径
+            }
+        }
+        // JSONL 文件查询路径（默认或 DB 失败回退）
         List<TrackPoint> pts = new ArrayList<>();
         for (Map<String, Object> m : query(day, "telemetry", sysid, 0)) {
             Object lat = m.get("lat");

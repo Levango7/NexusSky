@@ -25,4 +25,7 @@ public interface DeviceRepository extends JpaRepository<DeviceEntity, Integer> {
 
     /** 检查设备是否存在。 */
     boolean existsBySysid(Integer sysid);
+
+    /** 查找所有离线设备。 */
+    List<DeviceEntity> findByOnlineFalse();
 }

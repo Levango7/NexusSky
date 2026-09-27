@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.gateway;
 
 import io.aerofleet.cloud.security.TenantContext;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +39,33 @@ public class DeviceRegistry {
     private DeviceRepository repository;
 
     private final Map<Integer, DroneSnapshot> drones = new ConcurrentHashMap<>();
+
+    /**
+     * 启动时从数据库恢复已知设备列表到内存缓存。
+     * <p>
+     * 所有恢复的设备初始状态为 offline，等待心跳确认后转为 online。
+     * 当 persist=false 或 repository 不可用时直接 return，不影响现有行为。
+     */
+    @PostConstruct
+    public void restoreFromRepository() {
+        if (!persist || repository == null) {
+            return;
+        }
+        try {
+            List<DeviceEntity> entities = repository.findAll();
+            int count = 0;
+            for (DeviceEntity entity : entities) {
+                DroneSnapshot snapshot = new DroneSnapshot(entity.getSysid());
+                snapshot.online = false;
+                snapshot.tenantId = entity.getTenantId();
+                drones.put(entity.getSysid(), snapshot);
+                count++;
+            }
+            log.info("Restored {} devices from repository (all offline, awaiting heartbeat)", count);
+        } catch (Exception e) {
+            log.warn("设备恢复失败，降级为空缓存: {}", e.getMessage());
+        }
+    }
 
     /** Get or create the snapshot for a systemId (called from the receive thread). */
     public DroneSnapshot registerIfAbsent(int sysid) {
