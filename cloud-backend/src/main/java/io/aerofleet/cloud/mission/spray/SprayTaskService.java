@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -97,6 +98,7 @@ public class SprayTaskService {
      * @return 创建的 SprayTask
      * @throws BadRequestException 航点 < 2 或字段非法
      */
+    @Transactional
     public SprayTask create(SprayTaskRequest req) {
         if (req.waypoints == null || req.waypoints.size() < 2) {
             throw new BadRequestException("waypoints must have >= 2 points");
@@ -173,7 +175,7 @@ public class SprayTaskService {
                                     .map(entity -> tenantId.equals(entity.getTenantId()))
                                     .orElse(false);
                         } catch (Exception e) {
-                            return true; // 降级：Repository 不可用时返回所有
+                            return false; // 降级：Repository 异常时拒绝不确定归属的数据，确保租户隔离
                         }
                     }
                     return true;
@@ -195,6 +197,7 @@ public class SprayTaskService {
      * @throws NotFoundException 任务不存在
      * @throws BadRequestException 未知 action
      */
+    @Transactional
     public Map<Integer, AckResult> control(int id, String action) {
         if (action == null) {
             throw new BadRequestException("action is required");

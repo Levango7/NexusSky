@@ -21,6 +21,7 @@ import jakarta.annotation.PostConstruct;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,19 +60,22 @@ public class OrchestrationPlanService {
     private final ResourceManager resourceManager;
     private final StepExecutor stepExecutor;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     public OrchestrationPlanService(OrchestrationPlanRepository planRepository,
                                      TaskStepRepository stepRepository,
                                      ConditionTriggerRepository triggerRepository,
                                      ResourceManager resourceManager,
                                      StepExecutor stepExecutor,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     ApplicationEventPublisher eventPublisher) {
         this.planRepository = planRepository;
         this.stepRepository = stepRepository;
         this.triggerRepository = triggerRepository;
         this.resourceManager = resourceManager;
         this.stepExecutor = stepExecutor;
         this.objectMapper = objectMapper;
+        this.eventPublisher = eventPublisher;
     }
 
     // ==================== 计划 CRUD ====================
@@ -403,6 +407,10 @@ public class OrchestrationPlanService {
             // 检查步骤状态是否仍为 PENDING，避免递归调用导致重复启动
             if (step.getStatus() == StepStatus.PENDING) {
                 log.info("推进步骤：planId={}, stepId={}", planId, step.getStepId());
+                // 先认领为 ALLOCATING 并持久化，防止并发 advanceSteps 重复选中同一步骤；
+                // StepExecutor.executeStep 第一步同样是 PENDING→ALLOCATING，两者衔接一致
+                step.setStatus(StepStatus.ALLOCATING);
+                stepRepository.save(step);
                 // 在事务提交后执行步骤，避免长事务阻塞；非事务上下文中同步执行
                 executeStepAfterCommit(step, planId);
             }
@@ -422,11 +430,28 @@ public class OrchestrationPlanService {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    stepExecutor.executeStep(step, planId);
+                    try {
+                        stepExecutor.executeStep(step, planId);
+                    } catch (Exception e) {
+                        log.error("afterCommit 中执行步骤异常：stepId={}, planId={}", step.getStepId(), planId, e);
+                        step.setStatus(StepStatus.FAILED);
+                        stepRepository.save(step);
+                        eventPublisher.publishEvent(
+                                new StepFailEvent(OrchestrationPlanService.this, planId, step.getStepId(),
+                                        "afterCommit 执行异常：" + e.getMessage()));
+                    }
                 }
             });
         } else {
-            stepExecutor.executeStep(step, planId);
+            try {
+                stepExecutor.executeStep(step, planId);
+            } catch (Exception e) {
+                log.error("执行步骤异常：stepId={}, planId={}", step.getStepId(), planId, e);
+                step.setStatus(StepStatus.FAILED);
+                stepRepository.save(step);
+                eventPublisher.publishEvent(
+                        new StepFailEvent(this, planId, step.getStepId(), "执行异常：" + e.getMessage()));
+            }
         }
     }
 

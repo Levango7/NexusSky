@@ -230,6 +230,7 @@ public class DeliveryController2 {
         if (task.getStatus() != DeliveryTask2.Status.DELIVERED) {
             throw new BadRequestException("task " + id + " is not DELIVERED");
         }
+        task.setStatus(DeliveryTask2.Status.CONFIRMED);
         repository.save(task);
         statusTracker.advancePhase(id);
 

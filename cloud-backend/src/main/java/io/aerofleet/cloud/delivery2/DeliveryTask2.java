@@ -27,7 +27,7 @@ public class DeliveryTask2 {
 
     /** 配送任务状态。 */
     public enum Status {
-        PENDING, IN_PROGRESS, DELIVERED, FAILED, ABORTED
+        PENDING, IN_PROGRESS, DELIVERED, CONFIRMED, FAILED, ABORTED
     }
 
     /** 优先级。 */

@@ -83,6 +83,7 @@ public class EmergencyReturnStrategy {
         if (!shouldTrigger()) return null;
 
         String reason = determineTriggerReason();
+        if (reason == null) return null;
         double confidence = computeConfidence(reason);
 
         double[] target = selectLandingSite();

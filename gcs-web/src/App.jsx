@@ -52,6 +52,45 @@ import useUI, { VIEW_PANEL_MAP } from './hooks/useUI.js'
 import useMission from './hooks/useMission.js'
 import useReplay from './hooks/useReplay.js'
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('面板组件崩溃:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, height: '100%' }}>
+          <div style={{ textAlign: 'center', color: '#888' }}>
+            <p style={{ fontSize: 14, margin: '4px 0' }}>⚠ 面板组件崩溃</p>
+            <p style={{ fontSize: 12, margin: '4px 0' }}>{this.state.error?.message}</p>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+function PanelWrapper({ children }) {
+  return (
+    <div className="gcs-body" style={{ display: 'block' }}>
+      <ErrorBoundary>
+        {children}
+      </ErrorBoundary>
+    </div>
+  )
+}
+
 function haversine(a, b) {
   const R = 6371000
   const dLa = ((b.lat - a.lat) * Math.PI) / 180
@@ -277,169 +316,175 @@ export default function App() {
 
       {view === 'dashboard' ? (
         <div className="gcs-body" style={{ display: 'block', overflow: 'auto' }}>
-          <DashboardPanel
-            drones={drones}
-            onSelect={(sysid) => {
-              setSelectedSysid(sysid)
-              setView('control')
-            }}
-          />
+          <ErrorBoundary>
+            <DashboardPanel
+              drones={drones}
+              onSelect={(sysid) => {
+                setSelectedSysid(sysid)
+                setView('control')
+              }}
+            />
+          </ErrorBoundary>
         </div>
       ) : view === 'formation' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <FormationPanel formations={formations} drones={drones} />
-        </div>
+        </PanelWrapper>
       ) : view === 'spray' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <SprayPanel drones={drones} />
-        </div>
+        </PanelWrapper>
       ) : view === 'hardware' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <HardwarePanel drones={drones} />
-        </div>
+        </PanelWrapper>
       ) : view === 'mesh' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <MeshTopologyPanel meshTopology={meshTopology} />
-        </div>
+        </PanelWrapper>
       ) : view === 'celltower' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <CellTowerPanel cellTowerData={cellTowerData} />
-        </div>
+        </PanelWrapper>
       ) : view === 'satlink' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <SatLinkPanel satLinkData={satLinkData} />
-        </div>
+        </PanelWrapper>
       ) : view === 'terrain' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <TerrainMapPanel terrainData={terrainData} />
-        </div>
+        </PanelWrapper>
       ) : view === 'emergency' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <EmergencyOrchPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'surveillance' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <SurveillancePanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'alarm' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <AlarmPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'tracking' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <TrackingPanel
             onTrackLoaded={(overlay) => setTrackingOverlay(overlay)}
           />
-        </div>
+        </PanelWrapper>
       ) : view === 'geofence' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <GeofencePanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'dronelock' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <DroneLockPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'autodispatch' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <AutoDispatchPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'scenariolib' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <ScenarioLibraryPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'inspection' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <InspectionPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'health' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <HealthPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'commadapt' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <CommAdaptPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'mapping' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <MappingPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'voicecmd' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <VoiceCmdPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'citytwin' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <CityTwinPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'delivery' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <DeliveryPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'show' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <ShowPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'disastercomm' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <DisasterCommPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'unifiedcmd' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <UnifiedCommandPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'videofusion' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <VideoFusionPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'thermal' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <ThermalOverlayPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'weather' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <WeatherLayerPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'linkquality' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <LinkQualityPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'trajectory3d' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <Trajectory3DPanel
             track={track}
             telemetry={telemetry}
             selected={selected}
             missionDraft={missionDraft}
           />
-        </div>
+        </PanelWrapper>
       ) : view === 'tenants' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <TenantPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'users' ? (
-        <div className="gcs-body" style={{ display: 'block' }}>
+        <PanelWrapper>
           <UserPanel />
-        </div>
+        </PanelWrapper>
       ) : view === 'scene3d' ? (
         <div className="scene3d-layout">
-          <div className="scene3d-main">
-            <Scene3D
-              drones={drones}
-              telemetry={telemetry}
-              track={track}
-              formations={formations}
-              selected={selected}
-              terrainData={terrainData}
-            />
-          </div>
-          <div className="scene3d-side">
-            <Trajectory3D
-              track={track}
-              missionDraft={missionDraft}
-              telemetry={telemetry}
-              selected={selected}
-            />
-          </div>
+          <ErrorBoundary>
+            <div className="scene3d-main">
+              <Scene3D
+                drones={drones}
+                telemetry={telemetry}
+                track={track}
+                formations={formations}
+                selected={selected}
+                terrainData={terrainData}
+              />
+            </div>
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <div className="scene3d-side">
+              <Trajectory3D
+                track={track}
+                missionDraft={missionDraft}
+                telemetry={telemetry}
+                selected={selected}
+              />
+            </div>
+          </ErrorBoundary>
         </div>
       ) : (
       <div className="gcs-body">
@@ -460,38 +505,44 @@ export default function App() {
           />
         )}
         <aside className={`rail left ${mobileRail === 'left' ? 'mobile-open' : ''}`}>
-          <DroneList drones={drones} selectedSysid={selectedSysid} onSelect={(sysid) => { setSelectedSysid(sysid); setMobileRail(null) }} />
-          <MissionPlanner
-            drone={selected}
-            missionDraft={missionDraft}
-            setMissionDraft={setMissionDraft}
-            onUploaded={() => loadTelemetry(selectedSysid)}
-          />
+          <ErrorBoundary>
+            <DroneList drones={drones} selectedSysid={selectedSysid} onSelect={(sysid) => { setSelectedSysid(sysid); setMobileRail(null) }} />
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <MissionPlanner
+              drone={selected}
+              missionDraft={missionDraft}
+              setMissionDraft={setMissionDraft}
+              onUploaded={() => loadTelemetry(selectedSysid)}
+            />
+          </ErrorBoundary>
         </aside>
 
         <main className="stage">
-          <MapView
-            telemetry={telemetry}
-            track={track}
-            missionDraft={missionDraft}
-            selected={selected}
-            orbitOverlay={orbitOverlay}
-            drones={drones}
-            multiTracks={multiTracks}
-            trackColorMode={trackColorMode}
-            replayTrack={replayTrack}
-            replayProgress={replayProgress}
-            formations={formations}
-            trackingOverlay={trackingOverlay}
-            onDroneSelect={(sysid) => setSelectedSysid(sysid)}
-            onMapClick={({ lat, lon }) => {
-              // Shift+click on the map appends a waypoint to the draft
-              setMissionDraft((prev) => [
-                ...prev,
-                { cmd: 'waypoint', lat, lon, alt: 50, holdTime: 2 },
-              ])
-            }}
-          />
+          <ErrorBoundary>
+            <MapView
+              telemetry={telemetry}
+              track={track}
+              missionDraft={missionDraft}
+              selected={selected}
+              orbitOverlay={orbitOverlay}
+              drones={drones}
+              multiTracks={multiTracks}
+              trackColorMode={trackColorMode}
+              replayTrack={replayTrack}
+              replayProgress={replayProgress}
+              formations={formations}
+              trackingOverlay={trackingOverlay}
+              onDroneSelect={(sysid) => setSelectedSysid(sysid)}
+              onMapClick={({ lat, lon }) => {
+                // Shift+click on the map appends a waypoint to the draft
+                setMissionDraft((prev) => [
+                  ...prev,
+                  { cmd: 'waypoint', lat, lon, alt: 50, holdTime: 2 },
+                ])
+              }}
+            />
+          </ErrorBoundary>
           {/* 故障状态横幅：GPS 降级 / 链路丢失时压在地图上方 */}
           {telemetry && telemetry.gpsHealthy === false && (
             <div className="fault-banner crit">
@@ -522,24 +573,34 @@ export default function App() {
         </main>
 
         <aside className={`rail right ${mobileRail === 'right' ? 'mobile-open' : ''}`}>
-          <Joystick drone={selected} />
-          <VisionPanel
-            drone={selected}
-            onOrbitActive={(active, overlay) => {
-              // Draw the orbit ring while a job runs; clear it on completion
-              setOrbitOverlay(active ? overlay : null)
-            }}
-          />
-          <TelemetryPanel
-            drone={selected}
-            telemetry={telemetry}
-            onCommand={async (type, alt) => {
-              if (selectedSysid == null) return { status: 'error', result: '未选择设备' }
-              return api.sendCommand(selectedSysid, type, alt)
-            }}
-          />
-          <TelemetryCharts telemetry={telemetry} history={telemetryHistory} />
-          <AlertFeed alerts={alerts} />
+          <ErrorBoundary>
+            <Joystick drone={selected} />
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <VisionPanel
+              drone={selected}
+              onOrbitActive={(active, overlay) => {
+                // Draw the orbit ring while a job runs; clear it on completion
+                setOrbitOverlay(active ? overlay : null)
+              }}
+            />
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <TelemetryPanel
+              drone={selected}
+              telemetry={telemetry}
+              onCommand={async (type, alt) => {
+                if (selectedSysid == null) return { status: 'error', result: '未选择设备' }
+                return api.sendCommand(selectedSysid, type, alt)
+              }}
+            />
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <TelemetryCharts telemetry={telemetry} history={telemetryHistory} />
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <AlertFeed alerts={alerts} />
+          </ErrorBoundary>
         </aside>
       </div>
       )}

@@ -76,7 +76,7 @@ public class TerrainMapService {
                 changeHistory.remove(0);
             }
         }
-        version.set(Math.max(version.get(), msg.terrainVersion));
+        version.accumulateAndGet(msg.terrainVersion, Math::max);
         log.debug("terrain update: sysid={} version={} affected={}",
                 sysid, msg.terrainVersion, msg.affectedCount());
     }

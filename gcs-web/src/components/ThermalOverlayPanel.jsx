@@ -31,12 +31,17 @@ export default function ThermalOverlayPanel() {
   const [replayData, setReplayData] = useState([])
   const canvasRef = useRef(null)
   const pollRef = useRef(null)
+  const thresholdRef = useRef(threshold)
+
+  useEffect(() => {
+    thresholdRef.current = threshold
+  }, [threshold])
 
   const fetchSources = useCallback(async () => {
     try {
       const data = await api.getThermalSources()
       setSources(data.sources || data || [])
-      const triggered = (data.sources || data || []).filter((s) => s.temp >= threshold)
+      const triggered = (data.sources || data || []).filter((s) => s.temp >= thresholdRef.current)
       setAlarms(triggered)
       setError(null)
     } catch (e) {
@@ -44,7 +49,7 @@ export default function ThermalOverlayPanel() {
     } finally {
       setLoading(false)
     }
-  }, [threshold])
+  }, [])
 
   useEffect(() => {
     fetchSources()

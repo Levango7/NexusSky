@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -96,6 +97,7 @@ public class DeliveryService {
      * @return 创建的 DeliverySequence
      * @throws BadRequestException 空站点列表或字段非法
      */
+    @Transactional
     public DeliverySequence create(DeliveryRequest req) {
         if (req.sites == null || req.sites.isEmpty()) {
             throw new BadRequestException("sites must not be empty");
@@ -131,6 +133,7 @@ public class DeliveryService {
     public DeliverySequence sequence(int id) {
         DeliverySequence seq = sequences.get(id);
         if (seq != null) {
+            verifyTenantAccess(id);
             return seq;
         }
         // 内存未命中，尝试从 Repository 加载
@@ -139,10 +142,16 @@ public class DeliveryService {
                 Optional<DeliverySequenceEntity> opt = repository.findById(id);
                 if (opt.isPresent()) {
                     DeliverySequenceEntity entity = opt.get();
+                    Integer tenantId = TenantContext.getEffectiveTenantId();
+                    if (tenantId != null && !tenantId.equals(entity.getTenantId())) {
+                        throw new NotFoundException("delivery " + id + " not found");
+                    }
                     seq = entity.toSequence();
                     sequences.put(id, seq);
                     return seq;
                 }
+            } catch (NotFoundException e) {
+                throw e;
             } catch (Exception e) {
                 log.warn("Failed to load delivery sequence {} from repository: {}", id, e.getMessage());
             }
@@ -168,7 +177,7 @@ public class DeliveryService {
                                     .map(entity -> tenantId.equals(entity.getTenantId()))
                                     .orElse(false);
                         } catch (Exception e) {
-                            return true; // 降级：Repository 不可用时返回所有
+                            return false; // 降级：Repository 异常时拒绝返回不确定归属的数据
                         }
                     }
                     return true;
@@ -191,6 +200,7 @@ public class DeliveryService {
      * @throws NotFoundException 任务不存在
      * @throws BadRequestException 未知 action
      */
+    @Transactional
     public Map<Integer, AckResult> control(int id, String action) {
         if (action == null) {
             throw new BadRequestException("action is required");
@@ -203,9 +213,15 @@ public class DeliveryService {
                     Optional<DeliverySequenceEntity> opt = repository.findById(id);
                     if (opt.isPresent()) {
                         DeliverySequenceEntity entity = opt.get();
+                        Integer tenantId = TenantContext.getEffectiveTenantId();
+                        if (tenantId != null && !tenantId.equals(entity.getTenantId())) {
+                            throw new NotFoundException("delivery " + id + " not found");
+                        }
                         seq = entity.toSequence();
                         sequences.put(id, seq);
                     }
+                } catch (NotFoundException e) {
+                    throw e;
                 } catch (Exception e) {
                     log.warn("Failed to load delivery sequence {} from repository: {}", id, e.getMessage());
                 }
@@ -213,6 +229,9 @@ public class DeliveryService {
             if (seq == null) {
                 throw new NotFoundException("delivery " + id + " not found");
             }
+        } else {
+            // 内存命中，校验租户归属
+            verifyTenantAccess(id);
         }
         int sysid = seq.targetSysid();
         // 校验无人机在线（除 FINISH 外，FINISH 是本地状态收尾不需要无人机）
@@ -274,6 +293,35 @@ public class DeliveryService {
                 // 位置更新可能改变站点状态，同步到 Repository
                 persistSequenceState(seq.deliveryId(), seq);
             }
+        }
+    }
+
+    /**
+     * 校验当前租户是否有权访问指定配送任务。
+     * <p>
+     * 当 Repository 可用且租户上下文非 null 时，通过 Repository 查询任务的 tenantId
+     * 与当前租户比对，不匹配时抛出 NotFoundException（不泄露资源存在性）。
+     *
+     * @param id 配送任务 ID
+     * @throws NotFoundException 租户不匹配时
+     */
+    private void verifyTenantAccess(int id) {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null || repository == null) {
+            return;
+        }
+        try {
+            Optional<DeliverySequenceEntity> opt = repository.findById(id);
+            if (opt.isPresent()) {
+                DeliverySequenceEntity entity = opt.get();
+                if (!tenantId.equals(entity.getTenantId())) {
+                    throw new NotFoundException("delivery " + id + " not found");
+                }
+            }
+        } catch (NotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Failed to verify tenant access for delivery {}: {}", id, e.getMessage());
         }
     }
 

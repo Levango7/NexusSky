@@ -389,6 +389,7 @@ public class FormationService {
      * @throws BadRequestException steps < 1
      */
 
+    @Transactional
     public Map<Integer, List<Formation.GeoPos>> transition(int formationId,
                                                             FormationGeometry.Shape newShape,
                                                             int steps) {
@@ -641,6 +642,7 @@ public class FormationService {
     // =====================================================================
 
     /** 编队解散：在飞成员 RTL → state=DISSOLVED（异常 5.4.3-3）。 */
+    @Transactional
     private Map<Integer, AckResult> dissolve(Formation f) {
         Map<Integer, AckResult> results = new ConcurrentHashMap<>();
         for (int sysid : f.sortedMembers()) {

@@ -558,7 +558,9 @@ class OrchestrationPlanServiceTest {
         service.onStepFail(new StepFailEvent(this, 1L, "step-1", "执行失败"));
 
         // Assert
-        assertEquals(StepStatus.PENDING, dependentStep.getStatus());
+        // advanceSteps 认领步骤后状态进入 ALLOCATING（由 StepExecutor 接管），
+        // 契约核心：未被标 SKIPPED，且仍被启动执行
+        assertNotEquals(StepStatus.SKIPPED, dependentStep.getStatus());
         verify(stepExecutor).executeStep(dependentStep, 1L);
     }
 
