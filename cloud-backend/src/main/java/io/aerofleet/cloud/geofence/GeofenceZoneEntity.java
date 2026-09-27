@@ -51,6 +51,14 @@ public class GeofenceZoneEntity {
     @Column(name = "action")
     private String action;
 
+    /** 围栏类型：KEEP_IN / KEEP_OUT，默认 KEEP_IN。 */
+    @Column(name = "fence_type")
+    private String fenceType = "KEEP_IN";
+
+    /** 接近缓冲区距离（米），仅对 KEEP_OUT 围栏生效，默认 100。 */
+    @Column(name = "proximity_buffer_m")
+    private int proximityBufferM = 100;
+
     @Column(name = "enabled")
     private boolean enabled;
 
@@ -91,6 +99,12 @@ public class GeofenceZoneEntity {
     public String getAction() { return action; }
     public void setAction(String action) { this.action = action; }
 
+    public String getFenceType() { return fenceType; }
+    public void setFenceType(String fenceType) { this.fenceType = fenceType; }
+
+    public int getProximityBufferM() { return proximityBufferM; }
+    public void setProximityBufferM(int proximityBufferM) { this.proximityBufferM = proximityBufferM; }
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
@@ -112,13 +126,16 @@ public class GeofenceZoneEntity {
     public GeofenceZone toZone() {
         GeofenceZone.Type typeEnum = GeofenceZone.Type.valueOf(type);
         GeofenceZone.Action actionEnum = GeofenceZone.Action.valueOf(action);
+        FenceType fenceTypeEnum = FenceType.valueOf(fenceType != null ? fenceType : "KEEP_IN");
 
         GeofenceZone zone;
         if (typeEnum == GeofenceZone.Type.CIRCLE) {
-            zone = GeofenceZone.circleZone(id, name, centerLat, centerLon, radiusM, actionEnum);
+            zone = GeofenceZone.circleZone(id, name, centerLat, centerLon, radiusM, actionEnum,
+                    fenceTypeEnum, proximityBufferM);
         } else {
             zone = GeofenceZone.polygonZone(id, name,
-                    points != null ? points : Collections.emptyList(), actionEnum);
+                    points != null ? points : Collections.emptyList(), actionEnum,
+                    fenceTypeEnum, proximityBufferM);
         }
 
         // 同步 enabled 状态（工厂方法默认 enabled=true）
@@ -141,6 +158,8 @@ public class GeofenceZoneEntity {
         entity.setRadiusM(zone.getRadiusM());
         entity.setPoints(zone.getPoints() != null ? new ArrayList<>(zone.getPoints()) : new ArrayList<>());
         entity.setAction(zone.getAction().name());
+        entity.setFenceType(zone.getFenceType().name());
+        entity.setProximityBufferM(zone.getProximityBufferM());
         entity.setEnabled(zone.isEnabled());
         entity.setCreatedAtMs(zone.getCreatedAtMs());
         return entity;

@@ -5,16 +5,26 @@ package io.aerofleet.cloud.geofence;
  * <p>
  * 当无人机位置相对于围栏区域发生状态切换时生成：
  * <ul>
- *   <li>{@link BreachType#ENTER ENTER}：进入禁飞区（围栏区域为禁止进入时）。</li>
- *   <li>{@link BreachType#EXIT EXIT}：离开允许区（围栏区域为允许活动时）。</li>
+ *   <li>{@link BreachType#ENTER ENTER}：进入禁飞区（KEEP_OUT 围栏区域为禁止进入时）。</li>
+ *   <li>{@link BreachType#EXIT EXIT}：离开允许区（KEEP_IN 围栏区域为允许活动时）。</li>
+ *   <li>{@link BreachType#PROXIMITY PROXIMITY}：接近禁飞区告警（无人机进入 KEEP_OUT 围栏的接近缓冲区）。</li>
+ *   <li>{@link BreachType#CLEAR CLEAR}：离开接近区恢复（无人机离开 KEEP_OUT 围栏的接近缓冲区）。</li>
  * </ul>
  * <p>
  * 不可变值对象；由 {@link GeofenceMonitor} 生成并存入 {@link GeofenceStore}。
  */
 public final class GeofenceBreachEvent {
 
-    /** 越界类型：进入禁飞区 / 离开允许区。 */
-    public enum BreachType { ENTER, EXIT }
+    /**
+     * 越界类型。
+     * <ul>
+     *   <li>ENTER：进入禁飞区（KEEP_OUT 围栏）。</li>
+     *   <li>EXIT：离开允许区（KEEP_IN 围栏）。</li>
+     *   <li>PROXIMITY：接近禁飞区告警（进入 KEEP_OUT 围栏的接近缓冲区）。</li>
+     *   <li>CLEAR：离开接近区恢复（离开 KEEP_OUT 围栏的接近缓冲区）。</li>
+     * </ul>
+     */
+    public enum BreachType { ENTER, EXIT, PROXIMITY, CLEAR }
 
     private final int sysid;
     private final int zoneId;

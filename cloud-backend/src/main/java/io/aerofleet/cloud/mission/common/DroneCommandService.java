@@ -1,5 +1,10 @@
 package io.aerofleet.cloud.mission.common;
 
+import io.aerofleet.cloud.geofence.GeofenceInterceptService;
+import io.aerofleet.cloud.geofence.InterceptLog;
+import io.aerofleet.cloud.geofence.InterceptLogStore;
+import io.aerofleet.cloud.geofence.InterceptVerdict;
+import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.UdpGateway;
 import io.aerofleet.cloud.telemetry.PendingAcks;
 import io.aerofleet.mavlink.enums.MavEnums;
@@ -13,6 +18,7 @@ import io.aerofleet.mavlink.messages.MissionRequestInt;
 import io.aerofleet.mavlink.messages.MissionRequestList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -54,6 +60,14 @@ public class DroneCommandService {
     /** Fallback sysid when the registry is empty (skeleton: first online drone wins). */
     private final int defaultTargetSysid;
     private final AtomicInteger sequence = new AtomicInteger();
+
+    /** 围栏拦截服务（可选注入，不可用时拦截链跳过）。 */
+    @Autowired(required = false)
+    private GeofenceInterceptService geofenceIntercept;
+
+    /** 拦截日志存储（可选注入，不可用时拦截链跳过日志记录）。 */
+    @Autowired(required = false)
+    private InterceptLogStore interceptLogStore;
 
     /** Thrown when a command/mission exchange fails (timeout or negative ack). */
     public static class CommandException extends RuntimeException {
@@ -154,6 +168,19 @@ public class DroneCommandService {
     public int command(int sysid, int mavCommand, float p1, float p2, float p3,
                         float p4, float p5, float p6, float p7) {
         int target = resolveTarget(sysid);
+
+        // 拦截链校验：仅 ARM(param1=1) 和 TAKEOFF 命令需要拦截
+        if (isInterceptRequired(mavCommand, p1)) {
+            InterceptVerdict verdict = performInterceptCheck(target, mavCommand, p1);
+            if (verdict != null && verdict.isDenied()) {
+                // DENY：不发送命令，返回拦截拒绝结果
+                log.warn("Command {} to sysid={} intercepted (DENY): reason={}",
+                        mavCommand, target, verdict.getDenyReason());
+                return MavEnums.MAV_RESULT_DENIED;
+            }
+            // ALLOW：继续正常下发路径
+        }
+
         for (int attempt = 1; attempt <= ACK_RETRIES; attempt++) {
             var future = pendings.expectCommandAck(mavCommand, target);
             try {
@@ -207,6 +234,104 @@ public class DroneCommandService {
             }
         }
         throw new CommandException("command " + mavCommand + " failed", -1); // unreachable
+    }
+
+    // =====================================================================
+    // 拦截链（Geofence Intercept Chain）
+    // =====================================================================
+
+    /**
+     * 判断命令是否需要经过拦截链校验。
+     * <p>
+     * 仅以下命令需要拦截：
+     * <ul>
+     *   <li>MAV_CMD_COMPONENT_ARM_DISARM(400)，且 param1=1（ARM 操作）；DISARM(param1=0) 不拦截</li>
+     *   <li>MAV_CMD_NAV_TAKEOFF(22)</li>
+     * </ul>
+     *
+     * @param mavCommand MAVLink 命令 ID
+     * @param p1         命令的第一个参数（ARM/DISARM 的 param1 区分 ARM=1/DISARM=0）
+     * @return true 表示该命令需要拦截校验
+     */
+    private boolean isInterceptRequired(int mavCommand, float p1) {
+        if (mavCommand == MavEnums.MAV_CMD_COMPONENT_ARM_DISARM) {
+            // 仅 ARM(param1=1) 需要拦截，DISARM(param1=0) 不拦截
+            return p1 == 1.0f;
+        }
+        if (mavCommand == MavEnums.MAV_CMD_NAV_TAKEOFF) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 执行拦截链校验：获取无人机位置 → 调用 geofenceIntercept.check() → 记录日志。
+     * <p>
+     * 故障安全原则（FR-10）：拦截服务不可用或校验异常时，按 DENY(INTERCEPT_ERROR) 处理。
+     *
+     * @param target     目标无人机 sysid
+     * @param mavCommand MAVLink 命令 ID
+     * @param p1         命令的第一个参数
+     * @return 拦截判决结果；null 表示拦截服务不可用（放行）
+     */
+    private InterceptVerdict performInterceptCheck(int target, int mavCommand, float p1) {
+        // 拦截服务未注入 → 跳过拦截链（向后兼容）
+        if (geofenceIntercept == null) {
+            return null;
+        }
+
+        // 构造命令名称用于拦截日志
+        String commandName = resolveCommandName(mavCommand, p1);
+
+        // 从 DeviceRegistry 获取无人机当前位置
+        DroneSnapshot snapshot = registry.get(target);
+        double lat = Double.NaN;
+        double lon = Double.NaN;
+        if (snapshot != null) {
+            lat = snapshot.lat;
+            lon = snapshot.lon;
+        }
+
+        InterceptVerdict verdict;
+        try {
+            verdict = geofenceIntercept.check(target, commandName, lat, lon);
+        } catch (Exception e) {
+            // 异常 → DENY(INTERCEPT_ERROR)（故障安全）
+            log.error("Intercept check exception for sysid={} command={}: {}",
+                    target, commandName, e.getMessage(), e);
+            verdict = InterceptVerdict.deny(InterceptVerdict.DenyReason.INTERCEPT_ERROR, null);
+        }
+
+        // 记录拦截日志
+        if (interceptLogStore != null) {
+            try {
+                InterceptLog logEntry = InterceptLog.fromVerdict(
+                        target, commandName, lat, lon, verdict);
+                interceptLogStore.record(logEntry);
+            } catch (Exception e) {
+                log.warn("Intercept log record failed for sysid={} command={}: {}",
+                        target, commandName, e.getMessage());
+            }
+        }
+
+        return verdict;
+    }
+
+    /**
+     * 将 MAVLink 命令 ID 和参数映射为人类可读的命令名称。
+     *
+     * @param mavCommand MAVLink 命令 ID
+     * @param p1         命令的第一个参数
+     * @return 命令名称字符串
+     */
+    private static String resolveCommandName(int mavCommand, float p1) {
+        if (mavCommand == MavEnums.MAV_CMD_COMPONENT_ARM_DISARM) {
+            return p1 == 1.0f ? "ARM" : "DISARM";
+        }
+        if (mavCommand == MavEnums.MAV_CMD_NAV_TAKEOFF) {
+            return "TAKEOFF";
+        }
+        return "CMD_" + mavCommand;
     }
 
     // =====================================================================

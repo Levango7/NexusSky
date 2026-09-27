@@ -158,6 +158,98 @@ class GeofenceControllerTest {
     }
 
     // =====================================================================
+    // fenceType / proximityBufferM 扩展字段
+    // =====================================================================
+
+    @Test
+    @DisplayName("testCreateZoneDefaultFenceType: 创建围栏不传 fenceType → 默认 KEEP_IN")
+    void testCreateZoneDefaultFenceType() throws Exception {
+        Map<String, Object> body = circleBody(10, "default-fence");
+        // 不传 fenceType，期望默认 KEEP_IN
+
+        mockMvc.perform(post("/api/v1/geofence/zones")
+                        .contentType("application/json")
+                        .content(json(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(10))
+                .andExpect(jsonPath("$.fenceType").value("KEEP_IN"))
+                .andExpect(jsonPath("$.proximityBufferM").value(100));
+    }
+
+    @Test
+    @DisplayName("testCreateZoneKeepOut: 创建围栏传 fenceType=KEEP_OUT → 创建 KEEP_OUT 围栏")
+    void testCreateZoneKeepOut() throws Exception {
+        Map<String, Object> body = circleBody(11, "keepout-fence");
+        body.put("fenceType", "KEEP_OUT");
+        body.put("proximityBufferM", 150);
+
+        mockMvc.perform(post("/api/v1/geofence/zones")
+                        .contentType("application/json")
+                        .content(json(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(11))
+                .andExpect(jsonPath("$.fenceType").value("KEEP_OUT"))
+                .andExpect(jsonPath("$.proximityBufferM").value(150));
+    }
+
+    @Test
+    @DisplayName("testCreateZoneInvalidFenceType: 创建围栏传非法 fenceType → 400")
+    void testCreateZoneInvalidFenceType() throws Exception {
+        Map<String, Object> body = circleBody(12, "bad-fence");
+        body.put("fenceType", "INVALID_TYPE");
+
+        mockMvc.perform(post("/api/v1/geofence/zones")
+                        .contentType("application/json")
+                        .content(json(body)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").exists());
+    }
+
+    @Test
+    @DisplayName("testCreateZoneProximityBuffer200: 创建围栏传 proximityBufferM=200 → 接近缓冲距离 200")
+    void testCreateZoneProximityBuffer200() throws Exception {
+        Map<String, Object> body = circleBody(13, "buffer-fence");
+        body.put("fenceType", "KEEP_OUT");
+        body.put("proximityBufferM", 200);
+
+        mockMvc.perform(post("/api/v1/geofence/zones")
+                        .contentType("application/json")
+                        .content(json(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(13))
+                .andExpect(jsonPath("$.proximityBufferM").value(200))
+                .andExpect(jsonPath("$.fenceType").value("KEEP_OUT"));
+    }
+
+    @Test
+    @DisplayName("testListZonesContainsFenceTypeAndProximityBufferM: GET zones 响应包含 fenceType 和 proximityBufferM 字段")
+    void testListZonesContainsFenceTypeAndProximityBufferM() throws Exception {
+        // 创建 KEEP_IN 围栏（默认）
+        mockMvc.perform(post("/api/v1/geofence/zones")
+                        .contentType("application/json")
+                        .content(json(circleBody(14, "keepin-zone"))));
+
+        // 创建 KEEP_OUT 围栏（显式指定）
+        Map<String, Object> keepOutBody = circleBody(15, "keepout-zone");
+        keepOutBody.put("fenceType", "KEEP_OUT");
+        keepOutBody.put("proximityBufferM", 200);
+        mockMvc.perform(post("/api/v1/geofence/zones")
+                        .contentType("application/json")
+                        .content(json(keepOutBody)));
+
+        // GET 列表验证两个字段都存在
+        mockMvc.perform(get("/api/v1/geofence/zones"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(2))
+                // 第一个围栏（id=14）：默认 KEEP_IN + proximityBufferM=100
+                .andExpect(jsonPath("$.items[0].fenceType").value("KEEP_IN"))
+                .andExpect(jsonPath("$.items[0].proximityBufferM").value(100))
+                // 第二个围栏（id=15）：KEEP_OUT + proximityBufferM=200
+                .andExpect(jsonPath("$.items[1].fenceType").value("KEEP_OUT"))
+                .andExpect(jsonPath("$.items[1].proximityBufferM").value(200));
+    }
+
+    // =====================================================================
     // 越界历史
     // =====================================================================
 

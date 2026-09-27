@@ -17,17 +17,32 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 电子围栏监控服务：定期检查无人机位置是否越界并生成告警事件。
  * <p>
- * 围栏语义：围栏区域 = 允许活动区（keep-in zone）。
+ * 围栏语义按 {@link FenceType} 分派：
  * <ul>
- *   <li>无人机从区域内 → 区域外：生成 {@link GeofenceBreachEvent.BreachType#EXIT EXIT} 事件（离开允许区 = 越界告警）。</li>
- *   <li>无人机从区域外 → 区域内：生成 {@link GeofenceBreachEvent.BreachType#ENTER ENTER} 事件（进入允许区 = 恢复通知）。</li>
- *   <li>首次检查时若已在区域外，生成 EXIT 事件。</li>
+ *   <li>{@link FenceType#KEEP_IN KEEP_IN}（允许活动区）：
+ *     <ul>
+ *       <li>区域内 → 区域外：生成 {@link GeofenceBreachEvent.BreachType#EXIT EXIT} 事件（越界告警）。</li>
+ *       <li>区域外 → 区域内：生成 {@link GeofenceBreachEvent.BreachType#ENTER ENTER} 事件（恢复通知）。</li>
+ *       <li>首次检查时若已在区域外，生成 EXIT 事件。</li>
+ *     </ul>
+ *   </li>
+ *   <li>{@link FenceType#KEEP_OUT KEEP_OUT}（禁飞区）：
+ *     <ul>
+ *       <li>区域外 → 区域内：生成 {@link GeofenceBreachEvent.BreachType#ENTER ENTER} 事件（进入禁飞区告警）。</li>
+ *       <li>区域内 → 区域外：生成 {@link GeofenceBreachEvent.BreachType#EXIT EXIT} 事件（离开禁飞区恢复）。</li>
+ *       <li>首次检查时若已在区域内，生成 ENTER 事件。</li>
+ *       <li>接近缓冲区告警：无人机在围栏外时，若到边界距离 ≤ proximityBufferM，
+ *           生成 {@link GeofenceBreachEvent.BreachType#PROXIMITY PROXIMITY} 事件；
+ *           从接近区离开时生成 {@link GeofenceBreachEvent.BreachType#CLEAR CLEAR} 事件。</li>
+ *     </ul>
+ *   </li>
  * </ul>
  * <p>
  * 几何计算：
  * <ul>
  *   <li>圆形围栏：{@link #haversineDistance Haversine 大圆距离} ≤ 半径。</li>
  *   <li>多边形围栏：{@link #isInsidePolygon 射线法（ray casting）}判断点是否在多边形内部。</li>
+ *   <li>到边界距离：{@link #distanceToBoundary} 圆形用 haversineDistance - radiusM，多边形用各边最短距离。</li>
  * </ul>
  * <p>
  * 依赖 {@link DeviceRegistry} 和 {@code FlightTrackStore} 通过 {@code @Lazy} 注入避免循环依赖。
@@ -54,6 +69,13 @@ public class GeofenceMonitor {
      */
     private final Map<Long, Boolean> insideState = new ConcurrentHashMap<>();
 
+    /**
+     * 接近缓冲区状态：key = sysid * 100000 + zoneId，
+     * value = 上次是否在接近缓冲区内。仅对 KEEP_OUT 围栏生效。
+     * 用于检测接近/远离状态切换并生成 PROXIMITY/CLEAR 事件。
+     */
+    private final Map<Long, Boolean> proximityState = new ConcurrentHashMap<>();
+
     public GeofenceMonitor(GeofenceStore store,
                            @Lazy DeviceRegistry registry) {
         this.store = store;
@@ -65,8 +87,12 @@ public class GeofenceMonitor {
     // ------------------------------------------------------------------
 
     /**
-     * 检查指定无人机位置是否越界，对每个启用的围栏区域判断 inside/outside 状态切换，
+     * 检查指定无人机位置是否越界，对每个启用的围栏区域按 {@link FenceType} 分派判断逻辑，
      * 状态切换时生成 {@link GeofenceBreachEvent} 存入 {@link GeofenceStore}。
+     * <p>
+     * KEEP_IN 围栏：inside→outside 生成 EXIT，outside→inside 生成 ENTER。
+     * KEEP_OUT 围栏：outside→inside 生成 ENTER，inside→outside 生成 EXIT（语义反转）。
+     * KEEP_OUT 围栏在无人机位于围栏外时额外检查接近缓冲区，生成 PROXIMITY/CLEAR 事件。
      *
      * @param sysid 无人机 systemId
      * @param lat   纬度
@@ -85,9 +111,28 @@ public class GeofenceMonitor {
             long stateKey = stateKey(sysid, zone.getId());
             Boolean previous = insideState.get(stateKey);
 
-            if (previous == null) {
-                // 首次检查：若在围栏外，生成 EXIT 事件
-                if (!inside) {
+            if (zone.getFenceType() == FenceType.KEEP_OUT) {
+                // KEEP_OUT 语义反转：outside→inside = ENTER（进入禁飞区），inside→outside = EXIT（离开禁飞区）
+                if (previous == null) {
+                    // 首次检查：若在围栏内，生成 ENTER 事件
+                    if (inside) {
+                        GeofenceBreachEvent ev = new GeofenceBreachEvent(
+                                sysid, zone.getId(), zone.getName(),
+                                GeofenceBreachEvent.BreachType.ENTER,
+                                lat, lon, now);
+                        store.recordBreach(ev);
+                        newEvents.add(ev);
+                    }
+                } else if (!previous && inside) {
+                    // outside → inside：进入禁飞区
+                    GeofenceBreachEvent ev = new GeofenceBreachEvent(
+                            sysid, zone.getId(), zone.getName(),
+                            GeofenceBreachEvent.BreachType.ENTER,
+                            lat, lon, now);
+                    store.recordBreach(ev);
+                    newEvents.add(ev);
+                } else if (previous && !inside) {
+                    // inside → outside：离开禁飞区
                     GeofenceBreachEvent ev = new GeofenceBreachEvent(
                             sysid, zone.getId(), zone.getName(),
                             GeofenceBreachEvent.BreachType.EXIT,
@@ -95,22 +140,74 @@ public class GeofenceMonitor {
                     store.recordBreach(ev);
                     newEvents.add(ev);
                 }
-            } else if (previous && !inside) {
-                // inside → outside：离开允许区（越界告警）
-                GeofenceBreachEvent ev = new GeofenceBreachEvent(
-                        sysid, zone.getId(), zone.getName(),
-                        GeofenceBreachEvent.BreachType.EXIT,
-                        lat, lon, now);
-                store.recordBreach(ev);
-                newEvents.add(ev);
-            } else if (!previous && inside) {
-                // outside → inside：进入允许区（恢复通知）
-                GeofenceBreachEvent ev = new GeofenceBreachEvent(
-                        sysid, zone.getId(), zone.getName(),
-                        GeofenceBreachEvent.BreachType.ENTER,
-                        lat, lon, now);
-                store.recordBreach(ev);
-                newEvents.add(ev);
+
+                // 接近缓冲区告警：仅在无人机位于围栏外时检查
+                if (!inside) {
+                    double distToBoundary = distanceToBoundary(lat, lon, zone);
+                    boolean inProximity = distToBoundary <= zone.getProximityBufferM();
+                    Boolean prevProximity = proximityState.get(stateKey);
+
+                    if (prevProximity == null) {
+                        // 首次检查：若已在接近缓冲区内，生成 PROXIMITY 事件
+                        if (inProximity) {
+                            GeofenceBreachEvent ev = new GeofenceBreachEvent(
+                                    sysid, zone.getId(), zone.getName(),
+                                    GeofenceBreachEvent.BreachType.PROXIMITY,
+                                    lat, lon, now);
+                            store.recordBreach(ev);
+                            newEvents.add(ev);
+                        }
+                    } else if (!prevProximity && inProximity) {
+                        // 远 → 近：进入接近缓冲区
+                        GeofenceBreachEvent ev = new GeofenceBreachEvent(
+                                sysid, zone.getId(), zone.getName(),
+                                GeofenceBreachEvent.BreachType.PROXIMITY,
+                                lat, lon, now);
+                        store.recordBreach(ev);
+                        newEvents.add(ev);
+                    } else if (prevProximity && !inProximity) {
+                        // 近 → 远：离开接近缓冲区
+                        GeofenceBreachEvent ev = new GeofenceBreachEvent(
+                                sysid, zone.getId(), zone.getName(),
+                                GeofenceBreachEvent.BreachType.CLEAR,
+                                lat, lon, now);
+                        store.recordBreach(ev);
+                        newEvents.add(ev);
+                    }
+                    proximityState.put(stateKey, inProximity);
+                } else {
+                    // 无人机在禁飞区内时，清除接近缓冲区状态
+                    proximityState.remove(stateKey);
+                }
+            } else {
+                // KEEP_IN 语义：inside→outside = EXIT（越界告警），outside→inside = ENTER（恢复通知）
+                if (previous == null) {
+                    // 首次检查：若在围栏外，生成 EXIT 事件
+                    if (!inside) {
+                        GeofenceBreachEvent ev = new GeofenceBreachEvent(
+                                sysid, zone.getId(), zone.getName(),
+                                GeofenceBreachEvent.BreachType.EXIT,
+                                lat, lon, now);
+                        store.recordBreach(ev);
+                        newEvents.add(ev);
+                    }
+                } else if (previous && !inside) {
+                    // inside → outside：离开允许区（越界告警）
+                    GeofenceBreachEvent ev = new GeofenceBreachEvent(
+                            sysid, zone.getId(), zone.getName(),
+                            GeofenceBreachEvent.BreachType.EXIT,
+                            lat, lon, now);
+                    store.recordBreach(ev);
+                    newEvents.add(ev);
+                } else if (!previous && inside) {
+                    // outside → inside：进入允许区（恢复通知）
+                    GeofenceBreachEvent ev = new GeofenceBreachEvent(
+                            sysid, zone.getId(), zone.getName(),
+                            GeofenceBreachEvent.BreachType.ENTER,
+                            lat, lon, now);
+                    store.recordBreach(ev);
+                    newEvents.add(ev);
+                }
             }
             insideState.put(stateKey, inside);
         }
@@ -161,16 +258,101 @@ public class GeofenceMonitor {
     /** 清除指定无人机的围栏状态记录（用于无人机注销或测试）。 */
     public void clearState(int sysid) {
         insideState.keySet().removeIf(k -> k / 100000 == sysid);
+        proximityState.keySet().removeIf(k -> k / 100000 == sysid);
     }
 
     /** 清除所有围栏状态记录（用于测试）。 */
     public void clearAllState() {
         insideState.clear();
+        proximityState.clear();
     }
 
     // ------------------------------------------------------------------
     // 几何计算
     // ------------------------------------------------------------------
+
+    /**
+     * 计算点到围栏边界的最短距离（米）。
+     * <p>
+     * 圆形围栏：{@code haversineDistance(point, center) - radiusM}（点在圆外时为正，圆内时为负）。
+     * 多边形围栏：点到各边的最短距离（点在多边形外时为正，内部时为负）。
+     *
+     * @param lat  点纬度
+     * @param lon  点经度
+     * @param zone 围栏区域
+     * @return 到边界的距离（米），围栏外为正，围栏内为负
+     */
+    public double distanceToBoundary(double lat, double lon, GeofenceZone zone) {
+        if (zone.getType() == GeofenceZone.Type.CIRCLE) {
+            double distToCenter = haversineDistance(lat, lon, zone.getCenterLat(), zone.getCenterLon());
+            return distToCenter - zone.getRadiusM();
+        }
+        return distanceToPolygonBoundary(lat, lon, zone.getPoints());
+    }
+
+    /**
+     * 计算点到多边形边界的最短距离。
+     * <p>
+     * 点在多边形外部时返回正值（到最近边的距离），内部时返回负值（到最近边的距离的负数）。
+     * 使用 Haversine 距离近似计算点到线段的最短距离。
+     *
+     * @param lat    点纬度
+     * @param lon    点经度
+     * @param points 多边形顶点列表
+     * @return 到边界的距离（米），外部为正，内部为负
+     */
+    private double distanceToPolygonBoundary(double lat, double lon,
+                                              List<GeofenceZone.GeoPoint> points) {
+        int n = points.size();
+        if (n < 3) {
+            return Double.MAX_VALUE;
+        }
+        double minDist = Double.MAX_VALUE;
+        for (int i = 0, j = n - 1; i < n; j = i++) {
+            GeofenceZone.GeoPoint pi = points.get(i);
+            GeofenceZone.GeoPoint pj = points.get(j);
+            double dist = distanceToSegment(lat, lon, pj.lat(), pj.lon(), pi.lat(), pi.lon());
+            minDist = Math.min(minDist, dist);
+        }
+        // 点在多边形内部时，距离取负值
+        if (isInsidePolygon(lat, lon, points)) {
+            return -minDist;
+        }
+        return minDist;
+    }
+
+    /**
+     * 计算点到线段的最短 Haversine 距离。
+     * <p>
+     * 将线段端点和待测点视为球面上的点，使用 Haversine 距离计算。
+     * 若垂足落在线段上，返回点到垂足的距离；否则返回到最近端点的距离。
+     *
+     * @param lat  点纬度
+     * @param lon  点经度
+     * @param lat1 线段端点1纬度
+     * @param lon1 线段端点1经度
+     * @param lat2 线段端点2纬度
+     * @param lon2 线段端点2经度
+     * @return 点到线段的最短距离（米）
+     */
+    private double distanceToSegment(double lat, double lon,
+                                     double lat1, double lon1,
+                                     double lat2, double lon2) {
+        // 使用平面近似（小范围区域内精度足够），将经纬度转为米
+        double dx = lon2 - lon1;
+        double dy = lat2 - lat1;
+        double segLenSq = dx * dx + dy * dy;
+        if (segLenSq == 0) {
+            // 线段退化为点
+            return haversineDistance(lat, lon, lat1, lon1);
+        }
+        // 计算投影比例 t
+        double t = ((lon - lon1) * dx + (lat - lat1) * dy) / segLenSq;
+        t = Math.max(0, Math.min(1, t));
+        double projLat = lat1 + t * dy;
+        double projLon = lon1 + t * dx;
+        return haversineDistance(lat, lon, projLat, projLon);
+    }
 
     /** 判断点是否在围栏区域内（按围栏类型分派）。 */
     public boolean isInsideZone(double lat, double lon, GeofenceZone zone) {

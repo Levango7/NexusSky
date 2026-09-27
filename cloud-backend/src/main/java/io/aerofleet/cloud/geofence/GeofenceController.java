@@ -41,8 +41,8 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
  * <p>
  * 围栏 JSON 格式：
  * <pre>
- * 圆形：{"id":1,"name":"base","type":"CIRCLE","centerLat":22.5,"centerLon":113.9,"radiusM":500,"action":"WARN"}
- * 多边形：{"id":2,"name":"area","type":"POLYGON","points":[{"lat":22.0,"lon":113.0},...],"action":"LOCK_RTH"}
+ * 圆形：{"id":1,"name":"base","type":"CIRCLE","centerLat":22.5,"centerLon":113.9,"radiusM":500,"action":"WARN","fenceType":"KEEP_IN","proximityBufferM":100}
+ * 多边形：{"id":2,"name":"area","type":"POLYGON","points":[{"lat":22.0,"lon":113.0},...],"action":"LOCK_RTH","fenceType":"KEEP_OUT","proximityBufferM":200}
  * </pre>
  */
 @RestController
@@ -221,13 +221,15 @@ public class GeofenceController {
         }
         GeofenceZone.Action action = parseAction(body.get("action"));
         boolean enabled = body.containsKey("enabled") ? toBool(body.get("enabled")) : true;
+        FenceType fenceType = parseFenceType(body.get("fenceType"));
+        int proximityBufferM = parseProximityBufferM(body.get("proximityBufferM"));
 
         GeofenceZone zone;
         if ("CIRCLE".equalsIgnoreCase(typeStr)) {
             double centerLat = toDouble(body.get("centerLat"), "centerLat");
             double centerLon = toDouble(body.get("centerLon"), "centerLon");
             double radiusM = toDouble(body.get("radiusM"), "radiusM");
-            zone = GeofenceZone.circleZone(id, name, centerLat, centerLon, radiusM, action);
+            zone = GeofenceZone.circleZone(id, name, centerLat, centerLon, radiusM, action, fenceType, proximityBufferM);
         } else if ("POLYGON".equalsIgnoreCase(typeStr)) {
             Object pointsObj = body.get("points");
             if (!(pointsObj instanceof List)) {
@@ -249,7 +251,7 @@ public class GeofenceController {
                 double plon = toDouble(pm.get("lon"), "lon");
                 points.add(new GeofenceZone.GeoPoint(plat, plon));
             }
-            zone = GeofenceZone.polygonZone(id, name, points, action);
+            zone = GeofenceZone.polygonZone(id, name, points, action, fenceType, proximityBufferM);
         } else {
             throw new BadRequestException("field 'type' must be CIRCLE or POLYGON, got " + typeStr);
         }
@@ -268,6 +270,38 @@ public class GeofenceController {
             return GeofenceZone.Action.WARN;
         }
         throw new BadRequestException("field 'action' must be WARN or LOCK_RTH, got " + s);
+    }
+
+    /** 解析围栏类型 fenceType，未指定时默认 KEEP_IN，非法值返回 400。 */
+    private FenceType parseFenceType(Object obj) {
+        if (obj == null) {
+            return FenceType.KEEP_IN;
+        }
+        String s = String.valueOf(obj);
+        if ("KEEP_IN".equalsIgnoreCase(s)) {
+            return FenceType.KEEP_IN;
+        }
+        if ("KEEP_OUT".equalsIgnoreCase(s)) {
+            return FenceType.KEEP_OUT;
+        }
+        throw new BadRequestException("field 'fenceType' must be KEEP_IN or KEEP_OUT, got " + s);
+    }
+
+    /** 解析接近缓冲区距离 proximityBufferM，未指定时默认 100，必须 > 0。 */
+    private int parseProximityBufferM(Object obj) {
+        if (obj == null) {
+            return 100;
+        }
+        int val;
+        if (obj instanceof Number n) {
+            val = n.intValue();
+        } else {
+            val = Integer.parseInt(String.valueOf(obj));
+        }
+        if (val <= 0) {
+            throw new BadRequestException("field 'proximityBufferM' must be > 0, got " + val);
+        }
+        return val;
     }
 
     /** 围栏区域 → JSON Map。 */
@@ -291,6 +325,8 @@ public class GeofenceController {
             m.put("points", pts);
         }
         m.put("action", z.getAction().name());
+        m.put("fenceType", z.getFenceType().name());
+        m.put("proximityBufferM", z.getProximityBufferM());
         m.put("enabled", z.isEnabled());
         m.put("createdAtMs", z.getCreatedAtMs());
         return m;

@@ -12,6 +12,13 @@ import java.util.List;
  *   <li>{@link Type#POLYGON POLYGON}：多边形围栏，由至少 3 个 {@link GeoPoint} 顶点描述。</li>
  * </ul>
  * <p>
+ * 围栏类型 {@link FenceType} 决定围栏语义：
+ * <ul>
+ *   <li>{@link FenceType#KEEP_IN KEEP_IN}：允许活动区，无人机应在围栏内部，越出围栏触发 EXIT 事件。</li>
+ *   <li>{@link FenceType#KEEP_OUT KEEP_OUT}：禁飞区，无人机应在围栏外部，进入围栏触发 ENTER 事件；
+ *       支持接近缓冲区告警（proximityBufferM）。</li>
+ * </ul>
+ * <p>
  * 越界动作 {@link Action} 决定无人机越界后的处置策略：
  * <ul>
  *   <li>{@link Action#WARN WARN}：仅生成告警事件，不干预飞行。</li>
@@ -40,12 +47,17 @@ public final class GeofenceZone {
     /** 多边形围栏顶点列表（不可变）；CIRCLE 时为空列表。 */
     private final List<GeoPoint> points;
     private final Action action;
+    /** 围栏类型：KEEP_IN（允许活动区）或 KEEP_OUT（禁飞区），默认 KEEP_IN。 */
+    private final FenceType fenceType;
+    /** 接近缓冲区距离（米），仅对 KEEP_OUT 围栏生效，默认 100。 */
+    private final int proximityBufferM;
     private final boolean enabled;
     private final long createdAtMs;
 
     private GeofenceZone(int id, String name, Type type,
                          double centerLat, double centerLon, double radiusM,
                          List<GeoPoint> points, Action action,
+                         FenceType fenceType, int proximityBufferM,
                          boolean enabled, long createdAtMs) {
         this.id = id;
         this.name = name;
@@ -55,12 +67,14 @@ public final class GeofenceZone {
         this.radiusM = radiusM;
         this.points = points;
         this.action = action;
+        this.fenceType = fenceType;
+        this.proximityBufferM = proximityBufferM;
         this.enabled = enabled;
         this.createdAtMs = createdAtMs;
     }
 
     /**
-     * 创建圆形围栏。
+     * 创建圆形围栏（默认 KEEP_IN 类型，proximityBufferM=100）。
      *
      * @param id        围栏 ID
      * @param name      围栏名称
@@ -72,16 +86,41 @@ public final class GeofenceZone {
     public static GeofenceZone circleZone(int id, String name,
                                           double centerLat, double centerLon,
                                           double radiusM, Action action) {
-        if (radiusM <= 0) {
-            throw new IllegalArgumentException("circle radius must be > 0, got " + radiusM);
-        }
-        return new GeofenceZone(id, name, Type.CIRCLE,
-                centerLat, centerLon, radiusM,
-                Collections.emptyList(), action, true, System.currentTimeMillis());
+        return circleZone(id, name, centerLat, centerLon, radiusM, action,
+                FenceType.KEEP_IN, 100);
     }
 
     /**
-     * 创建多边形围栏。
+     * 创建圆形围栏（指定围栏类型和接近缓冲区）。
+     *
+     * @param id               围栏 ID
+     * @param name             围栏名称
+     * @param centerLat        中心纬度
+     * @param centerLon        中心经度
+     * @param radiusM          半径（米），必须 > 0
+     * @param action           越界动作
+     * @param fenceType        围栏类型（KEEP_IN / KEEP_OUT）
+     * @param proximityBufferM 接近缓冲区距离（米），KEEP_OUT 时必须 > 0
+     */
+    public static GeofenceZone circleZone(int id, String name,
+                                          double centerLat, double centerLon,
+                                          double radiusM, Action action,
+                                          FenceType fenceType, int proximityBufferM) {
+        if (radiusM <= 0) {
+            throw new IllegalArgumentException("circle radius must be > 0, got " + radiusM);
+        }
+        if (fenceType == FenceType.KEEP_OUT && proximityBufferM <= 0) {
+            throw new IllegalArgumentException(
+                    "proximityBufferM must be > 0 for KEEP_OUT fence, got " + proximityBufferM);
+        }
+        return new GeofenceZone(id, name, Type.CIRCLE,
+                centerLat, centerLon, radiusM,
+                Collections.emptyList(), action, fenceType, proximityBufferM,
+                true, System.currentTimeMillis());
+    }
+
+    /**
+     * 创建多边形围栏（默认 KEEP_IN 类型，proximityBufferM=100）。
      *
      * @param id     围栏 ID
      * @param name   围栏名称
@@ -90,15 +129,36 @@ public final class GeofenceZone {
      */
     public static GeofenceZone polygonZone(int id, String name,
                                            List<GeoPoint> points, Action action) {
+        return polygonZone(id, name, points, action, FenceType.KEEP_IN, 100);
+    }
+
+    /**
+     * 创建多边形围栏（指定围栏类型和接近缓冲区）。
+     *
+     * @param id               围栏 ID
+     * @param name             围栏名称
+     * @param points           顶点列表，至少 3 个点
+     * @param action           越界动作
+     * @param fenceType        围栏类型（KEEP_IN / KEEP_OUT）
+     * @param proximityBufferM 接近缓冲区距离（米），KEEP_OUT 时必须 > 0
+     */
+    public static GeofenceZone polygonZone(int id, String name,
+                                           List<GeoPoint> points, Action action,
+                                           FenceType fenceType, int proximityBufferM) {
         if (points == null || points.size() < 3) {
             throw new IllegalArgumentException(
                     "polygon requires at least 3 points, got "
                             + (points == null ? 0 : points.size()));
         }
+        if (fenceType == FenceType.KEEP_OUT && proximityBufferM <= 0) {
+            throw new IllegalArgumentException(
+                    "proximityBufferM must be > 0 for KEEP_OUT fence, got " + proximityBufferM);
+        }
         return new GeofenceZone(id, name, Type.POLYGON,
                 Double.NaN, Double.NaN, Double.NaN,
                 Collections.unmodifiableList(List.copyOf(points)),
-                action, true, System.currentTimeMillis());
+                action, fenceType, proximityBufferM,
+                true, System.currentTimeMillis());
     }
 
     /**
@@ -107,7 +167,8 @@ public final class GeofenceZone {
     public GeofenceZone withEnabled(boolean enabled) {
         return new GeofenceZone(id, name, type,
                 centerLat, centerLon, radiusM,
-                points, action, enabled, createdAtMs);
+                points, action, fenceType, proximityBufferM,
+                enabled, createdAtMs);
     }
 
     public int getId() { return id; }
@@ -118,6 +179,8 @@ public final class GeofenceZone {
     public double getRadiusM() { return radiusM; }
     public List<GeoPoint> getPoints() { return points; }
     public Action getAction() { return action; }
+    public FenceType getFenceType() { return fenceType; }
+    public int getProximityBufferM() { return proximityBufferM; }
     public boolean isEnabled() { return enabled; }
     public long getCreatedAtMs() { return createdAtMs; }
 
@@ -127,7 +190,9 @@ public final class GeofenceZone {
                 + (type == Type.CIRCLE
                     ? ", center=(" + centerLat + "," + centerLon + "), radius=" + radiusM + "m"
                     : ", points=" + points.size())
-                + ", action=" + action + ", enabled=" + enabled + "}";
+                + ", action=" + action + ", fenceType=" + fenceType
+                + ", proximityBufferM=" + proximityBufferM
+                + ", enabled=" + enabled + "}";
     }
 
     /**
