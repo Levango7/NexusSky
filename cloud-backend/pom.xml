@@ -19,10 +19,19 @@
       <groupId>io.aerofleet</groupId>
       <artifactId>aerofleet-mavlink-core</artifactId>
     </dependency>
-    <!-- 复用 drone-sim 的 TrajectoryPredictor（卡尔曼滤波 + 运动学模型） -->
+    <!-- 复用 drone-sim 的 TrajectoryPredictor（卡尔曼滤波 + 运动学模型）。
+         slf4j-simple 是 drone-sim 自身的日志绑定（shade fat jar 用），
+         必须排除：否则与 Spring Boot 的 Logback 双绑定，SLF4J 2.x
+         provider 顺序敏感导致"单跑能过全量挂" -->
     <dependency>
       <groupId>io.aerofleet</groupId>
       <artifactId>aerofleet-drone-sim</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>slf4j-simple</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>

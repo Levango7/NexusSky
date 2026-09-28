@@ -59,7 +59,7 @@ $ls = Start-Process -FilePath $java -ArgumentList @(
     '--profile', $Profile, '--port', '14600', '--drone-ip', '127.0.0.2', '--drone-port', '14540'
 ) -PassThru -WindowStyle Hidden
 $sim = Start-Process -FilePath $java -ArgumentList @(
-    '-jar', "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar",
+    '-jar', "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar",
     '--port', '14540', '--bind-ip', '127.0.0.2', '--sysid', '1', '--name', 'AF-NET-01'
 ) -PassThru -WindowStyle Hidden
 
@@ -116,7 +116,7 @@ $ls2 = Start-Process -FilePath $java -ArgumentList @(
     '--profile', 'starlink', '--port', '14600', '--drone-ip', '127.0.0.2', '--drone-port', '14540'
 ) -PassThru -WindowStyle Hidden
 $sim2 = Start-Process -FilePath $java -ArgumentList @(
-    '-jar', "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar",
+    '-jar', "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar",
     '--port', '14540', '--bind-ip', '127.0.0.2', '--sysid', '1', '--name', 'AF-SL-01'
 ) -PassThru -WindowStyle Hidden
 

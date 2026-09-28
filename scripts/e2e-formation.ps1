@@ -187,7 +187,7 @@ function Wait-FormationState($formationId, $expectedState, $timeoutSec, $interva
 Step '前置检查（异常 5.5.3-1：jar 存在、端口可用、Java>=17）'
 
 $backendJar   = Join-Path $Root 'cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
-$droneSimJar  = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar'
+$droneSimJar  = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 $linkSimJar   = Join-Path $Root 'link-sim\target\aerofleet-link-sim-0.1.0-SNAPSHOT.jar'
 
 $backendOk  = Test-Path $backendJar

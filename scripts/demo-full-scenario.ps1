@@ -141,7 +141,7 @@ try {
         $env:JAVA_HOME = 'E:\dev-tools\jdk17.0.20_8'
         $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
         & mvn -q -DskipTests -f "$Root\pom.xml" package 2>&1 | ForEach-Object { Info "$_" }
-        Check "Maven 构建成功" (Test-Path "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar")
+        Check "Maven 构建成功" (Test-Path "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar")
     }
 
     Step "启动 cloud-backend"
@@ -162,7 +162,7 @@ try {
     if (-not $backendReady) { throw "后端启动失败" }
 
     Step "启动 3 台 drone-sim"
-    $droneSimJar = "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar"
+    $droneSimJar = "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar"
     if (-not (Test-Path $droneSimJar)) {
         Write-Host "[ERROR] drone-sim jar 不存在，请先构建" -ForegroundColor Red
         exit 1

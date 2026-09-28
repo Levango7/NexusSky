@@ -3,7 +3,7 @@
 # 前置：cloud-backend(8080/14550) 已运行；故障模拟器由本脚本启动 (sysid=7, port=14541)。
 set -u
 BASE=http://localhost:8080/api/v1
-JAR=drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT.jar
+JAR=drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
 FAIL=0
 
 step() { echo "== $1"; }

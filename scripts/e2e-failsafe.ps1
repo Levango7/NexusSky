@@ -43,7 +43,7 @@ catch { Write-Host '后端未运行（先 start-all.cmd），中止' -Foreground
 # UDP 14550 发一帧 GCS 心跳注册模拟器（模拟 PX4 主动上报），后端会从入帧
 # 学习源地址并加入路由表。
 Step '启动故障模拟器 (sysid=9, port=14542, link-loss@60s:45s)'
-$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar'
+$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
 Assert-Java17 $java
 $sim = Start-Process -FilePath $java -ArgumentList @(

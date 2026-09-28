@@ -10,7 +10,7 @@ services:
     image: eclipse-temurin:17-jre
     volumes:
       - ./drone-sim/target:/app
-    command: java -jar aerofleet-drone-sim-0.1.0-SNAPSHOT.jar --port 14540
+    command: java -jar aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar --port 14540
     network_mode: host
 
   cloud-backend:

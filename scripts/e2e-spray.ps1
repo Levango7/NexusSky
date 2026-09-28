@@ -169,7 +169,7 @@ function Wait-DroneOnline($expectedSysid, $timeoutSec) {
 Step '前置检查（jar 存在、端口可用、Java>=17）'
 
 $backendJar  = Join-Path $Root 'cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
-$droneSimJar = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar'
+$droneSimJar = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 
 $backendOk  = Test-Path $backendJar
 $droneSimOk = Test-Path $droneSimJar

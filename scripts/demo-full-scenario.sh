@@ -81,7 +81,7 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
     banner "步骤0：构建系统"
     step "Maven 构建（跳过测试）"
     (cd "$ROOT" && mvn -q -DskipTests package) || { echo "[ERROR] Maven 构建失败"; exit 1; }
-    check "Maven 构建成功" "[ -f '$ROOT/drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT.jar' ]"
+    check "Maven 构建成功" "[ -f '$ROOT/drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar' ]"
 fi
 
 step "启动 cloud-backend"
@@ -99,7 +99,7 @@ done
 check "cloud-backend 启动" "curl -s --max-time 2 '$BASE/drones' >/dev/null 2>&1"
 
 step "启动 3 台 drone-sim"
-DRONE_SIM_JAR="$ROOT/drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT.jar"
+DRONE_SIM_JAR="$ROOT/drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar"
 [ -f "$DRONE_SIM_JAR" ] || { echo "[ERROR] drone-sim jar 不存在"; exit 1; }
 for i in 0 1 2; do
     PORT=${DRONE_SIM_PORTS[$i]}

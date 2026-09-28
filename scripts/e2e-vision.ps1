@@ -1,5 +1,6 @@
 ﻿# AeroFleet 视觉链路回归测试（Batch A5）
-# 前置：cloud-backend(8080/14550) 已运行（start-all.cmd）；JAVA_HOME 指向 JDK17
+# 前置：cloud-backend 已运行（默认 8080，AF_BACKEND_PORT 可覆盖；MAVLink 侧需
+#       --aerofleet.drone-port=14542 与本脚本 sim 的 --port 对齐）；JAVA_HOME 指向 JDK17
 #       （无 JAVA_HOME 时 fallback 到 PATH 上的 java，需自行保证 >= 17）。
 # 本脚本自行启动一台带真值 HTTP(18080) 的模拟器（MAVLink 14542），
 # 三段断言：
@@ -9,7 +10,9 @@
 # 目标布置：环绕中心 = home 北 100m，静态目标 A 在中心（0m），B 在中心东 30m。
 # 半径 50m、高度 60m、FOV 90° -> 每站点距目标 <= 58m，均入画。
 $ErrorActionPreference = 'Stop'
-$Base = 'http://localhost:8080/api/v1'
+# 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_PORT 覆盖
+$BackendPort = if ($env:AF_BACKEND_PORT) { [int]$env:AF_BACKEND_PORT } else { 8080 }
+$Base = "http://localhost:$BackendPort/api/v1"
 $Fail = 0
 
 # ---- Java 版本自检（e2e 共用守卫）：JDK8 会静默杀掉 sim（class 61 vs 52）----
@@ -42,7 +45,7 @@ catch { Write-Host '后端未运行（先 start-all.cmd），中止' -Foreground
 
 # ---- 1. 启动视觉模拟器 ----
 Step '启动视觉模拟器 (sysid=9, mavlink=14542, truth=18080)'
-$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar'
+$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
 Assert-Java17 $java
 # 环绕中心: home 北 100m = lat 22.5916；目标 A 在中心，B 东 30m (lon+30/102790)

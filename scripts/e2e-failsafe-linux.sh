@@ -17,7 +17,7 @@ curl -sf "$Base/drones" >/dev/null || { echo "backend not running, abort"; exit 
 
 # 1. fault drone on 14541 (backend default discovery includes it)
 step "start fault drone (sysid=9, link-loss@60s:45s)"
-java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT.jar \
+java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar \
     --port 14541 --sysid 9 --name AF-FAILSAFE-01 --scenario link-loss:60:45 &
 SIM_PID=$!
 

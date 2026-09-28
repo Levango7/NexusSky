@@ -6,7 +6,7 @@
 set -u
 BASE='http://localhost:8080/api/v1'
 FAIL=0
-JAR="$(dirname "$0")/../drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT.jar"
+JAR="$(dirname "$0")/../drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar"
 
 step()  { echo "== $1"; }
 check() {

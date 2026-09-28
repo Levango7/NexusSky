@@ -310,7 +310,7 @@ function Run-Full {
     Step '完整版：启动 cloud-backend + link-sim --relay + drone-sim'
 
     $backendJar = Join-Path $Root 'cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
-    $droneSimJar = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar'
+    $droneSimJar = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 
     $backendOk = Test-Path $backendJar
     $droneSimOk = Test-Path $droneSimJar

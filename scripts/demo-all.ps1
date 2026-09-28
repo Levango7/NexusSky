@@ -161,7 +161,7 @@ try {
     $javaExe = Assert-Java17
 
     $backendJar = "$Root\cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar"
-    $droneSimJar = "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar"
+    $droneSimJar = "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar"
 
     if (-not $SkipBuild) {
         if (-not (Test-Path $backendJar) -or -not (Test-Path $droneSimJar)) {

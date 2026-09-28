@@ -41,7 +41,7 @@ catch { Write-Host '后端未运行（先 start-all.cmd），中止' -Foreground
 
 # ---- 1. 启动故障模拟器：gps-loss@8s:10s, battery-fault@40s, link-loss@60s:12s ----
 Step '启动故障模拟器 (sysid=7, port=14541)'
-$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar'
+$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
 Assert-Java17 $java
 $sim = Start-Process -FilePath $java -ArgumentList @(

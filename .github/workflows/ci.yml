@@ -101,7 +101,7 @@ jobs:
           exit 1
       - name: Normal flight smoke (sim -> mission -> RTL + flightlog + joystick)
         run: |
-          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT.jar &
+          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar &
           sleep 5
           bash scripts/e2e-smoke.sh
       - name: Fault-injection regression (gps-loss / battery-fault / link-loss)
@@ -175,7 +175,7 @@ jobs:
           exit 1
       - name: Start drone-sim
         run: |
-          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT.jar &
+          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar &
           sleep 5
       - name: SDK integration tests
         run: |

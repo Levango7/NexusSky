@@ -29,7 +29,6 @@
       <artifactId>slf4j-simple</artifactId>
       <version>${slf4j.version}</version>
       <scope>runtime</scope>
-      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
@@ -54,6 +53,11 @@
             <phase>package</phase>
             <goals><goal>shade</goal></goals>
             <configuration>
+              <!-- fat jar 挂 shaded classifier 附属：主 artifact 保持 thin jar，
+                   依赖方（cloud-backend）拿到 thin jar + 正常的依赖声明传递，
+                   避免 fat jar 内嵌类污染下游 SLF4J provider 发现 -->
+              <shadedArtifactAttached>true</shadedArtifactAttached>
+              <shadedClassifierName>shaded</shadedClassifierName>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <mainClass>io.aerofleet.sim.DroneSimMain</mainClass>

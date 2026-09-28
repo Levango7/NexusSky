@@ -126,7 +126,7 @@ powershell -File scripts\e2e-network.ps1 -Profile lte-edge   :: 换更恶劣的�
 
 ```cmd
 :: GPS 在开机后 30s 丢失、持续 20s 后恢复
-java -jar drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar --scenario gps-loss:30:20
+java -jar drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar --scenario gps-loss:30:20
 
 :: 组合故障：全程 6m/s 侧风 + 45s 起链路黑洞 15s
 java -jar drone-sim\target\...jar --scenario wind:0:9999:6,link-loss:45:15

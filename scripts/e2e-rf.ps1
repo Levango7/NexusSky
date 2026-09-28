@@ -36,7 +36,7 @@ catch { Write-Host '后端未运行，中止' -ForegroundColor Red; exit 1 }
 
 # ---- 1. 启动无障碍模拟器 ----
 Step '启动 RF 模拟器 (sysid=11, mavlink=14543, truth=18081, 无障碍)'
-$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT.jar'
+$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
 Assert-Java17 $java
 $sim = Start-Process -FilePath $java -ArgumentList @(
