@@ -20,9 +20,41 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  maven-warm:
+    name: Warm Maven Cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      # actions/cache 对同一 key「首个保存者胜出」，其余 job 的保存全部被跳过
+      # （日志实证：Cache hit occurred on the primary key ..., not saving cache）。
+      # 若由并行构建 job 抢占，最先完成的小模块会把残缺 m2 冻结进缓存，
+      # 导致每个 maven job 每次运行都实时下载数百 artifact（单 job 实测 740 次
+      # Downloading from central），在共享 runner IP 上触发 Maven Central 429。
+      # 本作业先于全部 maven job 运行：冷缓存时成为唯一保存者（完整 m2）；
+      # 命中时以离线构建校验缓存完整性（-o 下任何缺失立刻失败而非静默回源）。
+      - name: Restore Maven local repository
+        id: mvn-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      - name: Populate local repository (cold cache)
+        if: steps.mvn-cache.outputs.cache-hit != 'true'
+        run: mvn -B -DskipTests verify
+      - name: Verify cached repository is complete (offline build)
+        if: steps.mvn-cache.outputs.cache-hit == 'true'
+        run: mvn -B -o -DskipTests verify
+
   java:
     name: Java ${{ matrix.module }}
     runs-on: ubuntu-latest
+    needs: [ maven-warm ]
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +65,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          restore-keys: |
+            mvn-${{ runner.os }}-
       - name: Build & test
         run: mvn -B -pl ${{ matrix.module }} -am package
       - name: Upload JaCoCo coverage report
@@ -83,7 +121,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          restore-keys: |
+            mvn-${{ runner.os }}-
       - name: Build all
         run: mvn -B -DskipTests package
       - name: Start backend
@@ -131,7 +175,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          restore-keys: |
+            mvn-${{ runner.os }}-
       - name: Run integration tests
         run: |
           chmod +x scripts/ci-integration-test.sh
@@ -157,7 +207,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          restore-keys: |
+            mvn-${{ runner.os }}-
       - name: Build all
         run: mvn -B -DskipTests package
       - name: Start backend
@@ -212,7 +268,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          restore-keys: |
+            mvn-${{ runner.os }}-
       - name: Pre-populate local Maven repository (Trivy offline dependency resolution)
         continue-on-error: true
         run: mvn -B -q dependency:go-offline
@@ -241,6 +303,13 @@ jobs:
         language: [ java, javascript ]
     steps:
       - uses: actions/checkout@v4
+      - name: Restore Maven local repository (restore-only; saves are owned by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          restore-keys: |
+            mvn-${{ runner.os }}-
       - uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
