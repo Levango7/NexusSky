@@ -143,7 +143,8 @@ class SecurityImpairmentTest {
         int payloadLen = original[1] & 0xFF;
         int bitDiffCount = 0;
         for (int i = 10; i < 10 + payloadLen; i++) {
-            int xor = original[i] ^ tampered[i];
+            // byte 提升为 int 会符号扩展（0x80 → 0xFFFFFF80），必须先掩码再计数
+            int xor = (original[i] ^ tampered[i]) & 0xFF;
             bitDiffCount += Integer.bitCount(xor);
         }
         assertTrue(bitDiffCount >= 1 && bitDiffCount <= 3,

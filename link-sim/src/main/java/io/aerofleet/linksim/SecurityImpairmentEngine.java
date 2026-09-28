@@ -107,15 +107,19 @@ final class SecurityImpairmentEngine {
         }
 
         int payloadStart = 10;
-        int payloadEnd = payloadStart + payloadLen - 1;
 
-        // 随机翻转 1~3 个 bit
-        int bitCount = 1 + new Random().nextInt(3);
+        // 翻转 1~3 个互不重复的 bit：重复翻转同一 bit 会相互抵消，导致篡改后与原文相同
         Random rng = new Random();
+        int bitCount = 1 + rng.nextInt(3);
+        int totalBits = payloadLen * 8;
+        boolean[] used = new boolean[totalBits];
         for (int i = 0; i < bitCount; i++) {
-            int byteIdx = payloadStart + rng.nextInt(payloadLen);
-            int bitIdx = rng.nextInt(8);
-            result[byteIdx] ^= (1 << bitIdx);
+            int pos;
+            do {
+                pos = rng.nextInt(totalBits);
+            } while (used[pos]);
+            used[pos] = true;
+            result[payloadStart + pos / 8] ^= (1 << (pos % 8));
         }
 
         return result;
