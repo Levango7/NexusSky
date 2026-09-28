@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import org.junit.jupiter.api.DisplayName;
@@ -108,5 +110,51 @@ class DroneControllerTest {
         assertThat(result).isNotNull();
         assertThat(result).containsKey("sysid");
         assertThat(result.get("sysid")).isEqualTo(1);
+    }
+
+    /** 构造任务 body：合法航点字段 + 可覆盖的 lat/lon/alt。 */
+    private static JsonNode missionBody(double lat, double lon, double alt) throws Exception {
+        return new ObjectMapper().readTree(String.format(
+                "{\"items\":[{\"cmd\":\"waypoint\",\"lat\":%s,\"lon\":%s,\"alt\":%s,\"holdTime\":0}]}",
+                lat, lon, alt));
+    }
+
+    @Test
+    @DisplayName("uploadMission 非法纬度(>90) 抛 BadRequestException")
+    void uploadMission_latAbove90_throwsBadRequest() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneController controller = newController(registry);
+        JsonNode body = missionBody(95.0, 113.9345, 30);
+
+        assertThatThrownBy(() -> controller.uploadMission(1, body))
+                .isInstanceOf(ApiExceptionHandler.BadRequestException.class)
+                .hasMessageContaining("lat must be in [-90, 90]");
+    }
+
+    @Test
+    @DisplayName("uploadMission 非法经度(<-180) 抛 BadRequestException")
+    void uploadMission_lonBelowMinus180_throwsBadRequest() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneController controller = newController(registry);
+        JsonNode body = missionBody(22.5907, -200.0, 30);
+
+        assertThatThrownBy(() -> controller.uploadMission(1, body))
+                .isInstanceOf(ApiExceptionHandler.BadRequestException.class)
+                .hasMessageContaining("lon must be in [-180, 180]");
+    }
+
+    @Test
+    @DisplayName("uploadMission 非法高度(<0) 抛 BadRequestException")
+    void uploadMission_negativeAlt_throwsBadRequest() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneController controller = newController(registry);
+        JsonNode body = missionBody(22.5907, 113.9345, -10);
+
+        assertThatThrownBy(() -> controller.uploadMission(1, body))
+                .isInstanceOf(ApiExceptionHandler.BadRequestException.class)
+                .hasMessageContaining("alt must be >= 0");
     }
 }

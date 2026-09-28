@@ -251,11 +251,22 @@ public class DroneController {
             if (n.path("cmd").asText("").isBlank()) {
                 throw new BadRequestException("each item needs a 'cmd' field");
             }
+            // MissionItemRequest 在此手工构造（非 Spring 绑定），
+            // record 上的 JSR303 注解不会触发，范围约束需显式检查。
+            double lat = n.path("lat").asDouble(0);
+            double lon = n.path("lon").asDouble(0);
+            double alt = n.path("alt").asDouble(0);
+            if (lat < -90 || lat > 90) {
+                throw new BadRequestException("mission item lat must be in [-90, 90], got " + lat);
+            }
+            if (lon < -180 || lon > 180) {
+                throw new BadRequestException("mission item lon must be in [-180, 180], got " + lon);
+            }
+            if (alt < 0) {
+                throw new BadRequestException("mission item alt must be >= 0, got " + alt);
+            }
             out.add(new MissionItemRequest(
-                    n.path("cmd").asText(),
-                    n.path("lat").asDouble(0),
-                    n.path("lon").asDouble(0),
-                    n.path("alt").asDouble(0),
+                    n.path("cmd").asText(), lat, lon, alt,
                     n.path("holdTime").asDouble(0)));
         }
         return out;
