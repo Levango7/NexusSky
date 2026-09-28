@@ -106,7 +106,8 @@ active=$(jqget "$tr" 'sum(1 for t in d["tracks"] if t["state"]=="ACTIVE")')
 [ "$active" -ge 1 ]; check "存在 ACTIVE 航迹 ($active 条)" "$?"
 hits4=$(jqget "$tr" 'sum(1 for t in d["tracks"] if t["hits"]>=4)')
 [ "$hits4" -ge 1 ]; check "至少一条航迹 >= 4 hits（环绕 4 站连续命中）" "$?"
-for t in $(jqget "$tr" "range(len(d['tracks']))"); do
+tracks_n=$(jqget "$tr" "len(d['tracks'])")
+for t in $(seq 0 $((tracks_n - 1))); do
   echo "   track id=$(jqget "$tr" "d['tracks'][$t]['trackId']") state=$(jqget "$tr" "d['tracks'][$t]['state']") hits=$(jqget "$tr" "d['tracks'][$t]['hits']")"
 done
 
