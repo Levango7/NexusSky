@@ -48,14 +48,16 @@
 | 11 | E2E job Build all 被 Maven Central 429 打死（m2 缓存残缺） | setup-java 的 m2 缓存「首个保存者胜出」，之后所有保存被跳过、内容**永久冻结**（日志实证：`Cache hit occurred on the primary key ..., not saving cache`）——冻结的缓存仅 33MB，每个 maven job 每次运行仍实时下载数百 artifact（单 job 实测 740 次 `Downloading from central`），共享 runner IP 聚合流量触发 Central 限流后 `maven-shade-plugin:3.6.0` 解析即败。修复：新增 `maven-warm` 作业先于全部 maven job 运行（冷缓存时全量构建并成为唯一保存者；命中时 `-o` 离线构建自检缓存完整性，缺失立刻失败而非静默回源）；全部 maven job 改用显式 `actions/cache`（versioned key `mvn-<os>-<pom hash>-v1` + restore-keys 跨 pom 变更复用），下游与 CodeQL 用 `actions/cache/restore` 仅恢复不保存，杜绝二次冻结。依据：Central 官方 429 FAQ「reduce unnecessary traffic…caching artifacts…avoid repeated downloads from clean or ephemeral environments」，明确不要靠重试 |
 | 12 | E2E failsafe 观测窗口 130s 过紧（CI 落地晚于固定窗口） | CI 重跑实证：RTL 于观测 ~72s 才触发（`FAILSAFE: datalink/battery critical -> RTL`），130s 固定窗口截止时仍 `[130s] online=True mode=RTL`（下降末段）→ `FAIL: vehicle landed by itself (STANDBY, disarmed)`。改为有界轮询 ≤225s（`seq 1 45`）：三项链式证据（offline→RTL→landed）齐备即提前退出，真回归仍由 225s 封顶兜底 |
 | 13 | vision 脚本 track 循环迭代 range repr（装饰输出坏 + CI 日志噪声） | `for t in $(jqget "$tr" "range(len(d['tracks']))")` 迭代的是 Python `range` 的 repr 串（首个 token `range(0,`、次个 `2)`）→ 三条 `d['tracks'][$t][...]` 表达式全部 SyntaxError，CI 日志出现回显噪声（断言 L106-108 已在前判过，判定不受影响）。改为先取 `tracks_n=len(...)` 再 `seq 0 $((tracks_n-1))` 索引迭代 |
+| 14 | CodeQL job 未等待 maven-warm（冷启动缓存 miss，autobuild 全量下载 1013 次） | codeql 无 needs、与 warm 并行竞争缓存：restore 于 19:21:52 执行时 warm 尚未保存（19:22:41 才 `Cache saved`），日志实证 `Cache not found for input keys: mvn-Linux-0115124c…v1, mvn-Linux-`，autobuild 随后实测 1013 次 `Downloading from central`——与 warm 的 1010 次叠加使冷启动流量近乎翻倍（429 风险面扩大）。修复：`codeql` 加 `needs: [ maven-warm ]`，restore 必在 save 之后（java job 同款依赖模式已实证命中；本修复待下次 CI 复验） |
 
-> **本轮验证**：run 36467057124（f86af5d）：Java ×4 / GCS Web / CodeQL ×2 / Integration Tests / SDK Integration / Security Scan / Docker ×3 全绿（Trivy `scan.offline` 首验通过）；E2E 重跑后 smoke / fault 通过，failsafe 判负（观测窗口过紧，已修见 #12），vision 未及执行。本地：缓存修复 `mvn -B -o -DskipTests verify` EXIT 0（2m13s）、完整 m2 下 `mvn -B -DskipTests package` 零下载（1m36s）；failsafe 修复本地复跑 ALL FAILSAFE TESTS PASSED（offline@50s → RTL 触发@52s、云端复见@70s → STANDBY@85s 三项齐备提前退出，未触及 225s 上限）。
+> **本轮验证**：run 36471697558（1df333d，16 job 全 success，11.7 min）：Java ×4 / GCS Web / CodeQL ×2 / Integration Tests / SDK Integration / Security Scan / Docker ×3 全绿；maven-warm 冷启动单次集中下载 1010 次（`BUILD SUCCESS` 42.9s）并成为唯一保存者（`Cache saved with key: mvn-Linux-0115124c…v1`），下游命中恢复（E2E `Cache restored from key: …`、Build all 零下载 15.8s；Java job 命中恢复，仅 surefire 运行期 provider 15 个 artifact 实时解析——`-DskipTests` 暖缓存不含）；CodeQL(java) 未 wait warm 而 miss（见 #14，已修）；E2E failsafe CI 实证 offline@70s → RTL@105s → STANDBY@145s 三项齐备提前退出（3 断言 PASS，未及 225s 上限）；vision 首跑 VISION E2E PASSED（单拍/环绕 max 误差 0.0m、DONE 4/4、ACTIVE 航迹 2 条、≥4 hits；track 装饰输出因 #13 bug 打印 SyntaxError 噪声，已修）。本地：vision 修复复跑 VISION E2E PASSED——13 项断言全过，`track id=1 state=ACTIVE hits=4` / `track id=2 state=ACTIVE hits=2` 正常输出，无 SyntaxError 噪声。
 
 ### 已知项（外部依赖，待决策）
 
 | # | 项 | 说明 |
 |---|---|---|
 | 1 | Esri 底图商用条款 | 现为免 key 公开 REST 服务，开发/内部使用实测可用；转商用前需确认 Esri 授权 |
+| 2 | Docker Compose E2E 在 CI 恒跳过 | runner 无 hyphen 版 `docker-compose` 二进制（SDK job 19:28:42 日志 `docker-compose not available, skipping`）；且脚本按独占 Docker 主机设计（host 网络自起 8080 backend / 5173 web，与 job 内已启动的 backend/sim 端口冲突），同 job 无法实跑、须独立 job。现保留为本地/手工 smoke（`continue-on-error: true`，不产生失败）；如需 CI 实跑需单开 job（估计 +5–8 min/次，本机 8080 被 Docker Desktop 占用无法本地完整验证） |
 
 ---
 
