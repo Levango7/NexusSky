@@ -1,6 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
-import maplibregl from 'maplibre-gl'
+// maplibre-gl v6 起仅发布 ESM（无 UMD），默认导入不可用，须用命名空间导入
+import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+// v6 打包器环境下 worker 无法靠 import.meta.url 自动定位，需显式注册；
+// ?worker&url 让 Vite 产出自包含 worker chunk（?url 会漏掉其 shared 依赖）
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl)
 
 // 免密钥底图（Esri ArcGIS REST，实测本机可达；CARTO keyless 只返回 API KEY 水印图）
 // 注意 Esri 瓦片路径为 {z}/{y}/{x}（与常规 {z}/{x}/{y} 不同）
