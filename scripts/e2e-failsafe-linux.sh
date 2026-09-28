@@ -45,9 +45,12 @@ curl -sf -X POST "$Base/drones/9/commands" -H 'Content-Type: application/json' -
 curl -sf -X POST "$Base/drones/9/commands" -H 'Content-Type: application/json' -d '{"type":"start_mission"}' >/dev/null && check "start mission" true || check "start mission" false
 
 # 3. silent observation: offline during blackout, RTL after recovery, landed
-step "silent observation of the failsafe chain (130s)"
+# 有界轮询（≤225s）：CI 实测 130s 固定窗口截止时仍在 RTL 末段下降
+# （[130s] online=True mode=RTL；本地约 100s 已完成落地），需放宽上限；
+# 三项链式证据齐备即提前退出，真回归仍由 225s 封顶兜底。
+step "silent observation of the failsafe chain (up to 225s, exits early once landed)"
 sawOffline=false; sawRtl=false; sawLanded=false
-for i in $(seq 1 26); do
+for i in $(seq 1 45); do
     sleep 5
     row=$(curl -sf "$Base/drones" 2>/dev/null || true)
     [ -z "$row" ] && continue
@@ -66,6 +69,8 @@ for d in json.load(sys.stdin):
     [ "$online" = "False" ] && sawOffline=true
     [ "$online" = "True" ] && [ "$mode" = "RTL" ] && sawRtl=true
     [ "$online" = "True" ] && [ "$mode" = "STANDBY" ] && [ "$armed" = "False" ] && [ $i -gt 14 ] && sawLanded=true
+    # 证据齐备即提前退出；真回归由 225s 封顶兜底（三项仍缺则判负）
+    if [ "$sawOffline" = "true" ] && [ "$sawRtl" = "true" ] && [ "$sawLanded" = "true" ]; then break; fi
 done
 
 check "cloud flagged offline during blackout" "$sawOffline"
