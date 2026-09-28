@@ -2,23 +2,28 @@ import React, { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
-// 免费无密钥瓦片：CartoDB dark（户外地面站审美：深色高对比）
+// 免密钥底图（Esri ArcGIS REST，实测本机可达；CARTO keyless 只返回 API KEY 水印图）
+// 注意 Esri 瓦片路径为 {z}/{y}/{x}（与常规 {z}/{x}/{y} 不同）
+const BASEMAP_SOURCES = {
+  'basemap-dark': {
+    type: 'raster',
+    tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'],
+    tileSize: 256,
+    attribution: '© Esri, HERE, Garmin, © OpenStreetMap contributors',
+  },
+  'basemap-imagery': {
+    type: 'raster',
+    tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+    tileSize: 256,
+    attribution: '© Esri, Maxar, Earthstar Geographics',
+  },
+}
 const MAP_STYLE = {
   version: 8,
-  sources: {
-    basemap: {
-      type: 'raster',
-      tiles: [
-        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-      ],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors © CARTO',
-    },
-  },
+  sources: BASEMAP_SOURCES,
   layers: [
-    { id: 'base', type: 'raster', source: 'basemap' },
+    { id: 'base-imagery', type: 'raster', source: 'basemap-imagery', layout: { visibility: 'none' } },
+    { id: 'base-dark', type: 'raster', source: 'basemap-dark', layout: { visibility: 'visible' } },
   ],
 }
 
@@ -169,6 +174,8 @@ export default function MapView({
   const replayMarkerRef = useRef(null)
   // 着色模式内部状态（可与外部 trackColorMode prop 同步）
   const [colorMode, setColorMode] = useState(trackColorMode || 'single')
+  // 底图模式：dark（默认）/ imagery
+  const [basemapMode, setBasemapMode] = useState('dark')
   // 脉冲动画 ID
   const pulseAnimRef = useRef(null)
 
@@ -902,6 +909,14 @@ export default function MapView({
     }
   }, [trackingOverlay, retryKey, loadedRetryKey])
 
+  // 底图切换：两套 raster 层互斥显隐（style 层，不受业务图层叠加顺序影响）
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map || !map.getLayer('base-dark')) return
+    map.setLayoutProperty('base-dark', 'visibility', basemapMode === 'dark' ? 'visible' : 'none')
+    map.setLayoutProperty('base-imagery', 'visibility', basemapMode === 'imagery' ? 'visible' : 'none')
+  }, [basemapMode, retryKey, loadedRetryKey])
+
   // ─── 地图加载失败降级 UI ───────────────────────────────────
   if (mapError) {
     return (
@@ -929,6 +944,35 @@ export default function MapView({
 
   return (
     <div ref={mapRef} className="map-view">
+      {/* 底图切换：暗色（默认）/ 卫星影像 */}
+      <div
+        className="basemap-mode-btns"
+        style={{
+          position: 'absolute',
+          top: 10,
+          left: 10,
+          zIndex: 10,
+          display: 'flex',
+          gap: 4,
+          pointerEvents: 'none',
+        }}
+      >
+        {['dark', 'imagery'].map(mode => (
+          <button
+            key={mode}
+            className={`btn small ${basemapMode === mode ? 'primary' : ''}`}
+            style={{
+              pointerEvents: 'auto',
+              padding: '4px 8px',
+              fontSize: 11,
+              opacity: basemapMode === mode ? 1 : 0.6,
+            }}
+            onClick={() => setBasemapMode(mode)}
+          >
+            {mode === 'dark' ? '暗色' : '卫星'}
+          </button>
+        ))}
+      </div>
       {/* 轨迹着色模式切换按钮组（仅有多机轨迹时显示） */}
       {multiTracks && Object.keys(multiTracks).length > 0 && (
         <div

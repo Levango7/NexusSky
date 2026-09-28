@@ -26,12 +26,13 @@
 | 3 | replay-track / multi-track 图层校验报错 | `line-gradient` paint 要求 GeoJSON 源开启 `lineMetrics: true`，补上 |
 | 4 | formation-labels 图层报错（从未渲染） | `text-field` 需 style `glyphs`（MAP_STYLE 为纯 raster 无 glyphs）；移除该 symbol 层，保留 formation-centers 圆点 |
 | 5 | 错误面板重试按钮不可见/不可点 | maplibre canvas 为 absolute 定位盖住静态错误 UI；`.map-error-body` 抬 z-index |
+| 6 | 底图换源：CARTO keyless → Esri 暗色/卫星双底图 | keyless `cartocdn.com` 实测仅返回 "API KEY REQUIRED" 水印瓦片（b./c. 子域）或连接超时（a. 子域，黑块来源）；换 Esri ArcGIS REST 免 key 源（暗色默认，地图左上角一键切卫星；商用条款需自行确认） |
 
 ### 已知项（外部依赖，待决策）
 
 | # | 项 | 说明 |
 |---|---|---|
-| 1 | CARTO 底图水印/超时 | keyless `basemaps.cartocdn.com` 部分子域返回 "API KEY REQUIRED" 水印瓦片（服务端行为）或连接超时（本机 a. 子域持续 14+ 条 ERR_CONNECTION_TIMED_OUT）；待决策换源或配置 API key |
+| 1 | Esri 底图商用条款 | 现为免 key 公开 REST 服务，开发/内部使用实测可用；转商用前需确认 Esri 授权 |
 
 ---
 
