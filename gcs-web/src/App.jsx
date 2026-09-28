@@ -18,6 +18,7 @@ import SurveillancePanel from './components/SurveillancePanel.jsx'
 import AlarmPanel from './components/AlarmPanel.jsx'
 import TrackingPanel from './components/TrackingPanel.jsx'
 import GeofencePanel from './components/GeofencePanel.jsx'
+import RidPanel from './components/RidPanel.jsx'
 import DroneLockPanel from './components/DroneLockPanel.jsx'
 import AutoDispatchPanel from './components/AutoDispatchPanel.jsx'
 import ScenarioLibraryPanel from './components/ScenarioLibraryPanel.jsx'
@@ -209,6 +210,7 @@ export default function App() {
               { key: 'alarm', label: '报警联动' },
               { key: 'tracking', label: '追踪' },
               { key: 'geofence', label: '围栏' },
+              { key: 'rid', label: 'RID' },
               { key: 'dronelock', label: '锁机' },
               { key: 'autodispatch', label: '自动出警' },
               { key: 'scenariolib', label: '场景库' },
@@ -375,6 +377,10 @@ export default function App() {
       ) : view === 'geofence' ? (
         <PanelWrapper>
           <GeofencePanel />
+        </PanelWrapper>
+      ) : view === 'rid' ? (
+        <PanelWrapper>
+          <RidPanel />
         </PanelWrapper>
       ) : view === 'dronelock' ? (
         <PanelWrapper>
