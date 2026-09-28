@@ -30,6 +30,9 @@ COPY link-sim/pom.xml ./link-sim/pom.xml
 # —— 与 Dockerfile.cloud（4 个全拷，故能解析）形成对照。
 # 只需其 pom 用于解析模块结构，**不需要**其源码（-am 只构建 drone-sim 所需）。
 COPY cloud-backend/pom.xml ./cloud-backend/pom.xml
+# 根 pom <modules> 声明的其余模块（C 系列合规专项新增）：同上只需 pom。
+COPY sdk-java/pom.xml ./sdk-java/pom.xml
+COPY regulator-sim/pom.xml ./regulator-sim/pom.xml
 
 COPY mavlink-core/src ./mavlink-core/src
 COPY drone-sim/src ./drone-sim/src
@@ -43,7 +46,9 @@ RUN --mount=type=cache,target=/root/.m2 \
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 
-COPY --from=builder /build/drone-sim/target/aerofleet-drone-sim-*.jar app.jar
+# 只拷 shaded（可执行 fat jar）；target 下还有 thin 主 artifact，
+# 原通配符会命中 2 个文件导致多源 COPY 报错
+COPY --from=builder /build/drone-sim/target/aerofleet-drone-sim-*-shaded.jar app.jar
 
 # 非 Root 用户运行（安全加固）
 RUN useradd -r -u 1001 appuser && \

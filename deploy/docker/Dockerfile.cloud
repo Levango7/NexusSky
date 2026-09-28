@@ -22,6 +22,9 @@ COPY mavlink-core/pom.xml ./mavlink-core/pom.xml
 COPY drone-sim/pom.xml ./drone-sim/pom.xml
 COPY link-sim/pom.xml ./link-sim/pom.xml
 COPY cloud-backend/pom.xml ./cloud-backend/pom.xml
+# 根 pom <modules> 声明的其余模块：只需 pom 用于解析模块结构（-am 不构建它们）
+COPY sdk-java/pom.xml ./sdk-java/pom.xml
+COPY regulator-sim/pom.xml ./regulator-sim/pom.xml
 
 # 源码
 COPY mavlink-core/src ./mavlink-core/src
