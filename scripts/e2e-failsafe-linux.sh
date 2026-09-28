@@ -55,7 +55,7 @@ for i in $(seq 1 26); do
 import sys, json
 for d in json.load(sys.stdin):
     if d["sysid"] == 9:
-        print(f"{d[\"online\"]} {d[\"mode\"]} {d.get(\"armed\", False)}")
+        print(d["online"], d["mode"], d.get("armed", False))
         break
 ' 2>/dev/null || true)
     [ -z "$d9" ] && continue
