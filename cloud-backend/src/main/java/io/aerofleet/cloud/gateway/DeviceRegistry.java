@@ -72,7 +72,7 @@ public class DeviceRegistry {
         return drones.computeIfAbsent(sysid, id -> {
             DroneSnapshot s = new DroneSnapshot(id);
             s.online = true;
-            s.tenantId = TenantContext.getEffectiveTenantId();
+            s.tenantId = resolveTenantFor(id);
             log.info("Drone registered: sysid={} tenantId={}", id, s.tenantId);
             if (persist && repository != null) {
                 try {
@@ -97,23 +97,94 @@ public class DeviceRegistry {
         if (snapshot == null) {
             return null;
         }
-        Integer tenantId = TenantContext.getEffectiveTenantId();
-        if (tenantId == null) {
-            return snapshot;
-        }
-        if (snapshot.tenantId == null || tenantId.equals(snapshot.tenantId)) {
-            return snapshot;
-        }
-        return null;
+        return isVisibleTo(snapshot) ? snapshot : null;
     }
 
     /** All known drones, sorted by sysid. Includes offline ones. */
     public List<DroneSnapshot> all() {
-        Integer tenantId = TenantContext.getEffectiveTenantId();
         return drones.values().stream()
-                .filter(s -> tenantId == null || s.tenantId == null || tenantId.equals(s.tenantId))
+                .filter(this::isVisibleTo)
                 .sorted(Comparator.comparingInt(s -> s.sysid))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Sysids with no tenant assigned (visible only to the global-admin context).
+     * Used by provisioning to find devices that still need ownership binding.
+     */
+    public List<Integer> unassigned() {
+        return drones.values().stream()
+                .filter(s -> s.tenantId == null)
+                .map(s -> s.sysid)
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Bind a device to a tenant. Applies to the in-memory snapshot and, when
+     * {@code aerofleet.device-registry.persist=true}, to the persisted row.
+     *
+     * @return false when the device is unknown (never seen and not persisted)
+     */
+    public boolean assignTenant(int sysid, Integer tenantId) {
+        DroneSnapshot snapshot = drones.get(sysid);
+        if (snapshot == null && !(persist && repository != null && repository.existsById(sysid))) {
+            return false;
+        }
+        if (snapshot != null) {
+            snapshot.tenantId = tenantId;
+        }
+        if (persist && repository != null) {
+            try {
+                DeviceEntity entity = repository.findById(sysid).orElseGet(() -> {
+                    DeviceEntity created = new DeviceEntity(sysid);
+                    created.setFirstSeen(java.time.Instant.now());
+                    return created;
+                });
+                entity.setTenantId(tenantId);
+                repository.save(entity);
+            } catch (Exception e) {
+                log.warn("设备租户归属持久化失败 sysid={}: {}", sysid, e.getMessage());
+            }
+        }
+        log.info("Device tenant assigned: sysid={} tenantId={}", sysid, tenantId);
+        return true;
+    }
+
+    /**
+     * Tenant for a newly created snapshot: the request context when present
+     * (REST-initiated registration), otherwise the persisted row's tenant so an
+     * offline device that was already assigned does not lose its ownership on
+     * the next heartbeat. The UDP receive thread has no request context, so it
+     * takes the second branch.
+     */
+    private Integer resolveTenantFor(int sysid) {
+        Integer contextTenant = TenantContext.getEffectiveTenantId();
+        if (contextTenant != null) {
+            return contextTenant;
+        }
+        if (persist && repository != null) {
+            try {
+                return repository.findById(sysid)
+                        .map(DeviceEntity::getTenantId)
+                        .orElse(null);
+            } catch (Exception e) {
+                log.warn("读取设备归属失败 sysid={}: {}", sysid, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Tenant visibility. A null effective tenant means the global-admin context
+     * (including dev-mode, where no TenantFilter runs) and sees everything.
+     * A device with no tenant is <em>unassigned</em> and must not be visible or
+     * controllable by any tenant — UDP-registered devices get their snapshot
+     * created on the receive thread, where there is no request context.
+     */
+    private boolean isVisibleTo(DroneSnapshot snapshot) {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        return tenantId == null || tenantId.equals(snapshot.tenantId);
     }
 
     /**

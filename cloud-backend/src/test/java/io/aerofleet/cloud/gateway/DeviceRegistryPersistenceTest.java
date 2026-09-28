@@ -168,6 +168,31 @@ class DeviceRegistryPersistenceTest {
         drones.clear();
     }
 
+    // ===== 设备归属（P0-1）=====
+
+    @Test
+    @DisplayName("指派离线（仅入库）设备返回成功并写入 tenant_id")
+    void assignTenantPersistsForOfflineDevice() throws Exception {
+        deviceRepository.save(new DeviceEntity(43));
+        clearDronesMap();
+
+        assertThat(deviceRegistry.assignTenant(43, 9)).isTrue();
+        assertThat(deviceRepository.findById(43).orElseThrow().getTenantId()).isEqualTo(9);
+    }
+
+    @Test
+    @DisplayName("心跳重建快照时从库中恢复归属，指派不因重连丢失")
+    void assignmentSurvivesReconnect() throws Exception {
+        DeviceEntity entity = new DeviceEntity(42);
+        entity.setTenantId(7);
+        deviceRepository.save(entity);
+        clearDronesMap();
+
+        DroneSnapshot snapshot = deviceRegistry.registerIfAbsent(42);
+
+        assertThat(snapshot.tenantId).isEqualTo(7);
+    }
+
     /**
      * 通过反射设置 persist 字段。
      */
