@@ -28,4 +28,19 @@ public interface VisionSource {
      * @return 检测结果列表（空列表表示无目标，非 null）
      */
     List<VisionDetection> detect(CameraShot shot, CameraPose cameraPose);
+
+    /**
+     * 从相机帧 + JPEG 字节产出检测结果（F1 真 CV 接入重载）。
+     * <p>
+     * 需要真实像素的外部推理/本地模型实现覆写本方法；既有元数据级实现
+     * （投影/模拟）无需修改，默认忽略 JPEG 委托 {@link #detect(CameraShot, CameraPose)}。
+     *
+     * @param shot       相机帧元数据（含投影目标 + 相机位姿）
+     * @param cameraPose 相机位姿
+     * @param jpeg       渲染 JPEG 字节（可为 null，视为无像素数据）
+     * @return 检测结果列表（非 null）
+     */
+    default List<VisionDetection> detect(CameraShot shot, CameraPose cameraPose, byte[] jpeg) {
+        return detect(shot, cameraPose);
+    }
 }

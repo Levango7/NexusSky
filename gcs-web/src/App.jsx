@@ -19,6 +19,7 @@ import AlarmPanel from './components/AlarmPanel.jsx'
 import TrackingPanel from './components/TrackingPanel.jsx'
 import GeofencePanel from './components/GeofencePanel.jsx'
 import RidPanel from './components/RidPanel.jsx'
+import CvEvalPanel from './components/CvEvalPanel.jsx'
 import DroneLockPanel from './components/DroneLockPanel.jsx'
 import AutoDispatchPanel from './components/AutoDispatchPanel.jsx'
 import ScenarioLibraryPanel from './components/ScenarioLibraryPanel.jsx'
@@ -181,9 +182,9 @@ export default function App() {
         <div className="brand">
           <svg className="brand-mark" width="26" height="26" viewBox="0 0 26 26" role="img" aria-label="NexusSky 标志">
             <title>NexusSky 无人机地面站标志</title>
-            <circle cx="13" cy="13" r="11.5" fill="none" stroke="#00d4ff" stroke-width="1.2" />
+            <circle cx="13" cy="13" r="11.5" fill="none" stroke="#00d4ff" strokeWidth="1.2" />
             <path d="M13 4 A 9 9 0 0 1 22 13 L 13 13 Z" fill="#00d4ff" opacity=".35" />
-            <path d="M13 13 L 20 20" stroke="#00d4ff" stroke-width="1.4" />
+            <path d="M13 13 L 20 20" stroke="#00d4ff" strokeWidth="1.4" />
             <circle cx="13" cy="13" r="2.2" fill="#00d4ff" />
           </svg>
           <div className="brand-text">
@@ -211,6 +212,7 @@ export default function App() {
               { key: 'tracking', label: '追踪' },
               { key: 'geofence', label: '围栏' },
               { key: 'rid', label: 'RID' },
+              { key: 'cveval', label: 'CV评测' },
               { key: 'dronelock', label: '锁机' },
               { key: 'autodispatch', label: '自动出警' },
               { key: 'scenariolib', label: '场景库' },
@@ -381,6 +383,10 @@ export default function App() {
       ) : view === 'rid' ? (
         <PanelWrapper>
           <RidPanel />
+        </PanelWrapper>
+      ) : view === 'cveval' ? (
+        <PanelWrapper>
+          <CvEvalPanel />
         </PanelWrapper>
       ) : view === 'dronelock' ? (
         <PanelWrapper>

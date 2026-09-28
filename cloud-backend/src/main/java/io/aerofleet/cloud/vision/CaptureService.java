@@ -57,13 +57,17 @@ public class CaptureService {
     private final ObjectMapper mapper;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2)).build();
+    /** CV 评测指标层（F1）：拍摄主路径的纯旁路（spec N3）。 */
+    private final CvEvalService eval;
 
     /** Ground-truth HTTP base of the drone-sim instance (properties-configurable). */
     private final String simTruthBase;
-    /** "truth" (projection oracle) / "vision-source" (SimulatedVisionSource) / "pixels" (JPEG→blob). */
+    /** "truth" / "vision-source" / "pixels" / "external"（spec U1）。 */
     private final String source;
-    /** M3 VisionSource 抽象层（FR-03）：source=vision-source 时使用，null 表示走既有 truth/pixels 路径。 */
+    /** M3 VisionSource 抽象层（FR-03）：truth/vision-source/external 时使用，null 表示走既有 pixels 路径。 */
     private final VisionSource visionSource;
+    /** 外部推理服务源（F1，source=external 且 endpoint 配置齐全时才存在）。 */
+    private final ExternalVisionSource externalSource;
     /** 投影简化降级实例（异常 5.1.2：VisionSource 异常时回退）。 */
     private final ProjectionVisionSource fallback = new ProjectionVisionSource();
 
@@ -71,19 +75,32 @@ public class CaptureService {
                           DeviceRegistry registry,
                           GeolocationSolver solver,
                           ObjectMapper objectMapper,
+                          CvEvalService eval,
+                          org.springframework.beans.factory.ObjectProvider<ExternalVisionSource> externalSourceProvider,
                           @Value("${aerofleet.sim-truth-base:http://127.0.0.1:18080}") String simTruthBase,
                           @Value("${aerofleet.vision.source:truth}") String source) {
         this.commands = commands;
         this.registry = registry;
         this.solver = solver;
         this.mapper = objectMapper;
+        this.eval = eval;
         this.simTruthBase = simTruthBase;
-        this.source = source;
-        // FR-03 投影简化切换：truth→ProjectionVisionSource / vision-source→SimulatedVisionSource / pixels→null
-        this.visionSource = switch (source) {
+        this.externalSource = externalSourceProvider.getIfAvailable();
+        // source=external 但条件 Bean 缺失（endpoint 未配置）→ 启动时 WARN 回退 truth（spec N2）
+        String effectiveSource = source;
+        if ("external".equalsIgnoreCase(source) && externalSource == null) {
+            log.warn("aerofleet.vision.source=external but ExternalVisionSource bean is absent "
+                    + "(endpoint not configured?) — falling back to truth (check N2)");
+            effectiveSource = "truth";
+        }
+        this.source = effectiveSource;
+        // FR-03 投影简化切换：truth→ProjectionVisionSource / vision-source→SimulatedVisionSource
+        // external→ExternalVisionSource / pixels→null
+        this.visionSource = switch (effectiveSource) {
             case "truth" -> new ProjectionVisionSource();        // 投影简化（默认，既有行为）
             case "vision-source" -> new SimulatedVisionSource(); // 模拟检测（合成置信度）
             case "pixels" -> null;                               // 既有 BlobDetector 路径
+            case "external" -> externalSource;                   // F1 外部推理服务（非 null 已保证）
             default -> new ProjectionVisionSource();             // 未知值默认投影简化
         };
     }
@@ -131,14 +148,19 @@ public class CaptureService {
         double gpitch = shot.path("gimbalPitchDeg").asDouble();
         double gyaw = shot.path("gimbalYawDeg").asDouble();
 
-        List<Map<String, Object>> detections = new ArrayList<>();
         String effSource = sourceOverride != null ? sourceOverride : source;
+        long detectStartNanos = System.nanoTime();
+        DetectionBatch batch;
         if ("pixels".equalsIgnoreCase(effSource)) {
-            detections = detectFromPixels(shot, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+            batch = detectFromPixels(shot, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
         } else if ("vision-source".equalsIgnoreCase(effSource)) {
             // FR-03 source=vision-source 分支：委托 VisionSource.detect() → 经 locateTarget 定位
-            detections = detectFromVisionSource(shot, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+            batch = detectFromVisionSource(shot, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+        } else if ("external".equalsIgnoreCase(effSource)) {
+            // F1 source=external 分支：JPEG → 外部推理服务 → 经 locateTarget 定位
+            batch = detectFromExternal(shot, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
         } else {
+            List<Map<String, Object>> detections = new ArrayList<>();
             for (JsonNode t : shot.path("targets")) {
                 Map<String, Object> d = locateTarget(
                         t.path("u").asDouble(), t.path("v").asDouble(),
@@ -150,7 +172,11 @@ public class CaptureService {
                 d.put("truthErrorM", Math.round(errM * 10) / 10.0);
                 detections.add(d);
             }
+            batch = new DetectionBatch(detections, effSource);
         }
+        double latencyMs = (System.nanoTime() - detectStartNanos) / 1_000_000.0;
+        recordEval(shot, batch.source(), batch.items(), latencyMs);
+        List<Map<String, Object>> detections = batch.items();
 
         Map<String, Object> out = new HashMap<>();
         out.put("sysid", sysid);
@@ -159,8 +185,11 @@ public class CaptureService {
         out.put("shotLon", shot.path("lon").asDouble());
         out.put("altM", shot.path("altM").asDouble());
         out.put("detections", detections);
-        log.info("captureAndLocate sysid={} frame={} -> {} detection(s)",
-                sysid, shot.path("frameSeq").asLong(), detections.size());
+        out.put("detectionSource", batch.source());
+        out.put("latencyMs", Math.round(latencyMs * 10) / 10.0);
+        log.info("captureAndLocate sysid={} frame={} source={} -> {} detection(s) in {} ms",
+                sysid, shot.path("frameSeq").asLong(), batch.source(),
+                detections.size(), Math.round(latencyMs));
         return out;
     }
 
@@ -170,21 +199,17 @@ public class CaptureService {
      * Pixels pipeline: pull the rendered JPEG, find blobs, geolocate each
      * centroid. Scores against the NEAREST truth target (a detector has no id).
      */
-    private List<Map<String, Object>> detectFromPixels(JsonNode shot, double[] camNe,
-                                                        double alt, double roll, double pitch,
-                                                        double yaw, double gpitch, double gyaw) {
+    private DetectionBatch detectFromPixels(JsonNode shot, double[] camNe,
+                                            double alt, double roll, double pitch,
+                                            double yaw, double gpitch, double gyaw) {
         List<Map<String, Object>> out = new ArrayList<>();
         long frameSeq = shot.path("frameSeq").asLong();
         try {
-            HttpResponse<byte[]> imgResp = http.send(
-                    HttpRequest.newBuilder(URI.create(
-                            simTruthBase + "/camera/shots/" + frameSeq + ".jpg")).GET().build(),
-                    HttpResponse.BodyHandlers.ofByteArray());
-            if (imgResp.statusCode() != 200) {
-                log.warn("jpeg fetch {} -> {}", frameSeq, imgResp.statusCode());
-                return out;
+            byte[] jpeg = fetchJpeg(frameSeq);
+            if (jpeg == null) {
+                return new DetectionBatch(out, "pixels");
             }
-            List<BlobDetector.Box> boxes = detector.detect(imgResp.body());
+            List<BlobDetector.Box> boxes = detector.detect(jpeg);
             for (BlobDetector.Box b : boxes) {
                 Map<String, Object> d = locateTarget(b.u, b.v, "blob", JPEG_W, JPEG_H,
                         camNe, alt, roll, pitch, yaw, gpitch, gyaw);
@@ -200,37 +225,74 @@ public class CaptureService {
         } catch (Exception e) {
             log.warn("pixel pipeline failed for frame {}: {}", frameSeq, e.getMessage());
         }
-        return out;
+        return new DetectionBatch(out, "pixels");
+    }
+
+    /** 拉取 sim 渲染 JPEG（pixels 与 external 路径共用），失败返回 null。 */
+    private byte[] fetchJpeg(long frameSeq) {
+        try {
+            HttpResponse<byte[]> imgResp = http.send(
+                    HttpRequest.newBuilder(URI.create(
+                            simTruthBase + "/camera/shots/" + frameSeq + ".jpg")).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            if (imgResp.statusCode() != 200) {
+                log.warn("jpeg fetch {} -> {}", frameSeq, imgResp.statusCode());
+                return null;
+            }
+            return imgResp.body();
+        } catch (Exception e) {
+            log.warn("jpeg fetch {} failed: {}", frameSeq, e.getMessage());
+            return null;
+        }
     }
 
     /**
-     * FR-03 source=vision-source 分支：委托 VisionSource.detect() → 经 locateTarget 定位。
+     * F1 source=external 分支：拉 JPEG → ExternalVisionSource（HTTP 推理）→ 定位评分。
      * <p>
-     * VisionSource 异常时回退 ProjectionVisionSource + WARN 日志（异常 5.1.2）。
-     * 定位与评分步骤复用既有 GeolocationSolver（FR-37 既有感知链路不变）。
+     * 外部源异常时回退投影简化（异常 5.1.2 同款降级），source 记 truth(fallback)（spec S1）。
+     * 检出无真值 id，按最近真值评分。
      */
-    private List<Map<String, Object>> detectFromVisionSource(JsonNode shot, double[] camNe,
-                                                             double alt, double roll, double pitch,
-                                                             double yaw, double gpitch, double gyaw) {
+    private DetectionBatch detectFromExternal(JsonNode shot, double[] camNe,
+                                              double alt, double roll, double pitch,
+                                              double yaw, double gpitch, double gyaw) {
         List<Map<String, Object>> out = new ArrayList<>();
-        // 构造 CameraShot + CameraPose
+        long frameSeq = shot.path("frameSeq").asLong();
+        byte[] jpeg = fetchJpeg(frameSeq);
+        if (jpeg == null) {
+            return new DetectionBatch(out, "external");
+        }
         CameraShot camShot = toCameraShot(shot);
         CameraPose pose = new CameraPose(roll, pitch, yaw, gpitch, gyaw);
-        // 调 VisionSource.detect()，异常降级到 ProjectionVisionSource（异常 5.1.2）
         List<VisionDetection> detections;
         try {
-            detections = visionSource != null
-                    ? visionSource.detect(camShot, pose)
-                    : fallback.detect(camShot, pose);
+            detections = externalSource != null
+                    ? externalSource.detect(camShot, pose, jpeg)
+                    : List.of();
         } catch (Exception e) {
-            log.warn("VisionSource.detect failed, falling back to ProjectionVisionSource: {}",
+            log.warn("ExternalVisionSource.detect failed, falling back to ProjectionVisionSource: {}",
                     e.getMessage());
             detections = fallback.detect(camShot, pose);
+            out.addAll(locateAndScore(detections, camNe, alt, roll, pitch, yaw, gpitch, gyaw,
+                    IMAGE_W, IMAGE_H));
+            return new DetectionBatch(out, "truth(fallback)");
         }
-        // 经 locateTarget 定位（既有 GeolocationSolver）+ 附加 confidence/trackId
+        out.addAll(locateAndScore(detections, camNe, alt, roll, pitch, yaw, gpitch, gyaw, JPEG_W, JPEG_H));
+        return new DetectionBatch(out, "external");
+    }
+
+    /**
+     * 通用"检出 → 定位 → 真值评分"循环（vision-source 与 external 共用）。
+     *
+     * @param imgW/imgH 检出坐标所属分辨率（元数据投影 1920×1080，JPEG 640×360）
+     */
+    private List<Map<String, Object>> locateAndScore(List<VisionDetection> detections,
+                                                     double[] camNe, double alt, double roll,
+                                                     double pitch, double yaw, double gpitch,
+                                                     double gyaw, int imgW, int imgH) {
+        List<Map<String, Object>> out = new ArrayList<>();
         for (VisionDetection d : detections) {
             Map<String, Object> loc = locateTarget(d.u(), d.v(), d.kind(),
-                    IMAGE_W, IMAGE_H, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+                    imgW, imgH, camNe, alt, roll, pitch, yaw, gpitch, gyaw);
             if (loc == null) {
                 continue;
             }
@@ -245,6 +307,40 @@ public class CaptureService {
             out.add(loc);
         }
         return out;
+    }
+
+    /**
+     * FR-03 source=vision-source 分支：委托 VisionSource.detect() → 经 locateTarget 定位。
+     * <p>
+     * VisionSource 异常时回退 ProjectionVisionSource + WARN 日志（异常 5.1.2），
+     * source 记 truth(fallback)（spec S1）。
+     * 定位与评分步骤复用既有 GeolocationSolver（FR-37 既有感知链路不变）。
+     */
+    private DetectionBatch detectFromVisionSource(JsonNode shot, double[] camNe,
+                                                  double alt, double roll, double pitch,
+                                                  double yaw, double gpitch, double gyaw) {
+        // 构造 CameraShot + CameraPose
+        CameraShot camShot = toCameraShot(shot);
+        CameraPose pose = new CameraPose(roll, pitch, yaw, gpitch, gyaw);
+        // 调 VisionSource.detect()，异常降级到 ProjectionVisionSource（异常 5.1.2）
+        List<VisionDetection> detections;
+        try {
+            detections = visionSource != null
+                    ? visionSource.detect(camShot, pose)
+                    : fallback.detect(camShot, pose);
+        } catch (Exception e) {
+            log.warn("VisionSource.detect failed, falling back to ProjectionVisionSource: {}",
+                    e.getMessage());
+            detections = fallback.detect(camShot, pose);
+            return new DetectionBatch(
+                    locateAndScore(detections, camNe, alt, roll, pitch, yaw, gpitch, gyaw,
+                            IMAGE_W, IMAGE_H),
+                    "truth(fallback)");
+        }
+        return new DetectionBatch(
+                locateAndScore(detections, camNe, alt, roll, pitch, yaw, gpitch, gyaw,
+                        IMAGE_W, IMAGE_H),
+                "vision-source");
     }
 
     /** 从 drone-sim 真值 HTTP 的 Shot JSON 构造 CameraShot（适配层）。 */
@@ -290,6 +386,28 @@ public class CaptureService {
         d.put("lon", r.lon);
         d.put("groundRangeM", Math.round(r.groundRangeM * 10) / 10.0);
         return d;
+    }
+
+    /** 一次检测批次的产出：检出列表 + 实际生效的检测源（降级时可与配置值不同，spec S1）。 */
+    private record DetectionBatch(List<Map<String, Object>> items, String source) {}
+
+    /**
+     * F1 评测记录（纯旁路，spec N3）：帧内真值数取自真值投影 targets 大小，
+     * 每个检出的 truthErrorM 作为与最近真值的距离交给 CvEvalService 做贪心匹配。
+     */
+    private void recordEval(JsonNode shot, String source,
+                            List<Map<String, Object>> detections, double latencyMs) {
+        try {
+            int truthCount = shot.path("targets").size();
+            List<Double> dists = new ArrayList<>(detections.size());
+            for (Map<String, Object> d : detections) {
+                Object err = d.get("truthErrorM");
+                dists.add(err instanceof Number n ? n.doubleValue() : -1.0);
+            }
+            eval.record(shot.path("frameSeq").asLong(), source, truthCount, dists, latencyMs);
+        } catch (Exception e) {
+            log.warn("cv-eval record failed (ignored): {}", e.getMessage());
+        }
     }
 
     private double[] latLonToNe(double lat, double lon) {
