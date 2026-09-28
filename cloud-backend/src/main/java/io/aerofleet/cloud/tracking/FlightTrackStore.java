@@ -121,10 +121,12 @@ public class FlightTrackStore {
     /** 追加一个轨迹点；超过容量上限时丢弃最旧点。 */
     public void addPoint(int sysid, TrackPoint point) {
         Deque<TrackPoint> deque = tracks.computeIfAbsent(sysid, k -> new ConcurrentLinkedDeque<>());
-        deque.addLast(point);
-        // 修剪超容量部分：并发场景下可能短暂超过 1 个，最终一致即可
-        while (deque.size() > maxPoints) {
-            deque.pollFirst();
+        // add+trim 必须原子：并发线程同时观测到超限会各自 poll 同一"多余量"，过度裁剪后最终 size < maxPoints
+        synchronized (deque) {
+            deque.addLast(point);
+            while (deque.size() > maxPoints) {
+                deque.pollFirst();
+            }
         }
         log.trace("Track point added: sysid={} size={}", sysid, deque.size());
 
