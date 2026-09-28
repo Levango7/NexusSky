@@ -43,7 +43,7 @@ body {
 .gcs-root { display: flex; flex-direction: column; height: 100vh; }
 
 .topbar {
-  height: 54px; flex: none;
+  min-height: 54px; flex: none;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 18px;
   background: linear-gradient(180deg, #131a29, #10141d);
@@ -55,7 +55,7 @@ body {
   background: linear-gradient(90deg, transparent, rgba(0,212,255,.5) 30%, rgba(0,212,255,.5) 70%, transparent);
 }
 
-.brand { display: flex; align-items: center; gap: 11px; }
+.brand { display: flex; align-items: center; gap: 11px; flex: none; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-name {
   font-weight: 800; letter-spacing: 3px; font-size: 15px;
@@ -64,8 +64,13 @@ body {
 }
 .brand-sub { font-size: 10.5px; color: var(--dim); letter-spacing: 2px; }
 
-.topbar-center { display: flex; gap: 8px; align-items: center; }
-.topbar-right { display: flex; gap: 8px; align-items: center; }
+.topbar-center { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.topbar-right { display: flex; gap: 8px; align-items: center; flex: none; }
+.topbar-right .btn { white-space: nowrap; }
+
+/* 顶栏视图标签（35+ 个）：宽度不足时换行；按钮保持单行文本，禁止逐字竖排压缩 */
+.view-tabs { flex-wrap: wrap; justify-content: center; }
+.view-tabs .btn { white-space: nowrap; }
 
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -359,6 +364,8 @@ body {
   color: var(--dim); font-size: 13px; text-align: center; line-height: 2;
   background: var(--bg);
 }
+/* maplibre 画布是 absolute 定位，会盖住错误面板；抬升面板保证重试按钮可见可点 */
+.map-error .map-error-body { position: relative; z-index: 5; }
 
 /* 信号条（E1） */
 .signal-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; }

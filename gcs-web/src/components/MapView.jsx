@@ -197,7 +197,9 @@ export default function MapView({
     // 监听地图加载错误，按严重程度分级处理
     map.on('error', (e) => {
       const msg = (e.error && e.error.message) || ''
-      if (msg.includes('tile') || msg.includes('Tile')) {
+      // 瓦片级错误由 maplibre 附带 e.tile 标记；断网/超时时消息为 "Failed to fetch"（不含 "tile"），
+      // 仅靠字符串判断会误把缺图升级为整图失败
+      if (e.tile || msg.includes('tile') || msg.includes('Tile')) {
         console.warn('[MapView] 瓦片加载失败（已忽略，不影响地图使用）:', msg)
         return
       }
@@ -293,6 +295,7 @@ export default function MapView({
       // ── 回放轨迹 source + layer ──
       map.addSource('replay-track', {
         type: 'geojson',
+        lineMetrics: true,
         data: { type: 'FeatureCollection', features: [] },
       })
       map.addLayer({
@@ -343,21 +346,6 @@ export default function MapView({
           'circle-stroke-width': 2,
           'circle-stroke-color': '#fff',
           'circle-opacity': 0.8,
-        },
-      })
-      map.addLayer({
-        id: 'formation-labels',
-        type: 'symbol',
-        source: 'formation-centers',
-        layout: {
-          'text-field': ['get', 'label'],
-          'text-size': 12,
-          'text-offset': [0, -1.5],
-        },
-        paint: {
-          'text-color': '#fff',
-          'text-halo-color': '#000',
-          'text-halo-width': 2,
         },
       })
 
@@ -603,6 +591,7 @@ export default function MapView({
       if (!map.getSource(sourceId)) {
         map.addSource(sourceId, {
           type: 'geojson',
+          lineMetrics: true,
           data: { type: 'FeatureCollection', features: [] },
         })
       }
@@ -917,7 +906,7 @@ export default function MapView({
   if (mapError) {
     return (
       <div className="map-view map-error" ref={mapRef}>
-        <div>
+        <div className="map-error-body">
           <div style={{ fontSize: 28, opacity: .4, marginBottom: 8 }}>🗺️</div>
           <b style={{ color: 'var(--crit)', display: 'block', marginBottom: 6 }}>地图加载失败</b>
           <div style={{ fontSize: 11, color: 'var(--dim-2)', marginBottom: 14, wordBreak: 'break-word' }}>

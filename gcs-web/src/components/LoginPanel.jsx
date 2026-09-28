@@ -59,9 +59,9 @@ export default function LoginPanel({ onLoginSuccess }) {
         {/* 标志 */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 24 }}>
           <svg width="48" height="48" viewBox="0 0 26 26" role="img" aria-label="NexusSky 标志">
-            <circle cx="13" cy="13" r="11.5" fill="none" stroke="#00d4ff" stroke-width="1.2" />
+            <circle cx="13" cy="13" r="11.5" fill="none" stroke="#00d4ff" strokeWidth="1.2" />
             <path d="M13 4 A 9 9 0 0 1 22 13 L 13 13 Z" fill="#00d4ff" opacity=".35" />
-            <path d="M13 13 L 20 20" stroke="#00d4ff" stroke-width="1.4" />
+            <path d="M13 13 L 20 20" stroke="#00d4ff" strokeWidth="1.4" />
             <circle cx="13" cy="13" r="2.2" fill="#00d4ff" />
           </svg>
           <span style={{
