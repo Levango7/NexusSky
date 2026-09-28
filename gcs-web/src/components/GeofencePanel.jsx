@@ -477,7 +477,7 @@ export default function GeofencePanel() {
               {/* POLYGON 字段 */}
               {form.type === 'POLYGON' && (
                 <div>
-                  <div style={labelStyle}>points（每行一个 "lat,lon"，至少 3 行）</div>
+                  <div style={labelStyle}>points（每行一个 &quot;lat,lon&quot;，至少 3 行）</div>
                   <textarea
                     value={form.pointsText}
                     onChange={(e) => updateForm('pointsText', e.target.value)}

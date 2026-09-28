@@ -402,8 +402,8 @@ export default function DroneLockPanel() {
             <div>• <b style={{ color: 'var(--warn)' }}>DISARM</b>：解除武装，电机停转</div>
             <div>• <b style={{ color: 'var(--crit)' }}>FORCE_LAND</b>：强制原地降落</div>
             <div>• <b style={{ color: 'var(--cyan)' }}>RETURN_TO_LAUNCH</b>：自动返航</div>
-            <div style={{ marginTop: 4 }}>• 已锁定无人机可点击"解锁"按钮</div>
-            <div>• "清除"为管理操作，删除锁定记录</div>
+            <div style={{ marginTop: 4 }}>• 已锁定无人机可点击&quot;解锁&quot;按钮</div>
+            <div>• &quot;清除&quot;为管理操作，删除锁定记录</div>
           </div>
         </div>
       </div>

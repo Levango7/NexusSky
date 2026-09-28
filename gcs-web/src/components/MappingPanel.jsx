@@ -481,9 +481,9 @@ export default function MappingPanel() {
             </div>
             {result ? (
               <div style={{ fontSize: 10, color: 'var(--dim-2)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {pick(result, 'orthomosaicUrl', 'orthomosaic') && <div>正射影像：<a href={pick(result, 'orthomosaicUrl', 'orthomosaic')} target="_blank" rel="noopener" style={{ color: 'var(--cyan)' }}>查看</a></div>}
-                {pick(result, 'demUrl', 'dem') && <div>DEM：<a href={pick(result, 'demUrl', 'dem')} target="_blank" rel="noopener" style={{ color: 'var(--cyan)' }}>查看</a></div>}
-                {pick(result, 'modelUrl', 'model3dUrl', 'model') && <div>3D 模型：<a href={pick(result, 'modelUrl', 'model3dUrl', 'model')} target="_blank" rel="noopener" style={{ color: 'var(--cyan)' }}>查看</a></div>}
+                {pick(result, 'orthomosaicUrl', 'orthomosaic') && <div>正射影像：<a href={pick(result, 'orthomosaicUrl', 'orthomosaic')} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--cyan)' }}>查看</a></div>}
+                {pick(result, 'demUrl', 'dem') && <div>DEM：<a href={pick(result, 'demUrl', 'dem')} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--cyan)' }}>查看</a></div>}
+                {pick(result, 'modelUrl', 'model3dUrl', 'model') && <div>3D 模型：<a href={pick(result, 'modelUrl', 'model3dUrl', 'model')} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--cyan)' }}>查看</a></div>}
               </div>
             ) : (
               <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无测绘成果</div>
