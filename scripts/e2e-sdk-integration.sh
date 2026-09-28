@@ -17,6 +17,15 @@ jsonget_idx() { python3 -c "import sys,json;d=json.load(sys.stdin);print(d[$1])"
 api_get() { curl -s -m 15 "$BASE$1"; }
 api_post() { curl -s -m 15 -X POST -H 'Content-Type: application/json' -d "$2" "$BASE$1"; }
 
+# POST 后断言被拒绝：期望 HTTP 400（ApiExceptionHandler 统一错误体 {"error":"..."}）。
+post_expect_400() {
+  local desc=$1 path=$2 body=$3 out code
+  out=$(curl -s -m 15 -X POST -H 'Content-Type: application/json' -d "$body" -w '\n%{http_code}' "$BASE$path")
+  code=$(echo "$out" | tail -n1)
+  echo "   HTTP $code $(echo "$out" | sed '$d')"
+  if [ "$code" = "400" ]; then echo "   PASS: $desc"; else echo "   FAIL: $desc"; FAIL=1; fi
+}
+
 # ── 辅助函数：发送命令 ──
 send_cmd() {
   local sysid=$1 type=$2 alt=$3
@@ -139,10 +148,7 @@ check "不存在的无人机返回 404" "[ \"$HTTP_CODE\" = \"404\" ]"
 # 场景 12：错误场景 — 无效命令
 # ═══════════════════════════════════════════════════
 step "错误场景：POST 无效命令 {\"type\":\"invalid_cmd\"}"
-ERR_RESP=$(api_post "/drones/$SYSID/commands" '{"type":"invalid_cmd"}')
-echo "   $ERR_RESP"
-ERR_STATUS=$(echo "$ERR_RESP" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('status',''))" 2>/dev/null || echo "")
-check "无效命令返回 status=error" "[ \"$ERR_STATUS\" = \"error\" ] || [ -z \"$ERR_RESP\" ]"
+post_expect_400 "无效命令被拒绝（HTTP 400）" "/drones/$SYSID/commands" '{"type":"invalid_cmd"}'
 
 # ═══════════════════════════════════════════════════
 # 场景 13：Waypoint 范围验证
@@ -155,22 +161,13 @@ VALID_RESP=$(api_post "/drones/$SYSID/mission" "$VALID_MISSION")
 check "合法航点上传成功" "echo '$VALID_RESP' | grep -q '\"status\":\"ok\"' || echo '$VALID_RESP' | grep -q '\"status\": \"ok\"'"
 
 # 非法纬度（> 90）
-BAD_LAT_MISSION='{"items":[{"cmd":"waypoint","lat":95.0,"lon":113.9345,"alt":30,"holdTime":0}]}'
-BAD_LAT_RESP=$(api_post "/drones/$SYSID/mission" "$BAD_LAT_MISSION")
-BAD_LAT_STATUS=$(echo "$BAD_LAT_RESP" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('status',''))" 2>/dev/null || echo "")
-check "非法纬度(>90)被拒绝" "[ \"$BAD_LAT_STATUS\" = \"error\" ] || [ -z \"$BAD_LAT_RESP\" ]"
+post_expect_400 "非法纬度(>90)被拒绝" "/drones/$SYSID/mission" '{"items":[{"cmd":"waypoint","lat":95.0,"lon":113.9345,"alt":30,"holdTime":0}]}'
 
 # 非法经度（< -180）
-BAD_LON_MISSION='{"items":[{"cmd":"waypoint","lat":22.5907,"lon":-200.0,"alt":30,"holdTime":0}]}'
-BAD_LON_RESP=$(api_post "/drones/$SYSID/mission" "$BAD_LON_MISSION")
-BAD_LON_STATUS=$(echo "$BAD_LON_RESP" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('status',''))" 2>/dev/null || echo "")
-check "非法经度(<-180)被拒绝" "[ \"$BAD_LON_STATUS\" = \"error\" ] || [ -z \"$BAD_LON_RESP\" ]"
+post_expect_400 "非法经度(<-180)被拒绝" "/drones/$SYSID/mission" '{"items":[{"cmd":"waypoint","lat":22.5907,"lon":-200.0,"alt":30,"holdTime":0}]}'
 
 # 非法高度（< 0）
-BAD_ALT_MISSION='{"items":[{"cmd":"waypoint","lat":22.5907,"lon":113.9345,"alt":-10,"holdTime":0}]}'
-BAD_ALT_RESP=$(api_post "/drones/$SYSID/mission" "$BAD_ALT_MISSION")
-BAD_ALT_STATUS=$(echo "$BAD_ALT_RESP" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('status',''))" 2>/dev/null || echo "")
-check "非法高度(<0)被拒绝" "[ \"$BAD_ALT_STATUS\" = \"error\" ] || [ -z \"$BAD_ALT_RESP\" ]"
+post_expect_400 "非法高度(<0)被拒绝" "/drones/$SYSID/mission" '{"items":[{"cmd":"waypoint","lat":22.5907,"lon":113.9345,"alt":-10,"holdTime":0}]}'
 
 # ═══════════════════════════════════════════════════
 # 结果汇总
