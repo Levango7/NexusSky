@@ -67,7 +67,8 @@ public class SecurityConfig {
                     .sessionManagement(session ->
                             session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                     .authorizeHttpRequests(auth -> auth
-                            .requestMatchers("/api/v1/auth/**").permitAll()
+                            // 仅登录/刷新匿名开放；/api/v1/auth/** 其余端点（API Key 铸造/撤销/列表）需认证
+                            .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
                             .requestMatchers("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
                             .requestMatchers("/ws/**").permitAll()
                             .anyRequest().authenticated())

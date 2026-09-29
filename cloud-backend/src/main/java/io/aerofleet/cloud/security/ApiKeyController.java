@@ -76,6 +76,7 @@ public class ApiKeyController {
      * 数据库中只存储 SHA-256 哈希，不存储明文。
      */
     @PostMapping
+    @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> createApiKey(@RequestBody Map<String, Object> body) {
         if (apiKeyRepository == null) {
             return errorResponse(HttpStatus.SERVICE_UNAVAILABLE,
@@ -183,6 +184,7 @@ public class ApiKeyController {
      * DELETE /api/v1/auth/api-key/{keyId} → {keyId, revoked: true}
      */
     @DeleteMapping("/{keyId}")
+    @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> revokeApiKey(@PathVariable String keyId) {
         if (apiKeyRepository == null) {
             return errorResponse(HttpStatus.SERVICE_UNAVAILABLE,
@@ -198,7 +200,7 @@ public class ApiKeyController {
 
         Jwt jwt = (Jwt) auth.getPrincipal();
         Integer currentTenantId = extractClaimAsInteger(jwt, "tenant_id");
-        String currentUsername = jwt.getSubject();
+        String currentRole = jwt.getClaimAsString("role");
 
         var entityOpt = apiKeyRepository.findByKeyId(keyId);
         if (entityOpt.isEmpty()) {
@@ -206,10 +208,14 @@ public class ApiKeyController {
         }
 
         ApiKeyEntity entity = entityOpt.get();
-        if (currentTenantId != null && entity.getTenantId() != null
-                && !currentTenantId.equals(entity.getTenantId())) {
-            log.warn("API Key 撤销被拒绝（租户不匹配）: keyId={} keyTenantId={} currentTenantId={}",
-                    keyId, entity.getTenantId(), currentTenantId);
+        // 全局管理员上下文（无 tenant_id）或 ADMIN 角色可跨租户撤销；
+        // 其余情况要求两侧租户都明确且相等——未归属 Key（tenant_id 为空）只允许管理员撤销，
+        // 否则历史上一方为 null 就会跳过比对，任何已认证用户都能撤销别人的 Key。
+        boolean privileged = currentTenantId == null
+                || Role.ADMIN.name().equalsIgnoreCase(currentRole);
+        if (!privileged && (entity.getTenantId() == null || !currentTenantId.equals(entity.getTenantId()))) {
+            log.warn("API Key 撤销被拒绝（租户不匹配）: keyId={} keyTenantId={} currentTenantId={} username={}",
+                    keyId, entity.getTenantId(), currentTenantId, jwt.getSubject());
             return errorResponse(HttpStatus.FORBIDDEN, "API Key does not belong to your tenant");
         }
 
