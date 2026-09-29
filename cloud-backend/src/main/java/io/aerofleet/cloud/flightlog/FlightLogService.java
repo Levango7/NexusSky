@@ -2,8 +2,10 @@ package io.aerofleet.cloud.flightlog;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.gateway.AlertEntry;
+import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.TrackPoint;
+import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,6 +61,13 @@ public class FlightLogService {
     /** JPA Repository（可选注入，数据库不可用时不影响 JSONL 路径）。 */
     @Autowired(required = false)
     private FlightLogRepository flightLogRepository;
+
+    /**
+     * 设备注册表（可选注入）：写入侧据此取设备归属租户。
+     * 用字段注入而非构造注入，避免改变构造器签名（现有单测直接 new FlightLogService）。
+     */
+    @Autowired(required = false)
+    private DeviceRegistry deviceRegistry;
 
     /** sysid -> last track-point write, for the telemetry throttle. */
     private final Map<Integer, Long> lastTrackWrite = new HashMap<>();
@@ -154,16 +163,57 @@ public class FlightLogService {
         append(e);
     }
 
-    private static Map<String, Object> base(String type, int sysid) {
+    private Map<String, Object> base(String type, int sysid) {
         Map<String, Object> e = new HashMap<>();
         e.put("t", now());
         e.put("type", type);
         e.put("sysid", sysid);
+        // 写入侧落租户：日志按设备归档，归属取设备注册表（DeviceRegistry.tenantOf，
+        // 与 WS 投递同源）；设备未归属时退回当前请求上下文（REST 触发的写入）。
+        Integer tenantId = tenantForWrite(sysid);
+        if (tenantId != null) {
+            e.put("tenantId", tenantId);
+        }
         return e;
+    }
+
+    /**
+     * 写入侧的租户归属：设备归属优先，无归属设备退回请求上下文。
+     * UDP 接收线程没有请求上下文，因此不能只用 {@link TenantContext}。
+     *
+     * @param sysid 无人机 systemId
+     * @return 租户 ID；设备未知/未归属且无上下文时返回 null
+     */
+    private Integer tenantForWrite(int sysid) {
+        if (deviceRegistry != null) {
+            Integer deviceTenant = deviceRegistry.tenantOf(sysid);
+            if (deviceTenant != null) {
+                return deviceTenant;
+            }
+        }
+        return TenantContext.getWritableTenantId();
     }
 
     private static Object nanToNull(double v) {
         return Double.isNaN(v) ? null : v;
+    }
+
+    /**
+     * 租户可见性判定，口径与 {@code DeviceRegistry.isVisibleTo()} 一致：
+     * 有效租户为 null（全局管理员 / dev-mode / 无请求上下文）时看全部，否则仅本租户；
+     * 记录自身租户为 null 视为「未归属」，任何具体租户都看不到。
+     *
+     * @param recordTenant 记录上的租户 ID，可为 null
+     * @param effectiveTenant 当前上下文的有效租户 ID，可为 null
+     * @return 可见返回 true
+     */
+    private static boolean isVisibleTo(Integer recordTenant, Integer effectiveTenant) {
+        return effectiveTenant == null || effectiveTenant.equals(recordTenant);
+    }
+
+    /** 从 JSONL 反序列化出的 Map 中取租户 ID（历史行无该字段时为 null）。 */
+    private static Integer tenantOfMap(Map<String, Object> m) {
+        return m.get("tenantId") instanceof Number n ? n.intValue() : null;
     }
 
     // ---- readers (REST) ----
@@ -188,7 +238,9 @@ public class FlightLogService {
                 } else {
                     entities = flightLogRepository.findByTimestampBetween(start, end);
                 }
+                Integer tenantId = TenantContext.getEffectiveTenantId();
                 List<Map<String, Object>> out = entities.stream()
+                        .filter(e -> isVisibleTo(e.getTenantId(), tenantId))
                         .map(FlightLogEntity::toMap)
                         .collect(Collectors.toList());
                 if (limit > 0 && out.size() > limit) {
@@ -205,6 +257,7 @@ public class FlightLogService {
         if (!Files.isReadable(f)) {
             return List.of();
         }
+        Integer jsonlTenant = TenantContext.getEffectiveTenantId();
         List<Map<String, Object>> out = new ArrayList<>();
         try {
             for (String line : Files.readAllLines(f, StandardCharsets.UTF_8)) {
@@ -214,6 +267,9 @@ public class FlightLogService {
                 try {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> m = mapper.readValue(line, Map.class);
+                    if (!isVisibleTo(tenantOfMap(m), jsonlTenant)) {
+                        continue;
+                    }
                     if (type != null && !type.equals(m.get("type"))) {
                         continue;
                     }
@@ -244,8 +300,12 @@ public class FlightLogService {
                 Instant end = day.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant();
                 List<FlightLogEntity> entities = flightLogRepository
                         .findByTypeAndSysidAndTimestampBetween("telemetry", sysid, start, end);
+                Integer tenantId = TenantContext.getEffectiveTenantId();
                 List<TrackPoint> pts = new ArrayList<>();
                 for (FlightLogEntity e : entities) {
+                    if (!isVisibleTo(e.getTenantId(), tenantId)) {
+                        continue;
+                    }
                     if (e.getLat() != null && e.getLon() != null) {
                         double alt = e.getRelativeAlt() != null ? e.getRelativeAlt() : 0;
                         pts.add(new TrackPoint(e.getLat(), e.getLon(), alt, 0));

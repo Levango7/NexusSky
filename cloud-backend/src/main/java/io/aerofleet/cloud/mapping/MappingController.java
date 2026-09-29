@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.mapping;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.security.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -150,6 +151,8 @@ public class MappingController {
                 0,
                 0.0
         );
+        // 写入侧落租户：否则读侧过滤后本租户永远查不到自己创建的任务。
+        task.setTenantId(TenantContext.getWritableTenantId());
         taskRepository.save(task);
 
         // 规划航线
@@ -176,8 +179,10 @@ public class MappingController {
 
     /**
      * 列出测绘任务。
+     * <p>
+     * 租户隔离：有租户上下文时只返回本租户任务；有效租户为 null（全局管理员 / dev-mode）时返回全部。
      */
-    @Operation(summary = "列出测绘任务", description = "可选按状态筛选")
+    @Operation(summary = "列出测绘任务", description = "可选按状态筛选，自动按当前租户过滤")
     @GetMapping("/tasks")
     public List<Map<String, Object>> listTasks(
             @RequestParam(value = "status", required = false) String statusFilter) {
@@ -186,8 +191,12 @@ public class MappingController {
             filter = parseStatus(statusFilter);
         }
 
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         List<Map<String, Object>> result = new ArrayList<>();
         for (MappingTask task : taskRepository.findAll()) {
+            if (tenantId != null && !tenantId.equals(task.getTenantId())) {
+                continue;
+            }
             if (filter != null && task.getStatus() != filter) {
                 continue;
             }
@@ -198,6 +207,8 @@ public class MappingController {
 
     /**
      * 获取任务详情。
+     * <p>
+     * 租户隔离经由 {@link #requireTask} 生效：他租户任务返回 404。
      */
     @Operation(summary = "获取测绘任务详情")
     @ApiResponses({
@@ -424,8 +435,15 @@ public class MappingController {
     // ========== 内部方法 ==========
 
     private MappingTask requireTask(String id) {
-        return taskRepository.findById(id)
+        MappingTask task = taskRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("mapping task not found: " + id));
+        // 租户隔离：他租户任务按「不存在」处理（404 而非 403），口径与 DeviceRegistry.get()
+        // 一致，不按 ID 直取暴露资源归属。有效租户为 null（全局管理员 / dev-mode）时不限制。
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null && !tenantId.equals(task.getTenantId())) {
+            throw new NotFoundException("mapping task not found: " + id);
+        }
+        return task;
     }
 
     private void validateCreateRequest(CreateTaskRequest req) {

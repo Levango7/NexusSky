@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.geofence;
 
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -126,12 +128,14 @@ public class GeofenceController {
         return ResponseEntity.ok(zoneToMap(zone));
     }
 
-    @Operation(summary = "删除围栏区域")
+    @Operation(summary = "删除围栏区域", description = "需要 OPERATOR 角色")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "删除成功"),
+        @ApiResponse(responseCode = "403", description = "角色不足"),
         @ApiResponse(responseCode = "404", description = "围栏不存在")
     })
     @DeleteMapping("/zones/{id}")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> deleteZone(@PathVariable("id") int id) {
         GeofenceZone removed = store.removeZone(id);
         if (removed == null) {

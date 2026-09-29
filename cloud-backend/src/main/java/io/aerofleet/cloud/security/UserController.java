@@ -70,7 +70,7 @@ public class UserController {
     @GetMapping
     @RequireRole(Role.ADMIN)
     public ResponseEntity<List<Map<String, Object>>> listUsers() {
-        Integer tenantId = TenantContext.getTenantId();
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         List<UserEntity> users = (tenantId == null)
                 ? userRepository.findAll()
                 : userRepository.findByTenantId(tenantId);
@@ -93,7 +93,7 @@ public class UserController {
         return userRepository.findById(id)
                 .map(user -> {
                     // 跨租户访问控制：非全局管理员只能访问本租户用户
-                    Integer currentTenantId = TenantContext.getTenantId();
+                    Integer currentTenantId = TenantContext.getEffectiveTenantId();
                     if (currentTenantId != null && !currentTenantId.equals(user.getTenantId())) {
                         return errorResponse(HttpStatus.NOT_FOUND, "user not found");
                     }
@@ -157,7 +157,7 @@ public class UserController {
         return userRepository.findById(id)
                 .map(user -> {
                     // 跨租户访问控制：非全局管理员只能更新本租户用户
-                    Integer currentTenantId = TenantContext.getTenantId();
+                    Integer currentTenantId = TenantContext.getEffectiveTenantId();
                     if (currentTenantId != null && !currentTenantId.equals(user.getTenantId())) {
                         return errorResponse(HttpStatus.NOT_FOUND, "user not found");
                     }
@@ -212,7 +212,7 @@ public class UserController {
         return userRepository.findById(id)
                 .map(user -> {
                     // 跨租户访问控制：非全局管理员只能删除本租户用户
-                    Integer currentTenantId = TenantContext.getTenantId();
+                    Integer currentTenantId = TenantContext.getEffectiveTenantId();
                     if (currentTenantId != null && !currentTenantId.equals(user.getTenantId())) {
                         return errorResponse(HttpStatus.NOT_FOUND, "user not found");
                     }

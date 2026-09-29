@@ -2,6 +2,7 @@ package io.aerofleet.cloud.delivery2;
 
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
@@ -93,25 +94,49 @@ public class DeliveryController2 {
         if (task.getStatus() == null) {
             task.setStatus(DeliveryTask2.Status.PENDING);
         }
+        // 写入侧落租户：有租户上下文时以当前租户为准（忽略请求体伪造的 tenantId），
+        // 全局管理员上下文保留请求体显式指定的归属。
+        Integer contextTenant = TenantContext.getWritableTenantId();
+        if (contextTenant != null) {
+            task.setTenantId(contextTenant);
+        }
         repository.save(task);
         statusTracker.initStatus(id);
         log.info("配送任务创建：id={} type={} priority={}", id, task.getType(), task.getPriority());
         return task;
     }
 
-    /** 列出配送任务。 */
+    /**
+     * 列出配送任务。
+     * <p>
+     * 租户隔离：有租户上下文时只返回本租户任务；有效租户为 null（全局管理员 / dev-mode）时返回全部。
+     */
     @GetMapping("/tasks")
-    @Operation(summary = "列出配送任务", description = "返回所有配送任务列表")
+    @Operation(summary = "列出配送任务", description = "返回当前租户的配送任务列表")
     public List<DeliveryTask2> listTasks() {
-        return repository.findAll();
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null) {
+            return repository.findAll();
+        }
+        return repository.findByTenantId(tenantId);
     }
 
-    /** 获取任务详情。 */
+    /**
+     * 获取任务详情。
+     * <p>
+     * 租户隔离：他租户任务按「不存在」处理（404 而非 403），
+     * 口径与 {@code DeviceRegistry.get()} 一致，不按 ID 直取暴露资源归属。
+     */
     @GetMapping("/tasks/{id}")
     @Operation(summary = "获取任务详情", description = "根据任务 ID 获取配送任务详细信息")
     public DeliveryTask2 getTask(@PathVariable("id") String id) {
-        return repository.findById(id)
+        DeliveryTask2 task = repository.findById(id)
                 .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null && !tenantId.equals(task.getTenantId())) {
+            throw new NotFoundException("delivery task " + id + " not found");
+        }
+        return task;
     }
 
     /** 启动配送。 */

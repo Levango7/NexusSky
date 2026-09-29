@@ -369,4 +369,33 @@ public class JwtTokenProvider {
             return null;
         }
     }
+
+    /**
+     * 从令牌中提取角色名（role claim）。
+     *
+     * @param token JWT 令牌
+     * @return 角色名，令牌无效或不含该 claim 时返回 null
+     */
+    public String getRole(String token) {
+        try {
+            return decoder.decode(token).getClaim("role");
+        } catch (JwtException e) {
+            log.debug("JWT 解析失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 按令牌 claims 解析三态租户域（与 HTTP 入口同一套规则，见
+     * {@link TenantContext#resolveTenantScope}）。
+     * <p>
+     * WS 握手等非 Servlet 入口必须走这里，否则"无 tenant_id claim"会被当成全局管理员，
+     * 与刚收紧的 HTTP 侧语义不一致。
+     *
+     * @param token JWT 令牌
+     * @return 真实租户 ID；null=全局管理员；{@link TenantContext#NO_ACCESS}=无权访问任何租户
+     */
+    public Integer resolveTenantScope(String token) {
+        return TenantContext.resolveTenantScope(getTenantId(token), getRole(token));
+    }
 }

@@ -100,6 +100,30 @@ public class DeviceRegistry {
         return isVisibleTo(snapshot) ? snapshot : null;
     }
 
+    /**
+     * 设备的归属租户，供服务端投递路径（WS 广播、事件监听）使用——这些线程没有请求上下文，
+     * 不能走 {@link #get(int)} 的可见性过滤。
+     *
+     * @return 归属租户 ID；设备未知或未归属时为 null
+     */
+    public Integer tenantOf(int sysid) {
+        DroneSnapshot snapshot = drones.get(sysid);
+        return snapshot == null ? null : snapshot.tenantId;
+    }
+
+    /**
+     * 该 sysid 是否是本机队里真实存在的无人机。
+     * <p>
+     * 用于区分「设备但未归属租户」与「压根不是设备（基站/卫星/地面中继等基础设施）」：
+     * 前者的数据不该出现在任何租户的界面上，后者本就没有租户归属，属公共态势。
+     *
+     * @param sysid 待判定的 system id
+     * @return 已知设备返回 true
+     */
+    public boolean isKnownDevice(int sysid) {
+        return drones.containsKey(sysid);
+    }
+
     /** All known drones, sorted by sysid. Includes offline ones. */
     public List<DroneSnapshot> all() {
         return drones.values().stream()

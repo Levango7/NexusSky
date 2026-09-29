@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.alarm;
 
+import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,6 +88,11 @@ public class AlarmEventStore {
     @Transactional
     public synchronized void store(AlarmEvent event) {
         ensureCountInit();
+        // 写入侧落租户：REST 摄取路径带上当前请求的租户，否则读侧过滤后本租户永远查不到
+        // 自己的事件。调用方已显式设置（设备归属）时不覆盖。
+        if (event.getTenantId() == null) {
+            event.setTenantId(TenantContext.getWritableTenantId());
+        }
         repository.save(event);
         cachedCount.incrementAndGet();
         // 驱逐超容量事件：按时间戳正序（最旧在前），删除超出容量的部分
@@ -106,12 +112,16 @@ public class AlarmEventStore {
 
     /**
      * 按 ID 查询事件。
+     * <p>
+     * 租户隔离：他租户事件视为不存在（返回 null，由调用方转 404），
+     * 口径与 {@code DeviceRegistry.get()} 一致——不按 ID 直取暴露资源归属。
      *
      * @param id 事件 ID
-     * @return 事件，不存在返回 null
+     * @return 事件，不存在或不属于当前租户返回 null
      */
     public AlarmEvent getById(String id) {
-        return repository.findById(id).orElse(null);
+        AlarmEvent event = repository.findById(id).orElse(null);
+        return isVisibleTo(event) ? event : null;
     }
 
     /**
@@ -138,6 +148,9 @@ public class AlarmEventStore {
      * <p>
      * 返回结果按时间戳倒序（最新在前）。{@code severityFilter} 与
      * {@code typeFilter} 为 null 或空字符串时不参与筛选。
+     * <p>
+     * 租户隔离：有租户上下文时只返回本租户事件；有效租户为 null（全局管理员 /
+     * dev-mode / 无请求上下文的后台线程）时返回全部。
      *
      * @param page           页码（0-based）
      * @param size           每页大小
@@ -159,6 +172,9 @@ public class AlarmEventStore {
 
         List<AlarmEvent> filtered = new ArrayList<>();
         for (AlarmEvent e : all) {
+            if (!isVisibleTo(e)) {
+                continue;
+            }
             if (!matchesFilter(e, severityFilter, typeFilter)) {
                 continue;
             }
@@ -195,6 +211,25 @@ public class AlarmEventStore {
             }
         }
         return true;
+    }
+
+    /**
+     * 租户可见性判定，口径与 {@code DeviceRegistry.isVisibleTo()} 一致：
+     * <ul>
+     *   <li>有效租户为 null —— 全局管理员（含 dev-mode，无 TenantFilter 设置上下文），看全部；</li>
+     *   <li>否则仅本租户；事件 tenantId 为 null 视为「未归属」，任何具体租户都看不到。</li>
+     * </ul>
+     * 无请求上下文的后台线程（SSE 轮询、联动引擎）取到 null，行为与修复前一致。
+     *
+     * @param event 事件，可为 null
+     * @return 当前上下文可见返回 true；事件为 null 或他租户返回 false
+     */
+    private static boolean isVisibleTo(AlarmEvent event) {
+        if (event == null) {
+            return false;
+        }
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        return tenantId == null || tenantId.equals(event.getTenantId());
     }
 
     /** 分页查询结果。 */

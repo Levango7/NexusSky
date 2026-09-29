@@ -154,7 +154,7 @@ public class TenantController {
         return tenantRepository.findById(id)
                 .map(tenant -> {
                     // 不允许删除自己所属租户
-                    Integer currentTenantId = TenantContext.getTenantId();
+                    Integer currentTenantId = TenantContext.getEffectiveTenantId();
                     if (currentTenantId != null && currentTenantId.equals(id)) {
                         return errorResponse(HttpStatus.BAD_REQUEST,
                                 "cannot delete your own tenant");

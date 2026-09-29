@@ -13,6 +13,7 @@ import io.aerofleet.cloud.orch.event.StepFailEvent;
 import io.aerofleet.cloud.orch.repository.ConditionTriggerRepository;
 import io.aerofleet.cloud.orch.repository.OrchestrationPlanRepository;
 import io.aerofleet.cloud.orch.repository.TaskStepRepository;
+import io.aerofleet.cloud.security.TenantContext;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -123,6 +124,8 @@ public class OrchestrationPlanService {
         plan.setStatus(PlanStatus.DRAFT);
         plan.setResourcePool(toJson(resourcePool));
         plan.setCreateTime(System.currentTimeMillis());
+        // 写入侧落租户：无请求上下文的创建（联动引擎/事件监听）取到 null，保持未归属语义。
+        plan.setTenantId(TenantContext.getWritableTenantId());
         plan = planRepository.save(plan);
 
         // 保存步骤，设置 planId 和初始状态
@@ -146,23 +149,55 @@ public class OrchestrationPlanService {
 
     /**
      * 查询指定计划。
+     * <p>
+     * 租户隔离：他租户计划按「不存在」处理（返回 null → 控制层 404），
+     * 口径与 {@code DeviceRegistry.get()} 一致，不按 ID 直取暴露资源归属。
      *
      * @param planId 计划 ID
-     * @return 计划实体；不存在时返回 null
+     * @return 计划实体；不存在或不属于当前租户时返回 null
+     */
+    /**
+     * 编排计划的归属租户，供服务端事件投递（WS 定向广播）使用——这些线程没有请求上下文，
+     * 不能走 {@link #getPlan(Long)} 的租户可见性过滤。
+     *
+     * @param planId 计划 ID
+     * @return 归属租户 ID；计划不存在或未落租户时为 null
      */
     @Transactional(readOnly = true)
+    public Integer tenantOfPlan(Long planId) {
+        if (planId == null) {
+            return null;
+        }
+        return planRepository.findById(planId)
+                .map(OrchestrationPlanEntity::getTenantId)
+                .orElse(null);
+    }
+
+    @Transactional(readOnly = true)
     public OrchestrationPlanEntity getPlan(Long planId) {
-        return planRepository.findById(planId).orElse(null);
+        OrchestrationPlanEntity plan = planRepository.findById(planId).orElse(null);
+        if (plan == null) {
+            return null;
+        }
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        return (tenantId == null || tenantId.equals(plan.getTenantId())) ? plan : null;
     }
 
     /**
-     * 查询所有计划列表。
+     * 查询计划列表。
+     * <p>
+     * 租户隔离：有租户上下文时只返回本租户计划；有效租户为 null
+     * （全局管理员 / dev-mode）时返回全部。
      *
      * @return 计划列表
      */
     @Transactional(readOnly = true)
     public List<OrchestrationPlanEntity> listPlans() {
-        return planRepository.findAll();
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId == null) {
+            return planRepository.findAll();
+        }
+        return planRepository.findByTenantId(tenantId);
     }
 
     // ==================== 生命周期管理 ====================

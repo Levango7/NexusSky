@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.autodispatch;
 
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -157,9 +159,10 @@ public class AutoDispatchController {
      * body: {@code {"enabled": true, "minBatteryPct": 30, "maxDispatchDistanceM": 10000,
      * "defaultDroneCount": 1, "hoverAltitudeM": 50, "hoverDurationSec": 300}}
      */
-    @Operation(summary = "更新自动出警配置", description = "字段级合并，未提供的字段保留原值")
+    @Operation(summary = "更新自动出警配置", description = "字段级合并，未提供的字段保留原值；需要 OPERATOR 角色")
     @ApiResponse(responseCode = "200", description = "更新后的配置")
     @PutMapping("/config")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> updateConfig(@RequestBody Map<String, Object> body) {
         boolean enabled = toBool(body.get("enabled"), service.getConfig().isEnabled());
         Integer minBatteryPct = toIntegerOrNull(body.get("minBatteryPct"));

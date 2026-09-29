@@ -116,7 +116,10 @@ public class ApiKeyFilter extends OncePerRequestFilter {
             SecurityContextHolder.getContext().setAuthentication(authToken);
 
             // 设置 TenantContext 和 ApiKeyContext（ThreadLocal，供业务代码使用）
-            TenantContext.setTenantId(entity.getTenantId());
+            // 无租户归属的 Key 只有 ADMIN 才是全局管理员；其余落 NO_ACCESS，
+            // 否则一把不带 tenant_id 的 OPERATOR Key 就能读遍全租户。
+            TenantContext.setTenantId(
+                    TenantContext.resolveTenantScope(entity.getTenantId(), entity.getRole()));
             ApiKeyContext.set(entity.getKeyId(), entity.getTenantId(), entity.getScopes(), entity.getRole());
 
             // 异步更新 lastUsedAt（不影响请求处理）

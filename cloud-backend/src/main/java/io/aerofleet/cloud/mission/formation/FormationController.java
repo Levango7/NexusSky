@@ -2,6 +2,8 @@ package io.aerofleet.cloud.mission.formation;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -45,8 +47,9 @@ public class FormationController {
         this.registry = registry;
     }
 
-    /** 创建编队（FR-14）。 */
+    /** 创建编队（FR-14）。需要 OPERATOR 角色。 */
     @PostMapping
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> create(@RequestBody FormationCreateRequest req) {
         FormationService.FormationCreateResult r = formationService.create(req);
         Map<String, Object> out = new LinkedHashMap<>();
