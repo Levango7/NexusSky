@@ -621,13 +621,22 @@ NexusSky/
 
 ## 测试规模
 
+实测于 2026-09-30，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped，4m15s）：
+
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 221 |
-| `drone-sim` | 1222 |
-| `link-sim` | 105+ |
-| `cloud-backend` | 1682 |
-| **总计** | **3230（全部通过，0 failures）** |
+| `mavlink-core` | 331 |
+| `drone-sim` | 1324 |
+| `link-sim` | 115 |
+| `cloud-backend` | 1986 |
+| `sdk-java` | 12 |
+| `regulator-sim` | 19 |
+| **总计** | **3787** |
+
+注意：这些用例跑在 `test` profile（`dev-mode=true`、`rbac-enabled=false`），
+即鉴权与租户面**不在其覆盖范围内**；链级鉴权/隔离证据在
+`cloud-backend/src/test/java/io/aerofleet/cloud/security/chain/HttpAuthChainTest.java`
+与 `api/ws/TelemetryWsTenantIsolationTest.java`（以 `dev-mode=false` 起完整过滤器链）。
 
 ## 代码审查修复记录
 
@@ -646,7 +655,11 @@ NexusSky/
 - 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
 - 微服务/K8s 暂不引入：模块化单体已够当前规模，拆分时机见设计文档讨论
 - MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（420–483）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
-- 链路签名（MAVLink v2 signing）未实现，模拟器与真机的 UDP 通信在局域网内是明文
+- 链路签名（MAVLink v2 signing）**代码已实现并接入** `UdpGateway`/`VirtualDrone`，但
+  `mavlink.signing.enabled` 默认 false 且**任何 profile 都未配置**，故出厂状态是明文 UDP；
+  且本仓签名块为 15 字节（LINK_ID 1 + TIMESTAMP 6 + SIGNATURE 8），与官方 13 字节
+  （sha256_48 + 4 字节小端时间戳）不一致 → 与 PX4/pymavlink 混流会错帧，接真机前需先做
+  协议对等验证（解析层当前也只接受不验签）
 - **检测器是投影可见性**（简化是有意的）：接入真实 CV 模型的替换点在
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
@@ -655,8 +668,12 @@ NexusSky/
   限制挡住（EPERM），本地用 `gcs-web/scripts/check-frontend.cjs`
   （Babel 语法 + import 图）把关；**真实构建在 CI 跑**（`npm run build`）。
   改前端后推 CI 验证，别信本地静态检查的"绿"就万事大吉。
-- **安全认证已实现**：JWT 令牌 + Spring Security + 多租户隔离 + 审计日志 + License 管理；
-  dev-mode 白名单便于本地开发
+- **安全认证：机制可用但覆盖面未满**。JWT + API Key + Spring Security + 三态租户域
+  （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
+  审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
+  仍需注意：`@RequireRole` 只覆盖 341 个端点中的 70 个（其余靠"无注解=放行"），
+  `aerofleet.security.rbac-enabled` 默认 false 且 staging profile 未显式打开；
+  License 在缺 key 或验签失败时降级为无限期 dev license（商用门禁当前不成立）
 - **持久化已部分实现**：飞行日志 JSONL 落盘、围栏/追踪/安防设备等支持持久化测试；
   主数据仍为内存态，换数据库是包内替换
 
