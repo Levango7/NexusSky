@@ -23,6 +23,7 @@ public class ApiKeyAuthenticationToken extends AbstractAuthenticationToken {
     private final String keyId;
     private final Integer tenantId;
     private final String scopes;
+    private final String role;
 
     /**
      * 创建已认证的 API Key Token。
@@ -30,12 +31,14 @@ public class ApiKeyAuthenticationToken extends AbstractAuthenticationToken {
      * @param keyId    API Key ID（展示标识）
      * @param tenantId 租户 ID
      * @param scopes   权限范围（JSON 数组字符串）
+     * @param role     签发时继承的角色，用于 {@link RoleInterceptor} 判定
      */
-    public ApiKeyAuthenticationToken(String keyId, Integer tenantId, String scopes) {
+    public ApiKeyAuthenticationToken(String keyId, Integer tenantId, String scopes, String role) {
         super(Collections.singletonList(new SimpleGrantedAuthority("ROLE_API_KEY")));
         this.keyId = keyId;
         this.tenantId = tenantId;
         this.scopes = scopes;
+        this.role = role;
         setAuthenticated(true);
     }
 
@@ -47,7 +50,17 @@ public class ApiKeyAuthenticationToken extends AbstractAuthenticationToken {
         this.keyId = null;
         this.tenantId = null;
         this.scopes = null;
+        this.role = null;
         setAuthenticated(false);
+    }
+
+    /**
+     * 获取签发时继承的角色。
+     *
+     * @return 角色名，可能为 null（历史 Key 未记录角色）
+     */
+    public String getRole() {
+        return role;
     }
 
     @Override

@@ -92,6 +92,9 @@ public class ApiKeyController {
         String username = jwt.getSubject();
         Integer tenantId = extractClaimAsInteger(jwt, "tenant_id");
 
+        // Key 继承签发者的角色，供 RoleInterceptor 在纯 API Key 调用（SDK 路径）下判定
+        String role = jwt.getClaimAsString("role");
+
         // 查找用户实体获取 userId
         Integer userId = null;
         if (userRepository != null) {
@@ -147,6 +150,7 @@ public class ApiKeyController {
         entity.setUserId(userId);
         entity.setName(name);
         entity.setScopes(scopes);
+        entity.setRole(role);
         entity.setCreatedAt(now);
         entity.setExpiresAt(expiresAt);
         entity.setLastUsedAt(null);
@@ -165,6 +169,7 @@ public class ApiKeyController {
         resp.put("maskedKey", maskedKey);
         resp.put("name", name);
         resp.put("scopes", scopes);
+        resp.put("role", role);
         resp.put("createdAt", now.toString());
         resp.put("expiresAt", expiresAt.toString());
         resp.put("warning", "This is the only time the full API Key will be shown. Please save it securely.");
@@ -321,6 +326,7 @@ public class ApiKeyController {
         dto.put("maskedKey", entity.getMaskedKey());
         dto.put("name", entity.getName());
         dto.put("scopes", entity.getScopes());
+        dto.put("role", entity.getRole());
         dto.put("createdAt", entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null);
         dto.put("expiresAt", entity.getExpiresAt() != null ? entity.getExpiresAt().toString() : null);
         dto.put("lastUsedAt", entity.getLastUsedAt() != null ? entity.getLastUsedAt().toString() : null);

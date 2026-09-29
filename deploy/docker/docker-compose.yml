@@ -71,7 +71,7 @@ services:
       - AEROFLEET_SECURITY_JWT_SECRET=change-this-jwt-secret-in-production-min-32-chars
       - AEROFLEET_SECURITY_ALLOWED_ORIGINS=http://localhost:3000
       - AEROFLEET_JWT_SECRET=change-this-jwt-secret-in-production-min-32-chars
-      - AEROFLEET_USERS=admin:admin
+      - AEROFLEET_USERS=admin:admin:ADMIN
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/aerofleet_prod
       - SPRING_DATASOURCE_USERNAME=aerofleet
       - SPRING_DATASOURCE_PASSWORD=aerofleet_dev_password

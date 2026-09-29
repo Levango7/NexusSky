@@ -24,9 +24,10 @@ public final class ApiKeyContext {
      * @param keyId    API Key ID
      * @param tenantId 租户 ID
      * @param scopes   权限范围（JSON 数组字符串）
+     * @param role     签发时继承的角色（用于 RBAC 判定）
      */
-    public static void set(String keyId, Integer tenantId, String scopes) {
-        CONTEXT.set(new ApiKeyInfo(keyId, tenantId, scopes));
+    public static void set(String keyId, Integer tenantId, String scopes, String role) {
+        CONTEXT.set(new ApiKeyInfo(keyId, tenantId, scopes, role));
     }
 
     /**
@@ -60,6 +61,16 @@ public final class ApiKeyContext {
     }
 
     /**
+     * 获取当前 API Key 的角色（签发时从 JWT 继承）。
+     *
+     * @return 角色名，null 表示未通过 API Key 认证或该 Key 未记录角色
+     */
+    public static String getRole() {
+        ApiKeyInfo info = CONTEXT.get();
+        return info == null ? null : info.role;
+    }
+
+    /**
      * 判断当前请求是否通过 API Key 认证。
      *
      * @return true 表示当前请求使用 API Key 认证
@@ -83,11 +94,13 @@ public final class ApiKeyContext {
         final String keyId;
         final Integer tenantId;
         final String scopes;
+        final String role;
 
-        ApiKeyInfo(String keyId, Integer tenantId, String scopes) {
+        ApiKeyInfo(String keyId, Integer tenantId, String scopes, String role) {
             this.keyId = keyId;
             this.tenantId = tenantId;
             this.scopes = scopes;
+            this.role = role;
         }
     }
 }

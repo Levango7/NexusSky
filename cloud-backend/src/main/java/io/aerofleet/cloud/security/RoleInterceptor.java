@@ -15,15 +15,24 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.util.Arrays;
 
 /**
- * RBAC 角色拦截器：基于 {@link RequireRole} 注解校验 JWT 中的 {@code role} claim。
+ * RBAC 角色拦截器：基于 {@link RequireRole} 注解校验调用方角色。
  * <p>
  * 角色层级（ordinal 越小权限越大）：{@link Role#ADMIN}(0) > {@link Role#OPERATOR}(1) > {@link Role#OBSERVER}(2)。
  * <p>
- * 跳过校验的条件（任一满足即放行，不影响现有功能）：
+ * 注解查找顺序：方法级优先，未标注时回退到类级（整个控制器同一最低角色）。
+ * <p>
+ * 角色来源（依次尝试）：
+ * <ol>
+ *   <li>{@code Authorization: Bearer} 的 JWT {@code role} claim</li>
+ *   <li>API Key 上下文的角色（{@code X-API-Key} 路径，由 {@link ApiKeyFilter} 从
+ *       {@link ApiKeyEntity#getRole()} 写入 {@link ApiKeyContext}——SDK 只用 API Key 认证）</li>
+ * </ol>
+ * <p>
+ * 跳过校验的条件（任一满足即放行）：
  * <ul>
  *   <li>{@code aerofleet.security.dev-mode=true}（开发模式）</li>
- *   <li>{@code aerofleet.security.rbac-enabled=false}（默认关闭）</li>
- *   <li>目标方法未标注 {@link RequireRole}</li>
+ *   <li>{@code aerofleet.security.rbac-enabled=false}</li>
+ *   <li>目标方法与所在类均未标注 {@link RequireRole}</li>
  *   <li>非控制器方法（HandlerMethod 之外的静态资源等）</li>
  * </ul>
  * <p>
@@ -61,18 +70,21 @@ public class RoleInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        // 方法未标注 @RequireRole 则放行
+        // 方法级优先，回退类级
         RequireRole annotation = handlerMethod.getMethodAnnotation(RequireRole.class);
+        if (annotation == null) {
+            annotation = handlerMethod.getBeanType().getAnnotation(RequireRole.class);
+        }
         if (annotation == null) {
             return true;
         }
 
         Role required = annotation.value();
 
-        // 提取 JWT 中的 role claim
-        String roleClaim = extractRoleClaim(request);
+        // 解析调用方角色：JWT role claim 优先，其次 API Key 记录的角色
+        String roleClaim = resolveRole(request);
         if (roleClaim == null) {
-            log.warn("RBAC 拒绝: 缺少有效 JWT 或 role claim, path={}, requires={}",
+            log.warn("RBAC 拒绝: 无 JWT role claim 且 API Key 未记录角色, path={}, requires={}",
                     request.getRequestURI(), required);
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=UTF-8");
@@ -91,6 +103,17 @@ public class RoleInterceptor implements HandlerInterceptor {
         }
 
         return true;
+    }
+
+    /**
+     * 调用方角色：Bearer JWT 的 role claim 优先；无 JWT 时用 API Key 记录的角色
+     * （SDK 只用 X-API-Key，否则加注解后 SDK 写操作会全部 403）。
+     *
+     * @return 角色名，两条来源都拿不到时返回 null
+     */
+    private String resolveRole(HttpServletRequest request) {
+        String fromJwt = extractRoleClaim(request);
+        return fromJwt != null ? fromJwt : ApiKeyContext.getRole();
     }
 
     /**

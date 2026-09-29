@@ -112,12 +112,12 @@ public class ApiKeyFilter extends OncePerRequestFilter {
 
             // 设置 SecurityContext（ApiKeyAuthenticationToken），使 Spring Security 授权链识别 API Key 认证
             ApiKeyAuthenticationToken authToken = new ApiKeyAuthenticationToken(
-                    entity.getKeyId(), entity.getTenantId(), entity.getScopes());
+                    entity.getKeyId(), entity.getTenantId(), entity.getScopes(), entity.getRole());
             SecurityContextHolder.getContext().setAuthentication(authToken);
 
             // 设置 TenantContext 和 ApiKeyContext（ThreadLocal，供业务代码使用）
             TenantContext.setTenantId(entity.getTenantId());
-            ApiKeyContext.set(entity.getKeyId(), entity.getTenantId(), entity.getScopes());
+            ApiKeyContext.set(entity.getKeyId(), entity.getTenantId(), entity.getScopes(), entity.getRole());
 
             // 异步更新 lastUsedAt（不影响请求处理）
             try {

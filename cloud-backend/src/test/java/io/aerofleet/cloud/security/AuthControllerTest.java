@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.Jwt;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -158,5 +159,54 @@ class AuthControllerTest {
     void refresh_nonBearerHeader_returns401() {
         ResponseEntity<Map<String, Object>> resp = controller.refresh("Basic sometoken");
         assertThat(resp.getStatusCode().value()).isEqualTo(401);
+    }
+
+    // ===== 内存用户角色（P0-2：RBAC 可用的前提）=====
+
+    @Test
+    @DisplayName("内存用户缺省角色 OPERATOR 并写入 token 的 role claim")
+    void login_memoryUserDefaultsToOperator() {
+        ResponseEntity<Map<String, Object>> resp = controller.login(body("operator", "op123"), request());
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+
+        Jwt jwt = tokenProvider.getDecoder().decode(resp.getBody().get("token").toString());
+        assertThat(jwt.getClaimAsString("role")).isEqualTo("OPERATOR");
+    }
+
+    @Test
+    @DisplayName("users 配置第三段可显式指定 ADMIN 角色")
+    void login_explicitRoleFromConfig() {
+        AuthController rootController = new AuthController(tokenProvider, passwordEncoder,
+                "root:rootpw:ADMIN", EXPIRY_SECONDS, null);
+
+        ResponseEntity<Map<String, Object>> resp = rootController.login(body("root", "rootpw"), request());
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+
+        Jwt jwt = tokenProvider.getDecoder().decode(resp.getBody().get("token").toString());
+        assertThat(jwt.getClaimAsString("role")).isEqualTo("ADMIN");
+    }
+
+    @Test
+    @DisplayName("口令含冒号且末段不是角色名时整段仍视为口令（不被当角色）")
+    void login_passwordWithColonIsNotMistakenForRole() {
+        AuthController colonController = new AuthController(tokenProvider, passwordEncoder,
+                "svc:a:b", EXPIRY_SECONDS, null);
+
+        assertThat(colonController.login(body("svc", "a:b"), request()).getStatusCode().value()).isEqualTo(200);
+        assertThat(colonController.login(body("svc", "a"), request()).getStatusCode().value()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("refresh 时用户已不在内存配置中返回 401（与 DB 模式行为一致）")
+    void refresh_removedMemoryUser_returns401() {
+        AuthController soloController = new AuthController(tokenProvider, passwordEncoder,
+                "solo:solo:ADMIN", EXPIRY_SECONDS, null);
+        String token = soloController.login(body("solo", "solo"), request())
+                .getBody().get("token").toString();
+        assertThat(soloController.refresh("Bearer " + token).getStatusCode().value()).isEqualTo(200);
+
+        AuthController withoutSolo = new AuthController(tokenProvider, passwordEncoder,
+                "other:other", EXPIRY_SECONDS, null);
+        assertThat(withoutSolo.refresh("Bearer " + token).getStatusCode().value()).isEqualTo(401);
     }
 }

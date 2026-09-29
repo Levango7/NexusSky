@@ -44,7 +44,7 @@ public class AuthController {
 
     private final JwtTokenProvider tokenProvider;
     private final PasswordEncoder passwordEncoder;
-    private final Map<String, String> users; // username -> encoded password
+    private final Map<String, MemoryUser> users; // username -> 编码口令 + 角色
     private final long expirySeconds;
     /** 可选注入：有 Spring 上下文时使用数据库查询，无上下文时降级为内存模式。 */
     private final UserRepository userRepository;
@@ -68,7 +68,7 @@ public class AuthController {
         if (this.users.isEmpty() && userRepository == null) {
             throw new IllegalStateException(
                     "aerofleet.security.users is not configured and UserRepository is not available. "
-                    + "Set aerofleet.security.users environment variable (format: username:password)");
+                    + "Set aerofleet.security.users environment variable (format: username:password[:ROLE])");
         }
     }
 
@@ -124,14 +124,16 @@ public class AuthController {
         }
 
         // 内存模式降级（无 Spring 上下文或无数据库）
-        String encodedPassword = users.get(username);
-        if (encodedPassword == null || !passwordEncoder.matches(password, encodedPassword)) {
+        MemoryUser memoryUser = users.get(username);
+        if (memoryUser == null || !passwordEncoder.matches(password, memoryUser.passwordHash())) {
             log.warn("登录失败: username={} ip={}", username, clientIp);
             return errorResponse(HttpStatus.UNAUTHORIZED, "invalid credentials");
         }
 
-        String token = tokenProvider.generateToken(username, Duration.ofSeconds(expirySeconds));
-        log.info("用户登录成功: username={} ip={}", username, clientIp);
+        // 内存用户同样带 role claim，否则加过 @RequireRole 的端点对内存模式一律 403
+        String token = tokenProvider.generateToken(
+                username, memoryUser.role(), null, Duration.ofSeconds(expirySeconds));
+        log.info("用户登录成功: username={} role={} ip={}", username, memoryUser.role(), clientIp);
 
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("token", token);
@@ -179,8 +181,13 @@ public class AuthController {
             return ResponseEntity.ok(resp);
         }
 
-        // 内存模式降级：不含 role/tenant_id claim
-        String newToken = tokenProvider.generateToken(username, Duration.ofSeconds(expirySeconds));
+        // 内存模式降级：角色取自配置解析结果；用户已从配置移除则拒绝（与 DB 模式一致）
+        MemoryUser refreshed = users.get(username);
+        if (refreshed == null) {
+            return errorResponse(HttpStatus.UNAUTHORIZED, "user no longer exists or disabled");
+        }
+        String newToken = tokenProvider.generateToken(
+                username, refreshed.role(), null, Duration.ofSeconds(expirySeconds));
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("token", newToken);
         resp.put("expiresIn", expirySeconds);
@@ -193,18 +200,59 @@ public class AuthController {
         return ResponseEntity.status(status).body(body);
     }
 
-    private Map<String, String> parseUsers(String usersConfig) {
-        Map<String, String> result = new LinkedHashMap<>();
+    /**
+     * 解析 {@code aerofleet.security.users}，格式 {@code username:password[:ROLE]}，多项逗号分隔。
+     * <p>
+     * 未写 ROLE 时默认 {@link Role#OPERATOR}（可控制设备，但不能管理用户/租户/API Key）。
+     * 末段只有正好匹配角色枚举时才当作角色，因此口令里含冒号仍可工作（需要显式角色时，
+     * 口令请用不含角色名的写法）。
+     */
+    private Map<String, MemoryUser> parseUsers(String usersConfig) {
+        Map<String, MemoryUser> result = new LinkedHashMap<>();
         if (usersConfig == null || usersConfig.isBlank()) {
             return result;
         }
         for (String entry : usersConfig.split(",")) {
-            String[] parts = entry.trim().split(":", 2);
-            if (parts.length == 2) {
-                result.put(parts[0].trim(), passwordEncoder.encode(parts[1].trim()));
+            String trimmed = entry.trim();
+            int first = trimmed.indexOf(':');
+            if (first <= 0) {
+                log.warn("忽略非法 aerofleet.security.users 条目（缺 username）: {}", trimmed);
+                continue;
             }
+            String username = trimmed.substring(0, first).trim();
+            String rest = trimmed.substring(first + 1).trim();
+
+            Role role = Role.OPERATOR;
+            String password = rest;
+            int last = rest.lastIndexOf(':');
+            if (last > 0) {
+                Role parsed = parseRoleName(rest.substring(last + 1).trim());
+                if (parsed != null) {
+                    role = parsed;
+                    password = rest.substring(0, last).trim();
+                }
+            }
+            result.put(username, new MemoryUser(passwordEncoder.encode(password), role));
         }
         return result;
+    }
+
+    /**
+     * 把配置里的角色段解析为枚举（大小写不敏感）。
+     *
+     * @return 匹配的 Role，不匹配返回 null
+     */
+    private Role parseRoleName(String value) {
+        for (Role candidate : Role.values()) {
+            if (candidate.name().equalsIgnoreCase(value)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /** 内存用户：编码后的口令 + 角色。 */
+    private record MemoryUser(String passwordHash, Role role) {
     }
 
     // =====================================================================

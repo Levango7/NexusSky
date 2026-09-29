@@ -44,6 +44,10 @@ public class ApiKeyEntity {
     @Column(name = "scopes", length = 500)
     private String scopes;
 
+    /** 签发时从 JWT 继承的角色（ADMIN/OPERATOR/OBSERVER），供 RBAC 判定。 */
+    @Column(name = "role", length = 20)
+    private String role;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -100,6 +104,9 @@ public class ApiKeyEntity {
 
     public String getScopes() { return scopes; }
     public void setScopes(String scopes) { this.scopes = scopes; }
+
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

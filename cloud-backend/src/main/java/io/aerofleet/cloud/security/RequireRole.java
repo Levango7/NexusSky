@@ -6,7 +6,9 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * 声明接口方法所需的最小角色（RBAC）。
+ * 声明接口所需的最小角色（RBAC）。
+ * <p>
+ * 可标注在方法上（仅该方法）或类上（该类全部端点）；方法级优先于类级。
  * <p>
  * 用法示例：
  * <pre>
@@ -15,15 +17,16 @@ import java.lang.annotation.Target;
  * public Result createTask(&#64;RequestBody TaskRequest req) { ... }
  * </pre>
  * <p>
- * 由 {@link RoleInterceptor} 在请求处理前拦截，校验 JWT 中的 {@code role} claim。
- * 当 {@code aerofleet.security.rbac-enabled=false}（默认）或
- * {@code aerofleet.security.dev-mode=true} 时跳过校验，不影响现有功能。
+ * 由 {@link RoleInterceptor} 在请求处理前拦截，角色来源依次为：JWT 的
+ * {@code role} claim、API Key 记录上的 {@code role} 列。
+ * 当 {@code aerofleet.security.rbac-enabled=false} 或
+ * {@code aerofleet.security.dev-mode=true} 时跳过校验。
  *
  * @see Role
  * @see RoleInterceptor
  */
 @Retention(RetentionPolicy.RUNTIME)
-@Target(ElementType.METHOD)
+@Target({ElementType.METHOD, ElementType.TYPE})
 public @interface RequireRole {
 
     /**
