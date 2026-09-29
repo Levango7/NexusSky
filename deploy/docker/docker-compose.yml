@@ -68,13 +68,14 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - AEROFLEET_SECURITY_DEV_MODE=false
-      - AEROFLEET_SECURITY_JWT_SECRET=change-this-jwt-secret-in-production-min-32-chars
+      # 刻意不留默认值：未显式注入即启动失败（原内置密钥长度已达校验阈值，可伪造任意租户/角色 JWT）
+      - AEROFLEET_SECURITY_JWT_SECRET=${AEROFLEET_SECURITY_JWT_SECRET:?AEROFLEET_SECURITY_JWT_SECRET is required (>=32 chars)}
       - AEROFLEET_SECURITY_ALLOWED_ORIGINS=http://localhost:3000
-      - AEROFLEET_JWT_SECRET=change-this-jwt-secret-in-production-min-32-chars
-      - AEROFLEET_USERS=admin:admin:ADMIN
+      - AEROFLEET_JWT_SECRET=${AEROFLEET_JWT_SECRET:?AEROFLEET_JWT_SECRET is required (>=32 chars)}
+      - AEROFLEET_USERS=${AEROFLEET_USERS:?AEROFLEET_USERS is required (username:password[:ROLE])}
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/aerofleet_prod
       - SPRING_DATASOURCE_USERNAME=aerofleet
-      - SPRING_DATASOURCE_PASSWORD=aerofleet_dev_password
+      - SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD is required}
       - SPRING_REDIS_HOST=redis
       - SPRING_REDIS_PORT=6379
       - SPRING_FLYWAY_ENABLED=false
