@@ -1,5 +1,11 @@
 # Trivy 扫描配置（CI security-scan 通过 trivy-action 的 trivy-config 传入）。
 # scan.offline: 依赖解析只查本地 Maven 仓库，不回源 Maven Central——
 # 共享 runner IP 对 Central 的匿名请求会被 429 限流（Retry-After 1800），离线模式跳过远程拉取。
+#
+# 注意 scan.offline 与"是否阻断"无关：它只关掉 Maven 依赖的远程解析，
+# 不会把发现降级成非阻断。阻断语义在 .github/workflows/ci.yml 的 Trivy 步骤里
+# 由 exit-code: '1' 给出（缺这个入参时 trivy-action 默认 exit-code=0，
+# 即"只产 SARIF、永远不红"——那是 2026-09-29 之前的名义门禁状态）。
+# severity 也在 CI 步骤里（CRITICAL,HIGH），保持集中、可审计。
 scan:
   offline: true

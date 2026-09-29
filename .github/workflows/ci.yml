@@ -76,12 +76,27 @@ jobs:
         run: mvn -B -pl ${{ matrix.module }} -am package
       - name: Upload JaCoCo coverage report
         uses: actions/upload-artifact@v4
+        # if-no-files-found 默认 warn：模块没有 jacoco 产物时上传会静默"成功"，
+        # 与本 job 的覆盖率门禁语义相符——缺产物就是故障，不是可跳过的美化步骤。
         with:
+          if-no-files-found: error
           name: jacoco-report-${{ matrix.module }}
           path: ${{ matrix.module }}/target/site/jacoco/
           retention-days: 14
-      - name: Coverage gate check (line >= 50%)
-        run: mvn -B -pl ${{ matrix.module }} -am verify -DskipTests
+      - name: Coverage gate (jacoco check; BUNDLE LINE >= per-module threshold)
+        # 阈值不在本文件里，而在各模块 pom 的 jacoco check 规则中：
+        #   mavlink-core 0.65 / drone-sim 0.70 / link-sim 0.65 / cloud-backend 0.50
+        # 每个阈值 = 该模块实测 LINE 覆盖率向下取整到 5%（见 scripts/ci-coverage-threshold.sh）。
+        # jacoco:check 在 <module>/target/jacoco.exec 缺失时会打一条 warn 后**直接跳过**
+        # （-DskipTests / pom 漏配 prepare-agent 都会导致这种"假绿"），
+        # 所以先显式断言产物存在，缺文件立刻红而不是空转。
+        run: |
+          if [ ! -f "${{ matrix.module }}/target/jacoco.exec" ]; then
+            echo "::error::${{ matrix.module }} 缺少 target/jacoco.exec —— 覆盖率门禁本次会被 jacoco 静默跳过"
+            ls -la "${{ matrix.module }}/target/"
+            exit 1
+          fi
+          mvn -B -pl ${{ matrix.module }} -am verify -DskipTests
 
   frontend:
     name: GCS Web
@@ -263,7 +278,12 @@ jobs:
           cache-dependency-path: gcs-web/package-lock.json
       - name: Frontend dependency audit
         working-directory: gcs-web
-        run: npm audit --production --audit-level=high
+        # 不带 --production/--omit=dev：必须把 devDependencies 一起扫。
+        # 原写法用 --production 把 vite/esbuild 这类构建期/开发期依赖整体滤掉，
+        # 实测退出码 0，而同一份 lockfile 全量扫描是 1（vite<=6.4.2 high）。
+        # 这不是理论风险：docker-compose.yml:29 就是用 `npm run dev -- --host 0.0.0.0`
+        # 把 Vite dev server 直接暴露到宿主机网卡，dev 依赖链上的漏洞就是在线攻击面。
+        run: npm audit --audit-level=high
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -279,14 +299,33 @@ jobs:
         continue-on-error: true
         run: mvn -B -q dependency:go-offline
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
+        # 固定到发布 tag v0.36.0，不再用 @master。理由（供应链）：
+        #   @master 是浮动 ref——同一份 workflow 在不同日期会执行不同的 action 代码，
+        #   上游合入任何改动（默认 scanners、退出码语义、内置 trivy 版本）都会在没有
+        #   任何 PR 评审信号的情况下改变本仓库的安全门禁方向。实测：master 目前比
+        #   v0.36.0 领先 11 个提交（含 "Update trivy to v0.74.0"），也就是说
+        #   "今天跑的是哪个 trivy" 完全取决于上游当天合进了什么。
+        # 注意：这是**有行为差异**的改动（tag 的内置 trivy 比 master 旧），
+        # 本仓库无法本地跑 trivy（docker 镜像白名单 + avd/raw.githubusercontent 均被网关拦截），
+        # 因此合并后的第一次 security-scan 运行就是这次改动的验收点。
+        # 若想要"零行为差异 + 固定 ref"，把 uses 换成 master 当前 commit SHA：
+        #   aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           trivy-config: trivy.yaml
+          # 0 → CRITICAL/HIGH 只产 SARIF 不阻断（原状态：名义门禁）
+          # 1 → 发现 CRITICAL/HIGH 直接让 job 变红；SARIF 仍然上传，用于看红因。
+          # trivy.yaml 的 scan.offline 保持不变（只影响 Maven 依赖解析不回源，
+          # 不影响漏洞数据库下载与退出码语义）。
+          exit-code: '1'
       - name: Upload Trivy results to GitHub Security
+        # always()：扫描步骤现在会因 CRITICAL/HIGH 直接判红，
+        # 若不加这一条，SARIF 上传会被跳过，安全面板反而在最需要报告的运行里失去数据。
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif

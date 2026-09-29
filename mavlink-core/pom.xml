@@ -39,4 +39,50 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <!-- 覆盖率门禁（与 cloud-backend 同型：BUNDLE LINE ≥ 阈值，verify 阶段阻断）。
+           阈值 0.65 = 实测 LINE 覆盖率 67.93%（331 个用例全绿）向下取整到 5%。
+           2026-09-29 之前本模块没有 jacoco，CI 里名为 "Coverage gate check" 的步骤
+           对本模块是空转（无 jacoco.exec → jacoco:check 直接 skip），故门禁在此落地。
+           注意：jacoco:check 在 jacoco.exec 缺失时会静默跳过，CI 步骤已加显式断言
+           防止"缺数据=绿"。阈值调整请同步 scripts/ci-coverage-threshold.sh 的实测输出。 -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.12</version>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals><goal>prepare-agent</goal></goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>test</phase>
+            <goals><goal>report</goal></goals>
+          </execution>
+          <execution>
+            <id>check-coverage</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>0.65</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

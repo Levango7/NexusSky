@@ -36,9 +36,19 @@ docker run -d --name nexussky-redis --network host redis:7-alpine 2>/dev/null ||
 sleep 2
 
 # 启动 docker-compose 服务
-docker-compose -f "$COMPOSE_FILE" up -d
+# 原写法：docker-compose up -d 之后夹了一行 sleep 5，再用 "[ $? -eq 0 ]" 断言 ——
+# $? 取的是 sleep 的退出码（恒 0），所以这条断言永远 PASS，compose 起不来也看不见。
+# $? 必须紧跟被检查的命令取值。
+COMPOSE_UP_LOG=$(mktemp)
+docker-compose -f "$COMPOSE_FILE" up -d > "$COMPOSE_UP_LOG" 2>&1
+COMPOSE_UP_STATUS=$?
 sleep 5
-check "docker-compose 服务已启动" "[ $? -eq 0 ]"
+check "docker-compose up -d 退出码为 0" "[ $COMPOSE_UP_STATUS -eq 0 ]"
+if [ "$COMPOSE_UP_STATUS" -ne 0 ]; then
+  echo "   --- docker-compose up 输出（末尾 30 行）---"
+  tail -30 "$COMPOSE_UP_LOG"
+fi
+rm -f "$COMPOSE_UP_LOG"
 
 # ═══════════════════════════════════════════════════
 # 场景 2：等待服务就绪（健康检查轮询）
@@ -141,7 +151,28 @@ check "飞行日志非空" "[ \"$FLOGN\" -ge 1 ] 2>/dev/null"
 # ═══════════════════════════════════════════════════
 step "清理容器"
 cleanup_containers
-check "容器已清理" "true"
+# 原写法是 check "容器已清理" "true" —— 恒真假断言，任何清理失败都会打 PASS。
+# cleanup_containers 内部用 `|| true` 吞掉 docker-compose down 的错误（teardown 要幂等，
+# 不该把清理错误盖过真实测试结果），所以这里改为断言**清理后的真实状态**。
+# 查询命令本身失败时不能当成"没有残留"，显式判失败。
+COMPOSE_PS_OUT=$(docker-compose -f "$COMPOSE_FILE" ps -q 2>/dev/null)
+COMPOSE_PS_STATUS=$?
+if [ $COMPOSE_PS_STATUS -ne 0 ]; then
+  echo "   ❌ docker-compose ps 查询失败（退出码 $COMPOSE_PS_STATUS），无法确认容器已清理"
+  FAIL=1
+else
+  COMPOSE_LEFTOVER=$(printf '%s' "$COMPOSE_PS_OUT" | grep -c .)
+  check "compose 项目内无残留运行容器（实测 $COMPOSE_LEFTOVER 个）" "[ \"$COMPOSE_LEFTOVER\" = \"0\" ]"
+fi
+REDIS_PS_OUT=$(docker ps -q -f name=nexussky-redis 2>/dev/null)
+REDIS_PS_STATUS=$?
+if [ $REDIS_PS_STATUS -ne 0 ]; then
+  echo "   ❌ docker ps 查询失败（退出码 $REDIS_PS_STATUS），无法确认 redis 已清理"
+  FAIL=1
+else
+  REDIS_LEFTOVER=$(printf '%s' "$REDIS_PS_OUT" | grep -c .)
+  check "nexussky-redis 容器已移除（实测残留 $REDIS_LEFTOVER 个）" "[ \"$REDIS_LEFTOVER\" = \"0\" ]"
+fi
 
 # ═══════════════════════════════════════════════════
 # 结果汇总

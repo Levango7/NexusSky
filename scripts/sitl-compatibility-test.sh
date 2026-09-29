@@ -93,7 +93,9 @@ echo "  cloud-backend: $CLOUD_HOST:$CLOUD_PORT (API: $CLOUD_API)"
 
 # ─────────────────── 1. MAVLink 编解码离线自检 ───────────────────
 step "1. MAVLink 编解码离线自检（mavlink-compatibility-check.py --self-test）"
+SELF_TEST_OK=false
 if "$PYTHON" "$SCRIPT_DIR/mavlink-compatibility-check.py" --self-test; then
+  SELF_TEST_OK=true
   echo "   ✅ 离线自检全部通过"
 else
   echo "   ❌ 离线自检失败"
@@ -267,7 +269,10 @@ step "8. NexusSky 扩展消息（420-476）编解码验证"
 echo "   （已在步骤 1 离线自检中覆盖全部 44 条扩展消息的帧层往返）"
 echo "   扩展消息区间: 420(LED_CONTROL) ~ 476(PREDICTION_RESULT)"
 echo "   含 3 条可变长度消息: MESH_NEIGHBOR_TABLE(454), TERRAIN_TYPE_MAP(462), TERRAIN_UPDATE(463), FLIGHT_RESTRICTION(464)"
-check "扩展消息编解码已在离线自检中验证" "[ '$FAIL' = '0' ] || true"
+# 原写法是 "[ '$FAIL' = '0' ] || true"：check 用 eval 执行这个串，尾巴上的 `|| true`
+# 让断言**恒真**——无论前面有没有失败项都会打 ✅，而且它断言的还是"$FAIL"（全局累计值）
+# 而不是被测对象本身。现在断言步骤 1 自检的真实结果（420-476 扩展消息的帧层往返就在其中）。
+check "扩展消息编解码已在离线自检中验证（步骤 1 自检通过）" "[ '$SELF_TEST_OK' = 'true' ]"
 
 # ─────────────────── 9. SITL 特有验证（如 SITL 就绪） ───────────────────
 if [ "$sitl_ready" = true ] && kill -0 "$SITL_PID" 2>/dev/null; then
@@ -292,10 +297,13 @@ fi
 # ─────────────────── 结果汇总 ───────────────────
 step "验证结果汇总"
 echo "  离线自检:          已执行（MAVLink 编解码 + v1/v2 兼容性 + 扩展消息）"
-echo "  cloud-backend:     $([ '$cloud_running' = 'true' ] && echo '已连接' || echo '未连接')"
-echo "  PX4 SITL:          $([ '$sitl_ready' = 'true' ] && echo '已启动' || echo '未启动/跳过')"
+# 同类"恒真/恒假"缺陷（shellcheck SC2050）：下面三行把变量写进了单引号，
+# [ '$cloud_running' = 'true' ] 比较的是字面量 "$cloud_running"，永远为假 →
+# 汇总里无论实际状态如何都固定打印"未连接/未启动/跳过"，把真实状态报告成相反值。
+echo "  cloud-backend:     $([ "$cloud_running" = "true" ] && echo '已连接' || echo '未连接')"
+echo "  PX4 SITL:          $([ "$sitl_ready" = "true" ] && echo '已启动' || echo '未启动/跳过')"
 echo "  端到端往返:        已执行（Python → cloud-backend UDP 14550）"
-echo "  REST API 验证:     $([ '$cloud_running' = 'true' ] && echo '已执行' || echo '跳过')"
+echo "  REST API 验证:     $([ "$cloud_running" = "true" ] && echo '已执行' || echo '跳过')"
 
 echo ""
 if [ "$FAIL" = '0' ]; then
