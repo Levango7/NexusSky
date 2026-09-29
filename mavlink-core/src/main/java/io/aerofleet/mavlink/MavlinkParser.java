@@ -69,7 +69,11 @@ public final class MavlinkParser {
                 msgId = buffer.get(pos + 5) & 0xFF;
             }
 
-            int sigLen = ((incompat & 0x01) != 0) ? 13 : 0;
+            // 签名块长度必须与实际读取范围一致：本仓 v2 签名布局为
+            // LINK_ID(1) + TIMESTAMP(6) + SIGNATURE(8) = 15 字节（MavlinkFrame.SIGNATURE_DATA_LENGTH）。
+            // 此前这里硬编码 13，导致 totalLen 少算 2 字节：签名帧之后的下一帧错位 2 字节，
+            // 且签名帧位于缓冲区末尾时边界校验按 13 通过、实际却读到 15（越界风险）。
+            int sigLen = ((incompat & 0x01) != 0) ? MavlinkFrame.SIGNATURE_DATA_LENGTH : 0;
             int totalLen = headerLen + payloadLen + 2 + sigLen;
             if (buffer.remaining() < totalLen) {
                 return null;
