@@ -13,7 +13,7 @@ import java.util.Map;
  * 应急编排 WebSocket 推送（M9 应急任务编排，FR-30）。
  * <p>
  * 由 {@link EmergencyOrchService} 在计划状态变更时主动调用，组装 JSON 帧并
- * 复用 {@link TelemetryWebSocketHandler#broadcast}（既有不变）。
+ * {@link TelemetryWebSocketHandler#broadcastPublicInfra}（应急协同态，暂无租户归属模型）adcast}（既有不变）。
  * <p>
  * 推送帧类型：
  * <pre>
@@ -85,7 +85,8 @@ public class EmergencyOrchPusher {
             return;
         }
         try {
-            handler.broadcast(mapper.writeValueAsString(frame), mapper);
+            // 应急预案推进帧（emergency plan 尚无 tenant 列，归属模型待建）：帧内无设备/任务归属信息，按公共基础设施通道投递
+            handler.broadcastPublicInfra(mapper.writeValueAsString(frame));
         } catch (Exception e) {
             log.warn("emergency push failed: type={} planId={}: {}",
                     frame.get("type"), frame.get("planId"), e.getMessage());

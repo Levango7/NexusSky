@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -51,9 +52,9 @@ public class TelemetryPusher {
 
     @Scheduled(fixedDelay = 1000)
     public void pushOnce() {
-        // Collect all online drone entries into a single batch frame.
+        // 按设备归属租户分组：每租户一批帧，避免一个租户的 GCS 收到他机队遥测。
         // Flight log persistence happens regardless of WS viewer count.
-        List<Map<String, Object>> items = new ArrayList<>();
+        Map<Integer, List<Map<String, Object>>> itemsByTenant = new LinkedHashMap<>();
         for (DroneSnapshot s : registry.all()) {
             if (!s.online) {
                 continue;
@@ -62,21 +63,25 @@ public class TelemetryPusher {
             // log must not depend on somebody having the GCS page open.
             flightLog.telemetry(s);
             if (handler.connectionCount() > 0) {
-                items.add(frameMap("telemetry", s.sysid, DroneViews.telemetry(s)));
-                items.add(frameMap("status", s.sysid, DroneViews.status(s)));
+                List<Map<String, Object>> group = itemsByTenant.computeIfAbsent(
+                        registry.tenantOf(s.sysid), k -> new ArrayList<>());
+                group.add(frameMap("telemetry", s.sysid, DroneViews.telemetry(s)));
+                group.add(frameMap("status", s.sysid, DroneViews.status(s)));
             }
         }
 
         // Skip serialization entirely when no WS viewers or no online drones
-        if (items.isEmpty()) {
+        if (itemsByTenant.isEmpty()) {
             return;
         }
 
         try {
-            Map<String, Object> batch = new HashMap<>();
-            batch.put("type", "batch");
-            batch.put("items", items);
-            handler.broadcast(mapper.writeValueAsString(batch), mapper);
+            for (Map.Entry<Integer, List<Map<String, Object>>> group : itemsByTenant.entrySet()) {
+                Map<String, Object> batch = new HashMap<>();
+                batch.put("type", "batch");
+                batch.put("items", group.getValue());
+                handler.broadcastToTenant(group.getKey(), mapper.writeValueAsString(batch));
+            }
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             log.warn("Failed to serialize batch telemetry frame: {}", e.getMessage());
         }
@@ -88,7 +93,8 @@ public class TelemetryPusher {
             return;
         }
         try {
-            handler.broadcast(frame("alert", sysid, DroneViews.alert(entry)), mapper);
+            handler.broadcastToTenant(registry.tenantOf(sysid),
+                    frame("alert", sysid, DroneViews.alert(entry)));
         } catch (RuntimeException e) {
             log.warn("Failed to serialize alert for sysid={}: {}", sysid, e.getMessage());
         }

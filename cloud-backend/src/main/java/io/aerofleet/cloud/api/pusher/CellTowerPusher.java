@@ -19,7 +19,7 @@ import java.util.Map;
  * 基站拓扑变化 WebSocket 推送（M6 移动基站载荷抽象，FR-NFER-OBS-02）。
  * <p>
  * 2Hz @Scheduled 检测拓扑变化，1 秒 debounce 抑制事件风暴，
- * 复用 {@link TelemetryWebSocketHandler#broadcast}（既有不变）。
+ * {@link TelemetryWebSocketHandler#tryBroadcastByDeviceOwner} 按设备归属定向投递adcast}（既有不变）。
  * <p>
  * 推送格式：
  * <pre>
@@ -109,7 +109,10 @@ public class CellTowerPusher {
             snapshot.put("terminalCount", topologyService.registeredTerminalCount());
             snapshot.put("towers", towers);
             frame.put("snapshot", snapshot);
-            handler.broadcast(mapper.writeValueAsString(frame), mapper);
+            // 设备派生态势：按条目归属定向投递，租户只收自己机队的条目
+            if (!handler.tryBroadcastByDeviceOwner(frame, mapper)) {
+                handler.broadcastPublicInfra(mapper.writeValueAsString(frame));
+            }
         } catch (Exception e) {
             log.warn("celltower topology push failed: {}", e.getMessage());
         }

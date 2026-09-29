@@ -17,7 +17,7 @@ import java.util.Map;
 /**
  * 避障状态 WebSocket 推送（M3 感知成像增强，FR-30/DFX 4.4）。
  * <p>
- * 1Hz @Scheduled 推送各机避障状态，复用 {@link TelemetryWebSocketHandler#broadcast}（既有不变）。
+ * 1Hz @Scheduled 推送各机避障状态，{@link TelemetryWebSocketHandler#tryBroadcastByDeviceOwner} 按设备归属定向投递adcast}（既有不变）。
  * 推送格式：{"type":"obstacle","drones":[{"sysid":1,"threat":"HIGH",...},...]}
  */
 @Component
@@ -59,7 +59,10 @@ public class ObstaclePusher {
             Map<String, Object> frame = new HashMap<>();
             frame.put("type", "obstacle");
             frame.put("drones", drones);
-            handler.broadcast(mapper.writeValueAsString(frame), mapper);
+            // 设备派生态势：按条目归属定向投递，租户只收自己机队的条目
+            if (!handler.tryBroadcastByDeviceOwner(frame, mapper)) {
+                handler.broadcastPublicInfra(mapper.writeValueAsString(frame));
+            }
         } catch (Exception e) {
             log.warn("obstacle push failed: {}", e.getMessage());
         }

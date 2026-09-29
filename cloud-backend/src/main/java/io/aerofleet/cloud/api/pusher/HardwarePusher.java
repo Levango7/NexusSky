@@ -18,7 +18,7 @@ import java.util.Map;
  * 硬件状态 WebSocket 推送（M4 硬件抽象，FR-30/DFX 4.4）。
  * <p>
  * 1Hz @Scheduled 推送各机雷达扫描状态 + 动力遥测，
- * 复用 {@link TelemetryWebSocketHandler#broadcast}（既有不变）。
+ * {@link TelemetryWebSocketHandler#tryBroadcastByDeviceOwner} 按设备归属定向投递adcast}（既有不变）。
  * <p>
  * 推送格式：
  * <pre>
@@ -85,7 +85,10 @@ public class HardwarePusher {
             frame.put("type", "hardware");
             frame.put("radar", radarList);
             frame.put("rotor", rotorList);
-            handler.broadcast(mapper.writeValueAsString(frame), mapper);
+            // 设备派生态势：按条目归属定向投递，租户只收自己机队的条目
+            if (!handler.tryBroadcastByDeviceOwner(frame, mapper)) {
+                handler.broadcastPublicInfra(mapper.writeValueAsString(frame));
+            }
         } catch (Exception e) {
             log.warn("hardware push failed: {}", e.getMessage());
         }

@@ -13,7 +13,7 @@ import java.util.Map;
  * 灾害通信 WebSocket 推送（P2 灾害应急通讯组网扩展）。
  * <p>
  * 由 {@link io.aerofleet.cloud.api.service.DisasterCommService} 在状态变更时主动调用，
- * 组装 JSON 帧并复用 {@link TelemetryWebSocketHandler#broadcast}（既有不变）。
+ * 组装 JSON 帧并{@link TelemetryWebSocketHandler#broadcastPublicInfra}（无租户归属的基础设施态势）adcast}（既有不变）。
  * <p>
  * 推送帧类型：
  * <pre>
@@ -70,7 +70,8 @@ public class DisasterCommPusher {
             return;
         }
         try {
-            handler.broadcast(mapper.writeValueAsString(frame), mapper);
+            // 灾害区聚合态势（zone/cluster/QoS，无租户归属模型）：帧内无设备/任务归属信息，按公共基础设施通道投递
+            handler.broadcastPublicInfra(mapper.writeValueAsString(frame));
         } catch (Exception e) {
             log.warn("disaster push failed: type={}: {}", frame.get("type"), e.getMessage());
         }

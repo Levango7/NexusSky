@@ -2,6 +2,7 @@ package io.aerofleet.cloud.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.api.ws.TelemetryWebSocketHandler;
+import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.security.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -24,9 +25,10 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final DeviceRegistry deviceRegistry;
     private final ObjectMapper objectMapper;
 
-    @Value("${aerofleet.security.dev-mode:true}")
+    @Value("${aerofleet.security.dev-mode:false}")
     private boolean devMode;
 
     @Value("${aerofleet.security.allowed-origins:http://localhost:5173}")
@@ -38,14 +40,16 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Value("${aerofleet.ws.max-connections-per-tenant:20}")
     private int maxConnectionsPerTenant;
 
-    public WebSocketConfig(JwtTokenProvider jwtTokenProvider, ObjectMapper objectMapper) {
+    public WebSocketConfig(JwtTokenProvider jwtTokenProvider, DeviceRegistry deviceRegistry,
+                           ObjectMapper objectMapper) {
         this.jwtTokenProvider = jwtTokenProvider;
+        this.deviceRegistry = deviceRegistry;
         this.objectMapper = objectMapper;
     }
 
     @Bean
     public TelemetryWebSocketHandler telemetryWebSocketHandler() {
-        return new TelemetryWebSocketHandler(jwtTokenProvider, devMode,
+        return new TelemetryWebSocketHandler(jwtTokenProvider, deviceRegistry, devMode,
                 maxConnectionsPerIp, maxConnectionsPerTenant, objectMapper);
     }
 

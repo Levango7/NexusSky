@@ -16,7 +16,7 @@ import java.util.Map;
  * 空地协同 WebSocket 推送。
  * <p>
  * 由 {@link AirGroundCoordinationService} 在空地协同态势变更时主动调用，
- * 组装 JSON 帧并复用 {@link TelemetryWebSocketHandler#broadcast}。
+ * 组装 JSON 帧并{@link TelemetryWebSocketHandler#broadcastPublicInfra}（跨机构协同一张图，暂无租户归属）adcast}。
  * <p>
  * 推送帧类型：
  * <pre>
@@ -92,7 +92,8 @@ public class AirGroundCoordinationPusher {
             return;
         }
         try {
-            handler.broadcast(mapper.writeValueAsString(frame), mapper);
+            // 空地协同一张图（含地面监控设备，跨机构协同态，尚无租户归属）：帧内无设备/任务归属信息，按公共基础设施通道投递
+            handler.broadcastPublicInfra(mapper.writeValueAsString(frame));
         } catch (Exception e) {
             log.warn("air-ground push failed: type={} coordinationId={}: {}",
                     frame.get("type"), frame.get("coordinationId"), e.getMessage());

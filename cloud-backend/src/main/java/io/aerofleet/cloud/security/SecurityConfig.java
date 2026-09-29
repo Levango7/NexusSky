@@ -70,6 +70,8 @@ public class SecurityConfig {
                             // 仅登录/刷新匿名开放；/api/v1/auth/** 其余端点（API Key 铸造/撤销/列表）需认证
                             .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
                             .requestMatchers("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
+                            // 浏览器 WS 握手带不了 Authorization 头：链上放行，
+                            // 由 TelemetryWebSocketHandler 在握手后校验 query token 并拒绝匿名连接
                             .requestMatchers("/ws/**").permitAll()
                             .anyRequest().authenticated())
                     .oauth2ResourceServer(oauth2 ->

@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.api.ws;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.security.JwtTokenProvider;
 import org.slf4j.Logger;
@@ -14,13 +15,17 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Raw WebSocket endpoint /ws/telemetry (no SockJS). Sessions are kept in an
- * in-memory set; the 1Hz pusher broadcasts to all of them.
+ * in-memory set; frames are delivered per tenant — see {@link #broadcastToTenant}
+ * — so one tenant's GCS never receives another tenant's telemetry.
  * <p>
  * 认证：非开发模式下，handshake 时从 query parameter {@code token} 或
  * {@code Authorization} header 提取 JWT 并验证，无效则拒绝连接。
@@ -38,8 +43,25 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
     /** Session attribute key for stored tenant ID. */
     private static final String ATTR_TENANT_ID = "tenantId";
 
+    /** 分桶哨兵：条目 sysid 不属于机队设备（基站/卫星/地面中继等基础设施）。 */
+    private static final Object PUBLIC_INFRA = new Object() {
+        @Override
+        public String toString() {
+            return "PUBLIC_INFRA";
+        }
+    };
+
+    /** 分桶哨兵：机队里的设备但尚未指派租户——只发给全局会话，不进任何租户界面。 */
+    private static final Object UNASSIGNED = new Object() {
+        @Override
+        public String toString() {
+            return "UNASSIGNED";
+        }
+    };
+
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final JwtTokenProvider jwtTokenProvider;
+    private final DeviceRegistry registry;
     private final boolean devMode;
     private final int maxConnectionsPerIp;
     private final int maxConnectionsPerTenant;
@@ -67,10 +89,12 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
             Map.entry(io.aerofleet.mavlink.messages.SurveillanceStatusMsg.ID, "surveillance-status")
     );
 
-    public TelemetryWebSocketHandler(JwtTokenProvider jwtTokenProvider, boolean devMode,
+    public TelemetryWebSocketHandler(JwtTokenProvider jwtTokenProvider, DeviceRegistry registry,
+                                     boolean devMode,
                                      int maxConnectionsPerIp, int maxConnectionsPerTenant,
                                      ObjectMapper objectMapper) {
         this.jwtTokenProvider = jwtTokenProvider;
+        this.registry = registry;
         this.devMode = devMode;
         this.maxConnectionsPerIp = maxConnectionsPerIp;
         this.maxConnectionsPerTenant = maxConnectionsPerTenant;
@@ -170,14 +194,127 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * Push one JSON text frame to every live connection.
+     * 投递给所有连接：仅限<b>无租户归属的基础设施态势</b>（基站/卫星链路/地形/灾害区聚合等）。
      * <p>
-     * Uses {@link WebSocketSession#sendMessage} for synchronous delivery
-     * (Spring 6 removed sendMessageAsync from the WebSocketSession interface).
-     * The {@code mapper} parameter is retained for API compatibility with
-     * existing callers but is not used internally (the json is already serialized).
+     * 任何由设备或任务派生的数据都必须走 {@link #tryBroadcastByDeviceOwner} 或
+     * {@link #broadcastToTenant}；调用本方法即是在声明"这帧不属于任何租户"，请写明依据。
      */
-    public void broadcast(String json, ObjectMapper mapper) {
+    public void broadcastPublicInfra(String json) {
+        dispatch(json, null, true);
+    }
+
+    /**
+     * 按租户投递一帧。
+     * <p>
+     * 带租户上下文的连接只收本租户的帧；无租户上下文的全局会话（全局管理员与 dev-mode）收全部。
+     * {@code ownerTenantId} 为 null 表示设备存在但尚未归属，此时只有全局会话可见——
+     * 未归属设备不得落到任何租户连接，口径与 {@code DeviceRegistry} 的可见性判定一致。
+     *
+     * @param ownerTenantId 帧所属租户 ID，null 表示未归属
+     */
+    public void broadcastToTenant(Integer ownerTenantId, String json) {
+        dispatch(json, ownerTenantId, false);
+    }
+
+    /**
+     * 定向投递机制（按条目里的 {@code sysid} 归属分区）。等价于
+     * {@code tryBroadcastByOwnerKey(frame, "sysid", mapper)}。
+     */
+    public boolean tryBroadcastByDeviceOwner(Map<String, Object> frame, ObjectMapper mapper) {
+        return tryBroadcastByOwnerKey(frame, "sysid", mapper);
+    }
+
+    /**
+     * 定向投递机制：把一帧按其中条目的设备归属拆开，逐租户各发一份"只含自己条目"的帧。
+     * <p>
+     * 帧里凡是「元素带 {@code ownerKey} 的列表」都会被分区（例如 mesh 的 nodes/events、
+     * hardware 的 radar/rotor、obstacle 的 drones、formation 的 formations 按 leader 设备）；
+     * 其余字段（type、时间戳等）原样复制进每一帧。分区依据：
+     * <ul>
+     *   <li>已知设备且已归属 → 只发给该租户；</li>
+     *   <li>已知设备但未归属 → 只发给全局会话（不进任何租户界面）；</li>
+     *   <li>ownerKey 缺失或不是已知设备（基站/卫星等基础设施）→ 按公共基础设施发给所有连接。</li>
+     * </ul>
+     * 帧内找不到任何可分区的条目时返回 false——调用方必须显式决定归属（而不是静默全员广播）。
+     *
+     * @param frame    待投递的帧（本方法不修改它）
+     * @param ownerKey 条目里承载设备 system id 的字段名
+     * @param mapper   序列化用的 ObjectMapper
+     * @return 完成定向投递返回 true；帧内无归属信息返回 false
+     */
+    public boolean tryBroadcastByOwnerKey(Map<String, Object> frame, String ownerKey,
+                                          ObjectMapper mapper) {
+        List<String> listKeys = new ArrayList<>();
+        for (Map.Entry<String, Object> entry : frame.entrySet()) {
+            if (entry.getValue() instanceof List<?> list && !list.isEmpty()
+                    && list.get(0) instanceof Map<?, ?> first && first.containsKey(ownerKey)) {
+                listKeys.add(entry.getKey());
+            }
+        }
+        if (listKeys.isEmpty()) {
+            return false;
+        }
+
+        // 桶：真实租户 ID / UNASSIGNED（机队里的设备但尚未归属）/ PUBLIC_INFRA（不是机队设备）
+        Map<Object, Map<String, List<Map<String, Object>>>> byOwner = new LinkedHashMap<>();
+        for (String key : listKeys) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> items = (List<Map<String, Object>>) frame.get(key);
+            for (Map<String, Object> item : items) {
+                Object bucket = ownerBucketFor(item, ownerKey);
+                Map<String, List<Map<String, Object>>> scopedLists = byOwner.computeIfAbsent(
+                        bucket, k -> {
+                            Map<String, List<Map<String, Object>>> fresh = new LinkedHashMap<>();
+                            listKeys.forEach(listKey -> fresh.put(listKey, new ArrayList<>()));
+                            return fresh;
+                        });
+                scopedLists.get(key).add(item);
+            }
+        }
+
+        for (Map.Entry<Object, Map<String, List<Map<String, Object>>>> group : byOwner.entrySet()) {
+            Map<String, Object> scopedFrame = new HashMap<>(frame);
+            scopedFrame.putAll(group.getValue());
+            String json;
+            try {
+                json = mapper.writeValueAsString(scopedFrame);
+            } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                log.warn("Failed to serialize scoped frame: {}", e.getMessage());
+                continue;
+            }
+            Object bucket = group.getKey();
+            if (PUBLIC_INFRA.equals(bucket)) {
+                broadcastPublicInfra(json);
+            } else if (UNASSIGNED.equals(bucket)) {
+                broadcastToTenant(null, json);
+            } else {
+                broadcastToTenant((Integer) bucket, json);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 一条目的归属桶：已归属设备→租户 ID；机队内未归属设备→{@link #UNASSIGNED}；
+     * 归属键缺失或该 sysid 不是机队设备（基站/卫星/地面中继）→{@link #PUBLIC_INFRA}。
+     */
+    private Object ownerBucketFor(Map<String, Object> item, String ownerKey) {
+        if (!(item.get(ownerKey) instanceof Number sysid)) {
+            return PUBLIC_INFRA;
+        }
+        int id = sysid.intValue();
+        if (!registry.isKnownDevice(id)) {
+            return PUBLIC_INFRA;
+        }
+        Integer tenantId = registry.tenantOf(id);
+        return tenantId != null ? tenantId : UNASSIGNED;
+    }
+
+    /**
+     * @param toEverySession true=无归属的基础设施帧，发给所有连接；
+     *                       false=按 {@code ownerTenantId} 做租户可见性判定
+     */
+    private void dispatch(String json, Integer ownerTenantId, boolean toEverySession) {
         if (sessions.isEmpty()) {
             return;
         }
@@ -187,6 +324,10 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
                 sessions.remove(s.getId());
                 continue;
             }
+            Integer sessionTenant = (Integer) s.getAttributes().get(ATTR_TENANT_ID);
+            if (!toEverySession && !isVisible(ownerTenantId, sessionTenant)) {
+                continue;
+            }
             try {
                 s.sendMessage(msg);
             } catch (Exception e) {
@@ -194,6 +335,16 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
                 sessions.remove(s.getId());
             }
         }
+    }
+
+    /**
+     * 帧可见性判定：全局会话（无租户上下文）看全部；租户会话只看本租户。
+     */
+    private static boolean isVisible(Integer ownerTenantId, Integer sessionTenantId) {
+        if (sessionTenantId == null) {
+            return true;
+        }
+        return ownerTenantId != null && ownerTenantId.equals(sessionTenantId);
     }
 
     public int connectionCount() {
@@ -224,7 +375,8 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
             frame.put("sysid", event.getSysid());
             frame.put("data", event.getMessage());
             frame.put("timestamp", event.getMsgTimestamp());
-            broadcast(objectMapper.writeValueAsString(frame), objectMapper);
+            broadcastToTenant(registry.tenantOf(event.getSysid()),
+                    objectMapper.writeValueAsString(frame));
         } catch (Exception e) {
             log.warn("WS forward failed: sysid={} type={}: {}", event.getSysid(), type, e.getMessage());
         }
@@ -290,9 +442,9 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 从 WebSocket session 的 JWT token 中提取租户 ID。
+     * 从 WebSocket session 的 JWT token 中解析三态租户域（与 HTTP 入口同一规则）。
      * <p>
-     * 开发模式下无 token，返回 null（不进行租户限制）。
+     * 开发模式下无 token，返回 null（全局域，不做租户限制）。
      */
     private Integer extractTenantId(WebSocketSession session) {
         if (devMode) {
@@ -302,7 +454,7 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
         if (token == null) {
             return null;
         }
-        return jwtTokenProvider.getTenantId(token);
+        return jwtTokenProvider.resolveTenantScope(token);
     }
 
     private void closeQuietly(WebSocketSession session, CloseStatus status) {

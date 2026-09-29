@@ -18,7 +18,7 @@ import java.util.Map;
 /**
  * 编队状态 WebSocket 推送（FR-13，DFX 4.1 ≤1Hz，DFX 4.5 既有遥测推送不变）。
  *
- * 1Hz 推送编队状态 + 各机灯光状态，复用既有 {@link TelemetryWebSocketHandler#broadcast}，
+ * 1Hz 推送编队状态 + 各机灯光状态，{@link TelemetryWebSocketHandler#tryBroadcastByOwnerKey} 按长机归属定向投递er#broadcast}，
  * 编队帧 {@code {"type":"formation",...}} 与既有遥测帧 {@code {"type":"telemetry",...}} 共存，
  * 前端按 type 字段分发。
  *
@@ -61,8 +61,11 @@ public class FormationPusher {
             return;
         }
         try {
-            String json = mapper.writeValueAsString(buildFrame(formations));
-            wsHandler.broadcast(json, mapper);
+            Map<String, Object> frame = buildFrame(formations);
+            // 编队按其 leader 设备的归属分区投递：一个租户只收自己机队担任长机的编队帧
+            if (!wsHandler.tryBroadcastByOwnerKey(frame, "leader", mapper)) {
+                wsHandler.broadcastPublicInfra(mapper.writeValueAsString(frame));
+            }
         } catch (Exception e) {
             log.warn("formation push failed: {}", e.getMessage());
         }

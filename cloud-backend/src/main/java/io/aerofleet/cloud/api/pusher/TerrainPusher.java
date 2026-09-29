@@ -16,7 +16,7 @@ import java.util.Map;
  * 地形变更 WebSocket 推送（M8 复杂地形适配，FR-32）。
  * <p>
  * 2Hz @Scheduled 检测地形版本变化，1 秒 debounce 抑制事件风暴，
- * 复用 {@link TelemetryWebSocketHandler#broadcast}（既有不变）。
+ * {@link TelemetryWebSocketHandler#broadcastPublicInfra}（地图级数据，无租户归属）adcast}（既有不变）。
  * <p>
  * 推送格式：
  * <pre>
@@ -94,7 +94,8 @@ public class TerrainPusher {
                 snap.put("timestamp", snapshot.timestamp());
                 frame.put("snapshot", snap);
             }
-            handler.broadcast(mapper.writeValueAsString(frame), mapper);
+            // 地形栅格更新（地图级数据，无租户归属）：帧内无设备/任务归属信息，按公共基础设施通道投递
+            handler.broadcastPublicInfra(mapper.writeValueAsString(frame));
             lastVersion = currentVersion;
             lastPushMs = now;
         } catch (Exception e) {

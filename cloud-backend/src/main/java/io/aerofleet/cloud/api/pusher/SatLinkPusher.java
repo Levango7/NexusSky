@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * 卫星链路 WebSocket 推送（M7 星-空-地多层级中继）。
  * <p>
- * 2Hz @Scheduled 检测链路状态变化，复用 {@link TelemetryWebSocketHandler#broadcast}。
+ * 2Hz @Scheduled 检测链路状态变化，{@link TelemetryWebSocketHandler#broadcastPublicInfra}（satId 非机队设备）adcast}。
  * 连接数为 0 时跳过（仿 MeshTopologyPusher 范式）。
  * <p>
  * 推送格式：
@@ -91,7 +91,8 @@ public class SatLinkPusher {
             // 当前策略
             frame.put("strategy", monitorService.getCurrentStrategy());
 
-            handler.broadcast(mapper.writeValueAsString(frame), mapper);
+            // 卫星链路与选层决策（satId 非机队设备，无租户归属）：帧内无设备/任务归属信息，按公共基础设施通道投递
+            handler.broadcastPublicInfra(mapper.writeValueAsString(frame));
         } catch (Exception e) {
             log.warn("sat-link push failed: {}", e.getMessage());
         }
