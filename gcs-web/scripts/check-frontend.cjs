@@ -5,21 +5,16 @@
 // - Verifies named exports of local modules exist
 const fs = require('node:fs')
 const path = require('node:path')
-// pnpm layout: resolve @babel/parser from vite's dependency tree directly
-function findBabelParser(root) {
-  const dir = path.join(root, 'node_modules', '.pnpm')
-  for (const e of fs.readdirSync(dir)) {
-    if (e.startsWith('@babel+parser@')) {
-      return path.join(dir, e, 'node_modules', '@babel', 'parser')
-    }
-  }
-  return null
+const ROOT = path.resolve(__dirname, '..')
+// @babel/parser 是 vite 的传递依赖，交给 Node 解析（npm 提升布局亦可）
+let parserPath
+try {
+  parserPath = require.resolve('@babel/parser', { paths: [ROOT] })
+} catch {
+  throw new Error('@babel/parser not found; run npm ci in gcs-web first')
 }
-const parserPath = findBabelParser(path.resolve(__dirname, '..'))
-if (!parserPath) throw new Error('@babel/parser not found under node_modules/.pnpm')
 const parser = require(parserPath)
 
-const ROOT = path.resolve(__dirname, '..')
 const SRC = path.join(ROOT, 'src')
 let failures = 0
 
@@ -56,6 +51,13 @@ function analyze(file) {
         if (n.declaration.type === 'VariableDeclaration') {
           for (const d of n.declaration.declarations) {
             if (d.id.type === 'Identifier') exports.push(d.id.name)
+            // export const { a, b } = obj 形态（api.js 的命名导出用）
+            else if (d.id.type === 'ObjectPattern') {
+              for (const p of d.id.properties) {
+                const v = p.value
+                exports.push(v.type === 'AssignmentPattern' ? v.left.name : v.name)
+              }
+            }
           }
         } else if (n.declaration.id) {
           exports.push(n.declaration.id.name)
