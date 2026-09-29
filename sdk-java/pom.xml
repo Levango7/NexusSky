@@ -44,7 +44,8 @@
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
-        <jackson.version>2.16.1</jackson.version>
+        <!-- 2.16.1 含 CVE-2026-54512/54513/68497，2.21.7 为已修复版本 -->
+        <jackson.version>2.21.7</jackson.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
