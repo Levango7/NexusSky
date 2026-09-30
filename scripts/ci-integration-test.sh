@@ -34,7 +34,9 @@
 #     2) 匿名访问受保护端点 401（prod 的 dev-mode=false 生效）；
 #     3) DB 引导管理员账密能换到 token（证明 PG 上的用户表/JPA 查询通路可用）；
 #     4) 带 token 访问 200；
-#     5) 审计哈希链校验通过（V21 建表 + 审计落库 + 链生成/校验全通路）。
+#     5) 审计哈希链校验通过（V21 建表 + 审计落库 + 链生成/校验全通路）；
+#     6) flight_log 在 PG 上可查（Pass C 用 flag 打开 persist-to-db，覆盖未加引号的
+#        timestamp 作 WHERE 谓词/ORDER BY 键这一 PG 方言风险——H2 两版语法都认）。
 #   为什么必须 --logging.level.org.flywaydb=INFO：prod 的 root=WARN
 #   （application-prod.properties:52），Flyway 的 INFO 迁移日志默认被压掉，
 #   没有这行断言 2) 会永远看不到证据。
@@ -299,6 +301,7 @@ PID_C=$(AEROFLEET_JWT_SECRET="$C_JWT_SECRET" \
     start_backend "$LOG_C" "$C_PORT" $REDIS_OVERRIDE \
     --spring.profiles.active=prod \
     --logging.level.org.flywaydb=INFO \
+    --aerofleet.flightlog.persist-to-db=true \
     --aerofleet.security.bootstrap-admin-username="$CI_USER" \
     --aerofleet.security.bootstrap-admin-password="$CI_PASSWORD")
 if ! wait_ready "$PID_C" "$C_PORT" "$LOG_C" "Pass C cloud-backend"; then
@@ -363,6 +366,26 @@ if [ -n "$TOKEN_C" ]; then
     assert_true "链校验覆盖 ≥1 条记录（实际 checked=${VERIFY_CHECKED:-?}）" "$VERIFY_CHECKED"
 else
     echo "   ❌ 无 token，跳过审计链校验断言（prod 登录已判红）"
+    FAILED=1
+fi
+
+echo "   --- Pass C 断言 6：flight_log 在 PostgreSQL 上可查（DB 读通路 + PG 方言）---"
+# prod 默认 aerofleet.flightlog.persist-to-db=false（遥测只落 JSONL），这里用命令行 flag
+# 临时打开 DB 读通路。Pass C 没有真机遥测，flight_log 是空表——这条断言要证明的不是
+# "有数据"，而是三件在 H2 上永远看不到的事：V18 建的表在 PG 里存在、Hibernate 生成的
+# "where type=? and sysid=? and timestamp between ? and ? order by timestamp asc, id asc"
+# 被 PostgreSQL 接受（未加引号的 timestamp 作谓词/排序键，H2 两种模式都认，只有 PG 会红）、
+# 保留清理作用的那张表在 prod schema 下与实体一致（validate 已隐含，这里补可查证据）。
+if [ -n "$TOKEN_C" ]; then
+    FLIGHTLOG_RAW=$(curl -sS -w $'\n%{http_code}' -H "Authorization: Bearer ${TOKEN_C}" \
+        "http://localhost:${C_PORT}/api/v1/flightlog?type=telemetry&limit=5")
+    FLIGHTLOG_STATUS=${FLIGHTLOG_RAW##*$'\n'}
+    FLIGHTLOG_BODY=${FLIGHTLOG_RAW%$'\n'*}
+    assert_status "GET /api/v1/flightlog（prod + PostgreSQL，DB 读通路）" "200" "$FLIGHTLOG_STATUS"
+    FLIGHTLOG_IS_ARRAY=$(printf '%s' "$FLIGHTLOG_BODY" | sed -n 's/^\[.*/array/p')
+    assert_true "flight_log 查询返回 JSON 数组（实际 ${FLIGHTLOG_BODY:0:60}）" "$FLIGHTLOG_IS_ARRAY"
+else
+    echo "   ❌ 无 token，跳过 flight_log PG 读通路断言"
     FAILED=1
 fi
 
