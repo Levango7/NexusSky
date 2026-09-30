@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.io.IOException;
 import java.util.Arrays;
 
 /**
@@ -32,13 +33,18 @@ import java.util.Arrays;
  * <ul>
  *   <li>{@code aerofleet.security.dev-mode=true}（开发模式）</li>
  *   <li>{@code aerofleet.security.rbac-enabled=false}</li>
- *   <li>目标方法与所在类均未标注 {@link RequireRole}</li>
+ *   <li>生效声明是 {@link PermitAll}（显式白名单）</li>
  *   <li>非控制器方法（HandlerMethod 之外的静态资源等）</li>
  * </ul>
  * <p>
- * 校验失败返回 403 Forbidden，响应体 {@code {"error":"forbidden: requires role XXX"}}。
+ * <b>默认拒绝</b>：方法与其所在类既没有 {@link RequireRole} 也没有 {@link PermitAll} 时返回 403。
+ * 此前这里是"两者都缺即放行"，等于每个新端点默认无鉴权，且漏写注解在运行时毫无信号。
+ * <p>
+ * 校验失败返回 403 Forbidden，响应体 {@code {"error":"forbidden: requires role XXX"}}；
+ * 缺声明时响应体 {@code {"error":"forbidden: endpoint has no role declaration"}}。
  *
  * @see RequireRole
+ * @see PermitAll
  * @see Role
  */
 @Component
@@ -70,25 +76,34 @@ public class RoleInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        // 方法级优先，回退类级
-        RequireRole annotation = handlerMethod.getMethodAnnotation(RequireRole.class);
-        if (annotation == null) {
-            annotation = handlerMethod.getBeanType().getAnnotation(RequireRole.class);
+        // 生效声明解析：方法级覆盖类级，@RequireRole 与 @PermitAll 同规则；
+        // 同一元素上两者并存时按"收紧优先"取 @RequireRole。
+        RequireRole requiredRole = handlerMethod.getMethodAnnotation(RequireRole.class);
+        boolean methodDeclaredPublic = handlerMethod.getMethodAnnotation(PermitAll.class) != null;
+        if (requiredRole == null && !methodDeclaredPublic) {
+            requiredRole = handlerMethod.getBeanType().getAnnotation(RequireRole.class);
+            methodDeclaredPublic = handlerMethod.getBeanType().getAnnotation(PermitAll.class) != null;
         }
-        if (annotation == null) {
-            return true;
+        if (requiredRole == null) {
+            if (methodDeclaredPublic) {
+                return true;
+            }
+            // 默认拒绝：既无角色要求也无白名单声明，说明这个端点从未被纳入 RBAC 设计
+            log.warn("RBAC 拒绝: 端点缺少 @RequireRole/@PermitAll 声明, path={}, handler={}#{}",
+                    request.getRequestURI(), handlerMethod.getBeanType().getSimpleName(),
+                    handlerMethod.getMethod().getName());
+            writeForbidden(response, "forbidden: endpoint has no role declaration");
+            return false;
         }
 
-        Role required = annotation.value();
+        Role required = requiredRole.value();
 
         // 解析调用方角色：JWT role claim 优先，其次 API Key 记录的角色
         String roleClaim = resolveRole(request);
         if (roleClaim == null) {
             log.warn("RBAC 拒绝: 无 JWT role claim 且 API Key 未记录角色, path={}, requires={}",
                     request.getRequestURI(), required);
-            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write("{\"error\":\"forbidden: requires role " + required + "\"}");
+            writeForbidden(response, "forbidden: requires role " + required);
             return false;
         }
 
@@ -96,9 +111,7 @@ public class RoleInterceptor implements HandlerInterceptor {
         if (userRole == null || !hasPermission(userRole, required)) {
             log.warn("RBAC 拒绝: userRole={}, requires={}, path={}",
                     roleClaim, required, request.getRequestURI());
-            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write("{\"error\":\"forbidden: requires role " + required + "\"}");
+            writeForbidden(response, "forbidden: requires role " + required);
             return false;
         }
 
@@ -158,6 +171,13 @@ public class RoleInterceptor implements HandlerInterceptor {
      * @param requiredRole 方法要求的最小角色
      * @return 有权限返回 true
      */
+    /** 写 403 响应体（三个拒绝分支共用）。 */
+    private void writeForbidden(HttpServletResponse response, String message) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"error\":\"" + message + "\"}");
+    }
+
     private boolean hasPermission(Role userRole, Role requiredRole) {
         return userRole.ordinal() <= requiredRole.ordinal();
     }

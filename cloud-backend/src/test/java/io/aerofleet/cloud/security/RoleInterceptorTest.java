@@ -28,7 +28,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>
  * 此前 RBAC 在 src/test 里零覆盖：既没有角色断言，也没有拦截器用例。
  * 本测试用 standaloneSetup 手工装配拦截器（test profile 的 dev-mode 会整体短路，
- * 故不能靠 @SpringBootTest 覆盖），逐条验证开关、注解查找顺序与角色来源。
+ * 故不能靠 @SpringBootTest 覆盖），逐条验证开关、注解查找顺序、白名单与角色来源。
+ * <p>
+ * 2026-10-01 起拦截器改为默认拒绝，其中一条用例（"未标注注解的端点不受 RBAC 影响"）
+ * 断言方向被翻转——旧用例钉的正是那个"漏写注解即静默无鉴权"的缺陷本身。
  */
 @DisplayName("RoleInterceptor RBAC 拦截 (P0-2)")
 class RoleInterceptorTest {
@@ -63,6 +66,21 @@ class RoleInterceptorTest {
         public String admin() {
             return METHOD_OK;
         }
+
+        /** 显式白名单：已认证的任意角色可用，无需角色匹配。 */
+        @GetMapping("/public")
+        @PermitAll
+        public String permitAll() {
+            return METHOD_OK;
+        }
+
+        /** 同一元素上两种声明并存：按"收紧优先"，@RequireRole 应胜出。 */
+        @GetMapping("/both")
+        @PermitAll
+        @RequireRole(Role.ADMIN)
+        public String bothDeclarations() {
+            return METHOD_OK;
+        }
     }
 
     /** 类级 ADMIN，方法级可放宽。 */
@@ -81,6 +99,32 @@ class RoleInterceptorTest {
         public String loosened() {
             return METHOD_OK;
         }
+
+        /** 方法级 @PermitAll 覆盖类级 @RequireRole（登录类端点在 ADMIN 控制器里的形状）。 */
+        @GetMapping("/opened")
+        @PermitAll
+        public String opened() {
+            return METHOD_OK;
+        }
+    }
+
+    /** 整个控制器都在白名单里：类级 @PermitAll 覆盖所有未声明方法。 */
+    @RestController
+    @RequestMapping("/rbac/anonymous")
+    @PermitAll
+    static class PublicController {
+
+        @GetMapping("/anything")
+        public String anything() {
+            return METHOD_OK;
+        }
+
+        /** 类级白名单里的单个方法仍可收紧。 */
+        @GetMapping("/guarded")
+        @RequireRole(Role.OPERATOR)
+        public String guarded() {
+            return METHOD_OK;
+        }
     }
 
     private MockMvc mockMvc(boolean devMode, boolean rbacEnabled) {
@@ -97,17 +141,72 @@ class RoleInterceptorTest {
             return new Jwt(token, Instant.now(), Instant.now().plusSeconds(300), Map.of("typ", "JWT"), claims);
         });
         RoleInterceptor interceptor = new RoleInterceptor(jwtDecoder, devMode, rbacEnabled);
-        return MockMvcBuilders.standaloneSetup(new MethodAnnotatedController(), new ClassAnnotatedController())
+        return MockMvcBuilders.standaloneSetup(new MethodAnnotatedController(), new ClassAnnotatedController(),
+                        new PublicController())
                 .addInterceptors(interceptor)
                 .build();
     }
 
     @Test
-    @DisplayName("未标注注解的端点不受 RBAC 影响")
-    void unannotatedEndpointPasses() throws Exception {
+    @DisplayName("未标注声明的端点默认拒绝（fail-closed）")
+    void unannotatedEndpointIsRejected() throws Exception {
+        // 这条断言在 2026-10-01 翻了方向：此前"无注解=放行"，等于漏写注解就静默无鉴权。
         mockMvc(false, true).perform(get("/rbac/open"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("forbidden: endpoint has no role declaration"));
+    }
+
+    @Test
+    @DisplayName("@PermitAll 端点无需角色即可访问")
+    void permitAllEndpointPassesWithoutRole() throws Exception {
+        MockMvc mvc = mockMvc(false, true);
+        mvc.perform(get("/rbac/public"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(METHOD_OK));
+        // 带低角色也照样放行：白名单只看"是否声明公开"，不看角色
+        mvc.perform(get("/rbac/public").header("Authorization", "Bearer tok-observer"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("类级 @PermitAll 覆盖整个控制器，方法级仍可单独收紧")
+    void classLevelPermitAllWithMethodTightening() throws Exception {
+        MockMvc mvc = mockMvc(false, true);
+        mvc.perform(get("/rbac/anonymous/anything"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/rbac/anonymous/guarded"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/rbac/anonymous/guarded").header("Authorization", "Bearer tok-operator"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("方法级 @PermitAll 覆盖类级 @RequireRole")
+    void methodLevelPermitAllOverridesClassRole() throws Exception {
+        mockMvc(false, true).perform(get("/rbac/class/opened"))
+                .andExpect(status().isOk());
+        // 同一控制器里未放宽的方法仍受类级 ADMIN 约束（证明覆盖是逐方法的）
+        mockMvc(false, true).perform(get("/rbac/class/inherited"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("同一元素两种声明并存时 @RequireRole 胜出（收紧优先）")
+    void requireRoleWinsOverPermitAllOnSameMethod() throws Exception {
+        mockMvc(false, true).perform(get("/rbac/both").header("Authorization", "Bearer tok-operator"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("forbidden: requires role ADMIN"));
+        mockMvc(false, true).perform(get("/rbac/both").header("Authorization", "Bearer tok-admin"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("fail-closed 只在 RBAC 开启时生效：rbac-enabled=false 与 dev-mode 仍整体放行")
+    void unannotatedStillPassesWhenRbacOffOrDevMode() throws Exception {
+        mockMvc(false, false).perform(get("/rbac/open"))
+                .andExpect(status().isOk());
+        mockMvc(true, true).perform(get("/rbac/open"))
+                .andExpect(status().isOk());
     }
 
     @Test
