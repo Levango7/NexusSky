@@ -73,6 +73,11 @@ services:
       - AEROFLEET_SECURITY_ALLOWED_ORIGINS=http://localhost:3000
       - AEROFLEET_JWT_SECRET=${AEROFLEET_JWT_SECRET:?AEROFLEET_JWT_SECRET is required (>=32 chars)}
       - AEROFLEET_USERS=${AEROFLEET_USERS:?AEROFLEET_USERS is required (username:password[:ROLE])}
+      # 设备/边缘摄取通道的共享 API Key（四条 OPERATOR 档写端点：edge/results、loRa/alarm、
+      # offline-alarm/batch-upload|flush、alarms/events）。与上面的必填项不同，这里刻意允许留空：
+      # 留空=不引导任何 key，摄取端点在 prod 下不可用（本来就要凭据，宁缺不滥发一把后门 key）。
+      # 要跑通设备上报就注入一个 >=16 位的值；轮换=改值后重启，库里只存 SHA-256 哈希。
+      - AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY=${AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY:-}
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/aerofleet_prod
       - SPRING_DATASOURCE_USERNAME=aerofleet
       - SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD is required}
