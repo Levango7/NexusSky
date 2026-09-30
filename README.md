@@ -545,7 +545,7 @@ ESP-NOW 用于近距离低延迟机间通讯（百元级），LoRa 用于远距�
 - `POST /scheduling/tasks` 集群调度 · `GET /v1/squad/roles` 角色状态
 - `GET /ai/decisions` AI 决策监控 · `POST /edge/results` 边缘计算结果提交
 - `GET /twin/state/{id}` 数字孪生 · `GET /twin/predict/{id}` 轨迹预测
-- `GET /v1/env-alerts` 环境告警查询 · `GET /audit/logs` 审计日志（需 ADMIN）
+- `GET /v1/env-alerts` 环境告警查询 · `GET /v1/audit/logs` 审计日志（需 ADMIN）
 - `GET /license/info` License 信息 · `POST /license/activate` 激活 License
 - `GET /surveillance/devices` 安防设备 · `POST /surveillance/rapid-deploy` 一键布控
 - `GET /tracking/{id}/track` 飞行追踪 · `GET /tracking/lost` 失联无人机列表

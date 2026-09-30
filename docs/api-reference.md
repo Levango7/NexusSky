@@ -1106,23 +1106,29 @@ curl -X POST -H "Authorization: Bearer <old-token>" \
 
 ## 审计日志
 
-### 基础路径 `/api/audit`
+### 基础路径 `/api/v1/audit`
 
-**Controller**: `audit/AuditController` | 审计日志查询端点
+**Controller**: `audit/AuditController` | 审计日志查询与哈希链校验端点
 
 | 方法 | 路径 | 说明 | 请求体 | 响应 |
 |------|------|------|--------|------|
-| GET | `/logs` | 查询审计日志（需 ADMIN） | - | 200 List<{timestamp,userId,action,target,ip}> |
+| GET | `/logs` | 查询审计日志（需 ADMIN） | - | 200 List<{timestamp,userId,action,target,detail,ip,prevHash,entryHash}> |
+| GET | `/verify` | 校验哈希链完整性（需 ADMIN） | - | 200 {ok,checked,brokenAtId,reason} |
 
 #### 端点详情
 
-**GET /api/audit/logs** （需 ADMIN 角色）
+**GET /api/v1/audit/logs** （需 ADMIN 角色）
 - 查询参数: `limit` (Integer, 可选) - 最大返回条数，默认全部
-- 响应: 200 - 审计日志列表，每条含 `{timestamp, userId, action, target, ip}`
+- 响应: 200 - 审计日志列表，每条含 `{timestamp, userId, action, target, detail, ip, prevHash, entryHash}`；
+  `entryHash` = SHA-256(prevHash + 时间戳毫秒 + 各字段)，`prevHash` 指向上一条的 `entryHash`（首条为 64 个 0）
+
+**GET /api/v1/audit/verify** （需 ADMIN 角色）
+- 响应: 200 - `{ok, checked, brokenAtId, reason}`；`ok=false` 时 `brokenAtId` 为首个断链记录 id
 
 **curl 示例**:
 ```bash
-curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/audit/logs?limit=100"
+curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/audit/logs?limit=100"
+curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/audit/verify"
 ```
 
 ---
@@ -2134,7 +2140,7 @@ es.onerror = (e) => {
 | 数字孪生 | TwinController | /api/v1/twin | 4 |
 | 环境气象 | EnvAlertController | /api/v1/env-alerts | 1 |
 | 安全认证 | AuthController | /api/auth | 2 |
-| 审计日志 | AuditController | /api/audit | 1 |
+| 审计日志 | AuditController | /api/v1/audit | 2 |
 | 许可证 | LicenseController | /api/license | 3 |
 | 自动出警 | AutoDispatchController | /api/v1/autodispatch | 6 |
 | 自动出警 | VoiceIntercomController | /api/v1/voice-intercom | 4 |

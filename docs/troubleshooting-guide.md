@@ -176,7 +176,10 @@ cat flight-logs/flight-2026-09-13.jsonl | jq 'select(.sysid==1 and .type=="telem
 
 ### 3.3 审计日志
 
-生产环境启用审计日志（`aerofleet.audit.enabled=true`），输出到 `./audit-logs/` 目录。
+生产环境启用审计日志（`aerofleet.audit.enabled=true`）并落库到 `audit_log` 表
+（`aerofleet.audit.persist-to-db=true`，V21 迁移，含哈希链）；开发/测试默认纯内存
+（最近 1000 条）。查询与链校验端点：`GET /api/v1/audit/logs`、`GET /api/v1/audit/verify`
+（均需 ADMIN）。链校验返回 `ok/checked/brokenAtId/reason`，断链即说明历史行被改动或缺失。
 
 ### 3.4 日志分析技巧
 

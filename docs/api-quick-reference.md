@@ -250,7 +250,8 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/audit/logs | 查询审计日志（需 ADMIN） |
+| GET | /api/v1/audit/logs | 查询审计日志（需 ADMIN） |
+| GET | /api/v1/audit/verify | 校验审计哈希链完整性（需 ADMIN） |
 
 ## 许可证
 
