@@ -13,3 +13,7 @@ docs/设计文档.md~
 flight-logs-test/
 flight-logs-retention-test/
 /data/
+# maven-shade-plugin 每次 package 都会重写，属构建产物而非源
+dependency-reduced-pom.xml
+__pycache__/
+*.pyc
