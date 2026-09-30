@@ -102,9 +102,19 @@ systemctl status postgresql
 DELETE FROM flyway_schema_history WHERE success = false;
 ```
 
+- `Migration checksum mismatch for migration version N`：本地库应用过旧版迁移文件，
+  而仓库里该文件随后被修改（预发布阶段直接改迁移属预期）。两种处理：
+  - 保留数据：用 Flyway repair 重刷历史表校验和（Flyway CLI `flyway repair`，或应用启动前调用 Flyway API 的 `repair()`）；
+  - 可丢弃数据：删掉本地库重建（dev H2 文件库为 `./data/aerofleet.mv.db`，删除后下次启动全量重迁移）。
+
 ### 2.4 Redis 连接诊断
 
-**开发环境**：Redis 禁用（`spring.cache.type=simple`），无需 Redis
+**开发环境**：缓存用 Simple（`spring.cache.type=simple`），做缓存不需要 Redis；
+但 actuator health 仍包含 redis 指标且连接指向 `localhost:6379`，本机没有 Redis
+（或 6379 被别的实例占用、需要密码）时 `/actuator/health` 会恒 503。
+CI 集成腿自带 redis service；本地可临时起一个无密码 Redis，或用
+`scripts/ci-integration-test.sh` 的 `REDIS_PORT=<端口>` 覆盖（等价命令行参数
+`--spring.data.redis.host/port`，优先级最高，可穿透 profile 内硬编码）。
 
 **生产环境**：
 - 连接地址通过 `SPRING_REDIS_HOST` / `SPRING_REDIS_PORT` 配置
