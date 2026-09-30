@@ -19,19 +19,27 @@
 #
 # 前置：JDK 17 + Maven（自动构建缺失 jar）
 
-param([switch]$SkipBuild)
+param(
+    [switch]$SkipBuild,
+    # 端口默认沿用 8080/14550/14540/14541/14600；本机这些端口常被 Docker Desktop 或
+    # 其它项目的容器占用（脚本自带端口检查会直接退出），因此允许按次覆盖，
+    # 与 scripts/ci-integration-test.sh 的 A_PORT/B_PORT/PG_PORT 同一做法。
+    [int]$BackendRestPort = 8080,
+    [int]$BackendUdpPort = 14550,
+    [int]$DronePort = 14540,
+    [int]$DronePort2 = 14541,
+    [int]$LinkSimPort = 14600,
+    # dev profile 自带 spring.data.redis.*=localhost:6379，而 RedisRateLimiter 在请求路径上，
+    # 连不上就会拖累场景断言；本机 6379 常被别的服务占用且要求 AUTH（/actuator/health 恒
+    # 503 → Wait-BackendUp 判失败），所以 Redis 也留可覆盖的入口。
+    [string]$RedisHost = 'localhost',
+    [int]$RedisPort = 6379
+)
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $Fail = 0
 $script:CleanupActions = @()
-
-# ---- 端口配置 ----
-$BackendRestPort = 8080
-$BackendUdpPort = 14550
-$DronePort = 14540
-$DronePort2 = 14541
-$LinkSimPort = 14600
 
 # ---- 签名测试密钥 ----
 $SigningKey = 'test-signing-secret-key-2026'
@@ -182,6 +190,18 @@ function Search-Log($logFile, $pattern) {
     return $false
 }
 
+# 有界轮询日志：有些断言的目标行由周期任务打印（如 backend 的签名统计是
+# fixedDelay=60s / initialDelay=60s），固定 Start-Sleep 3 必然读不到。
+# 轮询到命中就立刻返回，不白等满窗口。
+function Wait-LogPattern($logFile, $pattern, $maxSeconds) {
+    $steps = [Math]::Ceiling($maxSeconds / 2)
+    for ($i = 0; $i -lt $steps; $i++) {
+        if (Search-Log $logFile $pattern) { return $true }
+        Start-Sleep 2
+    }
+    return $false
+}
+
 # ============================================================
 # 构建缺失 jar
 # ============================================================
@@ -319,6 +339,11 @@ if (Test-Path $backendLog1) { Remove-Item $backendLog1 -Force }
 
 $backend1 = Start-Process -FilePath $java -ArgumentList @(
     '-jar', $backendJar.FullName,
+    '--spring.profiles.active=dev',
+    "--server.port=$BackendRestPort",
+    "--aerofleet.udp-port=$BackendUdpPort",
+    "--spring.data.redis.host=$RedisHost",
+    "--spring.data.redis.port=$RedisPort",
     "--aerofleet.drone-port=$DronePort",
     '--aerofleet.security.rbac-enabled=false',
     '--aerofleet.security.dev-mode=true',
@@ -378,9 +403,10 @@ if ($discovered1) {
         Check '场景1: 签名启用时遥测数据可读' $false
     }
 
-    # 检查 backend 日志中是否有签名验证通过的记录
-    Start-Sleep 3
-    $signingVerified = Search-Log $backendLog1 'signing.*verified|verified='
+    # backend 的签名统计行由 @Scheduled(fixedDelay=60_000, initialDelay=60_000) 打印，
+    # 原来只等 3s 就去 grep —— 这条断言在此后的每一次运行里都必然红。等到命中为止（上限 85s）。
+    Info '等待 backend 打印签名统计（周期任务 60s 首报，最多等 85s）...'
+    $signingVerified = Wait-LogPattern $backendLog1 'signing: verified=' 85
     Check '场景1: backend 日志可见签名验证统计' $signingVerified
 }
 
@@ -397,6 +423,11 @@ if (Test-Path $backendLog2) { Remove-Item $backendLog2 -Force }
 
 $backend2 = Start-Process -FilePath $java -ArgumentList @(
     '-jar', $backendJar.FullName,
+    '--spring.profiles.active=dev',
+    "--server.port=$BackendRestPort",
+    "--aerofleet.udp-port=$BackendUdpPort",
+    "--spring.data.redis.host=$RedisHost",
+    "--spring.data.redis.port=$RedisPort",
     "--aerofleet.drone-port=$LinkSimPort",
     '--aerofleet.security.rbac-enabled=false',
     '--aerofleet.security.dev-mode=true',
@@ -419,6 +450,9 @@ $linkSimLog2 = Join-Path $env:TEMP "signing-e2e-linksim-s2.log"
 if (Test-Path $linkSimLog2) { Remove-Item $linkSimLog2 -Force }
 
 $linkSim2 = Start-Process -FilePath $java -ArgumentList @(
+    # 让 slf4j-simple 自己写文件：Start-Process 的 -RedirectStandardOutput 是缓冲写，
+    # link-sim 全程输出不足一个缓冲区，强杀后文件仍是 0 字节（实测），统计断言无法成立。
+    "-Dorg.slf4j.simpleLogger.logFile=$linkSimLog2",
     '-jar', $linkSimJar.FullName,
     '--profile', 'tamper',
     '--port', $LinkSimPort,
@@ -451,17 +485,10 @@ Start-Sleep 2
 $drone2Alive = -not $drone2.HasExited
 Check '场景2: drone-sim 启动成功' $drone2Alive
 
-# 等待通信建立和篡改帧被拒绝
-Info '等待 10s 让篡改帧产生并被 backend 拒绝...'
-Start-Sleep 10
-
-# 检查 backend 日志中是否有签名验证失败的记录
-$tamperDetected = Search-Log $backendLog2 '签名验证失败|signing.*rejected'
+# 篡改帧要等链路双向建立、被中继篡改、再被 backend 验签拒绝——用有界轮询，不固定睡
+Info '等待篡改帧产生并被 backend 拒绝（最多 40s）...'
+$tamperDetected = Wait-LogPattern $backendLog2 '签名验证失败|signing.*rejected' 40
 Check '场景2: backend 日志可见签名验证失败（篡改检测）' $tamperDetected
-
-# 检查 link-sim 日志中是否有篡改统计
-$tamperStats = Search-Log $linkSimLog2 'tampered='
-Check '场景2: link-sim 日志可见篡改统计' $tamperStats
 
 # 篡改场景下设备应该无法正常通信（因为帧被篡改后签名验证失败）
 $drone2Discovered = Wait-DroneDiscovered 1 10
@@ -481,6 +508,13 @@ Check '场景2: 篡改帧被接收方拒绝（签名验证失败日志可见）'
 
 Stop-SceneProcesses
 
+# link-sim/drone 的日志是 JVM 的 System.out 重定向到文件，进程存活期间不刷新
+# （实测读到 0 字节），必须在停止后读——这是"link-sim 日志可见篡改统计"此前恒红的根因。
+# 同时 SecurityImpairmentEngine.applyTamper 已改为只改签名块（改 payload 会让接收方
+# 在 CRC 阶段丢帧，永远走不到验签），所以这里统计应见 tampered>0。
+$tamperStats = Search-Log $linkSimLog2 'tampered=[1-9]'
+Check '场景2: link-sim 日志可见篡改统计（停止后读取）' $tamperStats
+
 # ============================================================
 # 场景3：未签名拒绝
 # backend(signing on, reject-unsigned=true) + link-sim(unsigned) + drone-sim(signing on)
@@ -492,6 +526,11 @@ if (Test-Path $backendLog3) { Remove-Item $backendLog3 -Force }
 
 $backend3 = Start-Process -FilePath $java -ArgumentList @(
     '-jar', $backendJar.FullName,
+    '--spring.profiles.active=dev',
+    "--server.port=$BackendRestPort",
+    "--aerofleet.udp-port=$BackendUdpPort",
+    "--spring.data.redis.host=$RedisHost",
+    "--spring.data.redis.port=$RedisPort",
     "--aerofleet.drone-port=$LinkSimPort",
     '--aerofleet.security.rbac-enabled=false',
     '--aerofleet.security.dev-mode=true',
@@ -515,6 +554,7 @@ $linkSimLog3 = Join-Path $env:TEMP "signing-e2e-linksim-s3.log"
 if (Test-Path $linkSimLog3) { Remove-Item $linkSimLog3 -Force }
 
 $linkSim3 = Start-Process -FilePath $java -ArgumentList @(
+    "-Dorg.slf4j.simpleLogger.logFile=$linkSimLog3",
     '-jar', $linkSimJar.FullName,
     '--profile', 'unsigned',
     '--port', $LinkSimPort,
@@ -546,23 +586,20 @@ Start-Sleep 2
 $drone3Alive = -not $drone3.HasExited
 Check '场景3: drone-sim 启动成功' $drone3Alive
 
-# 等待通信建立和未签名帧被拒绝
-Info '等待 10s 让未签名帧产生并被 backend 拒绝...'
-Start-Sleep 10
-
-# 检查 backend 日志中是否有拒绝未签名帧的记录
-$unsignedRejected = Search-Log $backendLog3 '拒绝未签名帧|rejectUnsigned'
+# 未签名帧要等链路建立、被中继剥掉签名、再被 backend 按 reject-unsigned 拒绝
+Info '等待未签名帧产生并被 backend 拒绝（最多 40s）...'
+$unsignedRejected = Wait-LogPattern $backendLog3 '拒绝未签名帧' 40
 Check '场景3: backend 日志可见拒绝未签名帧' $unsignedRejected
-
-# 检查 link-sim 日志中是否有剥离签名统计
-$strippedStats = Search-Log $linkSimLog3 'stripped='
-Check '场景3: link-sim 日志可见签名剥离统计' $strippedStats
 
 # 未签名场景下设备应该无法被发现（签名被剥离后帧被拒绝）
 $drone3Discovered = Wait-DroneDiscovered 1 10
 Check '场景3: 未签名帧被拒绝（设备不应被发现）' (-not $drone3Discovered)
 
 Stop-SceneProcesses
+
+# 同上：sim 侧日志必须停止后才能读到
+$strippedStats = Search-Log $linkSimLog3 'stripped=[1-9]'
+Check '场景3: link-sim 日志可见签名剥离统计（停止后读取）' $strippedStats
 
 # ============================================================
 # 场景4：密钥不匹配
@@ -575,6 +612,11 @@ if (Test-Path $backendLog4) { Remove-Item $backendLog4 -Force }
 
 $backend4 = Start-Process -FilePath $java -ArgumentList @(
     '-jar', $backendJar.FullName,
+    '--spring.profiles.active=dev',
+    "--server.port=$BackendRestPort",
+    "--aerofleet.udp-port=$BackendUdpPort",
+    "--spring.data.redis.host=$RedisHost",
+    "--spring.data.redis.port=$RedisPort",
     "--aerofleet.drone-port=$DronePort",
     '--aerofleet.security.rbac-enabled=false',
     '--aerofleet.security.dev-mode=true',
@@ -649,6 +691,11 @@ if (Test-Path $backendLog5) { Remove-Item $backendLog5 -Force }
 
 $backend5 = Start-Process -FilePath $java -ArgumentList @(
     '-jar', $backendJar.FullName,
+    '--spring.profiles.active=dev',
+    "--server.port=$BackendRestPort",
+    "--aerofleet.udp-port=$BackendUdpPort",
+    "--spring.data.redis.host=$RedisHost",
+    "--spring.data.redis.port=$RedisPort",
     "--aerofleet.drone-port=$DronePort",
     "--aerofleet.drone-extra-ports=$DronePort2",
     '--aerofleet.security.rbac-enabled=false',
@@ -753,6 +800,11 @@ if (Test-Path $backendLog6) { Remove-Item $backendLog6 -Force }
 
 $backend6 = Start-Process -FilePath $java -ArgumentList @(
     '-jar', $backendJar.FullName,
+    '--spring.profiles.active=dev',
+    "--server.port=$BackendRestPort",
+    "--aerofleet.udp-port=$BackendUdpPort",
+    "--spring.data.redis.host=$RedisHost",
+    "--spring.data.redis.port=$RedisPort",
     "--aerofleet.drone-port=$DronePort",
     '--aerofleet.security.rbac-enabled=false',
     '--aerofleet.security.dev-mode=true'

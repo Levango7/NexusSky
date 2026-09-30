@@ -33,7 +33,7 @@ class SecurityImpairmentTest {
         // payload bytes 10~18: all zeros
         // CRC bytes 19~20: 0x00, 0x00
         if (signed) {
-            // signature: linkId(1B) + timestamp(6B) + signature(8B) = 13B
+            // 官方签名块 13B = linkId(1B) + timestamp(6B) + signature(6B)
             for (int i = 21; i < frameLen; i++) {
                 frame[i] = (byte) 0xAA;
             }
@@ -106,52 +106,89 @@ class SecurityImpairmentTest {
     // --- applyTamper 测试 ---
 
     @Test
-    void applyTamperModifiesPayloadOnly() {
+    void applyTamperModifiesSignatureBlockOnly() {
         byte[] original = buildFrame(true);
         byte[] tampered = SecurityImpairmentEngine.applyTamper(original);
 
-        // 头部字节 0~9 不变（STX/LEN/INC/COMPAT/SEQ/SID/CID/MSGID）
-        for (int i = 0; i <= 9; i++) {
-            assertEquals(original[i], tampered[i],
-                    "Header byte " + i + " should not change after tamper");
-        }
-
-        // CRC + 签名区域不变（从 payload 结束位置到帧尾）
         int payloadLen = original[1] & 0xFF;
-        int afterPayloadStart = 10 + payloadLen;
-        for (int i = afterPayloadStart; i < original.length; i++) {
+        int sigBlockStart = 12 + payloadLen;      // linkId + timestamp + signature
+        int signatureStart = sigBlockStart + 7;   // 只有最后 6 字节允许变化
+
+        // 帧长不变（篡改不是截断）
+        assertEquals(original.length, tampered.length, "Tamper must not change frame length");
+
+        // CRC 覆盖区（头 + payload + CRC）与 linkId/timestamp 全部原样：
+        // 这是本画像的意义——接收方必须能过 CRC，才会走下去验签并失败
+        for (int i = 0; i < signatureStart; i++) {
             assertEquals(original[i], tampered[i],
-                    "Post-payload byte " + i + " should not change after tamper");
+                    "Byte " + i + " (CRC-covered region / linkId / timestamp) must be untouched");
         }
 
-        // payload 区域至少有一个字节发生变化
-        boolean payloadChanged = false;
-        for (int i = 10; i < 10 + payloadLen; i++) {
+        boolean signatureChanged = false;
+        for (int i = signatureStart; i < original.length; i++) {
             if (original[i] != tampered[i]) {
-                payloadChanged = true;
+                signatureChanged = true;
                 break;
             }
         }
-        assertTrue(payloadChanged, "At least one payload byte should differ after tamper");
+        assertTrue(signatureChanged,
+                "At least one signature byte must differ, otherwise the attack is a no-op");
     }
 
     @Test
-    void applyTamperFlips1To3Bits() {
+    void applyTamperFlips1To3BitsInSignature() {
         byte[] original = buildFrame(true);
         byte[] tampered = SecurityImpairmentEngine.applyTamper(original);
 
         int payloadLen = original[1] & 0xFF;
+        int signatureStart = 12 + payloadLen + 7;
         int bitDiffCount = 0;
-        for (int i = 10; i < 10 + payloadLen; i++) {
+        for (int i = signatureStart; i < original.length; i++) {
             // byte 提升为 int 会符号扩展（0x80 → 0xFFFFFF80），必须先掩码再计数
             int xor = (original[i] ^ tampered[i]) & 0xFF;
             bitDiffCount += Integer.bitCount(xor);
         }
         assertTrue(bitDiffCount >= 1 && bitDiffCount <= 3,
-                "Tamper should flip 1-3 bits in payload, got " + bitDiffCount);
+                "Tamper should flip 1-3 bits in the signature block, got " + bitDiffCount);
+    }
+
+    @Test
+    void applyTamperLeavesUnsignedFrameUnchanged() {
+        byte[] unsignedFrame = buildFrame(false);
+        byte[] result = SecurityImpairmentEngine.applyTamper(unsignedFrame);
+
+        // 未签名帧没有签名块可篡改；若去改 payload 就变成"CRC 破坏帧"，
+        // 接收方会在解析阶段丢弃，模拟不出签名攻击——所以必须原样返回
+        assertArrayEquals(unsignedFrame, result,
+                "Unsigned frame must pass through applyTamper untouched");
     }
 
     // --- applyStripSignature 测试 ---
+
+    @Test
+    void applyStripSignatureProducesCrcValidUnsignedFrame() {
+        byte[] signedFrame = buildFrame(true);
+        byte[] stripped = SecurityImpairmentEngine.applyStripSignature(signedFrame);
+
+        // 剥离必须产出"合法的未签名帧"：INC bit0 在 CRC 覆盖范围内，清掉它不重算 CRC
+        // 就是一帧坏数据，接收方在解析阶段丢弃 → 永远测不到"未签名被拒"。
+        int payloadLen = stripped[1] & 0xFF;
+        int crcExtra = io.aerofleet.mavlink.MavlinkMessageInfo.crcExtraOf(0);  // HEARTBEAT
+        int crc = io.aerofleet.mavlink.MavlinkCrc.init();
+        for (int i = 1; i <= 9; i++) {
+            crc = io.aerofleet.mavlink.MavlinkCrc.accumulate(crc, stripped[i]);
+        }
+        crc = io.aerofleet.mavlink.MavlinkCrc.accumulate(crc, stripped, 10, payloadLen);
+        crc = io.aerofleet.mavlink.MavlinkCrc.accumulate(crc, crcExtra);
+
+        int embedded = (stripped[10 + payloadLen] & 0xFF) | ((stripped[11 + payloadLen] & 0xFF) << 8);
+        assertEquals(crc, embedded,
+                "Stripped frame must carry the CRC recomputed for INC bit 0 cleared");
+
+        // 且必须能被正常解析为未签名帧（接收方走得到验签分支的前提）
+        io.aerofleet.mavlink.MavlinkFrame decoded = io.aerofleet.mavlink.MavlinkFrame.decodeV2(stripped);
+        assertFalse(decoded.isSigned(), "Stripped frame must decode as an unsigned frame");
+    }
 
     @Test
     void applyStripSignatureClearsIncBit() {
