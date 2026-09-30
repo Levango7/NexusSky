@@ -68,6 +68,9 @@ JAR="cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar"
 # 用户名用 CI 专用名，避免覆盖仓库 H2 库里已有的 admin 记录。
 CI_USER="ci_gateway_admin"
 CI_PASSWORD="CiGateBootPassw0rd"
+# 设备/边缘摄取通道的共享 API Key（DeviceIngestKeyBootstrapRunner 在 Pass B 启动时引导）。
+# >=16 位是引导器的硬门槛，短于此会被拒绝并留 WARN。
+CI_DEVICE_KEY="ci-device-ingest-key-0123456789"
 A_PORT="${A_PORT:-8080}"
 B_PORT="${B_PORT:-8081}"
 C_PORT="${C_PORT:-8082}"
@@ -240,7 +243,8 @@ PID_B=$(start_backend "$LOG_B" "$B_PORT" $REDIS_OVERRIDE \
     $DEV_DB_OVERRIDE \
     --aerofleet.security.dev-mode=false \
     --aerofleet.security.bootstrap-admin-username="$CI_USER" \
-    --aerofleet.security.bootstrap-admin-password="$CI_PASSWORD")
+    --aerofleet.security.bootstrap-admin-password="$CI_PASSWORD" \
+    --aerofleet.security.device-ingest-api-key="$CI_DEVICE_KEY")
 if ! wait_ready "$PID_B" "$B_PORT" "$LOG_B" "Pass B cloud-backend"; then
     stop_backend "$PID_B" "Pass B cloud-backend"
     rm -f "$LOG_B"
@@ -334,6 +338,20 @@ else
     echo "   ❌ 无 token，跳过 RBAC 生效断言（登录已判红）"
     FAILED=1
 fi
+
+echo "   --- Pass B 断言 7：设备摄取走 API Key 的真实通路（成对：对的 key 200 / 错的 key 401）---"
+# 上面几条断言都经 JWT。这条专门验证 X-API-Key 分支：启动时用
+# --aerofleet.security.device-ingest-api-key 引导 keyId=device-ingest（库里只存哈希），
+# 再用该 key 打 OPERATOR 档的 POST /api/v1/alarms/events。
+# 为什么必须配一条反向：只断 200 排不掉"拦截器压根没跑、谁都放行"这种假绿；
+# 错的 key 应在 Spring Security 层就 401（ApiKeyFilter 认不出来 → 仍是匿名 → anyRequest 需认证）。
+EVENTS_BODY='{"sourceDeviceId":"ci-edge-1","sourceDeviceName":"CI 边缘节点","eventType":"CUSTOM","severity":"WARN","description":"api-key-path proof"}'
+assert_status "POST /api/v1/alarms/events（引导出的 device-ingest key → 200）" "200" \
+    "$(http_status -X POST -H "X-API-Key: ${CI_DEVICE_KEY}" -H 'Content-Type: application/json' \
+        -d "$EVENTS_BODY" "http://localhost:${B_PORT}/api/v1/alarms/events")"
+assert_status "[对照] POST /api/v1/alarms/events（错误 key → 401，证明不是恒放行）" "401" \
+    "$(http_status -X POST -H "X-API-Key: nsk_this_key_does_not_exist_000000" -H 'Content-Type: application/json' \
+        -d "$EVENTS_BODY" "http://localhost:${B_PORT}/api/v1/alarms/events")"
 
 stop_backend "$PID_B" "Pass B cloud-backend"
 
