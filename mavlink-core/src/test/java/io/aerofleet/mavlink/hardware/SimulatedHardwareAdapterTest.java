@@ -135,12 +135,28 @@ class SimulatedHardwareAdapterTest {
 
     @Test
     @DisplayName("RTL 应成功，模式应为 RTL")
-    void rtlShouldSetRtlMode() {
+    void rtlShouldSetRtlMode() throws InterruptedException {
         adapter.connect("sim://test");
         adapter.arm();
         adapter.takeoff(10.0);
+        // 起飞是异步的（遥测线程 200ms 一跳、每跳 0.4m），而 simulateRtl 在"位于家点上方且
+        // alt<=0.1"时把这次 RTL 判为已着陆并立刻把 mode 改成 LAND——没爬升就 RTL，断言的是竞态。
+        waitAltitudeAbove(2.0, 5000);
         assertTrue(adapter.rtl());
         assertEquals("RTL", adapter.getState().getMode());
+    }
+
+    /** 有界轮询等待模拟高度越过 threshold，替代对后台线程的一次性快照断言。 */
+    private void waitAltitudeAbove(double threshold, long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (adapter.getState().getAlt() > threshold) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        fail("模拟起飞未在 " + timeoutMs + "ms 内爬升到 " + threshold + "m 以上，实测 alt="
+                + adapter.getState().getAlt());
     }
 
     @Test
