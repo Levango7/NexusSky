@@ -627,19 +627,20 @@ NexusSky/
 
 ## 测试规模
 
-实测于 2026-09-30，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped，4m15s）：
+实测于 2026-09-30，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
 
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 331 |
 | `drone-sim` | 1324 |
 | `link-sim` | 115 |
-| `cloud-backend` | 1986 |
+| `cloud-backend` | 2005 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **3787** |
+| **总计** | **3806** |
 
-注意：这些用例跑在 `test` profile（`dev-mode=true`、`rbac-enabled=false`），
+注意：这些用例跑在 `test` profile（`dev-mode=true`、`rbac-enabled=false`——
+`application-test.properties:8/:10` 显式设置，所以 base 默认翻 true 不影响它们），
 即鉴权与租户面**不在其覆盖范围内**；链级鉴权/隔离证据在
 `cloud-backend/src/test/java/io/aerofleet/cloud/security/chain/HttpAuthChainTest.java`
 与 `api/ws/TelemetryWsTenantIsolationTest.java`（以 `dev-mode=false` 起完整过滤器链）。
@@ -677,8 +678,12 @@ NexusSky/
 - **安全认证：机制可用但覆盖面未满**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
-  仍需注意：`@RequireRole` 只覆盖 341 个端点中的 70 个（其余靠"无注解=放行"），
-  `aerofleet.security.rbac-enabled` 默认 false 且 staging profile 未显式打开；
+  仍需注意：`@RequireRole` 只覆盖 341 个端点中的 70 个——**未标注的端点在 RBAC
+  打开后依然放行**（`RoleInterceptor:78-80`），所以真正的收口是 fail-closed 化，
+  不是逐个补注解。开关本身：`aerofleet.security.rbac-enabled` base 默认已翻 **true**
+  （prod/staging 各自显式打开；dev 不设该键但 `dev-mode=true` 先行旁路；
+  test profile 显式 false），CI 集成腿 Pass B 以"ADMIN 建用户 201 + OBSERVER 打
+  /api/v1/audit/logs 403"成对取证。
   License 在缺 key 或验签失败时降级为无限期 dev license（商用门禁当前不成立）
 - **持久化已部分实现**：飞行日志（JSONL 与 `flight_log` 表双模式，默认保留 30 天后自动清理）、
   审计日志（`audit_log` 表 + SHA-256 哈希链，默认仍纯内存、保留清理默认关闭）、

@@ -112,8 +112,12 @@ public Result createTask(@RequestBody TaskRequest req) { ... }
 
 **跳过校验的条件**（任一满足即放行）：
 - `aerofleet.security.dev-mode=true`（开发模式）
-- `aerofleet.security.rbac-enabled=false`（默认关闭）
-- 目标方法未标注 `@RequireRole`
+- `aerofleet.security.rbac-enabled=false`（**base 默认 true**；`application.properties:59`，
+  dev profile 不设该键而靠 `dev-mode=true` 旁路，`application-test.properties:10` 显式 false，
+  prod/staging 各自显式 true）
+- 目标方法未标注 `@RequireRole`（`RoleInterceptor:78-80`——当前主要缺口：341 个端点只有
+  70 个标注，未标注的对**任何已认证主体**一视同仁（匿名由 Spring Security 拦，与 RBAC 无关），
+  OBSERVER 与 ADMIN 无差别）
 - 非控制器方法（静态资源等）
 
 **校验流程**：
