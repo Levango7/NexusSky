@@ -652,7 +652,7 @@ MetricsCollector
 | ~~7~~ | ~~无 Webhook 机制~~ | ✅ 已修复：WebhookEntity+Repository+Service+Controller + V17迁移 + tenantId隔离 | — | ~~P1~~ | ~~2 人周~~ |
 | ~~8~~ | ~~持久化缺失~~ | ✅ 已修复：SprayTaskEntity/DeliverySequenceEntity新建 + FormationService改为Repository持久化 + V12-V16迁移 | — | ~~P0~~ | ~~5 人周~~ |
 | ~~9~~ | ~~无 OpenAPI 规范导出~~ | ✅ 已修复：OpenApiConfig ApiKeyAuth安全方案 + OpenApiExportController(json/yaml导出) + application-prod.properties | — | ~~P1~~ | ~~1 人周~~ |
-| ~~10~~ | ~~MAVLink 签名未实现~~ | ✅ 已修复：MavlinkSigner(HMAC-SHA256) + MavlinkSignatureConfig(配置开关) + MavlinkMessage签名字段 | — | ~~P2~~ | ~~2 人周~~ |
+| ~~10~~ | ~~MAVLink 签名未实现~~ | ✅ 已修复：MavlinkSigner(HMAC-SHA256) + MavlinkSignatureConfig(配置开关) + MavlinkMessage签名字段 **【2026-10-01 更正】该实现与官方不互通（官方是 sha256_48 取 6 字节、时间戳小端、签名块 13 字节），且 backend 的签名注入点当时恒为 null；现已改为官方语义并用 pymavlink 已知答案向量验证，见 `docs/security-design.md` 第 7 节** | — | ~~P2~~ | ~~2 人周~~ |
 | ~~11~~ | ~~无 SDK 包发布~~ | ✅ 已修复：sdk-java(NexusSkyClient JDK HttpClient) + sdk-python(aerofleet_sdk包) 骨架 | — | ~~P1~~ | ~~3 人周~~ |
 | ~~12~~ | ~~JWT 对称签名~~ | ✅ 已修复：JwtTokenProvider RS256非对称签名 + RSA密钥对配置 + 兼容HS256回退 + 自动生成密钥对 | — | ~~P2~~ | ~~1 人周~~ |
 
@@ -672,7 +672,7 @@ MetricsCollector
 | 7 | **无 Webhook 机制** | WebhookEntity+Repository+Service+Controller(POST/GET/DELETE /api/v1/webhooks) + V17迁移 + tenantId隔离 | (本轮提交) |
 | 9 | **无 OpenAPI 规范导出** | OpenApiConfig ApiKeyAuth安全方案 + OpenApiExportController(json/yaml导出) + application-prod.properties启用api-docs | (本轮提交) |
 | 11 | **无 SDK 包发布** | sdk-java(NexusSkyClient JDK HttpClient + ApiKey认证) + sdk-python(aerofleet_sdk包) 骨架 | (本轮提交) |
-| 10 | **MAVLink 签名未实现** | MavlinkSigner(HMAC-SHA256 8字节截断签名) + MavlinkSignatureConfig(配置开关默认关闭) + MavlinkMessage signature字段+签名感知编解码 | (本轮提交) |
+| 10 | **MAVLink 签名未实现** | MavlinkSigner(官方 sha256_48：签名块 13 字节 = linkId + 6B 小端时间戳 + 6B 签名) + MavlinkSignatureConfig(配置开关默认关闭) + MavlinkMessage signature字段+签名感知编解码。**2026-10-01 更正**：本行原写"HMAC-SHA256 8字节截断签名"，那套与 PX4/pymavlink 不互通；且 backend 的签名注入点当时恒为 null（未接入），现已按开关条件装配并用 pymavlink 已知答案向量验证；多机密钥（`MavlinkSignerFactory` 按 sysid 取口令）与 `scripts/e2e-signing.ps1` 6 场景 43 条断言于 2026-10-01 补完 | (本轮提交) |
 | 12 | **JWT 对称签名** | JwtTokenProvider RS256非对称签名 + RSA密钥对配置(jwt.private-key/jwt.public-key) + 兼容HS256回退 + jwt.generate-keys自动生成 | (本轮提交) |
 | P3-1 | **动态 MAX_HOPS 集成** | Mesh 组网支持动态调整最大跳数，适应不同网络拓扑 | 93b1058 |
 | P3-2 | **真实卫星接入预留** | 卫星中继模块预留真实硬件接入接口，支持后续对接真实卫星链路 | 93b1058 |
@@ -695,6 +695,8 @@ MetricsCollector
 
 **P2（商用后 3-6 月内完成，约 3 人周 ✅ 全部完成）**：
 11. ✅ MAVLink 签名（2 人周）— MavlinkSigner + MavlinkSignatureConfig + MavlinkMessage签名字段
+    （**2026-10-01 补充**：首版实现与官方不互通且 backend 未接线，现已改为官方 sha256_48
+    语义、补上条件装配，并以 pymavlink 生成的已知答案向量做逐字节验证；开关默认仍关闭）
 12. ✅ JWT 非对称签名升级（1 人周）— JwtTokenProvider RS256 + 兼容HS256回退 + 自动生成密钥对
 
 **P3（已完成 ✅）**：

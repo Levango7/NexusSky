@@ -5,8 +5,10 @@
 > 取自北斗七星之首，主掌天机运转——无人机智能操控的中枢，亦暗合北斗导航的意象。
 
 > **定位**：在"没有硬件、没有团队"的条件下，搭建一套**还能跑起来的**无人机智能控制系统骨架。
-> 真飞机的位置被一台**软件模拟器**顶替，但所有协议、接口与真实硬件（PX4 飞控）完全一致——
-> 未来买来 Pixhawk 硬件的那天，替换的是数据源，不是架构。
+> 真飞机的位置被一台**软件模拟器**顶替。帧编解码与链路签名（MAVLink v2 signing）与官方
+> 规范逐字节对等（签名有 pymavlink 已知答案向量把关，见"已知边界"），消息集是常用子集且
+> 未与真机联调过——未来接 Pixhawk 时替换的是数据源，但每条消息仍需按真固件行为验证，
+> 不是"插上就能跑"。
 
 ## 系统架构
 
@@ -627,17 +629,17 @@ NexusSky/
 
 ## 测试规模
 
-实测于 2026-09-30，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
+实测于 2026-10-01，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 331 |
+| `mavlink-core` | 343 |
 | `drone-sim` | 1324 |
-| `link-sim` | 115 |
-| `cloud-backend` | 2005 |
+| `link-sim` | 117 |
+| `cloud-backend` | 2012 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **3806** |
+| **总计** | **3827** |
 
 注意：这些用例跑在 `test` profile（`dev-mode=true`、`rbac-enabled=false`——
 `application-test.properties:8/:10` 显式设置，所以 base 默认翻 true 不影响它们），
@@ -662,11 +664,23 @@ NexusSky/
 - 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
 - 微服务/K8s 暂不引入：模块化单体已够当前规模，拆分时机见设计文档讨论
 - MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（420–483）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
-- 链路签名（MAVLink v2 signing）**代码已实现并接入** `UdpGateway`/`VirtualDrone`，但
-  `mavlink.signing.enabled` 默认 false 且**任何 profile 都未配置**，故出厂状态是明文 UDP；
-  且本仓签名块为 15 字节（LINK_ID 1 + TIMESTAMP 6 + SIGNATURE 8），与官方 13 字节
-  （sha256_48 + 4 字节小端时间戳）不一致 → 与 PX4/pymavlink 混流会错帧，接真机前需先做
-  协议对等验证（解析层当前也只接受不验签）
+- **链路签名（MAVLink v2 signing）自 2026-10-01 起与官方逐字节对等**：签名块 13 字节
+  （LINK_ID 1 + TIMESTAMP 6 **小端** + SIGNATURE 6 = `sha256_48`，即
+  `SHA-256(secret + 帧头至CRC + linkId + timestamp)` 前 6 字节），重放规则改为"同流严格递增
+  + 新流最多落后 60 秒"。等价性由 pymavlink 生成的**已知答案向量**逐字节把关
+  （`MavlinkSigningVectorTest`，向量生成器 `scripts/mavlink-signing-vectors.py`）。
+  此前是 15 字节（HMAC-SHA256 取 8 字节 + 大端时间戳），与 PX4/pymavlink 混流既验不过签名
+  又会因帧长差 2 字节错帧
+- 签名**出厂仍是明文**：`mavlink.signing.enabled` 默认 false 且任何 profile 都未配置。
+  而且接线此前是断的——backend 的四个签名注入点全是 `@Autowired(required=false)`，
+  而裸 `@SpringBootApplication` 不扫 `io.aerofleet.mavlink.*` 包，故四个字段恒为 null、
+  `UdpGateway.isSigningEnabled()` 恒 false，把开关打开也不签名（现在由
+  `MavlinkSigningConfiguration` 按开关条件装配，`MavlinkSigningConfigurationTest` 盯住这条路径）。
+  多机密钥（`key-store-path`）的 per-sysid 口令现已真正进入签名路径：backend 改为经
+  `MavlinkSignerFactory` **按 sysid 取签名器**（旧实现只用密钥库取 linkId、口令仍取全局值），
+  e2e 场景 5 用两把不同口令的机子端到端验过。仍未闭合：`MavlinkParser` 层仍只切帧不验签
+  （验签在 `MavlinkMessage.decode(frame, signer)` 与 `UdpGateway.verifyFrame`），
+  口令与密钥库都是明文、无轮换端点，接真机前需做端到端联调
 - **检测器是投影可见性**（简化是有意的）：接入真实 CV 模型的替换点在
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让

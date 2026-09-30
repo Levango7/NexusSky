@@ -377,3 +377,77 @@ aerofleet.udp.device-whitelist-enabled=true # 启用设备白名单
 springdoc.swagger-ui.enabled=false         # 禁用 Swagger UI
 management.endpoint.health.show-details=when-authorized  # 健康详情需认证
 ```
+
+## 7. 链路签名（MAVLink v2 signing）
+
+上行/下行 UDP 帧可附加官方 MAVLink v2 签名块，防止地面命令被注入或重放。
+
+### 7.1 线上格式（与官方逐字节对等）
+
+签名帧在 CRC 之后追加 **13 字节**：
+
+| 偏移 | 字段 | 宽度 | 说明 |
+|---|---|---|---|
+| 0 | `link_id` | 1 B | 链路标识，多密钥库可按 sysid 配置 |
+| 1 | `timestamp` | 6 B | **小端** 48 位，单位 10 微秒，纪元 2015-01-01T00:00:00Z |
+| 7 | `signature` | 6 B | `SHA-256(secret_key ++ 帧头至CRC ++ link_id ++ timestamp)` 的前 6 字节（sha256_48） |
+
+签名覆盖**含 STX 的整帧**（帧头至 CRC），口令以"前置后整体求摘要"的方式参与，
+**不是 HMAC**——旧实现用 HMAC-SHA256 截 8 字节、时间戳按大端写入（签名块共 15 字节），
+与 PX4/pymavlink 混流既验不过签名又会因帧长差 2 字节错帧。
+
+### 7.2 重放规则（`TimestampTracker`）
+
+- 流标识是三元组 `(link_id, system_id, component_id)`；只按 link_id 分桶会让共用同一
+  linkId 的多台设备互相顶高基准，把正常流量误判为重放。
+- 已见过的流：`timestamp` 必须**严格大于**上次值，相等即拒（旧实现 `>=` 放行相等值，
+  等于允许原帧重放一次）。
+- 新出现的流：允许落后本地时间最多 **60 秒** = 6,000,000 tick（旧实现阈值 500 tick 且
+  时间戳单位口径也不对）。
+
+### 7.3 开关与装配
+
+`mavlink.signing.enabled`（默认 false）、`secret-key`、`key-store-path`、
+`reject-unsigned`（默认 true，fail-closed）。
+
+装配曾长期是断的：`UdpGateway` 的四个签名注入点都是 `@Autowired(required=false)`，
+而 `CloudBackendApplication` 是不带 `scanBasePackages` 的裸 `@SpringBootApplication`
+（只扫 `io.aerofleet.cloud`），签名类却在 `io.aerofleet.mavlink.security` 包里，
+mavlink-core 也没有自动配置文件 → 四个字段恒为 null，开关打开也不签名，连配置类的
+启动校验都不执行。现由 `cloud-backend` 的 `MavlinkSigningConfiguration`
+（`@ConditionalOnProperty(mavlink.signing.enabled=true)`）按开关条件装配：关着时不创建
+任何签名 bean（出厂行为不变），打开后缺口令会在启动阶段直接失败而不是静默明文。
+`MavlinkSigningConfigurationTest` 用 `ApplicationContextRunner` 双向断言这两点。
+
+### 7.4 互通性怎么证明的
+
+不靠"自己签自己验"。`scripts/mavlink-signing-vectors.py` 用独立参考实现 **pymavlink**
+打包并签名 5 条固定输入的消息（HEARTBEAT、GLOBAL_POSITION_INT、尾零裁剪的 HEARTBEAT、
+奇数长度 payload 的 RADIO_STATUS、含负浮点的 ATTITUDE），把完整帧 hex 与期望签名作为
+**已知答案向量**写进 `MavlinkSigningVectorTest`：Java 侧算出的 6 字节签名必须逐字节相同，
+解码 pymavlink 帧再重编码必须逐字节还原。向量生成器自身还做了两道自检（pymavlink 能验过
+自己的帧 + 按规范公式独立重算签名）。
+
+字节层之外还有 `scripts/e2e-signing.ps1` 的 6 个场景（本机 43 条断言全绿，2026-10-01）：
+正常签名通信、篡改检测、未签名拒绝、密钥不匹配、多机密钥分发、签名未启用兼容。
+其中"篡改"与"未签名"这两条以前从未真正端到端成立过——link-sim 的损伤画像改的是载荷、
+且剥签名后不重算 CRC，帧在解析阶段就因 CRC 失败被丢掉，压根到不了验签。现在断言用的是
+backend 日志里真实出现过的那一行，例如
+`拒绝未签名帧：sysid=1 msgId=242 (rejectUnsigned=true)` 与
+`签名验证失败：sysid=1 linkId=1 msgId=33`，配对 link-sim 侧的 `stripped=3` / `tampered=3`。
+
+### 7.5 已知边界
+
+- 出厂仍是明文：任何 profile 都未设置 `mavlink.signing.enabled=true`。
+- 口令与密钥库都是**明文**：`secret-key` 写在配置里（走命令行会进进程列表），
+  `key-store-path` 指向的 JSON 不做加密，也没有轮换端点。
+- 多机模式（`key-store-path`）现在确实按 sysid 取口令（`MavlinkSignerFactory` →
+  `SigningKeyManager.keyFor()`），但**未命中该 sysid 时会回退 `defaultKey`**；
+  要"只认密钥库里列出的机子"，必须显式不配 `defaultKey`，否则陌生 sysid 的签名帧
+  会被拿去和 `defaultKey` 比对（比对失败仍拒，但这不是一次成员白名单检查）。
+- `MavlinkParser` 层只切帧、不验签；验签发生在 `MavlinkMessage.decode(frame, signer)`
+  与 `UdpGateway.verifyFrame`。
+- 时间戳由毫秒时钟换算，粒度是 1 毫秒（100 tick）；同一毫秒内连发多帧需要调用方自行递增。
+- 重放与时间戳回退只有单元测试证据：link-sim 的损伤画像会篡改签名字节、剥离签名块，
+  但不会转发一条已签名的原帧来触发重放分支。
+- 签名统计（`signing: verified=/rejected=/unsigned=`）只进日志，既无指标也无告警。
