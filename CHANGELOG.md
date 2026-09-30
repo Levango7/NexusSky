@@ -23,7 +23,9 @@
 如实记下两处代价与限制：
 - **cloud-backend 余量只剩 2.7pt**。这是地板应有的样子，但也意味着今后一个不加测试的 PR 就更可能把 CI 撞红；出口是补测试，不是下调阈值。
 - **sdk-java 只有 37% 是真实状况**，不是阈值定低了——它 6 个主类只有 1 个测试文件（`DroneApiTest`，用 JDK 内置 `HttpServer` + 端口 0 自给，所以接进门禁不会与后端抢端口）。把地板钉在 0.35 的作用是防退化，不代表 SDK 覆盖已够。
-- 阈值写在 6 个 pom 里，与 `ci.yml` 的注释、`ci-coverage-threshold.sh` 三处需要同步维护；本次靠该脚本的 `--strict` 自证一致，但它并未进 CI（只有 pom 的 `check` 在 CI 里执行）。
+- 阈值写在 6 个 pom 里，与 `ci.yml` 的注释、`ci-coverage-threshold.sh` 三处需要同步维护；本次靠该脚本的 `--strict` 自证一致，但它并未进 CI（只有 pom 的 `check` 在 CI 里执行）。**注意**：本批最初那次"六模块全自洽"是用 CSV 口径算的，即上面那个偏乐观的口径；改用 BUNDLE 后重跑，六模块仍全自洽（sdk-java 从 37% 修正为 36%，阈值 0.35 依旧成立）。
+
+**核对时发现并修掉的一个口径缺陷（这条是本节存在的主要原因）**：`ci-coverage-threshold.sh` 原本从 `jacoco.csv` 逐行相加算覆盖率，而 **CSV 是每个类一行，匿名内部类与其宿主的同一源行会被重复计数**，BUNDLE 级则按去重后的源行统计——`jacoco:check` 用的正是后者。sdk-java 实测差 1 行：CSV 求和 87/234=0.3718，BUNDLE 86/233=0.3691。差异本身微小，但它让脚本**给一个真门禁会拒的阈值盖章**：把 `<minimum>` 临时设成 0.37 时，旧脚本输出"✅ 自洽"，而 `mvn -pl sdk-java verify` 直接 `Rule violated ... ratio is 0.36, but expected minimum is 0.37` + BUILD FAILURE。其余五模块两种口径恰好相等，所以这个坑只有 sdk-java 暴露得出来。修法：改读 `jacoco.xml` 里最后一个 `counter type="LINE"`（report/BUNDLE 级），与 check 同源；改完后同一 0.37 阈值在 strict 与默认两种模式都变成 `RESULT: FAIL`，并明确提示"verify 会失败"。核对全部六模块：mavlink-core 0.6927 / drone-sim 0.7119 / link-sim 0.6634 / cloud-backend 0.6270 / sdk-java 0.3691 / regulator-sim 0.7133，与各自声明阈值自洽。
 
 **本轮未闭合**：`ci-coverage-threshold.sh` 未接入 CI（三处数字一致性只靠人工跑）；SDK 响应信封契约问题仍在（与覆盖率无关，是既有项）；`mvn verify -DskipTests` 复用上一次构建遗留的 `.exec` 这一"陈旧产物也算存在"的窗口，CI 里因为同 job 先跑过测试而不成立，但本地单独执行 `verify` 时存在——守卫判的是"文件在不在"，不是"新不新"。
 
