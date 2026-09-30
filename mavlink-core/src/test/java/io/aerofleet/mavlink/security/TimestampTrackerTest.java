@@ -3,113 +3,168 @@ package io.aerofleet.mavlink.security;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * TimestampTracker 单元测试（C5-T16）：
- * 1. 首次 timestamp → true
- * 2. 递增 timestamp → true
- * 3. 回退 ≤500 tick → true
- * 4. 回退 >500 tick → false
- * 5. 小回退后，后续递增 timestamp 仍以原基准判断
- * 6. 不同 linkId 的 timestamp 互不影响
+ * 签名重放防护测试（官方规则）。
+ * <p>
+ * 本类同时是两处旧实现缺陷的回归守卫：
+ * ① 旧版用 {@code timestamp >= last} 放行**相等**时间戳，等于允许原帧重放一次；
+ * ② 旧版只按 linkId 分桶，两台源设备共用同一 linkId 时会互相把对方的时间戳基准顶高，
+ *    正常流量被误判为重放；
+ * ③ 旧版回退阈值 500 tick 且时间戳单位口径（10ms）与官方（10µs）不符。
+ * <p>
+ * 本地"当前时间"通过构造器注入，60 秒新流窗口因此可确定性验证。
  */
+@DisplayName("MAVLink 签名时间戳重放防护")
 class TimestampTrackerTest {
 
-    // ========== 1. firstTimestampAccepted ==========
+    private static final int LINK_ID = 3;
+    private static final int SYSID = 1;
+    private static final int COMPID = 0;
 
-    @Test
-    @DisplayName("首次 timestamp → true")
-    void firstTimestampAccepted() {
-        TimestampTracker tracker = new TimestampTracker();
+    /** 固定"现在"=1_000_000 tick，便于把窗口边界算成整数。 */
+    private static final long NOW = 1_000_000L;
 
-        assertTrue(tracker.check(1, 1000L), "首次 timestamp 应被接受");
+    private TimestampTracker trackerAt(long now) {
+        return new TimestampTracker(() -> now);
     }
 
-    // ========== 2. increasingTimestampAccepted ==========
+    // ==================== 严格递增 ====================
 
     @Test
-    @DisplayName("递增 timestamp → true")
+    @DisplayName("首次见到的流在 60 秒窗口内被接受")
+    void newStreamWithinWindowAccepted() {
+        TimestampTracker tracker = trackerAt(NOW);
+
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, NOW - 100)).isTrue();
+        assertThat(tracker.trackedStreams()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("时间戳前进被接受并更新基准")
     void increasingTimestampAccepted() {
-        TimestampTracker tracker = new TimestampTracker();
+        TimestampTracker tracker = trackerAt(NOW);
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 500)).isTrue();
 
-        assertTrue(tracker.check(1, 1000L), "首次 timestamp 应被接受");
-        assertTrue(tracker.check(1, 1001L), "递增 timestamp 应被接受");
-        assertTrue(tracker.check(1, 2000L), "递增 timestamp 应被接受");
-        assertTrue(tracker.check(1, 10000L), "递增 timestamp 应被接受");
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 501)).isTrue();
+        assertThat(tracker.lastKnown(new TimestampTracker.StreamKey(LINK_ID, SYSID, COMPID)))
+                .isEqualTo(501);
     }
 
-    // ========== 3. smallBackwardAccepted ==========
-
     @Test
-    @DisplayName("回退 ≤500 tick → true")
-    void smallBackwardAccepted() {
-        TimestampTracker tracker = new TimestampTracker();
+    @DisplayName("时间戳相等必须被拒（旧实现用 >= 放行，是原帧重放）")
+    void equalTimestampRejected() {
+        TimestampTracker tracker = trackerAt(NOW);
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 700)).isTrue();
 
-        assertTrue(tracker.check(1, 1000L), "首次 timestamp 应被接受");
-        // 回退 500 tick（等于阈值）
-        assertTrue(tracker.check(1, 500L), "回退 500 tick（等于阈值）应被接受");
-        // 回退 200 tick（相对于基准 1000）
-        assertTrue(tracker.check(1, 800L), "回退 200 tick 应被接受");
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 700)).isFalse();
+        // 被拒后基准不应被改写
+        assertThat(tracker.lastKnown(new TimestampTracker.StreamKey(LINK_ID, SYSID, COMPID)))
+                .isEqualTo(700);
     }
 
-    // ========== 4. largeBackwardRejected ==========
-
     @Test
-    @DisplayName("回退 >500 tick → false")
-    void largeBackwardRejected() {
-        TimestampTracker tracker = new TimestampTracker();
+    @DisplayName("已见过的流即使只差 1 tick 回退也拒绝（不因窗口宽而放宽）")
+    void rollbackRejectedForKnownStream() {
+        TimestampTracker tracker = trackerAt(NOW);
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 900)).isTrue();
 
-        assertTrue(tracker.check(1, 1000L), "首次 timestamp 应被接受");
-        // 回退 501 tick（超过阈值）
-        assertFalse(tracker.check(1, 499L), "回退 501 tick（超过阈值）应被拒绝");
-        // 回退更多
-        assertFalse(tracker.check(1, 0L), "回退 1000 tick 应被拒绝");
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 899)).isFalse();
     }
 
-    // ========== 5. smallBackwardDoesNotLowerBaseline ==========
+    // ==================== 新流 60 秒窗口 ====================
 
     @Test
-    @DisplayName("小回退后，后续递增 timestamp 仍以原基准判断")
-    void smallBackwardDoesNotLowerBaseline() {
-        TimestampTracker tracker = new TimestampTracker();
+    @DisplayName("新流落后正好 60 秒（6,000,000 tick）仍接受")
+    void newStreamExactlyAtWindowAccepted() {
+        TimestampTracker tracker = trackerAt(NOW + MavlinkSigner.REPLAY_WINDOW_TICKS);
+        long behind = NOW;
 
-        // 基准 = 1000
-        assertTrue(tracker.check(1, 1000L), "首次 timestamp 应被接受");
-
-        // 小回退到 800（回退 200 ≤ 500），允许但不更新基准
-        assertTrue(tracker.check(1, 800L), "小回退应被接受");
-
-        // 后续 timestamp = 900，仍 < 基准 1000，回退 100 ≤ 500，应被接受
-        assertTrue(tracker.check(1, 900L), "小回退后递增但仍低于基准的 timestamp 应被接受");
-
-        // 后续 timestamp = 1001，> 基准 1000，应被接受并更新基准
-        assertTrue(tracker.check(1, 1001L), "超过基准的 timestamp 应被接受");
-
-        // 新基准 = 1001，回退到 400（回退 601 > 500），应被拒绝
-        assertFalse(tracker.check(1, 400L), "超过阈值的大回退应被拒绝");
+        assertThat(behind + MavlinkSigner.REPLAY_WINDOW_TICKS < NOW + MavlinkSigner.REPLAY_WINDOW_TICKS)
+                .isFalse();
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, behind)).isTrue();
     }
 
-    // ========== 6. differentLinkIdsIndependent ==========
+    @Test
+    @DisplayName("新流落后超过 60 秒被拒（旧实现阈值只有 500 tick 且单位不对）")
+    void newStreamTooFarBehindRejected() {
+        TimestampTracker tracker = trackerAt(NOW + MavlinkSigner.REPLAY_WINDOW_TICKS + 1);
+
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, NOW)).isFalse();
+        assertThat(tracker.trackedStreams()).isZero();   // 被拒的流不留基准
+    }
 
     @Test
-    @DisplayName("不同 linkId 的 timestamp 互不影响")
-    void differentLinkIdsIndependent() {
+    @DisplayName("60 秒窗口就是 6,000,000 个 10 微秒 tick = 1 分钟")
+    void replayWindowIsOneMinuteInOfficialTicks() {
+        assertThat(MavlinkSigner.REPLAY_WINDOW_TICKS).isEqualTo(6_000_000L);
+        assertThat(MavlinkSigner.REPLAY_WINDOW_TICKS * MavlinkSigner.TICK_MICROSECONDS / 1_000_000L)
+                .isEqualTo(60);
+    }
+
+    // ==================== 分流键 ====================
+
+    @Test
+    @DisplayName("同 linkId 不同 sysid/compid 是独立的流，互不顶高基准")
+    void streamsAreScopedByLinkSystemAndComponent() {
+        TimestampTracker tracker = trackerAt(NOW);
+        assertThat(tracker.check(LINK_ID, 1, 0, 800)).isTrue();
+
+        // 另一台设备（sysid=2）时间戳更小，也应作为新流被接受
+        assertThat(tracker.check(LINK_ID, 2, 0, 100)).isTrue();
+        // 但第一台设备自己的回退仍被拒
+        assertThat(tracker.check(LINK_ID, 1, 0, 100)).isFalse();
+        assertThat(tracker.trackedStreams()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("同流不同 linkId 也互相独立")
+    void differentLinkIdsAreSeparateStreams() {
+        TimestampTracker tracker = trackerAt(NOW);
+        assertThat(tracker.check(1, SYSID, COMPID, 500)).isTrue();
+
+        assertThat(tracker.check(2, SYSID, COMPID, 400)).isTrue();
+        assertThat(tracker.check(1, SYSID, COMPID, 400)).isFalse();
+    }
+
+    // ==================== 边界与维护 ====================
+
+    @Test
+    @DisplayName("48 位范围外的时间戳被拒")
+    void outOfRangeTimestampRejected() {
+        TimestampTracker tracker = trackerAt(NOW);
+
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, -1)).isFalse();
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, MavlinkSigner.MAX_TIMESTAMP_48 + 1))
+                .isFalse();
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, MavlinkSigner.MAX_TIMESTAMP_48)).isTrue();
+    }
+
+    @Test
+    @DisplayName("reset 清空所有流基准；未知流的 lastKnown 返回 null")
+    void resetClearsStreams() {
+        TimestampTracker tracker = trackerAt(NOW);
+        TimestampTracker.StreamKey key = new TimestampTracker.StreamKey(LINK_ID, SYSID, COMPID);
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 500)).isTrue();
+        assertThat(tracker.lastKnown(key)).isEqualTo(500);
+
+        tracker.reset();
+
+        assertThat(tracker.trackedStreams()).isZero();
+        assertThat(tracker.lastKnown(key)).isNull();
+        // 清空后同一下降时间戳作为"新流"重新被接受
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 400)).isTrue();
+    }
+
+    @Test
+    @DisplayName("默认构造器用系统时钟换算的官方 tick，可正常接受递增值")
+    void defaultConstructorUsesWallClock() {
         TimestampTracker tracker = new TimestampTracker();
+        long now = MavlinkSigner.currentSigningTimestamp();
 
-        // linkId=1 基准 = 1000
-        assertTrue(tracker.check(1, 1000L), "linkId=1 首次 timestamp 应被接受");
-
-        // linkId=2 基准 = 500（独立于 linkId=1）
-        assertTrue(tracker.check(2, 500L), "linkId=2 首次 timestamp 应被接受");
-
-        // linkId=1 回退到 400（回退 600 > 500），应被拒绝
-        assertFalse(tracker.check(1, 400L), "linkId=1 大回退应被拒绝");
-
-        // linkId=2 回退到 400（回退 100 ≤ 500），应被接受（不受 linkId=1 影响）
-        assertTrue(tracker.check(2, 400L), "linkId=2 小回退应被接受（独立于 linkId=1）");
-
-        // linkId=3 首次 timestamp，不受其他 linkId 影响
-        assertTrue(tracker.check(3, 100L), "linkId=3 首次 timestamp 应被接受");
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, now)).isTrue();
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, now)).isFalse();
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, now + 1)).isTrue();
     }
 }

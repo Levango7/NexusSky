@@ -1,5 +1,7 @@
 package io.aerofleet.mavlink;
 
+import io.aerofleet.mavlink.security.MavlinkSigner;
+
 import java.nio.ByteBuffer;
 
 /**
@@ -69,10 +71,9 @@ public final class MavlinkParser {
                 msgId = buffer.get(pos + 5) & 0xFF;
             }
 
-            // 签名块长度必须与实际读取范围一致：本仓 v2 签名布局为
-            // LINK_ID(1) + TIMESTAMP(6) + SIGNATURE(8) = 15 字节（MavlinkFrame.SIGNATURE_DATA_LENGTH）。
-            // 此前这里硬编码 13，导致 totalLen 少算 2 字节：签名帧之后的下一帧错位 2 字节，
-            // 且签名帧位于缓冲区末尾时边界校验按 13 通过、实际却读到 15（越界风险）。
+            // 签名块长度取自 MavlinkFrame.SIGNATURE_DATA_LENGTH（官方 = 13：linkId 1 +
+            // timestamp 6 + sha256_48 签名 6），totalLen 必须与实际读取范围一致，否则
+            // 签名帧之后的下一帧会错位、且缓冲区末尾的边界校验会假通过（越界风险）。
             int sigLen = ((incompat & 0x01) != 0) ? MavlinkFrame.SIGNATURE_DATA_LENGTH : 0;
             int totalLen = headerLen + payloadLen + 2 + sigLen;
             if (buffer.remaining() < totalLen) {
@@ -106,14 +107,14 @@ public final class MavlinkParser {
             if (stx == MavlinkFrame.STX_V2 && (incompat & 0x01) != 0) {
                 int sigOffset = pos + headerLen + payloadLen + 2; // CRC 之后
                 linkId = buffer.get(sigOffset) & 0xFF;
-                timestamp = ((long) (buffer.get(sigOffset + 1) & 0xFF) << 40)
-                        | ((long) (buffer.get(sigOffset + 2) & 0xFF) << 32)
-                        | ((long) (buffer.get(sigOffset + 3) & 0xFF) << 24)
-                        | ((long) (buffer.get(sigOffset + 4) & 0xFF) << 16)
-                        | ((long) (buffer.get(sigOffset + 5) & 0xFF) << 8)
-                        | ((long) (buffer.get(sigOffset + 6) & 0xFF));
-                signature = new byte[8];
-                for (int i = 0; i < 8; i++) {
+                byte[] tsBytes = new byte[6];
+                for (int i = 0; i < 6; i++) {
+                    tsBytes[i] = buffer.get(sigOffset + 1 + i);
+                }
+                // 时间戳与签名的字节序/长度只在 MavlinkSigner 里定义一次
+                timestamp = MavlinkSigner.readTimestampLittleEndian(tsBytes, 0);
+                signature = new byte[MavlinkSigner.SIGNATURE_LENGTH];
+                for (int i = 0; i < signature.length; i++) {
                     signature[i] = buffer.get(sigOffset + 7 + i);
                 }
             }

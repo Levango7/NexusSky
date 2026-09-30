@@ -8,6 +8,7 @@ import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.Heartbeat;
 import io.aerofleet.mavlink.security.MavlinkSignatureConfig;
 import io.aerofleet.mavlink.security.MavlinkSigner;
+import io.aerofleet.mavlink.security.MavlinkSignerFactory;
 import io.aerofleet.mavlink.security.SigningKeyManager;
 import io.aerofleet.mavlink.security.TimestampTracker;
 import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
@@ -75,9 +76,9 @@ public class UdpGateway {
 
     // ==================== MAVLink v2 签名组件（可选注入） ====================
 
-    /** 签名器：提供 HMAC-SHA256 签名与验证功能。 */
+    /** 签名器工厂：按 sysid 取对应口令的签名器（单机全局口令与多机密钥库走同一路径）。 */
     @Autowired(required = false)
-    private MavlinkSigner mavlinkSigner;
+    private MavlinkSignerFactory signerFactory;
 
     /** 密钥管理器：提供 sysid→密钥与 linkId 映射。 */
     @Autowired(required = false)
@@ -329,13 +330,13 @@ public class UdpGateway {
      */
     private boolean isSigningEnabled() {
         return signatureConfig != null && signatureConfig.isEnabled()
-                && mavlinkSigner != null && signingKeyManager != null;
+                && signerFactory != null && signingKeyManager != null;
     }
 
     /**
-     * 发送路径签名：对帧附加 HMAC-SHA256 签名。
+     * 发送路径签名：对帧附加 13 字节官方签名块。
      * <p>
-     * 流程：从 keyManager 获取 linkId → 计算 timestamp → 构造临时签名帧获取 frameBytes →
+     * 流程：从 keyManager 取该 sysid 的口令与 linkId → 计算 timestamp → 构造临时签名帧获取 frameBytes →
      * signer.sign() 计算签名 → 构造最终签名帧。
      * <p>
      * 降级条件（返回 null，调用方发送未签名帧）：
@@ -358,7 +359,8 @@ public class UdpGateway {
             }
 
             int linkId = keyEntry.linkId();
-            long timestamp = System.currentTimeMillis() / 10;
+            // 官方签名时间戳：48 位、单位 10 微秒、纪元 2015-01-01
+            long timestamp = MavlinkSigner.currentSigningTimestamp();
 
             // 获取 CRC_EXTRA（通过 msgId 查找消息定义）
             int crcExtra = MavlinkMessageInfo.crcExtraOf(frame.getMessageId());
@@ -370,8 +372,13 @@ public class UdpGateway {
                     linkId, timestamp, null);
             byte[] frameBytes = tempFrame.encodeV2();
 
-            // 计算 HMAC-SHA256 签名
-            byte[] signature = mavlinkSigner.sign(frameBytes, linkId, timestamp);
+            // 计算官方 sha256_48 签名：口令按目标 sysid 取（多机密钥模式下各机可不同）
+            MavlinkSigner signer = signerFactory.signerFor(keyEntry);
+            if (signer == null) {
+                log.warn("签名降级：sysid={} 密钥条目里没有可用口令，发送未签名帧", sysid);
+                return null;
+            }
+            byte[] signature = signer.sign(frameBytes, linkId, timestamp);
             if (signature == null) {
                 log.warn("签名降级：sysid={} 签名计算返回 null，发送未签名帧", sysid);
                 return null;
@@ -428,16 +435,25 @@ public class UdpGateway {
             long timestamp = frame.getTimestamp();
             byte[] signature = frame.getSignature();
 
-            // 验证签名
-            if (!mavlinkSigner.verify(frameBytes, linkId, timestamp, signature)) {
+            // 验证签名：口令按来源 sysid 取；取不到口令时拒绝（不拿别的机的口令去验，
+            // 否则等于把一个未知来源的帧当成本机队成员放行）
+            MavlinkSigner signer = signerFactory.signerFor(frame.getSystemId());
+            if (signer == null) {
+                signingStats.rejected++;
+                log.warn("签名验证拒绝：sysid={} 无可用密钥（msgId={}），按未授权帧丢弃",
+                        frame.getSystemId(), frame.getMessageId());
+                return false;
+            }
+            if (!signer.verify(frameBytes, linkId, timestamp, signature)) {
                 signingStats.rejected++;
                 log.warn("签名验证失败：sysid={} linkId={} msgId={}",
                         frame.getSystemId(), linkId, frame.getMessageId());
                 return false;
             }
 
-            // 验证 timestamp（重放攻击防护）
-            if (timestampTracker != null && !timestampTracker.check(linkId, timestamp)) {
+            // 验证 timestamp（重放攻击防护，官方按 linkId+sysid+compid 分流且要求严格递增）
+            if (timestampTracker != null && !timestampTracker.check(linkId, frame.getSystemId(),
+                    frame.getComponentId(), timestamp)) {
                 signingStats.rejected++;
                 log.warn("Timestamp 校验失败（疑似重放）：sysid={} linkId={} timestamp={}",
                         frame.getSystemId(), linkId, timestamp);

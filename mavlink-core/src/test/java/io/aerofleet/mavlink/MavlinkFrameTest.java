@@ -24,8 +24,9 @@ class MavlinkFrameTest {
     private static final byte[] TEST_PAYLOAD = new byte[]{(byte)4, (byte)2, (byte)12, (byte)0, (byte)209, (byte)0, (byte)3, (byte)0, (byte)0};
     private static final int TEST_LINK_ID = 1;
     private static final long TEST_TIMESTAMP = 12345L;
+    /** 官方 sha256_48 签名 = 6 字节。 */
     private static final byte[] TEST_SIGNATURE = new byte[]{
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06
     };
 
     // ========== 1. encodeV2SignedProducesCorrectFormat ==========
@@ -40,10 +41,9 @@ class MavlinkFrameTest {
         byte[] encoded = frame.encodeV2();
         int len = TEST_PAYLOAD.length;
 
-        // 长度 = 12 (header) + LEN (payload) + 2 (CRC) + 13 (signature data) = 27 + LEN
-        // 但任务描述说 25+LEN，让我验证：STX(1)+LEN(1)+INC(1)+COMPAT(1)+SEQ(1)+SID(1)+CID(1)+MSGID(3) = 10
-        // + PAYLOAD(LEN) + CRC(2) + SIG(13) = 10 + LEN + 2 + 13 = 25 + LEN
-        assertEquals(27 + len, encoded.length, "签名帧 encodeV2() 长度应为 27+LEN");
+        // STX(1)+LEN(1)+INC(1)+COMPAT(1)+SEQ(1)+SID(1)+CID(1)+MSGID(3) = 10
+        // + PAYLOAD(LEN) + CRC(2) + 官方签名块(13) = 25 + LEN
+        assertEquals(25 + len, encoded.length, "签名帧 encodeV2() 长度应为 25+LEN");
 
         // STX = 0xFD
         assertEquals(MavlinkFrame.STX_V2, encoded[0] & 0xFF, "STX 应为 0xFD");
@@ -55,18 +55,16 @@ class MavlinkFrameTest {
         int sigOffset = 12 + len; // CRC 后的偏移
         assertEquals(TEST_LINK_ID, encoded[sigOffset] & 0xFF, "linkId 字节应正确");
 
-        // timestamp 6 字节大端
-        long decodedTs = ((long) (encoded[sigOffset + 1] & 0xFF) << 40)
-                | ((long) (encoded[sigOffset + 2] & 0xFF) << 32)
-                | ((long) (encoded[sigOffset + 3] & 0xFF) << 24)
-                | ((long) (encoded[sigOffset + 4] & 0xFF) << 16)
-                | ((long) (encoded[sigOffset + 5] & 0xFF) << 8)
-                | ((long) (encoded[sigOffset + 6] & 0xFF));
-        assertEquals(TEST_TIMESTAMP, decodedTs, "timestamp 字节应正确");
+        // timestamp: 6 字节**小端**（官方 48 位口径，此前按大端写入是与 PX4 不互通的根因之一）
+        long decodedTs = io.aerofleet.mavlink.security.MavlinkSigner
+                .readTimestampLittleEndian(encoded, sigOffset + 1);
+        assertEquals(TEST_TIMESTAMP, decodedTs, "timestamp 应按小端解析");
+        assertEquals((byte) (TEST_TIMESTAMP & 0xFF), encoded[sigOffset + 1],
+                "timestamp 最低位字节应紧随 linkId");
 
-        // signature 8 字节
-        byte[] decodedSig = new byte[8];
-        System.arraycopy(encoded, sigOffset + 7, decodedSig, 0, 8);
+        // signature: 6 字节
+        byte[] decodedSig = new byte[6];
+        System.arraycopy(encoded, sigOffset + 7, decodedSig, 0, 6);
         assertArrayEquals(TEST_SIGNATURE, decodedSig, "signature 字节应正确");
     }
 
@@ -180,8 +178,8 @@ class MavlinkFrameTest {
     void ofSignedCrcConsistent() {
         // 构造两个签名帧，只有签名数据不同（linkId/timestamp/signature 不同），
         // 其他参数相同，CRC 应该一致（因为 CRC 不含签名数据）
-        byte[] sig1 = new byte[]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-        byte[] sig2 = new byte[]{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, (byte)0x88};
+        byte[] sig1 = new byte[]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+        byte[] sig2 = new byte[]{0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
         MavlinkFrame frame1 = MavlinkFrame.ofSigned(
                 1, 1, 0, TEST_MSG_ID, TEST_CRC_EXTRA, TEST_PAYLOAD,

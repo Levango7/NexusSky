@@ -13,8 +13,8 @@ import java.nio.file.Paths;
  * <p>
  * 配置项：
  * <ul>
- *   <li>{@code mavlink.signing.enabled} — 是否启用 HMAC-SHA256 消息签名（默认 false）</li>
- *   <li>{@code mavlink.signing.secret-key} — HMAC 密钥（默认空字符串）</li>
+ *   <li>{@code mavlink.signing.enabled} — 是否启用 MAVLink v2 链路签名（默认 false）</li>
+ *   <li>{@code mavlink.signing.secret-key} — 签名口令（默认空字符串）</li>
  *   <li>{@code mavlink.signing.key-store-path} — 多密钥存储路径（默认空字符串）</li>
  *   <li>{@code mavlink.signing.reject-unsigned} — 是否拒绝未签名消息（默认 true，fail-closed）</li>
  * </ul>

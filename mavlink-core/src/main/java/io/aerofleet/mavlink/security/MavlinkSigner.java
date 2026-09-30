@@ -1,30 +1,52 @@
 package io.aerofleet.mavlink.security;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 
 /**
- * MAVLink 消息签名器：使用 HMAC-SHA256 对消息内容签名与验证。
+ * MAVLink v2 消息签名器：与官方签名规范逐字节对齐（sha256_48）。
  * <p>
- * 支持两种签名模式：
- * <ul>
- *   <li><b>标准协议签名</b>（推荐）：签名输入 = 帧头至 CRC 全部字节 + linkId(1B) + timestamp(6B BE)，
- *       HMAC-SHA256 截取前 8 字节。符合 MAVLink v2 签名规范。</li>
- *   <li><b>简化签名</b>（已废弃）：签名输入 = msgId（4 字节小端）+ payload bytes，
- *       HMAC-SHA256 截取前 8 字节。仅用于向后兼容。</li>
- * </ul>
- * 验证流程：重新计算签名并与传入签名用 {@link MessageDigest#isEqual} 恒定时间比对。
+ * 官方签名块共 <b>13 字节</b>，追加在 CRC 之后：
+ * <pre>
+ *   [0]      linkId        1 字节
+ *   [1..6]   timestamp     6 字节 **小端** 48 位，单位 10 微秒、纪元 2015-01-01T00:00:00Z
+ *   [7..12]  signature     6 字节 = SHA-256(secretKey + frameBytes + 上述 7 字节) 的前 6 字节
+ * </pre>
+ * 其中 {@code frameBytes} 是帧头到 CRC 的全部字节（不含签名块）——即签名覆盖
+ * STX 之后的 LEN/INC/COMPAT/SEQ/SYSID/COMPID/MSGID + payload + CRC，与 pymavlink 的
+ * {@code sign_packet()} 同一输入序列。
+ * <p>
+ * <b>此前的实现为什么是错的</b>：旧版用 HMAC-SHA256 截取前 8 字节、时间戳按大端写入，
+ * 签名块共 15 字节。哈希构造（HMAC 的密钥参与方式）与字段宽度/字节序都不同，
+ * 与 PX4/ArduPilot/pymavlink 混流时既验不过签名、又会因帧长差 2 字节而错帧。
+ * <p>
+ * 与独立参考实现的等价性由 {@code MavlinkSigningVectorTest} 的已知答案向量证明，
+ * 向量由 {@code scripts/mavlink-signing-vectors.py}（pymavlink 打包+签名）生成。
  */
 public class MavlinkSigner {
 
-    public static final int SIGNATURE_LENGTH = 8;
+    /** 官方 sha256_48：取 SHA-256 摘要的前 6 字节作为签名。 */
+    public static final int SIGNATURE_LENGTH = 6;
 
-    private static final String HMAC_ALGORITHM = "HmacSHA256";
+    /** 签名块总长：linkId(1) + timestamp(6) + signature(6)。 */
+    public static final int SIGNATURE_BLOCK_LENGTH = 13;
+
+    /** 签名时间戳的时间戳单位：10 微秒。 */
+    public static final long TICK_MICROSECONDS = 10;
+
+    /** 官方签名时间戳纪元：2015-01-01T00:00:00Z（Unix 毫秒）。 */
+    public static final long EPOCH_2015_MS = 1_420_070_400_000L;
+
+    /** 48 位时间戳上限。 */
+    public static final long MAX_TIMESTAMP_48 = (1L << 48) - 1;
+
+    /** 一毫秒的 tick 数（1ms = 1000µs = 100 × 10µs）。 */
+    private static final long TICKS_PER_MILLISECOND = 1_000 / TICK_MICROSECONDS;
+
+    /** 新流可接受的最大落后量：60 秒（官方 6,000,000 个 10 微秒 tick）。 */
+    public static final long REPLAY_WINDOW_TICKS = 6_000_000L;
 
     private final boolean enabled;
     private final byte[] secretKeyBytes;
@@ -41,9 +63,7 @@ public class MavlinkSigner {
         if (this.enabled && (config.getSecretKey() == null || config.getSecretKey().isEmpty())) {
             throw new IllegalArgumentException("MAVLink signing enabled but secret key is empty");
         }
-        this.secretKeyBytes = config.getSecretKey() == null
-                ? new byte[0]
-                : config.getSecretKey().getBytes(StandardCharsets.UTF_8);
+        this.secretKeyBytes = toKeyBytes(config.getSecretKey());
         this.linkId = 0;
         this.rejectUnsigned = config.isRejectUnsigned();
     }
@@ -52,7 +72,7 @@ public class MavlinkSigner {
      * 直接指定参数构造签名器（便于测试和手动使用）。
      *
      * @param enabled   是否启用签名
-     * @param secretKey HMAC 密钥字符串
+     * @param secretKey 签名口令字符串
      */
     public MavlinkSigner(boolean enabled, String secretKey) {
         this(enabled, secretKey, 0, true);
@@ -62,8 +82,8 @@ public class MavlinkSigner {
      * 全参数构造器。
      *
      * @param enabled        是否启用签名
-     * @param secretKey      HMAC 密钥字符串
-     * @param linkId         链路 ID
+     * @param secretKey      签名口令字符串
+     * @param linkId         默认链路 ID
      * @param rejectUnsigned 是否拒绝未签名消息
      */
     public MavlinkSigner(boolean enabled, String secretKey, int linkId, boolean rejectUnsigned) {
@@ -71,23 +91,21 @@ public class MavlinkSigner {
         if (this.enabled && (secretKey == null || secretKey.isEmpty())) {
             throw new IllegalArgumentException("MAVLink signing enabled but secret key is empty");
         }
-        this.secretKeyBytes = secretKey == null
-                ? new byte[0]
-                : secretKey.getBytes(StandardCharsets.UTF_8);
+        this.secretKeyBytes = toKeyBytes(secretKey);
         this.linkId = linkId;
         this.rejectUnsigned = rejectUnsigned;
     }
 
-    /**
-     * 判断签名是否启用。
-     *
-     * @return true 表示签名已启用
-     */
+    private static byte[] toKeyBytes(String secretKey) {
+        return secretKey == null ? new byte[0] : secretKey.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** 签名是否启用。 */
     public boolean isEnabled() {
         return enabled;
     }
 
-    /** 获取链路 ID。 */
+    /** 默认链路 ID。 */
     public int getLinkId() {
         return linkId;
     }
@@ -97,39 +115,32 @@ public class MavlinkSigner {
         return rejectUnsigned;
     }
 
-    // ==================== 标准协议签名（MAVLink v2 signing） ====================
+    // ==================== 签名与验证 ====================
 
     /**
-     * 标准协议签名：对帧字节计算 8 字节 HMAC-SHA256 签名。
-     * <p>
-     * 签名输入 = frameBytes（帧头至 CRC 全部字节）+ linkId(1B) + timestamp(6B 大端)。
-     * HMAC-SHA256 截取前 8 字节作为签名。
+     * 计算官方 6 字节签名（sha256_48）。
      *
-     * @param frameBytes 帧头至 CRC 的全部字节（不含签名数据）
+     * @param frameBytes 帧头至 CRC 的全部字节（不含签名块）
      * @param linkId     链路 ID
-     * @param timestamp  签名时间戳（10ms tick）
-     * @return 8 字节签名；若签名未启用则返回 null
+     * @param timestamp  签名时间戳（10 微秒 tick，见 {@link #currentSigningTimestamp()}）
+     * @return 6 字节签名；签名未启用时返回 null
      */
     public byte[] sign(byte[] frameBytes, int linkId, long timestamp) {
         if (!enabled) {
             return null;
         }
-        byte[] input = buildStandardSignInput(frameBytes, linkId, timestamp);
-        byte[] hmac = computeHmac(input);
-        return Arrays.copyOf(hmac, SIGNATURE_LENGTH);
+        byte[] input = buildSignInput(frameBytes, linkId, timestamp);
+        return sha256_48(secretKeyBytes, input);
     }
 
     /**
-     * 标准协议签名验证：重算签名并与传入签名用恒定时间比对。
-     * <p>
-     * 使用 {@link MessageDigest#isEqual} 进行恒定时间比较，防止时序攻击（DFX 4.3）。
+     * 验证签名：以恒定时间比对重算结果（{@link MessageDigest#isEqual}）。
      *
-     * @param frameBytes 帧头至 CRC 的全部字节（不含签名数据）
+     * @param frameBytes 帧头至 CRC 的全部字节（不含签名块）
      * @param linkId     链路 ID
-     * @param timestamp  签名时间戳（10ms tick）
-     * @param signature  待验证的 8 字节签名
-     * @return true 表示签名验证通过；签名未启用时也返回 true；
-     *         signature=null 或长度≠8 时返回 false
+     * @param timestamp  签名时间戳（10 微秒 tick）
+     * @param signature  待验证签名，长度必须为 6
+     * @return true 表示通过；签名未启用时也返回 true；signature 为 null 或长度≠6 时 false
      */
     public boolean verify(byte[] frameBytes, int linkId, long timestamp, byte[] signature) {
         if (!enabled) {
@@ -143,101 +154,69 @@ public class MavlinkSigner {
     }
 
     /**
-     * 构造标准协议签名输入数据：frameBytes + linkId(1B) + timestamp(6B 大端)。
-     *
-     * @param frameBytes 帧头至 CRC 的全部字节
-     * @param linkId     链路 ID
-     * @param timestamp  签名时间戳
-     * @return 签名输入字节序列
+     * 官方签名输入序列：{@code frameBytes + linkId(1B) + timestamp(6B 小端)}。
+     * 口令不参与拼接位置，而是在摘要计算时前置（见 {@link #sha256_48}）。
      */
-    private byte[] buildStandardSignInput(byte[] frameBytes, int linkId, long timestamp) {
-        byte[] input = new byte[frameBytes.length + 7];
+    static byte[] buildSignInput(byte[] frameBytes, int linkId, long timestamp) {
+        byte[] input = new byte[frameBytes.length + 1 + 6];
         System.arraycopy(frameBytes, 0, input, 0, frameBytes.length);
         int offset = frameBytes.length;
-        // linkId: 1 byte
         input[offset] = (byte) (linkId & 0xFF);
-        // timestamp: 6 bytes big-endian
-        input[offset + 1] = (byte) ((timestamp >> 40) & 0xFF);
-        input[offset + 2] = (byte) ((timestamp >> 32) & 0xFF);
-        input[offset + 3] = (byte) ((timestamp >> 24) & 0xFF);
-        input[offset + 4] = (byte) ((timestamp >> 16) & 0xFF);
-        input[offset + 5] = (byte) ((timestamp >> 8) & 0xFF);
-        input[offset + 6] = (byte) (timestamp & 0xFF);
-        return input;
-    }
-
-    // ==================== 简化签名（已废弃，向后兼容） ====================
-
-    /**
-     * 对消息计算 8 字节 HMAC-SHA256 签名（简化模式）。
-     * <p>
-     * 签名输入 = msgId（4 字节小端）+ payload bytes。
-     *
-     * @param msgId   MAVLink 消息 ID
-     * @param payload 消息 payload 字节
-     * @return 8 字节签名；若签名未启用则返回 null
-     * @deprecated 使用标准协议签名 {@link #sign(byte[], int, long)} 替代
-     */
-    @Deprecated
-    public byte[] sign(int msgId, byte[] payload) {
-        if (!enabled) {
-            return null;
-        }
-        byte[] input = buildSignInput(msgId, payload);
-        byte[] hmac = computeHmac(input);
-        return Arrays.copyOf(hmac, SIGNATURE_LENGTH);
-    }
-
-    /**
-     * 验证消息签名是否正确（简化模式）。
-     * <p>
-     * 重新计算签名并与传入签名逐字节比对。
-     *
-     * @param msgId     MAVLink 消息 ID
-     * @param payload   消息 payload 字节
-     * @param signature 待验证的 8 字节签名
-     * @return true 表示签名验证通过；签名未启用时也返回 true
-     * @deprecated 使用标准协议签名验证 {@link #verify(byte[], int, long, byte[])} 替代
-     */
-    @Deprecated
-    public boolean verify(int msgId, byte[] payload, byte[] signature) {
-        if (!enabled) {
-            return true;
-        }
-        if (signature == null) {
-            throw new IllegalStateException("签名验证启用但消息不包含签名数据");
-        }
-        if (signature.length != SIGNATURE_LENGTH) {
-            return false;
-        }
-        byte[] expected = sign(msgId, payload);
-        return MessageDigest.isEqual(expected, signature);
-    }
-
-    /**
-     * 构造简化签名输入数据：msgId（4 字节小端）+ payload。
-     */
-    private byte[] buildSignInput(int msgId, byte[] payload) {
-        byte[] input = new byte[4 + payload.length];
-        input[0] = (byte) (msgId & 0xFF);
-        input[1] = (byte) ((msgId >> 8) & 0xFF);
-        input[2] = (byte) ((msgId >> 16) & 0xFF);
-        input[3] = (byte) ((msgId >> 24) & 0xFF);
-        System.arraycopy(payload, 0, input, 4, payload.length);
+        writeTimestampLittleEndian(timestamp, input, offset + 1);
         return input;
     }
 
     /**
-     * 计算 HMAC-SHA256。
+     * 计算 sha256_48：{@code SHA-256(secretKey + data)} 的前 6 字节。
+     * <p>
+     * 注意是"口令前置后整体求摘要"，不是 HMAC——HMAC 有两次密钥混合与分块填充，
+     * 结果必然与官方不同，这一点就是旧实现无法互通的根因。
      */
-    private byte[] computeHmac(byte[] data) {
+    static byte[] sha256_48(byte[] secretKey, byte[] data) {
         try {
-            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
-            SecretKeySpec keySpec = new SecretKeySpec(secretKeyBytes, HMAC_ALGORITHM);
-            mac.init(keySpec);
-            return mac.doFinal(data);
-        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            throw new IllegalStateException("HMAC-SHA256 not available", e);
+            MessageDigest sha = MessageDigest.getInstance("SHA-256");
+            sha.update(secretKey);
+            sha.update(data);
+            return Arrays.copyOf(sha.digest(), SIGNATURE_LENGTH);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 not available", e);
         }
+    }
+
+    // ==================== 时间戳：单位与字节序的唯一出处 ====================
+
+    /**
+     * 当前签名时间戳：自 2015-01-01T00:00:00Z 起、以 10 微秒为单位的 48 位计数。
+     * <p>
+     * 由毫秒时钟换算，因此实际粒度是 1 毫秒（100 tick）。官方只要求同一条流上严格
+     * 递增（{@code TimestampTracker} 负责），粒度粗不会让对端拒收，但连续毫秒内多发
+     * 几帧时会出现相同 tick——调用方若要在同一毫秒内发多帧，应自行递增并写入
+     * （pymavlink 每发一帧 {@code timestamp += 1}）。
+     *
+     * @return 48 位范围内的 tick 值；系统时钟早于 2015 纪元时返回 0
+     */
+    public static long currentSigningTimestamp() {
+        long millisSinceEpoch = System.currentTimeMillis() - EPOCH_2015_MS;
+        if (millisSinceEpoch <= 0) {
+            return 0;
+        }
+        return Math.min(millisSinceEpoch * TICKS_PER_MILLISECOND, MAX_TIMESTAMP_48);
+    }
+
+    /** 把 48 位时间戳按**小端**写入 buf 的 offset 起 6 个字节。 */
+    public static void writeTimestampLittleEndian(long timestamp, byte[] buf, int offset) {
+        long value = timestamp & MAX_TIMESTAMP_48;
+        for (int i = 0; i < 6; i++) {
+            buf[offset + i] = (byte) ((value >> (8 * i)) & 0xFF);
+        }
+    }
+
+    /** 从 buf 的 offset 起读 6 字节**小端** 48 位时间戳。 */
+    public static long readTimestampLittleEndian(byte[] buf, int offset) {
+        long value = 0;
+        for (int i = 0; i < 6; i++) {
+            value |= (buf[offset + i] & 0xFFL) << (8 * i);
+        }
+        return value;
     }
 }

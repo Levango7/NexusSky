@@ -1,9 +1,11 @@
 package io.aerofleet.mavlink;
 
+import io.aerofleet.mavlink.security.MavlinkSigner;
+
 /**
  * MAVLink v2.0 帧（STX=0xFD）的不可变表示。
  * 线上布局：STX | LEN | INC | COMPAT | SEQ | SID | CID | MSGID(3B LE) | PAYLOAD | CRC(2B LE)。
- * 签名帧在 CRC 后追加 13 字节：LINK_ID(1B) | TIMESTAMP(6B BE) | SIGNATURE(8B)。
+ * 签名帧在 CRC 后追加官方 13 字节：LINK_ID(1B) | TIMESTAMP(6B 小端) | SIGNATURE(6B sha256_48)。
  * v1 帧（STX=0xFE，无 INC/COMPAT，MSGID 单字节）由 Parser 解析后统一为本表示。
  */
 public final class MavlinkFrame {
@@ -11,8 +13,8 @@ public final class MavlinkFrame {
     public static final int STX_V2 = 0xFD;
     public static final int STX_V1 = 0xFE;
 
-    /** 签名数据长度：linkId(1B) + timestamp(6B) + signature(8B) = 15B */
-    public static final int SIGNATURE_DATA_LENGTH = 15;
+    /** 官方签名块长度：linkId(1B) + timestamp(6B) + signature(6B) = 13B */
+    public static final int SIGNATURE_DATA_LENGTH = 13;
 
     private final int payloadLength;
     private final int incompatibilityFlags;
@@ -43,7 +45,7 @@ public final class MavlinkFrame {
      * @param crc                 CRC-16/X.25
      * @param linkId              链路 ID（签名帧用，非签名帧为 0）
      * @param timestamp           签名时间戳（签名帧用，非签名帧为 0）
-     * @param signature           8 字节签名（签名帧用，非签名帧为 null）
+     * @param signature           6 字节 sha256_48 签名（签名帧用，非签名帧为 null）
      */
     public MavlinkFrame(int payloadLength, int incompatibilityFlags, int compatibilityFlags,
                         int sequence, int systemId, int componentId, int messageId,
@@ -110,8 +112,8 @@ public final class MavlinkFrame {
      * @param crcExtra    CRC_EXTRA 字节
      * @param payload     payload 字节
      * @param linkId      链路 ID
-     * @param timestamp   签名时间戳（10ms tick）
-     * @param signature   8 字节 HMAC-SHA256 签名
+     * @param timestamp   签名时间戳（10 微秒 tick，自 2015-01-01；见 MavlinkSigner#currentSigningTimestamp）
+     * @param signature   6 字节 sha256_48 签名
      * @return 签名帧实例
      */
     public static MavlinkFrame ofSigned(int systemId, int componentId, int sequence,
@@ -120,8 +122,9 @@ public final class MavlinkFrame {
         if (payload != null && payload.length > 255) {
             throw new IllegalArgumentException("MAVLink payload exceeds 255 bytes: " + payload.length);
         }
-        if (signature != null && signature.length != 8) {
-            throw new IllegalArgumentException("Signature must be 8 bytes, got: " + signature.length);
+        if (signature != null && signature.length != MavlinkSigner.SIGNATURE_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Signature must be " + MavlinkSigner.SIGNATURE_LENGTH + " bytes, got: " + signature.length);
         }
         int crc = MavlinkCrc.init();
         crc = MavlinkCrc.accumulate(crc, payload.length);
@@ -171,15 +174,10 @@ public final class MavlinkFrame {
             int sigOffset = 12 + len;
             // linkId: 1 byte
             buf[sigOffset] = (byte) (linkId & 0xFF);
-            // timestamp: 6 bytes big-endian
-            buf[sigOffset + 1] = (byte) ((timestamp >> 40) & 0xFF);
-            buf[sigOffset + 2] = (byte) ((timestamp >> 32) & 0xFF);
-            buf[sigOffset + 3] = (byte) ((timestamp >> 24) & 0xFF);
-            buf[sigOffset + 4] = (byte) ((timestamp >> 16) & 0xFF);
-            buf[sigOffset + 5] = (byte) ((timestamp >> 8) & 0xFF);
-            buf[sigOffset + 6] = (byte) (timestamp & 0xFF);
-            // signature: 8 bytes
-            System.arraycopy(signature, 0, buf, sigOffset + 7, 8);
+            // timestamp: 6 bytes little-endian（官方 48 位口径）
+            MavlinkSigner.writeTimestampLittleEndian(timestamp, buf, sigOffset + 1);
+            // signature: 6 bytes (sha256_48)
+            System.arraycopy(signature, 0, buf, sigOffset + 7, MavlinkSigner.SIGNATURE_LENGTH);
         }
         return buf;
     }
@@ -232,14 +230,9 @@ public final class MavlinkFrame {
         if ((inc & 0x01) != 0) {
             int sigOffset = 12 + len;
             linkId = raw[sigOffset] & 0xFF;
-            timestamp = ((long) (raw[sigOffset + 1] & 0xFF) << 40)
-                    | ((long) (raw[sigOffset + 2] & 0xFF) << 32)
-                    | ((long) (raw[sigOffset + 3] & 0xFF) << 24)
-                    | ((long) (raw[sigOffset + 4] & 0xFF) << 16)
-                    | ((long) (raw[sigOffset + 5] & 0xFF) << 8)
-                    | ((long) (raw[sigOffset + 6] & 0xFF));
-            signature = new byte[8];
-            System.arraycopy(raw, sigOffset + 7, signature, 0, 8);
+            timestamp = MavlinkSigner.readTimestampLittleEndian(raw, sigOffset + 1);
+            signature = new byte[MavlinkSigner.SIGNATURE_LENGTH];
+            System.arraycopy(raw, sigOffset + 7, signature, 0, MavlinkSigner.SIGNATURE_LENGTH);
         }
 
         return new MavlinkFrame(len, inc, compat, seq, sid, cid, msgId,
@@ -292,7 +285,7 @@ public final class MavlinkFrame {
         return timestamp;
     }
 
-    /** 获取 8 字节签名数据（签名帧用，非签名帧为 null）。 */
+    /** 获取 6 字节 sha256_48 签名数据（签名帧用，非签名帧为 null）。 */
     public byte[] getSignature() {
         return signature;
     }
