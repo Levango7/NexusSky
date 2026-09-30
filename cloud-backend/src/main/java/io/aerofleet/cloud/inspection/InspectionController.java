@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 无人机集群智能巡检 REST API。
@@ -37,6 +39,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/inspection")
 @Tag(name = "Inspection", description = "无人机集群智能巡检 REST API：任务管理、航线规划、异常检测、报告生成")
+@RequireRole(Role.OBSERVER)
 public class InspectionController {
 
     private static final Logger log = LoggerFactory.getLogger(InspectionController.class);
@@ -79,6 +82,7 @@ public class InspectionController {
         @ApiResponse(responseCode = "400", description = "模板不存在或参数非法")
     })
     @PostMapping("/tasks")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> createTask(@RequestBody CreateTaskRequest req) {
         if (req.templateId == null || req.templateId.isBlank()) {
             throw new BadRequestException("templateId is required");
@@ -131,6 +135,7 @@ public class InspectionController {
     /** 启动巡检。 */
     @Operation(summary = "启动巡检任务")
     @PostMapping("/tasks/{id}/start")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> startTask(@PathVariable("id") String id) {
         InspectionTask task = taskService.startTask(id);
         return taskSummary(task);
@@ -139,6 +144,7 @@ public class InspectionController {
     /** 中止巡检。 */
     @Operation(summary = "中止巡检任务")
     @PostMapping("/tasks/{id}/abort")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> abortTask(@PathVariable("id") String id) {
         InspectionTask task = taskService.abortTask(id);
         return taskSummary(task);

@@ -18,6 +18,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 限飞区 REST API：限飞区列表查询、缓存状态、手动刷新、拦截日志查询。
@@ -33,6 +35,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/geofence")
 @Tag(name = "Restriction", description = "限飞区 REST API：限飞区列表、缓存状态、手动刷新、拦截日志查询")
+@RequireRole(Role.OBSERVER)
 public class RestrictionController {
 
     private static final Logger log = LoggerFactory.getLogger(RestrictionController.class);
@@ -91,6 +94,7 @@ public class RestrictionController {
         @ApiResponse(responseCode = "200", description = "刷新结果")
     })
     @PostMapping("/restriction/refresh")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> refreshRestrictionCache() {
         long beforeCount = cacheManager.getRestrictionZones().size();
         boolean wasStale = cacheManager.isStale();

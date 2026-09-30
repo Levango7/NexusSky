@@ -19,6 +19,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * Webhook 管理端点。
@@ -41,6 +43,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/webhooks")
+@RequireRole(Role.OBSERVER)
 public class WebhookController {
 
     private static final Logger log = LoggerFactory.getLogger(WebhookController.class);
@@ -57,6 +60,7 @@ public class WebhookController {
      * @return 已注册的 webhook 信息
      */
     @PostMapping
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> register(@RequestBody Map<String, Object> body) {
         if (webhookService == null) {
             return errorResponse(HttpStatus.SERVICE_UNAVAILABLE,
@@ -149,6 +153,7 @@ public class WebhookController {
      * @return 注销结果
      */
     @DeleteMapping("/{id}")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> unregister(@PathVariable Long id) {
         if (webhookService == null) {
             return errorResponse(HttpStatus.SERVICE_UNAVAILABLE,

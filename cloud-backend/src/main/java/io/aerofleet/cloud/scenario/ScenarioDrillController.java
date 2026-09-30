@@ -22,6 +22,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 场景演练 REST API（P0-2 应急救援场景库）。
@@ -39,6 +41,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/scenarios/drill")
 @Tag(name = "ScenarioDrill", description = "应急救援场景演练：模拟执行与评估报告")
+@RequireRole(Role.OBSERVER)
 public class ScenarioDrillController {
 
     private static final Logger log = LoggerFactory.getLogger(ScenarioDrillController.class);
@@ -65,6 +68,7 @@ public class ScenarioDrillController {
             @ApiResponse(responseCode = "200", description = "演练评估报告"),
             @ApiResponse(responseCode = "404", description = "模板不存在")
     })
+    @RequireRole(Role.OPERATOR)
     public DrillResult drill(@PathVariable("templateId") String templateId) {
         ScenarioTemplate template = templateController.get(templateId);
         String drillId = "drill-" + UUID.randomUUID().toString().substring(0, 8);

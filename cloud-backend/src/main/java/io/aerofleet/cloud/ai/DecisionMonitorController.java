@@ -2,10 +2,13 @@ package io.aerofleet.cloud.ai;
 
 import org.springframework.web.bind.annotation.*;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /** M11 决策监控 REST API */
 @RestController
 @RequestMapping("/api/v1/ai")
+@RequireRole(Role.OBSERVER)
 public class DecisionMonitorController {
     private final DecisionMonitorService service;
 

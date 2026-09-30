@@ -28,6 +28,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 安防设备 REST API。
@@ -48,6 +50,7 @@ import java.util.concurrent.TimeUnit;
 @RestController
 @RequestMapping("/api/v1/surveillance")
 @Tag(name = "Surveillance", description = "安防设备 REST API：ONVIF 设备全生命周期管理、RTSP 流、PTZ 控制、事件订阅")
+@RequireRole(Role.OBSERVER)
 public class SurveillanceController {
 
     private static final Logger log = LoggerFactory.getLogger(SurveillanceController.class);
@@ -102,6 +105,7 @@ public class SurveillanceController {
         @ApiResponse(responseCode = "400", description = "参数错误")
     })
     @PostMapping("/devices")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> registerDevice(@RequestBody JsonNode body) {
         String id = body.path("id").asText("");
         String name = body.path("name").asText("");
@@ -176,6 +180,7 @@ public class SurveillanceController {
         @ApiResponse(responseCode = "404", description = "设备不存在")
     })
     @DeleteMapping("/devices/{id}")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> unregisterDevice(@PathVariable("id") String id) {
         SurveillanceDevice removed = registry.unregister(id);
         if (removed == null) {
@@ -229,6 +234,7 @@ public class SurveillanceController {
         @ApiResponse(responseCode = "502", description = "PTZ 控制失败")
     })
     @PostMapping("/devices/{id}/ptz")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> ptzControl(@PathVariable("id") String id,
                                                           @RequestBody JsonNode body) {
         SurveillanceDevice d = registry.getDevice(id);
@@ -261,6 +267,7 @@ public class SurveillanceController {
         @ApiResponse(responseCode = "502", description = "发现失败")
     })
     @PostMapping("/discover")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> discover(@RequestBody JsonNode body) {
         String subnet = body.path("subnet").asText("");
         if (subnet.isBlank()) {
@@ -307,6 +314,7 @@ public class SurveillanceController {
         @ApiResponse(responseCode = "502", description = "部署失败")
     })
     @PostMapping("/rapid-deploy")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> rapidDeploy(@RequestBody JsonNode body) {
         String subnet = body.path("subnet").asText("");
         String username = body.path("username").asText("");
@@ -346,6 +354,7 @@ public class SurveillanceController {
         @ApiResponse(responseCode = "502", description = "扫描失败")
     })
     @PostMapping("/scan")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> scan(@RequestBody JsonNode body) {
         String subnet = body.path("subnet").asText("");
         if (subnet.isBlank()) {

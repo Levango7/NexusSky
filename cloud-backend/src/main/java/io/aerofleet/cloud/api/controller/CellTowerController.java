@@ -42,6 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @RestController
 @RequestMapping("/api/v1/celltowers")
+@RequireRole(Role.OBSERVER)
 public class CellTowerController {
 
     private static final Logger log = LoggerFactory.getLogger(CellTowerController.class);

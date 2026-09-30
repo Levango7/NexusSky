@@ -38,6 +38,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/spray")
+@RequireRole(Role.OBSERVER)
 public class SprayController {
 
     /** 喷洒任务最少航点数（起点 + 终点）。 */

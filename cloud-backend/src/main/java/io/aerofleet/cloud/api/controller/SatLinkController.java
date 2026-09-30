@@ -36,6 +36,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/sat-link")
+@RequireRole(Role.OBSERVER)
 public class SatLinkController {
 
     private final SatLinkMonitorService monitorService;

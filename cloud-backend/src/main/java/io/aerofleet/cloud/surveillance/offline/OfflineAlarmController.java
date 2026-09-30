@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 安防设备离线自治 REST API。
@@ -47,6 +49,7 @@ import java.util.Set;
 @RestController
 @RequestMapping("/api/v1/offline-alarm")
 @Tag(name = "OfflineAlarm", description = "安防设备离线自治 REST API")
+@RequireRole(Role.OBSERVER)
 public class OfflineAlarmController {
 
     private static final Logger log = LoggerFactory.getLogger(OfflineAlarmController.class);
@@ -81,6 +84,7 @@ public class OfflineAlarmController {
             @ApiResponse(responseCode = "503", description = "离线报警缓存服务不可用（依赖未注入）")
     })
     @PostMapping("/batch-upload")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> batchUpload(@RequestBody JsonNode body) {
         if (offlineAlarmCache == null) {
             return serviceUnavailable("OfflineAlarmCache is not available");
@@ -181,6 +185,7 @@ public class OfflineAlarmController {
             @ApiResponse(responseCode = "503", description = "离线报警缓存服务不可用（依赖未注入）")
     })
     @PostMapping("/flush")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> flush() {
         if (offlineAlarmCache == null) {
             return serviceUnavailable("OfflineAlarmCache is not available");
@@ -219,6 +224,7 @@ public class OfflineAlarmController {
             @ApiResponse(responseCode = "503", description = "边缘 AI 触发服务不可用（依赖未注入）")
     })
     @PostMapping("/edge-ai/trigger")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> triggerEdgeAi(@RequestBody JsonNode body) {
         if (edgeAiTrigger == null) {
             return serviceUnavailable("EdgeAiTrigger is not available");
@@ -287,6 +293,7 @@ public class OfflineAlarmController {
             @ApiResponse(responseCode = "503", description = "边缘 AI 触发服务不可用（依赖未注入）")
     })
     @PostMapping("/edge-ai/configure")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> configureEdgeAi(@RequestBody JsonNode body) {
         if (edgeAiTrigger == null) {
             return serviceUnavailable("EdgeAiTrigger is not available");

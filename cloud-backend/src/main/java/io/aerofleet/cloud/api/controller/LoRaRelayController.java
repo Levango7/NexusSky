@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * LoRa 回传报警 REST 端点。
@@ -35,6 +37,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/loRa")
 @Tag(name = "LoRaRelay", description = "LoRa 回传报警 REST API：接收布控球经无人机 mesh 路由的回传告警")
+@RequireRole(Role.OBSERVER)
 public class LoRaRelayController {
 
     private final LoRaRelayService loRaRelayService;
@@ -58,6 +61,7 @@ public class LoRaRelayController {
             @ApiResponse(responseCode = "503", description = "LoRa 回传服务不可用（依赖未注入）")
     })
     @PostMapping("/alarm")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> receiveLoRaAlarm(@RequestBody @Valid LoRaAlarmDto dto) {
         if (loRaRelayService == null) {
             Map<String, Object> result = new LinkedHashMap<>();

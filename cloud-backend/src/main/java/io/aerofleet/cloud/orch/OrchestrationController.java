@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 编排计划 REST 端点。
@@ -43,6 +45,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/orch")
+@RequireRole(Role.OBSERVER)
 public class OrchestrationController {
 
     private final OrchestrationPlanService planService;
@@ -56,6 +59,7 @@ public class OrchestrationController {
 
     /** 创建编排计划。 */
     @PostMapping("/plans")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> createPlan(@RequestBody CreatePlanRequest req) {
         List<TaskStepEntity> stepEntities = new ArrayList<>();
         if (req.getSteps() != null) {
@@ -97,6 +101,7 @@ public class OrchestrationController {
 
     /** 启动计划。 */
     @PostMapping("/plans/{planId}/start")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> startPlan(@PathVariable("planId") Long planId) {
         planService.startPlan(planId);
         Map<String, Object> result = new LinkedHashMap<>();
@@ -107,6 +112,7 @@ public class OrchestrationController {
 
     /** 暂停计划。 */
     @PostMapping("/plans/{planId}/pause")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> pausePlan(@PathVariable("planId") Long planId) {
         planService.pausePlan(planId);
         Map<String, Object> result = new LinkedHashMap<>();
@@ -117,6 +123,7 @@ public class OrchestrationController {
 
     /** 恢复计划。 */
     @PostMapping("/plans/{planId}/resume")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> resumePlan(@PathVariable("planId") Long planId) {
         planService.resumePlan(planId);
         Map<String, Object> result = new LinkedHashMap<>();
@@ -127,6 +134,7 @@ public class OrchestrationController {
 
     /** 中止计划。 */
     @PostMapping("/plans/{planId}/abort")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> abortPlan(@PathVariable("planId") Long planId) {
         planService.abortPlan(planId);
         Map<String, Object> result = new LinkedHashMap<>();

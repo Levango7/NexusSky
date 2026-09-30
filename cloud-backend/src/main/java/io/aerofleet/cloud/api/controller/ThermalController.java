@@ -24,6 +24,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/thermal")
+@RequireRole(Role.OBSERVER)
 public class ThermalController {
 
     private final ThermalTaskService service;

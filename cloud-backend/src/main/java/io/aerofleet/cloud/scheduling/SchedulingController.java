@@ -14,6 +14,7 @@ import java.util.Map;
 /** M10 集群调度 REST API */
 @RestController
 @RequestMapping("/api/v1/scheduling")
+@RequireRole(Role.OBSERVER)
 public class SchedulingController {
     private static final Logger log = LoggerFactory.getLogger(SchedulingController.class);
 
@@ -49,6 +50,7 @@ public class SchedulingController {
     }
 
     @PostMapping("/conflicts/check")
+    @RequireRole(Role.OPERATOR)
     public ConflictAvoidanceService.ConflictResult checkConflict(@RequestBody Map<String, Number> body) {
         // P3-fix(Minor): 缺少字段时返回 400 而非 NPE 导致的 500
         String[] required = {"lat1", "lon1", "alt1", "v1", "h1", "lat2", "lon2", "alt2", "v2", "h2"};

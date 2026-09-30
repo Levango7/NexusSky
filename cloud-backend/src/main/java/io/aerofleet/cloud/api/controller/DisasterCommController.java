@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 灾害通信监控 REST 控制器（P2 灾害应急通讯组网扩展）。
@@ -27,6 +29,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/disaster")
+@RequireRole(Role.OBSERVER)
 public class DisasterCommController {
 
     private final DisasterCommService service;
@@ -43,6 +46,7 @@ public class DisasterCommController {
 
     /** 手动激活灾害模式。 */
     @PostMapping("/activate")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> activate() {
         Map<String, Object> status = service.activateDisasterMode();
         Map<String, Object> result = new LinkedHashMap<>();
@@ -55,6 +59,7 @@ public class DisasterCommController {
 
     /** 手动退出灾害模式。 */
     @PostMapping("/deactivate")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> deactivate() {
         Map<String, Object> status = service.deactivateDisasterMode();
         Map<String, Object> result = new LinkedHashMap<>();

@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 巡检报告 REST API。
@@ -34,6 +36,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/inspection/reports")
 @Tag(name = "InspectionReport", description = "巡检报告 REST API：报告查询、异常清单、照片列表、导出")
+@RequireRole(Role.OBSERVER)
 public class InspectionReportController {
 
     private static final Logger log = LoggerFactory.getLogger(InspectionReportController.class);
@@ -88,6 +91,7 @@ public class InspectionReportController {
     /** 导出报告（JSON/CSV）。 */
     @Operation(summary = "导出报告", description = "支持 JSON 与 CSV 格式导出")
     @PostMapping("/{taskId}/export")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<String> exportReport(@PathVariable("taskId") String taskId,
                                                 @RequestBody ExportRequest req) {
         String format = req.format == null ? "json" : req.format.toLowerCase();

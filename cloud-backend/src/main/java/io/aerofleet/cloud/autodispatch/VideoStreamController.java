@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 视频流回传 REST API（P0-1 安防报警→无人机自动出警闭环）。
@@ -33,6 +35,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/video-stream")
 @Tag(name = "VideoStream", description = "视频流回传 REST API：无人机 RTSP 流 URL、启停控制、状态查询")
+@RequireRole(Role.OBSERVER)
 public class VideoStreamController {
 
     private static final Logger log = LoggerFactory.getLogger(VideoStreamController.class);
@@ -73,6 +76,7 @@ public class VideoStreamController {
             @ApiResponse(responseCode = "404", description = "无人机未注册")
     })
     @PostMapping("/{sysid}/start")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> start(@PathVariable("sysid") int sysid) {
         VideoStreamService.StreamState state = service.startStream(sysid);
         log.info("video stream start requested: sysid={} status={}", sysid, state.getStatus());
@@ -88,6 +92,7 @@ public class VideoStreamController {
     @Operation(summary = "停止视频流")
     @ApiResponse(responseCode = "200", description = "停止成功")
     @PostMapping("/{sysid}/stop")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> stop(@PathVariable("sysid") int sysid) {
         VideoStreamService.StreamState state = service.stopStream(sysid);
         log.info("video stream stop requested: sysid={} status={}", sysid, state.getStatus());

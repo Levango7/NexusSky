@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 灾害模拟推演 REST API。
@@ -30,6 +32,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/city-twin/simulation")
 @Tag(name = "CityTwin-Simulation", description = "灾害模拟推演：洪水、火灾、地震、疏散模拟及结果查询")
+@RequireRole(Role.OBSERVER)
 public class SimulationController {
 
     private static final Logger log = LoggerFactory.getLogger(SimulationController.class);
@@ -42,6 +45,7 @@ public class SimulationController {
 
     @PostMapping("/flood")
     @Operation(summary = "洪水模拟", description = "基于中心坐标、影响半径、水深和持续时间进行洪水灾害模拟推演")
+    @RequireRole(Role.OPERATOR)
     public DisasterSimulation simulateFlood(
             @RequestParam("centerLat") double centerLat,
             @RequestParam("centerLon") double centerLon,
@@ -59,6 +63,7 @@ public class SimulationController {
 
     @PostMapping("/fire")
     @Operation(summary = "火灾模拟", description = "基于中心坐标、影响半径、风速和持续时间进行火灾灾害模拟推演")
+    @RequireRole(Role.OPERATOR)
     public DisasterSimulation simulateFire(
             @RequestParam("centerLat") double centerLat,
             @RequestParam("centerLon") double centerLon,
@@ -76,6 +81,7 @@ public class SimulationController {
 
     @PostMapping("/earthquake")
     @Operation(summary = "地震模拟", description = "基于中心坐标、震级和持续时间进行地震灾害模拟推演")
+    @RequireRole(Role.OPERATOR)
     public DisasterSimulation simulateEarthquake(
             @RequestParam("centerLat") double centerLat,
             @RequestParam("centerLon") double centerLon,
@@ -95,6 +101,7 @@ public class SimulationController {
 
     @PostMapping("/evacuation")
     @Operation(summary = "疏散模拟", description = "基于中心坐标和疏散半径进行疏散路线规划模拟")
+    @RequireRole(Role.OPERATOR)
     public DisasterSimulation simulateEvacuation(
             @RequestParam("centerLat") double centerLat,
             @RequestParam("centerLon") double centerLon,

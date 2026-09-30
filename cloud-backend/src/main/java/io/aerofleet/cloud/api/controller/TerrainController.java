@@ -32,6 +32,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/terrain")
+@RequireRole(Role.OBSERVER)
 public class TerrainController {
 
     private final TerrainMapService mapService;

@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 历史回放 REST API。
@@ -25,6 +27,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/city-twin/playback")
 @Tag(name = "CityTwin-Playback", description = "历史回放：无人机轨迹回放、告警事件回放、综合态势回放")
+@RequireRole(Role.OBSERVER)
 public class PlaybackController {
 
     private static final Logger log = LoggerFactory.getLogger(PlaybackController.class);

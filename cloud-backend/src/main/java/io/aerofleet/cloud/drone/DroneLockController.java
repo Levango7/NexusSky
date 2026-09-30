@@ -19,6 +19,8 @@ import java.util.Map;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 无人机远程锁定/解锁 REST API。
@@ -38,6 +40,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @Tag(name = "Drone Lock", description = "无人机远程锁定/解锁")
 @RestController
 @RequestMapping("/api/v1/drone-lock")
+@RequireRole(Role.OBSERVER)
 public class DroneLockController {
 
 
@@ -61,6 +64,7 @@ public class DroneLockController {
             @ApiResponse(responseCode = "400", description = "请求参数非法")
     })
     @PostMapping("/{sysid}/lock")
+    @RequireRole(Role.OPERATOR)
     public LockState lock(@PathVariable("sysid") int sysid, @RequestBody LockRequest request) {
         requireRegistered(sysid);
         if (request.getLockedBy() == null || request.getLockedBy().isBlank()) {
@@ -82,6 +86,7 @@ public class DroneLockController {
             @ApiResponse(responseCode = "400", description = "无人机未锁定或参数非法")
     })
     @PostMapping("/{sysid}/unlock")
+    @RequireRole(Role.OPERATOR)
     public LockState unlock(@PathVariable("sysid") int sysid, @RequestBody LockRequest request) {
         requireRegistered(sysid);
         if (request.getUnlockedBy() == null || request.getUnlockedBy().isBlank()) {
@@ -129,6 +134,7 @@ public class DroneLockController {
             @ApiResponse(responseCode = "404", description = "无人机未注册")
     })
     @DeleteMapping("/{sysid}")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> clearLockState(@PathVariable("sysid") int sysid) {
         requireRegistered(sysid);
         lockService.clearLockState(sysid);

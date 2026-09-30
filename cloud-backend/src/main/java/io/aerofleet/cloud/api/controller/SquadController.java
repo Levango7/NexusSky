@@ -26,6 +26,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/squad")
+@RequireRole(Role.OBSERVER)
 public class SquadController {
 
     private static final Logger log = LoggerFactory.getLogger(SquadController.class);

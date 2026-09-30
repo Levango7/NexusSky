@@ -21,6 +21,8 @@ import java.util.Map;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 场景启动 REST API（P0-2 应急救援场景库）。
@@ -37,6 +39,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/scenarios/launch")
 @Tag(name = "ScenarioLaunch", description = "应急救援场景一键启动、状态查询与中止")
+@RequireRole(Role.OBSERVER)
 public class ScenarioLaunchController {
 
     private static final Logger log = LoggerFactory.getLogger(ScenarioLaunchController.class);
@@ -66,6 +69,7 @@ public class ScenarioLaunchController {
             @ApiResponse(responseCode = "200", description = "启动结果"),
             @ApiResponse(responseCode = "404", description = "模板不存在")
     })
+    @RequireRole(Role.OPERATOR)
     public LaunchResult launch(@PathVariable("templateId") String templateId,
                                @RequestBody Map<String, Object> body) {
         ScenarioTemplate template = templateController.get(templateId);
@@ -131,6 +135,7 @@ public class ScenarioLaunchController {
             @ApiResponse(responseCode = "200", description = "中止成功"),
             @ApiResponse(responseCode = "404", description = "启动记录不存在或已结束")
     })
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> abort(@PathVariable("launchId") String launchId) {
         boolean ok = launcherService.abort(launchId);
         if (!ok) {

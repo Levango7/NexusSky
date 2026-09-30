@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 无人机追踪与遗失辅助查找 REST API。
@@ -35,6 +37,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/tracking")
 @Tag(name = "Tracking", description = "无人机追踪 REST API：飞行轨迹查询、历史轨迹回放、遗失辅助查找")
+@RequireRole(Role.OBSERVER)
 public class TrackingController {
 
     private static final Logger log = LoggerFactory.getLogger(TrackingController.class);

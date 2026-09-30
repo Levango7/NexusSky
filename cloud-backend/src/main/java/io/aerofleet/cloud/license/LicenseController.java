@@ -6,6 +6,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * License 管理 REST 端点。
@@ -16,6 +18,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/license")
+@RequireRole(Role.OBSERVER)
 public class LicenseController {
 
 
@@ -44,6 +47,7 @@ public class LicenseController {
 
     /** 激活 License */
     @PostMapping("/activate")
+    @RequireRole(Role.ADMIN)
     public Map<String, Object> activate(@RequestBody Map<String, String> body) {
         String activationCode = body.get("activationCode");
         String tenantId = body.get("tenantId");

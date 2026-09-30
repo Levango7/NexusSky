@@ -23,6 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 场景模板管理 REST API（P0-2 应急救援场景库）。
@@ -43,6 +45,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/scenarios/templates")
 @Tag(name = "ScenarioTemplate", description = "应急救援场景模板管理：CRUD 与按灾害类型筛选")
+@RequireRole(Role.OBSERVER)
 public class ScenarioTemplateController {
 
     private static final Logger log = LoggerFactory.getLogger(ScenarioTemplateController.class);
@@ -107,6 +110,7 @@ public class ScenarioTemplateController {
             @ApiResponse(responseCode = "200", description = "创建成功"),
             @ApiResponse(responseCode = "400", description = "请求体无效")
     })
+    @RequireRole(Role.ADMIN)
     public ScenarioTemplate create(@RequestBody ScenarioTemplate template) {
         if (template.getName() == null || template.getName().isBlank()) {
             throw new IllegalArgumentException("template name must not be blank");
@@ -137,6 +141,7 @@ public class ScenarioTemplateController {
             @ApiResponse(responseCode = "200", description = "更新成功"),
             @ApiResponse(responseCode = "404", description = "模板不存在")
     })
+    @RequireRole(Role.ADMIN)
     public ScenarioTemplate update(@PathVariable("id") String id,
                                    @RequestBody ScenarioTemplate template) {
         ScenarioTemplate existing = store.get(id);
@@ -166,6 +171,7 @@ public class ScenarioTemplateController {
             @ApiResponse(responseCode = "200", description = "删除成功"),
             @ApiResponse(responseCode = "404", description = "模板不存在")
     })
+    @RequireRole(Role.ADMIN)
     public Map<String, Object> delete(@PathVariable("id") String id) {
         ScenarioTemplate existing = store.get(id);
         if (existing == null) {

@@ -42,6 +42,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/autodispatch")
 @Tag(name = "AutoDispatch", description = "自动出警 REST API：报警触发无人机自动派遣、出警历史/活跃任务查询、配置管理")
+@RequireRole(Role.OBSERVER)
 public class AutoDispatchController {
 
 
@@ -65,6 +66,7 @@ public class AutoDispatchController {
             @ApiResponse(responseCode = "400", description = "请求体格式错误")
     })
     @PostMapping("/trigger")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> trigger(@RequestBody Map<String, Object> body) {
         double lat = toDouble(body.get("lat"));
         double lon = toDouble(body.get("lon"));
@@ -130,6 +132,7 @@ public class AutoDispatchController {
             @ApiResponse(responseCode = "404", description = "出警任务不存在")
     })
     @PostMapping("/{dispatchId}/abort")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> abort(@PathVariable("dispatchId") String dispatchId) {
         DispatchRecord record = service.abortDispatch(dispatchId);
         if (record == null) {

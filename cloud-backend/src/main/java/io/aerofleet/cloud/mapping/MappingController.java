@@ -27,6 +27,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 无人机航拍测绘 REST API。
@@ -49,6 +51,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/mapping")
 @Tag(name = "Mapping", description = "无人机航拍测绘 REST API：灾害区域快速测绘，生成正射影像/三维模型/DEM")
+@RequireRole(Role.OBSERVER)
 public class MappingController {
 
     private static final Logger log = LoggerFactory.getLogger(MappingController.class);
@@ -123,6 +126,7 @@ public class MappingController {
     })
     @PostMapping("/tasks")
     @Transactional
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> createTask(@RequestBody CreateTaskRequest req) {
         validateCreateRequest(req);
         MappingType type = parseType(req.type);
@@ -234,6 +238,7 @@ public class MappingController {
     })
     @PostMapping("/tasks/{id}/start")
     @Transactional
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> startTask(@PathVariable("id") String id) {
         MappingTask task = requireTask(id);
         // P1-fix: 添加状态校验，只允许从 PENDING 或 PLANNING 状态启动
@@ -265,6 +270,7 @@ public class MappingController {
     })
     @PostMapping("/tasks/{id}/abort")
     @Transactional
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> abortTask(@PathVariable("id") String id) {
         MappingTask task = requireTask(id);
         // P1-fix: 添加状态校验，只允许从 PLANNING 或 IN_PROGRESS 状态中止
@@ -338,6 +344,7 @@ public class MappingController {
     })
     @PostMapping("/tasks/{id}/process")
     @Transactional
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> processTask(@PathVariable("id") String id) {
         MappingTask task = requireTask(id);
         // P1-fix: 添加状态校验，只允许 IN_PROGRESS 状态触发成果生成

@@ -64,6 +64,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/alarms")
 @Tag(name = "Alarm", description = "报警联动 REST API：报警事件接收/查询/确认、联动规则 CRUD、SSE 实时推送、一键应急响应")
+@RequireRole(Role.OBSERVER)
 public class AlarmController {
 
     private static final Logger log = LoggerFactory.getLogger(AlarmController.class);
@@ -117,6 +118,7 @@ public class AlarmController {
     @Operation(summary = "接收报警事件", description = "接收后立即由 AlarmLinkageEngine 处理：存储 + 匹配规则 + 执行联动")
     @ApiResponse(responseCode = "200", description = "处理结果（匹配数、执行列表）")
     @PostMapping("/events")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> receiveEvent(@RequestBody Map<String, Object> body) {
         AlarmEvent event = parseEvent(body);
         AlarmLinkageEngine.ProcessResult result = engine.processEvent(event);

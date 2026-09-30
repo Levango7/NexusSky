@@ -7,6 +7,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * CV 评测指标 API（F1，spec E3/E4）。
@@ -16,6 +18,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/cv-eval")
+@RequireRole(Role.OBSERVER)
 public class CvEvalController {
 
     private final CvEvalService eval;
@@ -37,6 +40,7 @@ public class CvEvalController {
 
     /** 清空评测窗口。 */
     @PostMapping("/reset")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> reset() {
         eval.reset();
         return Map.of("ok", true);

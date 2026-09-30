@@ -37,6 +37,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/delivery")
+@RequireRole(Role.OBSERVER)
 public class DeliveryController {
 
     private final DeliveryService deliveryService;

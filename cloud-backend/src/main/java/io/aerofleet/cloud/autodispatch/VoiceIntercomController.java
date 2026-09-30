@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 语音对讲 REST API（P0-1 安防报警→无人机自动出警闭环）。
@@ -31,6 +33,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/voice-intercom")
 @Tag(name = "VoiceIntercom", description = "语音对讲 REST API：双向对讲启停、状态查询、广播喊话")
+@RequireRole(Role.OBSERVER)
 public class VoiceIntercomController {
 
     private static final Logger log = LoggerFactory.getLogger(VoiceIntercomController.class);
@@ -53,6 +56,7 @@ public class VoiceIntercomController {
             @ApiResponse(responseCode = "404", description = "无人机未注册")
     })
     @PostMapping("/{sysid}/start")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> start(@PathVariable("sysid") int sysid) {
         VoiceIntercomService.IntercomState state = service.startIntercom(sysid);
         log.info("intercom start requested: sysid={} status={}", sysid, state.getStatus());
@@ -68,6 +72,7 @@ public class VoiceIntercomController {
     @Operation(summary = "停止语音对讲")
     @ApiResponse(responseCode = "200", description = "停止成功")
     @PostMapping("/{sysid}/stop")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> stop(@PathVariable("sysid") int sysid) {
         VoiceIntercomService.IntercomState state = service.stopIntercom(sysid);
         log.info("intercom stop requested: sysid={} status={}", sysid, state.getStatus());
@@ -103,6 +108,7 @@ public class VoiceIntercomController {
             @ApiResponse(responseCode = "400", description = "文本为空或过长")
     })
     @PostMapping("/{sysid}/broadcast")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> broadcast(@PathVariable("sysid") int sysid,
                                                          @RequestBody Map<String, Object> body) {
         String text = body.get("text") == null ? null : String.valueOf(body.get("text"));

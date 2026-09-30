@@ -26,6 +26,8 @@ import java.util.stream.Collectors;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 维护管理 REST API（P1-2 维护管理）。
@@ -43,6 +45,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/maintenance")
 @Tag(name = "Maintenance", description = "维护管理 REST API：维护记录 CRUD、预测性维护建议、维护计划")
+@RequireRole(Role.OBSERVER)
 public class MaintenanceController {
 
     private static final Logger log = LoggerFactory.getLogger(MaintenanceController.class);
@@ -88,6 +91,7 @@ public class MaintenanceController {
         @ApiResponse(responseCode = "400", description = "请求体无效")
     })
     @PostMapping("/records")
+    @RequireRole(Role.OPERATOR)
     public MaintenanceRecord createRecord(@RequestBody MaintenanceRecord body) {
         if (body == null) {
             throw new BadRequestException("maintenance record body is required");
@@ -128,6 +132,7 @@ public class MaintenanceController {
         @ApiResponse(responseCode = "404", description = "记录不存在")
     })
     @PutMapping("/records/{id}")
+    @RequireRole(Role.OPERATOR)
     public MaintenanceRecord updateRecord(@PathVariable("id") String id,
                                            @RequestBody MaintenanceRecord body) {
         MaintenanceRecord existing = records.get(id);

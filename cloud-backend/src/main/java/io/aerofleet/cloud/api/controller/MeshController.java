@@ -14,6 +14,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * Mesh 拓扑 REST 端点（M5 应急 mesh，FR-28）。
@@ -31,6 +33,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/mesh")
+@RequireRole(Role.OBSERVER)
 public class MeshController {
 
     private final MeshTopologyService topologyService;

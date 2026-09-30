@@ -2,10 +2,13 @@ package io.aerofleet.cloud.twin;
 
 import org.springframework.web.bind.annotation.*;
 import java.util.*;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /** M13 数字孪生 REST API */
 @RestController
 @RequestMapping("/api/v1/twin")
+@RequireRole(Role.OBSERVER)
 public class TwinController {
     private final DigitalTwinService twinService;
     private final PredictionService predictionService;

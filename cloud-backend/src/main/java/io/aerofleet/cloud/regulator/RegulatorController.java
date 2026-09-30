@@ -48,6 +48,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/regulator")
 @Tag(name = "Regulator", description = "监管合规 REST API：实名验证、激活上报、注销、合规状态查询")
+@RequireRole(Role.OBSERVER)
 public class RegulatorController {
 
     private static final Logger log = LoggerFactory.getLogger(RegulatorController.class);

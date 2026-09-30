@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * Flight-log query API.
@@ -21,6 +23,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/flightlog")
+@RequireRole(Role.OBSERVER)
 public class FlightLogController {
 
     private final FlightLogService flightLog;

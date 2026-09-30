@@ -25,6 +25,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/multispectral")
+@RequireRole(Role.OBSERVER)
 public class MultispectralController {
 
     private final MultispectralTaskService service;

@@ -19,6 +19,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 语音/自然语言指挥 REST API。
@@ -38,6 +40,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/voice-cmd")
 @Tag(name = "Voice Command", description = "语音/自然语言指挥 REST API：语音解析、指令执行、语音播报")
+@RequireRole(Role.OBSERVER)
 public class VoiceCommandController {
 
     private static final Logger log = LoggerFactory.getLogger(VoiceCommandController.class);
@@ -69,6 +72,7 @@ public class VoiceCommandController {
         @ApiResponse(responseCode = "400", description = "请求体缺少 text 字段")
     })
     @PostMapping("/parse")
+    @RequireRole(Role.OPERATOR)
     public ParsedCommand parse(@RequestBody Map<String, String> body) {
         if (body == null) {
             throw new io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException(
@@ -95,6 +99,7 @@ public class VoiceCommandController {
         @ApiResponse(responseCode = "404", description = "无人机未注册")
     })
     @PostMapping("/execute")
+    @RequireRole(Role.OPERATOR)
     public ExecutionResult execute(@RequestBody ParsedCommand cmd) {
         log.info("Executing voice command: action={} sysid={}", cmd.getAction(), cmd.getSysid());
         return executor.execute(cmd);
@@ -112,6 +117,7 @@ public class VoiceCommandController {
         @ApiResponse(responseCode = "404", description = "待确认指令不存在")
     })
     @PostMapping("/confirm/{pendingId}")
+    @RequireRole(Role.OPERATOR)
     public ExecutionResult confirm(@PathVariable("pendingId") String pendingId) {
         log.info("Confirming pending command: {}", pendingId);
         ExecutionResult result = executor.confirm(pendingId);
@@ -134,6 +140,7 @@ public class VoiceCommandController {
         @ApiResponse(responseCode = "404", description = "无人机未注册")
     })
     @PostMapping("/broadcast/{sysid}")
+    @RequireRole(Role.OPERATOR)
     public BroadcastResult broadcast(@PathVariable("sysid") int sysid,
                                      @RequestBody Map<String, String> body) {
         requireRegistered(sysid);

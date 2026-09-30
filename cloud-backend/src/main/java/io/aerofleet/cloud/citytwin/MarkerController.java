@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 态势标绘 REST API。
@@ -29,6 +31,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/city-twin/markers")
 @Tag(name = "CityTwin-Markers", description = "态势标绘：在地图上创建、更新、删除点/线/面/圆/文本标记")
+@RequireRole(Role.OBSERVER)
 public class MarkerController {
 
     private static final Logger log = LoggerFactory.getLogger(MarkerController.class);
@@ -48,6 +51,7 @@ public class MarkerController {
 
     @PostMapping
     @Operation(summary = "创建标绘", description = "创建一个新的态势标绘标记")
+    @RequireRole(Role.OPERATOR)
     public SituationMarker createMarker(@RequestBody SituationMarker marker) {
         log.info("Creating marker: type={} label={}", marker.getType(), marker.getLabel());
         return markerService.createMarker(marker);
@@ -55,6 +59,7 @@ public class MarkerController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除标绘", description = "根据标绘 ID 删除态势标绘标记")
+    @RequireRole(Role.OPERATOR)
     public void deleteMarker(@PathVariable("id") String id) {
         log.info("Deleting marker: id={}", id);
         markerService.deleteMarker(id);
@@ -62,6 +67,7 @@ public class MarkerController {
 
     @PutMapping("/{id}")
     @Operation(summary = "更新标绘", description = "根据标绘 ID 更新态势标绘标记的内容")
+    @RequireRole(Role.OPERATOR)
     public SituationMarker updateMarker(@PathVariable("id") String id, @RequestBody SituationMarker marker) {
         log.info("Updating marker: id={}", id);
         return markerService.updateMarker(id, marker);

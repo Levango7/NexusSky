@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 城市模型管理 REST API。
@@ -30,6 +32,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/city-twin/models")
 @Tag(name = "CityTwin-Models", description = "城市三维模型管理：模型注册、查询、删除、刷新")
+@RequireRole(Role.OBSERVER)
 public class CityModelController {
 
     private static final Logger log = LoggerFactory.getLogger(CityModelController.class);
@@ -56,6 +59,7 @@ public class CityModelController {
 
     @PostMapping
     @Operation(summary = "上传/注册新模型", description = "注册一个新的城市三维模型")
+    @RequireRole(Role.OPERATOR)
     public CityModel registerModel(@RequestBody CityModel model) {
         log.info("Registering city model: name={} type={}", model.getName(), model.getModelType());
         return cityModelService.registerModel(model);
@@ -63,6 +67,7 @@ public class CityModelController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除模型", description = "根据模型 ID 删除城市模型")
+    @RequireRole(Role.OPERATOR)
     public void deleteModel(@PathVariable("id") String id) {
         log.info("Deleting city model: id={}", id);
         cityModelService.deleteModel(id);
@@ -70,6 +75,7 @@ public class CityModelController {
 
     @PutMapping("/{id}/refresh")
     @Operation(summary = "刷新模型数据", description = "刷新指定城市模型的数据，更新时间戳")
+    @RequireRole(Role.OPERATOR)
     public CityModel refreshModel(@PathVariable("id") String id) {
         log.info("Refreshing city model: id={}", id);
         return cityModelService.refreshModel(id);

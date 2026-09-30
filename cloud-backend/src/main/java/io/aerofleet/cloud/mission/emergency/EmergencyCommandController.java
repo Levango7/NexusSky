@@ -46,6 +46,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/emergency-command")
 @Tag(name = "EmergencyCommand", description = "应急指挥工作流 REST API：接报→研判→部署→执行→评估→总结全生命周期管理")
+@RequireRole(Role.OBSERVER)
 public class EmergencyCommandController {
 
     private final EmergencyCommandWorkflow workflow;

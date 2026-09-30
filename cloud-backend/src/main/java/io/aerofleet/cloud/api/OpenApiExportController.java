@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Locale;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * OpenAPI Spec 导出端点。
@@ -34,6 +36,7 @@ import java.util.Locale;
  */
 @RestController
 @RequestMapping("/api/v1/openapi")
+@RequireRole(Role.OBSERVER)
 public class OpenApiExportController {
 
     private static final Logger log = LoggerFactory.getLogger(OpenApiExportController.class);

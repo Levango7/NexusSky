@@ -40,6 +40,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestExc
  */
 @RestController
 @RequestMapping("/api/v1/emergency")
+@RequireRole(Role.OBSERVER)
 public class EmergencyOrchController {
 
     private final EmergencyOrchService service;

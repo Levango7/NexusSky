@@ -33,6 +33,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
  */
 @RestController
 @RequestMapping("/api/v1/drones")
+@RequireRole(Role.OBSERVER)
 public class DroneController {
 
     private static final Logger log = LoggerFactory.getLogger(DroneController.class);

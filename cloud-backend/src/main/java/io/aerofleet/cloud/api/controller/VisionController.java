@@ -25,6 +25,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/vision")
+@RequireRole(Role.OBSERVER)
 public class VisionController {
 
     private static final Logger log = LoggerFactory.getLogger(VisionController.class);

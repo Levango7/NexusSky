@@ -18,6 +18,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * Remote ID REST API（C2-T18）。
@@ -36,6 +38,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/rid")
 @Tag(name = "Remote ID", description = "Remote ID REST API：RID 状态查询、配置更新、广播控制")
+@RequireRole(Role.OBSERVER)
 public class RidController {
 
     private static final Logger log = LoggerFactory.getLogger(RidController.class);
@@ -100,6 +103,7 @@ public class RidController {
      */
     @PostMapping("/config")
     @Operation(summary = "更新 RID 配置", description = "更新操作者信息、自描述文本等 RID 配置")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> updateConfig(@RequestBody Map<String, Object> request) {
         if (request.containsKey("operatorId")) {
             config.setOperatorId((String) request.get("operatorId"));
@@ -136,6 +140,7 @@ public class RidController {
      */
     @PostMapping("/broadcast/{sysid}/start")
     @Operation(summary = "启动 RID 广播", description = "启动指定无人机的 Remote ID 广播")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> startBroadcast(@PathVariable int sysid) {
         RidSnapshot snapshot = stateManager.get(sysid);
         if (snapshot == null) {
@@ -164,6 +169,7 @@ public class RidController {
      */
     @PostMapping("/broadcast/{sysid}/stop")
     @Operation(summary = "停止 RID 广播", description = "停止指定无人机的 Remote ID 广播")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> stopBroadcast(@PathVariable int sysid) {
         RidSnapshot snapshot = stateManager.get(sysid);
 

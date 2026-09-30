@@ -32,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @RestController
 @RequestMapping("/api/v1/auth")
+@RequireRole(Role.OBSERVER)
 public class AuthController {
 
     /** 每 IP 每分钟最大登录尝试次数。 */
@@ -81,6 +82,7 @@ public class AuthController {
      * 超过返回 429 Too Many Requests。
      */
     @PostMapping("/login")
+    @PermitAll
     public ResponseEntity<Map<String, Object>> login(@RequestBody Map<String, String> body,
                                                       HttpServletRequest request) {
         // 频率限制检查
@@ -148,6 +150,7 @@ public class AuthController {
      * POST /api/auth/refresh (Authorization: Bearer <token>) → {token, expiresIn}
      */
     @PostMapping("/refresh")
+    @PermitAll
     public ResponseEntity<Map<String, Object>> refresh(
             @RequestHeader(value = "Authorization", required = false) String authHeader) {
 

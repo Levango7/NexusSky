@@ -50,6 +50,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/geofence")
 @Tag(name = "Geofence", description = "电子围栏 REST API：围栏区域 CRUD、越界历史查询、手动检查")
+@RequireRole(Role.OBSERVER)
 public class GeofenceController {
 
     private static final Logger log = LoggerFactory.getLogger(GeofenceController.class);
@@ -72,6 +73,7 @@ public class GeofenceController {
         @ApiResponse(responseCode = "400", description = "请求体格式错误")
     })
     @PostMapping("/zones")
+    @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> createZone(@RequestBody Map<String, Object> body) {
         GeofenceZone zone = parseZone(body);
         store.addZone(zone);
@@ -115,6 +117,7 @@ public class GeofenceController {
         @ApiResponse(responseCode = "400", description = "请求体格式错误")
     })
     @PutMapping("/zones/{id}")
+    @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> updateZone(@PathVariable("id") int id,
                                                           @RequestBody Map<String, Object> body) {
         if (store.getZone(id) == null) {
@@ -190,6 +193,7 @@ public class GeofenceController {
     @Operation(summary = "手动触发一次全量围栏检查", description = "检查所有在线无人机位置是否越界，返回新生成的越界事件")
     @ApiResponse(responseCode = "200", description = "检查结果（新生成的越界事件列表）")
     @PostMapping("/check")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> manualCheck() {
         List<GeofenceBreachEvent> events = monitor.checkAllDrones();
         List<Map<String, Object>> items = new ArrayList<>();

@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 无人机编队表演 REST API。
@@ -41,6 +43,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/show")
 @Tag(name = "Show", description = "无人机编队表演 REST API：队形管理、表演任务、动作序列、音乐同步")
+@RequireRole(Role.OBSERVER)
 public class ShowController {
 
     private static final Logger log = LoggerFactory.getLogger(ShowController.class);
@@ -82,6 +85,7 @@ public class ShowController {
         @ApiResponse(responseCode = "400", description = "参数非法")
     })
     @PostMapping("/formations")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> createFormation(@RequestBody CreateFormationRequest req) {
         if (req == null) {
             throw new BadRequestException("request body is required");
@@ -138,6 +142,7 @@ public class ShowController {
         @ApiResponse(responseCode = "404", description = "队形不存在")
     })
     @PostMapping("/formations/{id}/positions")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> computePositions(@PathVariable("id") String id,
                                                  @RequestBody ComputePositionsRequest req) {
         if (req == null) {
@@ -191,6 +196,7 @@ public class ShowController {
         @ApiResponse(responseCode = "404", description = "队形不存在")
     })
     @PostMapping("/tasks")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> createTask(@RequestBody CreateTaskRequest req) {
         if (req == null) {
             throw new BadRequestException("request body is required");
@@ -246,6 +252,7 @@ public class ShowController {
         @ApiResponse(responseCode = "404", description = "任务不存在")
     })
     @PostMapping("/tasks/{id}/start")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> startTask(@PathVariable("id") String id) {
         ShowTask task = taskService.startTask(id);
         return taskSummary(task);
@@ -257,6 +264,7 @@ public class ShowController {
         @ApiResponse(responseCode = "404", description = "任务不存在")
     })
     @PostMapping("/tasks/{id}/abort")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> abortTask(@PathVariable("id") String id) {
         ShowTask task = taskService.abortTask(id);
         return taskSummary(task);
@@ -284,6 +292,7 @@ public class ShowController {
         @ApiResponse(responseCode = "404", description = "任务不存在")
     })
     @PostMapping("/tasks/{id}/music-sync")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> configureMusicSync(@PathVariable("id") String id,
                                                    @RequestBody MusicSyncRequest req) {
         if (req == null) {

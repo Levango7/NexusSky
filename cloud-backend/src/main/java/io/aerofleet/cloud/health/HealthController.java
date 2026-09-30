@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 无人机健康管理 REST API（P1-2 健康管理与预测性维护）。
@@ -31,6 +33,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/health")
 @Tag(name = "Health", description = "无人机健康管理 REST API：健康评分查询、机队总览、历史趋势、部件详情、告警")
+@RequireRole(Role.OBSERVER)
 public class HealthController {
 
     private static final Logger log = LoggerFactory.getLogger(HealthController.class);

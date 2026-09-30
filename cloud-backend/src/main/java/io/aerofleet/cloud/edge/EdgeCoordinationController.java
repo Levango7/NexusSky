@@ -2,16 +2,20 @@ package io.aerofleet.cloud.edge;
 
 import org.springframework.web.bind.annotation.*;
 import java.util.*;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /** M12 边缘协同 REST API */
 @RestController
 @RequestMapping("/api/v1/edge")
+@RequireRole(Role.OBSERVER)
 public class EdgeCoordinationController {
     private final EdgeCoordinationService service;
 
     public EdgeCoordinationController(EdgeCoordinationService service) { this.service = service; }
 
     @PostMapping("/results")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> submitResult(@RequestBody Map<String, Object> body) {
         int sysid = (Integer) body.get("sysid");
         service.submitResult(sysid, (String) body.get("taskId"), (String) body.get("type"), body);

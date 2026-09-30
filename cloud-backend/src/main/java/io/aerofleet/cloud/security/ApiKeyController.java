@@ -46,6 +46,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/auth/api-key")
+@RequireRole(Role.OBSERVER)
 public class ApiKeyController {
 
     private static final Logger log = LoggerFactory.getLogger(ApiKeyController.class);

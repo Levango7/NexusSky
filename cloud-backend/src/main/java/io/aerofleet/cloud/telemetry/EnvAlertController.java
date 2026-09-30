@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 环境告警查询 API（M0b，FR-23 后端接入）。
@@ -25,6 +27,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/env-alerts")
+@RequireRole(Role.OBSERVER)
 public class EnvAlertController {
 
     private final FlightLogService flightLog;

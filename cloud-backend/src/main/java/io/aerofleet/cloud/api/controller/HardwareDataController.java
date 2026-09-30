@@ -46,6 +46,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @RestController
 @RequestMapping("/api/v1")
+@RequireRole(Role.OBSERVER)
 public class HardwareDataController {
 
 

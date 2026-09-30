@@ -23,6 +23,8 @@ import java.util.Map;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 多模态通信自适应态势可视化 REST API（P2-1）。
@@ -42,6 +44,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 @RestController
 @RequestMapping("/api/v1/comm-adapt")
 @Tag(name = "CommAdapt", description = "多模态通信自适应 REST API：通信质量监控、链路切换建议、故障切换管理、拓扑可视化")
+@RequireRole(Role.OBSERVER)
 public class CommSituationController {
 
     private static final Logger log = LoggerFactory.getLogger(CommSituationController.class);
@@ -138,6 +141,7 @@ public class CommSituationController {
             @ApiResponse(responseCode = "404", description = "无人机未注册")
     })
     @PostMapping("/switch/{sysid}")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> switchLink(
             @PathVariable("sysid") int sysid,
             @RequestBody Map<String, Object> body) {
@@ -246,6 +250,7 @@ public class CommSituationController {
      */
     @Operation(summary = "更新自适应配置", description = "字段级合并，未提供的字段保留原值")
     @PutMapping("/config")
+    @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> updateConfig(@RequestBody Map<String, Object> body) {
         // P1-fix: 使用原子更新方法，避免 volatile 字段组合写非原子问题
         Integer switchThreshold = body.containsKey("switchThreshold")

@@ -33,6 +33,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/obstacle")
+@RequireRole(Role.OBSERVER)
 public class ObstacleController {
 
 

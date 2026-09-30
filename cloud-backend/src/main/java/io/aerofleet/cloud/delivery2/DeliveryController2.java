@@ -22,6 +22,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 无人机物流配送 REST API（P4-1）。
@@ -43,6 +45,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RestController
 @RequestMapping("/api/v1/delivery2")
 @Tag(name = "Delivery2", description = "无人机物流配送 REST API：应急物资空投、医疗样本运输、偏远地区配送")
+@RequireRole(Role.OBSERVER)
 public class DeliveryController2 {
 
     private static final Logger log = LoggerFactory.getLogger(DeliveryController2.class);
@@ -68,6 +71,7 @@ public class DeliveryController2 {
     @PostMapping("/tasks")
     @Transactional
     @Operation(summary = "创建配送任务", description = "创建一个新的无人机配送任务")
+    @RequireRole(Role.OPERATOR)
     public DeliveryTask2 createTask(@RequestBody DeliveryTask2 task) {
         if (task == null) {
             throw new BadRequestException("task body is required");
@@ -143,6 +147,7 @@ public class DeliveryController2 {
     @PostMapping("/tasks/{id}/start")
     @Transactional
     @Operation(summary = "启动配送", description = "启动指定配送任务，状态从 PENDING 转为 IN_PROGRESS")
+    @RequireRole(Role.OPERATOR)
     public DeliveryTask2 startTask(@PathVariable("id") String id) {
         DeliveryTask2 task = repository.findById(id)
                 .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));
@@ -162,6 +167,7 @@ public class DeliveryController2 {
     @PostMapping("/tasks/{id}/abort")
     @Transactional
     @Operation(summary = "中止配送", description = "中止指定配送任务，状态转为 ABORTED")
+    @RequireRole(Role.OPERATOR)
     public DeliveryTask2 abortTask(@PathVariable("id") String id) {
         DeliveryTask2 task = repository.findById(id)
                 .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));
@@ -191,6 +197,7 @@ public class DeliveryController2 {
     @PostMapping("/tasks/{id}/deliver")
     @Transactional
     @Operation(summary = "执行投放", description = "执行配送投放操作（空投/着陆交付/绳索降下）")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> deliver(@PathVariable("id") String id,
                                        @RequestBody DeliverRequest body) {
         DeliveryTask2 task = repository.findById(id)
@@ -249,6 +256,7 @@ public class DeliveryController2 {
     @PostMapping("/tasks/{id}/confirm")
     @Transactional
     @Operation(summary = "确认签收", description = "确认配送任务已签收完成")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> confirm(@PathVariable("id") String id) {
         DeliveryTask2 task = repository.findById(id)
                 .orElseThrow(() -> new NotFoundException("delivery task " + id + " not found"));

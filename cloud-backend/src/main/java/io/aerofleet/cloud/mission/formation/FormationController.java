@@ -36,6 +36,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/formation")
+@RequireRole(Role.OBSERVER)
 public class FormationController {
 
 
@@ -73,6 +74,7 @@ public class FormationController {
 
     /** 下发编队命令（FR-15）。 */
     @PostMapping("/{id}/command")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> command(@PathVariable("id") int id,
                                         @RequestBody CommandRequest body) {
         FormationService.FormationCommand cmd = body.toCommand();
@@ -82,6 +84,7 @@ public class FormationController {
 
     /** 队形变换（FR-04）。 */
     @PostMapping("/{id}/transition")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> transition(@PathVariable("id") int id,
                                            @RequestBody TransitionRequest body) {
         if (body.steps < 1) {
@@ -99,6 +102,7 @@ public class FormationController {
 
     /** 灯光控制（FR-11）。 */
     @PostMapping("/{id}/lights")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> lights(@PathVariable("id") int id,
                                        @RequestBody LedControlCommand cmd) {
         Map<Integer, FormationService.AckResult> results = formationService.lights(id, cmd);
@@ -133,6 +137,7 @@ public class FormationController {
 
     /** 单机脱离（FR-17）。 */
     @DeleteMapping("/{id}/members/{sysid}")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> removeMember(@PathVariable("id") int id,
                                              @PathVariable("sysid") int sysid) {
         formationService.removeMember(id, sysid);
@@ -147,6 +152,7 @@ public class FormationController {
 
     /** 解散编队（FR-16）。 */
     @PostMapping("/{id}/dissolve")
+    @RequireRole(Role.OPERATOR)
     public Map<String, Object> dissolve(@PathVariable("id") int id) {
         Map<Integer, FormationService.AckResult> results =
                 formationService.command(id, FormationService.FormationCommand.dissolve());

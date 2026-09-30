@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import io.aerofleet.cloud.security.RequireRole;
+import io.aerofleet.cloud.security.Role;
 
 /**
  * 实时态势叠加 REST API。
@@ -25,6 +27,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/city-twin/situation")
 @Tag(name = "CityTwin-Situation", description = "实时态势叠加：当前态势、历史态势、无人机位置、告警标记")
+@RequireRole(Role.OBSERVER)
 public class SituationController {
 
     private static final Logger log = LoggerFactory.getLogger(SituationController.class);
