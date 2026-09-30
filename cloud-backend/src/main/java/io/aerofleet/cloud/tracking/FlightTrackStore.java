@@ -68,6 +68,17 @@ public class FlightTrackStore {
     private static final int PERSIST_INTERVAL = 10;
 
     /**
+     * 最后已知位置的批量写队列（延迟创建）。下面三个参数刻意写死，不像 flight-log 那样开配置项：
+     * 这条写已被 PERSIST_INTERVAL 节流（20Hz 遥测下每架机约 0.5 秒一条），量级远小于逐秒入库的
+     * 遥测快照，再开配置面换不来可观测的收益。
+     */
+    private volatile io.aerofleet.cloud.write.BatchedWriteQueue<DroneLastKnownPositionEntity> lastKnownQueue;
+
+    private static final int LAST_KNOWN_QUEUE_CAPACITY = 4096;
+    private static final int LAST_KNOWN_BATCH_SIZE = 50;
+    private static final long LAST_KNOWN_FLUSH_MS = 200;
+
+    /**
      * 启动时从数据库加载所有无人机的最后已知位置，作为每架机的第一个轨迹点。
      * 这样重启后前端可立即显示无人机的最后位置，而非空白。
      */
@@ -100,6 +111,13 @@ public class FlightTrackStore {
      */
     @PreDestroy
     public void persistAllOnShutdown() {
+        // 先排空队列再补写：队列里是较早的快照，若让它在本方法之后落地，就会用旧位置盖掉
+        // 下面从内存轨迹取的新值。顺序颠倒会是个静默的数据倒退。
+        io.aerofleet.cloud.write.BatchedWriteQueue<DroneLastKnownPositionEntity> queue = this.lastKnownQueue;
+        if (queue != null) {
+            queue.close();
+            this.lastKnownQueue = null;
+        }
         if (repository == null) return;
         int saved = 0;
         for (Map.Entry<Integer, Deque<TrackPoint>> entry : tracks.entrySet()) {
@@ -138,16 +156,41 @@ public class FlightTrackStore {
     }
 
     /**
-     * 将指定无人机的最后已知位置写入数据库。
-     * 使用 save() 实现 upsert（sysid 为主键，存在则更新）。
+     * 把最后已知位置交给批量写队列——绝不在调用线程（{@code @EventListener} 的那条
+     * {@code mavlink-udp-*} 接收线程）上做 JPA 写。
      */
     private void persistLastKnown(int sysid, TrackPoint point) {
         if (repository == null) return;
-        try {
-            DroneLastKnownPositionEntity entity = DroneLastKnownPositionEntity.fromTrackPoint(point);
-            repository.save(entity);
-        } catch (Exception e) {
-            log.warn("Failed to persist last known position for sysid={}: {}", sysid, e.getMessage());
+        DroneLastKnownPositionEntity entity = DroneLastKnownPositionEntity.fromTrackPoint(point);
+        io.aerofleet.cloud.write.BatchedWriteQueue<DroneLastKnownPositionEntity> queue = lastKnownQueue();
+        if (queue == null || !queue.offer(entity)) {
+            // 丢弃是可接受的：这条写只是"重启后立刻显示最后位置"的缓存值，
+            // 下一次节流会再入队，且关闭时 persistAllOnShutdown 会用内存里的最新轨迹补写
+            log.debug("last-known 写队列不可用，丢弃本次 sysid={}（关闭时会从内存轨迹补写）", sysid);
+        }
+    }
+
+    /**
+     * 延迟创建队列；repository 是可选注入且单测会在构造后替换它，
+     * 所以 sink 在 flush 时才读字段当前值，避免捕获到过期引用。
+     */
+    private io.aerofleet.cloud.write.BatchedWriteQueue<DroneLastKnownPositionEntity> lastKnownQueue() {
+        io.aerofleet.cloud.write.BatchedWriteQueue<DroneLastKnownPositionEntity> existing = this.lastKnownQueue;
+        if (existing != null) {
+            return existing;
+        }
+        synchronized (this) {
+            if (this.lastKnownQueue == null) {
+                if (repository == null) {
+                    return null;
+                }
+                this.lastKnownQueue = new io.aerofleet.cloud.write.BatchedWriteQueue<>(
+                        "last-known", LAST_KNOWN_QUEUE_CAPACITY, LAST_KNOWN_BATCH_SIZE, LAST_KNOWN_FLUSH_MS,
+                        batch -> repository.saveAll(batch),
+                        (batch, err) -> log.warn("last-known 批量落库失败（{} 条）：{}",
+                                batch.size(), err.toString()));
+            }
+            return this.lastKnownQueue;
         }
     }
 

@@ -6,6 +6,7 @@ import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.TrackPoint;
 import io.aerofleet.cloud.security.TenantContext;
+import io.aerofleet.cloud.write.BatchedWriteQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +68,28 @@ public class FlightLogService {
     @Autowired(required = false)
     private FlightLogRepository flightLogRepository;
 
+    /** 批量落库用（可选注入）；缺失时退回 {@code saveAll} 逐行写。 */
+    @Autowired(required = false)
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    /** 插入语句缓存，见 {@link #insertSql()}。 */
+    private volatile String insertSql;
+
+    /** 批量写队列（延迟创建，见 {@link #dbWriteQueue()}）。 */
+    private volatile io.aerofleet.cloud.write.BatchedWriteQueue<PendingLog> dbWriteQueue;
+
+    /** 队列容量：满即就地走 JSONL 兜底，不背压。50 机 × 1 行/秒 ≈ 400 秒缓冲。 */
+    @Value("${aerofleet.flightlog.write-queue-capacity:20000}")
+    private int writeQueueCapacity;
+
+    /** 单批最多落库条数；应与 hibernate.jdbc.batch_size 同量级。 */
+    @Value("${aerofleet.flightlog.write-batch-size:50}")
+    private int writeBatchSize;
+
+    /** writer 线程空闲轮询间隔（毫秒），也决定关闭时的最长排空延迟。 */
+    @Value("${aerofleet.flightlog.write-flush-ms:200}")
+    private long writeFlushIntervalMs;
+
     /**
      * 设备注册表（可选注入）：写入侧据此取设备归属租户。
      * 用字段注入而非构造注入，避免改变构造器签名（现有单测直接 new FlightLogService）。
@@ -99,17 +122,21 @@ public class FlightLogService {
     }
 
     private void append(Map<String, Object> event) {
-        // 优先尝试数据库持久化路径
+        // 数据库路径：入队，绝不在调用线程上写库。
+        // 这条链的起点可能是 MAVLink UDP 接收线程（告警经 AlertBus 同步派发）或那个
+        // 单线程调度池（每秒遥测快照），同步 JPA 写一慢就会拖住收包或所有 @Scheduled 作业。
         if (persistToDb && flightLogRepository != null) {
-            try {
-                flightLogRepository.save(FlightLogEntity.from(event));
-                return; // 数据库写入成功，跳过 JSONL
-            } catch (Exception e) {
-                log.warn("flight log DB persist failed, falling back to JSONL: {}", e.getMessage());
-                // 回退到 JSONL 路径
+            BatchedWriteQueue<PendingLog> queue = dbWriteQueue();
+            if (queue != null && queue.offer(new PendingLog(FlightLogEntity.from(event), event))) {
+                return;
             }
+            // 队列满或 writer 已停：就地走 JSONL 兜底，不阻塞、不丢账
         }
-        // JSONL 文件持久化路径（默认或 DB 失败回退）
+        writeJsonl(event);
+    }
+
+    /** JSONL 追加——默认路径，也是 DB 不可用/队列满时的兜底路径。 */
+    private void writeJsonl(Map<String, Object> event) {
         try {
             String line = mapper.writeValueAsString(event) + "\n";
             Files.writeString(fileFor(LocalDate.now()), line, StandardCharsets.UTF_8,
@@ -117,6 +144,109 @@ public class FlightLogService {
         } catch (IOException e) {
             log.debug("flight log append failed: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 延迟创建批量写队列。之所以不在构造器/字段初始化里建：
+     * ① {@code flightLogRepository} 是可选注入，构造期可能还是 null；
+     * ② 现有单测用反射在构造之后才塞 repository（FlightLogPersistenceTest:320），
+     *    提前捕获引用会拿到过期 sink。故 flush 时才读字段当前值。
+     *
+     * @return 队列；repository 尚未就绪时返回 null（调用方走兜底）
+     */
+    private BatchedWriteQueue<PendingLog> dbWriteQueue() {
+        BatchedWriteQueue<PendingLog> existing = this.dbWriteQueue;
+        if (existing != null) {
+            return existing;
+        }
+        synchronized (this) {
+            if (this.dbWriteQueue == null) {
+                if (flightLogRepository == null) {
+                    return null;
+                }
+                this.dbWriteQueue = new BatchedWriteQueue<>(
+                        "flight-log", writeQueueCapacity, writeBatchSize, writeFlushIntervalMs,
+                        this::writeBatch,
+                        (batch, err) -> {
+                            for (PendingLog p : batch) {
+                                writeJsonl(p.jsonl());
+                            }
+                        });
+            }
+            return this.dbWriteQueue;
+        }
+    }
+
+    /**
+     * 一批落库：优先走显式 JDBC 多行批量插入，没有 JdbcTemplate 时退回 {@code saveAll}。
+     * <p>
+     * 为什么不靠 Hibernate 批：{@code flight_log.id} 是 IDENTITY 主键，Hibernate 为取回生成键
+     * 必须逐行执行，{@code hibernate.jdbc.batch_size} 对它无效；而改序列主键会让 prod 的
+     * {@code ddl-auto=validate} 在真 PostgreSQL 上报 missing sequence（实测）。列与值都从
+     * 实体注解同源派生，不存在手写清单漂移。
+     */
+    void writeBatch(List<PendingLog> batch) {
+        List<FlightLogEntity> entities = batch.stream().map(PendingLog::entity).toList();
+        if (jdbcTemplate == null) {
+            flightLogRepository.saveAll(entities);
+            return;
+        }
+        String sql = insertSql();
+        int[] types = FlightLogEntity.insertSqlTypes();
+        List<Object[]> rows = entities.stream().map(FlightLogEntity::insertValues).toList();
+        // 第三个参数是"每个 JDBC 批多少**行**"，不是列数——写错不会报错，只会让批大小悄悄变成列数
+        jdbcTemplate.batchUpdate(sql, rows, writeBatchSize,
+                (org.springframework.jdbc.core.ParameterizedPreparedStatementSetter<Object[]>) (ps, row) -> {
+                    for (int i = 0; i < row.length; i++) {
+                        if (row[i] == null) {
+                            ps.setNull(i + 1, types[i]);
+                        } else {
+                            ps.setObject(i + 1, row[i]);
+                        }
+                    }
+                });
+    }
+
+    /** 插入语句（列清单与占位符由实体元数据生成，进程内只算一次）。 */
+    private String insertSql() {
+        String cached = this.insertSql;
+        if (cached != null) {
+            return cached;
+        }
+        String[] columns = FlightLogEntity.insertColumnNames();
+        StringBuilder sb = new StringBuilder("insert into flight_log (");
+        sb.append(String.join(", ", columns)).append(") values (");
+        for (int i = 0; i < columns.length; i++) {
+            sb.append(i == 0 ? "?" : ",?");
+        }
+        cached = sb.append(')').toString();
+        this.insertSql = cached;
+        return cached;
+    }
+
+    /**
+     * 等待已入队的写全部落地。写改成异步批量之后，"写完立刻读"不再必然看得见——
+     * 这个入口给测试与运维确认"这批已入库"，生产路径不依赖它。
+     *
+     * @return true 已排空；false 超时或队列还没建（此时确实没有任何在途写）
+     */
+    public boolean awaitPendingWrites(long timeoutMs) throws InterruptedException {
+        BatchedWriteQueue<PendingLog> queue = this.dbWriteQueue;
+        return queue == null || queue.awaitIdle(timeoutMs);
+    }
+
+    /** 关闭时把队列里剩余的写完；由 Spring 在上下文停止时调用。 */
+    @jakarta.annotation.PreDestroy
+    public void shutdownWriteQueue() {
+        BatchedWriteQueue<PendingLog> queue = this.dbWriteQueue;
+        if (queue != null) {
+            log.info("flight log 写队列关闭：{}", queue.statsLine());
+            queue.close();
+        }
+    }
+
+    /** 待落库条目：实体给 DB 路径，原始 map 给 JSONL 兜底路径（同一条账的两份表示）。 */
+    record PendingLog(FlightLogEntity entity, Map<String, Object> jsonl) {
     }
 
     private static String now() {
