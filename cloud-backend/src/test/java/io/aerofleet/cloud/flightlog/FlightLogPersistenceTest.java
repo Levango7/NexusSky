@@ -70,7 +70,7 @@ class FlightLogPersistenceTest {
 
     @Test
     @DisplayName("persistToDb=true 时 telemetry 写入数据库")
-    void telemetryWritesToDb() {
+    void telemetryWritesToDb() throws Exception {
         DroneSnapshot snapshot = new DroneSnapshot(1);
         snapshot.lat = 39.9042;
         snapshot.lon = 116.4074;
@@ -84,7 +84,7 @@ class FlightLogPersistenceTest {
 
         flightLogService.telemetry(snapshot);
 
-        List<FlightLogEntity> entities = flightLogRepository.findByTypeAndSysid("telemetry", 1);
+        List<FlightLogEntity> entities = awaitDbRows("telemetry", 1);
         assertThat(entities).hasSize(1);
         FlightLogEntity e = entities.get(0);
         assertThat(e.getType()).isEqualTo("telemetry");
@@ -98,12 +98,12 @@ class FlightLogPersistenceTest {
 
     @Test
     @DisplayName("persistToDb=true 时 alert 写入数据库")
-    void alertWritesToDb() {
+    void alertWritesToDb() throws Exception {
         AlertEntry entry = new AlertEntry(6, "Low battery warning", System.currentTimeMillis());
 
         flightLogService.alert(2, entry);
 
-        List<FlightLogEntity> entities = flightLogRepository.findByTypeAndSysid("alert", 2);
+        List<FlightLogEntity> entities = awaitDbRows("alert", 2);
         assertThat(entities).hasSize(1);
         FlightLogEntity e = entities.get(0);
         assertThat(e.getType()).isEqualTo("alert");
@@ -114,10 +114,10 @@ class FlightLogPersistenceTest {
 
     @Test
     @DisplayName("persistToDb=true 时 mission 写入数据库")
-    void missionWritesToDb() {
+    void missionWritesToDb() throws Exception {
         flightLogService.mission(3, "uploaded 4 items");
 
-        List<FlightLogEntity> entities = flightLogRepository.findByTypeAndSysid("mission", 3);
+        List<FlightLogEntity> entities = awaitDbRows("mission", 3);
         assertThat(entities).hasSize(1);
         FlightLogEntity e = entities.get(0);
         assertThat(e.getType()).isEqualTo("mission");
@@ -127,10 +127,10 @@ class FlightLogPersistenceTest {
 
     @Test
     @DisplayName("persistToDb=true 时 connectivity 写入数据库")
-    void connectivityWritesToDb() {
+    void connectivityWritesToDb() throws Exception {
         flightLogService.connectivity(4, true);
 
-        List<FlightLogEntity> entities = flightLogRepository.findByTypeAndSysid("connectivity", 4);
+        List<FlightLogEntity> entities = awaitDbRows("connectivity", 4);
         assertThat(entities).hasSize(1);
         FlightLogEntity e = entities.get(0);
         assertThat(e.getType()).isEqualTo("connectivity");
@@ -142,7 +142,7 @@ class FlightLogPersistenceTest {
 
     @Test
     @DisplayName("query() 从数据库返回的格式与 JSONL 路径一致")
-    void queryFromDbReturnsSameFormatAsJsonl() {
+    void queryFromDbReturnsSameFormatAsJsonl() throws Exception {
         DroneSnapshot snapshot = new DroneSnapshot(5);
         snapshot.lat = 40.0;
         snapshot.lon = 116.0;
@@ -156,7 +156,7 @@ class FlightLogPersistenceTest {
 
         flightLogService.telemetry(snapshot);
 
-        List<Map<String, Object>> results = flightLogService.query(LocalDate.now(), "telemetry", 5, 0);
+        List<Map<String, Object>> results = awaitQueryRows(5);
         assertThat(results).hasSize(1);
         Map<String, Object> m = results.get(0);
         // 验证返回格式与 JSONL 路径一致（key 名相同）
@@ -173,13 +173,14 @@ class FlightLogPersistenceTest {
 
     @Test
     @DisplayName("trackFor() 从数据库返回 List<TrackPoint> 格式正确")
-    void trackForFromDb() {
+    void trackForFromDb() throws Exception {
         DroneSnapshot snapshot = new DroneSnapshot(6);
         snapshot.lat = 31.2304;
         snapshot.lon = 121.4737;
         snapshot.relativeAlt = 200.0;
 
         flightLogService.telemetry(snapshot);
+        flightLogService.awaitPendingWrites(3000);
 
         List<TrackPoint> points = flightLogService.trackFor(LocalDate.now(), 6);
         assertThat(points).hasSize(1);
@@ -275,10 +276,12 @@ class FlightLogPersistenceTest {
 
         // 第一次写入应该成功
         flightLogService.telemetry(snapshot);
+        flightLogService.awaitPendingWrites(3000);
         assertThat(flightLogRepository.findByTypeAndSysid("telemetry", 9)).hasSize(1);
 
         // 第二次写入应被节流（在间隔内）
         flightLogService.telemetry(snapshot);
+        flightLogService.awaitPendingWrites(3000);
         assertThat(flightLogRepository.findByTypeAndSysid("telemetry", 9)).hasSize(1);
 
         // 恢复节流间隔为 0（无节流）
@@ -287,6 +290,7 @@ class FlightLogPersistenceTest {
 
         // 第三次写入应该成功（节流间隔为 0）
         flightLogService.telemetry(snapshot);
+        flightLogService.awaitPendingWrites(3000);
         assertThat(flightLogRepository.findByTypeAndSysid("telemetry", 9)).hasSize(2);
     }
 
@@ -302,6 +306,38 @@ class FlightLogPersistenceTest {
         e.setLon(116.4);
         e.setRelativeAlt(relativeAlt);
         flightLogRepository.save(e);
+    }
+
+    /**
+     * 入库改成异步批量写之后，断言前需要给 writer 线程一点时间。
+     * <p>
+     * 只放宽"多久能看到"，不放宽"必须看到"——超时仍返回空列表，让原有 hasSize(1) 断言失败。
+     */
+    private List<FlightLogEntity> awaitDbRows(String type, int sysid) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 5000;
+        List<FlightLogEntity> rows = List.of();
+        while (System.currentTimeMillis() < deadline) {
+            rows = flightLogRepository.findByTypeAndSysid(type, sysid);
+            if (!rows.isEmpty()) {
+                return rows;
+            }
+            Thread.sleep(20);
+        }
+        return rows;
+    }
+
+    /** 同上，走服务自己的读路径（DB 读 + 回退口径都经过它）。 */
+    private List<Map<String, Object>> awaitQueryRows(int sysid) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 5000;
+        List<Map<String, Object>> rows = List.of();
+        while (System.currentTimeMillis() < deadline) {
+            rows = flightLogService.query(LocalDate.now(), "telemetry", sysid, 0);
+            if (!rows.isEmpty()) {
+                return rows;
+            }
+            Thread.sleep(20);
+        }
+        return rows;
     }
 
     /**

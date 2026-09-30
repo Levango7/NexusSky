@@ -13,6 +13,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * FlightTrackStore 持久化模式单测（直接实例化，无 Spring 上下文）。
@@ -96,13 +97,18 @@ class FlightTrackStorePersistenceTest {
     void throttlePersistence_first9NoWrite() throws Exception {
         DroneLastKnownPositionRepository repo = mock(DroneLastKnownPositionRepository.class);
         injectRepository(repo);
+        List<DroneLastKnownPositionEntity> landed = recordWrites(repo);
 
         for (int i = 0; i < 9; i++) {
             FlightTrackStore.TrackPoint point = FlightTrackStore.TrackPoint.of(1, i * 1000L, 30.0, 120.0, 50.0);
             store.addPoint(1, point);
         }
 
-        verify(repo, never()).save(any(DroneLastKnownPositionEntity.class));
+        // 等过一个 flush 周期再判空；只 verify(never()).save() 在改成 saveAll 之后会永真，
+        // 所以断言必须跟着实际写接口走
+        Thread.sleep(400);
+        assertThat(landed).isEmpty();
+        verify(repo, never()).saveAll(any());
     }
 
     @Test
@@ -110,13 +116,15 @@ class FlightTrackStorePersistenceTest {
     void throttlePersistence_10thWritesOnce() throws Exception {
         DroneLastKnownPositionRepository repo = mock(DroneLastKnownPositionRepository.class);
         injectRepository(repo);
+        List<DroneLastKnownPositionEntity> landed = recordWrites(repo);
 
         for (int i = 0; i < 10; i++) {
             FlightTrackStore.TrackPoint point = FlightTrackStore.TrackPoint.of(1, i * 1000L, 30.0, 120.0, 50.0);
             store.addPoint(1, point);
         }
 
-        verify(repo, times(1)).save(any(DroneLastKnownPositionEntity.class));
+        awaitUntil(() -> landed.size() >= 1, 3000);
+        assertThat(landed).hasSize(1);
     }
 
     @Test
@@ -124,13 +132,17 @@ class FlightTrackStorePersistenceTest {
     void throttlePersistence_20thWritesSecond() throws Exception {
         DroneLastKnownPositionRepository repo = mock(DroneLastKnownPositionRepository.class);
         injectRepository(repo);
+        List<DroneLastKnownPositionEntity> landed = recordWrites(repo);
 
         for (int i = 0; i < 20; i++) {
             FlightTrackStore.TrackPoint point = FlightTrackStore.TrackPoint.of(1, i * 1000L, 30.0, 120.0, 50.0);
             store.addPoint(1, point);
         }
 
-        verify(repo, times(2)).save(any(DroneLastKnownPositionEntity.class));
+        // 断"落库 2 条"而不是"调用 2 次 saveAll"：成批提交时 2 条可能合进 1 批，
+        // 批次数是实现细节，条目数才是被保的行为
+        awaitUntil(() -> landed.size() >= 2, 3000);
+        assertThat(landed).hasSize(2);
     }
 
     @Test
@@ -187,6 +199,37 @@ class FlightTrackStorePersistenceTest {
     }
 
     // ===== 辅助方法 =====
+
+    /**
+     * 让 mock 的 saveAll 把落库条目记进一个列表，返回该列表。
+     * <p>
+     * 写库改到 writer 线程之后，"调用了几次 saveAll"不再是稳定的观测点（成批提交会合并批次），
+     * 所以这些用例统一断"落到库里的条目数"。
+     */
+    @SuppressWarnings("unchecked")
+    private List<DroneLastKnownPositionEntity> recordWrites(DroneLastKnownPositionRepository repo) {
+        List<DroneLastKnownPositionEntity> landed =
+                java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        when(repo.saveAll(any())).thenAnswer(invocation -> {
+            List<DroneLastKnownPositionEntity> batch = invocation.getArgument(0);
+            landed.addAll(batch);
+            return batch;
+        });
+        return landed;
+    }
+
+    /** 有界轮询等待条件成立，替代"睡一下再看"。 */
+    private static void awaitUntil(java.util.function.BooleanSupplier condition, long timeoutMs)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("条件未在 " + timeoutMs + "ms 内成立");
+    }
 
     /**
      * 通过反射注入 mock repository 到 FlightTrackStore 的私有字段。
