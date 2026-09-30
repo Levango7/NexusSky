@@ -86,7 +86,8 @@ database:
   driver: "org.h2.Driver"
   username: "sa"
   password: "REPLACE_WITH_DB_PASSWORD"
-  ddlAuto: "update"
+  # schema 由启动时的 Flyway 迁移建立后校验（与 prod 同口径）；update 会绕开迁移脚本
+  ddlAuto: "validate"
 
 # ---- Ingress ----
 ingress:

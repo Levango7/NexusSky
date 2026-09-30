@@ -78,8 +78,11 @@ services:
       - SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD is required}
       - SPRING_REDIS_HOST=redis
       - SPRING_REDIS_PORT=6379
-      - SPRING_FLYWAY_ENABLED=false
-      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      # Flyway 是 schema 的唯一真相源：本镜像与 prod profile 一致，
+      # 迁移必须真实执行（原配置关 Flyway + ddl-auto=update，
+      # 相当于让 Hibernate 隐式建表，迁移脚本从未在生产通路被验证过）。
+      - SPRING_FLYWAY_ENABLED=true
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
     depends_on:
       redis:
         condition: service_started

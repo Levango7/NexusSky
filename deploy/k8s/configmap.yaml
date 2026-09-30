@@ -18,7 +18,9 @@ data:
   # H2 内存库连接（生产应替换为外部 DB，见 secret + 此处 url）
   SPRING_DATASOURCE_URL: "jdbc:h2:mem:aerofleet"
   SPRING_DATASOURCE_DRIVER_CLASS_NAME: "org.h2.Driver"
-  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+  # schema 由启动时的 Flyway 迁移建立后校验（与 prod 同口径）；
+  # update 会让 Hibernate 隐式建表/补列，绕开迁移脚本
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "validate"
   # Actuator 端点暴露（与 application.properties 对齐）
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
   # JWT 有效期（秒）
