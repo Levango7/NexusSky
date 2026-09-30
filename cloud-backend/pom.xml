@@ -91,6 +91,13 @@
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-core</artifactId>
     </dependency>
+    <!-- Flyway 10+ 起 PostgreSQL 支持拆分为独立模块：缺它时 Flyway 报
+         "Unsupported Database: PostgreSQL"，prod/staging 的唯一 schema 通路直接断掉
+         （此前 CI 只用 H2，所以一直没暴露）。版本由 Boot BOM 管理（11.7.2）。 -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
     <!-- Redis 缓存：Spring Data Redis + Lettuce 连接池 -->
     <dependency>
       <groupId>org.springframework.boot</groupId>

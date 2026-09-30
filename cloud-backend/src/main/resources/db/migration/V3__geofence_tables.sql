@@ -1,6 +1,9 @@
 -- V3__geofence_tables.sql: 电子围栏模块两张表
 -- 覆盖 2 个 JPA 实体表
 -- 列名与 Hibernate SpringPhysicalNamingStrategy 生成结果一致
+-- 漂移修正（2026-09-30，prod profile + PG 的 Hibernate ddl-auto=validate 实测）：
+--   geofence_zone.fence_type / proximity_buffer_m 此前缺失，
+--   导致 Pass C 报 Schema-validation: missing column [fence_type]。
 
 -- ===== 围栏区域表 (GeofenceZoneEntity) =====
 CREATE TABLE IF NOT EXISTS geofence_zone (
@@ -12,6 +15,10 @@ CREATE TABLE IF NOT EXISTS geofence_zone (
     radius_m DOUBLE PRECISION,
     points TEXT,
     action VARCHAR(20),
+    -- KEEP_IN / KEEP_OUT，对齐 GeofenceZoneEntity.fenceType（默认 KEEP_IN）
+    fence_type VARCHAR(255),
+    -- 接近缓冲区距离（米），对齐 GeofenceZoneEntity.proximityBufferM（默认 100）
+    proximity_buffer_m INTEGER,
     enabled BOOLEAN,
     created_at_ms BIGINT
 );

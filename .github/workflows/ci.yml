@@ -184,6 +184,24 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # Pass C（prod profile + 真实 PostgreSQL）用：验证 Flyway 迁移在 PG 上
+      # 从零建库 + Hibernate ddl-auto=validate 逐实体校验。此前该通路从未被任何
+      # CI job 覆盖（integration 一直只跑 dev profile + H2），迁移里 MySQL 方言
+      # 的 DDL 直到上线才会暴露。库名/用户名与 application-prod.properties 默认值
+      # 一致（localhost:5432/aerofleet_prod），脚本只需注入密码环境变量。
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: aerofleet_prod
+          POSTGRES_USER: aerofleet
+          POSTGRES_PASSWORD: ci_pg_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aerofleet -d aerofleet_prod"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -317,8 +335,15 @@ jobs:
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           trivy-config: trivy.yaml
-          # 0 → CRITICAL/HIGH 只产 SARIF 不阻断（原状态：名义门禁）
-          # 1 → 发现 CRITICAL/HIGH 直接让 job 变红；SARIF 仍然上传，用于看红因。
+          # 0 → 只产 SARIF 不阻断（原状态：名义门禁）
+          # 1 → 有发现直接让 job 变红；SARIF 仍然上传，用于看红因。
+          # v0.36.0 实测语义修正（run 36647831204 红因 + action 源码
+          # entrypoint.sh:76-83）：format=sarif 且未设 limit-severities-for-sarif
+          # 时，action 会 **unset TRIVY_SEVERITY** —— 上面的 severity 入参在 SARIF
+          # 模式下不生效，exit-code 1 对**任意**严重级的发现都判红（该次运行即被
+          # 2 个 MEDIUM 触发）。当前保留这一更严语义：门禁 = 任意严重级的已知
+          # 漏洞清零，SARIF 全量上传保证面板可见；若要还原"只拦 CRITICAL/HIGH"，
+          # 加 limit-severities-for-sarif: true（代价：MEDIUM 不再进 SARIF/面板）。
           # trivy.yaml 的 scan.offline 保持不变（只影响 Maven 依赖解析不回源，
           # 不影响漏洞数据库下载与退出码语义）。
           exit-code: '1'
