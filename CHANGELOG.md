@@ -4,6 +4,29 @@
 
 ---
 
+## [Unreleased] — RBAC 默认拒绝：`@PermitAll` 白名单 + 342 个端点全量声明（2026-10-01）
+
+> **本轮验证**：全 reactor `mvn -B -o test` **3833 用例 / 0 failures / 0 errors / 0 skipped**（BUILD SUCCESS，7 模块；分模块 343/1324/117/2018/12/19，较 P6 后基线 3827 净 +6 = `RoleInterceptorTest` 11→16 + 新增 `RbacEndpointCoverageTest` 1）。本机 `scripts/ci-integration-test.sh`（跑前先 `mvn -B -o package -DskipTests`，避免拿旧 jar 验新断言）**IT_EXIT=0 / `=== All integration tests passed ===`**，断言较上轮 +2，两条新证据的实测输出：`✅ GET /api/v1/drones（OBSERVER 读已声明端点 → 200，未被 fail-closed 误伤） → HTTP 200`、`✅ POST /api/v1/geofence/check（OBSERVER 越级写 → 403） → HTTP 403`；成对是必须的——只断 403 分不清拦的是"角色不够"还是"端点没声明"，恒 403 也会绿。翻转过程中 `HttpAuthChainTest` 曾有 **8 例判红**（`tenantlessAdminIsGlobalScope`、`flightLogsAreTenantScoped`、`directIdAccessToOtherTenantIsNotFound` 等），补完端点声明后全部转绿——这个套件是全仓唯一以 `dev-mode=false` 起完整过滤器链的测试，所以它是这次翻转真正的自证：**它先红，说明 RBAC 之前在这些路径上确实一分力都没出**。
+> **为什么**：`RoleInterceptor:78-80` 写的是"方法与其类都没有 `@RequireRole` → `return true`"。这不是"某个端点忘了设角色"，而是**默认状态即无鉴权**：每新增一个端点都天然对任何已认证主体敞开，且运行时没有任何信号——上一轮实测 342 个端点里只有 70 个有声明（21 ADMIN/46 OPERATOR/3 OBSERVER），272 个裸奔，其中 92 个是写端点。P5 把 `rbac-enabled` 翻成 base 默认 true 只是让开关处于"开"的状态，覆盖面没变。
+
+| # | 类别 | 问题（实测） | 修复 |
+|---|---|---|---|
+| 1 | 默认值 | 无声明即放行，漏写注解静默失去鉴权 | `RoleInterceptor` 改为**无声明即 403**（响应体 `forbidden: endpoint has no role declaration`，WARN 里带 `handler=类#方法` 便于定位），"公开"必须写成显式 `@PermitAll` |
+| 2 | 覆盖面 | 272 个端点未声明（180 GET + 92 写） | 全部收口：读=类级 `@RequireRole(Role.OBSERVER)`（拦截器早已支持类级回退 `:74-77`）；写=方法级 `OPERATOR`，配置/用户/API Key/租户/围栏/场景模板/license 面 `ADMIN`；匿名入口只有 `AuthController#login`(:83)、`#refresh`(:150) 两处 `@PermitAll`。共 61 个文件、+268 行 |
+| 3 | 声明语义 | 翻转后"类级 vs 方法级、`@RequireRole` vs `@PermitAll` 并存时谁说话"没有定义，容易被顺手放宽 | 明确为：**方法级声明覆盖类级声明**（两种注解同规则），同一元素并存时 `@RequireRole` 胜出（收紧优先）。`RoleInterceptorTest` 从 11 例扩到 16 例逐条钉住，其中一条把旧的"未标注端点不受 RBAC 影响"断言**方向翻转**——旧用例断言的正是缺陷本身 |
+| 4 | 门禁怎么实现 | 我先写了一版 `scripts/rbac-endpoint-coverage.sh`（awk 文本扫描），实测把 272 个未声明**少报成 99**：方法签名里的 `@RequestBody`/`@PathVariable` 被当成注解行，注解缓冲区在错误的行结算 | 删掉 shell 版，改为 `RbacEndpointCoverageTest`：用 `ClassPathScanningCandidateComponentProvider` + `AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class)` 反射枚举真实端点。**一个会静默少报的安全门禁比没有门禁更糟**，而反射口径与运行时生效的东西同源，不会漂移（顺带过滤掉测试夹具里的嵌套 `@RestController`，它们不是生产端点） |
+| 5 | 别踩的两个坑 | ① 担心翻转会锁死管理界面；② 担心 `@PermitAll` 变成新的匿名口子 | ① 角色层级是**向上满足**的：`hasPermission = userRole.ordinal() <= requiredRole.ordinal()`，`Role` 声明顺序 ADMIN→OPERATOR→OBSERVER，故 ADMIN 令牌过任何门；② `@PermitAll` 只放开 RBAC，生产模式下 Spring Security 仍是 `anyRequest().authenticated()`（`SecurityConfig.java:76`），匿名先吃 401——它的真实语义是"已认证的任意角色可用" |
+| 6 | CI 侧证据 | Pass B 只有"ADMIN 201 / OBSERVER 打 ADMIN 端点 403"，看不出 fail-closed 有没有误伤只读用户 | 加两条制衡断言：`OBSERVER 读 /api/v1/drones → 200`（证明类级 OBSERVER 声明生效、只读面没被默认拒绝打掉）与 `OBSERVER 越级 POST /api/v1/geofence/check → 403` |
+| 7 | 批量标注的可控性 | 60+ 文件机械改动，容易把注解插错位置或把操作性端点误标 ADMIN | 由一次性脚本按 `Controller#method [VERB path]` 清单插入（脚本放 `target/`，不入库，入库的门禁是第 4 条那个反射测试）；插入点选在方法声明行之前，避免与多行 mapping 注解的括号配对纠缠。**ADMIN 全集我逐个复核**，把 `POST /api/v1/geofence/check`（手动触发一次围栏检查）与 `POST /api/v1/geofence/restriction/refresh`（拉取禁飞区数据）从 ADMIN 降级为 OPERATOR——它们是操作动作，不是配置变更 |
+| 8 | 仓库卫生 | `dependency-reduced-pom.xml` ×3 与 `__pycache__` ×6 被跟踪，每跑一次构建工作区就脏一次（shade 会把 jacoco 插件块抄 41 行进 diff） | `git rm --cached`（本地保留、构建自再生）+ `.gitignore` 补三条规则 |
+
+**新增/改动测试**：`RbacEndpointCoverageTest`(1，反射全量覆盖率)；`RoleInterceptorTest` 11→16（新增 `@PermitAll` 三向、并存收紧优先、缺声明 403 文案、rbac-off/dev-mode 仍整体放行）。
+
+**本轮未闭合**：`cloud-backend/data/aerofleet.{mv,trace}.db`（dev H2 数据文件）仍被跟踪，`.gitignore` 的 `/data/` 是根锚定、盖不到该路径——性质是数据不是构建产物，摘不摘由用户定；设备/边缘侧摄取端点（`POST /api/v1/edge/results`、`/loRa/alarm`、`/offline-alarm/batch-upload`、`/alarms/events`）已标 `OPERATOR`，但**仓库内没有任何带凭据的调用方**（唯一发 `X-API-Key` 的是 sdk-java `NexusSkyClient.java:490`），今天全靠 `dev-mode=true` 绕过，所以"设备必须持 key"目前是契约声明而非已验证通路，e2e 脚本与 compose 的凭据发放是下一件事；告警 SSE（`GET /api/v1/alarms/stream`）无法带 `Authorization` 头（`api.js:1171` 的 `alarmStreamUrl` 无 token、`EventSource` 也不支持自定义头），在 prod 下翻转前后都会在 Spring Security 层 401，属既有缺口；前端 110 余个调用点未逐一复验 OBSERVER 档的实际可见面；License 仍 fail-open。
+
+---
+
+
 ## [Unreleased] — MAVLink v2 签名与官方协议对等 + backend 签名接线（2026-10-01）
 
 > **本轮验证**：`mvn -B -o test` 全 reactor **3827 用例 / 0 failures / 0 errors / 0 skipped**（BUILD SUCCESS，7 模块；分模块 343/1324/117/2012/12/19，较上轮 3818 净 +9 = 按 sysid 取签名器的工厂用例 6 + link-sim 画像净 2（旧 2 条重写为 4 条）+ "只给密钥库"装配 1）。本机 `scripts/e2e-signing.ps1` 6 场景 **43 条断言全绿 / E2E_EXIT=0**（起点是 23 PASS / 7 FAIL，7 条 FAIL 逐条归因修完才有这个数：backend 启动没带 profile、断言时机导致的"空过"、link-sim 画像改错字节）。三条日志原文入档，作为"接线真的通了"的端到端证据：场景 2 `UdpGateway - 签名验证失败：sysid=1 linkId=1 msgId=33` 配 link-sim `tampered=3`；场景 3 `拒绝未签名帧：sysid=1 msgId=242 (rejectUnsigned=true)` 配 `stripped=3`；场景 5 两把不同口令的 sysid=1/sysid=2 都被发现且命令通路正常。

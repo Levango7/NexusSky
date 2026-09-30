@@ -636,10 +636,10 @@ NexusSky/
 | `mavlink-core` | 343 |
 | `drone-sim` | 1324 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2012 |
+| `cloud-backend` | 2018 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **3827** |
+| **总计** | **3833** |
 
 注意：这些用例跑在 `test` profile（`dev-mode=true`、`rbac-enabled=false`——
 `application-test.properties:8/:10` 显式设置，所以 base 默认翻 true 不影响它们），
@@ -689,15 +689,20 @@ NexusSky/
   限制挡住（EPERM），本地用 `gcs-web/scripts/check-frontend.cjs`
   （Babel 语法 + import 图）把关；**真实构建在 CI 跑**（`npm run build`）。
   改前端后推 CI 验证，别信本地静态检查的"绿"就万事大吉。
-- **安全认证：机制可用但覆盖面未满**。JWT + API Key + Spring Security + 三态租户域
+- **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
-  仍需注意：`@RequireRole` 只覆盖 341 个端点中的 70 个——**未标注的端点在 RBAC
-  打开后依然放行**（`RoleInterceptor:78-80`），所以真正的收口是 fail-closed 化，
-  不是逐个补注解。开关本身：`aerofleet.security.rbac-enabled` base 默认已翻 **true**
-  （prod/staging 各自显式打开；dev 不设该键但 `dev-mode=true` 先行旁路；
-  test profile 显式 false），CI 集成腿 Pass B 以"ADMIN 建用户 201 + OBSERVER 打
-  /api/v1/audit/logs 403"成对取证。
+  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：342 个端点
+  （190 GET/126 POST/13 PUT/13 DELETE）全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
+  写=`OPERATOR`、配置/用户/密钥/租户/围栏/license 面=`ADMIN`，匿名入口只有登录与刷新两处
+  `@PermitAll`；漏写注解由 `RbacEndpointCoverageTest` 反射逐个校验并判红，不靠文本扫描
+  （awk 版会把签名里的 `@RequestBody` 当注解行，把 272 个未声明少报成 99）。
+  两点别踩：角色层级向上满足（`userRole.ordinal() <= requiredRole.ordinal()`，ADMIN 能过任何门，
+  所以翻转不会锁死管理员界面）；`@PermitAll` 只放开 RBAC，认证仍由 `anyRequest().authenticated()`
+  把关（`SecurityConfig.java:76`）。开关：`aerofleet.security.rbac-enabled` base 默认 **true**
+  （prod/staging 显式 true；dev 靠 `dev-mode=true` 旁路；test 显式 false），CI 集成腿 Pass B
+  以四向取证：ADMIN 建用户 201、OBSERVER 打 /api/v1/audit/logs 403、
+  OBSERVER 读 /api/v1/drones 200、OBSERVER 越级写 /api/v1/geofence/check 403。
   License 在缺 key 或验签失败时降级为无限期 dev license（商用门禁当前不成立）
 - **持久化已部分实现**：飞行日志（JSONL 与 `flight_log` 表双模式，默认保留 30 天后自动清理）、
   审计日志（`audit_log` 表 + SHA-256 哈希链，默认仍纯内存、保留清理默认关闭）、

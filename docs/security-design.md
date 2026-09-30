@@ -115,10 +115,33 @@ public Result createTask(@RequestBody TaskRequest req) { ... }
 - `aerofleet.security.rbac-enabled=false`（**base 默认 true**；`application.properties:59`，
   dev profile 不设该键而靠 `dev-mode=true` 旁路，`application-test.properties:10` 显式 false，
   prod/staging 各自显式 true）
-- 目标方法未标注 `@RequireRole`（`RoleInterceptor:78-80`——当前主要缺口：341 个端点只有
-  70 个标注，未标注的对**任何已认证主体**一视同仁（匿名由 Spring Security 拦，与 RBAC 无关），
-  OBSERVER 与 ADMIN 无差别）
+- 目标方法（或其所属类）显式标注了 `@PermitAll`
 - 非控制器方法（静态资源等）
+
+**默认拒绝（2026-10-01 翻转）**：方法与其类既没有 `@RequireRole` 也没有 `@PermitAll` 时返回
+403，响应体 `{"error":"forbidden: endpoint has no role declaration"}`。
+此前这里是"无注解即放行"（旧 `RoleInterceptor:78-80`），后果不是"某个端点忘了设角色"，
+而是**每新增一个端点默认就没有鉴权、且运行时毫无信号**。翻转后：
+
+| 项 | 数值（实测口径：反射枚举 `@RestController` 的映射方法） |
+|---|---|
+| 端点方法总数 | 342（190 GET / 126 POST / 13 PUT / 13 DELETE / 0 PATCH） |
+| 翻转前已标注 | 70（21 ADMIN + 46 OPERATOR + 3 OBSERVER，全为方法级） |
+| 翻转时未标注 | 272（180 GET + 92 写）——已全部收口 |
+| 收口规则 | 读=类级 `@RequireRole(OBSERVER)`；写=方法级 `OPERATOR`，配置/用户/密钥/租户/围栏/模板/license 面=`ADMIN`；匿名入口只有 `AuthController#login`、`#refresh` 两处 `@PermitAll` |
+| 声明优先级 | 方法级覆盖类级（两种注解同规则）；同一元素并存时 `@RequireRole` 胜出（收紧优先）。已由 `RoleInterceptorTest` 逐条钉住（16 例） |
+
+两点容易被忽略的事实：
+1. **角色层级是向上满足的**：`hasPermission = userRole.ordinal() <= requiredRole.ordinal()`
+   且 `Role` 声明顺序为 ADMIN→OPERATOR→OBSERVER，所以 ADMIN 令牌能过任何门——翻转不会
+   锁死管理员界面，受影响的是 OBSERVER/OPERATOR 的可达面。
+2. **`@PermitAll` 只放开 RBAC，不放开认证**：生产模式下 Spring Security 仍是
+   `anyRequest().authenticated()`（`SecurityConfig.java:76`），匿名请求先吃 401。
+   所以 `@PermitAll` 的真实语义是"已认证的任意角色可用"。
+
+覆盖率由 `RbacEndpointCoverageTest` 在单测里用反射逐个校验（有未声明端点即红并列出
+`Controller#method [VERB path]`）。故意不用文本扫描：早前一版 awk 门禁会把方法签名里的
+`@RequestBody` 当成注解行，把"未声明"从 272 少报成 99——**会静默少报的安全门禁比没有门禁更糟**。
 
 **校验流程**：
 1. 从 `Authorization: Bearer <token>` 提取 JWT
