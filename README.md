@@ -217,8 +217,13 @@ GET /api/v1/flightlog/track?sysid=1            # 某日完整轨迹（从遥测�
 ```
 
 骨架阶段选 JSON Lines 而非 SQLite：零依赖、可 grep、可 git diff。现在两种模式
-并存：默认纯文件，`aerofleet.flightlog.persist-to-db=true` 改写 `flight_log` 表
-（单行写失败自动回退 JSONL，读路径同样回退）。
+并存：默认纯文件，`aerofleet.flightlog.persist-to-db=true` 改写 `flight_log` 表。
+DB 写**不在调用线程上执行**——入 `BatchedWriteQueue`，由单个 writer 线程成批 `saveAll`
+（`write-batch-size=50`、`write-flush-ms=200` 可配）；落库失败或队列满则整批就地回退
+JSONL，既不丢账也不背压生产者。代价是异步：刚写入的事件最多晚一个 flush 间隔才可读到。
+（批处理走显式 `JdbcTemplate.batchUpdate` 多行插入，不依赖 Hibernate 的批处理——
+`flight_log.id` 是 IDENTITY 主键，Hibernate 为取回生成键必须逐行执行；改序列则会被 prod 的
+`ddl-auto=validate` 判成 missing sequence，实测过。）
 
 ## GCS 完整化（P2）
 
@@ -525,8 +530,8 @@ ESP-NOW 用于近距离低延迟机间通讯（百元级），LoRa 用于远距�
 `GET /api/v1/flightlog?day=2026-09-13&type=alert&sysid=1&limit=100`
 （另有 `/flightlog/track`）——按**本地**日期一文件（`flight-logs/` 可配
 `aerofleet.flightlog.dir`），telemetry 节流 1s/机，alert/mission 即时
-写。`aerofleet.flightlog.persist-to-db=true` 时改写 `flight_log` 表
-（单行写失败自动回退 JSONL，读路径同样回退）。
+写。`aerofleet.flightlog.persist-to-db=true` 时改写 `flight_log` 表：写经有界队列
+交给单个 writer 线程成批提交，DB 失败或队列满都整批回退 JSONL（读路径同样回退）。
 `aerofleet.flightlog.retention-days=30`（默认）每天 03:30 删过期数据：
 DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理。
 纯文件、可 grep；换 SQLite/Postgres 是包内替换。B3 补齐 7 个单测

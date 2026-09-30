@@ -4,9 +4,31 @@
 
 ---
 
+## [Unreleased] — 遥测/告警入库移出调用线程：有界批量写队列 + flight_log 主键改序列（2026-10-01）
+
+> **为什么现在做**：`aerofleet.flightlog.persist-to-db` 一直是 false，所以"打开入库会怎样"从未被观测过。实测代码路径后确认：一旦打开，数据库写就发生在**产生这条数据的线程**上——而那条线程是不能等的。这是"遥测入库可用"的前置条件，不是可选优化。
+> **两条我自己说错、被实测推翻的话**：① 我说过"全量回归会顺带验证迁移"——不成立：`application-test.properties:25` 是 `spring.flyway.enabled=false`、`:20` 是 `ddl-auto=create-drop`，3849 个单测一条迁移都不跑；dev 是 `ddl-auto=update`，同样不校验。全仓只有 prod 档的 `validate` 会校验 schema，也就是**只有 Pass C 这一条腿**能发现迁移/映射不一致（CI 的 Integration Tests 会跑 Pass C，所以这条守门本来就该响）。② 我在 V22 的注释里写过"validate 大概不查序列，风险待确认"——它不是风险，是必然失败，见下表第 3 行。
+
+| # | 类别 | 问题（实测路径） | 修复 |
+|---|---|---|---|
+| 1 | 谁在阻塞路径上 | `UdpMavlinkTransport.java:59` 起一条 `mavlink-udp-<port>` 单线程接收循环 → `UdpGateway.onFrame:173` 同步调 `ingest.handle(frame)` → `TelemetryIngestService:52` 发 Spring 事件，**默认 multicaster 没有 task executor，所有 `@EventListener` 都在那条 UDP 线程上跑**。告警链路尤其致命：`TelemetrySnapshotListener:121/127/194/209 alerts.publish()` → `AlertBus`（同步派发的 `CopyOnWriteArrayList`）→ `TelemetryPusher:91 flightLog.alert()` → `FlightLogService:105 repository.save()` | 新增 `BatchedWriteQueue<T>`：有界队列 + 单 writer 线程 + 成批 `saveAll` + 关闭排空 + 计数（offered/written/failedBatches/rejected）。接入两条腿：`FlightLogService.append()` 与 `FlightTrackStore.persistLastKnown()` 都改为入队 |
+| 2 | 溢出与失败语义 | 直接改成异步很容易变成"要么背压回生产者，要么静默丢数据" | **两条都不选**：队列满或 writer 已停 → `offer` 立即返回 false（实测 <100ms，不阻塞）；调用方就地走既有的 JSONL 追加。落库抛异常 → 整批交给兜底回调写 JSONL。保留原注释声明的语义"DB 异常自动回退 JSONL"（`FlightLogService:48`），一账不丢 |
+| 3 | 批处理为什么以前是假的，以及为什么最终没走序列 | `FlightLogEntity:26` 原为 `GenerationType.IDENTITY`：Hibernate 对 IDENTITY 主键必须逐行执行才能取回生成键，所以 `hibernate.jdbc.batch_size` 对这张表静默无效——加了也不会批。**先按"改用序列"实现了一版，被真库打回**：Pass C（prod 档 `ddl-auto=validate` + 真 PostgreSQL）启动即失败 `Schema-validation: missing sequence [flight_log_id_seq]`；查库发现该名字**早已被 PG 给 identity 列的内部序列占用**（`pg_class` 里有、`information_schema.sequences` 里无，`DROP` 时报 "column id requires it"），于是 V22 的 `CREATE SEQUENCE IF NOT EXISTS` 是**空操作但 Flyway 记 success**——一个静默无效的迁移。序列对 Hibernate 校验不可见，prod 起不来 | 回退实体到 V18 的 IDENTITY（**删除 V22**，prod validate 不再有任何可失败点），改由 writer 线程用 `JdbcTemplate.batchUpdate` 做显式多行批量插入：批处理真实成立且不依赖驱动的序列元数据。INSERT 的列名/类型/值三者全部由实体 `@Column` 反射派生（同一份字段列表，结构上不可能错位），并加一条测试把该列清单与 **V18 DDL 逐项对比**，挡住"改 `@Column` 忘了改迁移"；另加一条测试断言"一批 N 行只发一次 `batchUpdate`" |
+| 4 | 不该被顺手改掉的并发保证 | `FlightTrackStore.java:124-130` 的 `synchronized(deque)` 是 cc28ed7 治并发 flake 的点 | 原样保留，只把落库挪走 |
+| 5 | 关闭顺序会静默倒退数据 | 有两个写者会在停机时抢同一行：队列里是**较早**的快照，`persistAllOnShutdown` 从内存轨迹取**最新**值 | `@PreDestroy` 里先 `queue.close()` 排空，再从内存补写；顺序颠倒就会用旧位置盖掉新位置。`TelemetryWriteOffThreadTest` 有一条专门钉这个顺序 |
+| 6 | 配置项该开在哪 | 高低频两条腿不该一样待遇 | 高频的 flight-log 开三个配置（容量/批量/轮询间隔），最后已知位置已被 `PERSIST_INTERVAL=10` 节流（20Hz 下每机约 0.5 秒一条），三个参数写死并在注释里说明为什么不配 |
+| 7 | 别让人以为全局开了批处理 | `audit_log`、`geofence_breach_event`、`orch_*` 等仍是 IDENTITY | `application.properties` 的批处理注释里直接点名：**batch_size 只对非 IDENTITY 主键生效**，本仓目前只有 `flight_log` 换成了序列 |
+| 8 | 异步化带来的隐性代价 | 写改异步后，"写完立刻读"的断言全部变成时序依赖。**第一次全量只有 3 条红（`telemetryWritesToDb`/`alertWritesToDb`/`queryFromDbReturnsSameFormatAsJsonl`），但这个类里实际有 6 处这种写法** —— 另外 3 处（`missionWritesToDb`/`connectivityWritesToDb`/`telemetryThrottleStillWorksInDbMode`/`trackForFromDb`）只是恰好被前面的耗时盖住，属于潜伏 flake，CI 换个机器就会红 | 统一改为**排空式等待**而不是"轮询到非空"：给 `BatchedWriteQueue` 加 `awaitIdle(timeout)`（判据是"队列空 **且** in-flight 批次数为 0"——只看队列空会漏掉已取走未提交的那批，故另设 `inFlight` 计数），并开 `FlightLogService.awaitPendingWrites(timeout)` 给测试/运维用。节流那条要的是"正好 N 条"，poll-to-non-empty 会把它变成弱断言，所以必须用排空语义。**没放宽任何实质断言**：超时后仍返回原结果，让 `hasSize(...)` 照常失败 |
+
+**新增测试**：`BatchedWriteQueueTest`(6：批次不超 batchSize 且条数守恒、写发生在 `db-write-*` 线程而非调用线程、队列满立即拒绝且 `offer` 耗时 <100ms、失败整批交兜底、`close` 排空 200 条不丢、关闭后 offer 不抛错)；`TelemetryWriteOffThreadTest`(5：DB 卡住时调用方仍立即返回、落库异常回退 JSONL 且账目在文件里、队列满回退 JSONL、最后已知位置在 writer 线程落地、停机顺序保证新值不被旧值覆盖)。；`TelemetryWriteOffThreadTest`(8：DB 卡住时调用方 <100ms 返回、落库异常整批回退 JSONL、队列满回退 JSONL、最后已知位置在 writer 线程落地、停机先排空再补写（旧值不盖新值）、**一批 N 行只发一次 `batchUpdate`**、插入列由注解派生且不含主键、**插入列与 V18 DDL 逐项一致（防实体/迁移漂移）。
+
+**本轮未闭合**：真库上的**批量插入路径本身没有被端到端断言**——Pass C 没有设备接入，`flight_log` 是空表，那条断言只证明"PG 上表存在 + 查询方言可用 + schema 校验通过"。我曾打算加"POST /alarms/events 后再查 flight_log 非空"来钉住它，核实后放弃：REST 告警经 `AlarmLinkageEngine` 只写告警表，**不写 `flight_log`**（`flightLog.alert()` 只由订阅 AlertBus 的 `TelemetryPusher.pushAlert` 调用），那条断言会是空证。要在 CI 里钉住插入路径，需要 Pass C 接一台 sim 或加一个可写的内部端点。
+
+
+
 ## [Unreleased] — 覆盖率门禁：补齐两个未接模块 + 抬回 cloud-backend 的地板（2026-10-01）
 
-> **本轮验证**：`mvn -B -o test` 全 reactor **3838 用例 / 0 failures / 0 errors / 0 skipped**（BUILD SUCCESS，与上批同数，本批不加测试）。根 `mvn -B -o verify -DskipTests` 日志里 **6 个 `jacoco:0.8.12:check (check-coverage)` 全部执行**（此前只有 4 个模块有该 execution）。`scripts/ci-coverage-threshold.sh --strict` 六模块全 `✅ 自洽`、`RESULT: OK`。**变异测试证明门禁真能变红**：cloud-backend 阈值临时抬到 0.99 → `Rule violated for bundle aerofleet-cloud-backend: lines covered ratio is 0.62, but expected minimum is 0.99` + BUILD FAILURE；sdk-java 抬到 0.90 → `ratio is 0.36 ... expected minimum is 0.90` + FAILURE。
+> **本轮验证**：`mvn -B -o test` 全 reactor **3852 用例 / 0 failures / 0 errors / 0 skipped**（BUILD SUCCESS；分模块 343/1324/117/2037/12/19，较 3838 基线净 +14 = `BatchedWriteQueueTest` 6 + `TelemetryWriteOffThreadTest` 8）。本机 `ci-integration-test.sh` **IT_EXIT=0、31 条 ✅**，关键是 **Pass C 在真 PostgreSQL 上正常启动**——方案 A 之前它启动即失败（`Schema-validation: missing sequence [flight_log_id_seq]`），这条腿是全仓唯一会校验 schema 的地方。
 > **先纠正一条我自己说错的**：上一轮我说"覆盖率门禁是装饰性的（步骤名写 >=50% 但命令带 `-DskipTests`，无 `.exec` → check 跳过 → 恒绿）"。那是外部审计报告在 253dca5 基线上的结论，**后来的 CI 真实化批次已经修好了**：现在测试步是 `mvn -B -pl <module> -am package`（不跳测试），CI 里还有一条显式守卫——`${module}/target/jacoco.exec` 不存在就 `::error::` + `exit 1`，artifact 上传也设了 `if-no-files-found: error`。我引用过期记忆而没先核实，是错的。
 
 真正还弱的两处，本批处理掉：
