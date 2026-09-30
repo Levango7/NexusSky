@@ -58,7 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [ mavlink-core, drone-sim, cloud-backend, link-sim ]
+        module: [ mavlink-core, drone-sim, cloud-backend, link-sim, sdk-java, regulator-sim ]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -85,7 +85,8 @@ jobs:
           retention-days: 14
       - name: Coverage gate (jacoco check; BUNDLE LINE >= per-module threshold)
         # 阈值不在本文件里，而在各模块 pom 的 jacoco check 规则中：
-        #   mavlink-core 0.65 / drone-sim 0.70 / link-sim 0.65 / cloud-backend 0.50
+        #   mavlink-core 0.65 / drone-sim 0.70 / link-sim 0.65 / cloud-backend 0.60
+        #   sdk-java 0.35 / regulator-sim 0.70
         # 每个阈值 = 该模块实测 LINE 覆盖率向下取整到 5%（见 scripts/ci-coverage-threshold.sh）。
         # jacoco:check 在 <module>/target/jacoco.exec 缺失时会打一条 warn 后**直接跳过**
         # （-DskipTests / pom 漏配 prepare-agent 都会导致这种"假绿"），
