@@ -120,6 +120,30 @@
         <artifactId>jackson-databind</artifactId>
         <version>2.21.7</version>
       </dependency>
+      <!-- 安全覆写第二批（2026-09-30 同日补，同一波 Security Scan 红因）：
+           trivy-action v0.36.0 在 format=sarif 且未开 limit-severities-for-sarif 时
+           会 unset TRIVY_SEVERITY（entrypoint.sh:76-83），severity 入参失效、
+           exit-code 1 对**所有**严重级生效——第一批清掉 CRITICAL/HIGH 后，
+           剩余 2 个 MEDIUM 仍红灯（SARIF 分析 7c755be：79 结果 → 4 结果，规则只剩这两条）。
+           - log4j-api / log4j-to-slf4j 2.25.5：CVE-2026-49844（修复版 2.25.5/2.26.1），
+             来自 spring-boot-starter-logging，两个 artifact 同版一起抬；
+           - commons-lang3 3.18.0：CVE-2025-48924（修复版 3.18.0），
+             来自 springdoc-openapi-starter-common 2.8.6 → swagger-core-jakarta 2.2.29。-->
+      <dependency>
+        <groupId>org.apache.logging.log4j</groupId>
+        <artifactId>log4j-api</artifactId>
+        <version>2.25.5</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.logging.log4j</groupId>
+        <artifactId>log4j-to-slf4j</artifactId>
+        <version>2.25.5</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-lang3</artifactId>
+        <version>3.18.0</version>
+      </dependency>
       <dependency>
         <groupId>io.aerofleet</groupId>
         <artifactId>aerofleet-mavlink-core</artifactId>
