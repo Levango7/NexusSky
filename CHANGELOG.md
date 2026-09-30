@@ -4,6 +4,31 @@
 
 ---
 
+## [Unreleased] — 覆盖率门禁：补齐两个未接模块 + 抬回 cloud-backend 的地板（2026-10-01）
+
+> **本轮验证**：`mvn -B -o test` 全 reactor **3838 用例 / 0 failures / 0 errors / 0 skipped**（BUILD SUCCESS，与上批同数，本批不加测试）。根 `mvn -B -o verify -DskipTests` 日志里 **6 个 `jacoco:0.8.12:check (check-coverage)` 全部执行**（此前只有 4 个模块有该 execution）。`scripts/ci-coverage-threshold.sh --strict` 六模块全 `✅ 自洽`、`RESULT: OK`。**变异测试证明门禁真能变红**：cloud-backend 阈值临时抬到 0.99 → `Rule violated for bundle aerofleet-cloud-backend: lines covered ratio is 0.62, but expected minimum is 0.99` + BUILD FAILURE；sdk-java 抬到 0.90 → `ratio is 0.36 ... expected minimum is 0.90` + FAILURE。
+> **先纠正一条我自己说错的**：上一轮我说"覆盖率门禁是装饰性的（步骤名写 >=50% 但命令带 `-DskipTests`，无 `.exec` → check 跳过 → 恒绿）"。那是外部审计报告在 253dca5 基线上的结论，**后来的 CI 真实化批次已经修好了**：现在测试步是 `mvn -B -pl <module> -am package`（不跳测试），CI 里还有一条显式守卫——`${module}/target/jacoco.exec` 不存在就 `::error::` + `exit 1`，artifact 上传也设了 `if-no-files-found: error`。我引用过期记忆而没先核实，是错的。
+
+真正还弱的两处，本批处理掉：
+
+| 模块 | 实测 LINE | 原声明 | 新声明 | 说明 |
+|---|---|---|---|---|
+| cloud-backend | 62.7% | 0.50 | **0.60** | 地板比实测低 **12.7 个百分点**：删掉那么多覆盖才会红。本仓口径是"实测向下取整到 5%"，其余三个模块余量只有 1.2~4.3pt，唯它离谱 |
+| sdk-java | 37.2%（87/234 行） | 无 jacoco | **0.35** | 此前完全未接门禁，也不在 CI matrix：12 个测试对覆盖率零贡献、零防退化 |
+| regulator-sim | 71.3%（209/293 行） | 无 jacoco | **0.70** | 同上（19 个测试） |
+| mavlink-core / drone-sim / link-sim | 69% / 71% / 66% | 0.65 / 0.70 / 0.65 | 不变 | 已自洽 |
+
+改动：`sdk-java/pom.xml`、`regulator-sim/pom.xml` 各加一段 jacoco execution（`prepare-agent` + `report@test` + `check-coverage@verify`，逐字照现有四模块的形态，不发明新结构）；CI matrix 由 4 模块扩到 6；matrix 上方阈值注释表同步；`ci-coverage-threshold.sh` 的 `MODULES_DEFAULT` 同步补齐并把"4 个门禁模块"改成 6。
+
+如实记下两处代价与限制：
+- **cloud-backend 余量只剩 2.7pt**。这是地板应有的样子，但也意味着今后一个不加测试的 PR 就更可能把 CI 撞红；出口是补测试，不是下调阈值。
+- **sdk-java 只有 37% 是真实状况**，不是阈值定低了——它 6 个主类只有 1 个测试文件（`DroneApiTest`，用 JDK 内置 `HttpServer` + 端口 0 自给，所以接进门禁不会与后端抢端口）。把地板钉在 0.35 的作用是防退化，不代表 SDK 覆盖已够。
+- 阈值写在 6 个 pom 里，与 `ci.yml` 的注释、`ci-coverage-threshold.sh` 三处需要同步维护；本次靠该脚本的 `--strict` 自证一致，但它并未进 CI（只有 pom 的 `check` 在 CI 里执行）。
+
+**本轮未闭合**：`ci-coverage-threshold.sh` 未接入 CI（三处数字一致性只靠人工跑）；SDK 响应信封契约问题仍在（与覆盖率无关，是既有项）；`mvn verify -DskipTests` 复用上一次构建遗留的 `.exec` 这一"陈旧产物也算存在"的窗口，CI 里因为同 job 先跑过测试而不成立，但本地单独执行 `verify` 时存在——守卫判的是"文件在不在"，不是"新不新"。
+
+---
+
 ## [Unreleased] — 设备/边缘摄取通道的 API Key 引导（2026-10-01）
 
 > **本轮验证**：`mvn -B -o test` 全 reactor **3838 用例 / 0 failures / 0 errors / 0 skipped**（BUILD SUCCESS；较上一批 +5 = `DeviceIngestKeyBootstrapRunnerTest` 5 例）。`docker compose config` 实测解析通过，未注入 `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY` 时该变量渲染为 `""`（不报错、不引导，既有部署不受影响）。本机 IT **IT_EXIT=0**，新增 Pass B 断言 7 走通 `X-API-Key` 分支并成对取证：`✅ POST /api/v1/alarms/events（引导出的 device-ingest key → 200） → HTTP 200`、`✅ [对照] POST /api/v1/alarms/events（错误 key → 401，证明不是恒放行） → HTTP 401`——这是本仓第一条经 API Key（而非 JWT）通过 RBAC 角色门的端到端断言，链路覆盖 `ApiKeyFilter` 哈希查库 → `ApiKeyContext` 角色 → `RoleInterceptor` OPERATOR 门。
