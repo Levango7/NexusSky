@@ -9,9 +9,13 @@
 #   2. 按策略"实测覆盖率向下取整到 5%"算出应声明的阈值；
 #   3. 与 pom 里已声明的 <minimum> 比对，判定门禁是真拦、空转、还是被人为调低过门。
 #
-# 口径：jacoco CSV 的 LINE_MISSED(第 8 列) / LINE_COVERED(第 9 列)，
-#       覆盖率 = COVERED / (MISSED + COVERED)，与 element=BUNDLE + counter=LINE
-#       + value=COVEREDRATIO 的判定完全一致。
+# 口径：取 jacoco.xml 里**最后一个** <counter type="LINE"> 节点，即 report(BUNDLE) 级
+#       missed/covered；覆盖率 = COVERED / (MISSED + COVERED)。
+#       这与 jacoco:check 的 element=BUNDLE + counter=LINE + value=COVEREDRATIO 完全同源。
+#       不要用 jacoco.csv 逐行相加：CSV 每个类一行，匿名内部类与其宿主的同一源行会被
+#       **重复计数**，于是比 BUNDLE 略乐观。实测 sdk-java：CSV 求和 87/234=0.3718，
+#       BUNDLE 86/233=0.3691；把阈值定在 0.37 时 CSV 口径说"自洽"，而 jacoco:check
+#       直接 BUILD FAILURE（ratio 0.36 < 0.37）——一个会盖章放过真门禁会拒的阈值，比没核对更糟。
 #
 # 用法：
 #   bash scripts/ci-coverage-threshold.sh                       # 全部 6 个门禁模块
@@ -43,11 +47,11 @@ printf '%-14s %10s %10s %10s %10s  %s\n' \
   "MODULE" "MISSED" "COVERED" "MEASURED" "POLICY" "DECLARED(pom)"
 
 for m in "${MODULES[@]}"; do
-  CSV="$ROOT/$m/target/site/jacoco/jacoco.csv"
+  XML="$ROOT/$m/target/site/jacoco/jacoco.xml"
   POM="$ROOT/$m/pom.xml"
 
-  if [ ! -f "$CSV" ]; then
-    printf '%-14s %s\n' "$m" "❌ 缺 $m/target/site/jacoco/jacoco.csv —— 该模块的门禁本次无法自证（要么没配 jacoco，要么构建被 -DskipTests 跳过）"
+  if [ ! -f "$XML" ]; then
+    printf '%-14s %s\n' "$m" "❌ 缺 $m/target/site/jacoco/jacoco.xml —— 该模块的门禁本次无法自证（要么没配 jacoco，要么构建被 -DskipTests 跳过）"
     FAIL=1
     continue
   fi
@@ -60,19 +64,21 @@ for m in "${MODULES[@]}"; do
     continue
   fi
 
-  read -r MISSED COVERED MEASURED POLICY <<< "$(awk -F, '
-    NR>1 { missed += $8; covered += $9 }
-    END {
+  # BUNDLE 级 LINE counter = jacoco.xml 里最后一个该类型节点（report 收尾时输出）
+  read -r MISSED COVERED MEASURED POLICY <<< "$(grep -o '<counter type="LINE"[^/]*/>' "$XML" | tail -1 | awk '
+    {
+      if (match($0, /missed="[0-9]+"/)) missed = substr($0, RSTART+8, RLENGTH-9)
+      if (match($0, /covered="[0-9]+"/)) covered = substr($0, RSTART+9, RLENGTH-10)
       total = missed + covered
       if (total == 0) { printf "%d %d nan nan\n", missed, covered; exit }
       ratio = covered / total
       # 向下取整到 5%：floor(ratio*100/5)*5/100
       policy = int(ratio * 20) / 20
       printf "%d %d %.4f %.2f\n", missed, covered, ratio, policy
-    }' "$CSV")"
+    }')"
 
   if [ "$MEASURED" = "nan" ]; then
-    printf '%-14s %s\n' "$m" "❌ jacoco.csv 里没有可统计的行（classes 目录为空？）"
+    printf '%-14s %s\n' "$m" "❌ jacoco.xml 里没有 BUNDLE 级 LINE counter（模块无字节码？或报告为空）"
     FAIL=1
     continue
   fi
