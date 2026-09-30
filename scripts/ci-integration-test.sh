@@ -312,6 +312,20 @@ if [ -n "$TOKEN" ]; then
         assert_status "GET /api/v1/audit/logs（OBSERVER 应被 RBAC 拒 403）" "403" \
             "$(http_status -H "Authorization: Bearer ${OBS_TOKEN}" \
                 "http://localhost:${B_PORT}/api/v1/audit/logs")"
+
+        # --- fail-closed 翻转后的成对证据（2026-10-01）---
+        # RoleInterceptor 已从"无注解即放行"翻成"无注解即 403"。光看上面的 403 分不清
+        # 拦的是"角色不够"还是"端点没声明"，所以这里补两条互相制衡的断言：
+        #   读侧 200 证明只读用户没被默认拒绝误伤（GeofenceController 等已类级 OBSERVER）；
+        #   写侧 403 证明 OPERATOR 门槛真的在拦 OBSERVER。
+        # 覆盖率门禁（每个端点都要有 @RequireRole 或 @PermitAll）由单元测试
+        # RbacEndpointCoverageTest 用反射逐端点校验，比文本扫描可靠，故不在此重复。
+        assert_status "GET /api/v1/drones（OBSERVER 读已声明端点 → 200，未被 fail-closed 误伤）" "200" \
+            "$(http_status -H "Authorization: Bearer ${OBS_TOKEN}" \
+                "http://localhost:${B_PORT}/api/v1/drones")"
+        assert_status "POST /api/v1/geofence/check（OBSERVER 越级写 → 403）" "403" \
+            "$(http_status -X POST -H "Authorization: Bearer ${OBS_TOKEN}" \
+                "http://localhost:${B_PORT}/api/v1/geofence/check")"
     else
         echo "   ❌ 无 OBSERVER token，跳过 RBAC 拒绝断言"
         FAILED=1
