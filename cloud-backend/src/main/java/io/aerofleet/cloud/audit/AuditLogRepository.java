@@ -2,8 +2,13 @@ package io.aerofleet.cloud.audit;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,4 +32,20 @@ public interface AuditLogRepository extends JpaRepository<AuditLogEntity, Long> 
 
     /** 全部记录，最旧的在前（哈希链校验用）。 */
     List<AuditLogEntity> findAllByOrderByIdAsc();
+
+    /**
+     * 保留策略用：删除 {@code cutoff} 之前的记录（链的<b>前缀</b>）。
+     * <p>
+     * 删前缀会让 {@code verifyChain} 的链首不再是创世哈希，因此该方法只在
+     * {@code aerofleet.audit.retention-days > 0} 时被 {@link AuditRetentionJob} 调用，
+     * 且校验逻辑据同一配置把该态识别为"截断"而非"断链"。
+     * 链尾（最新行）不受影响，续接照常。
+     *
+     * @param cutoff 截止时间，早于此的记录被删除
+     * @return 删除行数
+     */
+    @Modifying
+    @Transactional
+    @Query("delete from AuditLogEntity e where e.timestamp < :cutoff")
+    int deleteOlderThan(@Param("cutoff") Instant cutoff);
 }

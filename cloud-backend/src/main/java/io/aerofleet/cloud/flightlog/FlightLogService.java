@@ -31,7 +31,8 @@ import java.util.stream.Collectors;
 
 /**
  * Flight-log persistence: JSON Lines files under a configurable directory,
- * one file per UTC day, one line per event.
+ * one file per local day ({@code LocalDate.now()} in the JVM's default zone),
+ * one line per event.
  *
  *   { "t": "...", "type": "telemetry", "sysid": 1, "alt": 42.3, ... }
  *   { "t": "...", "type": "alert",     "sysid": 1, "severity": 6, "text": "..." }
@@ -42,6 +43,10 @@ import java.util.stream.Collectors;
  * Query path: REST reads today's (or a given day's) file back, newest-first
  * optional. This is the scaffold-honest persistence: no DB dependency, files
  * are grep-able, swapping to SQLite/Postgres later is a package change.
+ * <p>
+ * {@code aerofleet.flightlog.persist-to-db=true} 时写入与查询优先走
+ * {@code flight_log} 表（{@link FlightLogRepository}），DB 异常自动回退 JSONL，
+ * 两条路径的返回格式与租户过滤口径保持一致。
  */
 @Component
 public class FlightLogService {
@@ -88,7 +93,7 @@ public class FlightLogService {
         }
     }
 
-    /** File for a given UTC date. */
+    /** File for a given day (local date, same zone as {@link #now()}). */
     private Path fileFor(LocalDate day) {
         return dir.resolve("flight-" + day + ".jsonl");
     }
@@ -230,19 +235,22 @@ public class FlightLogService {
                 Instant end = day.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant();
                 List<FlightLogEntity> entities;
                 if (type != null && sysid != null) {
-                    entities = flightLogRepository.findByTypeAndSysidAndTimestampBetween(type, sysid, start, end);
+                    entities = flightLogRepository
+                            .findByTypeAndSysidAndTimestampBetweenOrderByTimestampAscIdAsc(type, sysid, start, end);
                 } else if (type != null) {
-                    entities = flightLogRepository.findByTypeAndTimestampBetween(type, start, end);
+                    entities = flightLogRepository.findByTypeAndTimestampBetweenOrderByTimestampAscIdAsc(type, start, end);
                 } else if (sysid != null) {
-                    entities = flightLogRepository.findBySysidAndTimestampBetween(sysid, start, end);
+                    entities = flightLogRepository.findBySysidAndTimestampBetweenOrderByTimestampAscIdAsc(sysid, start, end);
                 } else {
-                    entities = flightLogRepository.findByTimestampBetween(start, end);
+                    entities = flightLogRepository.findByTimestampBetweenOrderByTimestampAscIdAsc(start, end);
                 }
                 Integer tenantId = TenantContext.getEffectiveTenantId();
                 List<Map<String, Object>> out = entities.stream()
                         .filter(e -> isVisibleTo(e.getTenantId(), tenantId))
                         .map(FlightLogEntity::toMap)
                         .collect(Collectors.toList());
+                // 取末尾 = 最新 N 条：JSONL 路径按追加顺序天然如此，DB 路径靠
+                // 查询的 ORDER BY timestamp, id 保证同一口径。
                 if (limit > 0 && out.size() > limit) {
                     return out.subList(out.size() - limit, out.size());
                 }
@@ -299,7 +307,7 @@ public class FlightLogService {
                 Instant start = day.atStartOfDay(ZoneId.systemDefault()).toInstant();
                 Instant end = day.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant();
                 List<FlightLogEntity> entities = flightLogRepository
-                        .findByTypeAndSysidAndTimestampBetween("telemetry", sysid, start, end);
+                        .findByTypeAndSysidAndTimestampBetweenOrderByTimestampAscIdAsc("telemetry", sysid, start, end);
                 Integer tenantId = TenantContext.getEffectiveTenantId();
                 List<TrackPoint> pts = new ArrayList<>();
                 for (FlightLogEntity e : entities) {

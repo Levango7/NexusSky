@@ -11,4 +11,5 @@ docs/设计文档.md~
 .codeartsdoer/
 .hvigor/
 flight-logs-test/
+flight-logs-retention-test/
 /data/

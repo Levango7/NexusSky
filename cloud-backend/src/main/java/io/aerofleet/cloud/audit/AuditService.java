@@ -36,6 +36,10 @@ import java.util.concurrent.ConcurrentLinkedDeque;
  * 的行会因 prev_hash 指向前一条（未落库）哈希而被校验判为断链，使缺口可见。
  * <p>
  * 当 {@code aerofleet.audit.enabled=false} 时，{@link #record} 直接返回。
+ * <p>
+ * <b>保留策略</b>：{@code aerofleet.audit.retention-days}（默认 0=不删除）由
+ * {@link AuditRetentionJob} 每日按时间删除链前缀的历史行；{@link #verifyChain()}
+ * 读同一配置决定"链首不接创世哈希"是预期截断还是断链。
  */
 @Service
 public class AuditService {
@@ -58,6 +62,16 @@ public class AuditService {
     /** 是否将审计日志持久化到数据库（默认 false，保持纯内存行为）。 */
     @Value("${aerofleet.audit.persist-to-db:false}")
     private boolean persistToDb;
+
+    /**
+     * 审计保留天数（与 {@link AuditRetentionJob} 读同一配置键）。
+     * <p>
+     * 只影响 {@link #verifyChain()} 的判定口径：{@code >0} 时链的前缀可能被保留策略
+     * 删除，"链首 prev_hash 不是创世哈希"视为预期截断（结果里 {@code truncated=true}）；
+     * {@code =0}（默认，未启用保留）时这种形态仍按断链判红，不降低防篡改强度。
+     */
+    @Value("${aerofleet.audit.retention-days:0}")
+    private int retentionDays;
 
     /** JPA Repository（可选注入，数据库不可用时回退纯内存路径）。 */
     @Autowired(required = false)
@@ -167,8 +181,13 @@ public class AuditService {
      * 校验哈希链完整性，返回首个断链位置。
      * <p>
      * 数据库模式下从创世哈希起逐行重算（行按 id 升序）：内容被改 → entry_hash 不符；
-     * 历史行缺失 → 后继行的 prev_hash 不符。内存模式校验保留窗口内的链（容量裁剪
-     * 导致窗口首条之前没有记录，从窗口首条的 prev_hash 起算）。
+     * 历史行缺失 → 后继行的 prev_hash 不符。<b>链首例外</b>：未启用审计保留时链首的
+     * prev_hash 必须是创世哈希，否则判为断链（首行之前的记录不该存在又消失）；启用保留
+     * （{@code retention-days>0}）时前缀行是预期被删的，链自现存首行起算，结果标
+     * {@code truncated=true}。
+     * <p>
+     * 内存模式校验保留窗口内的链（容量裁剪必然使窗口首条之前没有记录，从窗口首条的
+     * prev_hash 起算，同样以 {@code truncated} 标明前缀不可验）。
      *
      * @return 校验结果
      */
@@ -177,24 +196,34 @@ public class AuditService {
             try {
                 List<AuditLogEntity> rows = auditLogRepository.findAllByOrderByIdAsc();
                 String prev = GENESIS_HASH;
+                boolean truncated = false;
                 int checked = 0;
-                for (AuditLogEntity r : rows) {
+                for (int i = 0; i < rows.size(); i++) {
+                    AuditLogEntity r = rows.get(i);
+                    if (i == 0 && !GENESIS_HASH.equals(r.getPrevHash())) {
+                        if (retentionDays <= 0) {
+                            return new ChainVerification(false, 0, r.getId(),
+                                    "链首 prev_hash 不是创世哈希（首行之前的记录缺失；未启用审计保留，不按截断处理）", false);
+                        }
+                        truncated = true;
+                        prev = r.getPrevHash();
+                    }
                     if (!prev.equals(r.getPrevHash())) {
                         return new ChainVerification(false, checked, r.getId(),
-                                "prev_hash 与前一条 entry_hash 不一致（历史行缺失或被改动）");
+                                "prev_hash 与前一条 entry_hash 不一致（历史行缺失或被改动）", truncated);
                     }
                     String expected = computeHash(prev, r.getTimestamp(), r.getUserId(),
                             r.getAction(), r.getTarget(), r.getDetail(), r.getIp());
                     if (!expected.equals(r.getEntryHash())) {
                         return new ChainVerification(false, checked, r.getId(),
-                                "entry_hash 与记录内容不符（内容被改动）");
+                                "entry_hash 与记录内容不符（内容被改动）", truncated);
                     }
                     prev = r.getEntryHash();
                     checked++;
                 }
-                return new ChainVerification(true, checked, null, null);
+                return new ChainVerification(true, checked, null, null, truncated);
             } catch (Exception e) {
-                return new ChainVerification(false, 0, null, "校验失败（查询异常）: " + e.getMessage());
+                return new ChainVerification(false, 0, null, "校验失败（查询异常）: " + e.getMessage(), false);
             }
         }
 
@@ -202,27 +231,29 @@ public class AuditService {
         synchronized (chainLock) {
             mem = new ArrayList<>(logs);
         }
+        boolean memTruncated = !mem.isEmpty() && !GENESIS_HASH.equals(mem.get(0).getPrevHash());
         String prev = mem.isEmpty() ? GENESIS_HASH : mem.get(0).getPrevHash();
         int checked = 0;
         for (AuditLog e : mem) {
             if (!prev.equals(e.getPrevHash())) {
-                return new ChainVerification(false, checked, null, "第 " + (checked + 1) + " 条 prev_hash 不匹配");
+                return new ChainVerification(false, checked, null, "第 " + (checked + 1) + " 条 prev_hash 不匹配", memTruncated);
             }
             String expected = computeHash(prev, e.getTimestamp(), e.getUserId(), e.getAction(),
                     e.getTarget(), e.getDetail(), e.getIp());
             if (!expected.equals(e.getEntryHash())) {
-                return new ChainVerification(false, checked, null, "第 " + (checked + 1) + " 条 entry_hash 校验失败");
+                return new ChainVerification(false, checked, null, "第 " + (checked + 1) + " 条 entry_hash 校验失败", memTruncated);
             }
             prev = e.getEntryHash();
             checked++;
         }
-        return new ChainVerification(true, checked, null, null);
+        return new ChainVerification(true, checked, null, null, memTruncated);
     }
 
     /**
      * 清空内存缓冲。
      * <p>
-     * 只清内存窗口，不删除数据库中的历史行（审计记录落库后不可由应用侧删除）。
+     * 只清内存窗口，不删除数据库中的历史行——落库的审计记录只能由
+     * {@link AuditRetentionJob} 按保留策略删除（{@code retention-days} 默认 0，即不删）。
      */
     public void clear() {
         synchronized (chainLock) {
@@ -247,6 +278,11 @@ public class AuditService {
         synchronized (chainLock) {
             return memoryCount;
         }
+    }
+
+    /** 设置审计保留天数（主要用于测试注入；影响 verifyChain 对链首截断的判定口径）。 */
+    void setRetentionDays(int retentionDays) {
+        this.retentionDays = retentionDays;
     }
 
     /** 内存窗口快照（最新在前）。 */
@@ -299,11 +335,12 @@ public class AuditService {
     /**
      * 哈希链校验结果。
      *
-     * @param ok          整条链是否完好
+     * @param ok          现存记录构成的链段是否自洽（{@code truncated=true} 时不含已删除的前缀）
      * @param checked     已通过校验的记录数
      * @param brokenAtId  首个断链记录的数据库 id（内存模式或无法定位时为 null）
      * @param reason      断链原因（完好时为 null）
+     * @param truncated   链首之前是否还有已不存在的记录（前缀被保留策略删除 / 内存窗口被容量裁剪）
      */
-    public record ChainVerification(boolean ok, int checked, Long brokenAtId, String reason) {
+    public record ChainVerification(boolean ok, int checked, Long brokenAtId, String reason, boolean truncated) {
     }
 }

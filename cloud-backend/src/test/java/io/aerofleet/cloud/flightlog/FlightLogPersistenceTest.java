@@ -13,7 +13,10 @@ import org.springframework.test.context.TestPropertySource;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 
@@ -186,6 +189,25 @@ class FlightLogPersistenceTest {
         assertThat(p.alt).isEqualTo(200.0);
     }
 
+    @Test
+    @DisplayName("query()/trackFor() 的时间顺序由 SQL ORDER BY 保证，limit 取的是最新 N 条")
+    void dbReadPathIsChronologicallyOrdered() {
+        // 三行故意按 +3h → +1h → +2h 的写入顺序落库：Repository 没有 ORDER BY 时
+        // "列表末尾 = 最新"不成立，limit 会取到最旧的几条（换数据库/走索引即翻转）。
+        LocalDate today = LocalDate.now();
+        Instant dayStart = today.atStartOfDay(ZoneId.systemDefault()).toInstant();
+        saveTelemetryRow(10, dayStart.plus(3, ChronoUnit.HOURS), 3.0);
+        saveTelemetryRow(10, dayStart.plus(1, ChronoUnit.HOURS), 1.0);
+        saveTelemetryRow(10, dayStart.plus(2, ChronoUnit.HOURS), 2.0);
+
+        List<Map<String, Object>> recent = flightLogService.query(today, "telemetry", 10, 2);
+        assertThat(recent).hasSize(2);
+        assertThat(recent).extracting(m -> m.get("relativeAlt")).containsExactly(2.0, 3.0);
+
+        List<TrackPoint> track = flightLogService.trackFor(today, 10);
+        assertThat(track).extracting(p -> p.alt).containsExactly(1.0, 2.0, 3.0);
+    }
+
     // ===== 降级测试 =====
 
     @Test
@@ -269,6 +291,18 @@ class FlightLogPersistenceTest {
     }
 
     // ===== 辅助方法 =====
+
+    /** 直接落一行可控时间的遥测（写入侧节流与时刻口径都不参与排序测试）。 */
+    private void saveTelemetryRow(int sysid, Instant ts, double relativeAlt) {
+        FlightLogEntity e = new FlightLogEntity();
+        e.setTimestamp(ts);
+        e.setType("telemetry");
+        e.setSysid(sysid);
+        e.setLat(39.9);
+        e.setLon(116.4);
+        e.setRelativeAlt(relativeAlt);
+        flightLogRepository.save(e);
+    }
 
     /**
      * 通过反射设置 persistToDb 字段。

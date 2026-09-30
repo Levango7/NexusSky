@@ -65,7 +65,9 @@ public class AuditController {
      * <p>
      * GET /api/v1/audit/verify
      *
-     * @return 校验结果（ok / checked / brokenAtId / reason）
+     * @return 校验结果（ok / checked / brokenAtId / reason / truncated）；
+     *         {@code truncated=true} 表示链首之前还有已不存在的记录（审计保留删除了前缀，
+     *         或纯内存模式下容量裁剪），此时 {@code ok} 只描述现存链段
      */
     @GetMapping("/verify")
     @RequireRole(Role.ADMIN)
@@ -76,6 +78,7 @@ public class AuditController {
         body.put("checked", v.checked());
         body.put("brokenAtId", v.brokenAtId());
         body.put("reason", v.reason());
+        body.put("truncated", v.truncated());
         return ResponseEntity.ok(body);
     }
 
