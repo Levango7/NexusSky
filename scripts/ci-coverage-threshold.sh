@@ -14,7 +14,7 @@
 #       + value=COVEREDRATIO 的判定完全一致。
 #
 # 用法：
-#   bash scripts/ci-coverage-threshold.sh                       # 全部 4 个门禁模块
+#   bash scripts/ci-coverage-threshold.sh                       # 全部 6 个门禁模块
 #   bash scripts/ci-coverage-threshold.sh mavlink-core link-sim  # 指定模块
 #   bash scripts/ci-coverage-threshold.sh --strict               # 阈值低于策略值也算失败
 #
@@ -24,7 +24,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODULES_DEFAULT=(mavlink-core drone-sim link-sim cloud-backend)
+MODULES_DEFAULT=(mavlink-core drone-sim link-sim cloud-backend sdk-java regulator-sim)
 STRICT=0
 
 if [ "${1:-}" = "--strict" ]; then
