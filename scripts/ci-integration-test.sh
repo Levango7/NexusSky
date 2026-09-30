@@ -20,8 +20,10 @@
 #   （RS256 密钥对自动生成，Pass B 的 decoder 才能验签）。
 #   所以 Pass B = dev profile 打底 + 命令行把 dev-mode 关掉，
 #   只翻转"鉴权"这一个维度，其余环境等价。
-#   （RBAC 授权层不在本脚本覆盖范围：aerofleet.security.rbac-enabled 保持 dev 默认
-#   false，链级 RBAC/租户断言由 cloud-backend 的 HttpAuthChainTest 负责。）
+#   （RBAC 授权层已被覆盖：base 的 aerofleet.security.rbac-enabled 默认 true，且 dev
+#   profile 不设该键，所以 Pass B 在 dev-mode=false 下会真正执行 RoleInterceptor——
+#   断言 6 用"ADMIN 建用户 201 + OBSERVER 打 /api/v1/audit/logs 403"成对取证。
+#   链级角色/租户的细粒度断言仍由 cloud-backend 的 HttpAuthChainTest 负责。）
 #
 # 2026-09-30 增补 Pass C（生产迁移通路）：
 #   此前 prod profile 从未在任何 CI 里启动过——integration job 只有 H2/dev，
@@ -282,6 +284,40 @@ if [ -n "$TOKEN" ]; then
             "http://localhost:${B_PORT}/api/v1/drones")"
 else
     echo "   ❌ 无 token，跳过带凭据访问断言（登录已判红）"
+    FAILED=1
+fi
+
+echo "   --- Pass B 断言 6：RBAC 真实生效（成对证据：ADMIN 过 / OBSERVER 拒）---"
+# base 的 aerofleet.security.rbac-enabled 默认已是 true，而 dev profile 不设该键、
+# 本趟又显式 --aerofleet.security.dev-mode=false（RoleInterceptor.preHandle 的旁路
+# 条件不再成立），所以 Pass B 是整条 CI 里唯一走 RoleInterceptor **拒绝分支**的腿。
+# （Pass C 的 prod 同样开着 RBAC，但它只证明"ADMIN 够格 → 放行"这一侧。）
+# 为什么必须成对：只断 OBSERVER 得 403 不足以证明拦截器接上了——恒 403 也会绿
+# （上一轮变异验证用过的口径）。先让 ADMIN 建用户拿到 201（证明"够格就放行"），
+# 再用该 OBSERVER 账号换 token 打 ADMIN-only 的 /api/v1/audit/logs 拿 403。
+if [ -n "$TOKEN" ]; then
+    OBS_USER="ci-observer"
+    OBS_PASS="ci-observer-pw"
+    CREATE_RAW=$(curl -sS -w $'\n%{http_code}' -X POST "http://localhost:${B_PORT}/api/v1/users" \
+        -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d "{\"username\":\"${OBS_USER}\",\"password\":\"${OBS_PASS}\",\"role\":\"OBSERVER\"}")
+    CREATE_STATUS=${CREATE_RAW##*$'\n'}
+    assert_status "POST /api/v1/users（ADMIN token 建 OBSERVER 用户 → 201 放行）" "201" "$CREATE_STATUS"
+    OBS_LOGIN=$(curl -sS -X POST "http://localhost:${B_PORT}/api/v1/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"username\":\"${OBS_USER}\",\"password\":\"${OBS_PASS}\"}")
+    OBS_TOKEN=$(printf '%s' "$OBS_LOGIN" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+    assert_true "OBSERVER 账号能换到 JWT（role claim 来自用户表）" "$OBS_TOKEN"
+    if [ -n "$OBS_TOKEN" ]; then
+        assert_status "GET /api/v1/audit/logs（OBSERVER 应被 RBAC 拒 403）" "403" \
+            "$(http_status -H "Authorization: Bearer ${OBS_TOKEN}" \
+                "http://localhost:${B_PORT}/api/v1/audit/logs")"
+    else
+        echo "   ❌ 无 OBSERVER token，跳过 RBAC 拒绝断言"
+        FAILED=1
+    fi
+else
+    echo "   ❌ 无 token，跳过 RBAC 生效断言（登录已判红）"
     FAILED=1
 fi
 
