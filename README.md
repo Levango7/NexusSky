@@ -206,15 +206,17 @@ java -jar drone-sim\...jar --terrain hill:300:100:150:80 --fence -600,-600:600,-
   凹多边形正确处理（射线法）
 
 **飞行日志持久化**：`./flight-logs/flight-YYYY-MM-DD.jsonl`，遥测 1Hz 节流、
-告警/任务/上下线即时落盘（不依赖有人开着 GCS 页面）。查询：
+告警/任务/上下线即时落盘（不依赖有人开着 GCS 页面）；默认保留 30 天
+（`aerofleet.flightlog.retention-days`，每天 03:30 清理，`<=0` 关闭）。查询：
 
 ```
 GET /api/v1/flightlog?day=2026-09-13&type=alert&sysid=1&limit=100
 GET /api/v1/flightlog/track?sysid=1            # 某日完整轨迹（从遥测行重建）
 ```
 
-骨架阶段选 JSON Lines 而非 SQLite：零依赖、可 grep、可 git diff；换数据库
-是 `flightlog` 包一个包的事。
+骨架阶段选 JSON Lines 而非 SQLite：零依赖、可 grep、可 git diff。现在两种模式
+并存：默认纯文件，`aerofleet.flightlog.persist-to-db=true` 改写 `flight_log` 表
+（单行写失败自动回退 JSONL，读路径同样回退）。
 
 ## GCS 完整化（P2）
 
@@ -519,9 +521,13 @@ ESP-NOW 用于近距离低延迟机间通讯（百元级），LoRa 用于远距�
 ## 飞行日志（flightlog，JSONL 落盘）
 
 `GET /api/v1/flightlog?day=2026-09-13&type=alert&sysid=1&limit=100`
-（另有 `/flightlog/track`）——按 UTC 日一文件（`flight-logs/` 可配
+（另有 `/flightlog/track`）——按**本地**日期一文件（`flight-logs/` 可配
 `aerofleet.flightlog.dir`），telemetry 节流 1s/机，alert/mission 即时
-写。纯文件、可 grep；换 SQLite/Postgres 是包内替换。B3 补齐 7 个单测
+写。`aerofleet.flightlog.persist-to-db=true` 时改写 `flight_log` 表
+（单行写失败自动回退 JSONL，读路径同样回退）。
+`aerofleet.flightlog.retention-days=30`（默认）每天 03:30 删过期数据：
+DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理。
+纯文件、可 grep；换 SQLite/Postgres 是包内替换。B3 补齐 7 个单测
 （@TempDir 往返/节流/过滤/轨迹重构/NaN 容忍）。
 
 ## API 摘要（/api/v1）
@@ -674,8 +680,9 @@ NexusSky/
   仍需注意：`@RequireRole` 只覆盖 341 个端点中的 70 个（其余靠"无注解=放行"），
   `aerofleet.security.rbac-enabled` 默认 false 且 staging profile 未显式打开；
   License 在缺 key 或验签失败时降级为无限期 dev license（商用门禁当前不成立）
-- **持久化已部分实现**：飞行日志 JSONL 落盘、围栏/追踪/安防设备等支持持久化测试；
-  主数据仍为内存态，换数据库是包内替换
+- **持久化已部分实现**：飞行日志（JSONL 与 `flight_log` 表双模式，默认保留 30 天后自动清理）、
+  审计日志（`audit_log` 表 + SHA-256 哈希链，默认仍纯内存、保留清理默认关闭）、
+  围栏/追踪/安防设备等支持持久化测试；主数据仍为内存态，换数据库是包内替换
 
 ## 集成过程中踩过的坑（对后来者有价值）
 

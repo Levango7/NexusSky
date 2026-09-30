@@ -133,6 +133,10 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 **GET /api/v1/flightlog**
 - 查询参数: `day` (String, 可选, YYYY-MM-DD, 默认今天), `type` (String, 可选, telemetry|alert|mission|connectivity), `sysid` (int, 可选), `limit` (int, 默认 200, 上限 5000)
 - 响应: 200 - 日志条目列表
+- 顺序: 按时间**升序**；`limit` 取的是最新的 N 条而不是最旧的 N 条
+  （JSONL 天然如此，`persist-to-db=true` 走 DB 时靠 `ORDER BY timestamp, id` 保证同一口径）
+- 保留: `aerofleet.flightlog.retention-days`（默认 30）每天 03:30 由 `FlightLogRetentionJob`
+  删除更早的 `flight_log` 行与 JSONL 文件；`<=0` 关闭清理
 
 **GET /api/v1/flightlog/track**
 - 查询参数: `day` (String, 可选, 默认今天), `sysid` (int, 必填)
@@ -1113,7 +1117,7 @@ curl -X POST -H "Authorization: Bearer <old-token>" \
 | 方法 | 路径 | 说明 | 请求体 | 响应 |
 |------|------|------|--------|------|
 | GET | `/logs` | 查询审计日志（需 ADMIN） | - | 200 List<{timestamp,userId,action,target,detail,ip,prevHash,entryHash}> |
-| GET | `/verify` | 校验哈希链完整性（需 ADMIN） | - | 200 {ok,checked,brokenAtId,reason} |
+| GET | `/verify` | 校验哈希链完整性（需 ADMIN） | - | 200 {ok,checked,brokenAtId,reason,truncated} |
 
 #### 端点详情
 
@@ -1123,7 +1127,12 @@ curl -X POST -H "Authorization: Bearer <old-token>" \
   `entryHash` = SHA-256(prevHash + 时间戳毫秒 + 各字段)，`prevHash` 指向上一条的 `entryHash`（首条为 64 个 0）
 
 **GET /api/v1/audit/verify** （需 ADMIN 角色）
-- 响应: 200 - `{ok, checked, brokenAtId, reason}`；`ok=false` 时 `brokenAtId` 为首个断链记录 id
+- 响应: 200 - `{ok, checked, brokenAtId, reason, truncated}`；`ok=false` 时 `brokenAtId` 为首个断链记录 id，
+  `checked` 为已通过校验的条数
+- `truncated=true`：链首之前还有已不存在的记录，`ok` 只描述现存链段。两种合法来源——
+  纯内存模式下容量裁剪掉窗口外的旧条目；或 `aerofleet.audit.retention-days > 0` 时保留任务按时间
+  删除了过期历史行（删除只切链**前缀**，链尾与新记录照常续接）。未启用保留（默认 `=0`）时
+  "链首不接创世哈希"不按截断处理，仍判 `ok=false`——防止"有人删了最早的审计行"被静默放行
 
 **curl 示例**:
 ```bash

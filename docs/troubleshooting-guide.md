@@ -179,7 +179,17 @@ cat flight-logs/flight-2026-09-13.jsonl | jq 'select(.sysid==1 and .type=="telem
 生产环境启用审计日志（`aerofleet.audit.enabled=true`）并落库到 `audit_log` 表
 （`aerofleet.audit.persist-to-db=true`，V21 迁移，含哈希链）；开发/测试默认纯内存
 （最近 1000 条）。查询与链校验端点：`GET /api/v1/audit/logs`、`GET /api/v1/audit/verify`
-（均需 ADMIN）。链校验返回 `ok/checked/brokenAtId/reason`，断链即说明历史行被改动或缺失。
+（均需 ADMIN）。链校验返回 `ok/checked/brokenAtId/reason/truncated`，断链即说明历史行被改动或缺失。
+
+**保留策略**：`aerofleet.audit.retention-days`（默认 `0`=不删）打开后，`AuditRetentionJob`
+每天 03:45 按 `timestamp` 删除更早的历史行。删除切的是哈希链**前缀**（链尾与新记录照常续接），
+所以删过一次之后 `verify` 会报 `truncated=true` 而 `ok` 仍可为 `true`——这表示"保留窗口内的链
+自洽"，不再覆盖已被删掉的前段。要反查是谁删的、或需要覆盖全周期的取证，应做归档导出而不是删库。
+
+**飞行日志保留**：`aerofleet.flightlog.retention-days`（默认 30）每天 03:30 由
+`FlightLogRetentionJob` 清理——`flight_log` 表行按精确时刻删，`flight-logs/*.jsonl`
+按文件名日期整天删（一天的事件在同一个文件里，无法部分删除），`<=0` 关闭。
+两条存储路径各自裁剪，切过 `persist-to-db` 的部署留下的旧文件也会被同样清掉。
 
 ### 3.4 日志分析技巧
 
