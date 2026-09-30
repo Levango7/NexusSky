@@ -704,6 +704,11 @@ NexusSky/
   以四向取证：ADMIN 建用户 201、OBSERVER 打 /api/v1/audit/logs 403、
   OBSERVER 读 /api/v1/drones 200、OBSERVER 越级写 /api/v1/geofence/check 403。
   License 在缺 key 或验签失败时降级为无限期 dev license（商用门禁当前不成立）
+  设备/边缘上报四条腿（`edge/results`、`loRa/alarm`、`offline-alarm/batch-upload|flush`、
+  `alarms/events`）要求 OPERATOR 档凭据：注入 `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`
+  （>=16 位）即由 `DeviceIngestKeyBootstrapRunner` 引导一条 `keyId=device-ingest` 的共享
+  API Key（库里只存哈希，留空完全不介入）；IT Pass B 断言 7 已实测该通路 200/伪造 key 401。
+  注意这是**整个部署一把共享 key**，不是每机一密钥
 - **持久化已部分实现**：飞行日志（JSONL 与 `flight_log` 表双模式，默认保留 30 天后自动清理）、
   审计日志（`audit_log` 表 + SHA-256 哈希链，默认仍纯内存、保留清理默认关闭）、
   围栏/追踪/安防设备等支持持久化测试；主数据仍为内存态，换数据库是包内替换

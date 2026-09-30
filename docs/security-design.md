@@ -229,6 +229,31 @@ public Result createTask(@RequestBody TaskRequest req) { ... }
 | `lastUsedAt` | Instant | 最后使用时间 |
 | `revoked` | boolean | 是否已撤销 |
 
+> 注：`scopes` 目前只随 `ApiKeyContext` 透传，**没有任何授权判定读它**（全仓 `getScopes()`
+> 的调用面只有上下文存取与 DTO 展示）。真正的能力边界来自 `role` 列 + `@RequireRole`。
+> 别把 `scopes` 当能力清单用。
+
+### 3.4 设备/边缘摄取凭据的引导（`DeviceIngestKeyBootstrapRunner`）
+
+RBAC 默认拒绝后，四条上报腿（`POST /api/v1/edge/results`、`/loRa/alarm`、
+`/offline-alarm/batch-upload` 与 `/flush`、`/alarms/events`）要求 `OPERATOR`。而生产模式下
+它们本来就 over `anyRequest().authenticated()`（`SecurityConfig.java:76`）——匿名上报一直是
+401，问题不是"这轮改坏了"，而是**仓库里从来没有发放凭据的路径**：唯一发 `X-API-Key` 的调用方
+是 sdk-java 的 `NexusSkyClient`，而铸 key 的 `POST /api/v1/auth/keys` 又要求 `ADMIN`，
+新部署会卡在"先要有账号才能发凭据、先要有凭据才能上报"。
+
+引导手法与 `AdminBootstrapRunner` 同构：
+
+- 配置 `aerofleet.security.device-ingest-api-key`（compose 里对应
+  `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`）；**留空即完全不介入**，出厂与 CI 行为不变。
+- 非空时按固定 `keyId=device-ingest` 创建或覆写一条 `api_keys` 记录，`role=OPERATOR`，
+  库里只存 SHA-256 哈希；长度 <16 拒绝引导，避免弱密钥出厂。
+- 轮换=改环境变量重启（同一 keyId 覆写，不会在表里堆积）。
+
+**如实的限制**：这是整个部署**一把共享 key**，不是每机一密钥，撤销粒度只有"整体换 key"；
+启动日志会 WARN 提醒这一点。每设备/租户发放与 SSE 的 `Authorization` 头问题（`EventSource`
+带不了自定义头，故 prod 下 `GET /api/v1/alarms/stream` 当前不可订阅）都还是未闭合项。
+
 ## 4. 租户隔离机制
 
 ### 4.1 TenantContext

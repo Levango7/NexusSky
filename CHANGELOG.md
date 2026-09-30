@@ -4,6 +4,23 @@
 
 ---
 
+## [Unreleased] — 设备/边缘摄取通道的 API Key 引导（2026-10-01）
+
+> **本轮验证**：`mvn -B -o test` 全 reactor **3838 用例 / 0 failures / 0 errors / 0 skipped**（BUILD SUCCESS；较上一批 +5 = `DeviceIngestKeyBootstrapRunnerTest` 5 例）。`docker compose config` 实测解析通过，未注入 `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY` 时该变量渲染为 `""`（不报错、不引导，既有部署不受影响）。本机 IT **IT_EXIT=0**，新增 Pass B 断言 7 走通 `X-API-Key` 分支并成对取证：`✅ POST /api/v1/alarms/events（引导出的 device-ingest key → 200） → HTTP 200`、`✅ [对照] POST /api/v1/alarms/events（错误 key → 401，证明不是恒放行） → HTTP 401`——这是本仓第一条经 API Key（而非 JWT）通过 RBAC 角色门的端到端断言，链路覆盖 `ApiKeyFilter` 哈希查库 → `ApiKeyContext` 角色 → `RoleInterceptor` OPERATOR 门。
+> **为什么**：上一批把四条上报腿（`POST /api/v1/edge/results`、`/loRa/alarm`、`/offline-alarm/batch-upload`+`/flush`、`/alarms/events`）标成 `@RequireRole(OPERATOR)`，但**仓库里没有任何发放凭据的路径**——唯一发 `X-API-Key` 的调用方是 sdk-java 的 `NexusSkyClient.java:490`，而铸 key 的 `POST /api/v1/auth/keys` 本身要求 ADMIN。生产模式下这些端点 over `anyRequest().authenticated()`（`SecurityConfig.java:76`），匿名上报一直是 401，所以问题不是"这轮改坏了"，而是**"设备必须持凭据"从来只是一句文档**，新部署卡在"先要有账号才能发凭据、先要有凭据才能上报"的循环里。
+
+| # | 类别 | 问题（实测） | 修复 |
+|---|---|---|---|
+| 1 | 引导通路 | 摄取端点要求 OPERATOR，却没有任何可运行的凭据发放方式 | 新增 `DeviceIngestKeyBootstrapRunner`（与 `AdminBootstrapRunner` 同构）：`aerofleet.security.device-ingest-api-key` 非空时按固定 `keyId=device-ingest` 创建/覆写一条 `api_keys` 记录（`role=OPERATOR`、库里只存 SHA-256 哈希、长度 <16 拒绝引导、`createdAt` 保留以便看出 key 寿命）；compose 注入 `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`。轮换=改环境变量重启，同 keyId 覆写所以表里不堆积 |
+| 2 | 出厂行为 | 引导类组件最常见的失败模式是"每个默认部署自带一把后门 key" | **留空即完全不介入**（含 CI 与 dev profile），compose 用 `${VAR:-}` 允许空值。`DeviceIngestKeyBootstrapRunnerTest` 第一条断言就是"未配置时不查库不写库"（`verify(repository, never()).findByKeyId/save`），第二条防"无数据源时抛错拖垮启动" |
+| 3 | 局限如实登记 | 一把共享 key 容易被误读成每机一密钥；`scopes` 容易被误读成能力边界 | 类 javadoc、启动 WARN、`docs/security-design.md` §3.4 三处都写明"这是整个部署共享的静态密钥，撤销粒度只有整体轮换"。`scopes` 经实测只随 `ApiKeyContext` 透传、**没有任何授权判定读它**（全仓 `getScopes()` 调用面只有上下文与 DTO 展示），API 参考与 security-design 的字段表都加了这句提醒 |
+
+**新增测试**：`DeviceIngestKeyBootstrapRunnerTest`(5)——未配置不介入 / 无 repository 不抛 / 短 key 拒绝 / 只存哈希且哈希与 `ApiKeyFilter` 同口径（测试里独立复算 SHA-256，防两处漂移）/ 覆写保留 `createdAt`。
+
+**本轮未闭合**：每设备·每租户独立发放与轮换/撤销（当前只有共享一把，撤销粒度=整体换 key）；告警 SSE `GET /api/v1/alarms/stream` 带不了 `Authorization` 头（`api.js:1171` + `EventSource` 限制），prod 下当前不可订阅，需要 query token 校验或迁 WS——用户已定"先不动，只登记"；Pass B 的端到端证据走的是 H2 + dev profile（`dev-mode=false`），**compose + PostgreSQL 那条腿未单独验证过引导路径**（`ApiKeyRepository` 与 profile 无关，风险低，但如实记着）；其余三条摄取腿（`edge/results`、`loRa/alarm`、`offline-alarm/*`）与 `/alarms/events` 走同一角色门，只在 `/alarms/events` 上做了实测。
+
+---
+
 ## [Unreleased] — RBAC 默认拒绝：`@PermitAll` 白名单 + 342 个端点全量声明（2026-10-01）
 
 > **本轮验证**：全 reactor `mvn -B -o test` **3833 用例 / 0 failures / 0 errors / 0 skipped**（BUILD SUCCESS，7 模块；分模块 343/1324/117/2018/12/19，较 P6 后基线 3827 净 +6 = `RoleInterceptorTest` 11→16 + 新增 `RbacEndpointCoverageTest` 1）。本机 `scripts/ci-integration-test.sh`（跑前先 `mvn -B -o package -DskipTests`，避免拿旧 jar 验新断言）**IT_EXIT=0 / `=== All integration tests passed ===`**，断言较上轮 +2，两条新证据的实测输出：`✅ GET /api/v1/drones（OBSERVER 读已声明端点 → 200，未被 fail-closed 误伤） → HTTP 200`、`✅ POST /api/v1/geofence/check（OBSERVER 越级写 → 403） → HTTP 403`；成对是必须的——只断 403 分不清拦的是"角色不够"还是"端点没声明"，恒 403 也会绿。翻转过程中 `HttpAuthChainTest` 曾有 **8 例判红**（`tenantlessAdminIsGlobalScope`、`flightLogsAreTenantScoped`、`directIdAccessToOtherTenantIsNotFound` 等），补完端点声明后全部转绿——这个套件是全仓唯一以 `dev-mode=false` 起完整过滤器链的测试，所以它是这次翻转真正的自证：**它先红，说明 RBAC 之前在这些路径上确实一分力都没出**。

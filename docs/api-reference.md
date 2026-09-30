@@ -4,7 +4,21 @@
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
-> 认证方式：除 `/api/auth/login` 外，所有端点要求 `Authorization: Bearer <JWT>` 请求头；部分端点额外要求 `ADMIN` 或 `OPERATOR` 角色（通过 `@RequireRole` 注解声明）。API Key 认证通过 `X-API-Key` 请求头，与 JWT 等效。
+> 认证方式：除 `POST /api/v1/auth/login` 与 `POST /api/v1/auth/refresh` 外，所有端点要求
+> `Authorization: Bearer <JWT>` 请求头（或 `X-API-Key`，两者等效）。在此之上还有 RBAC 角色门：
+> **每个端点都必须显式声明**角色（`@RequireRole`）或公开（`@PermitAll`），自 2026-10-01 起
+> 缺声明即 403（旧行为是缺声明即放行），覆盖率由 `RbacEndpointCoverageTest` 逐端点校验。
+> 角色层级向上满足——`ADMIN` 可满足 `OPERATOR`/`OBSERVER` 要求；`OBSERVER` 只读，
+> 写端点普遍要求 `OPERATOR`，用户/API Key/租户/地理围栏/场景模板/license 面要求 `ADMIN`。
+>
+> **设备与边缘上报的凭据（对外契约）**：`POST /api/v1/edge/results`、`POST /api/v1/loRa/alarm`、
+> `POST /api/v1/offline-alarm/batch-upload`、`POST /api/v1/offline-alarm/flush`、
+> `POST /api/v1/alarms/events` 要求 `OPERATOR` 档凭据。部署方注入
+> `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`（>=16 位）即可在启动时引导一条
+> `keyId=device-ingest` 的共享 API Key（库里只存 SHA-256 哈希）；不注入则这些端点在
+> 生产模式下不可用。注意这是**整个部署一把共享 key**，不是每机一密钥，撤销粒度只有整体轮换。
+> 另：告警 SSE（`GET /api/v1/alarms/stream`）走 `EventSource`，无法携带 `Authorization` 头，
+> 因此生产模式下当前不可订阅（已知未闭合项）。
 
 ## 目录
 
