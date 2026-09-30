@@ -27,13 +27,14 @@
 #   此前 prod profile 从未在任何 CI 里启动过——integration job 只有 H2/dev，
 #   而 Flyway 迁移里的 MySQL 方言 DDL（V17/V18 的 AUTO_INCREMENT）在 PG 上必然
 #   建表失败。也就是说"生产环境能不能起来"这个最基本的问题没有门禁回答。
-#   Pass C = prod profile + 真实 PostgreSQL（CI service / 本地容器），断言：
-#     1) 应用能启动（health UP）——这同时证明 Flyway 从零建库成功 +
-#        Hibernate ddl-auto=validate 逐实体校验通过（schema 与实体一致）；
-#     2) Flyway 日志确有 "Successfully applied ... migrations"；
-#     3) 匿名访问受保护端点 401（prod 的 dev-mode=false 生效）；
-#     4) DB 引导管理员账密能换到 token（证明 PG 上的用户表/JPA 查询通路可用）；
-#     5) 带 token 访问 200。
+#   Pass C = prod profile + 真实 PostgreSQL（CI service / 本地容器）。前置是应用能
+#   启动（health UP）——这同时证明 Flyway 从零建库成功 + Hibernate ddl-auto=validate
+#   逐实体校验通过（schema 与实体一致）。断言：
+#     1) Flyway 日志确有 "Successfully applied ... migrations"；
+#     2) 匿名访问受保护端点 401（prod 的 dev-mode=false 生效）；
+#     3) DB 引导管理员账密能换到 token（证明 PG 上的用户表/JPA 查询通路可用）；
+#     4) 带 token 访问 200；
+#     5) 审计哈希链校验通过（V21 建表 + 审计落库 + 链生成/校验全通路）。
 #   为什么必须 --logging.level.org.flywaydb=INFO：prod 的 root=WARN
 #   （application-prod.properties:52），Flyway 的 INFO 迁移日志默认被压掉，
 #   没有这行断言 2) 会永远看不到证据。
@@ -195,10 +196,20 @@ if [ ! -f "$JAR" ]; then
     exit 1
 fi
 
+# dev profile 的 H2 文件库固定 ./data/aerofleet（application-dev.properties:18-21）。
+# 一旦仓库迁移文件被编辑（本批 V2/V3/V13/V17/V18 的 schema 漂移修正），旧库的
+# flyway_schema_history 校验和必然失配，FlywayValidateException 在启动期杀死
+# Pass A/B（CI runner 无 data/ 目录所以从不暴露；本机复跑实测踩中）。
+# 改用脚本自管、每跑清空的 target 下临时库，CI 与本机行为一致。
+IT_DB_DIR="cloud-backend/target/it-dev-db"
+rm -rf "$IT_DB_DIR"
+mkdir -p "$IT_DB_DIR"
+DEV_DB_OVERRIDE="--spring.datasource.url=jdbc:h2:file:./${IT_DB_DIR}/aerofleet;AUTO_SERVER=TRUE"
+
 # ───────────────────────── 2. Pass A：无鉴权冒烟（dev-mode=true） ─────────────────────────
 echo "[2/6] Pass A —— dev profile（dev-mode=true）无鉴权冒烟..."
 LOG_A=$(mktemp)
-PID_A=$(start_backend "$LOG_A" "$A_PORT" $REDIS_OVERRIDE --spring.profiles.active=dev)
+PID_A=$(start_backend "$LOG_A" "$A_PORT" $REDIS_OVERRIDE --spring.profiles.active=dev $DEV_DB_OVERRIDE)
 if ! wait_ready "$PID_A" "$A_PORT" "$LOG_A" "Pass A cloud-backend"; then
     stop_backend "$PID_A" "Pass A cloud-backend"
     rm -f "$LOG_A"
@@ -222,6 +233,7 @@ echo "[3/6] Pass B —— 同一 profile 但 dev-mode=false，鉴权必须真实
 LOG_B=$(mktemp)
 PID_B=$(start_backend "$LOG_B" "$B_PORT" $REDIS_OVERRIDE \
     --spring.profiles.active=dev \
+    $DEV_DB_OVERRIDE \
     --aerofleet.security.dev-mode=false \
     --aerofleet.security.bootstrap-admin-username="$CI_USER" \
     --aerofleet.security.bootstrap-admin-password="$CI_PASSWORD")
@@ -301,7 +313,11 @@ echo "   --- Pass C 断言 1：Flyway 迁移在 PostgreSQL 上有执行证据（
 # 进程根本活不到 health UP。这一条只是把 Flyway 自己的日志取出来做显式证据。
 # sed 而非 grep：grep 无匹配返回 1，在 set -e/pipefail 下会直接中断脚本
 # （同 3 号断言取 token 的处理），sed 恒返回 0，交给 assert_true 判红。
-FLYWAY_EVIDENCE=$(sed -n 's/.*\(Successfully applied [0-9][0-9]* migrations[^"]*\|Schema .\{0,40\} is up to date\|No migration necessary\).*/\1/p' "$LOG_C" | head -1)
+# 匹配 "migration" 而非 "migrations"：Flyway 11.7.2 消息模板是
+# "Successfully applied <n> <migration{,\'s\'}> to schema ..."（DbMigrate 常量池
+# `migration\u0001` 占位符拼后缀）——只应用 1 个迁移的增量复跑日志是单数
+# "1 migration"，写死复数会在本机增量库上误红（实测踩中）。
+FLYWAY_EVIDENCE=$(sed -n 's/.*\(Successfully applied [0-9][0-9]* migration[^"]*\|Schema .\{0,40\} is up to date\|No migration necessary\).*/\1/p' "$LOG_C" | head -1)
 assert_true "Flyway 迁移日志（PostgreSQL）" "$FLYWAY_EVIDENCE"
 echo "   Flyway 证据: ${FLYWAY_EVIDENCE:-（无）}"
 
@@ -326,6 +342,27 @@ if [ -n "$TOKEN_C" ]; then
             "http://localhost:${C_PORT}/api/v1/drones")"
 else
     echo "   ❌ 无 token，跳过带凭据访问断言（prod 登录已判红）"
+    FAILED=1
+fi
+
+echo "   --- Pass C 断言 5：审计哈希链在该 PG 库上校验通过 ---"
+# prod 的 audit.enabled=true + persist-to-db=true（application-prod.properties），
+# 前面那一次登录 POST 已被审计拦截器落库入链（audit_log，V21），
+# 所以此时至少 1 行、链应完好（ok=true）。这条同时覆盖：V21 迁移在 PG 建表、
+# 审计写入通路、哈希链生成与校验端点。
+if [ -n "$TOKEN_C" ]; then
+    VERIFY_RAW=$(curl -sS -w $'\n%{http_code}' -H "Authorization: Bearer ${TOKEN_C}" \
+        "http://localhost:${C_PORT}/api/v1/audit/verify")
+    VERIFY_STATUS=${VERIFY_RAW##*$'\n'}
+    VERIFY_BODY=${VERIFY_RAW%$'\n'*}
+    assert_status "GET /api/v1/audit/verify（prod + PostgreSQL）" "200" "$VERIFY_STATUS"
+    echo "   链校验响应: ${VERIFY_BODY}"
+    VERIFY_OK=$(printf '%s' "$VERIFY_BODY" | sed -n 's/.*"ok":true.*/ok/p')
+    VERIFY_CHECKED=$(printf '%s' "$VERIFY_BODY" | sed -n 's/.*"checked":\([0-9][0-9]*\).*/\1/p')
+    assert_true "审计哈希链完好（ok=true，登录 POST 已入链）" "$VERIFY_OK"
+    assert_true "链校验覆盖 ≥1 条记录（实际 checked=${VERIFY_CHECKED:-?}）" "$VERIFY_CHECKED"
+else
+    echo "   ❌ 无 token，跳过审计链校验断言（prod 登录已判红）"
     FAILED=1
 fi
 
