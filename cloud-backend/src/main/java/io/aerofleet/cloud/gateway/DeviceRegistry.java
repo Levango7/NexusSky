@@ -92,6 +92,54 @@ public class DeviceRegistry {
         });
     }
 
+    /**
+     * 显式把一台设备登记进白名单，不等它先发包。
+     * <p>
+     * 为什么需要这条腿：白名单开启时陌生 sysid 的帧在 {@code UdpGateway.onFrame} 就被丢弃，
+     * 而内存快照原本只由这些被放行的帧创建 —— 于是 prod 首台设备永远注册不上。
+     * <p>
+     * 登记出的快照是 offline 的（尚未收到心跳），设备首帧到达后由 {@link #registerIfAbsent}
+     * 接管在线状态：它对已存在的快照不生效，所以不会重复入库、也不会覆盖这里的归属。
+     *
+     * @param sysid    MAVLink system id，合法范围 1..254（0 保留，255 是 GCS 自身且始终放行）
+     * @param tenantId 归属租户，null 表示未归属（只对全局管理员上下文可见）
+     * @return true 本次新建；false 设备已知（内存里已有，未做任何改动）
+     * @throws IllegalArgumentException sysid 越界
+     */
+    public boolean provision(int sysid, Integer tenantId) {
+        if (sysid < 1 || sysid > 254) {
+            throw new IllegalArgumentException("sysid must be in 1..254, got " + sysid);
+        }
+        DroneSnapshot snapshot = new DroneSnapshot(sysid);
+        snapshot.online = false;
+        snapshot.tenantId = tenantId;
+        // putIfAbsent：provision 与 UDP 注册线程可能同时建同一台设备的快照
+        if (drones.putIfAbsent(sysid, snapshot) != null) {
+            return false;
+        }
+        if (isPersisting()) {
+            try {
+                DeviceEntity entity = repository.findById(sysid).orElseGet(() -> new DeviceEntity(sysid));
+                entity.setOnline(false);
+                // 只在显式给了租户时改写：库里已有归属而请求未带的情况，不该被一次重登记抹掉
+                // （改归属是 PUT /api/v1/devices/{sysid}/tenant 的职责）
+                if (tenantId != null) {
+                    entity.setTenantId(tenantId);
+                }
+                repository.save(entity);
+            } catch (Exception e) {
+                log.warn("设备登记持久化失败 sysid={}: {}", sysid, e.getMessage());
+            }
+        }
+        log.info("Device provisioned: sysid={} tenantId={} persisted={}", sysid, tenantId, isPersisting());
+        return true;
+    }
+
+    /** 注册表是否会写数据库（{@code persist=true} 且数据源可用）。 */
+    public boolean isPersisting() {
+        return persist && repository != null;
+    }
+
     public DroneSnapshot get(int sysid) {
         DroneSnapshot snapshot = drones.get(sysid);
         if (snapshot == null) {
