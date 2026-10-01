@@ -13,6 +13,10 @@ docs/设计文档.md~
 flight-logs-test/
 flight-logs-retention-test/
 /data/
+# H2 数据库产物：dev profile 用 ./data/aerofleet 文件库，跑一次就生成。
+# 上面的 /data/ 是根锚定的，盖不到 cloud-backend/data/，所以按扩展名再兜一层。
+*.mv.db
+*.trace.db
 # maven-shade-plugin 每次 package 都会重写，属构建产物而非源
 dependency-reduced-pom.xml
 __pycache__/
