@@ -652,6 +652,39 @@ NexusSky/
 `cloud-backend/src/test/java/io/aerofleet/cloud/security/chain/HttpAuthChainTest.java`
 与 `api/ws/TelemetryWsTenantIsolationTest.java`（以 `dev-mode=false` 起完整过滤器链）。
 
+### 前端测试（2026-10-01 建立）
+
+此前前端**零测试**（`package.json` 无 test 脚本、`src` 下无测试文件，仅有
+`scripts/check-frontend.cjs` 这个不含行为断言的语法/import 图检查器），
+与后端 3869 例形成断层。现引入 vitest 3 + jsdom + Testing Library：
+
+| 命令 | 作用 |
+|---|---|
+| `npm run test` | `vitest run`，CI 的 GCS Web job 门禁 |
+| `npm run test:watch` | 监听模式 |
+| `npm run test:coverage` | v8 覆盖率 |
+| `npm run check` | 语法/import 图检查 + 单测 |
+
+首批 **46 例**（5 个文件），刻意只覆盖三类**已确认缺陷**与相关契约：
+
+- `test/droneSelection.test.js`（8）——`selected` 是**对象**而非机号这条契约。
+  修复前 `MapView` 两处写 `selected === sysid`，恒 false，「选中机标记高亮」与
+  「选中机轨迹渐变」两段代码从未执行过，且运行期零信号。
+- `test/telemetryHistory.test.jsx`（7）——历史曾把所有机型的遥测塞进**同一个扁平
+  数组**而消费端从不过滤 sysid，2 架机以上时曲线把不同飞机的数据交错画在一起。
+  现按 sysid 分桶（每桶 300 点 = 5Hz×60s，与图表窗口配套）。
+- `test/telemetryCharts.test.jsx`（7）——曲线渲染侧的 sysid 过滤，含「该机无数据时
+  不借用别机数值」「实时点带 sysid 不被过滤掉」两条边界。
+- `test/flightCommands.test.jsx`（18）——飞行命令二次确认。`arm`/`disarm`/`takeoff`/
+  `start_mission`/`kill` 五个不可逆命令取消时不得下发；**`rtl` 刻意不确认**
+  （应急回收动作不该被模态框挡住，QGC / Mission Planner 同样如此，此处有断言固化）。
+- `test/joystickDisarm.test.jsx`（6）——摇杆上锁按钮的二次确认，含「取消时**不得**
+  掐断正在进行的发送循环」这条顺序回归（确认必须早于停发，否则取消会留下
+  摇杆死区而飞机仍在飞）。
+
+覆盖率阈值暂未设：前端基线原为零，一上来卡阈值只会让 CI 立刻变红。
+先由 CI 实测产出基线，之后按模块逐步抬高。
+
 ## 代码审查修复记录
 
 5 轮收敛性审查（3 轮全量 + 2 轮验证），累计修复 21 个问题（4 Critical + 12 Major + 5 Minor）：
@@ -690,10 +723,11 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端本地只做静态检查**：vite build 在本仓开发沙箱里被 stdio 管道
-  限制挡住（EPERM），本地用 `gcs-web/scripts/check-frontend.cjs`
-  （Babel 语法 + import 图）把关；**真实构建在 CI 跑**（`npm run build`）。
-  改前端后推 CI 验证，别信本地静态检查的"绿"就万事大吉。
+- **前端测试仅覆盖首批 46 例**（2026-10-01 建立，vitest）：`npm run test` 已在 CI 的
+  GCS Web job 门禁。选的是三类**已确认缺陷**加相关契约，不是全量覆盖——
+  49 个组件里绝大多数仍只有 lint + build 保护。`vite build` 在本仓开发沙箱里曾被
+  stdio 管道限制挡住（EPERM），本地另用 `gcs-web/scripts/check-frontend.cjs`
+  （Babel 语法 + import 图）把关；`npm run check` 把两者串起来。
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
