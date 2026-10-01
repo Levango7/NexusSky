@@ -38,7 +38,11 @@
 #     4) 带 token 访问 200；
 #     5) 审计哈希链校验通过（V21 建表 + 审计落库 + 链生成/校验全通路）；
 #     6) flight_log 在 PG 上可查（Pass C 用 flag 打开 persist-to-db，覆盖未加引号的
-#        timestamp 作 WHERE 谓词/ORDER BY 键这一 PG 方言风险——H2 两版语法都认）。
+#        timestamp 作 WHERE 谓词/ORDER BY 键这一 PG 方言风险——H2 两版语法都认）；
+#     7) 活体设备：ADMIN 经 POST /api/v1/devices/{sysid} 登记 → drone-sim 真发遥测 →
+#        flight_log 在 PG 上真落行。这条同时钉住两件事：设备白名单与注册表持久化必须成对
+#        （prod 死锁回归腿），以及异步批量写路径在真实 PostgreSQL 上端到端可用
+#        （断言 6 只证明读通路与方言，行数是 7 带来的）。
 #   为什么必须 --logging.level.org.flywaydb=INFO：prod 的 root=WARN
 #   （application-prod.properties:52），Flyway 的 INFO 迁移日志默认被压掉，
 #   没有这行断言 2) 会永远看不到证据。
@@ -58,6 +62,10 @@ set -euo pipefail
 echo "=== NexusSky CI Integration Test ==="
 
 JAR="cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar"
+# Pass C 断言 7 用的活体设备模拟器（shaded = 可执行 fat jar，见 drone-sim/pom.xml 的 shade 配置）。
+SIM_JAR="drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar"
+# Pass C 里那台 sim 的 sysid：避开仓库内既有 sim/e2e 惯用的 1/7/9 等号段，便于日志里定位。
+C_SIM_SYSID="${C_SIM_SYSID:-231}"
 # Pass B 的凭据来源：DB 引导账号（AdminBootstrapRunner）。
 # 为什么不用 aerofleet.security.users 的内存用户：AuthController.login 里
 #   if (userRepository != null) { 查 DB；查不到就 401，**不会回退内存用户** }
@@ -96,12 +104,13 @@ FAILED=0
 PID_A=""
 PID_B=""
 PID_C=""
+PID_SIM=""
 
 # 任何硬失败（set -e 中途退出、就绪超时 exit 1）都不该把 java 进程留在工作区里：
 # 三趟各自绑 8080/8081/8082 + UDP 14550，残留进程会让复跑/后续步骤行为不可预期。
 cleanup_on_exit() {
     local p
-    for p in "$PID_A" "$PID_B" "$PID_C"; do
+    for p in "$PID_A" "$PID_B" "$PID_C" "$PID_SIM"; do
         if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
             kill "$p"
         fi
@@ -439,11 +448,12 @@ fi
 
 echo "   --- Pass C 断言 6：flight_log 在 PostgreSQL 上可查（DB 读通路 + PG 方言）---"
 # prod 默认 aerofleet.flightlog.persist-to-db=false（遥测只落 JSONL），这里用命令行 flag
-# 临时打开 DB 读通路。Pass C 没有真机遥测，flight_log 是空表——这条断言要证明的不是
-# "有数据"，而是三件在 H2 上永远看不到的事：V18 建的表在 PG 里存在、Hibernate 生成的
-# "where type=? and sysid=? and timestamp between ? and ? order by timestamp asc, id asc"
+# 临时打开 DB 读通路。这条断言要证明的是三件在 H2 上永远看不到的事：V18 建的表在 PG 里存在、
+# Hibernate 生成的 "where type=? and sysid=? and timestamp between ? and ? order by timestamp asc, id asc"
 # 被 PostgreSQL 接受（未加引号的 timestamp 作谓词/排序键，H2 两种模式都认，只有 PG 会红）、
 # 保留清理作用的那张表在 prod schema 下与实体一致（validate 已隐含，这里补可查证据）。
+# 注意：这一条跑在断言 7 之前，此刻表还是空的（sim 尚未接入），断言的是"查询通路 + 方言"，
+# 不断言行数——行数由断言 7 用活体设备真落真查。
 if [ -n "$TOKEN_C" ]; then
     FLIGHTLOG_RAW=$(curl -sS -w $'\n%{http_code}' -H "Authorization: Bearer ${TOKEN_C}" \
         "http://localhost:${C_PORT}/api/v1/flightlog?type=telemetry&limit=5")
@@ -454,6 +464,77 @@ if [ -n "$TOKEN_C" ]; then
     assert_true "flight_log 查询返回 JSON 数组（实际 ${FLIGHTLOG_BODY:0:60}）" "$FLIGHTLOG_IS_ARRAY"
 else
     echo "   ❌ 无 token，跳过 flight_log PG 读通路断言"
+    FAILED=1
+fi
+
+echo "   --- Pass C 断言 7：活体设备经 ADMIN 登记穿过白名单，遥测在 PG 真落行 ---"
+# 这一条是设备注册死锁（#46）的回归腿。prod 同时开 aerofleet.udp.device-whitelist-enabled=true
+# 与 aerofleet.device-registry.persist=true：陌生 sysid 的帧在进 ingest 之前就被 UdpGateway 丢弃，
+# 而注册条目过去只由被放行的帧创建 ⇒ 首台设备永远登记不上。修法补的是显式登记入口
+# POST /api/v1/devices/{sysid}（ADMIN）。这里必须用真 UDP 设备走完整链路，因为单测里
+# 白名单那几条一直用 mock DeviceRegistry（get() 恒给快照），恰好掩盖了"没人能填这个表"。
+# 接线：后端默认发现 127.0.0.1:14540（aerofleet.drone-port），sim 绑 14540 即被学到对端，
+# 之后自行持续推 GLOBAL_POSITION_INT —— 不需要任何 ARM/起飞触发命令（实测 1 行/秒/机）。
+if [ -n "$TOKEN_C" ]; then
+    # 必须带 tenantId：flight_log 的行按"设备归属"盖租户戳（FlightLogService.tenantForWrite →
+    # DeviceRegistry.tenantOf），而未归属设备的行任何具体租户都读不到。Pass C 的引导 ADMIN 的
+    # JWT 里带 tenant_id=1（AdminBootstrapRunner 默认租户，V6 种子 tenant id=1 code=default），
+    # 所以登记成租户 1，整条链路才是租户自洽的 —— 只登记不带归属会得到"写进去了但谁都看不见"。
+    PROVISION_RAW=$(curl -sS -w $'\n%{http_code}' -X POST \
+        -H "Authorization: Bearer ${TOKEN_C}" \
+        -H "Content-Type: application/json" -d '{"tenantId":1}' \
+        "http://localhost:${C_PORT}/api/v1/devices/${C_SIM_SYSID}")
+    PROVISION_STATUS=${PROVISION_RAW##*$'\n'}
+    PROVISION_BODY=${PROVISION_RAW%$'\n'*}
+    # 201=本次新建；200=已存在（本机增量复跑会走这支，因条目已入库）
+    if [ "$PROVISION_STATUS" = "201" ] || [ "$PROVISION_STATUS" = "200" ]; then
+        echo "   ✅ POST /api/v1/devices/${C_SIM_SYSID}（ADMIN 登记白名单）→ HTTP $PROVISION_STATUS"
+    else
+        echo "   ❌ POST /api/v1/devices/${C_SIM_SYSID}：期望 200/201，实际 $PROVISION_STATUS（响应 ${PROVISION_BODY:0:120}）"
+        FAILED=1
+    fi
+    # persisted=true 才是 prod 那对开关真的成对打开了（内存态条目重启即失，白名单会重新变死锁）
+    PERSISTED=$(printf '%s' "$PROVISION_BODY" | sed -n 's/.*"persisted":true.*/yes/p')
+    assert_true "登记条目已入库（device-registry.persist 在 prod 生效）" "$PERSISTED"
+
+    if [ -f "$SIM_JAR" ]; then
+        LOG_SIM=$(mktemp)
+        java -jar "$SIM_JAR" --port 14540 --sysid "$C_SIM_SYSID" > "$LOG_SIM" 2>&1 &
+        PID_SIM=$!
+        # 有界轮询：写队列是 200ms 批量刷 + 1 行/秒/机节流，放宽"多久能看到"，不放宽"必须看到"。
+        # curl/grep 都要吞失败：pipefail 下无匹配的 grep 返回 1 会直接中断脚本（见文件头取证注释）。
+        SIM_ROWS=0
+        for i in $(seq 1 30); do
+            sleep 2
+            SIM_ROWS=$( { curl -sS -H "Authorization: Bearer ${TOKEN_C}" \
+                "http://localhost:${C_PORT}/api/v1/flightlog?type=telemetry&sysid=${C_SIM_SYSID}&limit=200" \
+                || true; } | { grep -o '"sysid"' || true; } | wc -l )
+            [ "$SIM_ROWS" -ge 3 ] && break
+        done
+        if [ "$SIM_ROWS" -ge 3 ]; then
+            echo "   ✅ flight_log 在 PostgreSQL 上收到活体遥测（sysid=${C_SIM_SYSID}，${SIM_ROWS} 行，等待 ≤$((i * 2))s）"
+            # 同一 token 也应能在机队列表里看到这台设备（登记 + 归属 + 心跳三件事都成立才可能）
+            DRONE_SEEN=$( { curl -sS -H "Authorization: Bearer ${TOKEN_C}" \
+                "http://localhost:${C_PORT}/api/v1/drones" || true; } \
+                | { grep -o "\"sysid\":${C_SIM_SYSID}" || true; } | wc -l )
+            # assert_true 判的是"非空"，所以必须把 0 换算成空串——直接喂 wc -l 的 "0" 会被当成真。
+            assert_true "GET /api/v1/drones 含活体设备 sysid=${C_SIM_SYSID}（白名单确已放行）" \
+                "$([ "$DRONE_SEEN" -gt 0 ] && echo yes)"
+        else
+            echo "   ❌ 60s 内 flight_log 只见到 ${SIM_ROWS} 行 sysid=${C_SIM_SYSID} 的遥测（期望 ≥3）"
+            echo "   --- sim 日志末尾 15 行 ---"
+            tail -15 "$LOG_SIM"
+            FAILED=1
+        fi
+        kill "$PID_SIM" 2>/dev/null || true
+        PID_SIM=""
+        rm -f "$LOG_SIM"
+    else
+        echo "   ❌ 找不到 sim 制品 $SIM_JAR，活体设备断言无法执行"
+        FAILED=1
+    fi
+else
+    echo "   ❌ 无 token，跳过活体设备断言（prod 登录已判红）"
     FAILED=1
 fi
 
