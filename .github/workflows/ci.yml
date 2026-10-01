@@ -99,6 +99,14 @@ jobs:
           fi
           mvn -B -pl ${{ matrix.module }} -am verify -DskipTests
 
+      - name: Coverage threshold consistency (pom declared == measured policy floor)
+        # 上一行是"够不够阈值"，这一行是"三处声明是否互相自洽"：pom 的 <minimum>、本文件
+        # 上面的注释表、scripts/ci-coverage-threshold.sh 的 POLICY 口径（实测 LINE 向下取整
+        # 到 5%）。此前这条只能人工跑 --strict，下调 pom 阈值却忘了同步文档不会有任何信号。
+        # 只查本 matrix 项的模块：-am 会顺带构建依赖模块，但它们的 jacoco.xml 不保证存在，
+        # 不带参数全量跑会在依赖模块上误报"缺产物"。
+        run: bash scripts/ci-coverage-threshold.sh --strict ${{ matrix.module }}
+
   frontend:
     name: GCS Web
     runs-on: ubuntu-latest
