@@ -714,6 +714,14 @@ NexusSky/
   （>=16 位）即由 `DeviceIngestKeyBootstrapRunner` 引导一条 `keyId=device-ingest` 的共享
   API Key（库里只存哈希，留空完全不介入）；IT Pass B 断言 7 已实测该通路 200/伪造 key 401。
   注意这是**整个部署一把共享 key**，不是每机一密钥
+  prod 接真机还有一条硬前置：设备白名单（`aerofleet.udp.device-whitelist-enabled=true`，仅 prod）
+  必须与注册表持久化（`aerofleet.device-registry.persist=true`）**成对**打开，并经
+  `POST /api/v1/devices/{sysid}`（ADMIN）显式登记设备。陌生 sysid 的帧在 `UdpGateway.onFrame`
+  就被丢弃，而注册条目过去只由被放行的帧创建 —— 两者叠加曾让 prod 里任何真机都进不来
+  （2026-10-01 修，回归腿是 IT Pass C 断言 7：登记 → 起 sim → `flight_log` 在真 PG 上落行）。
+  登记时**记得带归属** `{"tenantId":N}`：`flight_log` 的行按设备归属盖租户戳
+  （`FlightLogService.tenantForWrite` → `DeviceRegistry.tenantOf`），未归属设备产生的遥测
+  对任何具体租户都读不到，只有无租户上下文的全局口径可见
 - **持久化已部分实现**：飞行日志（JSONL 与 `flight_log` 表双模式，默认保留 30 天后自动清理）、
   审计日志（`audit_log` 表 + SHA-256 哈希链，默认仍纯内存、保留清理默认关闭）、
   围栏/追踪/安防设备等支持持久化测试；主数据仍为内存态，换数据库是包内替换

@@ -380,7 +380,12 @@ WebSocket CORS 通过 `WebSocketConfig.registerWebSocketHandlers()` 的 `setAllo
 |---|---|---|---|
 | `aerofleet.udp.bind-address` | `0.0.0.0` | 内网网卡 IP | 网卡绑定地址 |
 | `aerofleet.udp.device-whitelist-enabled` | `false` | `true` | 只接受已注册 sysid 的帧 |
+| `aerofleet.device-registry.persist` | `false` | `true` | **必须与上一行成对**：白名单只认注册表里的 sysid，而陌生 sysid 的帧在进注册表之前就被丢弃。若注册表只在内存里，重启后 ADMIN 登记过的条目随之消失，白名单会重新变成"首台设备永远进不来"的死锁 |
 | `aerofleet.udp.max-frame-rate-per-sysid` | `100` | `100` | 单 sysid 每秒最大帧数 |
+
+设备登记入口：`POST /api/v1/devices/{sysid}`（ADMIN，可选 `{"tenantId":N}`）——这是白名单唯一的注册腿。
+登记后设备才可能被接受，其首帧再由心跳监听器置为在线；未登记设备的帧被 `UdpGateway.onFrame` 丢弃，
+打 `Rejected frame from unregistered sysid=...` WARN。
 
 ### 6.5 错误信息脱敏
 
@@ -422,6 +427,7 @@ aerofleet.security.users=${AEROFLEET_USERS}            # 环境变量注入
 aerofleet.license.enabled=true             # 启用 License 校验
 aerofleet.audit.enabled=true               # 启用审计日志
 aerofleet.udp.device-whitelist-enabled=true # 启用设备白名单
+aerofleet.device-registry.persist=true      # 白名单的成对项：登记条目必须跨重启保留
 springdoc.swagger-ui.enabled=false         # 禁用 Swagger UI
 management.endpoint.health.show-details=when-authorized  # 健康详情需认证
 ```

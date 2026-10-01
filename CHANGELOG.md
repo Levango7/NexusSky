@@ -4,7 +4,34 @@
 
 ---
 
-## [Unreleased] — 遥测/告警入库移出调用线程：有界批量写队列 + flight_log 主键改序列（2026-10-01）
+## [Unreleased] — prod 设备白名单死锁：显式登记端点 + 注册表持久化成对（2026-10-01）
+
+> **怎么发现的**：上一批留了一条未闭合项——"Pass C 没有设备接入，`flight_log` 空表，批量插入路径没被端到端断言"。我按活体配方在本地 prod + 真 PostgreSQL 复现它，60 秒遥测得到 **0 行**。不是异步队列没写，而是**帧根本没被接受**：prod 里任何真机都接不进来。
+
+| # | 类别 | 问题（实测路径） | 修复 |
+|---|---|---|---|
+| 1 | 死锁的三环 | 三条同时成立，就没有任何入口能让首台设备进白名单：① `UdpGateway.onFrame:152-157` 在进 ingest **之前**就丢弃陌生 sysid 的帧；② 唯一创建注册条目的是 ingest **之后**的 `TelemetrySnapshotListener.registerIfAbsent`（12 处调用全在监听器里）；③ 恢复路径也堵着——`aerofleet.device-registry.persist` 默认 false（`application.properties:82`），prod 未覆盖、compose/k8s 也未设，于是 `DeviceRegistry.restoreFromRepository():51-53` 直接 return；而 `DeviceRepository` 全仓只被 `DeviceRegistry` 引用，`DeviceProvisioningController` 只有 `GET /devices/unassigned` 和 `PUT /devices/{sysid}/tenant`，**没有"登记设备"这回事** | 新增 `POST /api/v1/devices/{sysid}`（ADMIN，可选 `{"tenantId":N}`；201 新建 / 200 已存在），把"登记"与"接受"解耦；prod 同时打开 `aerofleet.device-registry.persist=true`，让登记条目跨重启保留——否则重启后又回到 ① 的状态，白名单重新变成死锁 |
+| 2 | 3852 条单测为什么没抓到 | 白名单那 5 条用例全部用 **mock DeviceRegistry**，`get()` 被 `when(...)` 直接喂了快照。测试断言了"门会关"，却从未断言"有人能开门"——mock 恰好填上了现实中缺失的那条注册腿 | 加第 24 条用例：用**真实注册表**，先证明未登记设备的帧被丢（`never()`），再 `provision` 后证明同一设备的帧被放行。成对断言，任何一侧失效都判红 |
+| 3 | 归因靠 A/B，不靠猜 | 同一套接线，唯一变量是 `device-whitelist-enabled`：开着 = 0 行，关掉 = 60 秒 **59 行**（id 1..59 连续、`type=telemetry`、JSONL 反证未回退）。所以敢把它归因给配置门，而不是上一批的批量插入 | 该判据直接搬进 Pass C 断言 7（阈值 ≥3 行） |
+| 4 | 重登记不该抹掉既有归属 | `provision` 若对已入库行一律写 `tenantId=null`，会把 `PUT /tenant` 指派过的归属悄悄清掉 | 只在显式给了租户时改写；改归属仍是 `PUT /api/v1/devices/{sysid}/tenant` 的职责 |
+| 5 | 幂等与并发 | `provision` 与 UDP 注册线程可能同时为同一 sysid 建快照 | 用 `putIfAbsent`：已存在则返回 `alreadyRegistered=true` 且不改动快照。在线位仍由心跳监听器置——`registerIfAbsent` 对已存在快照不做任何事，有一条测试专门钉这点（我最初把它误写成"provision 后 registerIfAbsent 会置 online"，读 `TelemetrySnapshotListener:56-59` 后改正） |
+| 6 | prod 直连的启动前置（顺手记档） | 手工按 Pass C 参数起 prod 后端时先撞 `Could not resolve placeholder 'AEROFLEET_USERS'`——`application-prod.properties:19` 是无缺省的 `${AEROFLEET_USERS}`，compose 侧是 `${AEROFLEET_USERS:?...}` 必填 | IT 脚本早已在 `:86` 算好、`:365` 注入；此处记一句，免得下次手工复现再漏（四件套：datasource URL/口令 + `AEROFLEET_JWT_SECRET` + `AEROFLEET_USERS`） |
+| 7 | 断言 7 首跑判红，红在读不红在写（**附我的第二次同类错误**） | 首跑：登记返回 201、`persisted:true`、库里真落了 **65 行 sysid=231 的 telemetry**，但 `GET /api/v1/flightlog` 返回 `[]`，断言判红。我当场下的诊断是"写入端从不盖租户戳（P0-4 记的 `tenant_id 恒 NULL`）"——**这是错的**，又是一次照记忆陈述而未读当前代码：`FlightLogService.base():306-331` 的 `tenantForWrite()` 早就按 `DeviceRegistry.tenantOf(sysid)` 落租户。真实原因是我把设备登记成了**未归属**（`POST /devices/231` 没带 `tenantId`），于是行落 `tenant_id=NULL`，而 `isVisibleTo:345-347` 对"具体租户 + 记录 NULL"判不可见；引导 ADMIN 的 JWT 带 `tenant_id=1`，所以它读不到自己库里的数据 | Pass C 登记时带 `{"tenantId":1}`（V6 种子 `tenant id=1 code=default`），链路才租户自洽。并补两条单测把这条此前**零覆盖**的语义钉住——实测全仓 `flightlog` 包内没有任何与 `tenantId` 相关的断言，所以"写进去但没人看得见"这种状态可以长期无人察觉 |
+
+**新增测试 13 条**：`DeviceRegistryPersistenceTest` +5（provision 以 offline 入库、重启后可恢复进白名单 / 幂等不覆盖归属 / provision 后 `registerIfAbsent` 复用同一快照且不重复入库 / `persist=false` 时只进内存 / 越界 sysid 抛 `IllegalArgumentException`）；`DeviceProvisioningControllerTest` +5（201 登记后即时对该租户可见 / 无请求体登记为未归属、对租户不可见 / 200 已存在 / 400 越界（0 与 255）/ 租户不存在 404 与非整数 400 都不落库）；`UdpGatewayTest` +1（真实注册表的"未登记被丢 → 登记后放行"成对回归）；`FlightLogPersistenceTest` +2（遥测行继承设备归属且只有该租户读得到、未归属设备的行任何具体租户都读不到）。
+
+**IT 新增**：Pass C 断言 7 —— ADMIN `POST /api/v1/devices/231` → 断言响应 `persisted:true`（这才证明 prod 那两个开关真的成对打开了）→ 起 drone-sim（`--port 14540 --sysid 231`，由后端默认发现端口学到对端，**不需要任何 ARM/起飞触发**）→ 有界轮询 ≤60s 直到 `GET /api/v1/flightlog?type=telemetry&sysid=231` 返回 ≥3 行 → 停 sim（`cleanup_on_exit` 也带上 `PID_SIM`，中途硬失败不留进程）。这条一并闭合上一批"批量插入路径未被端到端断言"，并且是本仓第一次在 CI 里用真机（非 mock、非 REST 伪造遥测）验证 prod 遥测接入。
+
+**顺带修 CHANGELOG 自身两处**：① 上一条目第 7 行写"本仓目前只有 `flight_log` 换成了序列"——那是被真库打回**之前**的口径，与同表第 3 行自相矛盾，已改为"批量来自 writer 线程的显式 `batchUpdate`，与 `batch_size` 无关"；② 同条目测试列表里 `TelemetryWriteOffThreadTest` 被写了两遍（5 条版 + 8 条版）且括号残缺、多出一个 `。；`，合并为 8 条版。
+
+**验证（本机，串行跑批）**：全量 `mvn -B -o test` = **3865 用例 / 0 失败 / BUILD SUCCESS**（分模块 343/1324/117/2050/12/19，基线 3852 + 本批 13）；`mvn -B -o package -DskipTests` PKG_EXIT=0；`IT_EXIT=0`，**35 条 ✅ / 0 条 ❌**（原 31 + 断言 7 的 4 条），日志 `cloud-backend/target/verify-20260930/w11-it.log`。断言 7 实际输出：`POST /api/v1/devices/231 → HTTP 200`（本机是增量复跑，条目已在库里且已归属租户 1，所以走幂等分支；CI 全新库会是 201）、`登记条目已入库`、`flight_log 在 PostgreSQL 上收到活体遥测（3 行，等待 ≤4s）`、`GET /api/v1/drones 含活体设备`。
+注意那 3 行是**新落的行**：同库同表里还留着上一轮未归属的 65 行（`tenant_id IS NULL`），它们没有被计数——正好反证读过滤在真库上确实生效，不是"全表返回"造成的假绿。
+
+**仍未闭合**：① 没有"撤销登记"的端点，登记错的 sysid 目前只能删库里的行；② `persist=true` 后 `devices` 表会长期累积条目，没有任何清理/停用策略；③ 存量 `tenant_id IS NULL` 的遥测行**不回填**（你已定：只保证新数据正确），它们对具体租户永久不可见，只有无租户上下文的全局口径能看到；④ 每台设备独立凭据与轮换（现仍是整个部署一把共享摄取 key）；⑤ 告警 SSE 带不了 `Authorization`。
+
+---
+
+## [Unreleased] — 遥测/告警入库移出调用线程：有界批量写队列 + 显式 JDBC 批量插入（序列方案被真库打回）（2026-10-01）
 
 > **为什么现在做**：`aerofleet.flightlog.persist-to-db` 一直是 false，所以"打开入库会怎样"从未被观测过。实测代码路径后确认：一旦打开，数据库写就发生在**产生这条数据的线程**上——而那条线程是不能等的。这是"遥测入库可用"的前置条件，不是可选优化。
 > **两条我自己说错、被实测推翻的话**：① 我说过"全量回归会顺带验证迁移"——不成立：`application-test.properties:25` 是 `spring.flyway.enabled=false`、`:20` 是 `ddl-auto=create-drop`，3849 个单测一条迁移都不跑；dev 是 `ddl-auto=update`，同样不校验。全仓只有 prod 档的 `validate` 会校验 schema，也就是**只有 Pass C 这一条腿**能发现迁移/映射不一致（CI 的 Integration Tests 会跑 Pass C，所以这条守门本来就该响）。② 我在 V22 的注释里写过"validate 大概不查序列，风险待确认"——它不是风险，是必然失败，见下表第 3 行。
@@ -17,10 +44,10 @@
 | 4 | 不该被顺手改掉的并发保证 | `FlightTrackStore.java:124-130` 的 `synchronized(deque)` 是 cc28ed7 治并发 flake 的点 | 原样保留，只把落库挪走 |
 | 5 | 关闭顺序会静默倒退数据 | 有两个写者会在停机时抢同一行：队列里是**较早**的快照，`persistAllOnShutdown` 从内存轨迹取**最新**值 | `@PreDestroy` 里先 `queue.close()` 排空，再从内存补写；顺序颠倒就会用旧位置盖掉新位置。`TelemetryWriteOffThreadTest` 有一条专门钉这个顺序 |
 | 6 | 配置项该开在哪 | 高低频两条腿不该一样待遇 | 高频的 flight-log 开三个配置（容量/批量/轮询间隔），最后已知位置已被 `PERSIST_INTERVAL=10` 节流（20Hz 下每机约 0.5 秒一条），三个参数写死并在注释里说明为什么不配 |
-| 7 | 别让人以为全局开了批处理 | `audit_log`、`geofence_breach_event`、`orch_*` 等仍是 IDENTITY | `application.properties` 的批处理注释里直接点名：**batch_size 只对非 IDENTITY 主键生效**，本仓目前只有 `flight_log` 换成了序列 |
+| 7 | 别让人以为全局开了批处理 | `audit_log`、`geofence_breach_event`、`orch_*` 等仍是 IDENTITY | `application.properties` 的批处理注释里直接点名：**batch_size 只对非 IDENTITY 主键生效**，本仓的表几乎都是 IDENTITY，加了也不会批；`flight_log` 的批量来自 writer 线程的显式 `JdbcTemplate.batchUpdate`，与 batch_size 无关 |
 | 8 | 异步化带来的隐性代价 | 写改异步后，"写完立刻读"的断言全部变成时序依赖。**第一次全量只有 3 条红（`telemetryWritesToDb`/`alertWritesToDb`/`queryFromDbReturnsSameFormatAsJsonl`），但这个类里实际有 6 处这种写法** —— 另外 3 处（`missionWritesToDb`/`connectivityWritesToDb`/`telemetryThrottleStillWorksInDbMode`/`trackForFromDb`）只是恰好被前面的耗时盖住，属于潜伏 flake，CI 换个机器就会红 | 统一改为**排空式等待**而不是"轮询到非空"：给 `BatchedWriteQueue` 加 `awaitIdle(timeout)`（判据是"队列空 **且** in-flight 批次数为 0"——只看队列空会漏掉已取走未提交的那批，故另设 `inFlight` 计数），并开 `FlightLogService.awaitPendingWrites(timeout)` 给测试/运维用。节流那条要的是"正好 N 条"，poll-to-non-empty 会把它变成弱断言，所以必须用排空语义。**没放宽任何实质断言**：超时后仍返回原结果，让 `hasSize(...)` 照常失败 |
 
-**新增测试**：`BatchedWriteQueueTest`(6：批次不超 batchSize 且条数守恒、写发生在 `db-write-*` 线程而非调用线程、队列满立即拒绝且 `offer` 耗时 <100ms、失败整批交兜底、`close` 排空 200 条不丢、关闭后 offer 不抛错)；`TelemetryWriteOffThreadTest`(5：DB 卡住时调用方仍立即返回、落库异常回退 JSONL 且账目在文件里、队列满回退 JSONL、最后已知位置在 writer 线程落地、停机顺序保证新值不被旧值覆盖)。；`TelemetryWriteOffThreadTest`(8：DB 卡住时调用方 <100ms 返回、落库异常整批回退 JSONL、队列满回退 JSONL、最后已知位置在 writer 线程落地、停机先排空再补写（旧值不盖新值）、**一批 N 行只发一次 `batchUpdate`**、插入列由注解派生且不含主键、**插入列与 V18 DDL 逐项一致（防实体/迁移漂移）。
+**新增测试**：`BatchedWriteQueueTest`(6：批次不超 batchSize 且条数守恒、写发生在 `db-write-*` 线程而非调用线程、队列满立即拒绝且 `offer` 耗时 <100ms、失败整批交兜底、`close` 排空 200 条不丢、关闭后 offer 不抛错)；`TelemetryWriteOffThreadTest`(8：DB 卡住时调用方 <100ms 返回、落库异常整批回退 JSONL、队列满回退 JSONL、最后已知位置在 writer 线程落地、停机先排空再补写（旧值不盖新值）、**一批 N 行只发一次 `batchUpdate`**、插入列由注解派生且不含主键、**插入列与 V18 DDL 逐项一致（防实体/迁移漂移）**）。
 
 **本轮未闭合**：真库上的**批量插入路径本身没有被端到端断言**——Pass C 没有设备接入，`flight_log` 是空表，那条断言只证明"PG 上表存在 + 查询方言可用 + schema 校验通过"。我曾打算加"POST /alarms/events 后再查 flight_log 非空"来钉住它，核实后放弃：REST 告警经 `AlarmLinkageEngine` 只写告警表，**不写 `flight_log`**（`flightLog.alert()` 只由订阅 AlertBus 的 `TelemetryPusher.pushAlert` 调用），那条断言会是空证。要在 CI 里钉住插入路径，需要 Pass C 接一台 sim 或加一个可写的内部端点。
 
