@@ -123,6 +123,12 @@ jobs:
       - run: npm install
       - name: ESLint check
         run: npm run lint
+      # 2026-10-01 新增：前端此前零测试（后端 3869 例 vs 前端 0），
+      # 任何回归静默发布。现由 vitest 把「选中高亮死代码」「遥测曲线混机」
+      # 「危险飞行命令无确认」三类已确认缺陷钉成红线。
+      # 放在 lint 之后、build 之前：测试失败比构建失败更早暴露逻辑问题。
+      - name: Unit tests (vitest)
+        run: npm run test
       - run: npm run build
 
   e2e-smoke:
