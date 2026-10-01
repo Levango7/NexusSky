@@ -179,17 +179,29 @@ public class LicenseSigner {
     /**
      * 将 LicenseInfo 序列化为用于签名/验证的 JSON。
      * <p>
-     * 排除 signature 和 signerCert 字段，因为这些是签名结果的载体，
-     * 不应参与签名计算本身（否则签名会自引用）。
+     * 排除三个字段：
+     * <ul>
+     *   <li>{@code signature}、{@code signerCert}——签名结果的载体，不应参与签名计算
+     *       （否则签名会自引用）。</li>
+     *   <li>{@code licenseKey}——**它是承载签名的那层信封，不是被签名的内容**。
+     *       2026-10-01 修正：此前它参与了签名计算，而 {@code parseSignedLicense} 又在
+     *       验签**之前**把 {@code licenseKey} 覆写成完整的 key 串（payload + "." + signature）。
+     *       签发方在计算签名时不可能预知自己将要产出的那串 key，于是签方签的 licenseKey
+     *       与验签方算的 licenseKey 必然不同 → <b>任何合法签名的 License 都验不过</b>。
+     *       这个缺陷此前被「验签失败降级为 dev license」掩盖：坏 key 反而拿到全模块授权，
+     *       没人发现签名功能其实从未成功过一次。</li>
+     * </ul>
+     * 排除后，签名只覆盖 License 的**内容**，与它的封装形式解耦。
      */
     private String serializeForSigning(LicenseInfo info) throws Exception {
-        // 使用 ObjectMapper 序列化，排除 signature 和 signerCert
+        // 使用 ObjectMapper 序列化，排除 signature / signerCert / licenseKey
         String fullJson = objectMapper.writeValueAsString(info);
-        // 解析回 Map，移除 signature 和 signerCert，再序列化
+        // 解析回 Map，移除上述字段，再序列化
         @SuppressWarnings("unchecked")
         java.util.Map<String, Object> map = objectMapper.readValue(fullJson, java.util.Map.class);
         map.remove("signature");
         map.remove("signerCert");
+        map.remove("licenseKey");
         return objectMapper.writeValueAsString(map);
     }
 

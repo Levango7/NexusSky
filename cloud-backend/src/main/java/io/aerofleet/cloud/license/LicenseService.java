@@ -80,7 +80,8 @@ public class LicenseService {
         } else {
             this.licenseSigner = new LicenseSigner(objectMapper);
         }
-        // 启动时解析一次；解析失败则降级为开发版，避免启动崩溃影响现有测试
+        // 启动时解析一次。**已配置 key 时解析失败会抛异常拒绝启动**（见 loadLicense 的
+        // fail-closed 说明）；未配置 key 时走开发版，不影响开发/测试环境。
         this.currentLicense = loadLicense();
     }
 
@@ -136,13 +137,17 @@ public class LicenseService {
             String payloadJson = new String(payloadBytes, StandardCharsets.UTF_8);
 
             LicenseInfo info = objectMapper.readValue(payloadJson, LicenseInfo.class);
-            info.setLicenseKey(key);
             info.setSignature(signatureBase64);
 
-            // 验证签名
+            // 先验签再回填 licenseKey：licenseKey 是承载签名的那串 key 本身，
+            // 属于「信封」而非「内容」。虽然 serializeForSigning 已把它排除在签名之外
+            // （见 LicenseSigner#serializeForSigning），但把顺序摆正可以避免后人
+            // 再踩同一个坑——2026-10-01 之前正是「先 setLicenseKey 后 verify」，
+            // 而 licenseKey 又参与签名，导致任何合法签名的 License 都验不过。
             if (!licenseSigner.verify(info, signatureBase64)) {
                 throw new LicenseInvalidException("License 签名验证失败");
             }
+            info.setLicenseKey(key);
 
             log.info("License 签名验证通过: tenant={}", info.getTenantId());
             return info;
@@ -303,28 +308,55 @@ public class LicenseService {
     // ===== 内部方法 =====
 
     /**
-     * 加载 license：配置了 key 则解析，否则返回开发版。
-     * 解析失败也降级为开发版，保证服务可用。
+     * 加载 license。
+     * <p>
+     * <b>fail-closed 语义（2026-10-01 修正）</b>：
+     * <ul>
+     *   <li><b>未配置</b> {@code aerofleet.license.key} → 开发版。这是开发/CI 的正常路径。</li>
+     *   <li><b>已配置</b> key 但解析或验签失败 → <b>抛异常拒绝启动</b>。</li>
+     * </ul>
+     * 之所以按「是否配置 key」而不是「是否 enabled」来判：<b>配置 key 本身就是运营方
+     * 声明「本部署要执行授权校验」</b>。此前的实现是无论验签成功与否一律降级为
+     * {@link #buildDevLicense()}——而 dev license 是全模块、设备数无限制、永不过期的，
+     * 等于「一个被篡改或损坏的 key 反而拿到最宽松的授权」，把商业门禁变成了摆设。
+     * <p>
+     * 之所以不新增 {@code fail-closed} 开关：多一个开关就多一种「配错了反而继续放行」
+     * 的路径。规则本身就是开关——不配 key 就是开发版，配了就必须是对的。
      */
     private LicenseInfo loadLicense() {
         if (licenseKeyConfig == null || licenseKeyConfig.isBlank()) {
-            log.info("未配置 aerofleet.license.key，使用开发版 License");
+            log.info("未配置 aerofleet.license.key，使用开发版 License（不执行授权校验）");
             return buildDevLicense();
         }
+
+        LicenseInfo parsed;
         try {
-            LicenseInfo parsed = parseLicense(licenseKeyConfig);
-            if (parsed == null) {
-                log.warn("License key 解析失败，降级为开发版 License");
-                return buildDevLicense();
-            }
-            log.info("License 加载成功: tenant={}, product={}, maxDevices={}, modules={}, expiry={}",
-                    parsed.getTenantId(), parsed.getProductName(), parsed.getMaxDevices(),
-                    parsed.getModules(), parsed.getExpiryDate());
-            return parsed;
+            parsed = parseLicense(licenseKeyConfig);
         } catch (LicenseInvalidException e) {
-            log.error("License 签名验证失败，降级为开发版 License: {}", e.getMessage());
-            return buildDevLicense();
+            // 不降级：静默给一份全模块、无限设备、永不过期的 dev license，
+            // 等于把「key 坏了」变成「key 最好用」。
+            log.error("License 验签失败，拒绝启动: {}", e.getMessage());
+            throw new IllegalStateException(
+                    "License 验签失败，已拒绝以开发版继续运行（fail-closed）。"
+                            + "已配置 aerofleet.license.key 即表示本部署执行授权校验，"
+                            + "不接受降级。排查方向：(1) key 是否被截断/篡改/换行；"
+                            + "(2) 签发方私钥与 aerofleet.license.public-key 是否配对；"
+                            + "(3) 新格式为 payload.signature，旧格式（无签名）仅 dev 模式可用。"
+                            + "若本部署本就不需要授权校验，请清空 aerofleet.license.key。",
+                    e);
         }
+
+        if (parsed == null) {
+            log.error("License key 解析结果为空，拒绝启动");
+            throw new IllegalStateException(
+                    "License key 解析结果为空，已拒绝以开发版继续运行（fail-closed）。"
+                            + "若本部署本就不需要授权校验，请清空 aerofleet.license.key。");
+        }
+
+        log.info("License 加载成功: tenant={}, product={}, maxDevices={}, modules={}, expiry={}",
+                parsed.getTenantId(), parsed.getProductName(), parsed.getMaxDevices(),
+                parsed.getModules(), parsed.getExpiryDate());
+        return parsed;
     }
 
     /**

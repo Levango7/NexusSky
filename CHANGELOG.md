@@ -4,6 +4,49 @@
 
 ---
 
+## [Unreleased] — License 门禁 fail-closed：三个互相掩盖的缺陷（2026-10-02）
+
+> **怎么发现的**：外部审计指出「License 验签失败会降级为无限期 dev license」，准备改 fail-closed 时
+> 顺手去读 `parseSignedLicense`，结果发现**签名功能从未成功过一次**。三个缺陷叠在一起，
+> 每一个都把下一个的信号吃掉——所以单看任何一处都"看起来在工作"。
+
+| # | 类别 | 问题 | 修复 |
+|---|---|---|---|
+| 1 | 验签失败 fail-open | `LicenseService.loadLicense()` 无论验签成败一律 `return buildDevLicense()`，而 dev license 是 `maxDevices=0`（无限制）、`expiryDate=null`（永不过期）、`ALL_MODULES`。**被篡改或损坏的 key 反而拿到最宽松的授权**，商业门禁形同虚设 | 改为 fail-closed。判据是**「是否配置了 key」而不是「是否 enabled」**——配置 key 本身就是运营方声明本部署要执行授权校验，此时任何失败都必须显式失败。没配 key 仍是开发版，开发/CI 路径零影响（已核对全仓无任何配置设置过 `aerofleet.license.key`）。不新增开关：多一个 `fail-closed=false` 就多一条"配错反而继续放行"的路 |
+| 2 | 签名覆盖了信封（**合法 License 永远验不过**） | `serializeForSigning` 只排除 `signature`/`signerCert`，**`licenseKey` 参与了签名计算**；而 `parseSignedLicense` 又在验签**之前**把 `licenseKey` 覆写成完整 key 串（`payload + "." + signature`）。签发方在算签名时不可能预知自己将要产出的那串 key → 签方签的 `licenseKey` 与验签方算的必然不同 → **任何合法签名的 License 都验不过** | `licenseKey` 一并排除出签名（它是承载签名的那层信封，不是被签名的内容），并把 `setLicenseKey` 移到验签之后，摆正顺序避免后人再踩 |
+| 3 | 签名覆盖了**随时间变化**的派生量（**过期即提权**） | `LicenseInfo.isExpired()` 依赖 `Instant.now()`，是被序列化进签名 map 的派生字段。于是"签发时未过期、到期后变成已过期"这个**正常生命周期事件**会改变被签名的字节 → 验签失败 → 在旧的 fail-open 下，**License 一到期就自动变成全模块、设备无限制、永不过期的 dev license**。次生问题：该派生量没有对应 setter，任何按本类序列化出的 payload 在严格 ObjectMapper 下会抛 `UnrecognizedPropertyException`，即"能否加载 License"取决于运行环境的隐式配置 | `isExpired()` 加 `@JsonIgnore`（派生量不该被持久化，也不该参与签名，它由 `expiryDate` 唯一决定） |
+| 4 | 本模块零测试 | `src/test` 下 **0 个** License 用例。商业门禁这种"错了不会崩、只会悄悄放行"的逻辑，恰恰最需要测试——上面三个缺陷任何一个都会被一条"合法 key 应被接受"的红用例抓住 | 新增 `LicenseServiceFailClosedTest` **13 例**（本模块首批）：未配 key=dev 版 3、坏 key 必须 fail-closed 5（含 payload 篡改、非 dev 模式旧格式、垃圾串、报错可操作性）、合法签名必须被接受 5（含 `licenseKey` 解耦的最小复现、**过期 License 必须"验签通过但判定过期"而不是验签失败**） |
+
+**测试口径的一处修正**：用例里的 `ObjectMapper` 一开始用裸 `new ObjectMapper()`（`FAIL_ON_UNKNOWN_PROPERTIES` 默认开），
+于是缺陷 3 先以"反序列化失败"的形式暴露。生产环境跑的是 Spring Boot 自动配置的 mapper（该开关默认**关**），
+所以生产里不会抛这个异常——但这恰恰说明**代码的正确性依赖了环境的隐式配置**，本身不自洽。
+已把测试的 mapper 对齐 Spring 行为，另用一条独立断言直接钉住"`expired` 不得进入序列化"这个真正的根因。
+
+**本轮未闭合**：① License 签发工具链本身（`LicenseKeyGenerator` 只出密钥对，不出 key）仍无端到端签发脚本；
+② `LicenseController` 的激活/查询路径仍无测试；③ 设备摄取仍是**整部署一把共享 key**（上一批已记，未变）。
+
+---
+
+## [Unreleased] — 生产凭据加密密钥：去掉 base 明文默认值，改 fail-fast（2026-10-02）
+
+> 与上一条同源：都是"配置看起来是安全的，实际不是"。这个甚至更朴素——注释写着
+> "生产环境必须通过环境变量覆盖"，而**prod 和 staging profile 里都没有这一行**。
+
+| # | 类别 | 问题 | 修复 |
+|---|---|---|---|
+| 1 | base 硬编码加密密钥 | `application.properties` 里 `aerofleet.encryption.key=aerofleet-dev-encryption-key`，protecting 安防设备 ONVIF 口令（`PasswordConverter`）与 webhook secret（`WebhookService`）。prod/staging 均未覆盖 → 默认用一把**写在公开仓库里**的密钥加密生产凭据。且 `deriveKey()` 的"空值则抛异常"检查因为拿到的不是空值而**从不触发** | base 改为 `${AEROFLEET_ENCRYPTION_KEY:}`（无明文默认）；dev/test 各自显式声明自己的开发/测试密钥；prod/staging 用 `${AEROFLEET_ENCRYPTION_KEY}` **无缺省**，未设即启动失败——与 `aerofleet.security.jwt-secret` 同一套 fail-fast 口径，不新增机制 |
+| 2 | prod 飞行日志不落库 | `aerofleet.flightlog.persist-to-db` 默认 false 且 prod 未覆盖 → 生产只写 JSONL 文件，DB 无审计线索 | prod 显式 `true`（DB 写失败仍整批回退 JSONL，不丢账） |
+| 3 | staging 与 prod 不对齐 | staging 的定位是"把生产的配置跑一遍"，但**漏了** prod 有的两行：`device-whitelist-enabled=true` 与 `device-registry.persist=true`。它于是继承了 base 的 `false`，验证的是一个"接受任意 sysid 且注册表重启即失"的状态——与 prod 相反。加密密钥与 flightlog 同样漏了 | staging 补齐上述四项。CI 不启动 staging，因此无门禁影响；但这也意味着这些行目前**只有配置自证，没有运行证据** |
+
+**顺带更正两处指向不存在类名的文档**（核实 ① 时发现）：README「真实卫星接入预留」写的
+`*SatellitePlaceholder` 与接口 `SatelliteLink` 在代码中都不存在，实际是
+`*SatLinkProvider` + `SatLinkProvider`；`SatLinkProvider` 的 Javadoc 里三个 `{@link}`
+也指向不存在的类，一并更正。三个占位类的每个方法都抛 `UnsupportedOperationException`，
+仿真用 `SimulatedSatLinkProvider`——**抛错而非返回假数据**是这里正确的做法，
+与安防厂商适配器的 mock 做法恰成对照。
+
+---
+
 ## [Unreleased] — 设备撤销登记 + 覆盖率口径接进 CI + H2 产物取消跟踪（2026-10-01）
 
 > 三条都是上一批留下的"未闭合"里能独立收口的：撤销腿、口径自证、被跟踪的数据库产物。

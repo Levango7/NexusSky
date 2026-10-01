@@ -713,6 +713,17 @@ NexusSky/
   （prod/staging 显式 true；dev 靠 `dev-mode=true` 旁路；test 显式 false），CI 集成腿 Pass B
   以四向取证：ADMIN 建用户 201、OBSERVER 打 /api/v1/audit/logs 403、
   OBSERVER 读 /api/v1/drones 200、OBSERVER 越级写 /api/v1/geofence/check 403。
+  **License 已改 fail-closed（2026-10-02）**：配了 `aerofleet.license.key` 就等于声明本部署执行
+  授权校验，此时解析或验签失败**拒绝启动**，不再降级为「全模块 + 设备无限制 + 永不过期」的
+  dev license（那等于"被篡改的 key 反而拿到最宽松授权"）。没配 key 仍是开发版，开发/CI 路径不变。
+  同一批还修掉两个让签名功能**从未成功过一次**的缺陷：签名曾覆盖 `licenseKey`（信封）本身，
+  以及覆盖 `isExpired()` 这个**随时间变化**的派生量——后者叠加旧的 fail-open 会导致
+  **License 一到期就自动提权成无限 dev license**。详见 `CHANGELOG.md` 该条目与
+  `LicenseServiceFailClosedTest`(13 例，本模块首批测试)。
+  **凭据加密密钥不再有 base 明文默认值**（2026-10-02）：此前 `aerofleet.encryption.key` 在
+  base 里硬编码 `aerofleet-dev-encryption-key` 且 prod/staging 都未覆盖，等于用一把公开密钥
+  加密安防设备口令与 webhook secret。现在 dev/test 各自声明，prod/staging 走
+  `${AEROFLEET_ENCRYPTION_KEY}` 且无缺省（与 jwt-secret 同一套 fail-fast）。
   License 在缺 key 或验签失败时降级为无限期 dev license（商用门禁当前不成立）
   设备/边缘上报四条腿（`edge/results`、`loRa/alarm`、`offline-alarm/batch-upload|flush`、
   `alarms/events`）要求 OPERATOR 档凭据：注入 `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`

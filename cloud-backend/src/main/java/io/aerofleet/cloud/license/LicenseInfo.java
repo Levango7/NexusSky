@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.license;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -130,9 +131,30 @@ public class LicenseInfo {
      * 判断 License 是否已过期。
      * <p>
      * expiryDate 为 null 时视为永不过期（开发版语义）。
+     * <p>
+     * <b>{@link JsonIgnore} 是必需的，不是可选的</b>（2026-10-01 修正）。原因有二，
+     * 两个都是真实故障：
+     * <ol>
+     *   <li><b>时间炸弹</b>：本方法依赖 {@link Instant#now()}，是<b>随时间变化</b>的派生值。
+     *       而 {@code LicenseSigner#serializeForSigning} 会把它序列化进参与签名的 map。
+     *       于是「签发时未过期、到期后变成已过期」这一正常生命周期事件会改变被签名的
+     *       字节 → 验签必然失败。一份**完全合法、只是到期了**的 License 会被报成
+     *       「签名验证失败」而不是「已过期」。而在旧实现（验签失败降级为 dev license）下，
+     *       更糟：<b>License 一到期就自动变成全模块、设备无限制、永不过期的 dev license</b>——
+     *       过期即提权。</li>
+     *   <li><b>反序列化不对称</b>：{@code isExpired()} 让 Jackson 认为存在一个 {@code expired}
+     *       属性，但没有对应的 setter。任何按本类序列化出来的 payload（含 "expired" 字段）
+     *       在 {@code LicenseService#parseSignedLicense} 里
+     *       {@code readValue(payloadJson, LicenseInfo.class)} 时，
+     *       若 ObjectMapper 开启 FAIL_ON_UNKNOWN_PROPERTIES 就会抛
+     *       UnrecognizedPropertyException。也就是说「能否加载 License」取决于
+     *       运行环境里 ObjectMapper 的隐式配置，代码本身不自洽。</li>
+     * </ol>
+     * {@code expired} 是派生量，不该被持久化，也不该参与签名——它由 {@code expiryDate} 决定。
      *
      * @return 已过期返回 true，否则 false
      */
+    @JsonIgnore
     public boolean isExpired() {
         return expiryDate != null && Instant.now().isAfter(expiryDate);
     }
