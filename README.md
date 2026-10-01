@@ -641,10 +641,10 @@ NexusSky/
 | `mavlink-core` | 343 |
 | `drone-sim` | 1324 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2018 |
+| `cloud-backend` | 2054 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **3833** |
+| **总计** | **3869** |
 
 注意：这些用例跑在 `test` profile（`dev-mode=true`、`rbac-enabled=false`——
 `application-test.properties:8/:10` 显式设置，所以 base 默认翻 true 不影响它们），
@@ -716,7 +716,8 @@ NexusSky/
   注意这是**整个部署一把共享 key**，不是每机一密钥
   prod 接真机还有一条硬前置：设备白名单（`aerofleet.udp.device-whitelist-enabled=true`，仅 prod）
   必须与注册表持久化（`aerofleet.device-registry.persist=true`）**成对**打开，并经
-  `POST /api/v1/devices/{sysid}`（ADMIN）显式登记设备。陌生 sysid 的帧在 `UdpGateway.onFrame`
+  `POST /api/v1/devices/{sysid}`（ADMIN）显式登记设备，撤销用同路径的 `DELETE`（内存条目与
+  `devices` 行一起清掉，之后该 sysid 的帧重新被拒）。陌生 sysid 的帧在 `UdpGateway.onFrame`
   就被丢弃，而注册条目过去只由被放行的帧创建 —— 两者叠加曾让 prod 里任何真机都进不来
   （2026-10-01 修，回归腿是 IT Pass C 断言 7：登记 → 起 sim → `flight_log` 在真 PG 上落行）。
   登记时**记得带归属** `{"tenantId":N}`：`flight_log` 的行按设备归属盖租户戳

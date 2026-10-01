@@ -384,8 +384,9 @@ WebSocket CORS 通过 `WebSocketConfig.registerWebSocketHandlers()` 的 `setAllo
 | `aerofleet.udp.max-frame-rate-per-sysid` | `100` | `100` | 单 sysid 每秒最大帧数 |
 
 设备登记入口：`POST /api/v1/devices/{sysid}`（ADMIN，可选 `{"tenantId":N}`）——这是白名单唯一的注册腿。
-登记后设备才可能被接受，其首帧再由心跳监听器置为在线；未登记设备的帧被 `UdpGateway.onFrame` 丢弃，
-打 `Rejected frame from unregistered sysid=...` WARN。
+撤销用 `DELETE /api/v1/devices/{sysid}`（ADMIN）：内存条目与 `devices` 行一起清掉，撤销后该 sysid
+的帧重新被拒。登记后设备才可能被接受，其首帧再由心跳监听器置为在线；未登记设备的帧被
+`UdpGateway.onFrame` 丢弃，打 `Rejected frame from unregistered sysid=...` WARN。
 
 ### 6.5 错误信息脱敏
 

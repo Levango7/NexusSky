@@ -4,6 +4,28 @@
 
 ---
 
+## [Unreleased] — 设备撤销登记 + 覆盖率口径接进 CI + H2 产物取消跟踪（2026-10-01）
+
+> 三条都是上一批留下的"未闭合"里能独立收口的：撤销腿、口径自证、被跟踪的数据库产物。
+
+| # | 类别 | 问题 | 处理 |
+|---|---|---|---|
+| 1 | 有开门没关门 | 上一批补了 `POST /devices/{sysid}`，但**没有对称的撤销**：登记错的 sysid 只能手工删库行。prod 里 `device-registry.persist=true` 之后 `devices` 表只增不减，也没有任何停用/清理策略 | `DeviceRegistry.deregister(sysid)` + `DELETE /api/v1/devices/{sysid}`（ADMIN，200/404，响应带 `persisted`）。语义上把"内存有没有"和"库里有没有"**都**算已知，任一存在即撤销成功；两者都不存在返回 false → 404，绝不静默删库。正在飞的设备被撤销会立刻失联——这是运维意图，不加"在线即拒绝"的额外保护 |
+| 2 | `persist=false` 时的删除边界 | 若实现成"无条件 `deleteById`"，那么内存里没有、库里有（persist 关着）的情况会一边返回 404 一边把行删掉 | 只有 `isPersisting()` 才触碰库；`DeviceRegistryPersistenceTest` 有一条专门断言"`persist=false` 时 `deregister` 返回 false 且库行仍在" |
+| 3 | 覆盖率口径只能人工自证 | `pom` 的 `<minimum>`、`ci.yml` 的注释表、`scripts/ci-coverage-threshold.sh` 的 POLICY 口径三处需要同步，此前**没有任何 CI 信号**——下调 pom 阈值忘了改文档不会变红 | 在 Java matrix job 的 `Coverage gate` 之后加一步 `bash scripts/ci-coverage-threshold.sh --strict ${{ matrix.module }}`。它与 `jacoco:check` 是两个问题：前者"够不够阈值"，后者"三处声明是否自洽"。**只查本 matrix 项的模块**：`-am` 会顺带构建依赖模块，但它们的 `jacoco.xml` 不保证存在，不带参数全量跑会在依赖模块上误报"缺产物" |
+| 4 | 会不会引入新的假红 | `--strict` 的两个失败分支（`DECLARED > MEASURED`、`DECLARED < POLICY`）里，前者与 `jacoco:check` 的失败条件同向，后者只在人为下调阈值时触发 | 本机六模块 `--strict` 全 ✅ 自洽；且 CI 里若实测略低于声明阈值，上一步 `verify` 本来就会红，不是新增判据 |
+| 5 | H2 产物一直被跟踪 | `.gitignore` 的 `/data/` 是**根锚定**，盖不到 `cloud-backend/data/` ⇒ `aerofleet.mv.db`/`aerofleet.trace.db` 在版本库里，dev profile 每跑一次就产生二进制 diff 噪声 | `git rm --cached`（保留本地文件）+ 按扩展名兜一层 `*.mv.db` / `*.trace.db`，注释写明为什么根锚定不够 |
+
+**IT 补撤销腿**：Pass C 断言 7 在"落行 + 机队列表可见"之后加 `DELETE → 200`、`撤销后 PUT /tenant → 404 device unknown`。刻意选**纯 REST 状态断言**而不是"撤销后行数不再增长"——后者依赖帧到达时刻，会给 CI 引入计时抖动。顺带让 IT 自清理：`devices` 行被删掉后，复跑回到 201（新建）分支，不会再出现"增量库只能走幂等分支"的观测缺口。
+
+**新增/扩展测试**：`DeviceProvisioningControllerTest` +2（撤销 200 且设备离开白名单 / 未知设备 404）；`DeviceRegistryPersistenceTest` +2（撤销同时摘内存与库行 / 未知返回 false 且 `persist=false` 时不动库行）；`UdpGatewayTest` 第 24 条扩成三段（未登记被丢 → 登记后放行 → **撤销后重新拒收**），用 `mockingDetails` 的调用数不变来断"没进 ingest"，避开新增 mock 断言的口径漂移。
+
+**验证（本机，串行跑批；日志 `cloud-backend/target/verify-20260930/w13-*.log`）**：全量 `mvn -B -o test` = **3869 用例 / 0 失败 / BUILD SUCCESS**（343/1324/117/2054/12/19，基线 3865 + 4）；`PKG_EXIT=0`；`IT_EXIT=0`，**37 条 ✅ / 0 条 ❌**（原 35 + 撤销腿 2）。跑完在真 PG 上复核两件决定性的事：`SELECT count(*) FROM devices WHERE sysid=231` = **0**（撤销真的删了库行，不只是内存），`SELECT count(*) FROM flight_log WHERE sysid=231 AND tenant_id=1` = **4**（活体设备的遥测带着正确租户落库）。
+
+**仍未闭合**：① `devices` 表仍无停用/软删与清理策略（现在至少能删了）；② 每台设备独立凭据与轮换；③ 告警 SSE 带不了 `Authorization`；④ `ci-coverage-threshold.sh` 的 POLICY 与 pom 若同时被人下调，`--strict` 只拦"低于实测地板"，拦不住"两边一起放水"；⑤ 存量 `tenant_id IS NULL` 的遥测行不回填（上一批已定）。
+
+---
+
 ## [Unreleased] — prod 设备白名单死锁：显式登记端点 + 注册表持久化成对（2026-10-01）
 
 > **怎么发现的**：上一批留了一条未闭合项——"Pass C 没有设备接入，`flight_log` 空表，批量插入路径没被端到端断言"。我按活体配方在本地 prod + 真 PostgreSQL 复现它，60 秒遥测得到 **0 行**。不是异步队列没写，而是**帧根本没被接受**：prod 里任何真机都接不进来。
