@@ -520,6 +520,15 @@ if [ -n "$TOKEN_C" ]; then
             # assert_true 判的是"非空"，所以必须把 0 换算成空串——直接喂 wc -l 的 "0" 会被当成真。
             assert_true "GET /api/v1/drones 含活体设备 sysid=${C_SIM_SYSID}（白名单确已放行）" \
                 "$([ "$DRONE_SEEN" -gt 0 ] && echo yes)"
+            # 撤销腿（纯 REST 状态断言，不依赖帧到达时刻，避免计时抖动）：DELETE 成功后
+            # 注册表里内存与库行都没了，此时给同一 sysid 指派租户应当 404 device unknown。
+            DELETE_STATUS=$(http_status -X DELETE -H "Authorization: Bearer ${TOKEN_C}" \
+                "http://localhost:${C_PORT}/api/v1/devices/${C_SIM_SYSID}")
+            assert_status "DELETE /api/v1/devices/${C_SIM_SYSID}（撤销登记）" "200" "$DELETE_STATUS"
+            assert_status "撤销后 PUT /tenant 应判设备未知（证明条目真没了）" "404" \
+                "$(http_status -X PUT -H "Authorization: Bearer ${TOKEN_C}" \
+                    -H "Content-Type: application/json" -d '{"tenantId":1}' \
+                    "http://localhost:${C_PORT}/api/v1/devices/${C_SIM_SYSID}/tenant")"
         else
             echo "   ❌ 60s 内 flight_log 只见到 ${SIM_ROWS} 行 sysid=${C_SIM_SYSID} 的遥测（期望 ≥3）"
             echo "   --- sim 日志末尾 15 行 ---"
