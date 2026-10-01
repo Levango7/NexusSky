@@ -608,7 +608,11 @@ export default function App() {
             />
           </ErrorBoundary>
           <ErrorBoundary>
-            <TelemetryCharts telemetry={telemetry} history={telemetryHistory} />
+            <TelemetryCharts
+              telemetry={telemetry}
+              history={selectedSysid != null ? telemetryHistory[selectedSysid] : undefined}
+              sysid={selectedSysid}
+            />
           </ErrorBoundary>
           <ErrorBoundary>
             <AlertFeed alerts={alerts} />

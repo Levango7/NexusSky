@@ -11,8 +11,10 @@ import React, { useMemo, useRef, useEffect, useState, useId } from 'react'
  *
  * Props:
  *  - telemetry: 当前遥测对象（同 TelemetryPanel 使用的结构）
- *  - history:  历史遥测数据点数组，元素形如
- *              { ts, voltage, battery, relativeAlt, groundspeed, heading, ... }
+ *  - history:  **当前选中机**的历史遥测数据点数组，元素形如
+ *              { ts, sysid, voltage, battery, relativeAlt, groundspeed, heading, ... }
+ *              （由 useWebSocket 按 sysid 分桶后取出，勿传整张 map）
+ *  - sysid:    当前展示的机号；把 history 与末尾追加的实时点一起按机过滤
  *
  * 设计：暗色科技风，背景 #0a0e14，主色 #00d4ff，与现有 UI 一致。
  * 每 1 秒由父组件驱动重渲染（依赖 telemetry/history 变化），SVG 路径
@@ -41,13 +43,18 @@ function battColor(b) {
 
 // 将历史数据按字段提取并裁剪到时间窗口，返回 [{t, v}] 序列
 // t 归一化为 [0,1]，0=窗口起点，1=窗口终点
-function series(history, field, now) {
+//
+// 2026-10-01 起新增 sysid 过滤：历史曾把**所有机型**的点塞进一个扁平数组，
+// 这里从不过滤，导致 2 架机以上时曲线把不同飞机的数据交错画在一起。
+// 传了 sysid 就只取该机的点；没传（未选机）就取全部（此时通常也只有一机）。
+function series(history, field, now, sysid) {
   const out = []
   if (!Array.isArray(history) || history.length === 0) return out
   const start = now - WINDOW_MS
   for (let i = 0; i < history.length; i++) {
     const p = history[i]
     if (!p) continue
+    if (sysid != null && p.sysid != null && Number(p.sysid) !== Number(sysid)) continue
     const ts = p.ts || 0
     if (ts < start) continue
     const v = num(p[field])
@@ -212,7 +219,7 @@ function Compass({ heading }) {
   )
 }
 
-export default function TelemetryCharts({ telemetry, history }) {
+export default function TelemetryCharts({ telemetry, history, sysid }) {
   // 用一个 1s 节流的 now 值，避免高频刷新抖动
   const [nowTick, setNowTick] = useState(Date.now())
   const rafRef = useRef(0)
@@ -231,12 +238,15 @@ export default function TelemetryCharts({ telemetry, history }) {
   }, [])
 
   const t = telemetry || {}
-  // 把当前 telemetry 也作为一个数据点附加到序列末尾，保证曲线持续延伸
+  // 把当前 telemetry 也作为一个数据点附加到序列末尾，保证曲线持续延伸。
+  // 必须带上 sysid：否则这个点会被上面的 sysid 过滤判为「无归属」而丢弃，
+  // 曲线末端会永远差一格。
   const histWithNow = useMemo(() => {
     const arr = Array.isArray(history) ? history.slice() : []
     if (t && Object.keys(t).length > 0) {
       arr.push({
         ts: nowTick,
+        sysid: sysid != null ? sysid : t.sysid,
         voltage: num(t.voltage),
         battery: num(t.battery),
         relativeAlt: num(t.relativeAlt),
@@ -245,12 +255,12 @@ export default function TelemetryCharts({ telemetry, history }) {
       })
     }
     return arr
-  }, [history, t, nowTick])
+  }, [history, t, nowTick, sysid])
 
-  const battPts = useMemo(() => series(histWithNow, 'battery', nowTick), [histWithNow, nowTick])
-  const voltPts = useMemo(() => series(histWithNow, 'voltage', nowTick), [histWithNow, nowTick])
-  const altPts = useMemo(() => series(histWithNow, 'relativeAlt', nowTick), [histWithNow, nowTick])
-  const spdPts = useMemo(() => series(histWithNow, 'groundspeed', nowTick), [histWithNow, nowTick])
+  const battPts = useMemo(() => series(histWithNow, 'battery', nowTick, sysid), [histWithNow, nowTick, sysid])
+  const voltPts = useMemo(() => series(histWithNow, 'voltage', nowTick, sysid), [histWithNow, nowTick, sysid])
+  const altPts = useMemo(() => series(histWithNow, 'relativeAlt', nowTick, sysid), [histWithNow, nowTick, sysid])
+  const spdPts = useMemo(() => series(histWithNow, 'groundspeed', nowTick, sysid), [histWithNow, nowTick, sysid])
 
   // 当前值（用于卡片右上角显示）
   const curVolt = num(t.voltage) != null ? t.voltage / 1000 : null // 电压通常以 mV 给出
