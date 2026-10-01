@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -138,5 +139,75 @@ class DeviceProvisioningControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sysids[0]").value(7))
                 .andExpect(jsonPath("$.sysids.length()").value(1));
+    }
+
+    // ===== 显式登记设备（#46 prod 白名单死锁）=====
+
+    @Test
+    @DisplayName("POST /devices/{sysid} 登记新设备返回 201 并进入白名单")
+    void provisionRegistersNewDevice() throws Exception {
+        mockMvc.perform(post("/api/v1/devices/30")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tenantId\":1}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sysid").value(30))
+                .andExpect(jsonPath("$.tenantId").value(1))
+                .andExpect(jsonPath("$.alreadyRegistered").value(false))
+                // 本测试的注册表未开持久化：内存条目重启即失，prod 靠 persist=true 兜住
+                .andExpect(jsonPath("$.persisted").value(false));
+
+        assertThat(registry.isKnownDevice(30)).isTrue();
+        TenantContext.setTenantId(1);
+        assertThat(registry.get(30)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("POST 无请求体也可登记，登记为未归属（对任何租户不可见）")
+    void provisionWithoutBodyRegistersUnassigned() throws Exception {
+        mockMvc.perform(post("/api/v1/devices/31"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.tenantId").doesNotExist());
+
+        TenantContext.setTenantId(1);
+        assertThat(registry.isKnownDevice(31)).isTrue();
+        assertThat(registry.get(31)).isNull();
+    }
+
+    @Test
+    @DisplayName("POST 已存在设备返回 200 alreadyRegistered=true 且不覆盖归属")
+    void provisionExistingDeviceIsIdempotent() throws Exception {
+        registry.assignTenant(7, 2);
+
+        mockMvc.perform(post("/api/v1/devices/7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.alreadyRegistered").value(true));
+
+        assertThat(registry.tenantOf(7)).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("POST sysid 越界返回 400（0 保留、255 是 GCS 自身）")
+    void provisionRejectsOutOfRangeSysid() throws Exception {
+        mockMvc.perform(post("/api/v1/devices/0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("1..254")));
+        mockMvc.perform(post("/api/v1/devices/255"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST 租户不存在 404、tenantId 非整数 400，两种失败都不落库")
+    void provisionValidatesTenant() throws Exception {
+        mockMvc.perform(post("/api/v1/devices/32")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tenantId\":404}"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/v1/devices/33")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tenantId\":\"x\"}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(registry.isKnownDevice(32)).isFalse();
+        assertThat(registry.isKnownDevice(33)).isFalse();
     }
 }

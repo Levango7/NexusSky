@@ -1,8 +1,10 @@
 package io.aerofleet.cloud.flightlog;
 
 import io.aerofleet.cloud.gateway.AlertEntry;
+import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.TrackPoint;
+import io.aerofleet.cloud.security.TenantContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -55,6 +57,10 @@ class FlightLogPersistenceTest {
 
     @Autowired
     private FlightLogRepository flightLogRepository;
+
+    /** FlightLogService 写入端的租户来源就是这个注册表（tenantForWrite），测试直接用它登记设备。 */
+    @Autowired
+    private DeviceRegistry deviceRegistry;
 
     @BeforeEach
     void cleanUp() throws Exception {
@@ -292,6 +298,58 @@ class FlightLogPersistenceTest {
         flightLogService.telemetry(snapshot);
         flightLogService.awaitPendingWrites(3000);
         assertThat(flightLogRepository.findByTypeAndSysid("telemetry", 9)).hasSize(2);
+    }
+
+    // ===== 遥测行的租户归属（写入端盖戳 + 读端可见性）=====
+
+    @Test
+    @DisplayName("telemetry 行继承设备归属，且只有该租户读得到")
+    void telemetryInheritsDeviceTenant() throws Exception {
+        deviceRegistry.provision(61, 1);
+
+        flightLogService.telemetry(telemetrySnapshot(61));
+        flightLogService.awaitPendingWrites(3000);
+
+        List<FlightLogEntity> rows = flightLogRepository.findByTypeAndSysid("telemetry", 61);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getTenantId()).isEqualTo(1);
+
+        TenantContext.setTenantId(1);
+        assertThat(flightLogService.query(LocalDate.now(), "telemetry", 61, 0)).hasSize(1);
+        TenantContext.setTenantId(2);
+        assertThat(flightLogService.query(LocalDate.now(), "telemetry", 61, 0)).isEmpty();
+        TenantContext.clear();
+        // 无租户上下文 = 全局管理员口径，看得到（与 DeviceRegistry.isVisibleTo 同一口径）
+        assertThat(flightLogService.query(LocalDate.now(), "telemetry", 61, 0)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("设备未归属时遥测行不落租户，任何具体租户都读不到（这就是 prod 里查不到数据的那条路）")
+    void unassignedDeviceTelemetryIsInvisibleToEveryTenant() throws Exception {
+        deviceRegistry.provision(62, null);
+
+        flightLogService.telemetry(telemetrySnapshot(62));
+        flightLogService.awaitPendingWrites(3000);
+
+        List<FlightLogEntity> rows = flightLogRepository.findByTypeAndSysid("telemetry", 62);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getTenantId()).isNull();
+
+        TenantContext.setTenantId(1);
+        assertThat(flightLogService.query(LocalDate.now(), "telemetry", 62, 0)).isEmpty();
+        TenantContext.clear();
+        assertThat(flightLogService.query(LocalDate.now(), "telemetry", 62, 0)).hasSize(1);
+    }
+
+    /** 造一行可控的最小遥测快照（位置/电量都给出，避免 nanToNull 干扰断言）。 */
+    private static DroneSnapshot telemetrySnapshot(int sysid) {
+        DroneSnapshot s = new DroneSnapshot(sysid);
+        s.lat = 22.5907;
+        s.lon = 113.9345;
+        s.relativeAlt = 30.0;
+        s.mode = "STANDBY";
+        s.online = true;
+        return s;
     }
 
     // ===== 辅助方法 =====

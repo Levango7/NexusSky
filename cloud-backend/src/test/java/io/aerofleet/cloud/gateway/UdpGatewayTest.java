@@ -463,6 +463,29 @@ class UdpGatewayTest {
         verify(ingest, timeout(2000)).handle(any(MavlinkFrame.class));
     }
 
+    @Test
+    @DisplayName("24. 白名单启用：只有经 provision 登记的 sysid 才放行（prod 首台设备注册腿）")
+    void whitelistEnabled_provisionedSysid_forwards() throws Exception {
+        int port = BASE_PORT + 24;
+        gateway = newGateway(port, true, 100);
+        Thread.sleep(100);
+
+        // 用真实 DeviceRegistry 而非 mock：mock 里 get() 恒返回快照，恰好掩盖了
+        // "白名单开启时没有任何入口能把设备登记进来"的死锁（帧在进 ingest 前就被丢，
+        // 而快照过去只由被放行的帧创建）。
+        DeviceRegistry registry = new DeviceRegistry();
+        injectDeviceRegistry(registry);
+
+        sendFrame(port, droneHeartbeat(7, 0));
+        Thread.sleep(400);
+        verify(ingest, never()).handle(any(MavlinkFrame.class));
+
+        assertThat(registry.provision(7, null)).isTrue();
+
+        sendFrame(port, droneHeartbeat(7, 1));
+        verify(ingest, timeout(2000)).handle(any(MavlinkFrame.class));
+    }
+
     // ===== 频率限制 (P1-3) =====
 
     @Test

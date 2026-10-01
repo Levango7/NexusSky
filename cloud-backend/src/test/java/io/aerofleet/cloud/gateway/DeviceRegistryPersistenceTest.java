@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -153,6 +154,66 @@ class DeviceRegistryPersistenceTest {
 
         // 内存中有设备
         assertThat(deviceRegistry.get(5)).isNotNull();
+    }
+
+    // ===== 显式登记设备（#46 prod 白名单死锁）=====
+
+    @Test
+    @DisplayName("provision 登记的设备以 offline 入库，重启后可恢复进白名单")
+    void provisionPersistsOfflineDevice() throws Exception {
+        assertThat(deviceRegistry.provision(51, 3)).isTrue();
+
+        DeviceEntity entity = deviceRepository.findById(51).orElseThrow();
+        assertThat(entity.getOnline()).isFalse();
+        assertThat(entity.getTenantId()).isEqualTo(3);
+
+        clearDronesMap();
+        deviceRegistry.restoreFromRepository();
+        assertThat(deviceRegistry.isKnownDevice(51)).isTrue();
+        assertThat(deviceRegistry.tenantOf(51)).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("provision 幂等：重复登记返回 false，不覆盖既有归属")
+    void provisionIsIdempotent() {
+        assertThat(deviceRegistry.provision(52, 4)).isTrue();
+        assertThat(deviceRegistry.provision(52, 5)).isFalse();
+        assertThat(deviceRegistry.tenantOf(52)).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("provision 后 registerIfAbsent 复用同一快照：在线位留给心跳，不重复入库")
+    void provisionThenFirstFrame() {
+        deviceRegistry.provision(54, 2);
+        long rowsBefore = deviceRepository.count();
+
+        DroneSnapshot snapshot = deviceRegistry.registerIfAbsent(54);
+
+        // online 由 TelemetrySnapshotListener.onHeartbeat 置位，registerIfAbsent 对已存在快照不做任何事
+        assertThat(snapshot.online).isFalse();
+        assertThat(snapshot.tenantId).isEqualTo(2);
+        assertThat(deviceRepository.count()).isEqualTo(rowsBefore);
+    }
+
+    @Test
+    @DisplayName("persist=false 时 provision 只进内存，isPersisting=false")
+    void provisionWithoutPersist() throws Exception {
+        setPersist(false);
+
+        assertThat(deviceRegistry.isPersisting()).isFalse();
+        assertThat(deviceRegistry.provision(53, null)).isTrue();
+        assertThat(deviceRegistry.isKnownDevice(53)).isTrue();
+        assertThat(deviceRepository.findById(53)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("provision 拒绝越界 sysid（0 保留、255 为 GCS）")
+    void provisionRejectsOutOfRange() {
+        assertThatThrownBy(() -> deviceRegistry.provision(0, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> deviceRegistry.provision(255, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(deviceRegistry.isKnownDevice(255)).isFalse();
     }
 
     // ===== 辅助方法 =====
