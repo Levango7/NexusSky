@@ -83,8 +83,8 @@ class EnvironmentMessageTest {
         assertEquals(13, MavlinkMessageInfo.lengthOf(EnvironmentStatus.ID));
         assertEquals(46, MavlinkMessageInfo.lengthOf(EnvironmentAlert.ID));
         // 确认不与既有消息冲突（既有集合不含 421/422）
-        int[] existing = {0, 1, 2, 24, 30, 33, 42, 43, 44, 47, 51, 69, 73, 74, 76, 77,
-                109, 143, 242, 253, 259, 260, 262, 263, 271, 420};
+        int[] existing = {0, 1, 2, 24, 30, 33, 42, 43, 44, 47, 51, 69, 73, 74, 76, 77, 40,
+                109, 242, 253, 259, 260, 262, 263, 271, 420};
         for (int id : existing) {
             assertNotEquals(id, EnvironmentStatus.ID, "422 must not conflict with existing " + id);
             assertNotEquals(id, EnvironmentAlert.ID, "421 must not conflict with existing " + id);

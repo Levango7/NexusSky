@@ -159,7 +159,7 @@ public class PendingAcks {
 
     /**
      * Mission pull request waiter for one drone. PX4 may answer with either
-     * MISSION_REQUEST (43) or MISSION_REQUEST_INT (51); both are registered
+     * MISSION_REQUEST (40) or MISSION_REQUEST_INT (51); both are registered
      * under BOTH message ids so a waiter never misses whichever variant the
      * autopilot uses. The future resolves to the requested sequence (Integer).
      */

@@ -6,13 +6,13 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * MISSION_REQUEST (msgId=43, LEN=5, CRC=230)。
+ * MISSION_REQUEST (msgId=40, LEN=5, CRC=230)。
  * 旧版（非 INT）任务拉取请求：PX4 上传任务时回复的是它而非 MISSION_REQUEST_INT，
  * 字段布局两者完全一致（PX4 实际也常发 INT 版，但兼容层必须两种都认）。
  */
 public final class MissionRequest extends MavlinkMessage {
 
-    public static final int ID = 43;
+    public static final int ID = 40;
     public static final int LEN = 5;
 
     public final int seq;

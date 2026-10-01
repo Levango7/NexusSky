@@ -40,25 +40,28 @@ public final class MavlinkMessageInfo {
         INFOS[33]  = new Info(28, 104);   // GLOBAL_POSITION_INT
         INFOS[74]  = new Info(20, 20);    // VFR_HUD
         INFOS[42]  = new Info(18, 28);    // MISSION_CURRENT
-        INFOS[43]  = new Info(5, 230);   // MISSION_REQUEST (PX4 legacy)
+        INFOS[43]  = new Info(3, 132);    // MISSION_REQUEST_LIST
         INFOS[44]  = new Info(9, 221);    // MISSION_COUNT
         INFOS[47]  = new Info(8, 153);    // MISSION_ACK
         INFOS[51]  = new Info(5, 196);    // MISSION_REQUEST_INT
         INFOS[69]  = new Info(26, 243);  // MANUAL_CONTROL
         INFOS[73]  = new Info(38, 38);    // MISSION_ITEM_INT
+        INFOS[40]  = new Info(5, 230);    // MISSION_REQUEST (PX4 legacy)
         INFOS[259] = new Info(237, 92); // CAMERA_INFORMATION (min 235)
         INFOS[260] = new Info(14, 146); // CAMERA_SETTINGS (min 5)
         INFOS[262] = new Info(23, 12);   // CAMERA_CAPTURE_STATUS (min 18)
         INFOS[263] = new Info(255, 133); // CAMERA_IMAGE_CAPTURED
         INFOS[271] = new Info(53, 22);   // CAMERA_FOV_STATUS (min 52)
-        INFOS[143] = new Info(4, 132);   // MISSION_REQUEST_LIST
+        // msgId=143 官方为 SCALED_PRESSURE3，本项目未实现，故不登记。
+        // （此前误把 MISSION_REQUEST_LIST 登记在 143 上，而官方 143 是 SCALED_PRESSURE3，
+        //   同时官方 MISSION_REQUEST_LIST 是 43、官方 MISSION_REQUEST 是 40 —— 三个 id 串了位。）
         INFOS[76]  = new Info(33, 152);   // COMMAND_LONG
         INFOS[77]  = new Info(10, 143);   // COMMAND_ACK
         INFOS[242] = new Info(60, 104);   // HOME_POSITION
         INFOS[253] = new Info(54, 83);    // STATUSTEXT
-        INFOS[109] = new Info(9, 88);     // RADIO_STATUS (crc_extra computed
-                                            // per official message_checksum)
-        INFOS[420] = new Info(18, 72);   // LED_CONTROL_MSG (自定义扩展)
+        INFOS[109] = new Info(9, 185);    // RADIO_STATUS（官方 CRC_EXTRA=185；
+                                            // 原为 88，与 pymavlink 官方定义不符）
+        INFOS[420] = new Info(18, 72);   // LED_CONTROL (自定义扩展)
         // ---- NexusSky 自定义扩展消息（M0b 环境气象）----
         INFOS[422] = new Info(13, 249);  // ENVIRONMENT_STATUS (crc_extra computed
                                               // per official message_checksum)

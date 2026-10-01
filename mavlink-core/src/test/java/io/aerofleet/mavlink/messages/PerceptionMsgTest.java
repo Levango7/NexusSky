@@ -210,8 +210,8 @@ class PerceptionMsgTest {
 
     @Test
     void msgIdNoConflictWithExistingOrM2() {
-        int[] existing = {0, 1, 2, 24, 30, 33, 42, 43, 44, 47, 51, 69, 73, 74, 76, 77,
-                109, 143, 242, 253, 259, 260, 262, 263, 271, 420, 421, 422, 423, 424, 425, 426};
+        int[] existing = {0, 1, 2, 24, 30, 33, 42, 43, 44, 47, 51, 69, 73, 74, 76, 77, 40,
+                109, 242, 253, 259, 260, 262, 263, 271, 420, 421, 422, 423, 424, 425, 426};
         int[] m3Ids = {430, 431, 432, 433, 434};
         for (int existingId : existing) {
             for (int m3Id : m3Ids) {

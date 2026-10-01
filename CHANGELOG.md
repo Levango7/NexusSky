@@ -4,6 +4,47 @@
 
 ---
 
+## [Unreleased] — 标准消息 msgId 串位：MISSION_REQUEST / MISSION_REQUEST_LIST 挂反了（2026-10-02）
+
+> 上一条做 CRC_EXTRA 外部核对时顺带撞出来的。三处硬错，全部只影响**与真实飞控互通**，
+> 在仓库内部（drone-sim ↔ cloud-backend）因为两端共用同一张错表，往返始终正常——
+> 这正是这类缺陷能长期存活的原因。
+
+| msgId | 仓库登记 | pymavlink 官方定义 | 后果 |
+|---|---|---|---|
+| 40 | （未登记） | `MISSION_REQUEST` CRC=230 LEN=5 | MISSION_REQUEST 被错挂在 43 |
+| 43 | `MISSION_REQUEST` CRC=230 | **`MISSION_REQUEST_LIST`** CRC=132 | 与官方 MISSION_REQUEST_LIST 撞 id |
+| 143 | `MISSION_REQUEST_LIST` CRC=132 | **`SCALED_PRESSURE3`** CRC=131 | 43 的值被挂到 143 |
+| 109 | `RADIO_STATUS` CRC=**88** | `RADIO_STATUS` CRC=**185** | 真机发的 RADIO_STATUS 帧 CRC 必然不过 |
+
+**影响面**：`MISSION_REQUEST_LIST` 是**拉取航点的第一步**——`DroneCommandService`
+（cloud-backend）与 `ArduPilotAdapter`/`Px4Adapter` 都靠它向飞控发起任务下载。
+官方 MISSION_REQUEST_LIST 是 msgId 43，本项目发的是 143，**真实 PX4 / ArduPilot 会直接忽略**，
+任务下发链路在真机上走不通。
+
+**修复**：`MissionRequest.ID` 43→40；`MissionRequestList.ID` 143→43 且 `LEN` 4→3
+（官方 3 个字段 target_system/target_component/mission_type，此前多出的第 4 字节从未被写入也从未被声明）；
+`INFOS[109]` CRC 88→185；**删除** `INFOS[143]`（官方 143 是 SCALED_PRESSURE3，本项目未实现，
+不登记比登记一个解不出来的 id 更诚实——`MavlinkMessage.decode` 对未知 id 返回 null，行为安全）。
+所有引用都走 `ID` 常量而非硬编码，改动集中。
+
+**顺带更正一处失效论证**：`RadioStatusTest` 原注释称「解析器接受我们自己的帧即证明 seed
+与官方注册表一致」——这是**自证循环**，往返只证明内部自洽（两端用同一张表）。已改为指向
+真正能做外部核对的 `--cross-check`。
+
+**新增自动门禁**：`python scripts/mavlink-compatibility-check.py --cross-check` 用 pymavlink
+官方定义逐条核对标准消息 CRC_EXTRA，当前 24 条可比对项**全部一致**。
+
+**一处无法外部核实**：msgId=33 `GLOBAL_POSITION_INT` 在 pymavlink 打包的
+`message_definitions/v1.0/common.xml` 里**没有消息定义**（只在别的消息的描述文字里被提到）——
+该快照早于这条消息。所以它的 CRC_EXTRA=104 本轮**未能**用本快照核对，工具会照实打出告警。
+
+**本轮未闭合**：30 条自定义消息 + `RadioStatus` 的 wire 布局未按 MAVLink 的 type_length
+降序排列，多字节字段落在奇数偏移。改线格式属协议重设计、会同时影响 drone-sim 与 cloud-backend
+两端，不与本条混在一起做。
+
+---
+
 ## [Unreleased] — 自定义消息 CRC_EXTRA：改用官方算法实算，并加两道防回归门禁（2026-10-02）
 
 > **怎么发现的**：为核实自定义 msgId 是否与官方分配冲突去查 MAVLink 官方定义，顺手比对了
