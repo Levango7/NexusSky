@@ -685,6 +685,34 @@ NexusSky/
 覆盖率阈值暂未设：前端基线原为零，一上来卡阈值只会让 CI 立刻变红。
 先由 CI 实测产出基线，之后按模块逐步抬高。
 
+### 前端测试第二批：组件逻辑与单一真相源（2026-10-02）
+
+第二批补 **72 例**（118 例总量）。做法是先把**与 React 无关的纯逻辑**从组件里
+抽到 `src/utils/`，再对其做行为断言——挂载整个组件树才够得着的逻辑，恰恰是
+最该被测的那部分。
+
+新增模块：`utils/statusMeta.js`、`utils/battery.js`、`utils/geo.js`、`utils/format.js`。
+
+抽出过程中发现两个此前没被记录的问题：
+
+1. **电量分级有 6 份，且分成两套互不相同的阈值**——`DashboardPanel` / `DroneList` /
+   `TelemetryCharts` / `TelemetryPanel` 用 20/40，`EmergencyOrchPanel` /
+   `UnifiedCommandPanel` 用 15/30。同一架飞机在总览面板显示绿色、在指挥表格里
+   显示黄色，操作员会以为数据不一致。已统一为 20/40，阈值集中在
+   `BATT_CRIT_AT` / `BATT_WARN_AT`。
+2. **`Number('') === 0`**——原 `battClass` / `battColor` 只判 `b == null`，
+   空串电量会被当成 0% 显示成红色告警。`battLevel` 补上空串与 NaN 判定。
+
+| 文件 | 例数 | 覆盖 |
+|---|---|---|
+| `test/battery.test.js` | 10 | 判级边界、三个访问器全域一致性、全域单调性 |
+| `test/statusMeta.test.js` | 14 | 优先级/严重度规范化 +「返回值必定可查表」不变式 |
+| `test/geoFormat.test.js` | 26 | 球面距离（1° 纬度 ≈ 111.19 km、广州→深圳 100 km 量级）、圆形布局（落圆周 / 角距均匀）、格式化与档位配色 |
+| `test/singleSourceOfTruth.test.js` | 22 | **价值最高的一组**：逐函数扫描 `src/components` 禁止再出现本地定义；钉住 12 个引用方确实从 `utils` 导入；禁止内联电量阈值 |
+
+最后这组是防「抽了 utils 又复制一份回去」被悄悄回退的——没有它，下次有人
+复制一份不会有任何测试变红。
+
 ## 代码审查修复记录
 
 5 轮收敛性审查（3 轮全量 + 2 轮验证），累计修复 21 个问题（4 Critical + 12 Major + 5 Minor）：
