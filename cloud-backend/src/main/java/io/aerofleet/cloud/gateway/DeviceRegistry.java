@@ -140,6 +140,34 @@ public class DeviceRegistry {
         return persist && repository != null;
     }
 
+    /**
+     * 撤销一台已登记设备：从白名单里移除，并在持久化开启时删掉库里的行。
+     * <p>
+     * 撤销后该 sysid 的帧重新被 {@code UdpGateway} 丢弃，机队列表里也不再出现它。
+     * 正在飞的设备被撤销会立刻失联——这是运维意图，不做"在线就拒绝撤销"的额外保护。
+     *
+     * @param sysid 设备 MAVLink system id
+     * @return true 此前确有该条目（内存或库中）；false 设备未知，什么都没做
+     */
+    public boolean deregister(int sysid) {
+        boolean knownInMemory = drones.remove(sysid) != null;
+        boolean existedInDb = false;
+        if (isPersisting()) {
+            try {
+                existedInDb = repository.existsById(sysid);
+                if (existedInDb) {
+                    repository.deleteById(sysid);
+                }
+            } catch (Exception e) {
+                log.warn("设备撤销持久化删除失败 sysid={}: {}", sysid, e.getMessage());
+            }
+        }
+        if (knownInMemory || existedInDb) {
+            log.info("Device deregistered: sysid={} removedFromDb={}", sysid, existedInDb);
+        }
+        return knownInMemory || existedInDb;
+    }
+
     public DroneSnapshot get(int sysid) {
         DroneSnapshot snapshot = drones.get(sysid);
         if (snapshot == null) {

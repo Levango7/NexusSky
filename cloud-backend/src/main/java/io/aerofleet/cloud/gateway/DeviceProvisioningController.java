@@ -5,6 +5,7 @@ import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.security.TenantRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,6 +31,7 @@ import java.util.Map;
  * <ul>
  *   <li>GET  /api/v1/devices/unassigned — 待归属设备 sysid 列表</li>
  *   <li>POST /api/v1/devices/{sysid} — 把设备登记进白名单（可带 {"tenantId":N}）</li>
+ *   <li>DELETE /api/v1/devices/{sysid} — 撤销登记（白名单移除，persist 时连库行一起删）</li>
  *   <li>PUT  /api/v1/devices/{sysid}/tenant — 绑定（{"tenantId":N}）或解绑（{"tenantId":null}）</li>
  * </ul>
  * <p>
@@ -101,6 +103,25 @@ public class DeviceProvisioningController {
         resp.put("persisted", registry.isPersisting());
         resp.put("alreadyRegistered", !created);
         return ResponseEntity.status(created ? HttpStatus.CREATED : HttpStatus.OK).body(resp);
+    }
+
+    /**
+     * 撤销一台已登记设备（白名单移除；持久化开启时连库里的行一起删）。
+     *
+     * @param sysid 设备 MAVLink sysid
+     * @return 200 {@code {sysid, deregistered:true, persisted}}；设备未知 404
+     */
+    @DeleteMapping("/{sysid}")
+    @RequireRole(Role.ADMIN)
+    public ResponseEntity<?> deregister(@PathVariable int sysid) {
+        if (!registry.deregister(sysid)) {
+            return errorResponse(HttpStatus.NOT_FOUND, "device unknown: sysid=" + sysid);
+        }
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("sysid", sysid);
+        resp.put("deregistered", true);
+        resp.put("persisted", registry.isPersisting());
+        return ResponseEntity.ok(resp);
     }
 
     /**
