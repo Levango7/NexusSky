@@ -20,13 +20,13 @@ import java.nio.ByteBuffer;
  * 10   droneSysid           u8     确认的无人机 sysid
  * 11   ackResult            u8     0=已收到, 1=已开始响应, 2=无法响应, 3=拒绝
  * </pre>
- * CRC_EXTRA = 262（M14 自定义扩展）。
+ * CRC_EXTRA = 200（M14 自定义扩展）。
  */
 public final class AlarmAckMsg extends MavlinkMessage {
 
     public static final int ID = 478;
     public static final int LEN = 12;
-    public static final int CRC_EXTRA = 262;
+    public static final int CRC_EXTRA = 200;
 
     public final long alarmId;              // 报警事件 ID
     public final long timestamp;            // ms

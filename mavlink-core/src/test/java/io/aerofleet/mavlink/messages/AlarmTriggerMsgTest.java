@@ -18,11 +18,11 @@ class AlarmTriggerMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=477、LEN=68、CRC_EXTRA=261")
+    @DisplayName("消息 ID=477、LEN=68、CRC_EXTRA=64")
     void messageIdAndConstants() {
         assertThat(AlarmTriggerMsg.ID).isEqualTo(477);
         assertThat(AlarmTriggerMsg.LEN).isEqualTo(68);
-        assertThat(AlarmTriggerMsg.CRC_EXTRA).isEqualTo(261);
+        assertThat(AlarmTriggerMsg.CRC_EXTRA).isEqualTo(64);
     }
 
     @Test

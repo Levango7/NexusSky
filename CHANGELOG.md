@@ -4,6 +4,43 @@
 
 ---
 
+## [Unreleased] — 自定义消息 CRC_EXTRA：改用官方算法实算，并加两道防回归门禁（2026-10-02）
+
+> **怎么发现的**：为核实自定义 msgId 是否与官方分配冲突去查 MAVLink 官方定义，顺手比对了
+> CRC_EXTRA。发现 `MavlinkMessageInfo` 里 51 条自定义消息的 CRC_EXTRA 是**人工序数**
+> （430-434=201..205、437-441=211..215、450-454=233..237 …… 483=267），与字段签名毫无关系。
+
+| # | 类别 | 问题 | 修复 |
+|---|---|---|---|
+| 1 | CRC_EXTRA 是人工序数 | CRC_EXTRA 的唯一职责是让「对同一 msgId 持有不同字段定义」的两端在帧 CRC 上必然不一致。填与字段无关的常数，等于两份字段布局完全不同的实现只要抄同一个数就能互通，**该机制形同虚设**。代码里的注释还写着「按 MavlinkCrc 对消息名+字段名+类型计算」——`MavlinkCrc` 是帧 CRC（CRC-16/MCRF4XX），**不含**任何 CRC_EXTRA 计算逻辑，注释名不副实 | 新增 `MavlinkMessageChecksum`（官方 `message_checksum` 算法的 Java 实现）+ 生成器 `scripts/mavlink-crc-extra-gen.py`，51 条消息的 CRC_EXTRA 全部按官方算法从字段签名实算 |
+| 2 | 字段签名没有机器可读的定义 | 自定义消息在仓库里**没有 XML 定义**（全仓 `.xml` 只有 pom 和 logback），唯一定义源是各消息类的 Javadoc 字段布局表 + `encode()` 字节偏移。此前两者靠人读保持一致，实际已漂移：`SprayStatus` / `SprayCommand` 的 `reserved1/reserved2/reserved` 在 `encode()` 里写了但布局表没列；`OBSTACLE_REPORT` 尾部 2 字节、`VISION_DETECTION` 尾部 1 字节既没写也没列 | 生成器从 Javadoc 表提取并与 `encode()` 偏移交叉校验；7 处缺失的尾部保留字节补进布局表（源码即定义） |
+| 3 | 变长重复结构被静默丢弃 | `TERRAIN_TYPE_MAP` / `TERRAIN_UPDATE` / `MESH_NEIGHBOR_TABLE` / `FLIGHT_RESTRICTION` 的尾部是「每项 N 字节」的重复结构（Java 侧内嵌 record），正则匹配不到就被**静默丢掉**——签名少了字段，却不报错 | 显式 `STRUCT_TAILS` 表声明展开方式（MAVLink 不能表达重复结构体，展开成并列数组）；解析器对无法解释的布局行**报错而非丢弃** |
+| 4 | 改字段不会让构建变红 | 没有任何机制保证「改了字段 → CRC_EXTRA 跟着变」。下一次改字段又会静默失配 | 新增 `MavlinkCrcExtraTest`（**106 例**）：把 51 条消息的字段签名钉在测试里，用 `MavlinkMessageChecksum` 独立重算并与常量表比对，**改了字段没重算就红** |
+| 5 | 兼容性脚本在自证循环 | `scripts/mavlink-compatibility-check.py` 硬编码了一份从 `MavlinkMessageInfo.java` **抄来的**消息表，等于用副本校验原件——两份同时改错都不会被发现。且副本只覆盖到 msgId 476，漏了 477-483 | 改为**直接解析** `MavlinkMessageInfo.java`（单一真相源）；新增 `--cross-check`，用 pymavlink 官方定义逐条核对标准消息 CRC_EXTRA |
+
+**生成器如何被证明是对的**（不靠"看起来对"）：
+
+1. **算法自检 23/23**：用本仓库算法重算 23 条**标准** MAVLink 消息的 CRC_EXTRA，与 pymavlink
+   解析出的官方值逐条相等。算法对，则实现对。
+2. **交叉验证 51/51**：把自定义消息的字段签名写成 XML 交给 pymavlink 官方
+   `message_checksum` 重算，与本仓库结果全部一致。两条独立代码路径。
+3. **落表后 CHANGED = 0**：重跑生成器确认 Java 常量表与重算值完全一致。
+
+**一处必须写明的限制**：MAVLink 的 CRC 里**数组长度只占 1 个字节**，故签名中的数组长度上限是 255。
+这 4 条变长消息的 Java 侧允许更多元素（`MAX_CELLS=65535` 等），超出部分**不在 CRC_EXTRA 的表达
+范围内**——这是 MAVLink 本身的限制，不是本仓库的取舍。已写进生成器注释。
+
+**顺带发现（本次未改，另开一条）**：`mavlink-compatibility-check.py --cross-check` 独立指出标准
+消息段有 3 处硬错——`msgId=43/143` 被**互相对调**（官方 MISSION_REQUEST=40、MISSION_REQUEST_LIST=43、
+SCALED_PRESSURE3=143），`RADIO_STATUS(109)` 的 CRC_EXTRA 是 88 而官方为 185。详见下一条。
+
+**已知偏差（未修）**：46 条自定义消息里有 **30 条的 wire 布局未按 MAVLink 的 type_length 降序排列**，
+导致多字节字段落在奇数偏移（如 `RADAR_TARGET` 的 `distance` f32 在偏移 2）。MAVLink 之所以规定这个
+排序顺序，就是为了自然对齐、免填充。改线格式属协议重设计、会同时影响 drone-sim 与 cloud-backend
+两端，不在本次范围；已由生成器逐条报出，可随时复查。
+
+---
+
 ## [Unreleased] — License 门禁 fail-closed：三个互相掩盖的缺陷（2026-10-02）
 
 > **怎么发现的**：外部审计指出「License 验签失败会降级为无限期 dev license」，准备改 fail-closed 时

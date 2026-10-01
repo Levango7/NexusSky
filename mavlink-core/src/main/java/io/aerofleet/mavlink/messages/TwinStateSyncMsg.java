@@ -23,13 +23,13 @@ import java.nio.ByteBuffer;
  * 26   sysId           u8    发送方系统 ID
  * 27   twinBattery     u8    孪生电量（%，0-100）
  * </pre>
- * CRC_EXTRA = 259（M13 自定义扩展）。
+ * CRC_EXTRA = 208（M13 自定义扩展）。
  */
 public final class TwinStateSyncMsg extends MavlinkMessage {
 
     public static final int ID = 475;
     public static final int LEN = 28;
-    public static final int CRC_EXTRA = 259;
+    public static final int CRC_EXTRA = 208;
 
     public final int twinLat;           // 1E7 度
     public final int twinLon;           // 1E7 度

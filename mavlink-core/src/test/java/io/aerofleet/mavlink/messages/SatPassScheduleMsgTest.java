@@ -33,11 +33,11 @@ class SatPassScheduleMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=460、LEN=16、CRC_EXTRA=239")
+    @DisplayName("消息 ID=460、LEN=16、CRC_EXTRA=155")
     void messageIdAndConstants() {
         assertThat(SatPassScheduleMsg.ID).isEqualTo(460);
         assertThat(SatPassScheduleMsg.LEN).isEqualTo(16);
-        assertThat(SatPassScheduleMsg.CRC_EXTRA).isEqualTo(239);
+        assertThat(SatPassScheduleMsg.CRC_EXTRA).isEqualTo(155);
     }
 
     @Test

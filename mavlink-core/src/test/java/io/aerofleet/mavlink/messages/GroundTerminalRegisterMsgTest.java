@@ -32,11 +32,11 @@ class GroundTerminalRegisterMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=458、LEN=12、CRC_EXTRA=248")
+    @DisplayName("消息 ID=458、LEN=12、CRC_EXTRA=83")
     void messageIdAndConstants() {
         assertThat(GroundTerminalRegisterMsg.ID).isEqualTo(458);
         assertThat(GroundTerminalRegisterMsg.LEN).isEqualTo(12);
-        assertThat(GroundTerminalRegisterMsg.CRC_EXTRA).isEqualTo(248);
+        assertThat(GroundTerminalRegisterMsg.CRC_EXTRA).isEqualTo(83);
     }
 
     @Test

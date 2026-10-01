@@ -10,7 +10,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * HIERARCHICAL_ROUTE_DECISION (msgId=461, LEN=32) —— NexusSky M7 层级路由决策上报消息。
+ * HIERARCHICAL_ROUTE_DECISION (msgId=461, LEN=34) —— NexusSky M7 层级路由决策上报消息。
  * <p>
  * 承载层级行由决策结果：源层级、目标层级、选定路径、决策原因、估计延迟（FR-5.3）。
  * 由 drone-sim {@code HierarchicalRouter} 产出并 UDP 上报到 cloud-backend。
@@ -29,13 +29,13 @@ import java.util.List;
  * 16   reasonChars     char[14] 决策原因（ASCII，不足补 0）
  * 30   timestamp       u32    时间戳（ms）
  * </pre>
- * CRC_EXTRA = 240。
+ * CRC_EXTRA = 217。
  */
 public final class HierarchicalRouteDecisionMsg extends MavlinkMessage {
 
     public static final int ID = 461;
     public static final int LEN = 34;
-    public static final int CRC_EXTRA = 240;
+    public static final int CRC_EXTRA = 217;
 
     /** 路径节点最大数量。 */
     public static final int MAX_PATH_NODES = 8;

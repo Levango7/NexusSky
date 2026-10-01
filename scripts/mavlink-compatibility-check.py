@@ -1,32 +1,40 @@
 #!/usr/bin/env python3
 """
-NexusSky MAVLink 协议兼容性验证脚本（纯 socket，不依赖 pymavlink）。
+NexusSky MAVLink 协议兼容性验证脚本。
 
 验证内容：
   1. 标准 MAVLink 消息（HEARTBEAT, ATTITUDE, GLOBAL_POSITION_INT 等）编解码正确性
-  2. NexusSky 扩展消息（msgId 420-476）编解码一致性
+  2. NexusSky 扩展消息（msgId 420-483）编解码一致性
   3. MAVLink v1 vs v2 帧兼容性
   4. 与 cloud-backend（UDP 14550）的端到端往返验证
+  5. （需 pymavlink）标准消息 CRC_EXTRA 与 pymavlink 官方定义逐条比对
 
 帧格式参考 mavlink-core MavlinkFrame.java：
   v2: STX(0xFD) | LEN | INC | COMPAT | SEQ | SID | CID | MSGID(3B LE) | PAYLOAD | CRC(2B LE)
   v1: STX(0xFE) | LEN | SEQ | SID | CID | MSGID(1B)  | PAYLOAD | CRC(2B LE)
 
-CRC 算法参考 MavlinkCrc.java：CRC-16/X.25（init=0xFFFF, poly_reflected=0x8408）。
-标准测试向量：ASCII "123456789" 的 CRC = 0x906E。
+CRC 算法参考 MavlinkCrc.java：CRC-16/MCRF4XX（init=0xFFFF, poly_reflected=0x8408）。
+标准测试向量：ASCII "123456789" 的 CRC = 0x6F91（MAVLink 变体，无最终异或）。
+
+消息表来源
+----------
+**直接解析 mavlink-core/.../MavlinkMessageInfo.java**，不再在本文件里抄一份。
+此前本文件硬编码了一份副本，那等于用 Java 表校验 Java 表——两份同时漂移或同时
+改错都不会被发现。现改为单一真相源：Java 常量表是唯一定义，本脚本按需读取。
 
 用法：
   python3 mavlink-compatibility-check.py --self-test        # 离线自检（编解码一致性，无需后端）
   python3 mavlink-compatibility-check.py --roundtrip         # 端到端往返（需 cloud-backend 运行）
   python3 mavlink-compatibility-check.py --all               # 全部
   python3 mavlink-compatibility-check.py --list-messages     # 列出所有已知消息
+  python3 mavlink-compatibility-check.py --cross-check       # 与 pymavlink 官方 CRC_EXTRA 比对
 
 退出码：0=全部通过，1=有失败项。
-
-来源：消息表提取自 mavlink-core/.../MavlinkMessageInfo.java（2026-09 版本）。
 """
 
 import argparse
+import os
+import re
 import socket
 import struct
 import sys
@@ -52,82 +60,39 @@ MAV_MODE_FLAG_SAFETY_ARMED = 128
 MAV_STATE_ACTIVE = 4
 MAV_STATE_STANDBY = 3
 
-# ───────────────────────── 消息定义表 ─────────────────────────
-# (msg_id, name, length, crc_extra)
-# 提取自 mavlink-core MavlinkMessageInfo.java。length=-1 表示可变长度。
+# ───────────────── 消息表（唯一真相源 = Java 常量表） ─────────────────
 
-STANDARD_MESSAGES = [
-    (0,   "HEARTBEAT",           9,   50),
-    (1,   "SYS_STATUS",         43,  124),
-    (2,   "SYSTEM_TIME",        12,  137),
-    (24,  "GPS_RAW_INT",        52,   24),
-    (30,  "ATTITUDE",           28,   39),
-    (33,  "GLOBAL_POSITION_INT",28,  104),
-    (42,  "MISSION_CURRENT",    18,   28),
-    (43,  "MISSION_REQUEST",     5,  230),
-    (44,  "MISSION_COUNT",       9,  221),
-    (47,  "MISSION_ACK",         8,  153),
-    (51,  "MISSION_REQUEST_INT", 5,  196),
-    (69,  "MANUAL_CONTROL",     26,  243),
-    (73,  "MISSION_ITEM_INT",   38,   38),
-    (74,  "VFR_HUD",            20,   20),
-    (76,  "COMMAND_LONG",       33,  152),
-    (77,  "COMMAND_ACK",        10,  143),
-    (109, "RADIO_STATUS",        9,   88),
-    (143, "MISSION_REQUEST_LIST",4,  132),
-    (242, "HOME_POSITION",      60,  104),
-    (253, "STATUSTEXT",         54,   83),
-]
+HERE = os.path.dirname(os.path.abspath(__file__))
+MAVLINK_MESSAGE_INFO = os.path.join(
+    HERE, '..', 'mavlink-core', 'src', 'main', 'java', 'io', 'aerofleet', 'mavlink',
+    'MavlinkMessageInfo.java')
 
-EXTENSION_MESSAGES = [
-    (420, "LED_CONTROL",              18,   233),
-    (421, "ENVIRONMENT_ALERT",        46, 25705),
-    (422, "ENVIRONMENT_STATUS",       13, 36086),
-    (423, "SPRAY_STATUS",             12, 58864),
-    (424, "SPRAY_COMMAND",             6, 52077),
-    (425, "GRIPPER_COMMAND",           7, 46389),
-    (426, "PAYLOAD_STATUS",           10,  9268),
-    (430, "OBSTACLE_REPORT",          20,   201),
-    (431, "MULTISPECTRAL_DATA",       24,   202),
-    (432, "THERMAL_DATA",             24,   203),
-    (433, "DEPTH_DATA",               20,   204),
-    (434, "VISION_DETECTION",         20,   205),
-    (437, "RADAR_SCAN",               20,   211),
-    (438, "RADAR_TARGET",             28,   212),
-    (439, "ROTOR_TELEMETRY",          24,   213),
-    (440, "LIDAR_DATA",               20,   214),
-    (441, "IMU_DATA",                 41,   215),
-    (450, "MESH_HEARTBEAT",           24,   233),
-    (451, "MESH_ROUTE_REQUEST",       12,   234),
-    (452, "MESH_ROUTE_REPLY",         10,   235),
-    (453, "MESH_ROUTE_ERROR",          4,   236),
-    (454, "MESH_NEIGHBOR_TABLE",      -1,   237),   # 可变长度
-    (455, "CELL_TOWER_STATUS",        15,   245),
-    (456, "CELL_TOWER_CONFIG",         7,   246),
-    (457, "CELL_HANDOVER",             5,   247),
-    (458, "GROUND_TERMINAL_REGISTER", 12,   248),
-    (459, "SAT_LINK_STATUS",          24,   238),
-    (460, "SAT_PASS_SCHEDULE",        16,   239),
-    (461, "HIERARCHICAL_ROUTE_DECISION",34, 240),
-    (462, "TERRAIN_TYPE_MAP",         -1,   242),   # 可变长度
-    (463, "TERRAIN_UPDATE",           -1,   243),   # 可变长度
-    (464, "FLIGHT_RESTRICTION",       -1,   244),   # 可变长度
-    (465, "EMERGENCY_MISSION_PLAN",   25,   249),
-    (466, "COVERAGE_OPTIMIZATION",    24,   250),
-    (467, "EMERGENCY_PRIORITY",       50,   251),
-    (468, "TASK_ASSIGNMENT",          18,   252),
-    (469, "CONFLICT_ALERT",           12,   253),
-    (470, "TASK_STATUS",              11,   254),
-    (471, "DECISION_EVENT",           15,   255),
-    (472, "ADAPTIVE_PATH",            20,   256),
-    (473, "EDGE_TASK_STATUS",         13,   257),
-    (474, "SENSOR_FUSION_DATA",       24,   258),
-    (475, "TWIN_STATE_SYNC",          28,   259),
-    (476, "PREDICTION_RESULT",        20,   260),
-]
+_ROW = re.compile(
+    r'(?:INFOS\[(\d+)\]|EXTENDED_INFOS\.put\((\d+))'
+    r'\s*=\s*new Info\((-?\d+),\s*(\d+)\);\s*//\s*([A-Z][A-Z0-9_]*)')
 
-ALL_MESSAGES = STANDARD_MESSAGES + EXTENSION_MESSAGES
+
+def load_message_table(path=MAVLINK_MESSAGE_INFO):
+    """解析 MavlinkMessageInfo.java，返回 [(msg_id, name, length, crc_extra), ...]。
+
+    刻意不在本文件里维护第二份表：单一真相源，避免「用副本校验原件」的自证循环。
+    """
+    with open(path, encoding='utf-8') as fh:
+        src = fh.read()
+    table = []
+    for m in _ROW.finditer(src):
+        msg_id = int(m.group(1) if m.group(1) is not None else m.group(2))
+        table.append((msg_id, m.group(5), int(m.group(3)), int(m.group(4))))
+    if not table:
+        raise RuntimeError('未能从 %s 解析出任何消息，检查正则是否与源码失配' % path)
+    return table
+
+
+ALL_MESSAGES = load_message_table()
 MSG_MAP = {m[0]: m for m in ALL_MESSAGES}
+# 自定义扩展（msgId >= 420 且不属于官方 OPEN_DRONE_ID 扩展区）
+EXTENSION_MESSAGES = [m for m in ALL_MESSAGES if m[0] >= 420 and m[0] < 12900]
+STANDARD_MESSAGES = [m for m in ALL_MESSAGES if m not in EXTENSION_MESSAGES]
 
 # ───────────────────────── CRC-16/X.25 ─────────────────────────
 
@@ -740,6 +705,69 @@ def run_roundtrip_test(host=CLOUD_HOST, port=CLOUD_PORT):
     return _failed == 0
 
 
+# ───────────────────── 与 pymavlink 官方定义交叉核对 ─────────────────────
+
+
+def cross_check_with_pymavlink():
+    """把 Java 常量表里**标准**消息的 CRC_EXTRA 与 pymavlink 官方定义逐条比对。
+
+    这一步的作用是打破自证循环：MavlinkMessageInfo 的值是本项目自己维护的，
+    若没有任何外部参照，抄错一个值（例如把 MISSION_REQUEST_LIST 挂到 143 上）
+    永远不会被发现。pymavlink 自带官方 common.xml / minimal.xml，是独立参照物。
+
+    注意：只核对 CRC_EXTRA，不核对 LEN。CRC_EXTRA 只覆盖官方定义的 base_fields，
+    对「扩展字段」的增删免疫，因此跨 MAVLink 版本稳定；而 LEN 会随扩展字段变化，
+    pymavlink 打包的 message_definitions 是某个历史快照，用它核对 LEN 会把
+    版本漂移误判成缺陷。
+    """
+    step("与 pymavlink 官方定义交叉核对 CRC_EXTRA")
+    try:
+        from pymavlink.generator import mavparse
+    except ImportError:
+        print("  ⚠️  未安装 pymavlink，跳过（pip install pymavlink）")
+        return True
+
+    mdir = os.path.join(os.path.dirname(mavparse.__file__), '..', 'message_definitions', 'v1.0')
+    official, official_names = {}, {}
+    for fn in ('minimal.xml', 'common.xml', 'ardupilotmega.xml', 'development.xml',
+               'uAvionix.xml', 'csAirLink.xml', 'cubepilot.xml', 'ASLUAV.xml',
+               'AVSSUAS.xml', 'storm32.xml', 'matrixpilot.xml', 'icarous.xml',
+               'paparazzi.xml', 'ualberta.xml', 'loweheiser.xml'):
+        p = os.path.join(mdir, fn)
+        if not os.path.exists(p):
+            continue
+        try:
+            x = mavparse.MAVXML(p, wire_protocol_version='2.0')
+        except Exception:
+            continue
+        official.update(x.message_crcs)
+        official_names.update(x.message_names)
+
+    checked = mismatch = missing = 0
+    for msg_id, name, _length, crc in ALL_MESSAGES:
+        if 420 <= msg_id < 12900:
+            continue                      # 自定义扩展，官方无定义可比
+        if msg_id not in official:
+            continue
+        ref = official[msg_id]
+        checked += 1
+        if ref != crc:
+            mismatch += 1
+            fail(f"msgId={msg_id} CRC_EXTRA 不符：Java 表={crc} 官方={ref}"
+                 f"（官方该 msgId 是 {official_names.get(msg_id, '?')}，"
+                 f"本表登记为 {name}）")
+    for msg_id, name, _length, crc in ALL_MESSAGES:
+        if 420 <= msg_id < 12900:
+            continue
+        if msg_id not in official:
+            missing += 1
+            print(f"  ⚠️  msgId={msg_id} ({name}) 在 pymavlink 官方定义中不存在，"
+                  f"无法外部核对（CRC_EXTRA={crc}）")
+    print(f"  外部核对 {checked} 条标准消息，不符 {mismatch} 条，"
+          f"官方定义中查无此 id {missing} 条")
+    return mismatch == 0
+
+
 # ───────────────────── 消息列表打印 ─────────────────────
 
 
@@ -769,6 +797,8 @@ def main():
                         help="执行全部测试")
     parser.add_argument("--list-messages", action="store_true",
                         help="列出所有已知消息")
+    parser.add_argument("--cross-check", action="store_true",
+                        help="与 pymavlink 官方 CRC_EXTRA 逐条比对（需 pymavlink）")
     parser.add_argument("--host", default=CLOUD_HOST,
                         help=f"cloud-backend 地址（默认 {CLOUD_HOST}）")
     parser.add_argument("--port", type=int, default=CLOUD_PORT,
@@ -779,9 +809,16 @@ def main():
         list_messages()
         return 0
 
+    if args.cross_check:
+        print("=" * 60)
+        print("MAVLink CRC_EXTRA 外部交叉核对（真相源 vs pymavlink 官方定义）")
+        print("=" * 60)
+        return 0 if cross_check_with_pymavlink() else 1
+
     if args.all:
         args.self_test = True
         args.roundtrip = True
+        args.cross_check = True
 
     if not (args.self_test or args.roundtrip):
         parser.print_help()
@@ -794,6 +831,9 @@ def main():
 
     if args.roundtrip:
         success = run_roundtrip_test(args.host, args.port) and success
+
+    if args.cross_check:
+        success = cross_check_with_pymavlink() and success
 
     return 0 if success else 1
 

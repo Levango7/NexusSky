@@ -19,13 +19,13 @@ import java.nio.ByteBuffer;
  * 9    status           u8    0=已分配, 1=执行中, 2=已完成, 3=失败, 4=中止（{@link io.aerofleet.mavlink.enums.TaskStatusEnum}）
  * 10   progressPercent  u8    进度百分比（0-100）
  * </pre>
- * CRC_EXTRA = 254（M10 自定义扩展）。
+ * CRC_EXTRA = 104（M10 自定义扩展）。
  */
 public final class TaskStatusMsg extends MavlinkMessage {
 
     public static final int ID = 470;
     public static final int LEN = 11;
-    public static final int CRC_EXTRA = 254;
+    public static final int CRC_EXTRA = 104;
 
     public final long taskId;            // 任务 ID
     public final long timestamp;         // ms

@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
  * 21   reserved             u8     保留（0）
  * 22   reserved2            u16    保留（0）
  * </pre>
- * CRC_EXTRA = 202。
+ * CRC_EXTRA = 100。
  */
 public final class MultispectralDataMsg extends MavlinkMessage {
 
     public static final int ID = 431;
     public static final int LEN = 24;
-    public static final int CRC_EXTRA = 202;
+    public static final int CRC_EXTRA = 100;
 
     public final float ndviMean;
     public final float ndviMin;

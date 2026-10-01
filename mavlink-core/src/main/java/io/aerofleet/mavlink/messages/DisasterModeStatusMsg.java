@@ -19,13 +19,13 @@ import java.nio.ByteBuffer;
  * 6    affectedNodes     u8       受影响节点数
  * 7    recoveryRate      u8       恢复率（0-100%）
  * </pre>
- * CRC_EXTRA = 266（P2 自定义扩展）。
+ * CRC_EXTRA = 137（P2 自定义扩展）。
  */
 public final class DisasterModeStatusMsg extends MavlinkMessage {
 
     public static final int ID = 482;
     public static final int LEN = 8;
-    public static final int CRC_EXTRA = 266;
+    public static final int CRC_EXTRA = 137;
 
     public static final int MODE_INACTIVE = 0;
     public static final int MODE_ACTIVE = 1;

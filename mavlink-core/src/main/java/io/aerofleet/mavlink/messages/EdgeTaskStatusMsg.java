@@ -20,13 +20,13 @@ import java.nio.ByteBuffer;
  * 11   taskType          u8    0=视频分析, 1=传感器融合, 2=目标检测（{@link io.aerofleet.mavlink.enums.EdgeTaskType}）
  * 12   status            u8    0=待处理, 1=处理中, 2=完成, 3=失败
  * </pre>
- * CRC_EXTRA = 257（M12 自定义扩展）。
+ * CRC_EXTRA = 46（M12 自定义扩展）。
  */
 public final class EdgeTaskStatusMsg extends MavlinkMessage {
 
     public static final int ID = 473;
     public static final int LEN = 13;
-    public static final int CRC_EXTRA = 257;
+    public static final int CRC_EXTRA = 46;
 
     public final long edgeTaskId;          // 边缘任务 ID
     public final long processingTimeMs;    // ms

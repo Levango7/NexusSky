@@ -20,13 +20,13 @@ import java.nio.ByteBuffer;
  * 10   conflictingSysId  u8    冲突方系统 ID
  * 11   severity          u8    严重程度（1-4）
  * </pre>
- * CRC_EXTRA = 253（M10 自定义扩展）。
+ * CRC_EXTRA = 86（M10 自定义扩展）。
  */
 public final class ConflictAlertMsg extends MavlinkMessage {
 
     public static final int ID = 469;
     public static final int LEN = 12;
-    public static final int CRC_EXTRA = 253;
+    public static final int CRC_EXTRA = 86;
 
     public final float minDistance;        // m
     public final float timeToConflict;     // s

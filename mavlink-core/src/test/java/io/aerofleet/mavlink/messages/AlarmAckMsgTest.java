@@ -18,11 +18,11 @@ class AlarmAckMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=478、LEN=12、CRC_EXTRA=262")
+    @DisplayName("消息 ID=478、LEN=12、CRC_EXTRA=200")
     void messageIdAndConstants() {
         assertThat(AlarmAckMsg.ID).isEqualTo(478);
         assertThat(AlarmAckMsg.LEN).isEqualTo(12);
-        assertThat(AlarmAckMsg.CRC_EXTRA).isEqualTo(262);
+        assertThat(AlarmAckMsg.CRC_EXTRA).isEqualTo(200);
     }
 
     @Test

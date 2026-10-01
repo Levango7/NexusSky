@@ -21,13 +21,13 @@ import java.nio.ByteBuffer;
  * 17   reserved            u8     保留（0）
  * 18   reserved2           u16    保留（0）
  * </pre>
- * CRC_EXTRA = 204。
+ * CRC_EXTRA = 171。
  */
 public final class DepthDataMsg extends MavlinkMessage {
 
     public static final int ID = 433;
     public static final int LEN = 20;
-    public static final int CRC_EXTRA = 204;
+    public static final int CRC_EXTRA = 171;
 
     public final float nearestDistance;
     public final float nearestDirection;

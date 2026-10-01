@@ -31,11 +31,11 @@ class CellTowerConfigMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=456、LEN=7、CRC_EXTRA=246")
+    @DisplayName("消息 ID=456、LEN=7、CRC_EXTRA=190")
     void messageIdAndConstants() {
         assertThat(CellTowerConfigMsg.ID).isEqualTo(456);
         assertThat(CellTowerConfigMsg.LEN).isEqualTo(7);
-        assertThat(CellTowerConfigMsg.CRC_EXTRA).isEqualTo(246);
+        assertThat(CellTowerConfigMsg.CRC_EXTRA).isEqualTo(190);
     }
 
     @Test

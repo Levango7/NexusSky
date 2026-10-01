@@ -21,7 +21,7 @@ import java.nio.ByteBuffer;
  * 7    dropAccuracyCm           uint16  cm
  * 9    reserved                 uint8
  * </pre>
- * CRC_EXTRA = 9268（按 MavlinkCrc 对消息名+字段名+类型计算）。
+ * CRC_EXTRA = 153（由 MavlinkMessageChecksum 按官方 message_checksum 算法对消息名+字段签名计算）。
  */
 public final class PayloadStatus extends MavlinkMessage {
 

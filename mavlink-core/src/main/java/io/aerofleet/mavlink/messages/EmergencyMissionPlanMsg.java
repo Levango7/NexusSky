@@ -27,13 +27,13 @@ import java.nio.ByteBuffer;
  * 20   priority             u8    当前最高优先级任务级别（1-4）
  * 21   timestamp            u32   时间戳（ms）
  * </pre>
- * CRC_EXTRA = 249（M9 自定义扩展，避开 M5-M8 已占用的 233-248）。
+ * CRC_EXTRA = 106（M9 自定义扩展，避开 M5-M8 已占用的 233-248）。
  */
 public final class EmergencyMissionPlanMsg extends MavlinkMessage {
 
     public static final int ID = 465;
     public static final int LEN = 25;
-    public static final int CRC_EXTRA = 249;
+    public static final int CRC_EXTRA = 106;
 
     public final long planId;              // 编排计划 ID
     public final int scenarioType;         // 0=地震, 1=泥石流, 2=火灾, 3=自定义

@@ -98,9 +98,9 @@ class BuzzerControlMsgTest {
     }
 
     @Test
-    @DisplayName("CRC_EXTRA 为 267")
-    void crcExtraIs267() {
-        assertEquals(267, BuzzerControlMsg.CRC_EXTRA, "CRC_EXTRA 应为 267");
+    @DisplayName("CRC_EXTRA 为 94")
+    void crcExtraIs94() {
+        assertEquals(94, BuzzerControlMsg.CRC_EXTRA, "CRC_EXTRA 应为 94");
     }
 
     @Test

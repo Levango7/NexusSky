@@ -38,11 +38,11 @@ class HierarchicalRouteDecisionMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=461、LEN=34、CRC_EXTRA=240")
+    @DisplayName("消息 ID=461、LEN=34、CRC_EXTRA=217")
     void messageIdAndConstants() {
         assertThat(HierarchicalRouteDecisionMsg.ID).isEqualTo(461);
         assertThat(HierarchicalRouteDecisionMsg.LEN).isEqualTo(34);
-        assertThat(HierarchicalRouteDecisionMsg.CRC_EXTRA).isEqualTo(240);
+        assertThat(HierarchicalRouteDecisionMsg.CRC_EXTRA).isEqualTo(217);
     }
 
     @Test

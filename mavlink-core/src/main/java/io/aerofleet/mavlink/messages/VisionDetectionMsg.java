@@ -20,15 +20,16 @@ import java.nio.ByteBuffer;
  * 13   trackId    u8     跟踪 ID（0-255，0xFF=未关联）
  * 14   sysid      u8     源飞机 sysid
  * 15   timestamp  u32    检测时间戳（ms）
+ * 19   reserved   u8     保留（0）
  * </pre>
  * 注意：kind 在消息层用 u8 枚举码（节省字节），调用方需自行映射字符串↔枚举。
- * CRC_EXTRA = 205。
+ * CRC_EXTRA = 100。
  */
 public final class VisionDetectionMsg extends MavlinkMessage {
 
     public static final int ID = 434;
     public static final int LEN = 20;
-    public static final int CRC_EXTRA = 205;
+    public static final int CRC_EXTRA = 100;
     /** trackId 字段未关联时的占位值（255）。 */
     public static final int TRACK_ID_NONE = 0xFF;
 

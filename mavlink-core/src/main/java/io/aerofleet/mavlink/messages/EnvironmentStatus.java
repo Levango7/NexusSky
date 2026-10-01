@@ -24,7 +24,7 @@ import java.nio.ByteBuffer;
  * 9    gust            int16   cm/s
  * 11   visibility      uint16  m
  * </pre>
- * CRC_EXTRA = 36086（按 MavlinkCrc 对消息名+字段名+类型计算）。
+ * CRC_EXTRA = 249（由 MavlinkMessageChecksum 按官方 message_checksum 算法对消息名+字段签名计算）。
  */
 public final class EnvironmentStatus extends MavlinkMessage {
 

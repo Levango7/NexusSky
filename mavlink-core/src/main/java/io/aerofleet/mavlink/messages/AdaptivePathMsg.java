@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
  * 18   sysId                u8    发送方系统 ID
  * 19   adjustmentReason     u8    0=风场, 1=障碍物, 2=地形, 3=电量（{@link io.aerofleet.mavlink.enums.AdjustmentReason}）
  * </pre>
- * CRC_EXTRA = 256（M11 自定义扩展）。
+ * CRC_EXTRA = 208（M11 自定义扩展）。
  */
 public final class AdaptivePathMsg extends MavlinkMessage {
 
     public static final int ID = 472;
     public static final int LEN = 20;
-    public static final int CRC_EXTRA = 256;
+    public static final int CRC_EXTRA = 208;
 
     public final int newLat;                // 1E7 度
     public final int newLon;                // 1E7 度

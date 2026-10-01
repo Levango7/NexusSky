@@ -21,13 +21,13 @@ import java.nio.ByteBuffer;
  * 9    targetSysid       u8       目标 sysid（0=广播）
  * 10   reserved          u8[2]    保留（0填充）
  * </pre>
- * CRC_EXTRA = 264（P2 自定义扩展）。
+ * CRC_EXTRA = 121（P2 自定义扩展）。
  */
 public final class QoSRouteDecisionMsg extends MavlinkMessage {
 
     public static final int ID = 480;
     public static final int LEN = 12;
-    public static final int CRC_EXTRA = 264;
+    public static final int CRC_EXTRA = 121;
 
     public final long timestamp;       // ms
     public final int bandwidthAlloc;   // kbps

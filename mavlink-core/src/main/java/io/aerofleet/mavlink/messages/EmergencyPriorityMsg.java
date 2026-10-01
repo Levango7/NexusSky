@@ -21,13 +21,13 @@ import java.nio.ByteBuffer;
  * 14   reason            char[32] 原因描述（UTF-8，0 填充）
  * 46   timestamp         u32     时间戳（ms）
  * </pre>
- * CRC_EXTRA = 251（M9 自定义扩展）。
+ * CRC_EXTRA = 208（M9 自定义扩展）。
  */
 public final class EmergencyPriorityMsg extends MavlinkMessage {
 
     public static final int ID = 467;
     public static final int LEN = 50;
-    public static final int CRC_EXTRA = 251;
+    public static final int CRC_EXTRA = 208;
     private static final int REASON_LEN = 32;
 
     public final long planId;            // 编排计划 ID

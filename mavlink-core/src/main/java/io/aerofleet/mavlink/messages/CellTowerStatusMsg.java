@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
  * 12   connectedTerminals   u16   已接入终端数
  * 14   capacityUtilization  u8    容量利用率（0-100 表示 0.0-1.0）
  * </pre>
- * CRC_EXTRA = 245（M6 自定义扩展，避开 M7/M8 已占用的 238-244）。
+ * CRC_EXTRA = 21（M6 自定义扩展，避开 M7/M8 已占用的 238-244）。
  */
 public final class CellTowerStatusMsg extends MavlinkMessage {
 
     public static final int ID = 455;
     public static final int LEN = 15;
-    public static final int CRC_EXTRA = 245;
+    public static final int CRC_EXTRA = 21;
 
     public final int sysid;                // 1-255
     public final int cellType;             // 0=LTE, 1=WIFI, 2=LORA

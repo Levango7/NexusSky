@@ -27,13 +27,13 @@ import java.nio.ByteBuffer;
  * 19   reserved        u8     保留（0）
  * 20   reserved2       u32    保留（0）
  * </pre>
- * CRC_EXTRA = 238（M7 自定义扩展，接续 M5 的 237）。
+ * CRC_EXTRA = 152（M7 自定义扩展，接续 M5 的 237）。
  */
 public final class SatLinkStatusMsg extends MavlinkMessage {
 
     public static final int ID = 459;
     public static final int LEN = 24;
-    public static final int CRC_EXTRA = 238;
+    public static final int CRC_EXTRA = 152;
 
     public final int satId;            // u16
     public final int visible;          // 0/1

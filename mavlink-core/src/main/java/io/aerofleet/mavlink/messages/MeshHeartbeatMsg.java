@@ -24,13 +24,13 @@ import java.nio.ByteBuffer;
  * 19   reserved         u8    保留（0）
  * 20   reserved2        u32   保留（0）
  * </pre>
- * CRC_EXTRA = 233（M5 自定义扩展）。
+ * CRC_EXTRA = 193（M5 自定义扩展）。
  */
 public final class MeshHeartbeatMsg extends MavlinkMessage {
 
     public static final int ID = 450;
     public static final int LEN = 24;
-    public static final int CRC_EXTRA = 233;
+    public static final int CRC_EXTRA = 193;
 
     public final int sysid;            // 1-255
     public final int lat;              // 1E7 度

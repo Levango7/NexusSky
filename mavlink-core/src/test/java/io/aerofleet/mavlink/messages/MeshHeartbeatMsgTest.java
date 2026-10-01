@@ -37,11 +37,11 @@ class MeshHeartbeatMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=450、LEN=24、CRC_EXTRA=233")
+    @DisplayName("消息 ID=450、LEN=24、CRC_EXTRA=193")
     void messageIdAndConstants() {
         assertThat(MeshHeartbeatMsg.ID).isEqualTo(450);
         assertThat(MeshHeartbeatMsg.LEN).isEqualTo(24);
-        assertThat(MeshHeartbeatMsg.CRC_EXTRA).isEqualTo(233);
+        assertThat(MeshHeartbeatMsg.CRC_EXTRA).isEqualTo(193);
     }
 
     @Test

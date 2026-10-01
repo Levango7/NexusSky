@@ -21,13 +21,13 @@ import java.nio.ByteBuffer;
  * 17   reserved        u8    保留（0）
  * 18   reserved2       u16   保留（0）
  * </pre>
- * CRC_EXTRA = 214（M4 自定义扩展）。
+ * CRC_EXTRA = 153（M4 自定义扩展）。
  */
 public final class LidarDataMsg extends MavlinkMessage {
 
     public static final int ID = 440;
     public static final int LEN = 20;
-    public static final int CRC_EXTRA = 214;
+    public static final int CRC_EXTRA = 153;
 
     public final float nearestDistance; // 米
     public final long pointCount;

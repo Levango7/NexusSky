@@ -7,7 +7,7 @@ import io.aerofleet.mavlink.enums.BuzzerPattern;
 import java.nio.ByteBuffer;
 
 /**
- * BUZZER_CONTROL_MSG（自定义扩展 msgId=483, LEN=7, CRC_EXTRA=267）。
+ * BUZZER_CONTROL（自定义扩展 msgId=483, LEN=7, CRC_EXTRA=94）。
  * GCS/搜救调度 → 飞机：蜂鸣器声光报警控制命令，
  * 承载开关状态 + 报警模式 + 音量 + 持续时间。
  *
@@ -25,7 +25,7 @@ public final class BuzzerControlMsg extends MavlinkMessage {
 
     public static final int ID = 483;           // 自定义扩展 msgId
     public static final int LEN = 7;
-    public static final int CRC_EXTRA = 267;     // 自定义 CRC_EXTRA（全局唯一）
+    public static final int CRC_EXTRA = 94;     // 自定义 CRC_EXTRA（全局唯一）
 
     public final int sysid;
     public final boolean on;

@@ -23,13 +23,13 @@ import java.nio.ByteBuffer;
  * 17   severity          u8       0=INFO, 1=WARN, 2=CRITICAL
  * 18   description       char[50] 报警描述（UTF-8，0 填充）
  * </pre>
- * CRC_EXTRA = 261（M14 自定义扩展）。
+ * CRC_EXTRA = 64（M14 自定义扩展）。
  */
 public final class AlarmTriggerMsg extends MavlinkMessage {
 
     public static final int ID = 477;
     public static final int LEN = 68;
-    public static final int CRC_EXTRA = 261;
+    public static final int CRC_EXTRA = 64;
     private static final int DESCRIPTION_LEN = 50;
 
     public final long timestamp;          // ms

@@ -39,11 +39,11 @@ class EmergencyMissionPlanMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=465、LEN=25、CRC_EXTRA=249")
+    @DisplayName("消息 ID=465、LEN=25、CRC_EXTRA=106")
     void messageIdAndConstants() {
         assertThat(EmergencyMissionPlanMsg.ID).isEqualTo(465);
         assertThat(EmergencyMissionPlanMsg.LEN).isEqualTo(25);
-        assertThat(EmergencyMissionPlanMsg.CRC_EXTRA).isEqualTo(249);
+        assertThat(EmergencyMissionPlanMsg.CRC_EXTRA).isEqualTo(106);
     }
 
     @Test

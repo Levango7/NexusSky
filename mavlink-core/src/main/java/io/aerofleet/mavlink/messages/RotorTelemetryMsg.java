@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
  * 21   sysid        u8    源飞机 sysid
  * 22   reserved     u16   保留（0）
  * </pre>
- * CRC_EXTRA = 213（M4 自定义扩展）。
+ * CRC_EXTRA = 112（M4 自定义扩展）。
  */
 public final class RotorTelemetryMsg extends MavlinkMessage {
 
     public static final int ID = 439;
     public static final int LEN = 24;
-    public static final int CRC_EXTRA = 213;
+    public static final int CRC_EXTRA = 112;
 
     public final int rotorIndex;
     public final float rpm;        // RPM
