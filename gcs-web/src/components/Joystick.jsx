@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react'
 import { api } from '../api.js'
+import { confirmText } from '../utils/flightSafety.js'
 
 // 虚拟摇杆：按住拖动发送 MANUAL_CONTROL（10Hz），松开 2 秒后自动悬停。
 // 轴映射与 PX4 一致：y 前后（+前）、x 左右（+右）、z 油门（500=悬停）、r 旋转。
@@ -70,6 +71,11 @@ export default function Joystick({ drone }) {
   }
 
   const disarm = async () => {
+    // 二次确认必须在**停发之前**：否则用户点「取消」会留下
+    // sendingRef=false 且没有下发上锁——摇杆变成死区而飞机仍在飞。
+    // 这是 2026-10-01 加确认时最容易踩的顺序坑。
+    if (!window.confirm(confirmText('disarm', drone))) return
+
     sendingRef.current = false
     if (timerRef.current) clearTimeout(timerRef.current)
     try {

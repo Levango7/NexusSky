@@ -51,11 +51,19 @@ function AttitudeIndicator({ roll = 0, pitch = 0 }) {
   )
 }
 
+// 危险飞行命令的二次确认：判据、文案与「rtl 刻意不确认」的理由都在
+// src/utils/flightSafety.js（TelemetryPanel 与 Joystick 共用，避免两处各写一份）。
+// 这里同时再导出，是为了让测试能按组件路径引用；真正的实现只有一处。
+import { confirmText } from '../utils/flightSafety.js'
+export { confirmText }
+
 export default function TelemetryPanel({ drone, telemetry, onCommand }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
 
   const cmd = async (type, alt) => {
+    const prompt = confirmText(type, drone, alt)
+    if (prompt != null && !window.confirm(prompt)) return
     setBusy(true)
     setResult(null)
     try {
