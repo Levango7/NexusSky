@@ -16,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -209,5 +210,29 @@ class DeviceProvisioningControllerTest {
 
         assertThat(registry.isKnownDevice(32)).isFalse();
         assertThat(registry.isKnownDevice(33)).isFalse();
+    }
+
+    @Test
+    @DisplayName("DELETE 撤销已登记设备返回 200，撤销后不再在白名单里")
+    void deregisterRemovesDevice() throws Exception {
+        mockMvc.perform(post("/api/v1/devices/40")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tenantId\":1}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(delete("/api/v1/devices/40"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sysid").value(40))
+                .andExpect(jsonPath("$.deregistered").value(true));
+
+        assertThat(registry.isKnownDevice(40)).isFalse();
+    }
+
+    @Test
+    @DisplayName("DELETE 未知设备返回 404")
+    void deregisterUnknownReturnsNotFound() throws Exception {
+        mockMvc.perform(delete("/api/v1/devices/404"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("device unknown")));
     }
 }

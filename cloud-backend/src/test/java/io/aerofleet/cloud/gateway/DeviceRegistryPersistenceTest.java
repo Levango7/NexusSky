@@ -216,6 +216,30 @@ class DeviceRegistryPersistenceTest {
         assertThat(deviceRegistry.isKnownDevice(255)).isFalse();
     }
 
+    @Test
+    @DisplayName("deregister 同时摘掉内存条目与库里的行，撤销后白名单重新拒收")
+    void deregisterRemovesMemoryAndDbRow() {
+        deviceRegistry.provision(55, 6);
+        assertThat(deviceRegistry.isKnownDevice(55)).isTrue();
+        assertThat(deviceRepository.existsById(55)).isTrue();
+
+        assertThat(deviceRegistry.deregister(55)).isTrue();
+
+        assertThat(deviceRegistry.isKnownDevice(55)).isFalse();
+        assertThat(deviceRepository.existsById(55)).isFalse();
+    }
+
+    @Test
+    @DisplayName("deregister 对未知设备返回 false；persist=false 时不动库里的行")
+    void deregisterUnknownAndNonPersisting() throws Exception {
+        assertThat(deviceRegistry.deregister(599)).isFalse();
+
+        deviceRepository.save(new DeviceEntity(56));
+        setPersist(false);
+        assertThat(deviceRegistry.deregister(56)).isFalse();   // 内存没有、又不读库 ⇒ 视为未知
+        assertThat(deviceRepository.existsById(56)).isTrue();  // 不得悄悄删库
+    }
+
     // ===== 辅助方法 =====
 
     /**

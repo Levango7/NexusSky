@@ -464,7 +464,7 @@ class UdpGatewayTest {
     }
 
     @Test
-    @DisplayName("24. 白名单启用：只有经 provision 登记的 sysid 才放行（prod 首台设备注册腿）")
+    @DisplayName("24. 白名单启用：provision 登记才放行，deregister 撤销后重新拒收")
     void whitelistEnabled_provisionedSysid_forwards() throws Exception {
         int port = BASE_PORT + 24;
         gateway = newGateway(port, true, 100);
@@ -484,6 +484,13 @@ class UdpGatewayTest {
 
         sendFrame(port, droneHeartbeat(7, 1));
         verify(ingest, timeout(2000)).handle(any(MavlinkFrame.class));
+
+        // 撤销后重新拒收：白名单必须能关回去，登记不是一次性单向门
+        int ingestedSoFar = mockingDetails(ingest).getInvocations().size();
+        assertThat(registry.deregister(7)).isTrue();
+        sendFrame(port, droneHeartbeat(7, 2));
+        Thread.sleep(400);
+        assertThat(mockingDetails(ingest).getInvocations().size()).isEqualTo(ingestedSoFar);
     }
 
     // ===== 频率限制 (P1-3) =====
