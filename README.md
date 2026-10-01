@@ -500,10 +500,15 @@ ESP-NOW 用于近距离低延迟机间通讯（百元级），LoRa 用于远距�
 自适应伸缩，而非固定值。
 
 **真实卫星接入预留**：为天通（高轨稳定覆盖）、铱星（低轨低延迟）、星链（低轨星座
-带宽最优）三种卫星通信系统创建了占位实现类（`TiantongSatellitePlaceholder`/
-`IridiumSatellitePlaceholder`/`StarlinkSatellitePlaceholder`），实现统一的
-`SatelliteLink` 接口框架，为未来真实卫星硬件接入预留接口——替换占位为真实驱动时，
+带宽最优）三种卫星通信系统创建了占位实现类（`TiantongSatLinkProvider`/
+`IridiumSatLinkProvider`/`StarlinkSatLinkProvider`），实现统一的
+`SatLinkProvider` 接口，为未来真实卫星硬件接入预留接口——替换占位为真实驱动时，
 上层路由/中继/链路切换逻辑零改动。
+（2026-10-01 更正：原文写的类名 `*SatellitePlaceholder` 与接口名 `SatelliteLink`
+在代码中均不存在，实际为 `*SatLinkProvider` / `SatLinkProvider`；`SatLinkProvider`
+的 Javadoc 里引用的 `TiantongSatProvider` 等三个类名也已过期。三个占位类的每个方法
+都抛 `UnsupportedOperationException("真实星链接入尚未实现，请使用 SimulatedSatLinkProvider")`，
+仿真请用 `SimulatedSatLinkProvider`——**抛错而非返回假数据**是这里正确的做法。）
 
 ### MAVLink 消息 ID 分配（420–467、477–483 段）
 
