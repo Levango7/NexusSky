@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { getAuthToken } from '../api.js'
+import { fmtPct, fmtMs, gradeColor } from '../utils/format'
 
 const POLL_MS = 2000
 
@@ -59,21 +60,12 @@ export default function CvEvalPanel() {
     }
   }
 
-  // 指标档位配色：识别率绿≥85%/黄≥70%/红；误检比绿≤15%/黄≤30%/红
-  const gradeColor = (value, good, warn, lowerIsBetter) => {
-    if (value == null) return 'var(--dim)'
-    const hit = lowerIsBetter ? value <= good : value >= good
-    if (hit) return '#2de2a5'
-    const mid = lowerIsBetter ? value <= warn : value >= warn
-    return mid ? '#ffc857' : '#ff5d5d'
-  }
+  // 指标档位配色与格式化：见 utils/format
 
   const recall = metrics?.recall
   const fdr = metrics?.falseDetectionRatio
   const avg = metrics?.latencyAvgMs
   const p95 = metrics?.latencyP95Ms
-  const fmtPct = (v) => (v == null ? '--' : `${(v * 100).toFixed(1)}%`)
-  const fmtMs = (v) => (v == null ? '--' : `${v.toFixed(1)} ms`)
 
   return (
     <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>

@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { PRIORITY_META, normPriority } from '../utils/statusMeta'
+import { battColorVar } from '../utils/battery'
 import { emergencyOrch } from '../api.js'
 
 // M9 应急任务编排面板
@@ -51,28 +53,7 @@ const DRONE_STATUS_COLOR = {
   LOST: 'var(--crit)',
 }
 
-// 优先级 → 颜色 + 排序权重
-const PRIORITY_META = {
-  P0: { label: 'P0 紧急', color: 'var(--crit)', weight: 0 },
-  P1: { label: 'P1 高', color: 'var(--warn)', weight: 1 },
-  P2: { label: 'P2 中', color: 'var(--gold)', weight: 2 },
-  P3: { label: 'P3 低', color: 'var(--cyan)', weight: 3 },
-  HIGH: { label: '高', color: 'var(--crit)', weight: 0 },
-  MEDIUM: { label: '中', color: 'var(--warn)', weight: 1 },
-  LOW: { label: '低', color: 'var(--cyan)', weight: 2 },
-}
-
-// 规范化优先级键
-function normPriority(p) {
-  if (!p) return 'P3'
-  const u = String(p).toUpperCase()
-  if (PRIORITY_META[u]) return u
-  if (u.startsWith('P0')) return 'P0'
-  if (u.startsWith('P1')) return 'P1'
-  if (u.startsWith('P2')) return 'P2'
-  if (u.startsWith('P3')) return 'P3'
-  return 'P3'
-}
+// 优先级元数据与规范化：见 utils/statusMeta（与 UnifiedCommandPanel 共用单一实现）
 
 // 圆环仪表盘（覆盖率 / 连通率）
 function Gauge({ value, label, color }) {
@@ -511,16 +492,14 @@ export default function EmergencyOrchPanel() {
                   const role = d.role || d.taskRole || '--'
                   const status = String(d.status || d.state || 'ONLINE').toUpperCase()
                   const statusColor = DRONE_STATUS_COLOR[status] || 'var(--dim)'
-                  const battNum = Number(batt)
-                  const battColor = batt == null ? 'var(--dim)' : battNum <= 15 ? 'var(--crit)' : battNum <= 30 ? 'var(--warn)' : 'var(--ok)'
                   return (
                     <tr key={id || i}>
                       <td style={tdStyle}>{id}</td>
                       <td style={{ ...tdStyle, color: 'var(--dim)' }}>
                         {lat != null && lon != null ? `${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)}` : '--'}
                       </td>
-                      <td style={{ ...tdStyle, color: battColor }}>
-                        {batt != null ? `${battNum.toFixed(0)}%` : '--'}
+                      <td style={{ ...tdStyle, color: battColorVar(batt) }}>
+                        {batt != null ? `${Number(batt).toFixed(0)}%` : '--'}
                       </td>
                       <td style={tdStyle}>{role}</td>
                       <td style={{ ...tdStyle, color: statusColor }}>{status}</td>

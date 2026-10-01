@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { SEVERITY_META, normSeverity } from '../utils/statusMeta'
 import {
   listAlarmEvents,
   acknowledgeAlarm,
@@ -23,25 +24,7 @@ import { POLL_MS } from '../utils/panelUtils.js'
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（竞态守卫）
 
 
-// 严重程度元数据
-const SEVERITY_META = {
-  CRITICAL: { color: 'var(--crit)', label: '严重', weight: 0 },
-  WARN: { color: 'var(--warn)', label: '警告', weight: 1 },
-  WARNING: { color: 'var(--warn)', label: '警告', weight: 1 },
-  INFO: { color: 'var(--cyan)', label: '信息', weight: 2 },
-  ERROR: { color: 'var(--crit)', label: '错误', weight: 0 },
-}
-
-// 规范化严重程度
-function normSeverity(s) {
-  if (!s) return 'INFO'
-  const u = String(s).toUpperCase()
-  if (SEVERITY_META[u]) return u
-  if (u.includes('CRIT')) return 'CRITICAL'
-  if (u.includes('WARN')) return 'WARN'
-  if (u.includes('ERR')) return 'ERROR'
-  return 'INFO'
-}
+// 严重程度元数据与规范化：见 utils/statusMeta（与 UnifiedCommandPanel 共用单一实现）
 
 // 报警来源类型
 const SOURCE_TYPES = [

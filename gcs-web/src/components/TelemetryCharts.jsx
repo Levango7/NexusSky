@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useEffect, useState, useId } from 'react'
+import { battColor } from '../utils/battery'
 
 /**
  * 实时遥测图表组件（纯 SVG，无第三方依赖）
@@ -23,9 +24,7 @@ import React, { useMemo, useRef, useEffect, useState, useId } from 'react'
 
 const WINDOW_MS = 60 * 1000 // 60 秒滚动窗口
 const CYAN = '#00d4ff'
-const OK = '#2de2a5'
-const WARN = '#ffb224'
-const CRIT = '#ff5d5d'
+const OK = '#2de2a5'   // 调色板用（地速曲线），电量色见 utils/battery
 const GOLD = '#ffc857'
 
 // 取数值或 null
@@ -34,12 +33,6 @@ function num(v) {
 }
 
 // 电池颜色
-function battColor(b) {
-  if (b == null) return 'var(--dim)'
-  if (b <= 20) return CRIT
-  if (b <= 40) return WARN
-  return OK
-}
 
 // 将历史数据按字段提取并裁剪到时间窗口，返回 [{t, v}] 序列
 // t 归一化为 [0,1]，0=窗口起点，1=窗口终点

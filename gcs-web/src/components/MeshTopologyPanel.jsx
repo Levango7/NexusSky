@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../api.js'
+import { circularLayout } from '../utils/geo'
 
 // Mesh 拓扑可视化面板（M5 应急 mesh 自愈组网）
 // 展示节点、链路、链路质量分级、路由路径
@@ -23,21 +24,7 @@ const QUALITY_LABELS = {
   POOR: '差',
 }
 
-// 圆形布局：将节点均匀分布在圆周上
-function circularLayout(nodes, cx, cy, radius) {
-  const n = nodes.length
-  if (n === 0) return {}
-  if (n === 1) return { [nodes[0].sysid]: { x: cx, y: cy } }
-  const layout = {}
-  for (let i = 0; i < n; i++) {
-    const angle = (2 * Math.PI * i) / n - Math.PI / 2
-    layout[nodes[i].sysid] = {
-      x: cx + radius * Math.cos(angle),
-      y: cy + radius * Math.sin(angle),
-    }
-  }
-  return layout
-}
+// 圆形布局：见 utils/geo
 
 export default function MeshTopologyPanel({ meshTopology, onSelectNode, onSelectRoute }) {
   const [topology, setTopology] = useState(meshTopology || null)

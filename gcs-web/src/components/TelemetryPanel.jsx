@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { battClass } from '../utils/battery'
 
 const MODE_LABEL = {
   STANDBY: '待命',
@@ -108,7 +109,7 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
           </div>
           <div className="hud-cell">
             <label>电量 BAT</label>
-            <b className={batteryClass(t.battery)}>{t.battery != null ? t.battery : '--'}</b>
+            <b className={battClass(t.battery)}>{t.battery != null ? t.battery : '--'}</b>
             <span className="unit">%</span>
           </div>
           <div className="hud-cell">
@@ -170,12 +171,7 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
   )
 }
 
-function batteryClass(b) {
-  if (b == null) return ''
-  if (b <= 20) return 'batt-crit'
-  if (b <= 40) return 'batt-warn'
-  return 'batt-ok'
-}
+// 电池条分级：见 utils/battery
 
 // 信号条（E1）：-50 dBm 满格 -> -100 dBm 断，4 格量化
 function SignalBars({ dbm }) {

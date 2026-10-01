@@ -35,21 +35,9 @@ const HANDOVER_REASON_LABELS = {
   2: '基站关闭',
 }
 
-// 圆形布局：将基站均匀分布在圆周上
-function circularLayout(nodes, cx, cy, radius) {
-  const n = nodes.length
-  if (n === 0) return {}
-  if (n === 1) return { [nodes[0].sysid]: { x: cx, y: cy } }
-  const layout = {}
-  for (let i = 0; i < n; i++) {
-    const angle = (2 * Math.PI * i) / n - Math.PI / 2
-    layout[nodes[i].sysid] = {
-      x: cx + radius * Math.cos(angle),
-      y: cy + radius * Math.sin(angle),
-    }
-  }
-  return layout
-}
+import { circularLayout } from '../utils/geo'
+
+// 圆形布局：见 utils/geo
 
 export default function CellTowerPanel({ cellTowerData }) {
   const [topology, setTopology] = useState(null)
