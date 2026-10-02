@@ -39,7 +39,7 @@ public class AuditController {
     /**
      * 查询审计日志。
      * <p>
-     * GET /api/audit/logs?limit=100
+     * GET /api/v1/audit/logs?limit=100
      *
      * @param limit 最大返回条数（可选，默认全部）
      * @return 审计日志列表

@@ -6,7 +6,7 @@ import java.util.Objects;
  * 布控球快速部署结果模型。
  * <p>
  * 描述单个设备在 {@link RapidDeployService#scanAndDeploy} 流程中的部署结局，
- * 供 REST 层 {@code /api/surveillance/rapid-deploy} 端点批量返回。
+ * 供 REST 层 {@code /api/v1/surveillance/rapid-deploy} 端点批量返回。
  * <ul>
  *   <li>{@link Status#SUCCESS} — 设备发现并成功注册到 Registry，{@link #rtspUrl} 非空</li>
  *   <li>{@link Status#SKIPPED} — 设备已注册（同 IP 已存在）或仅扫描不注册，不重复入表</li>

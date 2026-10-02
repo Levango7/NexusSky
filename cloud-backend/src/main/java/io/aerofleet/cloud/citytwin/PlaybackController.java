@@ -19,9 +19,9 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code GET /api/city-twin/playback/drones/{sysid}} — 无人机轨迹回放</li>
- *   <li>{@code GET /api/city-twin/playback/alerts} — 告警事件回放</li>
- *   <li>{@code GET /api/city-twin/playback/situation} — 综合态势回放</li>
+ *   <li>{@code GET /api/v1/city-twin/playback/drones/{sysid}} — 无人机轨迹回放</li>
+ *   <li>{@code GET /api/v1/city-twin/playback/alerts} — 告警事件回放</li>
+ *   <li>{@code GET /api/v1/city-twin/playback/situation} — 综合态势回放</li>
  * </ul>
  */
 @RestController

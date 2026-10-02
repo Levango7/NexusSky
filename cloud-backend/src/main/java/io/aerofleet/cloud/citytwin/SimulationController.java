@@ -21,12 +21,12 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code POST /api/city-twin/simulation/flood} — 洪水模拟</li>
- *   <li>{@code POST /api/city-twin/simulation/fire} — 火灾模拟</li>
- *   <li>{@code POST /api/city-twin/simulation/earthquake} — 地震模拟</li>
- *   <li>{@code POST /api/city-twin/simulation/evacuation} — 疏散模拟</li>
- *   <li>{@code GET /api/city-twin/simulation/{id}} — 获取模拟结果</li>
- *   <li>{@code GET /api/city-twin/simulation/history} — 模拟历史</li>
+ *   <li>{@code POST /api/v1/city-twin/simulation/flood} — 洪水模拟</li>
+ *   <li>{@code POST /api/v1/city-twin/simulation/fire} — 火灾模拟</li>
+ *   <li>{@code POST /api/v1/city-twin/simulation/earthquake} — 地震模拟</li>
+ *   <li>{@code POST /api/v1/city-twin/simulation/evacuation} — 疏散模拟</li>
+ *   <li>{@code GET /api/v1/city-twin/simulation/{id}} — 获取模拟结果</li>
+ *   <li>{@code GET /api/v1/city-twin/simulation/history} — 模拟历史</li>
  * </ul>
  */
 @RestController

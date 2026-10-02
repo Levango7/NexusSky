@@ -35,17 +35,17 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code POST /api/mapping/tasks} — 创建测绘任务</li>
- *   <li>{@code GET /api/mapping/tasks} — 列出测绘任务</li>
- *   <li>{@code GET /api/mapping/tasks/{id}} — 获取任务详情</li>
- *   <li>{@code POST /api/mapping/tasks/{id}/start} — 启动测绘</li>
- *   <li>{@code POST /api/mapping/tasks/{id}/abort} — 中止测绘</li>
- *   <li>{@code GET /api/mapping/tasks/{id}/waypoints} — 获取航线规划</li>
- *   <li>{@code GET /api/mapping/tasks/{id}/photos} — 获取采集照片</li>
- *   <li>{@code GET /api/mapping/tasks/{id}/result} — 获取测绘成果</li>
- *   <li>{@code POST /api/mapping/tasks/{id}/process} — 触发成果生成</li>
- *   <li>{@code GET /api/mapping/results} — 列出所有测绘成果</li>
- *   <li>{@code GET /api/mapping/results/{id}/download} — 下载测绘成果</li>
+ *   <li>{@code POST /api/v1/mapping/tasks} — 创建测绘任务</li>
+ *   <li>{@code GET /api/v1/mapping/tasks} — 列出测绘任务</li>
+ *   <li>{@code GET /api/v1/mapping/tasks/{id}} — 获取任务详情</li>
+ *   <li>{@code POST /api/v1/mapping/tasks/{id}/start} — 启动测绘</li>
+ *   <li>{@code POST /api/v1/mapping/tasks/{id}/abort} — 中止测绘</li>
+ *   <li>{@code GET /api/v1/mapping/tasks/{id}/waypoints} — 获取航线规划</li>
+ *   <li>{@code GET /api/v1/mapping/tasks/{id}/photos} — 获取采集照片</li>
+ *   <li>{@code GET /api/v1/mapping/tasks/{id}/result} — 获取测绘成果</li>
+ *   <li>{@code POST /api/v1/mapping/tasks/{id}/process} — 触发成果生成</li>
+ *   <li>{@code GET /api/v1/mapping/results} — 列出所有测绘成果</li>
+ *   <li>{@code GET /api/v1/mapping/results/{id}/download} — 下载测绘成果</li>
  * </ul>
  */
 @RestController

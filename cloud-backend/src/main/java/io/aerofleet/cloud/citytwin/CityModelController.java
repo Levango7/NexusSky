@@ -22,11 +22,11 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code GET /api/city-twin/models} — 列出所有城市模型</li>
- *   <li>{@code GET /api/city-twin/models/{id}} — 获取模型详情</li>
- *   <li>{@code POST /api/city-twin/models} — 上传/注册新模型</li>
- *   <li>{@code DELETE /api/city-twin/models/{id}} — 删除模型</li>
- *   <li>{@code PUT /api/city-twin/models/{id}/refresh} — 刷新模型数据</li>
+ *   <li>{@code GET /api/v1/city-twin/models} — 列出所有城市模型</li>
+ *   <li>{@code GET /api/v1/city-twin/models/{id}} — 获取模型详情</li>
+ *   <li>{@code POST /api/v1/city-twin/models} — 上传/注册新模型</li>
+ *   <li>{@code DELETE /api/v1/city-twin/models/{id}} — 删除模型</li>
+ *   <li>{@code PUT /api/v1/city-twin/models/{id}/refresh} — 刷新模型数据</li>
  * </ul>
  */
 @RestController

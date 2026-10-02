@@ -51,6 +51,8 @@ public class LicenseService {
     public static final String DEV_TENANT_ID = "dev";
     /** 开发版被授权方 */
     public static final String DEV_ISSUED_TO = "AeroFleet Developer";
+    /** jwt-secret 未配置时的内置开发默认值（非 dev 模式下等于该值会拒绝启动，见构造器 fail-closed 守卫）。 */
+    public static final String DEV_HMAC_SECRET_FALLBACK = "aerofleet-dev-secret-change-in-production-at-least-32-chars";
     /** 全部模块集合 */
     public static final Set<String> ALL_MODULES = Set.of("core", "fleet", "emergency", "network", "advanced");
 
@@ -66,7 +68,7 @@ public class LicenseService {
 
     public LicenseService(
             @Value("${aerofleet.license.key:}") String licenseKeyConfig,
-            @Value("${aerofleet.security.jwt-secret:aerofleet-dev-secret-change-in-production-at-least-32-chars}") String hmacSecret,
+            @Value("${aerofleet.security.jwt-secret:" + DEV_HMAC_SECRET_FALLBACK + "}") String hmacSecret,
             @Value("${aerofleet.security.dev-mode:false}") boolean devMode,
             @Value("${aerofleet.license.public-key:}") String publicKeyConfig,
             ObjectMapper objectMapper) {
@@ -74,6 +76,18 @@ public class LicenseService {
         this.hmacSecret = hmacSecret;
         this.devMode = devMode;
         this.objectMapper = objectMapper;
+        // fail-closed：jwt-secret 同时用于 JWT HS256 回退与 license 激活码 HMAC（generateActivationCode）。
+        // 非 dev 模式下留空/未配置（等于内置默认值）一律拒绝启动，避免激活码静默不可用或弱密钥上岗；
+        // dev 模式下仅告警（保持本地/CI 可启动，激活码功能明确不可用）。
+        if (hmacSecret == null || hmacSecret.isBlank() || DEV_HMAC_SECRET_FALLBACK.equals(hmacSecret)) {
+            if (devMode) {
+                log.warn("aerofleet.security.jwt-secret 未配置或为内置默认值：license 激活码功能不可用"
+                        + "（generateActivationCode 返回 null），生产环境必须显式配置");
+            } else {
+                throw new IllegalStateException("aerofleet.security.jwt-secret 未配置或为内置开发默认值："
+                        + "非 dev 模式必须显式配置该密钥（同时用于 JWT HS256 回退与 license 激活码 HMAC）");
+            }
+        }
         // 初始化签名工具：生产模式从配置读取公钥，开发模式自动生成密钥对
         if (publicKeyConfig != null && !publicKeyConfig.isBlank()) {
             this.licenseSigner = new LicenseSigner(publicKeyConfig, objectMapper);

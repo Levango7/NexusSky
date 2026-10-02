@@ -6,10 +6,10 @@ NexusSky 是一个多模块 Maven 项目，根 POM 定义了 5 个子模块：
 
 | 模块 | artifactId | 技术栈 | 职责 |
 |---|---|---|---|
-| `mavlink-core` | `aerofleet-mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–M9 扩展消息 420–479） |
+| `mavlink-core` | `aerofleet-mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 420–483） |
 | `drone-sim` | `aerofleet-drone-sim` | 纯 Java 17 | 虚拟四轴无人机模拟器：任务上传、ARM/起飞/航点飞行/RTL 状态机、遥测广播、故障注入、物理引擎 v2 |
 | `link-sim` | `aerofleet-link-sim` | 纯 Java 17 | MAVLink/UDP 链路损伤代理：延迟、丢包（Gilbert-Elliot 模型）、带宽限制、分区模拟 |
-| `cloud-backend` | `aerofleet-cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、REST API（155+ 端点）、WebSocket 推送、JWT 安全认证、多租户隔离 |
+| `cloud-backend` | `aerofleet-cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、REST API（344 端点）、WebSocket 推送、JWT 安全认证、多租户隔离 |
 | `sdk-java` | `aerofleet-sdk-java` | 纯 Java 17 | Java SDK 客户端：封装 REST API 调用，提供 DroneApi/MissionApi/FlightLogApi |
 
 前端模块 `gcs-web` 独立于 Maven 构建，使用 npm/Vite：

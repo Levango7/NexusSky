@@ -131,6 +131,9 @@ public Result createTask(@RequestBody TaskRequest req) { ... }
 | 收口规则 | 读=类级 `@RequireRole(OBSERVER)`；写=方法级 `OPERATOR`，配置/用户/密钥/租户/围栏/模板/license 面=`ADMIN`；匿名入口只有 `AuthController#login`、`#refresh` 两处 `@PermitAll` |
 | 声明优先级 | 方法级覆盖类级（两种注解同规则）；同一元素并存时 `@RequireRole` 胜出（收紧优先）。已由 `RoleInterceptorTest` 逐条钉住（16 例） |
 
+> 注：上表为 2026-10-01 翻转时点的实测快照（总数 342）。截至 2026-10-02 复测，端点方法总数为
+> 344（190 GET / 127 POST / 13 PUT / 14 DELETE / 0 PATCH），仍未声明角色的端点为 0。
+
 两点容易被忽略的事实：
 1. **角色层级是向上满足的**：`hasPermission = userRole.ordinal() <= requiredRole.ordinal()`
    且 `Role` 声明顺序为 ADMIN→OPERATOR→OBSERVER，所以 ADMIN 令牌能过任何门——翻转不会
@@ -276,18 +279,18 @@ RBAC 默认拒绝后，四条上报腿（`POST /api/v1/edge/results`、`/loRa/al
 
 ### 4.3 TenantInterceptor
 
-`TenantInterceptor`（`cloud-backend/src/main/java/io/aerofleet/cloud/tenant/TenantInterceptor.java`）实现多租户拦截和 API 限流：
+`TenantInterceptor`（`cloud-backend/src/main/java/io/aerofleet/cloud/tenant/TenantInterceptor.java`）实现 API 限流（按租户 / 客户端 IP 滑动窗口），**不负责**租户数据隔离（隔离由 4.2 TenantFilter / ApiKeyFilter + 三态租户域承担）。
 
-**租户 ID 提取顺序**：
-1. `X-Tenant-Id` Header
-2. JWT subject（Authorization: Bearer token）
-3. dev-mode 下返回 `"default"`
-4. 其他情况返回 `"anonymous"`
+**限流 key 解析**（只读认证链已写入的 `TenantContext`，本类不写租户上下文）：
+1. 有真实租户归属（`TenantContext.getEffectiveTenantId()` 非 null 且非 `NO_ACCESS`）→ 按租户分桶，同一租户的所有凭证共享额度
+2. 其余（未认证、全局管理员、`NO_ACCESS`、dev-mode 跳过租户上下文）→ 按客户端 IP 分桶
+
+> 历史实现曾从客户端可控的 `X-Tenant-Id` header 提取租户并写入一个无人消费的 String ThreadLocal：既不参与数据隔离，又允许轮换 header 无限获取新限流桶绕过限流，该路径已移除。
 
 **限流机制**：
 - 优先使用 Redis 分布式限流（`RedisRateLimiter`，多实例共享计数）
 - Redis 不可用时回退到内存滑动窗口限流（单机模式）
-- 默认限制：每租户每分钟 100 次 API 调用（`aerofleet.tenant.rate-limit=100`）
+- 默认限制：每限流 key 每分钟 100 次 API 调用（`aerofleet.tenant.rate-limit=100`）
 - 超限返回 429：`{"code":429,"error":"Too Many Requests","message":"API 调用频率超限，请稍后重试"}`
 - 内存限流窗口每 60 秒自动清理过期条目（`@Scheduled(fixedRate=60000)`）
 
@@ -360,7 +363,7 @@ RBAC 默认拒绝后，四条上报腿（`POST /api/v1/edge/results`、`/loRa/al
 
 | 维度 | 限制 | 配置 | 实现 |
 |---|---|---|---|
-| 租户 API 调用 | 100 次/分钟 | `aerofleet.tenant.rate-limit` | `TenantInterceptor` |
+| 租户 / 客户端 IP API 调用 | 100 次/分钟 | `aerofleet.tenant.rate-limit` | `TenantInterceptor` |
 | 单 sysid MAVLink 帧数 | 100 帧/秒 | `aerofleet.udp.max-frame-rate-per-sysid` | `UdpGateway` |
 | WebSocket 单 IP 连接数 | 10 | `aerofleet.ws.max-connections-per-ip` | `TelemetryWebSocketHandler` |
 | WebSocket 单租户连接数 | 20 | `aerofleet.ws.max-connections-per-tenant` | `TelemetryWebSocketHandler` |

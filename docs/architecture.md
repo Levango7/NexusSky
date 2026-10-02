@@ -105,7 +105,7 @@ sequenceDiagram
     Reg->>WS: push position update
     WS->>GCS: 地图位置更新
 
-    GCS->>GW: REST POST /api/mission/upload
+    GCS->>GW: REST POST /api/v1/drones/{sysid}/mission
     GW->>Drone: MAVLink MISSION_ITEM
     Drone->>GW: MISSION_ACK
     GW->>GCS: 200 OK
@@ -200,8 +200,8 @@ graph TB
     REQ[HTTP 请求]
     SEC_F[SecurityFilterChain<br/>Spring Security]
     LIC_F[LicenseInterceptor<br/>License 校验]
-    TEN_F[TenantInterceptor<br/>租户上下文]
-    RL_F[RateLimitFilter<br/>API 限流]
+    TEN_F[TenantFilter / ApiKeyFilter<br/>写入 TenantContext]
+    RL_F[TenantInterceptor<br/>API 限流]
     CTRL[Controller]
     SVC[Service]
     JWT[JwtTokenProvider<br/>HMAC-SHA256]
@@ -210,8 +210,8 @@ graph TB
     SEC_F -->|dev-mode=true| CTRL
     SEC_F -->|dev-mode=false| JWT
     JWT -->|validate| LIC_F
-    LIC_F --> TEN_F
-    TEN_F --> RL_F
+    SEC_F -.写入租户上下文.-> TEN_F
+    LIC_F --> RL_F
     RL_F --> CTRL
     CTRL --> SVC
 ```
@@ -236,4 +236,6 @@ graph TB
 | 468-470 | TaskAssignment/ConflictAlert/TaskStatus | M10 | 集群调度 |
 | 471-472 | DecisionEvent/AdaptivePath | M11 | 自主决策 |
 | 473-474 | EdgeTaskStatus/SensorFusionData | M12 | 边缘计算 |
-| 475-476 | TwinStateSync/PredictionResult | M13 | 数字孪生 || 477-479 | AlarmTrigger/AlarmAck/SurveillanceStatus | 4a | 安防报警 |
+| 475-476 | TwinStateSync/PredictionResult | M13 | 数字孪生 |
+| 477-479 | AlarmTrigger/AlarmAck/SurveillanceStatus | 4a | 安防报警 |
+| 480-483 | QoSRouteDecision/ClusterFormation/DisasterModeStatus/BuzzerControl | P2 | 灾害应急通讯组网扩展 |

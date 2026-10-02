@@ -17,7 +17,7 @@
 4. [NexusSky 与 SITL 对接配置](#4-nexussky-与-sitl-对接配置)
 5. [兼容性验证清单](#5-兼容性验证清单)
 6. [验证脚本使用指南](#6-验证脚本使用指南)
-7. [NexusSky 扩展消息（420-476）](#7-nexussky-扩展消息420-476)
+7. [NexusSky 扩展消息（420-483）](#7-nexussky-扩展消息420-483)
 8. [常见问题和解决方案](#8-常见问题和解决方案)
 9. [已知边界与限制](#9-已知边界与限制)
 
@@ -245,7 +245,7 @@ cloud-backend `UdpGateway` + `TelemetryIngestService` 已实现以下兼容处�
 - [ ] **命令协议**：COMMAND_LONG / COMMAND_ACK
 - [ ] **v1/v2 兼容**：v1 帧（STX=0xFE）与 v2 帧（STX=0xFD）混合流自动识别
 - [ ] **CRC 校验**：所有帧 CRC-16/X.25 校验通过
-- [ ] **扩展消息**：420-476 全部 44 条编解码一致（含可变长度消息）
+- [ ] **扩展消息**：420-483 全部 51 条编解码一致（含可变长度消息）
 
 ### 5.3 NexusSky 扩展消息验证
 
@@ -284,7 +284,7 @@ python3 scripts/mavlink-compatibility-check.py --list-messages
 **验证内容**：
 1. CRC-16/X.25 标准测试向量
 2. 标准 MAVLink 消息（HEARTBEAT / ATTITUDE / GLOBAL_POSITION_INT / MISSION_ITEM_INT）编解码往返
-3. NexusSky 扩展消息（420-476）帧层透传往返（全部 44 条）
+3. NexusSky 扩展消息（420-483）帧层透传往返（全部 51 条）
 4. MAVLink v1 vs v2 帧兼容性（混合流自动识别、扩展消息 v1 拒绝）
 5. 消息 ID 无冲突检查
 6. 端到端：发送帧到 cloud-backend UDP 14550，接收 GCS 心跳响应
@@ -318,10 +318,10 @@ python3 scripts/mavlink-compatibility-check.py --list-messages
 
 ---
 
-## 7. NexusSky 扩展消息（420-476）
+## 7. NexusSky 扩展消息（420-483）
 
-NexusSky 在 MAVLink 标准消息之外定义了 44 条自定义扩展消息，
-msgId 区间 **420-476**，与 MAVLink 官方消息无冲突。
+NexusSky 在 MAVLink 标准消息之外定义了 51 条自定义扩展消息，
+msgId 区间 **420-483**，与 MAVLink 官方消息无冲突。
 
 ### 7.1 消息总览
 
@@ -341,6 +341,7 @@ msgId 区间 **420-476**，与 MAVLink 官方消息无冲突。
 | M11 自主决策 | 471-472 | 2 | DECISION_EVENT / ADAPTIVE_PATH |
 | M12 边缘融合 | 473-474 | 2 | EDGE_TASK_STATUS / SENSOR_FUSION_DATA |
 | M13 数字孪生 | 475-476 | 2 | TWIN_STATE_SYNC / PREDICTION_RESULT |
+| 后续扩展（安防/通信/集群/灾害） | 477-483 | 7 | ALARM_TRIGGER / ALARM_ACK / SURVEILLANCE_STATUS / QOS_ROUTE_DECISION / CLUSTER_FORMATION / DISASTER_MODE_STATUS / BUZZER_CONTROL |
 
 ### 7.2 CRC_EXTRA 计算
 
@@ -464,7 +465,7 @@ PYTHON=python ./scripts/sitl-compatibility-test.sh
 
 ### 9.2 协议兼容边界
 
-- **扩展消息**：PX4 / ArduPilot SITL 不发送 NexusSky 扩展消息（420-476），
+- **扩展消息**：PX4 / ArduPilot SITL 不发送 NexusSky 扩展消息（420-483），
   扩展消息兼容性通过离线自检和 drone-sim 验证
 - **MAVLink v1**：扩展消息（msgId > 255）无法用 v1 帧发送，必须用 v2
 - **可变长度消息**：4 条可变长度消息的帧层验证使用固定示例 payload，
@@ -578,7 +579,7 @@ ALL PX4 SITL TESTS PASSED
 | 编译时间 | PX4 SITL 首次编译约 20-40 分钟 | 仅首次需要 |
 | GPS 解锁 | SITL 的 GPS 信号依赖 EKF，ARM 前可能需等待 GPS 3D fix | 可设 `COM_ARM_WO_GPS=1` 绕过 |
 | Datalink Failsafe | PX4 在链路静默 ~15s 后触发 RTL | cloud-backend 的 1Hz GCS 心跳应维持链路 |
-| 扩展消息 | PX4 SITL 不发送 NexusSky 扩展消息（420-476） | 扩展消息通过离线自检和 drone-sim 验证 |
+| 扩展消息 | PX4 SITL 不发送 NexusSky 扩展消息（420-483） | 扩展消息通过离线自检和 drone-sim 验证 |
 | 无硬件链路 | SITL 无法验证串口 / CAN / I2C 等硬件接口 | 需真机测试覆盖 |
 | 实时性 | SITL 非硬实时，高负载时仿真步长可能抖动 | 不影响协议验证，影响时序敏感场景 |
 

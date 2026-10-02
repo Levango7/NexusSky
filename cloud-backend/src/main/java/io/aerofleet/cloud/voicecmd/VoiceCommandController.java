@@ -27,14 +27,14 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code POST /api/voice-cmd/parse} — 解析语音文本为指令</li>
- *   <li>{@code POST /api/voice-cmd/execute} — 执行解析后的指令</li>
- *   <li>{@code POST /api/voice-cmd/confirm/{pendingId}} — 确认待确认指令</li>
- *   <li>{@code POST /api/voice-cmd/broadcast/{sysid}} — 语音播报</li>
- *   <li>{@code GET /api/voice-cmd/broadcast/{sysid}/status} — 获取状态播报文本</li>
- *   <li>{@code GET /api/voice-cmd/broadcast/{sysid}/alert} — 获取告警播报文本</li>
- *   <li>{@code GET /api/voice-cmd/history} — 查询指令历史</li>
- *   <li>{@code GET /api/voice-cmd/pending} — 查询待确认指令</li>
+ *   <li>{@code POST /api/v1/voice-cmd/parse} — 解析语音文本为指令</li>
+ *   <li>{@code POST /api/v1/voice-cmd/execute} — 执行解析后的指令</li>
+ *   <li>{@code POST /api/v1/voice-cmd/confirm/{pendingId}} — 确认待确认指令</li>
+ *   <li>{@code POST /api/v1/voice-cmd/broadcast/{sysid}} — 语音播报</li>
+ *   <li>{@code GET /api/v1/voice-cmd/broadcast/{sysid}/status} — 获取状态播报文本</li>
+ *   <li>{@code GET /api/v1/voice-cmd/broadcast/{sysid}/alert} — 获取告警播报文本</li>
+ *   <li>{@code GET /api/v1/voice-cmd/history} — 查询指令历史</li>
+ *   <li>{@code GET /api/v1/voice-cmd/pending} — 查询待确认指令</li>
  * </ul>
  */
 @RestController
@@ -93,7 +93,8 @@ public class VoiceCommandController {
      * @param cmd 解析后的指令
      * @return 执行结果
      */
-    @Operation(summary = "执行语音指令", description = "执行已解析的语音指令，高优先级指令需二次确认")
+    @Operation(summary = "执行语音指令", description = "将指令通过 MAVLink 真实下发至无人机，"
+            + "高优先级指令需二次确认；无真实命令通路的动作（悬停/录像/设置高度/设置速度）将被明确拒绝")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "执行结果"),
         @ApiResponse(responseCode = "404", description = "无人机未注册")
@@ -111,20 +112,20 @@ public class VoiceCommandController {
      * @param pendingId 待确认指令 ID
      * @return 确认后的执行结果
      */
-    @Operation(summary = "确认紧急指令", description = "确认并执行待确认的高优先级指令")
+    @Operation(summary = "确认紧急指令", description = "确认待确认的高优先级指令并真实下发；"
+            + "下发失败返回 200 + FAILED，仅 pendingId 不存在返回 404")
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "确认结果"),
+        @ApiResponse(responseCode = "200", description = "确认结果（含下发失败 FAILED）"),
         @ApiResponse(responseCode = "404", description = "待确认指令不存在")
     })
     @PostMapping("/confirm/{pendingId}")
     @RequireRole(Role.OPERATOR)
     public ExecutionResult confirm(@PathVariable("pendingId") String pendingId) {
-        log.info("Confirming pending command: {}", pendingId);
-        ExecutionResult result = executor.confirm(pendingId);
-        if (result.getStatus() == ExecutionResult.Status.FAILED) {
+        if (!executor.hasPending(pendingId)) {
             throw new NotFoundException("pending command not found: " + pendingId);
         }
-        return result;
+        log.info("Confirming pending command: {}", pendingId);
+        return executor.confirm(pendingId);
     }
 
     /**

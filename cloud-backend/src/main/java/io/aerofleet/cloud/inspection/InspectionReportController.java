@@ -27,10 +27,10 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code GET  /api/inspection/reports/{taskId}} — 获取巡检报告</li>
- *   <li>{@code GET  /api/inspection/reports/{taskId}/anomalies} — 获取异常清单</li>
- *   <li>{@code GET  /api/inspection/reports/{taskId}/photos} — 获取照片列表（带 GPS 标注）</li>
- *   <li>{@code POST /api/inspection/reports/{taskId}/export} — 导出报告（JSON/CSV）</li>
+ *   <li>{@code GET  /api/v1/inspection/reports/{taskId}} — 获取巡检报告</li>
+ *   <li>{@code GET  /api/v1/inspection/reports/{taskId}/anomalies} — 获取异常清单</li>
+ *   <li>{@code GET  /api/v1/inspection/reports/{taskId}/photos} — 获取照片列表（带 GPS 标注）</li>
+ *   <li>{@code POST /api/v1/inspection/reports/{taskId}/export} — 导出报告（JSON/CSV）</li>
  * </ul>
  */
 @RestController

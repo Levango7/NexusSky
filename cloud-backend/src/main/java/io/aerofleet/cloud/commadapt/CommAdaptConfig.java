@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
  * 检测间隔、是否启用自动切换、最小稳定时间等。
  * <p>
  * 字段使用 volatile 以便在并发结构中安全共享，
- * 配置可在运行时通过 {@code PUT /api/comm-adapt/config} 端点更新。
+ * 配置可在运行时通过 {@code PUT /api/v1/comm-adapt/config} 端点更新。
  *
  * @see CommSituationController
  * @see AdaptiveRouter

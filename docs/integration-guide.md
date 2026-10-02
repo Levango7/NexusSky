@@ -23,14 +23,15 @@ aerofleet.heartbeat-timeout-seconds=10  # 心跳超时
 
 ### 1.2 扩展消息注册
 
-NexusSky 已注册 60 条扩展消息（msgId 420-479）。各区间分配如下：
+NexusSky 已注册 51 条扩展消息（msgId 420-483，区间内含空号）。各区间分配如下：
 
 | msgId 区间 | 里程碑 | 说明 |
 |---|---|---|
 | 420-441 | M0a-M4 | Mesh 中继、编队协同、喷洒物流、硬件抽象 |
-| 450-467 | M5-M9 | 应急 mesh、星地中继、数字孪生、边缘计算、应急编排 |
-| 468-476 | M10-M13 | 集群调度、故障检测、视觉感知、链路韧性 |
+| 450-467 | M5-M9 | Mesh 组网、移动基站、星地中继、地形适配、应急编排 |
+| 468-476 | M10-M13 | 集群调度、自主决策、边缘计算、数字孪生 |
 | 477-479 | 4a | 安防报警联动 |
+| 480-483 | P2 | 灾害应急通讯组网（QoS 路由/分簇/灾害模式/蜂鸣器） |
 
 如需新增：
 
@@ -52,7 +53,7 @@ NexusSky 已注册 60 条扩展消息（msgId 420-479）。各区间分配如下
 
 ```bash
 # 获取 JWT 令牌
-curl -X POST http://localhost:8080/api/auth/login \
+curl -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin"}'
 
@@ -63,7 +64,7 @@ curl -X POST http://localhost:8080/api/auth/login \
 
 ```bash
 # 查询所有设备
-curl http://localhost:8080/api/drones \
+curl http://localhost:8080/api/v1/drones \
   -H "Authorization: Bearer <token>"
 
 # 响应：[{"sysid":1,"online":true,"battery":85,"lat":39.9,"lon":116.4,...}]
@@ -72,32 +73,32 @@ curl http://localhost:8080/api/drones \
 ### 2.3 任务下发
 
 ```bash
-# 航点任务上传
-curl -X POST http://localhost:8080/api/mission/upload \
+# 航点任务上传（items 数组，每项 cmd/lat/lon/alt/holdTime，上限 1000 项）
+curl -X POST http://localhost:8080/api/v1/drones/1/mission \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"sysid":1,"waypoints":[{"lat":39.9,"lon":116.4,"alt":50},...]}'
+  -d '{"items":[{"cmd":"waypoint","lat":39.9,"lon":116.4,"alt":50,"holdTime":2},...]}'
 ```
 
 ### 2.4 集群调度
 
 ```bash
-# 任务分配
-curl -X POST http://localhost:8080/api/scheduling/assign \
+# 任务分配（taskType 取值 SURVEY/SPRAY/RELAY/RESCUE）
+curl -X POST http://localhost:8080/api/v1/scheduling/tasks \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"taskId":"task-001","priority":5,"targetLat":39.9,"targetLon":116.4}'
+  -d '{"taskId":"task-001","taskType":"SURVEY","priority":5,"targetLat":39.9,"targetLon":116.4}'
 ```
 
 ### 2.5 数字孪生
 
 ```bash
 # 查询孪生状态
-curl http://localhost:8080/api/twin/state/1 \
+curl http://localhost:8080/api/v1/twin/state/1 \
   -H "Authorization: Bearer <token>"
 
-# 轨迹预测
-curl http://localhost:8080/api/twin/predict/1?horizonSeconds=30 \
+# 轨迹预测（horizon 为预测秒数，默认 30）
+curl http://localhost:8080/api/v1/twin/predict/1?horizon=30 \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -133,14 +134,14 @@ ws.onmessage = (event) => {
 ### 4.1 查询 License
 
 ```bash
-curl http://localhost:8080/api/license/info
+curl http://localhost:8080/api/v1/license/info
 # {"tenantId":"dev","productName":"AeroFleet Cloud Dev Edition","devEdition":true}
 ```
 
 ### 4.2 激活
 
 ```bash
-curl -X POST http://localhost:8080/api/license/activate \
+curl -X POST http://localhost:8080/api/v1/license/activate \
   -H "Content-Type: application/json" \
   -d '{"activationCode":"<code>","tenantId":"<tenant>","machineId":"<machine>"}'
 ```
@@ -159,17 +160,16 @@ aerofleet.license.enabled=true
 
 ### 5.1 租户标识
 
-通过 HTTP Header 传递租户标识：
+租户归属由服务端从认证凭证解析（JWT 的 `tenant_id` claim 或 API Key 的租户绑定），客户端无法通过 header 自选租户：
 ```bash
-curl http://localhost:8080/api/drones \
-  -H "X-Tenant-Id: my-company" \
+curl http://localhost:8080/api/v1/drones \
   -H "Authorization: Bearer <token>"
 ```
 
 ### 5.2 限流配置
 
 ```properties
-aerofleet.tenant.rate-limit=100  # 每租户每分钟 API 调用上限
+aerofleet.tenant.rate-limit=100  # 每限流 key（真实租户或客户端 IP）每分钟 API 调用上限
 ```
 
 ---

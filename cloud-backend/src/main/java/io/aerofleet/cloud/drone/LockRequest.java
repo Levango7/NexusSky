@@ -3,8 +3,8 @@ package io.aerofleet.cloud.drone;
 /**
  * 锁定/解锁请求体 DTO。
  * <p>
- * 用于 {@code POST /api/drone-lock/{sysid}/lock} 与
- * {@code POST /api/drone-lock/{sysid}/unlock} 端点。
+ * 用于 {@code POST /api/v1/drone-lock/{sysid}/lock} 与
+ * {@code POST /api/v1/drone-lock/{sysid}/unlock} 端点。
  * <ul>
  *   <li>锁定请求需提供 {@code reason}、{@code lockedBy}、{@code action}。</li>
  *   <li>解锁请求需提供 {@code unlockedBy}。</li>

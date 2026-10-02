@@ -2,7 +2,7 @@
 
 > **文档版本**：v1.0 | **日期**：2026-09-24 | **定位**：内部商务参考，不对外发布
 >
-> **项目阶段**：PoC（3230 单测全绿，模拟器验证通过，未在真机集群上完成验证）
+> **项目阶段**：PoC（4026 单测全绿，模拟器验证通过，未在真机集群上完成验证）
 >
 > **关联文档**：[产品定位](PRODUCT-POSITIONING.md)、[定价策略](pricing-strategy.md)、[部署指南](deployment-guide.md)、[集成手册](integration-guide.md)、[演示场景](demo-scenarios.md)
 
@@ -155,7 +155,7 @@ NexusSky 客户接入遵循 **评估 → POC → 签约 → 部署 → 培训** 
 | 分析项 | 评估内容 | 结论 |
 |---|---|---|
 | **MAVLink 协议兼容** | 客户飞控是否支持 MAVLink v2 | PX4/ArduPilot 原生支持；自研飞控需确认 MAVLink 实现 |
-| **REST API 集成** | 客户系统是否可通过 REST API 对接 | 155+ 端点，OpenAPI 3.0 规范，标准 HTTP/JSON |
+| **REST API 集成** | 客户系统是否可通过 REST API 对接 | 344 端点，OpenAPI 3.0 规范，标准 HTTP/JSON |
 | **WebSocket 实时接入** | 客户是否需要实时遥测推送 | 支持 telemetry/alert/formation/scheduling/decision 五类消息 |
 | **部署环境适配** | 客户服务器资源是否满足部署要求 | Docker Compose 单机：4C8G 起步；K8s 集群：按规模配置 |
 | **定制开发范围** | 是否需要行业定制开发 | 评估定制工作量，纳入行业定制版报价 |
@@ -510,18 +510,18 @@ kubectl get svc
 |---|---|---|
 | UDP 连接 | 无人机 → cloud-backend:14550 | 设备上线后 GCS Web 可见 |
 | 心跳监控 | 10 秒超时判定离线 | 断开连接后设备状态变为 OFFLINE |
-| 扩展消息 | 60 条扩展消息（msgId 420-479） | 按需验证对应里程碑消息 |
+| 扩展消息 | 51 条扩展消息（msgId 420-483，区间含空号） | 按需验证对应里程碑消息 |
 | MAVLink 版本 | v2.0（兼容 v1） | PX4 SITL / ArduPilot SITL 验证 |
 
 #### 5.7.2 REST API 集成
 
 | 对接项 | 内容 | 验证方法 |
 |---|---|---|
-| 认证 | JWT 令牌获取与刷新 | `POST /api/auth/login` 成功返回 token |
-| 设备管理 | 设备查询、注册、状态监控 | `GET /api/drones` 返回设备列表 |
-| 任务下发 | 航点任务上传、飞行控制 | `POST /api/mission/upload` 成功 |
-| 集群调度 | 任务分配、冲突避免 | `POST /api/scheduling/assign` 成功 |
-| 数字孪生 | 状态查询、轨迹预测 | `GET /api/twin/state/{sysid}` 返回数据 |
+| 认证 | JWT 令牌获取与刷新 | `POST /api/v1/auth/login` 成功返回 token |
+| 设备管理 | 设备查询、注册、状态监控 | `GET /api/v1/drones` 返回设备列表 |
+| 任务下发 | 航点任务上传、飞行控制 | `POST /api/v1/drones/{sysid}/mission` 成功 |
+| 集群调度 | 任务分配、冲突避免 | `POST /api/v1/scheduling/tasks` 成功 |
+| 数字孪生 | 状态查询、轨迹预测 | `GET /api/v1/twin/state/{sysid}` 返回数据 |
 
 #### 5.7.3 WebSocket 集成
 
@@ -589,7 +589,7 @@ kubectl get svc
 
 | 培训模块 | 内容 | 时长 | 对象 |
 |---|---|---|---|
-| **API 概览** | REST API 155+ 端点分类与用途 | 1 小时 | 开发者 |
+| **API 概览** | REST API 344 端点分类与用途 | 1 小时 | 开发者 |
 | **认证与授权** | JWT 获取、刷新、多租户 Header | 0.5 小时 | 开发者 |
 | **设备管理 API** | 设备注册、查询、状态监控、遥测查询 | 1 小时 | 开发者 |
 | **任务控制 API** | 航点任务上传、飞行控制、任务状态查询 | 1 小时 | 开发者 |
@@ -744,7 +744,7 @@ kubectl get svc
 | 风险 | 概率 | 影响 | 应对策略 |
 |---|---|---|---|
 | **PoC 阶段真机未验证** | 高 | 高 | 所有商务沟通中如实告知 PoC 状态；不夸大能力；合同中约定真机验证里程碑 |
-| **3230 单测覆盖但不等于生产验证** | 中 | 中 | 强调单测 + 模拟器 e2e 双重验证；POC 阶段在客户环境中补充验证 |
+| **4026 单测覆盖但不等于生产验证** | 中 | 中 | 强调单测 + 模拟器 e2e 双重验证；POC 阶段在客户环境中补充验证 |
 | **功能迭代节奏与客户期望不匹配** | 中 | 中 | 合同中明确版本升级政策；SDK 授权版季度更新；私有部署版按合同约定 |
 
 ---

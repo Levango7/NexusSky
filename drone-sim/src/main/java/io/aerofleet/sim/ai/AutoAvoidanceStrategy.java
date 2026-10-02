@@ -8,6 +8,15 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * M11 多机自动避障策略：机间最近距离检测 + 分层避让决策。
+ * <p>
+ * 输入是本机与周围无人机的相对位置，输出避让动作（减速 / 横移 / 高度分离）与建议间隔。
+ * <p>
+ * <b>当前状态：未接入生产路径</b>——本类只被自己的单元测试引用，
+ * {@code VirtualDrone} 不调用它（机间避障目前没有自动执行路径）。
+ * 见 {@code AiAutonomyWiringTest}。
+ */
 public class AutoAvoidanceStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(AutoAvoidanceStrategy.class);

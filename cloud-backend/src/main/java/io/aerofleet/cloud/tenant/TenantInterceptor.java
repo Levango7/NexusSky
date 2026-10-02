@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.tenant;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aerofleet.cloud.security.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -17,15 +18,23 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 多租户拦截器 + API 限流。
+ * API 限流拦截器（按租户 / 客户端 IP 滑动窗口）。
  * <p>
  * 职责：
  * <ul>
- *   <li>从 X-Tenant-Id header 或 JWT subject 提取 tenantId，设置到 {@link TenantContext}；</li>
- *   <li>dev-mode=true 时设置默认租户 "default"；</li>
- *   <li>基于滑动时间窗口的简单限流：每租户每分钟最多 N 次 API 调用（可配置）；</li>
+ *   <li>限流 key 从<b>已认证</b>的租户上下文解析（{@link TenantContext#getEffectiveTenantId()}，
+ *       由 security 包的 TenantFilter / ApiKeyFilter 在更早的过滤器链阶段写入，本类只读不写）：
+ *       有真实租户归属 → 按租户分桶（同一租户的所有凭证共享每分钟 N 次额度）；
+ *       其余（未认证、全局管理员、NO_ACCESS、dev-mode 跳过租户上下文）→ 按客户端 IP 分桶；</li>
+ *   <li>Redis 可用时经 {@link RedisRateLimiter} 分布式限流，不可用时回退内存滑动窗口；</li>
  *   <li>超限返回 429 Too Many Requests。</li>
  * </ul>
+ * <p>
+ * 本类<b>不负责</b>租户数据隔离：隔离统一由 security 包的 {@link TenantContext}
+ * 三态租户域（TenantFilter / ApiKeyFilter 写入，业务层消费）承担。
+ * 历史上本类曾从客户端可控的 {@code X-Tenant-Id} header 提取租户并写入一个
+ * 无人消费的 String ThreadLocal——既不参与隔离，又允许轮换 header 无限获取
+ * 新限流桶绕过限流，该路径已移除。
  *
  * @author AeroFleet Cloud Team
  */
@@ -34,7 +43,6 @@ public class TenantInterceptor implements HandlerInterceptor {
 
     private static final Logger log = LoggerFactory.getLogger(TenantInterceptor.class);
 
-    private final boolean devMode;
     private final int rateLimitPerMinute;
     private final ObjectMapper objectMapper;
 
@@ -42,29 +50,24 @@ public class TenantInterceptor implements HandlerInterceptor {
     @Autowired(required = false)
     private RedisRateLimiter redisRateLimiter;
 
-    /** 租户限流计数器：tenantId → [windowStartMs, count]（内存 fallback） */
+    /** 限流计数器：限流 key → [windowStartMs, count]（内存 fallback） */
     private final ConcurrentHashMap<String, RateWindow> rateWindows = new ConcurrentHashMap<>();
 
     /** 内存限流窗口 TTL（毫秒），与滑动窗口时长一致 */
     private static final long WINDOW_TTL_MS = 60_000;
 
-    public TenantInterceptor(@Value("${aerofleet.security.dev-mode:true}") boolean devMode,
-                             @Value("${aerofleet.tenant.rate-limit:100}") int rateLimitPerMinute,
+    public TenantInterceptor(@Value("${aerofleet.tenant.rate-limit:100}") int rateLimitPerMinute,
                              ObjectMapper objectMapper) {
-        this.devMode = devMode;
         this.rateLimitPerMinute = rateLimitPerMinute;
         this.objectMapper = objectMapper;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        // 1. 提取租户 ID
-        String tenantId = extractTenantId(request);
-        TenantContext.setTenantId(tenantId);
-
-        // 2. 限流校验（dev-mode 下也限流，但阈值更高）
-        if (!checkRateLimit(tenantId)) {
-            log.warn("租户 {} API 调用超限", tenantId);
+        // 限流校验（key = 真实租户桶或客户端 IP 桶）
+        String key = resolveRateLimitKey(request);
+        if (!checkRateLimit(key)) {
+            log.warn("限流 key [{}] API 调用超限", key);
             response.setStatus(429);
             response.setContentType("application/json;charset=UTF-8");
             Map<String, Object> error = new LinkedHashMap<>();
@@ -76,11 +79,6 @@ public class TenantInterceptor implements HandlerInterceptor {
         }
 
         return true;
-    }
-
-    @Override
-    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
-        TenantContext.clear();
     }
 
     /**
@@ -96,49 +94,44 @@ public class TenantInterceptor implements HandlerInterceptor {
         );
     }
 
-    private String extractTenantId(HttpServletRequest request) {
-        // 优先从 X-Tenant-Id header 获取
-        String tenantId = request.getHeader("X-Tenant-Id");
-        if (tenantId != null && !tenantId.isBlank()) {
-            return tenantId.trim();
+    /**
+     * 限流 key：真实租户归属 → 租户桶；否则 → 客户端 IP 桶。
+     * <p>
+     * 拦截器在过滤器链之后执行，TenantFilter / ApiKeyFilter 写入的租户上下文此时已就绪，
+     * 本方法只读。null（全局管理员 / 未认证 / dev-mode）与 {@link TenantContext#NO_ACCESS}
+     * 都不是「真实租户」，一律落 IP 桶；remoteAddr 缺失时兜底为 "ip:unknown"。
+     */
+    private String resolveRateLimitKey(HttpServletRequest request) {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null && !TenantContext.NO_ACCESS.equals(tenantId)) {
+            return "tenant:" + tenantId;
         }
-
-        // 其次从 JWT subject 获取（Authorization: Bearer <token>）
-        String auth = request.getHeader("Authorization");
-        if (auth != null && auth.startsWith("Bearer ")) {
-            // JWT payload 的 subject 即 tenantId（JwtTokenProvider 中 subject = username）
-            // 这里简单提取，不做完整 JWT 解码（SecurityConfig 已做）
-            // 实际 tenantId 可从 JWT claim 中获取，此处用 subject 作为 fallback
-            return "jwt-user"; // 简化：实际场景由 SecurityConfig 解析 JWT 后填充
+        String ip = request.getRemoteAddr();
+        if (ip == null || ip.isBlank()) {
+            return "ip:unknown";
         }
-
-        // dev-mode 下返回默认租户
-        if (devMode) {
-            return "default";
-        }
-
-        return "anonymous";
+        return "ip:" + ip;
     }
 
     /**
      * 限流校验：优先使用 Redis 分布式限流，Redis 不可用时回退到内存滑动窗口限流。
      */
-    private boolean checkRateLimit(String tenantId) {
+    private boolean checkRateLimit(String key) {
         // 优先使用 Redis 分布式限流（多实例共享计数）
         if (redisRateLimiter != null) {
-            return redisRateLimiter.tryAcquire(tenantId, rateLimitPerMinute);
+            return redisRateLimiter.tryAcquire(key, rateLimitPerMinute);
         }
 
         // 回退到内存滑动窗口限流（单机模式）
-        return checkRateLimitInMemory(tenantId);
+        return checkRateLimitInMemory(key);
     }
 
     /**
      * 内存滑动窗口限流：每分钟重置计数（fallback）。
      */
-    private boolean checkRateLimitInMemory(String tenantId) {
+    private boolean checkRateLimitInMemory(String key) {
         long now = System.currentTimeMillis();
-        RateWindow window = rateWindows.computeIfAbsent(tenantId, k -> new RateWindow(now));
+        RateWindow window = rateWindows.computeIfAbsent(key, k -> new RateWindow(now));
 
         synchronized (window) {
             if (now - window.windowStartMs > WINDOW_TTL_MS) {

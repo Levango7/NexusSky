@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -97,8 +98,9 @@ public class FlightLogService {
     @Autowired(required = false)
     private DeviceRegistry deviceRegistry;
 
-    /** sysid -> last track-point write, for the telemetry throttle. */
-    private final Map<Integer, Long> lastTrackWrite = new HashMap<>();
+    /** sysid -> last track-point write, for the telemetry throttle.
+     *  CHM：telemetry() 可能被并发调用，避免 HashMap 并发写损坏内部结构；节流判断本身允许良性竞态。 */
+    private final Map<Integer, Long> lastTrackWrite = new ConcurrentHashMap<>();
 
     public FlightLogService(
             @Value("${aerofleet.flightlog.dir:./flight-logs}") String dir,

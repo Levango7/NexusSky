@@ -18,10 +18,10 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code GET /api/city-twin/situation/current} — 获取当前态势</li>
- *   <li>{@code GET /api/city-twin/situation/history} — 获取历史态势（参数：from, to）</li>
- *   <li>{@code GET /api/city-twin/situation/drones} — 获取所有无人机位置</li>
- *   <li>{@code GET /api/city-twin/situation/alerts} — 获取所有告警标记</li>
+ *   <li>{@code GET /api/v1/city-twin/situation/current} — 获取当前态势</li>
+ *   <li>{@code GET /api/v1/city-twin/situation/history} — 获取历史态势（参数：from, to）</li>
+ *   <li>{@code GET /api/v1/city-twin/situation/drones} — 获取所有无人机位置</li>
+ *   <li>{@code GET /api/v1/city-twin/situation/alerts} — 获取所有告警标记</li>
  * </ul>
  */
 @RestController

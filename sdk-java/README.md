@@ -22,7 +22,7 @@ NexusSky Java SDK 是 NexusSky 无人机智能飞控中间件的 Java 客户端 
 ```xml
 <dependency>
     <groupId>com.github.Levango7</groupId>
-    <artifactId>NexusSky</artifactId>
+    <artifactId>nexussky-sdk-java</artifactId>
     <version>v1.0.3</version>
 </dependency>
 ```
@@ -43,13 +43,18 @@ dependencyResolutionManagement {
 然后添加依赖：
 
 ```groovy
-implementation 'com.github.Levango7:NexusSky:v1.0.3'
+implementation 'com.github.Levango7:nexussky-sdk-java:v1.0.3'
 ```
+
+### 关于坐标与线上构建状态
+
+- `NexusSky` 是本仓库的根聚合模块（`packaging=pom`，不产出 jar），本 SDK 的实际模块为 `nexussky-sdk-java`；JitPack 对多模块仓库按 `com.github.用户名:模块 artifactId:tag` 坐标提供各模块依赖，故上面写 `nexussky-sdk-java` 而不是 `NexusSky`。
+- jitpack.io 为按需联网构建（tag `v1.0.2`/`v1.0.3` 已包含根目录 `jitpack.yml`，指定 JDK 17），但其线上构建结果无法在本仓库内验证。若拉取失败，可改为源码集成：仓库根目录执行 `mvn -pl sdk-java -am install`，然后依赖 `io.aerofleet:nexussky-sdk-java:0.1.0-SNAPSHOT`。
 
 ### 环境要求
 
 - Java 11 或更高版本
-- 依赖：Jackson Databind 2.16.1（自动引入）
+- 依赖：Jackson Databind 2.21.7（自动引入）
 
 ## 快速开始
 

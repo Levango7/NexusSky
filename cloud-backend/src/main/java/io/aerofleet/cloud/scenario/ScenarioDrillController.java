@@ -33,9 +33,9 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code POST /api/scenarios/drill/{templateId}} — 启动演练</li>
- *   <li>{@code GET /api/scenarios/drill/{drillId}/result} — 获取演练评估报告</li>
- *   <li>{@code GET /api/scenarios/drill/history} — 演练历史</li>
+ *   <li>{@code POST /api/v1/scenarios/drill/{templateId}} — 启动演练</li>
+ *   <li>{@code GET /api/v1/scenarios/drill/{drillId}/result} — 获取演练评估报告</li>
+ *   <li>{@code GET /api/v1/scenarios/drill/history} — 演练历史</li>
  * </ul>
  */
 @RestController

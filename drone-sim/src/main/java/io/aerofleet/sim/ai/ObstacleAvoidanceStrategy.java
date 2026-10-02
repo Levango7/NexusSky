@@ -7,6 +7,16 @@ import java.util.Collections;
 import java.util.List;
 
 /**
+
+ * <b>当前状态：未接入生产路径</b>——本类只被自己的单元测试与同包的 {@link DecisionEngine} 引用， {@code VirtualDrone} 不调用它（应急链路实际走 {@code FailsafeController}）。见 {@code AiAutonomyWiringTest}。
+ * <p>
+ * <b>advisory 接线后的精确状态</b>：{@code DecisionEngine} 已通过
+ * {@code AutonomyAdvisor} 以 advisory 模式接入 {@code VirtualDrone}（1Hz 节流），
+ * 本类<b>旧接口</b> {@link #evaluate(boolean, double)} 会随该链路<b>间接执行</b>
+ * （只产出建议，不执行动作）。「未接入」按 {@code AiAutonomyWiringTest} 的定义指
+ * <b>无包外生产调用方</b>——本类仍满足；但 {@link #avoidWithPath} 与其背后的
+ * {@code PathPlanner}（A* / RRT）<b>零生产调用方，从未执行</b>。
+ * <p>
  * M11 自动避障策略。
  * <p>
  * 保留旧接口 {@link #evaluate(boolean, double)} 供 {@link DecisionEngine} 调用（向后兼容）。

@@ -130,11 +130,14 @@ function Build-Jars {
         $mavenCmd = Join-Path $env:MAVEN_HOME "bin\mvn.cmd"
     }
 
-    # 设置 JDK17
-    $jdk17Home = 'E:\dev-tools\jdk17.0.20_8'
-    if (Test-Path $jdk17Home) {
-        $env:JAVA_HOME = $jdk17Home
-        Info "JAVA_HOME 设置为 $jdk17Home"
+    # 设置 JDK17：尊重已设置且可用的 JAVA_HOME；未设/无效时回退 AF_JDK17_HOME → 内置默认路径
+    if (-not ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe")))) {
+        $jdk17Home = $env:AF_JDK17_HOME
+        if (-not $jdk17Home) { $jdk17Home = 'E:\dev-tools\jdk17.0.20_8' }
+        if (Test-Path $jdk17Home) {
+            $env:JAVA_HOME = $jdk17Home
+            Info "JAVA_HOME 设置为 $jdk17Home"
+        }
     }
 
     Step '构建缺失的 jar（JDK17）'
@@ -161,6 +164,7 @@ function Build-Jars {
 # ---- Java 探测 + 版本自检 ----
 if ($env:AF_JAVA) { $java = $env:AF_JAVA }
 elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" }
+elseif ($env:AF_JDK17_HOME -and (Test-Path (Join-Path $env:AF_JDK17_HOME "bin\java.exe"))) { $java = Join-Path $env:AF_JDK17_HOME "bin\java.exe" }
 else {
     # 默认使用 JDK17 路径
     $jdk17Default = 'E:\dev-tools\jdk17.0.20_8\bin\java.exe'

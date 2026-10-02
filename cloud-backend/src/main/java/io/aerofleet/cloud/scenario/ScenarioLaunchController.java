@@ -29,11 +29,11 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code POST /api/scenarios/launch/{templateId}} — 一键启动场景（body: {lat, lon, overrides?}）</li>
- *   <li>{@code GET /api/scenarios/launch/active} — 查询进行中的场景</li>
- *   <li>{@code GET /api/scenarios/launch/history} — 查询历史启动记录</li>
- *   <li>{@code POST /api/scenarios/launch/{launchId}/abort} — 中止场景执行</li>
- *   <li>{@code GET /api/scenarios/launch/{launchId}/status} — 查询场景执行状态</li>
+ *   <li>{@code POST /api/v1/scenarios/launch/{templateId}} — 一键启动场景（body: {lat, lon, overrides?}）</li>
+ *   <li>{@code GET /api/v1/scenarios/launch/active} — 查询进行中的场景</li>
+ *   <li>{@code GET /api/v1/scenarios/launch/history} — 查询历史启动记录</li>
+ *   <li>{@code POST /api/v1/scenarios/launch/{launchId}/abort} — 中止场景执行</li>
+ *   <li>{@code GET /api/v1/scenarios/launch/{launchId}/status} — 查询场景执行状态</li>
  * </ul>
  */
 @RestController

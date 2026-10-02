@@ -50,6 +50,8 @@ public final class ScenarioController {
     private final java.util.List<Event> events = new java.util.ArrayList<>();
     private final String scenarioSpec;
     private boolean announcedActive = false;
+    /** WIND 事件的风向：进程启动时抽取一次——同一次运行内为恒定方向（持续侧风语义），跨进程方向不同。 */
+    private final double bootWindDirRad = ThreadLocalRandom.current().nextDouble(Math.PI * 2);
 
     public ScenarioController(String spec) {
         this.scenarioSpec = spec;
@@ -172,10 +174,10 @@ public final class ScenarioController {
             out[1] = 0;
             return;
         }
-        // Fixed pseudo-random direction per boot so flights are reproducible.
-        double dirRad = ThreadLocalRandom.current().nextDouble(Math.PI * 2);
-        out[0] = Math.cos(dirRad) * e.param;
-        out[1] = Math.sin(dirRad) * e.param;
+        // Direction is drawn once per process boot: within a run it is a
+        // sustained crosswind (constant direction); it varies across boots.
+        out[0] = Math.cos(bootWindDirRad) * e.param;
+        out[1] = Math.sin(bootWindDirRad) * e.param;
     }
 
     public boolean gpsNoisy(double bootSec) {

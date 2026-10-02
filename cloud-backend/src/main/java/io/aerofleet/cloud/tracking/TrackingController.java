@@ -25,11 +25,11 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code GET /api/tracking/{sysid}/track?limit=N} — 获取飞行轨迹（最近 N 条）</li>
- *   <li>{@code GET /api/tracking/{sysid}/replay?from=&to=&limit=N} — 历史轨迹回放（按时间范围查询）</li>
- *   <li>{@code GET /api/tracking/{sysid}/last-known} — 获取最后已知位置</li>
- *   <li>{@code GET /api/tracking/lost} — 获取失联无人机列表</li>
- *   <li>{@code GET /api/tracking/{sysid}/search-guide} — 获取辅助查找信息</li>
+ *   <li>{@code GET /api/v1/tracking/{sysid}/track?limit=N} — 获取飞行轨迹（最近 N 条）</li>
+ *   <li>{@code GET /api/v1/tracking/{sysid}/replay?from=&to=&limit=N} — 历史轨迹回放（按时间范围查询）</li>
+ *   <li>{@code GET /api/v1/tracking/{sysid}/last-known} — 获取最后已知位置</li>
+ *   <li>{@code GET /api/v1/tracking/lost} — 获取失联无人机列表</li>
+ *   <li>{@code GET /api/v1/tracking/{sysid}/search-guide} — 获取辅助查找信息</li>
  * </ul>
  * <p>
  * 认证由 {@link io.aerofleet.cloud.security.SecurityConfig} 统一处理。

@@ -11,6 +11,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * M11 集群协同策略：任务—机队匹配（按距离/电量/负载打分分配）与队形保持建议。
+ * <p>
+ * <b>当前状态：未接入生产路径</b>——本类只被自己的单元测试引用，
+ * {@code VirtualDrone} 不调用它。集群调度在本仓另有实现（见 cloud-backend 的
+ * 调度服务与 {@code docs/api-reference.md}），两者不是同一条链路。
+ * 见 {@code AiAutonomyWiringTest}。
+ */
 public class SwarmCoordinationStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(SwarmCoordinationStrategy.class);

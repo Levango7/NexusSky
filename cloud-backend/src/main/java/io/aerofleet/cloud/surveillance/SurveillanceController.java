@@ -34,7 +34,7 @@ import io.aerofleet.cloud.security.Role;
 /**
  * 安防设备 REST API。
  * <p>
- * 端点前缀 {@code /api/surveillance}，覆盖 ONVIF 安防设备全生命周期：
+ * 端点前缀 {@code /api/v1/surveillance}，覆盖 ONVIF 安防设备全生命周期：
  * <ul>
  *   <li>设备注册 / 列表 / 详情 / 注销</li>
  *   <li>RTSP 流 URL 获取（{@code /stream}）</li>

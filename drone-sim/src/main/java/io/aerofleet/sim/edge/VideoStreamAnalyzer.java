@@ -20,6 +20,14 @@ import java.util.Queue;
  *   <li>场景变化检测（灰度直方图 BHATTACHARYYA 距离）</li>
  * </ul>
  * 输入帧按单字节灰度图处理（每像素 1 字节），宽高可配。
+ * <p>
+ * <b>当前状态：未接入生产路径。</b>本类目前只被自己的单元测试引用，没有消费者。
+ * 这些是<b>经典 CV 算法，不是机器学习模型</b>——全仓 pom 无任何 ML 依赖。
+ * 「边缘 AI 推理」在产品文档里的确切含义以此为准：本地确定性图像处理，
+ * 不是神经网络推理。真正的模型接缝在云端
+ * {@code io.aerofleet.cloud.vision.ExternalVisionSource}（转发给外部推理服务），
+ * 同样需要外部服务就绪才可用。
+ * 见 {@code AiAutonomyWiringTest}。
  */
 public class VideoStreamAnalyzer {
 

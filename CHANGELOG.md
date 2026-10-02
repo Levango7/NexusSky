@@ -4,6 +4,339 @@
 
 ---
 
+## [Unreleased] — 搁置项清理：M11 advisory 接线、语音指令真实下发、CDN 本地化等（2026-10-02）
+
+> 第六轮审查后遗留的决策项分批解决。本轮六项全部落地，各模块测试全绿。
+
+### 1. M11 自主决策：advisory 接线（建议-only，改变第六轮「不擅自接线」的决定）
+
+- 新增 `drone-sim` 的 `AutonomyAdvisor`：`VirtualDrone.tickOnce` 每 tick 调用、
+  内部 1Hz 节流，组装 `DecisionContext`（电量含场景故障覆盖、链路静默与
+  `FailsafeThresholds.LINK_LOSS_AFTER_MS` 同口径、GPS、障碍报告、场景风+环境风
+  合成），主决策类型**变化沿**经 STATUSTEXT 播报一次（RTL/AVOID=WARNING、
+  EMERGENCY_LAND=CRITICAL、ADAPT_PATH=NOTICE，恢复时 INFO 澄清一次）。
+- **只建议、不执行**：不触碰飞行状态；真正生效的应急执行链路仍是
+  `FailsafeController`。执行级接线仍属产品决策，未做。
+- `AiAutonomyWiringTest` 反转：`DecisionEngine` 移出 UNWIRED 名单 + 新增
+  「已接线」正向断言（静默退线即判红）；其余策略/规划器/M12 边缘库仍未接线
+  （期望状态不变）。新增 `AutonomyAdvisorTest`（6 例）。
+- 文档同步：ROADMAP M11 / README 已知边界 / whitepaper / PRODUCT-POSITIONING /
+  竞品对比表 + 脚注。
+
+### 2. 语音指令真实下发（voicecmd：从「模拟成功」到真实 MAVLink 通路）
+
+- `VoiceCommandExecutor` 注入 `DroneCommandService`：TAKEOFF→`takeoff`（缺省
+  高度 10m，与仿真默认一致）、LAND→`NAV_LAND`、RETURN→`rtl`、PHOTO→
+  `IMAGE_START_CAPTURE`（单张）、FLY_TO→单航点任务上传 + `MISSION_START`
+  （需显式坐标+高度，仅地名无坐标服务→REJECTED）；HOVER/RECORD/SET_ALTITUDE/
+  SET_SPEED→REJECTED（无对应命令通路，原因写明）。
+- confirm 语义重构：404 仅限 pending 不存在；下发失败返回 200+FAILED（原实现
+  会把真实失败误报成 404）。ARM/TAKEOFF 仍过 geofence 拦截链（DENY 不抛异常）。
+- 测试：`VoiceCommandExecutorTest` 重写 23 例（Mockito 桩）/
+  `VoiceCommandControllerTest` 更新 18 例；voicecmd 套件 59→73。
+- `docs/api-reference.md` 语音小节同步真实下发语义。
+
+### 3. 前端：CDN 本地化 + 虚拟摇杆重构
+
+- three.js r128 与 hls.js 1.5.13 落地 `gcs-web/public/vendor/`（含双 LICENSE
+  与来源/版本/更新流程 README），`THREE_CDN`→`THREE_SRC`、`HLS_JS_CDN`→
+  `HLS_JS_SRC`，构建产物零外链（构建绿，dist/vendor 5 文件齐全）。
+- `Joystick.jsx` 重写为 Pointer Events（setPointerCapture + touchAction none），
+  新增偏航瞬时按钮 ↺/↻（YAW_RATE=400），发送循环幂等、无输入自停、disarm 清零。
+
+### 4. sdk-java README 修复（JitPack 可用性）
+
+- Maven 坐标 artifactId 修正（`NexusSky`→`nexussky-sdk-java`，与 JitPack 多模块
+  坐标规则一致）、Jackson 版本对齐 2.21.7、新增「关于坐标与线上构建状态」小节
+  （根聚合 packaging=pom 不产 jar、源码集成 fallback `mvn -pl sdk-java -am install`）。
+  jitpack.yml（`jdk: openjdk17`）此前已提交且 v1.0.2/v1.0.3 tag 均包含之；
+  jitpack.io 线上构建状态离线环境无法验证，已在 README 如实声明。
+
+### 5. 前端单测基建（vitest，补齐 devops-enhancement-plan CI7 的单测半边）
+
+- `gcs-web` 新增 vitest（^5.0.3）与 `npm test`（`vitest run`）；24 例单测：
+  `api.test.js`（JWT 格式校验/token 会话、getWsUrl 协议与 token 编码、
+  normalizeBudgetMode fallback 告警、预算档位面板裁剪包含关系）、
+  `Scene3DUtils.test.js`（geoTo3D 坐标契约：原点/象限/比例，独立于实现公式验证）。
+  api.js 模块级读取 `location`，测试须先 `vi.stubGlobal` 再动态 import（注释写明）。
+- CI frontend job 新增 `npm test` 步骤（lint → test → build）；本地回归
+  `npm run lint`（0 errors）+ `check-frontend.cjs`（61 文件 OK）+ `npm run build`
+  全绿。Playwright E2E 仍缺（CI7 另一半，未做）。
+
+### 6. TenantInterceptor 双轨统一（移除「声称隔离、实为零消费者」的死租户轨）
+
+- 发现：代码中存在两个同名 `TenantContext`——`security.TenantContext`
+  （Integer 三态租户域：真实租户 / null=全局管理员 / NO_ACCESS，由
+  `TenantFilter`/`ApiKeyFilter` 写入、16 个业务类消费，隔离唯一真轨）与
+  `tenant.TenantContext`（String，**全仓零消费者**，仅 `TenantInterceptor` 写入）。
+- 安全影响：`TenantInterceptor` 曾从**客户端可控**的 `X-Tenant-Id` header 提取
+  租户：虽未参与数据隔离（String 轨无人读），但轮换 header 即可无限获取新
+  限流桶，**绕过按租户限流**；且前端根本不发送该 header。
+- 统一：`TenantInterceptor` 瘦身为纯限流器——限流 key 只读认证链已写入的
+  `TenantContext.getEffectiveTenantId()`（真实租户 → `tenant:<id>` 桶；
+  未认证/全局管理员/NO_ACCESS/dev-mode → `ip:<addr>` 桶）；移除 header 提取、
+  死 String 上下文（`tenant/TenantContext.java` 整文件删除）与 `afterCompletion`
+  清理（租户上下文生命周期全权归过滤器）。类 javadoc 明示「不负责租户隔离」。
+- `RedisRateLimiter` 参数/key 语义同步（通用限流 key）；`TenantConfig` javadoc 更新。
+- 新增 `TenantInterceptorTest`（5 例）：429 行为、**轮换 header 不再能绕过限流**
+  （回归）、真实租户桶与 IP 桶隔离、NO_ACCESS 回落 IP 桶。
+- 文档同步：security-design §4.3/§6.2、integration-guide §5.1（curl 示例不再带
+  X-Tenant-Id）、troubleshooting 429 行与 Q7 第 4 步（afterCompletion 已不存在）、
+  architecture mermaid（租户上下文节点改为 TenantFilter/ApiKeyFilter，幻影节点
+  RateLimitFilter 改为 TenantInterceptor 限流）、commercialization-plan 三处旧述。
+
+---
+
+## [Unreleased] — 第七轮审查：文档量化声称 vs 代码实测对账（2026-10-02）
+
+> 承接第六轮「声称 vs 实际」的方法，本轮把对外材料的量化指标逐个实测：
+> 344 端点 ✓、51 扩展消息 ✓、38 功能面板 ✓、7 链路画像 ✓；「66 个 Controller」
+> 实测 65，api-reference 有 5 个 Controller 完全无文档。全部修复。代码行为变更
+> 见第 6 节（路径对齐发现的拦截器死排除修复）与第 7 节（提交前自查补档的
+> 工作区既有未入档变更）；其余只改文档。
+
+### 1. 实测口径修正（含两处上轮测量失误订正）
+
+- **65 个 `@RestController`**（注解位置 `^\s*@RestController\b`）= 64 个
+  `*Controller.java` + `delivery2/DeliveryController2.java`——后者文件名以
+  `Controller2.java` 结尾，会被 `*Controller.java` 过滤漏数。上轮「67 个
+  Controller 文件 / 32 个包」即因此失准，实为 **68 个 Controller 源文件 /
+  36 个业务包**（65 REST + 3 个 @Service）。
+- **344 端点** ✓（190 GET / 127 POST / 13 PUT / 14 DELETE / 0 PATCH）、
+  **51 条扩展消息（420-483）** ✓、**38 个功能面板** ✓、**7 个链路画像** ✓
+  （LinkProfile 逐项核对，销售材料无需改）。
+- 逐 Controller 实测端点数与 api-reference 映射表 60 行**全部一致**（表行
+  合计实为 324）；「60 个 / 318 个」只错在头注、合计行与脚注。
+
+### 2. api-reference.md：补齐 5 个无文档 Controller
+
+- 新增 5 个完整小节 + 目录项 + 映射表 5 行：RegulatorController
+  （/api/v1/regulator，5）、RidController（/api/v1/rid，5）、RestrictionController
+  （/api/v1/geofence，4）、DeviceProvisioningController（/api/v1/devices，4）、
+  CvEvalController（/api/v1/cv-eval，2）；合计行 60/318 → **65/344**；脚注
+  「63 个 *Controller.java」→ 68 源文件口径。api-quick-reference.md 同步
+  头部计数并补 5 个模块速查表。
+- 顺带订正：AuthController/LicenseController 基础路径文档写 `/api/auth`、
+  `/api/license`，代码实为 `/api/v1/auth`、`/api/v1/license`（两文档 16 处
+  正文 + 2 处映射表行）；附录角色表「（无注解）登录用户即可」行与 RBAC
+  默认拒绝翻转矛盾，改为 OBSERVER 行。（提交前自查证实旧路径残留是全仓性
+  问题，扩展为第 5 节的全仓对齐。）
+
+### 3. 其余文档订正
+
+- 「66 个 Controller」→ 65 @RestController（README、commercialization-plan、
+  low-altitude-economy-demand-research）；「20 个功能域」→ 36 个业务包
+  （commercialization-plan、sales-pitch-deck）。
+- security-design RBAC 表加复测注：翻转时点快照 342 → 现测 344
+  （190/127/13/14/0），未声明端点 0（历史快照数字保留不改）。
+- sitl-integration.md：扩展消息「44 条 / 420-476」→「51 条 / 420-483」
+  （9 处），消息总览表补 477-483 一行（ALARM_TRIGGER / ALARM_ACK /
+  SURVEILLANCE_STATUS / QOS_ROUTE_DECISION / CLUSTER_FORMATION /
+  DISASTER_MODE_STATUS / BUZZER_CONTROL）；可变长度消息仍 4 条，不变。
+- sales-pitch-deck M11 行：「未接线」→「已接线（AI advisory，建议-only）」。
+- commercialization-plan：「限流为单机内存」两处旧述（§3.1 差距 5、§3.3
+  关键差距表）改「Redis 优先 + 内存回退」；「业务数据无 tenantId 字段」
+  确证过时——V10–V16/V18 迁移已给设备/围栏/越界/位置/编队/喷洒/配送/编排/
+  安防/告警/测绘/表演/配送2/飞行日志表落地 tenant_id，§3.3 数据隔离行与
+  关键差距表三行按 §4.1 惯例标记已修复；真实遗留（License tenantId String
+  vs TenantEntity.id Integer 类型未统一）保留。
+
+### 4. ai 包 4 类 Javadoc 在 advisory 接线后的精确化（代码内文档，仍无行为变更）
+
+- 承接上方「搁置项清理」的 M11 advisory 接线：一刀切的「未接入生产路径」
+  对经 DecisionEngine 间接执行的类已不准确——`AutonomyAdvisor` 调
+  `evaluateFused`，后者只调三个策略的**旧 evaluate 签名**与决策树，
+  新算法接口不在链上。
+- 4 类 Javadoc 补「advisory 接线后的精确状态」段，两层区分：旧接口随
+  advisory 链 1Hz **间接执行**（只产出建议，不执行动作）；「未接入」收敛为
+  `AiAutonomyWiringTest` 的定义——**无包外生产调用方**（4 类仍成立）；而各家
+  的真实算法新接口仍**零生产调用方、从未执行**：ReturnToHomeStrategy（滑翔/
+  地形/能耗模型）、ObstacleAvoidanceStrategy（`avoidWithPath` 与 PathPlanner
+  A*/RRT）、AdaptivePathStrategy（风补偿/能耗优化/Dubins）、DecisionTree
+  （evaluate 间接执行）。
+- PathPlanner / AutoAvoidance / SwarmCoordination / EmergencyReturn 与 edge
+  包两类**确实从未执行**，Javadoc 原样保留；守卫测试
+  `unwiredClassesDocumentTheirStatus` 依赖的「未接入生产路径」短语在 4 类中
+  全部保留，重跑 `AiAutonomyWiringTest` 7/7 绿。
+
+### 5. 全仓 API 路径对齐（提交前自查扩展，2026-10-03）
+
+- 第 2 节「顺带订正」的旧路径问题在提交前全仓复扫中证实为系统性残留：代码
+  65 个 `@RestController` 基路径**全部**为 `/api/v1/*`（含 `ApiVersionConfig`
+  约定），但约 200 处文档仍写旧路径。本轮以代码为权威口径一次性对齐：
+  - 机械替换（边界感知正则，词干防误伤）：api-reference.md 83 处、
+    api-quick-reference.md 42 处、sdk-reference.md 18 处、demo-scenarios.md
+    17 处、sales-pitch-deck.md 3 处，integration-guide.md 与
+    customer-onboarding-guide.md 的 auth/drones/twin 词干。
+  - commercialization-plan.md 手工重写：附录 A「54 个」→ 68 源文件口径
+    （65 @RestController + 3 @Service），28 行路径按代码订正（sat-link、
+    env-alerts、voice-cmd、voice-intercom、video-stream、city-twin/*、
+    comm-adapt、inspection/reports、scenarios/*、obstacle、ai 等），补
+    Regulator/Rid/Restriction/DeviceProvisioning/CvEval 等 12 个缺失
+    Controller 行；HardwareData/Radar/Rotor/ObstacleAvoidance 4 行改为实际
+    暴露方式（`/api/v1` + /radar、/rotor、/lidar、/imu 子路径；3 个
+    @Service 经宿主 Controller 暴露）；§1.4 模块表 5 行路径、§2.1 审查表
+    3 行改「✅ 已核实」、附录 B 登录/刷新路径订正。
+  - 端点用法改写为真实签名：integration-guide.md 任务上传
+    `POST /api/v1/drones/{sysid}/mission`（body 为 `items` 数组，≤1000 项，
+    cmd/lat/lon/alt/holdTime）、任务分配 `POST /api/v1/scheduling/tasks`
+    （TaskRequest 补必填 `taskType`：SURVEY/SPRAY/RELAY/RESCUE）、孪生预测
+    参数 `horizonSeconds` → 代码实参 `horizon`（默认 30）；
+    customer-onboarding-guide.md 验证表 2 行与 architecture.md 时序图同步
+    改为真实端点。
+  - 误报核实不改：e2e-regulator.ps1 的 `/api/records`、`/api/telemetry` 是
+    regulator-sim `MockUomServer` 自有路由（非 cloud-backend 端点）；
+    security-design.md 的「api/exception/」是 Java 源文件路径非 REST 路径。
+    gcs-web/src/api.js 路径常量本就正确，仅 2 行注释订正，无运行时影响。
+- **新发现（仅记录，不改行为）**：`VideoFusionPanel` 调用的 4 个
+  `/api/v1/video-fusion/*` 端点在后端无对应 Controller——视频融合是
+  `docs/new-features-plan.md` 的 P2 规划项（前端先行），面板对失败有错误
+  捕获；README「已知边界」已加条目，并与已实现的「GCS 视频融合面板」
+  （= SurveillancePanel + AlarmPanel，真实端点 `/api/v1/surveillance/*`、
+  `/api/v1/alarms/*`）作出区分。
+
+- **代码内文档同步（javadoc，无行为变更）**：对齐时顺带扫描出 32 个后端源码
+  文件的 **154 处 javadoc/注释**仍在用 v1 迁移前的路径描述自家端点（如
+  `AuthController` 类注释写 `POST /api/auth/login`，实际是
+  `/api/v1/auth/login`；覆盖 alarms/show/mapping/emergency-command/
+  scenarios/city-twin/geofence 等 20+ 个域）。已全部按真实注解路径订正；
+  逐文件 diff 复核确认只动了注释行。`TenantInterceptorTest` 的 mock 请求
+  路径同步改为 `/api/v1/devices`。
+
+### 6. 路径对齐的代码面发现：拦截器死排除修复
+
+- 全仓对齐时发现 `LicenseConfig` / `TenantConfig` 的拦截器排除路径仍停留在
+  v1 迁移前：`/api/auth/**`、`/api/license/**` 是死模式（真实端点在
+  `/api/v1/auth/*`、`/api/v1/license/*`；`SecurityConfig` 的 requestMatchers
+  早已改对，这两个 `4478cf7` 引入的配置漏改）。
+- 实际影响：`aerofleet.license.enabled=true`（prod/staging 默认）且 License
+  运行期失效时，`LicenseInterceptor` 把登录/刷新与 License 自管理端点一并
+  403——鸡生蛋，部署无法经 API 激活/查询自救；`TenantInterceptor` 的共享
+  IP 限流桶则把登录/刷新与同 IP 其他匿名流量耦合（默认 100/分钟，登录另有
+  每 IP 10 次/分钟的独立限制）。
+- 修复：两处排除改为真实 v1 路径（`/api/v1/auth/**`、`/api/v1/license/**`）；
+  新增 `LicenseConfigTest`（4 例）/`TenantConfigTest`（2 例）：`@EnableWebMvc`
+  最小切片 + webAppContextSetup 走真实拦截器路径匹配，被测路径直接取自
+  AuthController/LicenseController/ApiKeyController/DroneController 的
+  `@RequestMapping` 注解（路径再漂移即判红）。已做变异验证：回滚为死模式时
+  LicenseConfigTest 3/4 判红（登录/刷新、License 自管理、API Key 各一）。
+  `SecurityConfig` 类 Javadoc 同步（正文曾写「/api/auth/** 和 /actuator/**
+  公开」，实际只放行 login/refresh 与 `/actuator/health*`）。
+- 测试基线 4020 → **4026**（cloud-backend 2086 → 2092），
+  `check-test-count-docs.py` 全绿；README/ROADMAP/whitepaper/sales-pitch-
+  deck/pricing-strategy/demo-scenarios/customer-onboarding/low-altitude
+  8 个文档 22 处声称同步更新。
+
+### 7. 提交前自查补档：工作区既有未入档变更（非本轮新做，随本次提交入档）
+
+- 单 commit 收口前对整个工作区逐文件对账，发现以下变更已实现、有注释与
+  测试佐证，但此前无 CHANGELOG 记录——如实补档，避免「提交里有、记录里无」：
+  - **EdgeCoordinationController.submitResult 入参硬化**：`POST /api/v1/edge/results`
+    缺失/非数值 `sysid` 返回 400（原实现 `(Integer) body.get("sysid")` 对非数值
+    直接 ClassCastException→500）；`taskId`/`type` 宽容转换（缺失 null、
+    非字符串取文本形式而非 500）。`EdgeCoordinationControllerTest` 补 3 例
+    （合法 body 200 / 缺 sysid 400 / 非数值 sysid 400）。
+  - **LicenseService 激活码密钥 fail-closed 守卫**：内置开发默认值抽为
+    `DEV_HMAC_SECRET_FALLBACK` 常量；构造器守卫——`aerofleet.security.jwt-secret`
+    （JWT HS256 回退与激活码 HMAC 双用途）留空或等于内置默认值时：dev 模式
+    WARN（激活码功能明确不可用，`generateActivationCode` 返回 null），非 dev
+    模式拒绝启动。与 prod/staging `${AEROFLEET_JWT_SECRET}` 无缺省 fail-fast
+    同一口径，补上「设了但值为空/默认值」的缺口；application.properties 注释同步。
+  - **FlightLogService 节流表线程安全**：`lastTrackWrite` HashMap →
+    ConcurrentHashMap（`telemetry()` 可能被并发调用，防并发写损坏内部结构；
+    节流判断本身允许良性竞态）。
+  - **drone-sim WIND 风向改进程启动抽取一次**（`bootWindDirRad`）：原代码逐
+    事件随机抽取，与 `DronePhysics` 类注释「fixed pseudo-random direction per
+    boot」自相矛盾；现一次运行内为恒定方向（持续侧风语义），跨进程方向不同。
+    `DronePhysics`/`ScenarioController` 同步。
+  - **MavlinkSigner javadoc 订正**（仅注释）：签名覆盖范围表述明确为
+    「帧头（STX）到 CRC，含 STX 本身」。
+  - **scripts/e2e-rid.ps1 JAVA_HOME 解析健壮化**：尊重已设置且可用的
+    JAVA_HOME；未设/无效时回退 `AF_JDK17_HOME` → 内置默认路径。
+  - **监控栈部署修复**：docker-compose-monitoring 补 `alertmanager.yml` 只读
+    挂载（无配置文件时 AM 崩溃重启循环，prometheus 一直在向 :9093 推告警）；
+    Grafana 供给改为正规三件套——`grafana-datasources.yaml`（uid=prometheus
+    与面板引用对齐）+ `grafana-dashboards.yaml`（provider 声明）+ JSON 挂到
+    provider 声明的 path 下（直接挂进 provisioning/dashboards/ 会被当成
+    provider 配置解析失败）。新增上述三个配置文件。
+
+---
+
+## [Unreleased] — 第六轮审查：自主决策接线状态、单测数口径与门禁（2026-10-02）
+
+> 第五轮结论是「审查收敛」。本轮换方法重扫：不再按「找 bug」的思路，而是按
+> **「文档声称的 vs 代码实际的」**逐条对账——从销售材料、路线图、白皮书、竞品表
+> 反向查回代码。18 个问题按根因分 5 组，全部有可复现的取证位置。
+
+### 1. AI 自主决策：库齐全，从未执行（4 项）
+
+| 声称 | 实际 |
+|---|---|
+| 竞品对比表给「自主决策引擎 / 边缘 AI 推理 / 传感器融合」打 ✅ | 三个包**生产零调用方** |
+| ROADMAP M11「自主决策引擎（AI 飞行策略）✅ 已完成」 | 从未执行 |
+| Javadoc 称 `DecisionEngine` 用「控制台输出（替代 slf4j）」 | 实际是 `log.debug` |
+
+- **证据**：`io.aerofleet.sim.ai` 14 个类 3513 行、`io.aerofleet.sim.edge` 6 个类
+  1093 行（`SensorFusionEngine` 521 行 / `VideoStreamAnalyzer` 506 行），实现完整、
+  单元测试全绿，但**只被自己的测试引用**。`VirtualDrone` 的应急链路走的是另一套
+  独立实现 `FailsafeController`（`VirtualDrone.java` 里唯一的 failsafe 字段）。
+- **「AI」的准确含义**：规则 + 排序 + 搜索（阈值规则、融合权重、决策树、A 星 / RRT），
+  **不含任何机器学习模型**。全仓 pom 无 onnxruntime / tensorflow / ONNX / OpenCV 任何
+  依赖；「边缘 AI 推理」的准确含义是**经典 CV 图像处理**。
+  （注：早先"115 处 ML 引用"是子串误报——`startOrchestration` 里含 "torch"。）
+- **修复**：① 竞品表 3 行改为「⚠️ 库已实现未接线 / ⚠️ 经典 CV，非模型 / ⚠️ EKF 库已实现
+  未接线」并加脚注；② ROADMAP M11 状态改为「⚠️ 库已完成，未接入飞行路径」；③
+  `DecisionEngine` 等 9 个类的 Javadoc 写明「未接入生产路径」，其中
+  `AutoAvoidanceStrategy` / `EmergencyReturnStrategy` / `SwarmCoordinationStrategy`
+  原本**连类注释都没有**；④ 订正失效注释。
+- **未做**：把 `DecisionEngine` 接进 `VirtualDrone` 会改变飞行行为，属产品决策，
+  本轮不擅自做。
+- **把"未接线"钉成断言**：`AiAutonomyWiringTest`（6 例）让「ai/edge 包无包外生产
+  调用方」成为**期望状态**——一旦有人接线即判红并提示同步 README / 竞品表 / ROADMAP。
+  比在文档里写一句「注意」可靠，文档不会自己变红。
+
+### 2. 安全阈值分裂（1 项）
+
+同一个「低电量返航」阈值仓库里曾有三个值：`FailsafeController` 22（PX4 `BAT_CRIT_THR`
+默认，**唯一真正生效的那个**）、`ReturnToHomeStrategy` 25、`DecisionEngine` 20。
+
+- **修复**：新增 `FailsafeThresholds` 作为唯一真相源（`BATTERY_CRIT_PCT=22`、
+  `LINK_LOSS_AFTER_MS=15_000`），前两者改为引用共享常量。
+- **20 刻意保持不等**：`DecisionEngine.BATTERY_BOOST_THRESHOLD` 是**权重放大**阈值
+  （提前给返航策略加权），不是硬触发，语义不同；有测试防止两者被反向收敛。
+
+### 3. 文档口径与"没人会变红"（2 项）
+
+- 单测数长期写 **3230**，实测已 **3994**，偏小 19%。共 4 处文档过期，其中
+  **2 个测试表**（README 测试规模表 343/1324/2054/3869、`docs/demo-scenarios.md`
+  185/1222/~1823/3230）此前**连文本关键词都没有**，任何"扫文档找数字"的检查都抓不到。
+- **根因不是"忘了改"，是没有任何信号会变红**：加测试不会让文档过期这件事变红。
+- **修复**：新增 `scripts/check-test-count-docs.py`，用 surefire XML 实测值逐格核对
+  当前口径文档，并接入 CI。**刻意排除** `CHANGELOG.md` 与文档里追述旧值的句子——
+  它们记的是"当时是什么状态"，改写等于篡改记录（如 ROADMAP 那句"此前此处写「…3230…」"
+  改成 3994 就成了假话）。
+
+### 4. 虚假引用（2 项）
+
+- README 与 `SatLinkProvider` Javadoc 引用的 `TiantongSatProvider` 等三个卫星实现类
+  **在仓库里不存在**（只有接口占位）。
+- `docs/product-brief.md` 对未实现能力（含 AI 自主决策）的声称，已诚实化。
+
+### 本轮其余发现（同属第六轮，已各自独立成条）
+
+| 主题 | 条目 |
+|---|---|
+| License 门禁 fail-closed + 两个让签名从未成功的缺陷 + 加密密钥 fail-fast | `025b6a7` |
+| 51 条自定义消息 CRC_EXTRA 改用官方算法实算 | `df047c1` |
+| 标准消息 msgId 串位（40/43/143）与 RADIO_STATUS CRC_EXTRA | `9148777` |
+| product-brief 诚实化 + 不存在的卫星类名 | `4fd375a` |
+
+**本轮未闭合**（与既有记录一致，不重复展开）：30 条自定义消息 wire 布局未按
+type_length 降序排列（改属协议重设计）；msgId 420–483 是否撞官方分配**仍无法外部核实**；
+`GLOBAL_POSITION_INT`(33) 在 pymavlink v1.0 快照里无消息定义，CRC=104 未能外部核对。
+
+---
+
 ## [Unreleased] — 标准消息 msgId 串位：MISSION_REQUEST / MISSION_REQUEST_LIST 挂反了（2026-10-02）
 
 > 上一条做 CRC_EXTRA 外部核对时顺带撞出来的。三处硬错，全部只影响**与真实飞控互通**，

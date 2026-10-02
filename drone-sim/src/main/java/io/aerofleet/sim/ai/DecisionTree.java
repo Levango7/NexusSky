@@ -1,6 +1,15 @@
 package io.aerofleet.sim.ai;
 
 /**
+
+ * <b>当前状态：未接入生产路径</b>——本类只被自己的单元测试与同包的 {@link DecisionEngine} 引用， {@code VirtualDrone} 不调用它（应急链路实际走 {@code FailsafeController}）。见 {@code AiAutonomyWiringTest}。
+ * <p>
+ * <b>advisory 接线后的精确状态</b>：{@code DecisionEngine} 已通过
+ * {@code AutonomyAdvisor} 以 advisory 模式接入 {@code VirtualDrone}（1Hz 节流），
+ * 本类的 {@code evaluate} 会随该链路<b>间接执行</b>（结果只用于融合排序与建议，
+ * 不执行动作）。「未接入」按 {@code AiAutonomyWiringTest} 的定义指
+ * <b>无包外生产调用方</b>——本类仍满足，不要在 ai 包外直接调用它。
+ * <p>
  * M11 决策树：用于复杂场景的决策路径选择。
  * <pre>
  * 根节点：是否有紧急情况？

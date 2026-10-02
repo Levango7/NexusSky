@@ -8,7 +8,7 @@
 
 ## 一、认证 API
 
-### POST /api/auth/login
+### POST /api/v1/auth/login
 获取 JWT 令牌。
 
 **请求：**
@@ -21,7 +21,7 @@
 {"token": "eyJhbG...", "expiresIn": 3600, "username": "admin"}
 ```
 
-### POST /api/auth/refresh
+### POST /api/v1/auth/refresh
 刷新 JWT 令牌（需携带当前有效令牌）。
 
 ---
@@ -103,7 +103,7 @@
 
 ## 四、集群调度 API
 
-### POST /api/scheduling/tasks
+### POST /api/v1/scheduling/tasks
 创建调度任务（综合评分：能力匹配 40% + 电量 30% + 距离 20% + 优先级 10%）。
 
 **请求：**
@@ -128,10 +128,10 @@
 }
 ```
 
-### GET /api/scheduling/tasks
+### GET /api/v1/scheduling/tasks
 查询所有调度任务。
 
-### DELETE /api/scheduling/tasks/{id}
+### DELETE /api/v1/scheduling/tasks/{id}
 取消调度任务。
 
 ### GET /api/v1/squad/roles
@@ -178,10 +178,10 @@
 
 ## 六、数字孪生 API
 
-### GET /api/twin/state/{sysid}
+### GET /api/v1/twin/state/{sysid}
 查询数字孪生状态。
 
-### GET /api/twin/predict/{sysid}?horizon=30
+### GET /api/v1/twin/predict/{sysid}?horizon=30
 轨迹预测（未来 30 秒）。
 
 **响应：**
@@ -195,14 +195,14 @@
 }
 ```
 
-### GET /api/twin/compare/{sysid}
+### GET /api/v1/twin/compare/{sysid}
 虚实对比（实测态 vs 模型预测态）。
 
 ---
 
 ## 七、边缘计算 API
 
-### POST /api/edge/results
+### POST /api/v1/edge/results
 提交边缘计算结果。
 
 **请求：**
@@ -215,10 +215,10 @@
 }
 ```
 
-### GET /api/edge/tasks
+### GET /api/v1/edge/tasks
 获取所有边缘任务。
 
-### GET /api/edge/fusion/{sysid}
+### GET /api/v1/edge/fusion/{sysid}
 获取传感器融合数据。
 
 ---
@@ -239,10 +239,10 @@
 }
 ```
 
-### POST /api/emergency-command
+### POST /api/v1/emergency-command
 创建应急指挥命令（接报阶段）。
 
-### POST /api/emergency-command/{id}/one-click
+### POST /api/v1/emergency-command/{id}/one-click
 一键应急响应（自动走完接报→研判→部署→执行）。
 
 ### GET /api/v1/emergency/scenarios
@@ -338,13 +338,13 @@
 
 ## 十一、License API
 
-### GET /api/license/info
+### GET /api/v1/license/info
 查询 License 信息。
 
-### POST /api/license/activate
+### POST /api/v1/license/activate
 激活 License。
 
-### GET /api/license/verify
+### GET /api/v1/license/verify
 验证 License 有效性。
 
 ---
@@ -365,19 +365,19 @@
 
 | 端点 | 事件名 | 心跳间隔 |
 |---|---|---|
-| GET /api/alarms/stream | `alarm-event` | 15 秒 |
-| GET /api/surveillance/devices/{id}/events | `surveillance-event` | 15 秒 |
+| GET /api/v1/alarms/stream | `alarm-event` | 15 秒 |
+| GET /api/v1/surveillance/devices/{id}/events | `surveillance-event` | 15 秒 |
 ---
 
 ## 十四、MAVLink 扩展消息
 
-NexusSky 已注册 **60 条扩展消息**（msgId 420-479），覆盖 M0a-M13 及 4a 安防报警等里程碑能力。
+NexusSky 已注册 **51 条扩展消息**（msgId 420-483，区间内含空号），覆盖 M0a-M13、4a 安防报警与 P2 灾害应急等里程碑能力。
 
 | msgId 区间 | 里程碑 | 说明 |
 |---|---|---|
 | 420-441 | M0a-M4 | Mesh 中继、编队协同、喷洒物流、硬件抽象 |
-| 450-467 | M5-M9 | 应急 mesh、星地中继、数字孪生、边缘计算、应急编排 |
-| 468-476 | M10-M13 | 集群调度、故障检测、视觉感知、链路韧性 |
+| 450-467 | M5-M9 | Mesh 组网、移动基站、星地中继、地形适配、应急编排 |
+| 468-476 | M10-M13 | 集群调度、自主决策、边缘计算、数字孪生 |
 | 477-479 | 4a | 安防报警联动 |
 
 > 扩展消息注册与编解码细节请参见 [integration-guide.md](integration-guide.md#12-扩展消息注册)。
