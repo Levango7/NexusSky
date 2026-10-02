@@ -4,6 +4,28 @@
 
 ---
 
+## [Unreleased] — LicenseController 激活/查询路径测试：收口 license 轮未闭合项 ②（2026-10-03）
+
+> License fail-closed 轮（025b6a7）留下的「LicenseController 的激活/查询路径仍无
+> 测试」在 PR 自查时收口：服务层验签/过期语义已被 `LicenseServiceFailClosedTest`
+> 钉住，但控制器 HTTP 侧的字段映射、参数缺失 fail-fast、服务判定到响应信封的
+> 透传一直零覆盖。
+
+- 新增 `LicenseControllerTest`（7 例，standalone MockMvc + mock LicenseService）：
+  - `GET /api/v1/license/info`：License 字段逐项映射（含派生 `expired` 与
+    `devEdition` 透传，2 例）；
+  - `POST /api/v1/license/activate`：缺任一必要参数返回 `success=false` 并指明
+    缺失项、**不触发服务校验**（never 验证）；合法激活码 `success=true` 且参数
+    按请求体原样透传（verify 精确参数）；无效激活码 `success=false`（3 例）；
+  - `GET /api/v1/license/verify`：服务判定有效/无效两种信封映射（2 例）。
+- 分层依据：拦截器排除路径已由 `LicenseConfigTest` 走真实 MVC 切片覆盖，RBAC
+  注解覆盖面由 `RbacEndpointCoverageTest` 反射钉住，本类只测「请求体 → 服务调用
+  → 响应映射」这一层。
+- 测试基线 4026 → **4033**（cloud-backend 2092 → 2099），当前口径文档 22 处声称
+  同步更新，`check-test-count-docs.py` 全绿。
+
+---
+
 ## [Unreleased] — 搁置项清理：M11 advisory 接线、语音指令真实下发、CDN 本地化等（2026-10-02）
 
 > 第六轮审查后遗留的决策项分批解决。本轮六项全部落地，各模块测试全绿。
