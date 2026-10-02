@@ -41,7 +41,7 @@ class TerrainMessageTest {
     void terrainTypeMapConstants() {
         assertThat(TerrainTypeMapMsg.ID).isEqualTo(462);
         assertThat(TerrainTypeMapMsg.LEN).isEqualTo(-1);
-        assertThat(TerrainTypeMapMsg.CRC_EXTRA).isEqualTo(242);
+        assertThat(TerrainTypeMapMsg.CRC_EXTRA).isEqualTo(107);
     }
 
     @Test
@@ -90,7 +90,7 @@ class TerrainMessageTest {
     @DisplayName("TerrainUpdate ID=463 / CRC_EXTRA=243")
     void terrainUpdateConstants() {
         assertThat(TerrainUpdateMsg.ID).isEqualTo(463);
-        assertThat(TerrainUpdateMsg.CRC_EXTRA).isEqualTo(243);
+        assertThat(TerrainUpdateMsg.CRC_EXTRA).isEqualTo(21);
     }
 
     @Test
@@ -139,7 +139,7 @@ class TerrainMessageTest {
     @DisplayName("FlightRestriction ID=464 / CRC_EXTRA=244")
     void flightRestrictionConstants() {
         assertThat(FlightRestrictionMsg.ID).isEqualTo(464);
-        assertThat(FlightRestrictionMsg.CRC_EXTRA).isEqualTo(244);
+        assertThat(FlightRestrictionMsg.CRC_EXTRA).isEqualTo(61);
     }
 
     @Test

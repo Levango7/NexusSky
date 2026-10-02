@@ -22,7 +22,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  *   <li><b>开发模式</b>（{@code aerofleet.security.dev-mode=true}，默认）：
  *       禁用 CSRF，允许所有请求，不破坏现有测试。</li>
  *   <li><b>生产模式</b>（{@code aerofleet.security.dev-mode=false}）：
- *       无状态 JWT + API Key 认证。/api/auth/** 和 /actuator/** 公开，
+ *       无状态 JWT + API Key 认证。仅 /api/v1/auth/login 与 /api/v1/auth/refresh
+ *       匿名开放，/actuator/health* 公开，
  *       /ws/** 公开（WebSocket handshake 在 {@code TelemetryWebSocketHandler} 中认证），
  *       其余 /api/** 需要 JWT 或 API Key 认证。
  *       API Key 通过 {@code X-API-Key} Header 传递，由 {@link ApiKeyFilter} 处理。</li>

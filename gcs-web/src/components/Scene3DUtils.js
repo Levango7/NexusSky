@@ -2,14 +2,16 @@
  * Scene3DUtils —— Scene3D / Trajectory3D 共享的常量与辅助函数
  *
  * 从 Scene3D.jsx 提取，供 Scene3D 和 Trajectory3D 复用：
- *  - 常量：THREE_CDN, REF, SCALE, M_PER_DEG_LAT, M_PER_DEG_LON, COLOR
+ *  - 常量：THREE_SRC, REF, SCALE, M_PER_DEG_LAT, M_PER_DEG_LON, COLOR
  *  - 函数：geoTo3D, loadThree, createOrbitState, applyOrbit, buildDroneModel, buildTerrain
  *
- * Three.js 通过 CDN 引入，不修改 package.json（避免 BOM 字节序标记问题）。
- * 经验来源：2026-09-16-package-json-bom-breaks-vite-build
+ * Three.js 从本地 /vendor/three.r128.min.js 加载（源自 devDependency three@0.128.0
+ * 的官方构建产物，见 public/vendor/README.md），不依赖外部 CDN，离线部署可用。
+ * 历史经验：2026-09-16-package-json-bom-breaks-vite-build（手写 package.json 曾引入
+ * BOM 导致 Vite 构建失败；现 package.json 由 npm 维护，无 BOM）
  */
 
-export const THREE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js'
+export const THREE_SRC = '/vendor/three.r128.min.js'
 
 // 参考点（无人机 home），与 MapView 保持一致
 export const REF = { lat: 22.5907, lon: 113.9345 }
@@ -40,7 +42,7 @@ export function geoTo3D(lat, lon, alt = 0) {
 }
 
 /**
- * 动态加载 Three.js（CDN），返回 Promise<THREE>。
+ * 动态加载 Three.js（本地 /vendor），返回 Promise<THREE>。
  * 导出供 Trajectory3D 复用，避免重复创建 script 标签。
  */
 export function loadThree() {
@@ -53,10 +55,10 @@ export function loadThree() {
     }
     window.__threeLoading = new Promise((res, rej) => {
       const s = document.createElement('script')
-      s.src = THREE_CDN
+      s.src = THREE_SRC
       s.async = true
       s.onload = () => res(window.THREE)
-      s.onerror = () => rej(new Error('Three.js CDN 加载失败'))
+      s.onerror = () => rej(new Error('Three.js 加载失败（' + THREE_SRC + '）'))
       document.head.appendChild(s)
     })
     window.__threeLoading.then(resolve, reject)

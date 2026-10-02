@@ -23,13 +23,13 @@ import java.nio.ByteBuffer;
  * 23   sysid          u8    源飞机 sysid
  * 24   timestamp      u32   时间戳（ms）
  * </pre>
- * CRC_EXTRA = 212（M4 自定义扩展）。
+ * CRC_EXTRA = 152（M4 自定义扩展）。
  */
 public final class RadarTargetMsg extends MavlinkMessage {
 
     public static final int ID = 438;
     public static final int LEN = 28;
-    public static final int CRC_EXTRA = 212;
+    public static final int CRC_EXTRA = 152;
 
     public final int targetId;
     public final float distance;       // 米

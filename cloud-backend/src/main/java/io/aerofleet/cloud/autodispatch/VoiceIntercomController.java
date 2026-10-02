@@ -22,7 +22,7 @@ import io.aerofleet.cloud.security.Role;
 /**
  * 语音对讲 REST API（P0-1 安防报警→无人机自动出警闭环）。
  * <p>
- * 端点前缀 {@code /api/voice-intercom}，覆盖：
+ * 端点前缀 {@code /api/v1/voice-intercom}，覆盖：
  * <ul>
  *   <li>启动双向语音对讲（{@code POST /{sysid}/start}）</li>
  *   <li>停止语音对讲（{@code POST /{sysid}/stop}）</li>

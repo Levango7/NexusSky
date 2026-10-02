@@ -34,11 +34,11 @@ class CellTowerStatusMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=455、LEN=15、CRC_EXTRA=245")
+    @DisplayName("消息 ID=455、LEN=15、CRC_EXTRA=21")
     void messageIdAndConstants() {
         assertThat(CellTowerStatusMsg.ID).isEqualTo(455);
         assertThat(CellTowerStatusMsg.LEN).isEqualTo(15);
-        assertThat(CellTowerStatusMsg.CRC_EXTRA).isEqualTo(245);
+        assertThat(CellTowerStatusMsg.CRC_EXTRA).isEqualTo(21);
     }
 
     @Test

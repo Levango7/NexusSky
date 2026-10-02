@@ -32,6 +32,11 @@ import org.slf4j.LoggerFactory;
  * （如后续加入协调转弯模型或非线性能量观测）。矩阵运算纯 Java 实现，不依赖外部库。
  *
  * <p>矩阵统一用 {@code double[][]} 表示，向量用 {@code double[]} 表示。
+ *
+ * <p><b>当前状态：未接入生产路径。</b>本类目前只被自己的单元测试引用，没有消费者，
+ * 飞行位姿由 {@code VirtualDrone} 的 {@code DronePhysics} 直接积分得出。
+ * 因此本类的测试全绿<b>不能</b>证明飞行器实际使用了 EKF 融合。
+ * {@code AiAutonomyWiringTest} 把这个事实钉成断言，接线时会失败并提示同步文档。
  */
 public class SensorFusionEngine {
 

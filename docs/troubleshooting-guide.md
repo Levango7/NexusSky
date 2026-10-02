@@ -13,7 +13,7 @@
 | 403 | `forbidden: requires role XXX` | RBAC 角色不足，JWT 中 `role` claim 不满足 `@RequireRole` 要求 | `RoleInterceptor.preHandle()` |
 | 404 | `no such endpoint` | 请求路径不存在 | `ApiExceptionHandler.noRoute()` |
 | 404 | `not found: ...` | 资源不存在（无人机、任务等） | `ApiExceptionHandler.NotFoundException` |
-| 429 | `Too Many Requests` | 租户 API 调用频率超限（默认 100 次/分钟） | `TenantInterceptor.preHandle()` |
+| 429 | `Too Many Requests` | API 调用频率超限（限流 key = 真实租户或客户端 IP，默认 100 次/分钟） | `TenantInterceptor.preHandle()` |
 | 500 | `internal server error` | 未捕获的服务端异常（生产模式不泄露细节） | `ApiExceptionHandler.internal()` |
 | 500 | `internal error: ...` | 未捕获的服务端异常（dev 模式返回详细消息） | `ApiExceptionHandler.internal()` |
 
@@ -349,7 +349,7 @@ curl -H "X-API-Key: nsk_xxxxxxxx" http://localhost:8080/api/v1/drones
 1. 确认 `TenantContext.getEffectiveTenantId()` 返回值正确
 2. 检查 `TenantFilter` 是否正确从 JWT 提取 `tenant_id` claim
 3. API Key 认证时检查 `ApiKeyContext.getTenantId()` 是否正确设置
-4. 确认 `TenantInterceptor.afterCompletion()` 中 `TenantContext.clear()` 被调用（防止线程池复用泄漏）
+4. 确认 `TenantFilter` / `ApiKeyFilter` 的 finally 块中 `TenantContext.clear()` 被调用（防止线程池复用泄漏；`TenantInterceptor` 只做限流，不再写入/清理租户上下文）
 
 ### Q8: Webhook 推送失败
 

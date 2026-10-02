@@ -27,7 +27,7 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 /**
  * 自动出警 REST API（P0-1 安防报警→无人机自动出警闭环）。
  * <p>
- * 端点前缀 {@code /api/autodispatch}，覆盖：
+ * 端点前缀 {@code /api/v1/autodispatch}，覆盖：
  * <ul>
  *   <li>手动触发自动出警（{@code POST /trigger}）</li>
  *   <li>出警历史查询（{@code GET /history}）</li>

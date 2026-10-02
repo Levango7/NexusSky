@@ -22,10 +22,10 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code GET /api/city-twin/markers} — 列出所有标绘</li>
- *   <li>{@code POST /api/city-twin/markers} — 创建标绘</li>
- *   <li>{@code DELETE /api/city-twin/markers/{id}} — 删除标绘</li>
- *   <li>{@code PUT /api/city-twin/markers/{id}} — 更新标绘</li>
+ *   <li>{@code GET /api/v1/city-twin/markers} — 列出所有标绘</li>
+ *   <li>{@code POST /api/v1/city-twin/markers} — 创建标绘</li>
+ *   <li>{@code DELETE /api/v1/city-twin/markers/{id}} — 删除标绘</li>
+ *   <li>{@code PUT /api/v1/city-twin/markers/{id}} — 更新标绘</li>
  * </ul>
  */
 @RestController

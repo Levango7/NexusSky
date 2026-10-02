@@ -5,11 +5,17 @@ package io.aerofleet.sim.sat;
  * <p>
  * 为三类真实卫星体制预留统一接入点：
  * <ul>
- *   <li>天通卫星（S 波段）— {@link TiantongSatProvider}</li>
- *   <li>铱星（L 波段）— {@link IridiumSatProvider}</li>
- *   <li>星链（Ku/Ka 波段）— {@link StarlinkSatProvider}</li>
+ *   <li>天通卫星（S 波段）— {@link TiantongSatLinkProvider}</li>
+ *   <li>铱星（L 波段）— {@link IridiumSatLinkProvider}</li>
+ *   <li>星链（Ku/Ka 波段）— {@link StarlinkSatLinkProvider}</li>
  * </ul>
  * 仿真实现为 {@link SimulatedSatLinkProvider}，真实实现为各体制的 provider。
+ * <p>
+ * ⚠️ 三个 `*SatLinkProvider` 类目前都是**占位**：每个方法抛
+ * {@link UnsupportedOperationException}，并非真实驱动。仿真请用
+ * {@link SimulatedSatLinkProvider}。（2026-10-01 修正：本 Javadoc 此前把类名写成
+ * `TiantongSatProvider` 等，与实际类名 `TiantongSatLinkProvider` 不符，
+ * {@code @link} 指向了不存在的类。）
  * <p>
  * 所有链路指标方法返回的是当前时刻的瞬时值，由实现方负责更新。
  */

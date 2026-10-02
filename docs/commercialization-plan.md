@@ -77,16 +77,16 @@
 | 2 | **任务上传与飞行控制** | Baseline | 核心操控能力：航点任务上传、ARM/起飞/RTL、虚拟摇杆 | `/api/v1/drones/{sysid}/mission`, `/commands` |
 | 3 | **Mesh 自愈组网** | M5 | 差异化核心：AODV-lite 多跳路由、自愈重构、链路质量评估 | `/api/v1/mesh/*` |
 | 4 | **应急任务编排** | M9 | 差异化核心：五阶段编排（测绘→覆盖→组网→服务→自愈）、四级抢占调度 | `/api/v1/emergency/*` |
-| 5 | **集群智能调度** | M10 | 多机核心：综合评分分配（能力40%+电量30%+距离20%+优先级10%）、冲突避免 | `/api/scheduling/*` |
+| 5 | **集群智能调度** | M10 | 多机核心：综合评分分配（能力40%+电量30%+距离20%+优先级10%）、冲突避免 | `/api/v1/scheduling/*` |
 
 #### 增值能力（4 项，对应中间件授权应急版/完整版）
 
 | # | 能力 | 里程碑 | 商用价值 | API 路径 |
 |---|---|---|---|---|
-| 6 | **空地一体化应急指挥** | 4a | 应急版核心：ONVIF 安防接入 + 报警联动 + 六阶段工作流 | `/api/surveillance/*`, `/api/alarms/*`, `/api/emergency-command` |
-| 7 | **多层级通信中继** | M6+M7 | 完整版核心：移动基站载荷 + LEO 卫星中继 + 层级路由 | `/api/v1/celltowers/*`, `/api/v1/satlink/*` |
-| 8 | **数字孪生与预测** | M13 | eVTOL 适航验证：实时镜像、轨迹预测、场景回放、虚实对比 | `/api/twin/*` |
-| 9 | **边缘计算协同** | M12 | 完整版：边缘节点框架、视频流分析、传感器融合 | `/api/edge/*` |
+| 6 | **空地一体化应急指挥** | 4a | 应急版核心：ONVIF 安防接入 + 报警联动 + 六阶段工作流 | `/api/v1/surveillance/*`, `/api/v1/alarms/*`, `/api/v1/emergency-command` |
+| 7 | **多层级通信中继** | M6+M7 | 完整版核心：移动基站载荷 + LEO 卫星中继 + 层级路由 | `/api/v1/celltowers/*`, `/api/v1/sat-link/*` |
+| 8 | **数字孪生与预测** | M13 | eVTOL 适航验证：实时镜像、轨迹预测、场景回放、虚实对比 | `/api/v1/twin/*` |
+| 9 | **边缘计算协同** | M12 | 完整版：边缘节点框架、视频流分析、传感器融合 | `/api/v1/edge/*` |
 
 #### 可选模块（6 项，按需启用，不作为主打卖点）
 
@@ -119,15 +119,15 @@
 
 ### 2.1 现有 REST API 审查
 
-**现状**：54 个 Controller 文件，155+ REST API 端点，覆盖 20 个功能域。
+**现状**：65 个 @RestController（68 个 Controller 源文件），344 REST API 端点，分布在 36 个业务包。
 
 **API 路径规范审查**：
 
 | 问题 | 现状 | 建议 |
 |---|---|---|
-| 路径前缀不统一 | `/api/v1/drones` vs `/api/scheduling` vs `/api/tracking` vs `/api/geofence` vs `/api/alarms` | 统一为 `/api/v1/{domain}` |
-| 版本号缺失 | 部分路径无 v1 前缀（`/api/auth`, `/api/scheduling`, `/api/tracking`, `/api/geofence`, `/api/alarms`, `/api/surveillance`, `/api/drone-lock`, `/api/emergency-command`, `/api/license`, `/api/twin`, `/api/edge`） | 商用版统一加 v1 |
-| 认证端点例外 | `/api/auth/login` 和 `/api/auth/refresh` 无版本号 | 统一为 `/api/v1/auth/*` |
+| 路径前缀统一 | ✅ 已核实（2026-10 代码实测）：65 个 `@RestController` 基础路径全部为 `/api/v1/{domain}` | 无需整改 |
+| 版本号完整 | ✅ 已核实：无缺失 v1 前缀的路径（auth/scheduling/tracking/geofence/alarms/surveillance/drone-lock/emergency-command/license/twin/edge 等此前记录的例外均已带 v1） | 无需整改 |
+| 认证端点 | ✅ 已核实：`/api/v1/auth/login` 与 `/api/v1/auth/refresh` 均带 v1 前缀 | 无需整改 |
 | 命名风格 | 混合使用 RESTful 和 RPC 风格 | 商用版统一 RESTful，RPC 操作用子资源 |
 
 **适合作为公开 SDK 接口的 API 分类**：
@@ -423,7 +423,7 @@ pip install nexussky-sdk[all]         # 全部模块
 | **AuthController** | `security/AuthController.java` | 登录/刷新，内存用户 + 数据库模式，频率限制 | ✅ 可用，需补充 API Key 登录方式 |
 | **UserController** | `security/UserController.java` | 用户 CRUD，ADMIN 管理本租户用户 | ✅ 可用 |
 | **TenantFilter** | `security/TenantFilter.java` | 从 JWT tenant_id claim 提取租户上下文 | ✅ 可用 |
-| **TenantInterceptor** | `tenant/TenantInterceptor.java` | 租户隔离 + 滑动窗口限流 | ✅ 可用，需优化为分布式限流 |
+| **TenantInterceptor** | `tenant/TenantInterceptor.java` | API 限流（key=真实租户/客户端 IP；Redis 优先 + 内存回退） | ✅ 可用 |
 | **LicenseService** | `license/LicenseService.java` | Base64 JSON license key，HMAC-SHA256 激活码 | ⚠️ 基础框架可用，但需强化签名机制 |
 | **LicenseInterceptor** | `license/LicenseInterceptor.java` | 请求前校验 License 有效性 | ✅ 可用 |
 | **LicenseInfo** | `license/LicenseInfo.java` | tenantId/maxDevices/expiryDate/active | ⚠️ 需扩展：模块授权、功能开关 |
@@ -434,7 +434,7 @@ pip install nexussky-sdk[all]         # 全部模块
 2. **License 签名弱**：Base64 JSON 无签名验证，可被篡改；需改为 RSA/ECDSA 签名
 3. **无模块级授权**：LicenseInfo 仅支持 maxDevices，无法按模块（基础版/应急版/完整版）授权
 4. **无计费计量**：无 API 调用量统计、设备活跃数统计等计费数据采集
-5. **限流为单机内存**：TenantInterceptor 限流为 ConcurrentHashMap，多实例部署不共享
+5. **限流依赖 Redis 可用性**：TenantInterceptor 已接入 RedisRateLimiter（Redis 优先 + 内存回退），未部署 Redis 时退化为单机内存计数，多实例间不共享
 
 ### 3.2 授权机制设计
 
@@ -620,19 +620,19 @@ MetricsCollector
 | 能力 | 实现方式 | 状态 | 商用评估 |
 |---|---|---|---|
 | **租户上下文** | TenantContext (ThreadLocal) + TenantFilter | ✅ | 可用 |
-| **租户隔离** | TenantInterceptor + X-Tenant-Id header | ✅ | 可用，但需强化 |
+| **租户隔离** | TenantFilter / ApiKeyFilter + 三态租户域（security.TenantContext） | ✅ | 可用 |
 | **用户管理** | UserController + tenantId 字段 + 跨租户访问控制 | ✅ | 可用 |
 | **租户管理** | TenantController + TenantEntity + TenantRepository | ✅ | 可用 |
-| **租户限流** | TenantInterceptor 滑动窗口 | ⚠️ | 单机内存，需升级为 Redis 分布式限流 |
-| **数据隔离** | 业务数据无 tenantId 字段 | ❌ | **关键差距**：DeviceRegistry、任务、围栏等无租户隔离 |
+| **租户限流** | TenantInterceptor 滑动窗口（Redis 优先 + 内存回退） | ✅ | RedisRateLimiter 已落地 |
+| **数据隔离** | 主要业务表已具备 tenant_id 列（V10–V16/V18 迁移） | ✅ | 设备/围栏/任务/编排/安防/告警/测绘/表演/配送/飞行日志等已落地；License 与租户 ID 类型（String vs Integer）尚未统一 |
 
 **关键差距与修复方案**：
 
 | 差距 | 影响 | 修复方案 | 工作量 |
 |---|---|---|---|
-| DeviceRegistry 无租户隔离 | 不同租户的无人机可能串线 | DroneSnapshot 增加 tenantId，按 tenantId 过滤 | 3 人天 |
-| 任务/围栏/编排无租户隔离 | 跨租户数据泄露 | 所有业务数据增加 tenantId 字段 + 查询过滤 | 5 人天 |
-| 限流为单机内存 | 多实例部署限流不共享 | 改为 Redis + Lua 脚本实现分布式限流 | 2 人天 |
+| ~~DeviceRegistry 无租户隔离~~ | ~~不同租户的无人机可能串线~~ | ✅ 已修复：DroneSnapshot 带 tenantId，未归属设备仅全局管理员可见，租户过滤已上线（DeviceProvisioningController 提供登记/绑定入口） | ~~3 人天~~ |
+| ~~任务/围栏/编排无租户隔离~~ | ~~跨租户数据泄露~~ | ✅ 已修复：业务表 tenant_id 列已由 V10–V16/V18 迁移落地（设备/围栏/越界/位置/编队/喷洒/配送/编排/安防/告警/测绘/表演/配送2/飞行日志） | ~~5 人天~~ |
+| ~~限流为单机内存~~ | ~~多实例部署限流不共享~~ | ✅ 已修复：TenantInterceptor 走 RedisRateLimiter（Redis 优先 + 内存回退），Redis 可用时限流多实例共享 | ~~2 人天~~ |
 | License 与租户绑定弱 | LicenseInfo.tenantId 为 String，TenantEntity.id 为 Integer | 统一为 String 类型 | 1 人天 |
 
 ---
@@ -773,9 +773,10 @@ MetricsCollector
 | 第 3 轮 | 0 | 2 | 1 | 3 | 已修复 |
 | 第 4 轮 | 0 | 1 | 1 | 2 | 已修复 |
 | 第 5 轮 | 0 | 0 | 0 | 0 | 收敛 ✅ |
-| **累计** | **4** | **12** | **5** | **21** | **全部修复** |
+| 第 6 轮 | — | — | — | 31（11 P1 + 20 新增） | 已修复 |
+| **累计** | **4** | **12** | **5** | **52** | **全部修复** |
 
-5 轮收敛性审查，累计修复 21 个问题（4C + 12M + 5m）。
+6 轮代码审查，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增）。
 
 ### 6.2 P1/P2 代码审查 — P0 修复
 
@@ -888,18 +889,18 @@ MetricsCollector
 
 ---
 
-## 附录 A：现有 Controller 清单（54 个）
+## 附录 A：现有 Controller 清单（68 个源文件 = 65 个 @RestController + 3 个 @Service）
 
 | # | Controller | 路径 | 功能域 | SDK 暴露 |
 |---|---|---|---|---|
 | 1 | DroneController | /api/v1/drones | 设备管理 | ✅ 核心 |
 | 2 | FlightLogController | /api/v1/flightlog | 飞行日志 | ✅ 核心 |
-| 3 | TrackingController | /api/tracking | 飞行追踪 | ✅ 核心 |
-| 4 | GeofenceController | /api/geofence | 电子围栏 | ✅ 机队 |
-| 5 | DroneLockController | /api/drone-lock | 远程锁机 | ✅ 机队 |
-| 6 | SurveillanceController | /api/surveillance | 安防监控 | ✅ 应急 |
-| 7 | AlarmController | /api/alarms | 报警联动 | ✅ 应急 |
-| 8 | EmergencyCommandController | /api/emergency-command | 应急指挥 | ✅ 应急 |
+| 3 | TrackingController | /api/v1/tracking | 飞行追踪 | ✅ 核心 |
+| 4 | GeofenceController | /api/v1/geofence | 电子围栏 | ✅ 机队 |
+| 5 | DroneLockController | /api/v1/drone-lock | 远程锁机 | ✅ 机队 |
+| 6 | SurveillanceController | /api/v1/surveillance | 安防监控 | ✅ 应急 |
+| 7 | AlarmController | /api/v1/alarms | 报警联动 | ✅ 应急 |
+| 8 | EmergencyCommandController | /api/v1/emergency-command | 应急指挥 | ✅ 应急 |
 | 9 | EmergencyOrchController | /api/v1/emergency | 应急编排 | ✅ 应急 |
 | 10 | FormationController | /api/v1/formation | 编队表演 | ✅ 机队 |
 | 11 | SprayController | /api/v1/spray | 喷洒任务 | ✅ 可选 |
@@ -908,46 +909,60 @@ MetricsCollector
 | 14 | VisionController | /api/v1/vision | 视觉感知 | ✅ 可选 |
 | 15 | ThermalController | /api/v1/thermal | 热成像 | ✅ 可选 |
 | 16 | MultispectralController | /api/v1/multispectral | 多光谱 | ✅ 可选 |
-| 17 | ObstacleController | /api/v1/obstacles | 避障 | ✅ 可选 |
-| 18 | HardwareDataController | /api/v1/hardware | 硬件数据 | ✅ 可选 |
-| 19 | RadarController | /api/v1/radar | 雷达 | ✅ 可选 |
-| 20 | RotorController | /api/v1/rotor | 旋翼 | ✅ 可选 |
-| 21 | ObstacleAvoidanceController | /api/v1/obstacle-avoidance | 避障控制 | ✅ 可选 |
+| 17 | ObstacleController | /api/v1/obstacle | 避障 | ✅ 可选 |
+| 18 | HardwareDataController | /api/v1（/radar、/rotor、/lidar、/imu 子路径） | 硬件数据 | ✅ 可选 |
+| 19 | RadarController | @Service（能力经 HardwareDataController /api/v1/radar/* 暴露） | 雷达 | 内部 |
+| 20 | RotorController | @Service（能力经 HardwareDataController /api/v1/rotor/* 暴露） | 旋翼 | 内部 |
+| 21 | ObstacleAvoidanceController | @Service（能力经 ObstacleController /api/v1/obstacle 暴露） | 避障控制 | 内部 |
 | 22 | MeshController | /api/v1/mesh | Mesh 组网 | ✅ 网络 |
 | 23 | CellTowerController | /api/v1/celltowers | 移动基站 | ✅ 网络 |
-| 24 | SatLinkController | /api/v1/satlink | 卫星中继 | ✅ 网络 |
+| 24 | SatLinkController | /api/v1/sat-link | 卫星中继 | ✅ 网络 |
 | 25 | TerrainController | /api/v1/terrain | 地形适配 | ✅ 网络 |
-| 26 | EnvAlertController | /api/v1/env | 环境气象 | ✅ 可选 |
-| 27 | SchedulingController | /api/scheduling | 集群调度 | ✅ 机队 |
+| 26 | EnvAlertController | /api/v1/env-alerts | 环境气象 | ✅ 可选 |
+| 27 | SchedulingController | /api/v1/scheduling | 集群调度 | ✅ 机队 |
 | 28 | SquadController | /api/v1/squad | 角色调度 | ✅ 机队 |
-| 29 | DecisionMonitorController | /api/v1/ai/decision | AI 决策监控 | ✅ 高级 |
+| 29 | DecisionMonitorController | /api/v1/ai | AI 决策监控 | ✅ 高级 |
 | 30 | EdgeCoordinationController | /api/v1/edge | 边缘计算 | ✅ 高级 |
 | 31 | TwinController | /api/v1/twin | 数字孪生 | ✅ 高级 |
-| 32 | AuthController | /api/auth | 认证 | ❌ 管理 |
+| 32 | AuthController | /api/v1/auth | 认证 | ❌ 管理 |
 | 33 | UserController | /api/v1/users | 用户管理 | ❌ 管理 |
 | 34 | TenantController | /api/v1/tenants | 租户管理 | ❌ 管理 |
-| 35 | LicenseController | /api/license | License 管理 | ❌ 管理 |
+| 35 | LicenseController | /api/v1/license | License 管理 | ❌ 管理 |
 | 36 | AuditController | /api/v1/audit | 审计日志 | ❌ 管理 |
 | 37 | OrchestrationController | /api/v1/orch | 编排控制 | ✅ 应急 |
 | 38 | AutoDispatchController | /api/v1/autodispatch | 自动调度 | ✅ 机队 |
-| 39 | VoiceIntercomController | /api/v1/autodispatch/voice | 语音对讲 | ✅ 应急 |
-| 40 | VideoStreamController | /api/v1/autodispatch/video | 视频流 | ✅ 应急 |
-| 41 | CityModelController | /api/v1/citytwin/model | 城市模型 | ✅ 高级 |
-| 42 | SimulationController | /api/v1/citytwin/simulation | 仿真控制 | ✅ 高级 |
-| 43 | SituationController | /api/v1/citytwin/situation | 态势感知 | ✅ 高级 |
-| 44 | PlaybackController | /api/v1/citytwin/playback | 回放 | ✅ 高级 |
-| 45 | MarkerController | /api/v1/citytwin/marker | 标记管理 | ✅ 高级 |
-| 46 | CommSituationController | /api/v1/commadapt | 通信态势 | ✅ 网络 |
+| 39 | VoiceIntercomController | /api/v1/voice-intercom | 语音对讲 | ✅ 应急 |
+| 40 | VideoStreamController | /api/v1/video-stream | 视频流 | ✅ 应急 |
+| 41 | CityModelController | /api/v1/city-twin/models | 城市模型 | ✅ 高级 |
+| 42 | SimulationController | /api/v1/city-twin/simulation | 仿真控制 | ✅ 高级 |
+| 43 | SituationController | /api/v1/city-twin/situation | 态势感知 | ✅ 高级 |
+| 44 | PlaybackController | /api/v1/city-twin/playback | 回放 | ✅ 高级 |
+| 45 | MarkerController | /api/v1/city-twin/markers | 标记管理 | ✅ 高级 |
+| 46 | CommSituationController | /api/v1/comm-adapt | 通信态势 | ✅ 网络 |
 | 47 | HealthController | /api/v1/health | 健康检查 | ❌ 管理 |
 | 48 | MaintenanceController | /api/v1/maintenance | 维护管理 | ❌ 管理 |
 | 49 | InspectionController | /api/v1/inspection | 巡检任务 | ✅ 可选 |
-| 50 | InspectionReportController | /api/v1/inspection/report | 巡检报告 | ✅ 可选 |
+| 50 | InspectionReportController | /api/v1/inspection/reports | 巡检报告 | ✅ 可选 |
 | 51 | MappingController | /api/v1/mapping | 测绘 | ✅ 可选 |
-| 52 | ScenarioTemplateController | /api/v1/scenario/template | 场景模板 | ✅ 应急 |
-| 53 | ScenarioLaunchController | /api/v1/scenario/launch | 场景启动 | ✅ 应急 |
-| 54 | ScenarioDrillController | /api/v1/scenario/drill | 场景演练 | ✅ 应急 |
+| 52 | ScenarioTemplateController | /api/v1/scenarios/templates | 场景模板 | ✅ 应急 |
+| 53 | ScenarioLaunchController | /api/v1/scenarios/launch | 场景启动 | ✅ 应急 |
+| 54 | ScenarioDrillController | /api/v1/scenarios/drill | 场景演练 | ✅ 应急 |
 | 55 | ShowController | /api/v1/show | 表演控制 | ✅ 可选 |
-| 56 | VoiceCommandController | /api/v1/voicecmd | 语音命令 | ✅ 可选 |
+| 56 | VoiceCommandController | /api/v1/voice-cmd | 语音命令 | ✅ 可选 |
+| 57 | AirGroundCoordinationController | /api/v1/air-ground | 空地协同 | ✅ 应急 |
+| 58 | DisasterCommController | /api/v1/disaster | 灾害通信 | ✅ 应急 |
+| 59 | OfflineAlarmController | /api/v1/offline-alarm | 离线自治 | ✅ 应急 |
+| 60 | LoRaRelayController | /api/v1/loRa | LoRa 回传 | ✅ 应急 |
+| 61 | RegulatorController | /api/v1/regulator | 监管合规 | ✅ 机队 |
+| 62 | RidController | /api/v1/rid | Remote ID | ✅ 机队 |
+| 63 | RestrictionController | /api/v1/geofence | 限飞区 | ✅ 机队 |
+| 64 | DeviceProvisioningController | /api/v1/devices | 设备归属 | ❌ 管理 |
+| 65 | ApiKeyController | /api/v1/auth/api-key | API Key 管理 | ❌ 管理 |
+| 66 | WebhookController | /api/v1/webhooks | Webhook 管理 | ✅ 高级 |
+| 67 | OpenApiExportController | /api/v1/openapi | OpenAPI 导出 | ❌ 管理 |
+| 68 | CvEvalController | /api/v1/cv-eval | 视觉感知评测 | ✅ 可选 |
+
+> **注**：68 个 Controller 源文件中 65 个为 `@RestController`（共 344 个端点，详见 `docs/api-reference.md` 的模块与 Controller 映射表）；`RadarController`、`RotorController`、`ObstacleAvoidanceController` 为 `@Service` 内部组件，不直接暴露 REST 端点。`LoRaRelayController` 基础路径为历史遗留的大小写混排 `/api/v1/loRa`，调用时须原样使用。
 
 ## 附录 B：现有安全模块代码审查摘要
 
@@ -964,8 +979,8 @@ MetricsCollector
 - 向后兼容版本（不含 role/tenant_id）
 
 ### AuthController.java
-- 登录端点：POST /api/auth/login
-- 刷新端点：POST /api/auth/refresh
+- 登录端点：POST /api/v1/auth/login
+- 刷新端点：POST /api/v1/auth/refresh
 - 内存用户存储 + 数据库模式（UserRepository）
 - 登录频率限制：每 IP 每分钟 10 次
 - JWT 有效期可配置（默认 3600 秒）
@@ -977,9 +992,9 @@ MetricsCollector
 - LicenseInfo 字段：tenantId, productName, maxDevices, expiryDate, issuedAt, issuedTo, active
 
 ### TenantInterceptor.java
-- 租户提取：X-Tenant-Id header → JWT subject → dev-mode default
-- 滑动窗口限流：每租户每分钟 N 次（可配置，默认 100）
-- 限流数据：ConcurrentHashMap（单机内存）
+- 限流 key：认证链写入的 TenantContext 真实租户 → 租户桶；其余（未认证/全局管理员/NO_ACCESS）→ 客户端 IP 桶
+- 滑动窗口限流：每 key 每分钟 N 次（可配置，默认 100）
+- 限流数据：Redis（RedisRateLimiter）优先，ConcurrentHashMap 内存回退
 
 ---
 

@@ -1,0 +1,17 @@
+# Grafana dashboard 供给声明（挂载到 /etc/grafana/provisioning/dashboards/）。
+# 供给分两半：本文件是 provider 声明，JSON 本体放在 provider 指向的
+# path（/var/lib/grafana/dashboards/，见 compose 的挂载）。
+# 此前把 dashboard JSON 直接挂进 provisioning/dashboards/——Grafana 会把该目录下
+# 每个文件当 provider 配置解析，JSON 解析失败，dashboard 永远不会被加载。
+apiVersion: 1
+providers:
+  - name: nexussky
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

@@ -32,13 +32,13 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
  * <p>
  * 端点清单：
  * <pre>
- * POST   /api/geofence/zones        创建围栏区域
- * GET    /api/geofence/zones        列出所有围栏
- * GET    /api/geofence/zones/{id}   获取单个围栏
- * PUT    /api/geofence/zones/{id}   更新围栏
- * DELETE /api/geofence/zones/{id}   删除围栏
- * GET    /api/geofence/breaches     获取越界历史（支持 sysid/zoneId 过滤）
- * POST   /api/geofence/check        手动触发一次全量检查
+ * POST   /api/v1/geofence/zones        创建围栏区域
+ * GET    /api/v1/geofence/zones        列出所有围栏
+ * GET    /api/v1/geofence/zones/{id}   获取单个围栏
+ * PUT    /api/v1/geofence/zones/{id}   更新围栏
+ * DELETE /api/v1/geofence/zones/{id}   删除围栏
+ * GET    /api/v1/geofence/breaches     获取越界历史（支持 sysid/zoneId 过滤）
+ * POST   /api/v1/geofence/check        手动触发一次全量检查
  * </pre>
  * <p>
  * 围栏 JSON 格式：

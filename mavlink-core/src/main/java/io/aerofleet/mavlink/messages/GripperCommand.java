@@ -19,7 +19,7 @@ import java.nio.ByteBuffer;
  * 4    payloadVolume   uint16  cL（×10，厘升）
  * 6    reserved        uint8
  * </pre>
- * CRC_EXTRA = 46389（按 MavlinkCrc 对消息名+字段名+类型计算）。
+ * CRC_EXTRA = 166（由 MavlinkMessageChecksum 按官方 message_checksum 算法对消息名+字段签名计算）。
  */
 public final class GripperCommand extends MavlinkMessage {
 

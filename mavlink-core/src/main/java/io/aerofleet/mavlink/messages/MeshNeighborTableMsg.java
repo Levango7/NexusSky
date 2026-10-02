@@ -23,7 +23,7 @@ import java.util.List;
  *                          neighborSysid u8 + rssi i8 + linkQuality u8 + reserved u8
  * </pre>
  * 内嵌 {@link NeighborInfo} record 承载每个邻居项。
- * CRC_EXTRA = 237。
+ * CRC_EXTRA = 113。
  */
 public final class MeshNeighborTableMsg extends MavlinkMessage {
 
@@ -36,7 +36,7 @@ public final class MeshNeighborTableMsg extends MavlinkMessage {
     public static final int MAX_NEIGHBORS = 255;
     /** LEN 字段填 -1 表示可变长度。 */
     public static final int LEN = -1;
-    public static final int CRC_EXTRA = 237;
+    public static final int CRC_EXTRA = 113;
 
     /** 内嵌邻居项：sysid + RSSI(dBm) + LinkQuality.ordinal()。 */
     public record NeighborInfo(int sysid, int rssiDbm, int linkQualityOrdinal) {

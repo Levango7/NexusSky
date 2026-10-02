@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
  * 11   reserved      u8    保留（0）
  * </pre>
  * 构造器接收 {@code double originMetric}，内部转 u16×100（精度 0.01）。
- * CRC_EXTRA = 234。
+ * CRC_EXTRA = 54。
  */
 public final class MeshRouteRequestMsg extends MavlinkMessage {
 
     public static final int ID = 451;
     public static final int LEN = 12;
-    public static final int CRC_EXTRA = 234;
+    public static final int CRC_EXTRA = 54;
 
     public final int sourceSysid;
     public final int targetSysid;

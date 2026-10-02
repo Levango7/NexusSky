@@ -31,12 +31,12 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code GET /api/scenarios/templates} — 列出所有场景模板（含预设 + 自定义）</li>
- *   <li>{@code GET /api/scenarios/templates/{id}} — 获取模板详情</li>
- *   <li>{@code POST /api/scenarios/templates} — 创建自定义模板</li>
- *   <li>{@code PUT /api/scenarios/templates/{id}} — 更新模板</li>
- *   <li>{@code DELETE /api/scenarios/templates/{id}} — 删除模板</li>
- *   <li>{@code GET /api/scenarios/templates/by-type/{disasterType}} — 按灾害类型筛选</li>
+ *   <li>{@code GET /api/v1/scenarios/templates} — 列出所有场景模板（含预设 + 自定义）</li>
+ *   <li>{@code GET /api/v1/scenarios/templates/{id}} — 获取模板详情</li>
+ *   <li>{@code POST /api/v1/scenarios/templates} — 创建自定义模板</li>
+ *   <li>{@code PUT /api/v1/scenarios/templates/{id}} — 更新模板</li>
+ *   <li>{@code DELETE /api/v1/scenarios/templates/{id}} — 删除模板</li>
+ *   <li>{@code GET /api/v1/scenarios/templates/by-type/{disasterType}} — 按灾害类型筛选</li>
  * </ul>
  * <p>
  * 启动时自动加载 {@link ScenarioPresetFactory} 提供的 18 个预设模板；

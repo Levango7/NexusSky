@@ -1,5 +1,6 @@
 package io.aerofleet.sim.ai;
 
+import io.aerofleet.sim.FailsafeThresholds;
 import io.aerofleet.sim.GeoUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,6 +11,18 @@ import java.util.List;
 
 /**
  * M11 应急返航策略：能耗最优返航 + 风向利用 + 地形规避 + 滑翔路径。
+ * <p>
+ * <b>当前状态：未接入生产路径。</b>本类目前只被自己的单元测试与
+ * {@link DecisionEngine} 引用；{@code VirtualDrone} 实际使用的是
+ * {@code FailsafeController}。见 {@code AiAutonomyWiringTest}。
+ * <p>
+ * <b>advisory 接线后的精确状态</b>：{@code DecisionEngine} 已经
+ * {@code AutonomyAdvisor} 以 advisory 模式接入 {@code VirtualDrone}（1Hz 节流），
+ * 因此本类的<b>旧接口</b> {@link #evaluate(double, boolean, boolean, double)}
+ * 会随该链路<b>间接执行</b>（只产出建议，不执行动作）。「未接入」按
+ * {@code AiAutonomyWiringTest} 的定义指<b>无包外生产调用方</b>——本类仍满足；
+ * 而下文的真实最优返航算法（滑翔 / 地形规避 / 能耗模型）
+ * <b>零生产调用方，从未执行</b>。
  * <p>
  * 保留旧接口 {@link #evaluate(double, boolean, boolean, double)} 供
  * {@link DecisionEngine} 调用（向后兼容）。
@@ -36,7 +49,12 @@ import java.util.List;
  */
 public class ReturnToHomeStrategy {
     private static final Logger log = LoggerFactory.getLogger(ReturnToHomeStrategy.class);
-    private static final double BATTERY_THRESHOLD = 25.0;
+    /**
+     * 低电量返航阈值。与 {@link FailsafeController} 共用同一常量
+     * （{@code FailsafeThresholds.BATTERY_CRIT_PCT}），此前本类写死 25、
+     * FailsafeController 写死 22，两者不一致。
+     */
+    private static final double BATTERY_THRESHOLD = FailsafeThresholds.BATTERY_CRIT_PCT;
     private static final double LINK_TIMEOUT_SEC = 10.0;
 
     // ====== 能耗模型参数 ======

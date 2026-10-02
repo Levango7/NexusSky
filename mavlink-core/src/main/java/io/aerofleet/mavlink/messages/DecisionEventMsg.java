@@ -20,13 +20,13 @@ import java.nio.ByteBuffer;
  * 13   decisionType   u8    0=RTL, 1=避障, 2=自适应航径, 3=紧急降落（{@link io.aerofleet.mavlink.enums.DecisionType}）
  * 14   reason         u8    触发原因码（自定义编码）
  * </pre>
- * CRC_EXTRA = 255（M11 自定义扩展）。
+ * CRC_EXTRA = 104（M11 自定义扩展）。
  */
 public final class DecisionEventMsg extends MavlinkMessage {
 
     public static final int ID = 471;
     public static final int LEN = 15;
-    public static final int CRC_EXTRA = 255;
+    public static final int CRC_EXTRA = 104;
 
     public final float triggerValue;     // 触发值
     public final float confidence;       // 0.0-1.0

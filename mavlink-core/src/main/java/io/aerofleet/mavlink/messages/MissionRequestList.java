@@ -5,11 +5,11 @@ import io.aerofleet.mavlink.PayloadCodec;
 
 import java.nio.ByteBuffer;
 
-/** MISSION_REQUEST_LIST (msgId=143, LEN=4, CRC=132)。GCS→飞控：请求任务项数（拉取任务第一步）。 */
+/** MISSION_REQUEST_LIST (msgId=43, LEN=3, CRC=132)。GCS→飞控：请求任务项数（拉取任务第一步）。 */
 public final class MissionRequestList extends MavlinkMessage {
 
-    public static final int ID = 143;
-    public static final int LEN = 4;
+    public static final int ID = 43;
+    public static final int LEN = 3;
 
     public final int targetSystem;
     public final int targetComponent;

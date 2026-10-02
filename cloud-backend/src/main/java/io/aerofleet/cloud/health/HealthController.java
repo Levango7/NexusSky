@@ -23,11 +23,11 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code GET /api/health/{sysid}} — 获取单机健康评分</li>
- *   <li>{@code GET /api/health/fleet} — 获取机队健康总览</li>
- *   <li>{@code GET /api/health/{sysid}/history} — 获取健康评分历史</li>
- *   <li>{@code GET /api/health/{sysid}/components/{component}} — 获取单部件详情</li>
- *   <li>{@code GET /api/health/warnings} — 获取所有健康告警</li>
+ *   <li>{@code GET /api/v1/health/{sysid}} — 获取单机健康评分</li>
+ *   <li>{@code GET /api/v1/health/fleet} — 获取机队健康总览</li>
+ *   <li>{@code GET /api/v1/health/{sysid}/history} — 获取健康评分历史</li>
+ *   <li>{@code GET /api/v1/health/{sysid}/components/{component}} — 获取单部件详情</li>
+ *   <li>{@code GET /api/v1/health/warnings} — 获取所有健康告警</li>
  * </ul>
  */
 @RestController

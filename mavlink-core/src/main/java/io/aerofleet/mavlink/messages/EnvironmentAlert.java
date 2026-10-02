@@ -18,7 +18,7 @@ import java.nio.ByteBuffer;
  * 4    threshold  int16    阈值×10
  * 6    text       char[40] ASCII 人类可读描述
  * </pre>
- * CRC_EXTRA = 25705（按 MavlinkCrc 对消息名+字段名+类型计算）。
+ * CRC_EXTRA = 230（由 MavlinkMessageChecksum 按官方 message_checksum 算法对消息名+字段签名计算）。
  */
 public final class EnvironmentAlert extends MavlinkMessage {
 

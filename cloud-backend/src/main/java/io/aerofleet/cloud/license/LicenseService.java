@@ -51,11 +51,17 @@ public class LicenseService {
     public static final String DEV_TENANT_ID = "dev";
     /** 开发版被授权方 */
     public static final String DEV_ISSUED_TO = "AeroFleet Developer";
+    /** jwt-secret 未配置时的内置开发默认值（非 dev 模式下等于该值会拒绝启动，见构造器 fail-closed 守卫）。 */
+    public static final String DEV_HMAC_SECRET_FALLBACK = "aerofleet-dev-secret-change-in-production-at-least-32-chars";
     /** 全部模块集合 */
     public static final Set<String> ALL_MODULES = Set.of("core", "fleet", "emergency", "network", "advanced");
 
-    /** License Key 中 payload 和 signature 的分隔符 */
-    private static final String KEY_SEPARATOR = ".";
+    /**
+     * License Key 中 payload 和 signature 的分隔符。
+     * 唯一定义在 {@link LicenseIssuer#KEY_SEPARATOR}（签发端），解析端只引用——
+     * wire format 分裂是这一域最贵的故障类型，签发/解析两侧不允许各写一份字面量。
+     */
+    private static final String KEY_SEPARATOR = LicenseIssuer.KEY_SEPARATOR;
 
     private final ObjectMapper objectMapper;
     private final String licenseKeyConfig;
@@ -66,7 +72,7 @@ public class LicenseService {
 
     public LicenseService(
             @Value("${aerofleet.license.key:}") String licenseKeyConfig,
-            @Value("${aerofleet.security.jwt-secret:aerofleet-dev-secret-change-in-production-at-least-32-chars}") String hmacSecret,
+            @Value("${aerofleet.security.jwt-secret:" + DEV_HMAC_SECRET_FALLBACK + "}") String hmacSecret,
             @Value("${aerofleet.security.dev-mode:false}") boolean devMode,
             @Value("${aerofleet.license.public-key:}") String publicKeyConfig,
             ObjectMapper objectMapper) {
@@ -74,13 +80,26 @@ public class LicenseService {
         this.hmacSecret = hmacSecret;
         this.devMode = devMode;
         this.objectMapper = objectMapper;
+        // fail-closed：jwt-secret 同时用于 JWT HS256 回退与 license 激活码 HMAC（generateActivationCode）。
+        // 非 dev 模式下留空/未配置（等于内置默认值）一律拒绝启动，避免激活码静默不可用或弱密钥上岗；
+        // dev 模式下仅告警（保持本地/CI 可启动，激活码功能明确不可用）。
+        if (hmacSecret == null || hmacSecret.isBlank() || DEV_HMAC_SECRET_FALLBACK.equals(hmacSecret)) {
+            if (devMode) {
+                log.warn("aerofleet.security.jwt-secret 未配置或为内置默认值：license 激活码功能不可用"
+                        + "（generateActivationCode 返回 null），生产环境必须显式配置");
+            } else {
+                throw new IllegalStateException("aerofleet.security.jwt-secret 未配置或为内置开发默认值："
+                        + "非 dev 模式必须显式配置该密钥（同时用于 JWT HS256 回退与 license 激活码 HMAC）");
+            }
+        }
         // 初始化签名工具：生产模式从配置读取公钥，开发模式自动生成密钥对
         if (publicKeyConfig != null && !publicKeyConfig.isBlank()) {
             this.licenseSigner = new LicenseSigner(publicKeyConfig, objectMapper);
         } else {
             this.licenseSigner = new LicenseSigner(objectMapper);
         }
-        // 启动时解析一次；解析失败则降级为开发版，避免启动崩溃影响现有测试
+        // 启动时解析一次。**已配置 key 时解析失败会抛异常拒绝启动**（见 loadLicense 的
+        // fail-closed 说明）；未配置 key 时走开发版，不影响开发/测试环境。
         this.currentLicense = loadLicense();
     }
 
@@ -136,13 +155,17 @@ public class LicenseService {
             String payloadJson = new String(payloadBytes, StandardCharsets.UTF_8);
 
             LicenseInfo info = objectMapper.readValue(payloadJson, LicenseInfo.class);
-            info.setLicenseKey(key);
             info.setSignature(signatureBase64);
 
-            // 验证签名
+            // 先验签再回填 licenseKey：licenseKey 是承载签名的那串 key 本身，
+            // 属于「信封」而非「内容」。虽然 serializeForSigning 已把它排除在签名之外
+            // （见 LicenseSigner#serializeForSigning），但把顺序摆正可以避免后人
+            // 再踩同一个坑——2026-10-01 之前正是「先 setLicenseKey 后 verify」，
+            // 而 licenseKey 又参与签名，导致任何合法签名的 License 都验不过。
             if (!licenseSigner.verify(info, signatureBase64)) {
                 throw new LicenseInvalidException("License 签名验证失败");
             }
+            info.setLicenseKey(key);
 
             log.info("License 签名验证通过: tenant={}", info.getTenantId());
             return info;
@@ -303,28 +326,55 @@ public class LicenseService {
     // ===== 内部方法 =====
 
     /**
-     * 加载 license：配置了 key 则解析，否则返回开发版。
-     * 解析失败也降级为开发版，保证服务可用。
+     * 加载 license。
+     * <p>
+     * <b>fail-closed 语义（2026-10-01 修正）</b>：
+     * <ul>
+     *   <li><b>未配置</b> {@code aerofleet.license.key} → 开发版。这是开发/CI 的正常路径。</li>
+     *   <li><b>已配置</b> key 但解析或验签失败 → <b>抛异常拒绝启动</b>。</li>
+     * </ul>
+     * 之所以按「是否配置 key」而不是「是否 enabled」来判：<b>配置 key 本身就是运营方
+     * 声明「本部署要执行授权校验」</b>。此前的实现是无论验签成功与否一律降级为
+     * {@link #buildDevLicense()}——而 dev license 是全模块、设备数无限制、永不过期的，
+     * 等于「一个被篡改或损坏的 key 反而拿到最宽松的授权」，把商业门禁变成了摆设。
+     * <p>
+     * 之所以不新增 {@code fail-closed} 开关：多一个开关就多一种「配错了反而继续放行」
+     * 的路径。规则本身就是开关——不配 key 就是开发版，配了就必须是对的。
      */
     private LicenseInfo loadLicense() {
         if (licenseKeyConfig == null || licenseKeyConfig.isBlank()) {
-            log.info("未配置 aerofleet.license.key，使用开发版 License");
+            log.info("未配置 aerofleet.license.key，使用开发版 License（不执行授权校验）");
             return buildDevLicense();
         }
+
+        LicenseInfo parsed;
         try {
-            LicenseInfo parsed = parseLicense(licenseKeyConfig);
-            if (parsed == null) {
-                log.warn("License key 解析失败，降级为开发版 License");
-                return buildDevLicense();
-            }
-            log.info("License 加载成功: tenant={}, product={}, maxDevices={}, modules={}, expiry={}",
-                    parsed.getTenantId(), parsed.getProductName(), parsed.getMaxDevices(),
-                    parsed.getModules(), parsed.getExpiryDate());
-            return parsed;
+            parsed = parseLicense(licenseKeyConfig);
         } catch (LicenseInvalidException e) {
-            log.error("License 签名验证失败，降级为开发版 License: {}", e.getMessage());
-            return buildDevLicense();
+            // 不降级：静默给一份全模块、无限设备、永不过期的 dev license，
+            // 等于把「key 坏了」变成「key 最好用」。
+            log.error("License 验签失败，拒绝启动: {}", e.getMessage());
+            throw new IllegalStateException(
+                    "License 验签失败，已拒绝以开发版继续运行（fail-closed）。"
+                            + "已配置 aerofleet.license.key 即表示本部署执行授权校验，"
+                            + "不接受降级。排查方向：(1) key 是否被截断/篡改/换行；"
+                            + "(2) 签发方私钥与 aerofleet.license.public-key 是否配对；"
+                            + "(3) 新格式为 payload.signature，旧格式（无签名）仅 dev 模式可用。"
+                            + "若本部署本就不需要授权校验，请清空 aerofleet.license.key。",
+                    e);
         }
+
+        if (parsed == null) {
+            log.error("License key 解析结果为空，拒绝启动");
+            throw new IllegalStateException(
+                    "License key 解析结果为空，已拒绝以开发版继续运行（fail-closed）。"
+                            + "若本部署本就不需要授权校验，请清空 aerofleet.license.key。");
+        }
+
+        log.info("License 加载成功: tenant={}, product={}, maxDevices={}, modules={}, expiry={}",
+                parsed.getTenantId(), parsed.getProductName(), parsed.getMaxDevices(),
+                parsed.getModules(), parsed.getExpiryDate());
+        return parsed;
     }
 
     /**
@@ -354,15 +404,17 @@ public class LicenseService {
     /**
      * 生成一个签名版 license key，供管理脚本/测试使用。
      * <p>
-     * 新格式：{@code Base64(JSON(payload)) + "." + Base64(RSA-SHA256(JSON(payload)))}
-     * 仅在开发模式（LicenseSigner 有私钥）下可用。
+     * 新格式：{@code Base64(JSON(payload)) + "." + Base64(RSA-SHA256(JSON(payload)))}。
+     * 组装与自验收敛到 {@link LicenseIssuer#issue}（全仓唯一组装路径）。
+     * 仅在开发模式（{@link LicenseSigner} 有私钥）下可用；生产模式签名器无私钥，
+     * 本方法保持既有契约返回 null。
      *
      * @param tenantId    租户 ID
      * @param productName 产品名
      * @param maxDevices  设备上限
      * @param expiryDate  过期时间（null=永久）
      * @param issuedTo    被授权方
-     * @return 签名版 license key
+     * @return 签名版 license key；无私钥或签发失败时返回 null
      */
     public String generateLicenseKey(String tenantId, String productName, int maxDevices,
                                      Instant expiryDate, String issuedTo) {
@@ -372,6 +424,10 @@ public class LicenseService {
 
     /**
      * 生成一个签名版 license key（含模块授权字段），供管理脚本/测试使用。
+     * <p>
+     * 组装/签名/自验全部委托 {@link LicenseIssuer#issue}——此前本方法内联一份
+     * 「payload+sign 拼接」，与签发工具各写一份，一旦漂移就会出现
+     * 「签出的 key 部署端验不过」这类只在真实签发时爆的问题。
      *
      * @param tenantId           租户 ID
      * @param productName        产品名
@@ -381,7 +437,7 @@ public class LicenseService {
      * @param modules            授权模块集合
      * @param maxApiCallsPerDay  每日 API 调用上限（<=0 无限制）
      * @param maxConcurrentDrones 最大并发无人机数（<=0 无限制）
-     * @return 签名版 license key
+     * @return 签名版 license key；无私钥（生产模式）或签发失败时返回 null
      */
     public String generateLicenseKey(String tenantId, String productName, int maxDevices,
                                      Instant expiryDate, String issuedTo,
@@ -395,15 +451,7 @@ public class LicenseService {
                     modules, maxApiCallsPerDay, maxConcurrentDrones,
                     null, null
             );
-
-            // 序列化 payload（不含 signature/signerCert）
-            String payloadJson = objectMapper.writeValueAsString(info);
-            String payloadBase64 = Base64.getEncoder().encodeToString(payloadJson.getBytes(StandardCharsets.UTF_8));
-
-            // 签名
-            String signature = licenseSigner.sign(info);
-
-            return payloadBase64 + KEY_SEPARATOR + signature;
+            return LicenseIssuer.issue(info, licenseSigner, objectMapper);
         } catch (Exception e) {
             log.error("生成 license key 失败: {}", e.getMessage());
             return null;

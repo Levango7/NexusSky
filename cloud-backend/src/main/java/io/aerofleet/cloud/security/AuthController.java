@@ -76,7 +76,7 @@ public class AuthController {
     /**
      * 用户登录，返回 JWT 令牌。
      * <p>
-     * POST /api/auth/login {username, password} → {token, expiresIn, username}
+     * POST /api/v1/auth/login {username, password} → {token, expiresIn, username}
      * <p>
      * 频率限制：每 IP 每分钟最多 {@value #MAX_ATTEMPTS_PER_MINUTE} 次，
      * 超过返回 429 Too Many Requests。
@@ -147,7 +147,7 @@ public class AuthController {
     /**
      * 刷新令牌。
      * <p>
-     * POST /api/auth/refresh (Authorization: Bearer <token>) → {token, expiresIn}
+     * POST /api/v1/auth/refresh (Authorization: Bearer <token>) → {token, expiresIn}
      */
     @PostMapping("/refresh")
     @PermitAll

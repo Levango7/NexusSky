@@ -30,16 +30,16 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>POST /api/delivery2/tasks — 创建配送任务</li>
- *   <li>GET /api/delivery2/tasks — 列出配送任务</li>
- *   <li>GET /api/delivery2/tasks/{id} — 获取任务详情</li>
- *   <li>POST /api/delivery2/tasks/{id}/start — 启动配送</li>
- *   <li>POST /api/delivery2/tasks/{id}/abort — 中止配送</li>
- *   <li>GET /api/delivery2/tasks/{id}/route — 获取优化路线</li>
- *   <li>POST /api/delivery2/tasks/{id}/deliver — 执行投放</li>
- *   <li>GET /api/delivery2/tasks/{id}/status — 配送状态</li>
- *   <li>POST /api/delivery2/tasks/{id}/confirm — 确认签收</li>
- *   <li>GET /api/delivery2/landing-sites — 搜索降落点</li>
+ *   <li>POST /api/v1/delivery2/tasks — 创建配送任务</li>
+ *   <li>GET /api/v1/delivery2/tasks — 列出配送任务</li>
+ *   <li>GET /api/v1/delivery2/tasks/{id} — 获取任务详情</li>
+ *   <li>POST /api/v1/delivery2/tasks/{id}/start — 启动配送</li>
+ *   <li>POST /api/v1/delivery2/tasks/{id}/abort — 中止配送</li>
+ *   <li>GET /api/v1/delivery2/tasks/{id}/route — 获取优化路线</li>
+ *   <li>POST /api/v1/delivery2/tasks/{id}/deliver — 执行投放</li>
+ *   <li>GET /api/v1/delivery2/tasks/{id}/status — 配送状态</li>
+ *   <li>POST /api/v1/delivery2/tasks/{id}/confirm — 确认签收</li>
+ *   <li>GET /api/v1/delivery2/landing-sites — 搜索降落点</li>
  * </ul>
  */
 @RestController

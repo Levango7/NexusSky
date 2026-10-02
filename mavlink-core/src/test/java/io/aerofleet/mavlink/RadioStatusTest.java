@@ -9,10 +9,15 @@ import java.nio.ByteBuffer;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * RADIO_STATUS (109) round-trip (batch E1). CRC_EXTRA=88 is computed from
- * the official message_checksum algorithm (X25 over "RADIO_STATUS " +
- * "type name " per field, extra = lo^hi) - the parser accepting our own
- * frames proves the seed matches the official registry.
+ * RADIO_STATUS (109) round-trip (batch E1).
+ * <p>
+ * CRC_EXTRA=185，取自 MAVLink 官方 common.xml。外部核对由
+ * {@code python scripts/mavlink-compatibility-check.py --cross-check} 完成
+ * （用 pymavlink 官方定义逐条比对）。
+ * <p>
+ * 注意：下面的往返用例**只能证明内部自洽**（本类编码 → 本仓库存量表 → 本仓理解码），
+ * 不能证明与官方注册表一致——两端用的是同一张表，自证循环。官方值必须靠外部参照物核对。
+ * 该值此前是 88，与 pymavlink 官方定义不符。
  */
 class RadioStatusTest {
 
@@ -25,9 +30,9 @@ class RadioStatusTest {
     }
 
     @Test
-    void infoRegisteredWithComputedLenCrc() {
+    void infoRegisteredWithOfficialLenCrc() {
         assertEquals(9, MavlinkMessageInfo.lengthOf(RadioStatus.ID));
-        assertEquals(88, MavlinkMessageInfo.crcExtraOf(RadioStatus.ID));
+        assertEquals(185, MavlinkMessageInfo.crcExtraOf(RadioStatus.ID));
     }
 
     @Test

@@ -13,6 +13,9 @@ import java.util.PriorityQueue;
 import java.util.Random;
 
 /**
+
+ * <b>当前状态：未接入生产路径</b>——本类只被自己的单元测试与同包的 {@link ObstacleAvoidanceStrategy} 引用， {@code VirtualDrone} 不调用它（应急链路实际走 {@code FailsafeController}）。见 {@code AiAutonomyWiringTest}。
+ * <p>
  * 路径规划器：实现 A* 网格搜索与 RRT 快速扩展随机树两种算法。
  * <p>
  * 两种算法在本地切平面坐标系（米）下工作，输入输出均为经纬度（+高度）。

@@ -37,9 +37,12 @@ final class FailsafeController {
     }
 
     static FailsafeController defaults() {
+        // 阈值来自 FailsafeThresholds（唯一真相源）。
         // link grace 15s > cloud's 10s offline timeout, so the drone reacts
         // slightly after the GCS has already flagged it offline - PX4-like.
-        return new FailsafeController(true, 15_000, 22);
+        return new FailsafeController(true,
+                FailsafeThresholds.LINK_LOSS_AFTER_MS,
+                FailsafeThresholds.BATTERY_CRIT_PCT);
     }
 
     /** Verdict handed back to the tick loop. */

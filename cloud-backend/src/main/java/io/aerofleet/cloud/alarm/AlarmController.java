@@ -42,23 +42,23 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 /**
  * 报警联动 REST 端点（M10 报警联动编排，FR-31）。
  * <p>
- * 独立路径前缀 /api/alarms/*，提供报警事件接收/查询/确认与联动规则 CRUD。
+ * 独立路径前缀 /api/v1/alarms/*，提供报警事件接收/查询/确认与联动规则 CRUD。
  * <p>
  * 端点清单：
  * <pre>
- * POST   /api/alarms/events            接收报警事件（来自安防设备）
- * GET    /api/alarms/events            查询报警事件列表（分页/筛选）
- * GET    /api/alarms/events/{id}       获取报警事件详情
- * POST   /api/alarms/events/{id}/ack   确认报警
- * POST   /api/alarms/events/ack-batch  批量确认报警
- * POST   /api/alarms/events/{id}/respond 一键应急响应
- * GET    /api/alarms/stream            报警事件 SSE 实时推送
- * GET    /api/alarms/linkage-logs      联动执行日志查询
- * GET    /api/alarms/rules             列出联动规则
- * POST   /api/alarms/rules             创建联动规则
- * PUT    /api/alarms/rules/{id}        更新联动规则
- * DELETE /api/alarms/rules/{id}        删除联动规则
- * POST   /api/alarms/rules/{id}/test   测试联动规则（模拟触发）
+ * POST   /api/v1/alarms/events            接收报警事件（来自安防设备）
+ * GET    /api/v1/alarms/events            查询报警事件列表（分页/筛选）
+ * GET    /api/v1/alarms/events/{id}       获取报警事件详情
+ * POST   /api/v1/alarms/events/{id}/ack   确认报警
+ * POST   /api/v1/alarms/events/ack-batch  批量确认报警
+ * POST   /api/v1/alarms/events/{id}/respond 一键应急响应
+ * GET    /api/v1/alarms/stream            报警事件 SSE 实时推送
+ * GET    /api/v1/alarms/linkage-logs      联动执行日志查询
+ * GET    /api/v1/alarms/rules             列出联动规则
+ * POST   /api/v1/alarms/rules             创建联动规则
+ * PUT    /api/v1/alarms/rules/{id}        更新联动规则
+ * DELETE /api/v1/alarms/rules/{id}        删除联动规则
+ * POST   /api/v1/alarms/rules/{id}/test   测试联动规则（模拟触发）
  * </pre>
  */
 @RestController

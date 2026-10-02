@@ -21,13 +21,13 @@ import java.nio.ByteBuffer;
  * 16   memberCount       u8       成员数量
  * 17   reserved          u8       保留（0填充）
  * </pre>
- * CRC_EXTRA = 265（P2 自定义扩展）。
+ * CRC_EXTRA = 241（P2 自定义扩展）。
  */
 public final class ClusterFormationMsg extends MavlinkMessage {
 
     public static final int ID = 481;
     public static final int LEN = 18;
-    public static final int CRC_EXTRA = 265;
+    public static final int CRC_EXTRA = 241;
     private static final int MEMBERS_LEN = 8;
 
     public final long timestamp;      // ms

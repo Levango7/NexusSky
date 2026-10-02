@@ -20,13 +20,13 @@ import java.nio.ByteBuffer;
  * 3    maxTerminals      u16   最大并发终端数
  * 5    frequencyChannel  u16   频段编号
  * </pre>
- * CRC_EXTRA = 246。
+ * CRC_EXTRA = 190。
  */
 public final class CellTowerConfigMsg extends MavlinkMessage {
 
     public static final int ID = 456;
     public static final int LEN = 7;
-    public static final int CRC_EXTRA = 246;
+    public static final int CRC_EXTRA = 190;
 
     public final int sysid;               // 目标无人机 sysid
     public final int cellType;            // 0=LTE, 1=WIFI, 2=LORA

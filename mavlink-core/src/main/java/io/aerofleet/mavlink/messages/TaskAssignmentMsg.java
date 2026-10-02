@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
  * 16   priority        u8    优先级（1-4）
  * 17   assignedSysId   u8    被分配无人机系统 ID
  * </pre>
- * CRC_EXTRA = 252（M10 自定义扩展，避开 M0-M9 已占用的 233-251）。
+ * CRC_EXTRA = 144（M10 自定义扩展，避开 M0-M9 已占用的 233-251）。
  */
 public final class TaskAssignmentMsg extends MavlinkMessage {
 
     public static final int ID = 468;
     public static final int LEN = 18;
-    public static final int CRC_EXTRA = 252;
+    public static final int CRC_EXTRA = 144;
 
     public final long taskId;           // 任务 ID
     public final int targetLat;         // 1E7 度

@@ -27,17 +27,17 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code POST /api/show/formations} — 创建队形定义</li>
- *   <li>{@code GET  /api/show/formations} — 列出所有队形</li>
- *   <li>{@code GET  /api/show/formations/{id}} — 获取队形详情</li>
- *   <li>{@code POST /api/show/formations/{id}/positions} — 计算队形位置（输入 droneCount）</li>
- *   <li>{@code POST /api/show/tasks} — 创建表演任务</li>
- *   <li>{@code GET  /api/show/tasks} — 列出所有任务</li>
- *   <li>{@code GET  /api/show/tasks/{id}} — 获取任务详情</li>
- *   <li>{@code POST /api/show/tasks/{id}/start} — 启动表演</li>
- *   <li>{@code POST /api/show/tasks/{id}/abort} — 中止表演</li>
- *   <li>{@code GET  /api/show/tasks/{id}/actions} — 获取动作序列</li>
- *   <li>{@code POST /api/show/tasks/{id}/music-sync} — 配置音乐同步</li>
+ *   <li>{@code POST /api/v1/show/formations} — 创建队形定义</li>
+ *   <li>{@code GET  /api/v1/show/formations} — 列出所有队形</li>
+ *   <li>{@code GET  /api/v1/show/formations/{id}} — 获取队形详情</li>
+ *   <li>{@code POST /api/v1/show/formations/{id}/positions} — 计算队形位置（输入 droneCount）</li>
+ *   <li>{@code POST /api/v1/show/tasks} — 创建表演任务</li>
+ *   <li>{@code GET  /api/v1/show/tasks} — 列出所有任务</li>
+ *   <li>{@code GET  /api/v1/show/tasks/{id}} — 获取任务详情</li>
+ *   <li>{@code POST /api/v1/show/tasks/{id}/start} — 启动表演</li>
+ *   <li>{@code POST /api/v1/show/tasks/{id}/abort} — 中止表演</li>
+ *   <li>{@code GET  /api/v1/show/tasks/{id}/actions} — 获取动作序列</li>
+ *   <li>{@code POST /api/v1/show/tasks/{id}/music-sync} — 配置音乐同步</li>
  * </ul>
  */
 @RestController

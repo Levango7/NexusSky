@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
  * 22   sysId          u8    发送方系统 ID
  * 23   sensorMask     u8    传感器位掩码：GPS=1, IMU=2, VISION=4, LIDAR=8
  * </pre>
- * CRC_EXTRA = 258（M12 自定义扩展）。
+ * CRC_EXTRA = 39（M12 自定义扩展）。
  */
 public final class SensorFusionDataMsg extends MavlinkMessage {
 
     public static final int ID = 474;
     public static final int LEN = 24;
-    public static final int CRC_EXTRA = 258;
+    public static final int CRC_EXTRA = 39;
 
     /** 传感器位掩码常量。 */
     public static final int MASK_GPS = 1;

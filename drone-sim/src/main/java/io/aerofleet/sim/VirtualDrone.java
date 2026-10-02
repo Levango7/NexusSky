@@ -122,6 +122,12 @@ public final class VirtualDrone implements AutoCloseable {
     /** 避障启用标志（volatile 保证接收线程写与 tick 线程读可见性）。 */
     private volatile boolean obstacleEnabled = false;
     /**
+     * M11 自主决策 advisory 接线：1Hz 组装态势快照喂给 {@link AutonomyAdvisor}，
+     * 主决策类型变化沿经 STATUSTEXT 下发<b>建议</b>（不执行动作——
+     * 真正生效的应急链路仍是 {@code FailsafeController}）。
+     */
+    private final AutonomyAdvisor autonomyAdvisor = new AutonomyAdvisor(this::pushStatus);
+    /**
      * M4 硬件抽象数据源（FR-01/FR-07/FR-12/FR-15）：null 表示未注入，不产生硬件上报（DFX 4.5）。
      * 由 setter 注入（供 e2e 脚本/配置注入），tickOnce 按各自频率分频调用。
      */
@@ -1247,6 +1253,12 @@ public final class VirtualDrone implements AutoCloseable {
         }
         checkBattery();
 
+        // M11 自主决策 advisory（1Hz，建议-only）：坠毁后不再评估（对残骸发
+        // 返航建议没有意义）；链路黑盒期间本段已被上方 return 跳过。
+        if (state != FlightState.CRASHED) {
+            autonomyAdvisor.tick(nowMs, buildAdvisorySnapshot(nowMs));
+        }
+
         // M9 应急任务编排引擎 tick 驱动（FR-01 周期驱动）：
         // orchEngine 启用时每个 tick 调 orchEngine.tick()，驱动持续服务阶段超时检查。
         if (orchEngine != null) {
@@ -2321,6 +2333,52 @@ public final class VirtualDrone implements AutoCloseable {
             SimLog.warn("battery low: " + pct + "%");
             pushStatus(MavEnums.MAV_SEVERITY_WARNING, "Battery low: " + pct + "%");
         }
+    }
+
+    /**
+     * M11 advisory 态势快照：电量（含场景电量故障覆盖，与 checkBattery/
+     * runFailsafe 同口径）、链路静默（与 {@code FailsafeController} 共用
+     * {@code FailsafeThresholds.LINK_LOSS_AFTER_MS} 判据）、GPS、位置、
+     * 障碍报告（检测器未注入/未启用时视为无障碍）与合成风（场景风+环境风
+     * 向量叠加，即本 tick 实际作用在机体上的风）。missionUrgency 无自然
+     * 来源，由 {@link AutonomyAdvisor} 固定填 0。
+     */
+    private AutonomyAdvisor.Snapshot buildAdvisorySnapshot(long nowMs) {
+        double bootSec = (nowMs - bootUnixMs) / 1000.0;
+        int batteryPct = physics.batteryRemainingPct();
+        if (scenario.batteryFault(bootSec)) {
+            batteryPct = (int) scenario.batteryFaultPct(bootSec);
+        }
+        long silence = lastGcsRxMs > 0 ? nowMs - lastGcsRxMs : 0;
+        double windN = reusableScenarioWind[0];
+        double windE = reusableScenarioWind[1];
+        if (envModel != null && envEnabled) {
+            windN += reusableEnvWind[0];
+            windE += reusableEnvWind[1];
+        }
+        boolean obstacleSeen = false;
+        double obstacleDistM = Double.MAX_VALUE;
+        if (obstacleDetector != null && obstacleEnabled) {
+            try {
+                ObstacleDetector.ObstacleReport report = obstacleDetector.detect();
+                if (report.distance() != Double.MAX_VALUE) {
+                    obstacleSeen = true;
+                    obstacleDistM = report.distance();
+                }
+            } catch (Exception e) {
+                SimLog.warn("advisory obstacle detect failed: " + e.getMessage());
+            }
+        }
+        boolean gpsLost = scenario.gpsLost(bootSec);
+        return new AutonomyAdvisor.Snapshot(
+                batteryPct,
+                silence <= FailsafeThresholds.LINK_LOSS_AFTER_MS,
+                !gpsLost,
+                physics.alt(),
+                Math.hypot(physics.north(), physics.east()),
+                obstacleSeen,
+                obstacleDistM,
+                Math.hypot(windN, windE));
     }
 
     // ------------------------------------------------------------------

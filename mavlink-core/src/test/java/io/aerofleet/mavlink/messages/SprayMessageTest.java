@@ -185,8 +185,8 @@ class SprayMessageTest {
         assertNotEquals(GripperCommand.ID, PayloadStatus.ID);
 
         // 确认不与既有消息冲突
-        int[] existing = {0, 1, 2, 24, 30, 33, 42, 43, 44, 47, 51, 69, 73, 74, 76, 77,
-                109, 143, 242, 253, 259, 260, 262, 263, 271, 420, 421, 422};
+        int[] existing = {0, 1, 2, 24, 30, 33, 42, 43, 44, 47, 51, 69, 73, 74, 76, 77, 40,
+                109, 242, 253, 259, 260, 262, 263, 271, 420, 421, 422};
         int[] m2Ids = {SprayStatus.ID, SprayCommand.ID, GripperCommand.ID, PayloadStatus.ID};
         for (int existingId : existing) {
             for (int m2Id : m2Ids) {

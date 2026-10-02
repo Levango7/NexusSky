@@ -38,11 +38,11 @@ class CoverageOptimizationMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=466、LEN=24、CRC_EXTRA=250")
+    @DisplayName("消息 ID=466、LEN=24、CRC_EXTRA=229")
     void messageIdAndConstants() {
         assertThat(CoverageOptimizationMsg.ID).isEqualTo(466);
         assertThat(CoverageOptimizationMsg.LEN).isEqualTo(24);
-        assertThat(CoverageOptimizationMsg.CRC_EXTRA).isEqualTo(250);
+        assertThat(CoverageOptimizationMsg.CRC_EXTRA).isEqualTo(229);
     }
 
     @Test

@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
  * 最大派遣距离（米）、默认派遣无人机数量、悬停侦察高度与时长。
  * <p>
  * 字段使用 volatile 以便在 {@code ConcurrentHashMap} 等并发结构中安全共享，
- * 配置可在运行时通过 {@code PUT /api/autodispatch/config} 端点更新。
+ * 配置可在运行时通过 {@code PUT /api/v1/autodispatch/config} 端点更新。
  *
  * @see AutoDispatchService
  * @see AutoDispatchController

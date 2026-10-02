@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 自动生成于 2026-09-26，共 60 个 `@RestController`、3 个 `@Service` 辅助类、318 个 REST API 端点
+> 更新至 2026-10-02，共 65 个 `@RestController`、3 个 `@Service` 辅助类、344 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -62,6 +62,11 @@
 - [API Key 管理](#api-key-管理)
 - [Webhook 管理](#webhook-管理)
 - [OpenAPI 导出](#openapi-导出)
+- [监管合规](#监管合规)
+- [Remote ID](#remote-id)
+- [限飞区](#限飞区)
+- [设备归属](#设备归属)
+- [CV 评测](#cv-评测)
 
 ---
 
@@ -166,7 +171,7 @@ curl -H "Authorization: Bearer <token>" \
 
 ## 飞行追踪
 
-### 基础路径 `/api/tracking`
+### 基础路径 `/api/v1/tracking`
 
 **Controller**: `tracking/TrackingController` | **Tag**: Tracking - 无人机追踪 REST API：飞行轨迹查询、历史轨迹回放、遗失辅助查找
 
@@ -181,45 +186,45 @@ curl -H "Authorization: Bearer <token>" \
 
 #### 端点详情
 
-**GET /api/tracking/{sysid}/track**
+**GET /api/v1/tracking/{sysid}/track**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 查询参数: `limit` (Integer, 可选) - 最多返回 N 条，<=0 表示不限制
 - 响应: 200 - 轨迹点列表；404 - 无人机未注册
 
-**GET /api/tracking/{sysid}/replay**
+**GET /api/v1/tracking/{sysid}/replay**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 查询参数: `from` (long, 默认 0, epoch ms, 0=不限起始), `to` (long, 默认 0, epoch ms, 0=不限结束), `limit` (int, 默认 1000)
 - 响应: 200 - 轨迹点列表（按时间升序）；404 - 无人机未注册
 
-**GET /api/tracking/{sysid}/last-known**
+**GET /api/v1/tracking/{sysid}/last-known**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 响应: 200 - 最新轨迹点（有注册但无轨迹时返回 null body）；404 - 无人机未注册
 
-**GET /api/tracking/lost**
+**GET /api/v1/tracking/lost**
 - 响应: 200 - 失联无人机列表（含告警时间、最后位置、电量等）
 
-**GET /api/tracking/{sysid}/search-guide**
+**GET /api/v1/tracking/{sysid}/search-guide**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 响应: 200 - 辅助查找信息；404 - 无人机未注册或无查找信息
 
-**GET /api/tracking/scan**
+**GET /api/v1/tracking/scan**
 - 响应: 200 - `{newlyLost:List<int>, totalLost:int}`（本次扫描新失联的 sysid 列表）
 
 **curl 示例**:
 ```bash
 # 历史轨迹回放
 curl -H "Authorization: Bearer <token>" \
-  "http://localhost:8080/api/tracking/1/replay?from=1695600000000&to=1695603600000&limit=500"
+  "http://localhost:8080/api/v1/tracking/1/replay?from=1695600000000&to=1695603600000&limit=500"
 
 # 获取失联无人机列表
-curl -H "Authorization: Bearer <token>" http://localhost:8080/api/tracking/lost
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/tracking/lost
 ```
 
 ---
 
 ## 电子围栏
 
-### 基础路径 `/api/geofence`
+### 基础路径 `/api/v1/geofence`
 
 **Controller**: `geofence/GeofenceController` | **Tag**: Geofence - 电子围栏 REST API：围栏区域 CRUD、越界历史查询、手动检查
 
@@ -235,32 +240,32 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/tracking/lost
 
 #### 端点详情
 
-**POST /api/geofence/zones**
+**POST /api/v1/geofence/zones**
 - 请求体（圆形）: `{id:int, name:String, type:"CIRCLE", centerLat:double, centerLon:double, radiusM:double, action:"WARN"|"LOCK_RTH", enabled?:boolean}`
 - 请求体（多边形）: `{id:int, name:String, type:"POLYGON", points:[{lat:double,lon:double}, ...], action:"WARN"|"LOCK_RTH", enabled?:boolean}`（至少 3 个点）
 - 响应: 200 - 围栏详情；400 - 请求体格式错误
 
-**GET /api/geofence/zones**
+**GET /api/v1/geofence/zones**
 - 响应: 200 - `{items:[Zone], total:int}`
 
-**GET /api/geofence/zones/{id}**
+**GET /api/v1/geofence/zones/{id}**
 - 路径参数: `id` (int) - 围栏 ID
 - 响应: 200 - 围栏详情；404 - 围栏不存在
 
-**PUT /api/geofence/zones/{id}**
+**PUT /api/v1/geofence/zones/{id}**
 - 路径参数: `id` (int) - 围栏 ID
 - 请求体: 同 POST（body 中的 id 会被强制设为路径 id）
 - 响应: 200 - 更新后的围栏；404 - 围栏不存在；400 - 请求体格式错误
 
-**DELETE /api/geofence/zones/{id}**
+**DELETE /api/v1/geofence/zones/{id}**
 - 路径参数: `id` (int) - 围栏 ID
 - 响应: 200 - `{deleted:true, id:int}`；404 - 围栏不存在
 
-**GET /api/geofence/breaches**
+**GET /api/v1/geofence/breaches**
 - 查询参数: `sysid` (Integer, 可选) - 按无人机过滤, `zoneId` (Integer, 可选) - 按围栏过滤
 - 响应: 200 - `{items:[BreachEvent], total:int}`
 
-**POST /api/geofence/check**
+**POST /api/v1/geofence/check**
 - 响应: 200 - `{newEvents:[BreachEvent], count:int, timestamp:long}`（检查所有在线无人机位置是否越界）
 
 **curl 示例**:
@@ -268,17 +273,17 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/tracking/lost
 # 创建圆形围栏
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"id":1,"name":"base","type":"CIRCLE","centerLat":22.5,"centerLon":113.9,"radiusM":500,"action":"WARN"}' \
-  http://localhost:8080/api/geofence/zones
+  http://localhost:8080/api/v1/geofence/zones
 
 # 手动触发全量检查
-curl -X POST -H "Authorization: Bearer <token>" http://localhost:8080/api/geofence/check
+curl -X POST -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/geofence/check
 ```
 
 ---
 
 ## 远程锁机
 
-### 基础路径 `/api/drone-lock`
+### 基础路径 `/api/v1/drone-lock`
 
 **Controller**: `drone/DroneLockController` | **Tag**: Drone Lock - 无人机远程锁定/解锁
 
@@ -293,27 +298,27 @@ curl -X POST -H "Authorization: Bearer <token>" http://localhost:8080/api/geofen
 
 #### 端点详情
 
-**POST /api/drone-lock/{sysid}/lock**
+**POST /api/v1/drone-lock/{sysid}/lock**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 请求体: `{reason:String, lockedBy:String, action:"DISARM"|"FORCE_LAND"|"RETURN_TO_LAUNCH"}`
 - 响应: 200 - 锁定状态（幂等，已锁定返回当前状态）；404 - 无人机未注册；400 - lockedBy 缺失或 action 非法
 
-**POST /api/drone-lock/{sysid}/unlock**
+**POST /api/v1/drone-lock/{sysid}/unlock**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 请求体: `{unlockedBy:String}`
 - 响应: 200 - 解锁后的状态；404 - 无人机未注册；400 - 未锁定或 unlockedBy 缺失
 
-**GET /api/drone-lock/{sysid}**
+**GET /api/v1/drone-lock/{sysid}**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 响应: 200 - 锁定状态；404 - 无人机未注册
 
-**GET /api/drone-lock/locked**
+**GET /api/v1/drone-lock/locked**
 - 响应: 200 - 当前处于锁定状态的无人机列表
 
-**GET /api/drone-lock/all**
+**GET /api/v1/drone-lock/all**
 - 响应: 200 - 所有有锁定记录的无人机状态
 
-**DELETE /api/drone-lock/{sysid}**
+**DELETE /api/v1/drone-lock/{sysid}**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 响应: 200 - `{status:"ok", sysid:int}`；404 - 无人机未注册
 
@@ -322,17 +327,17 @@ curl -X POST -H "Authorization: Bearer <token>" http://localhost:8080/api/geofen
 # 锁定无人机（强制降落）
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"reason":"违规飞行","lockedBy":"admin","action":"FORCE_LAND"}' \
-  http://localhost:8080/api/drone-lock/1/lock
+  http://localhost:8080/api/v1/drone-lock/1/lock
 
 # 查询所有已锁定无人机
-curl -H "Authorization: Bearer <token>" http://localhost:8080/api/drone-lock/locked
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/locked
 ```
 
 ---
 
 ## 安防监控
 
-### 基础路径 `/api/surveillance`
+### 基础路径 `/api/v1/surveillance`
 
 **Controller**: `surveillance/SurveillanceController` | **Tag**: Surveillance - 安防设备 REST API：ONVIF 设备全生命周期管理、RTSP 流、PTZ 控制、事件订阅
 
@@ -352,33 +357,33 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/drone-lock/loc
 
 #### 端点详情
 
-**POST /api/surveillance/devices**
+**POST /api/v1/surveillance/devices**
 - 请求体: `{id:String, name:String, vendor:"HIKVISION"|"DAHUA"|"UNIVIEW", ip:String, port:int, username:String, password:String}`
 - 响应: 200 - 设备详情（含能力信息）；400 - 参数错误
 
-**GET /api/surveillance/devices/{id}/stream**
+**GET /api/v1/surveillance/devices/{id}/stream**
 - 路径参数: `id` (String) - 设备 ID
 - 查询参数: `channel` (int, 默认 1) - 通道号，必须 >= 1
 - 响应: 200 - `{deviceId, channel, rtspUrl}`（URL 中凭据脱敏）；404 - 设备不存在；502 - 获取流 URL 失败
 
-**POST /api/surveillance/devices/{id}/ptz**
+**POST /api/v1/surveillance/devices/{id}/ptz**
 - 路径参数: `id` (String) - 设备 ID
 - 请求体: `{cmd:"up"|"down"|"left"|"right"|"zoomIn"|"zoomOut"|"stop"}`
 - 响应: 200 - `{status:"ok", cmd, result}`；400 - cmd 非法；404 - 设备不存在；502 - PTZ 控制失败
 
-**POST /api/surveillance/discover**
+**POST /api/v1/surveillance/discover**
 - 请求体: `{subnet:String}`（CIDR 格式，如 "192.168.1.0/24"）
 - 响应: 200 - `{subnet, count, devices:[Device]}`；400 - subnet 缺失；502 - 发现失败
 
-**POST /api/surveillance/rapid-deploy**
+**POST /api/v1/surveillance/rapid-deploy**
 - 请求体: `{subnet:String, username:String?, password:String?}`（默认 admin/admin123）
 - 响应: 200 - `{subnet, count, results:[{deviceId,ip,vendor,status,message,rtspUrl}]}`
 
-**GET /api/surveillance/devices/{id}/events** （SSE）
+**GET /api/v1/surveillance/devices/{id}/events** （SSE）
 - 路径参数: `id` (String) - 设备 ID
 - 响应: 200 - `text/event-stream`，事件名 `surveillance-event`，每 15 秒心跳注释；404 - 设备不存在
 
-**GET /api/surveillance/events**
+**GET /api/v1/surveillance/events**
 - 查询参数: `page` (int, 默认 0), `size` (int, 默认 20, 范围 [1,1000]), `deviceId` (String, 可选)
 - 响应: 200 - `{items, total, page, size, deviceId?}`
 
@@ -387,18 +392,18 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/drone-lock/loc
 # 注册安防设备
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"id":"cam-001","name":"前门摄像头","vendor":"HIKVISION","ip":"192.168.1.100","port":80,"username":"admin","password":"admin123"}' \
-  http://localhost:8080/api/surveillance/devices
+  http://localhost:8080/api/v1/surveillance/devices
 
 # PTZ 控制
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"cmd":"left"}' http://localhost:8080/api/surveillance/devices/cam-001/ptz
+  -d '{"cmd":"left"}' http://localhost:8080/api/v1/surveillance/devices/cam-001/ptz
 ```
 
 ---
 
 ## 报警联动
 
-### 基础路径 `/api/alarms`
+### 基础路径 `/api/v1/alarms`
 
 **Controller**: `alarm/AlarmController` | **Tag**: Alarm - 报警联动 REST API：报警事件接收/查询/确认、联动规则 CRUD、SSE 实时推送、一键应急响应
 
@@ -420,30 +425,30 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 
 #### 端点详情
 
-**POST /api/alarms/events**
+**POST /api/v1/alarms/events**
 - 请求体: `{id?:String, sourceDeviceId:String, sourceDeviceName:String, eventType:"MOTION"|"INTRUSION"|"FIRE"|"DOOR"|"CUSTOM", severity:"INFO"|"WARN"|"CRITICAL", description:String, lat:double, lon:double, alt:double, timestampMs?:long}`
 - 响应: 200 - `{eventId, matchedCount:int, executions:[{ruleId,actionType,status,planId,taskTemplate?,error?}], timestamp}`
 
-**GET /api/alarms/events**
+**GET /api/v1/alarms/events**
 - 查询参数: `page` (int, 默认 0), `size` (int, 默认 20), `severity` (String, 可选, INFO/WARN/CRITICAL), `type` (String, 可选, MOTION/INTRUSION/FIRE/DOOR/CUSTOM)
 - 响应: 200 - `{items:[Event], total, page, size}`
 
-**POST /api/alarms/events/ack-batch** （需 OPERATOR 角色）
+**POST /api/v1/alarms/events/ack-batch** （需 OPERATOR 角色）
 - 请求体: `{eventIds:[String]}`
 - 响应: 200 - `{totalRequested, successCount, failedIds:[String], timestamp}`；400 - eventIds 缺失或为空
 
-**POST /api/alarms/events/{id}/respond** （需 OPERATOR 角色）
+**POST /api/v1/alarms/events/{id}/respond** （需 OPERATOR 角色）
 - 路径参数: `id` (String) - 报警事件 ID
 - 响应: 200 - `{commandId, eventId, status:"EXECUTING"|"FAILED", message, timestamp}`；404 - 报警事件不存在
 
-**GET /api/alarms/stream** （SSE）
+**GET /api/v1/alarms/stream** （SSE）
 - 响应: 200 - `text/event-stream`，事件名 `alarm-event`，每 2 秒轮询新事件推送，每 15 秒心跳
 
-**GET /api/alarms/linkage-logs**
+**GET /api/v1/alarms/linkage-logs**
 - 查询参数: `limit` (int, 默认 100) - 最多返回条数
 - 响应: 200 - `{items:[{eventId,ruleId,actionType,status,planId,error?,timestampMs}], total, limit}`
 
-**POST /api/alarms/rules** （需 OPERATOR 角色）
+**POST /api/v1/alarms/rules** （需 OPERATOR 角色）
 - 请求体: `{id?:String, name:String, enabled?:boolean, matchEventType?:String, matchSeverity:"INFO"|"WARN"|"CRITICAL", matchDeviceIds:[String], actionType:"DEPLOY_DRONE"|..., droneCount:int, targetLat?:double, targetLon?:double, targetRadiusM:double, altitudeM:double, taskTemplate?:String}`
 - 响应: 200 - `{ruleId, created:true}`；400 - 规则参数非法
 
@@ -452,17 +457,17 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 # 接收报警事件
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"sourceDeviceId":"cam-001","sourceDeviceName":"前门摄像头","eventType":"INTRUSION","severity":"CRITICAL","description":"检测到入侵","lat":22.59,"lon":113.93,"alt":0}' \
-  http://localhost:8080/api/alarms/events
+  http://localhost:8080/api/v1/alarms/events
 
 # SSE 订阅报警事件
-curl -N -H "Authorization: Bearer <token>" http://localhost:8080/api/alarms/stream
+curl -N -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/alarms/stream
 ```
 
 ---
 
 ## 应急指挥
 
-### 基础路径 `/api/emergency-command`
+### 基础路径 `/api/v1/emergency-command`
 
 **Controller**: `mission/EmergencyCommandController` | **Tag**: EmergencyCommand - 应急指挥工作流 REST API：接报→研判→部署→执行→评估→总结全生命周期管理
 
@@ -481,16 +486,16 @@ curl -N -H "Authorization: Bearer <token>" http://localhost:8080/api/alarms/stre
 
 #### 端点详情
 
-**POST /api/emergency-command** （需 OPERATOR 角色）
+**POST /api/v1/emergency-command** （需 OPERATOR 角色）
 - 请求体: `{incidentType:String, severity:"INFO"|"WARN"|"CRITICAL", lat:double, lon:double, alt:double, description:String, reporterName:String, reporterContact:String}`
 - 约束: lat ∈ [-90,90]，lon ∈ [-180,180]
 - 响应: 200 - 指挥命令详情；400 - 参数非法
 
-**GET /api/emergency-command**
+**GET /api/v1/emergency-command**
 - 查询参数: `phase` (String, 可选) - 按阶段过滤（RECEIVED/ASSESSING/DEPLOYING/EXECUTING/EVALUATING/CLOSED）
 - 响应: 200 - `{commands:[Command], total}`
 
-**POST /api/emergency-command/{id}/deploy** （需 OPERATOR 角色）
+**POST /api/v1/emergency-command/{id}/deploy** （需 OPERATOR 角色）
 - 请求体: `{planName:String, strategy:String, estimatedDurationMin:int, communicationRelay:String, operator:String}`
 - 约束: estimatedDurationMin > 0
 - 响应: 200 - 部署后的命令；400 - 命令不存在或参数非法
@@ -528,11 +533,11 @@ curl -N -H "Authorization: Bearer <token>" http://localhost:8080/api/alarms/stre
 # 创建应急指挥命令
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"incidentType":"FIRE","severity":"CRITICAL","lat":22.59,"lon":113.93,"alt":0,"description":"仓库火灾","reporterName":"张三","reporterContact":"13800138000"}' \
-  http://localhost:8080/api/emergency-command
+  http://localhost:8080/api/v1/emergency-command
 
 # 一键应急响应
 curl -X POST -H "Authorization: Bearer <token>" \
-  http://localhost:8080/api/emergency-command/cmd-001/one-click
+  http://localhost:8080/api/v1/emergency-command/cmd-001/one-click
 
 # 启动编排计划
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
@@ -904,7 +909,7 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 
 ## 集群调度
 
-### 基础路径 `/api/scheduling`
+### 基础路径 `/api/v1/scheduling`
 
 **Controller**: `scheduling/SchedulingController` | M10 集群调度 REST API
 
@@ -918,11 +923,11 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 
 #### 端点详情
 
-**POST /api/scheduling/tasks** （需 OPERATOR 角色）
+**POST /api/v1/scheduling/tasks** （需 OPERATOR 角色）
 - 请求体: TaskRequest（含 taskId, taskType, priority 等）
 - 响应: 200 - 任务分配结果
 
-**POST /api/scheduling/conflicts/check**
+**POST /api/v1/scheduling/conflicts/check**
 - 请求体: `{lat1:double, lon1:double, alt1:double, v1:double, h1:double, lat2:double, lon2:double, alt2:double, v2:double, h2:double}`（两架无人机的位置/速度/航向）
 - 响应: 200 - 冲突检测结果；400 - 缺少必填字段
 
@@ -953,7 +958,7 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 # 创建调度任务
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"taskId":"task-001","taskType":"SURVEY","priority":1}' \
-  http://localhost:8080/api/scheduling/tasks
+  http://localhost:8080/api/v1/scheduling/tasks
 
 # 编队分派
 curl -X POST -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/squad/assign
@@ -963,7 +968,7 @@ curl -X POST -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/squ
 
 ## AI 决策
 
-### 基础路径 `/api/ai`
+### 基础路径 `/api/v1/ai`
 
 **Controller**: `ai/DecisionMonitorController` | M11 决策监控 REST API
 
@@ -974,23 +979,23 @@ curl -X POST -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/squ
 
 #### 端点详情
 
-**GET /api/ai/decisions**
+**GET /api/v1/ai/decisions**
 - 响应: 200 - 所有无人机决策列表（按 sysid 分组）
 
-**GET /api/ai/decisions/{sysid}**
+**GET /api/v1/ai/decisions/{sysid}**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 响应: 200 - 指定无人机的决策列表
 
 **curl 示例**:
 ```bash
-curl -H "Authorization: Bearer <token>" http://localhost:8080/api/ai/decisions
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/ai/decisions
 ```
 
 ---
 
 ## 边缘计算
 
-### 基础路径 `/api/edge`
+### 基础路径 `/api/v1/edge`
 
 **Controller**: `edge/EdgeCoordinationController` | M12 边缘协同 REST API
 
@@ -1002,11 +1007,11 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/ai/decisions
 
 #### 端点详情
 
-**POST /api/edge/results**
+**POST /api/v1/edge/results**
 - 请求体: `{sysid:int, taskId:String, type:String, ...}`（含任务结果数据）
 - 响应: 200 - `{status:"OK"}`
 
-**GET /api/edge/fusion/{sysid}**
+**GET /api/v1/edge/fusion/{sysid}**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 响应: 200 - 指定无人机的融合数据列表
 
@@ -1015,14 +1020,14 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/ai/decisions
 # 提交边缘计算结果
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"sysid":1,"taskId":"task-001","type":"DETECTION","result":"person"}' \
-  http://localhost:8080/api/edge/results
+  http://localhost:8080/api/v1/edge/results
 ```
 
 ---
 
 ## 数字孪生
 
-### 基础路径 `/api/twin`
+### 基础路径 `/api/v1/twin`
 
 **Controller**: `twin/TwinController` | M13 数字孪生 REST API
 
@@ -1035,29 +1040,29 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 
 #### 端点详情
 
-**GET /api/twin/state**
+**GET /api/v1/twin/state**
 - 响应: 200 - 所有数字孪生状态集合
 
-**GET /api/twin/state/{sysid}**
+**GET /api/v1/twin/state/{sysid}**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 响应: 200 - 指定无人机的数字孪生状态（含 lat/lon/alt/heading/velocity/battery/syncTimestamp）
 
-**GET /api/twin/predict/{sysid}**
+**GET /api/v1/twin/predict/{sysid}**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 查询参数: `horizon` (int, 默认 30) - 预测时间范围（秒）
 - 响应: 200 - 预测结果（含轨迹点列表）
 
-**GET /api/twin/compare/{sysid}**
+**GET /api/v1/twin/compare/{sysid}**
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 响应: 200 - 虚实对比结果（含位置/速度等偏差指标）
 
 **curl 示例**:
 ```bash
 # 轨迹预测（60 秒）
-curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/twin/predict/1?horizon=60"
+curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/twin/predict/1?horizon=60"
 
 # 虚实对比
-curl -H "Authorization: Bearer <token>" http://localhost:8080/api/twin/compare/1
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/twin/compare/1
 ```
 
 ---
@@ -1088,7 +1093,7 @@ curl -H "Authorization: Bearer <token>" \
 
 ## 安全认证
 
-### 基础路径 `/api/auth`
+### 基础路径 `/api/v1/auth`
 
 **Controller**: `security/AuthController` | 认证端点：登录与令牌刷新
 
@@ -1099,12 +1104,12 @@ curl -H "Authorization: Bearer <token>" \
 
 #### 端点详情
 
-**POST /api/auth/login**
+**POST /api/v1/auth/login**
 - 请求体: `{username:String, password:String}`
 - 频率限制: 每 IP 每分钟最多 10 次尝试，超限返回 429
 - 响应: 200 - `{token:String, expiresIn:long, username:String}`；400 - 缺少用户名/密码；401 - 凭据无效；429 - 频率超限
 
-**POST /api/auth/refresh**
+**POST /api/v1/auth/refresh**
 - 请求头: `Authorization: Bearer <token>`
 - 响应: 200 - `{token:String, expiresIn:long}`；401 - 令牌缺失/无效/过期
 
@@ -1113,11 +1118,11 @@ curl -H "Authorization: Bearer <token>" \
 # 登录
 curl -X POST -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin"}' \
-  http://localhost:8080/api/auth/login
+  http://localhost:8080/api/v1/auth/login
 
 # 刷新令牌
 curl -X POST -H "Authorization: Bearer <old-token>" \
-  http://localhost:8080/api/auth/refresh
+  http://localhost:8080/api/v1/auth/refresh
 ```
 
 ---
@@ -1158,7 +1163,7 @@ curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/audit/veri
 
 ## 许可证
 
-### 基础路径 `/api/license`
+### 基础路径 `/api/v1/license`
 
 **Controller**: `license/LicenseController` | License 管理 REST 端点
 
@@ -1170,25 +1175,25 @@ curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/audit/veri
 
 #### 端点详情
 
-**GET /api/license/info**
+**GET /api/v1/license/info**
 - 响应: 200 - `{tenantId, productName, maxDevices, expiryDate, issuedAt, issuedTo, active, expired, devEdition}`
 
-**POST /api/license/activate**
+**POST /api/v1/license/activate**
 - 请求体: `{activationCode:String, tenantId:String, machineId:String}`
 - 响应: 200 - `{success:boolean, message:String}`
 
-**GET /api/license/verify**
+**GET /api/v1/license/verify**
 - 响应: 200 - `{valid:boolean, expired:boolean, active:boolean, devEdition:boolean}`
 
 **curl 示例**:
 ```bash
 # 查询 License 信息
-curl -H "Authorization: Bearer <token>" http://localhost:8080/api/license/info
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/license/info
 
 # 激活 License
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"activationCode":"XXXX-XXXX-XXXX","tenantId":"tenant-001","machineId":"mac-001"}' \
-  http://localhost:8080/api/license/activate
+  http://localhost:8080/api/v1/license/activate
 ```
 
 ---
@@ -1302,16 +1307,19 @@ curl -X POST -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/vid
 
 **POST /api/v1/voice-cmd/parse**
 - 请求体: `{text:String}`（非空）
-- �,响应: 200 - ParsedCommand（含 action、sysid、params 等）；400 - 缺少 text 字段
+- 响应: 200 - ParsedCommand（含 action、sysid、params 等）；400 - 缺少 text 字段
 
 **POST /api/v1/voice-cmd/execute**
 - 请求体: ParsedCommand（从 /parse 获取的结构化指令）
 - 响应: 200 - ExecutionResult（含 status、message）；404 - 无人机未注册
-- 注: 高优先级指令（如 arm、takeoff）需二次确认，返回 status=PENDING
+- 注: 指令经 MAVLink 真实下发并依据飞控 ACK 生成结果：TAKEOFF/LAND/RETURN/PHOTO 走
+  COMMAND_LONG（未指定高度的起飞默认 10m）；FLY_TO 需显式经纬度+高度（单航点任务上传并启动，
+  覆盖机上原任务）；HOVER/RECORD/SET_ALTITUDE/SET_SPEED 无对应命令通路，返回 REJECTED
+- 注: 高优先级指令需二次确认，返回 status=PENDING_CONFIRMATION
 
 **POST /api/v1/voice-cmd/confirm/{pendingId}**
 - 路径参数: `pendingId` (String) - 待确认指令 ID
-- 响应: 200 - 确认后的执行结果；404 - 待确认指令不存在
+- 响应: 200 - 确认后的执行结果（下发失败时 status=FAILED）；404 - 待确认指令不存在
 
 **curl 示例**:
 ```bash
@@ -2072,6 +2080,219 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/openapi/yam
 
 ---
 
+## 监管合规
+
+### 基础路径 `/api/v1/regulator`
+
+**Controller**: `regulator/RegulatorController` | 实名验证、激活/注销上报与合规状态查询；写操作需 OPERATOR，已注销（CANCELLED）的无人机拒绝所有监管操作（409）
+
+| 方法 | 路径 | 说明 | 请求体 | 响应 |
+|------|------|------|--------|------|
+| POST | `/verify` | 实名登记状态验证（需 OPERATOR） | {sysid,productSerialNo,realNameCertNo} | 200 {sysid,verifyStatus,ownerName,registerDate} / 409 |
+| POST | `/activate` | 激活上报（需 OPERATOR，前置 VERIFIED） | {sysid,productSerialNo,activationTime,latitude,longitude} | 200 {sysid,success,activationId} / 409 |
+| POST | `/cancel` | 注销上报（需 OPERATOR，前置 ACTIVATED/OPERATING） | {sysid,productSerialNo,cancellationReason} | 200 {sysid,success,cancellationId} / 409 |
+| GET | `/status/{sysid}` | 单机合规状态详情 | - | 200 / 404 |
+| GET | `/status` | 全部合规状态列表 | - | 200 List |
+
+#### 端点详情
+
+**POST /api/v1/regulator/verify** （需 OPERATOR 角色）
+- 请求体: `{sysid:int, productSerialNo:String, realNameCertNo:String}`
+- 向监管平台发起实名登记状态验证，验证成功将合规状态流转为 VERIFIED；已 CANCELLED 的无人机返回 409
+- 响应: 200 - `{sysid, verifyStatus, ownerName, registerDate, errorMessage?}`（结果脱敏）
+
+**POST /api/v1/regulator/activate** （需 OPERATOR 角色）
+- 前置校验合规状态为 VERIFIED，否则 409；`activationTime=0` 时由服务端补当前时间；成功流转为 ACTIVATED 并启动遥测上报
+- 响应: 200 - `{sysid, success, activationId, errorMessage?}`
+
+**POST /api/v1/regulator/cancel** （需 OPERATOR 角色）
+- 前置校验合规状态为 ACTIVATED/OPERATING，否则 409；先停止遥测上报再注销，成功流转为 CANCELLED
+- 响应: 200 - `{sysid, success, cancellationId, errorMessage?}`
+
+**GET /api/v1/regulator/status/{sysid}**
+- 响应: 200 - `{sysid, productSerialNo, status, activationId, cancellationId, lastVerifyTime, lastActivationTime, lastTelemetryReportTime}`；404 - 记录不存在
+
+**GET /api/v1/regulator/status**
+- 响应: 200 - 上述结构的列表
+
+**curl 示例**:
+```bash
+# 实名验证
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"sysid":1,"productSerialNo":"SN-001","realNameCertNo":"CERT-001"}' \
+  http://localhost:8080/api/v1/regulator/verify
+
+# 查询合规状态
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/regulator/status/1
+```
+
+---
+
+## Remote ID
+
+### 基础路径 `/api/v1/rid`
+
+**Controller**: `rid/RidController` | Remote ID 状态查询、配置更新与广播控制；写操作需 OPERATOR，响应中 operatorId 脱敏（保留前 4 位 + `*`）
+
+| 方法 | 路径 | 说明 | 请求体 | 响应 |
+|------|------|------|--------|------|
+| GET | `/status/{sysid}` | 单机 RID 状态详情 | - | 200 / 404 |
+| GET | `/status` | 全部 RID 状态列表 | - | 200 List |
+| POST | `/config` | 更新 RID 配置（需 OPERATOR） | {operatorId?,operatorLat?,operatorLon?,defaultSelfId?} | 200 配置（operatorId 脱敏） |
+| POST | `/broadcast/{sysid}/start` | 启动 RID 广播（需 OPERATOR） | - | 200 {sysid,action,ridStatus} |
+| POST | `/broadcast/{sysid}/stop` | 停止 RID 广播（需 OPERATOR） | - | 200 {sysid,action,success,ridStatus} |
+
+#### 端点详情
+
+**GET /api/v1/rid/status/{sysid}**
+- 响应: 200 - `{sysid, ridStatus, lastReceivedTime, basicId?, location?, system?, selfId?, operatorId?}`；
+  `location` 含 `status/latitude/longitude/altitudeBarometric/altitudeGeodetic/direction/speedHorizontal/speedVertical/timestamp`，
+  `system` 含操作者位置与区域统计（areaCount/areaRadius/areaCeiling/areaFloor），`operatorId` 脱敏；404 - RID 状态记录不存在
+
+**GET /api/v1/rid/status**
+- 响应: 200 - 上述结构的列表
+
+**POST /api/v1/rid/config** （需 OPERATOR 角色）
+- 请求体: `{operatorId?:String, operatorLat?:double, operatorLon?:double, defaultSelfId?:String}`，仅更新出现的字段
+- 响应: 200 - `{operatorId(脱敏), operatorLat, operatorLon, defaultSelfId}`
+
+**POST /api/v1/rid/broadcast/{sysid}/start** （需 OPERATOR 角色）
+- 将指定无人机的 RID 状态置为 BROADCASTING（无快照时先初始化）
+- 响应: 200 - `{sysid, action:"start", ridStatus}`
+
+**POST /api/v1/rid/broadcast/{sysid}/stop** （需 OPERATOR 角色）
+- 将 RID 状态回退到 NOT_BROADCASTING；`BROADCASTING_ERROR` 状态不允许直接回退（返回 `success=false` 与 error 说明）
+- 响应: 200 - `{sysid, action:"stop", success, ridStatus?, error?}`
+
+**curl 示例**:
+```bash
+# 更新操作者信息
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"operatorId":"110101199001011234","operatorLat":30.5,"operatorLon":104.1}' \
+  http://localhost:8080/api/v1/rid/config
+
+# 启动 RID 广播
+curl -X POST -H "Authorization: Bearer <token>" \
+  http://localhost:8080/api/v1/rid/broadcast/1/start
+```
+
+---
+
+## 限飞区
+
+### 基础路径 `/api/v1/geofence`
+
+**Controller**: `geofence/RestrictionController` | 限飞区列表、缓存状态、手动刷新与拦截日志查询（与电子围栏 `/api/v1/geofence` 相互独立）
+
+| 方法 | 路径 | 说明 | 请求体 | 响应 |
+|------|------|------|--------|------|
+| GET | `/restriction/zones` | 当前缓存的限飞区列表 | - | 200 {items,total,stale} |
+| GET | `/restriction/status` | 缓存状态与连通状态 | - | 200 {…,connected} |
+| POST | `/restriction/refresh` | 手动刷新限飞区缓存（需 OPERATOR） | - | 200 {success,zoneCount,…} |
+| GET | `/intercept/logs` | 拦截日志列表（可按 sysid 过滤） | - | 200 {items,total} |
+
+#### 端点详情
+
+**GET /api/v1/geofence/restriction/zones**
+- 响应: 200 - `{items: [{zoneId, name, type, fenceType, source, fetchedAtMs, …}], total, stale}`；
+  CIRCLE 类型带 `centerLat/centerLon/radiusM`，POLYGON 类型带 `points` 顶点列表
+
+**GET /api/v1/geofence/restriction/status**
+- 响应: 200 - 缓存状态（缓存条数、最后刷新时间、数据源类型、是否 stale）+ `connected`（缓存非空且非 stale 时为 true）
+
+**POST /api/v1/geofence/restriction/refresh** （需 OPERATOR 角色）
+- 触发缓存立即刷新
+- 响应: 200 - `{success, zoneCount, previousCount, wasStale, nowStale, timestamp}`；刷新后仍 stale 时 `success=false`
+
+**GET /api/v1/geofence/intercept/logs**
+- 查询参数: `sysid` (Integer, 可选) - 按无人机过滤
+- 响应: 200 - `{items: [{sysid, command, lat, lon, verdict, reason?, zoneInfo?, timestampMs}], total}`
+
+**curl 示例**:
+```bash
+# 查询限飞区列表
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/geofence/restriction/zones
+
+# 手动刷新缓存
+curl -X POST -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/geofence/restriction/refresh
+```
+
+---
+
+## 设备归属
+
+### 基础路径 `/api/v1/devices`
+
+**Controller**: `gateway/DeviceProvisioningController` | 设备登记与租户归属管理，全部端点需 ADMIN；prod 白名单模式下这是首台设备的登记入口
+
+| 方法 | 路径 | 说明 | 请求体 | 响应 |
+|------|------|------|--------|------|
+| GET | `/unassigned` | 待归属设备 sysid 列表（需 ADMIN） | - | 200 {sysids} |
+| POST | `/{sysid}` | 登记设备进白名单（需 ADMIN） | {tenantId?} | 201/200 / 400 / 404 |
+| DELETE | `/{sysid}` | 撤销设备登记（需 ADMIN） | - | 200 / 404 |
+| PUT | `/{sysid}/tenant` | 绑定或解绑租户（需 ADMIN） | {tenantId} | 200 / 400 / 404 |
+
+#### 端点详情
+
+**GET /api/v1/devices/unassigned** （需 ADMIN 角色）
+- 响应: 200 - `{sysids: [...]}`——尚未归属任何租户的设备（UDP 上报自动注册但未显式归属的快照）
+
+**POST /api/v1/devices/{sysid}** （需 ADMIN 角色）
+- 路径参数: `sysid` 取值 1..254，越界返回 400
+- 请求体: 可选 `{tenantId: int}`，缺省登记为未归属；tenant 不存在返回 404
+- 响应: 201（新建）/ 200（已存在，`alreadyRegistered=true`）- `{sysid, tenantId, persisted, alreadyRegistered}`；
+  `persisted=false`（dev/test 默认）时注册表为内存态、不跨重启保留，prod profile 已开启持久化
+
+**DELETE /api/v1/devices/{sysid}** （需 ADMIN 角色）
+- 撤销登记（白名单移除；持久化开启时连库行一起删）
+- 响应: 200 - `{sysid, deregistered:true, persisted}`；404 - 设备未知
+
+**PUT /api/v1/devices/{sysid}/tenant** （需 ADMIN 角色）
+- 请求体: `{tenantId: int}` 绑定；`{"tenantId": null}` 解绑；缺字段返回 400
+- 响应: 200 - `{sysid, tenantId, assigned}`；404 - tenant 不存在，或设备未知（需先上线心跳，或持久化下已入库）
+
+**curl 示例**:
+```bash
+# 登记设备并归属到租户 2
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"tenantId":2}' http://localhost:8080/api/v1/devices/1
+
+# 解绑租户
+curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"tenantId":null}' http://localhost:8080/api/v1/devices/1/tenant
+```
+
+---
+
+## CV 评测
+
+### 基础路径 `/api/v1/cv-eval`
+
+**Controller**: `vision/CvEvalController` | CV 检测三指标（识别率/误检比/处理时间）聚合查询与评测窗口重置；评测为拍摄主路径的纯旁路，进程内滑动窗口（默认 500 帧，重启清零）
+
+| 方法 | 路径 | 说明 | 请求体 | 响应 |
+|------|------|------|--------|------|
+| GET | `/metrics` | 三指标聚合查询 | - | 200 指标聚合 |
+| POST | `/reset` | 清空评测窗口（需 OPERATOR） | - | 200 {ok:true} |
+
+#### 端点详情
+
+**GET /api/v1/cv-eval/metrics**
+- 查询参数: `source` (String, 可选) - 检测源过滤（truth / vision-source / pixels / external，空 = 全部）
+- 响应: 200 - `{frames, recall, falseDetectionRatio, latencyAvgMs, latencyP95Ms, windowSize, truePositives, falsePositives, truthTotal, reference:{recall:0.85, falseDetectionRatio:0.15}, perFrame:[最近 50 帧摘要]}`
+- 指标口径：recall = ΣTP/Σ真值数，falseDetectionRatio = ΣFP/(ΣTP+ΣFP)，latency 为检测+定位端到端 ms（avg 与 p95）；分母为零时对应指标为 `null`（前端显示 "--"）
+
+**POST /api/v1/cv-eval/reset** （需 OPERATOR 角色）
+- 响应: 200 - `{ok: true}`
+
+**curl 示例**:
+```bash
+# 查询三指标（按检测源过滤）
+curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/cv-eval/metrics?source=vision-source"
+```
+
+---
+
 ## 附录
 
 ### 错误响应格式
@@ -2105,7 +2326,7 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/openapi/yam
 |------|------|----------|
 | ADMIN | 管理员 | 雷达配置、基站配置、卫星策略、审计日志 |
 | OPERATOR | 操作员 | 飞行命令、任务创建、报警确认、应急响应 |
-| （无注解） | 登录用户即可 | 查询类端点（遥测、轨迹、状态） |
+| OBSERVER | 观察者（只读） | 状态/遥测/轨迹等查询类端点（类级 `@RequireRole(OBSERVER)`） |
 
 ### SSE 事件流
 
@@ -2113,12 +2334,12 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/openapi/yam
 
 | 端点 | 事件名 | 心跳间隔 | 超时时间 |
 |------|--------|----------|----------|
-| GET /api/alarms/stream | `alarm-event` | 15 秒 | 30 分钟 |
-| GET /api/surveillance/devices/{id}/events | `surveillance-event` | 15 秒 | 30 分钟 |
+| GET /api/v1/alarms/stream | `alarm-event` | 15 秒 | 30 分钟 |
+| GET /api/v1/surveillance/devices/{id}/events | `surveillance-event` | 15 秒 | 30 分钟 |
 
 SSE 客户端示例（JavaScript）：
 ```javascript
-const es = new EventSource('http://localhost:8080/api/alarms/stream', {
+const es = new EventSource('http://localhost:8080/api/v1/alarms/stream', {
   withCredentials: true
 });
 es.addEventListener('alarm-event', (e) => {
@@ -2137,12 +2358,12 @@ es.onerror = (e) => {
 |------|-----------|----------|--------|
 | 无人机控制 | DroneController | /api/v1/drones | 8 |
 | 无人机控制 | FlightLogController | /api/v1/flightlog | 2 |
-| 飞行追踪 | TrackingController | /api/tracking | 6 |
-| 电子围栏 | GeofenceController | /api/geofence | 7 |
-| 远程锁机 | DroneLockController | /api/drone-lock | 6 |
-| 安防监控 | SurveillanceController | /api/surveillance | 11 |
-| 报警联动 | AlarmController | /api/alarms | 13 |
-| 应急指挥 | EmergencyCommandController | /api/emergency-command | 10 |
+| 飞行追踪 | TrackingController | /api/v1/tracking | 6 |
+| 电子围栏 | GeofenceController | /api/v1/geofence | 7 |
+| 远程锁机 | DroneLockController | /api/v1/drone-lock | 6 |
+| 安防监控 | SurveillanceController | /api/v1/surveillance | 11 |
+| 报警联动 | AlarmController | /api/v1/alarms | 13 |
+| 应急指挥 | EmergencyCommandController | /api/v1/emergency-command | 10 |
 | 应急指挥 | EmergencyOrchController | /api/v1/emergency | 10 |
 | 编队表演 | FormationController | /api/v1/formation | 8 |
 | 喷洒物流 | SprayController | /api/v1/spray | 3 |
@@ -2162,9 +2383,9 @@ es.onerror = (e) => {
 | 边缘计算 | EdgeCoordinationController | /api/v1/edge | 3 |
 | 数字孪生 | TwinController | /api/v1/twin | 4 |
 | 环境气象 | EnvAlertController | /api/v1/env-alerts | 1 |
-| 安全认证 | AuthController | /api/auth | 2 |
+| 安全认证 | AuthController | /api/v1/auth | 2 |
 | 审计日志 | AuditController | /api/v1/audit | 2 |
-| 许可证 | LicenseController | /api/license | 3 |
+| 许可证 | LicenseController | /api/v1/license | 3 |
 | 自动出警 | AutoDispatchController | /api/v1/autodispatch | 6 |
 | 自动出警 | VoiceIntercomController | /api/v1/voice-intercom | 4 |
 | 自动出警 | VideoStreamController | /api/v1/video-stream | 5 |
@@ -2195,6 +2416,11 @@ es.onerror = (e) => {
 | API Key 管理 | ApiKeyController | /api/v1/auth/api-key | 3 |
 | Webhook 管理 | WebhookController | /api/v1/webhooks | 3 |
 | OpenAPI 导出 | OpenApiExportController | /api/v1/openapi | 2 |
-| **合计** | **60 个 @RestController** | | **318** |
+| 监管合规 | RegulatorController | /api/v1/regulator | 5 |
+| Remote ID | RidController | /api/v1/rid | 5 |
+| 限飞区 | RestrictionController | /api/v1/geofence | 4 |
+| 设备归属 | DeviceProvisioningController | /api/v1/devices | 4 |
+| 视觉感知 | CvEvalController | /api/v1/cv-eval | 2 |
+| **合计** | **65 个 @RestController** | | **344** |
 
-> **注**: 项目共 63 个 `*Controller.java` 文件，其中 `vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。已文档化的 60 个 `@RestController` 共 318 个端点。
+> **注**: 项目共 68 个 Controller 源文件（67 个 `*Controller.java` + `delivery2/DeliveryController2.java`），其中 65 个为 `@RestController`。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。65 个 `@RestController` 共 344 个端点。

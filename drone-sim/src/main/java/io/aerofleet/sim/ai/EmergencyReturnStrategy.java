@@ -8,6 +8,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * M11 应急返航策略（二级）：在基础返航之上叠加风场修正与安全高度抬升。
+ * <p>
+ * 与 {@link ReturnToHomeStrategy} 的分工：本类负责「应急」场景下的即时返航决策，
+ * 后者负责能耗最优路径规划。二者当前都未接入生产路径。
+ * <p>
+ * <b>当前状态：未接入生产路径</b>——本类只被自己的单元测试引用，
+ * {@code VirtualDrone} 不调用它（应急链路实际走 {@code FailsafeController}）。
+ * 见 {@code AiAutonomyWiringTest}。
+ */
 public class EmergencyReturnStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(EmergencyReturnStrategy.class);

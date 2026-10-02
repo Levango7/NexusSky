@@ -16,7 +16,9 @@ import java.util.Collections;
  * 基于 Redis 的分布式限流器。
  * <p>
  * 使用 Redis INCR + EXPIRE 实现固定窗口限流（每分钟 N 次）。
- * Key 格式：{@code rate_limit:{tenantId}:{minuteBucket}}，其中 minuteBucket 为当前分钟的时间戳。
+ * Key 格式：{@code rate_limit:{key}:{minuteBucket}}，其中 key 为调用方解析的限流 key
+ * （真实租户桶 {@code tenant:<id>} 或客户端 IP 桶 {@code ip:<addr>}），
+ * minuteBucket 为当前分钟的时间戳。
  * <p>
  * 当 Redis 不可用（StringRedisTemplate 未注入或操作异常）时，返回 true（允许通过），
  * 由调用方回退到内存限流。
@@ -57,20 +59,20 @@ public class RedisRateLimiter {
      * 使用 Redis INCR 原子递增当前分钟窗口的计数器，首次递增时设置 EXPIRE。
      * 当 Redis 不可用时返回 true（允许通过），由调用方回退到内存限流。
      *
-     * @param tenantId       租户 ID
+     * @param key           限流 key（真实租户桶 {@code tenant:<id>} 或客户端 IP 桶 {@code ip:<addr>}）
      * @param limitPerMinute 每分钟允许的最大请求数
      * @return true 表示允许通过，false 表示已超限
      */
-    public boolean tryAcquire(String tenantId, int limitPerMinute) {
+    public boolean tryAcquire(String key, int limitPerMinute) {
         if (redisTemplate == null) {
             return true;
         }
 
         try {
-            String key = buildKey(tenantId);
+            String redisKey = buildKey(key);
             Long current = redisTemplate.execute(
                     RATE_LIMIT_REDIS_SCRIPT,
-                    Collections.singletonList(key),
+                    Collections.singletonList(redisKey),
                     String.valueOf(WINDOW_TTL.getSeconds())
             );
 
@@ -84,23 +86,23 @@ public class RedisRateLimiter {
     /**
      * 使用默认限流阈值尝试获取许可。
      *
-     * @param tenantId 租户 ID
+     * @param key 限流 key（真实租户桶或客户端 IP 桶）
      * @return true 表示允许通过，false 表示已超限
      */
-    public boolean tryAcquire(String tenantId) {
-        return tryAcquire(tenantId, defaultLimitPerMinute);
+    public boolean tryAcquire(String key) {
+        return tryAcquire(key, defaultLimitPerMinute);
     }
 
     /**
-     * 构建限流 Key：{@code rate_limit:{tenantId}:{minuteBucket}}。
+     * 构建限流 Key：{@code rate_limit:{key}:{minuteBucket}}。
      * <p>
      * minuteBucket 为当前分钟的时间戳（epoch 秒 / 60），确保同一分钟内的请求落在同一窗口。
      *
-     * @param tenantId 租户 ID
+     * @param key 限流 key（真实租户桶或客户端 IP 桶）
      * @return Redis Key
      */
-    private String buildKey(String tenantId) {
+    private String buildKey(String key) {
         long minuteBucket = Instant.now().getEpochSecond() / 60;
-        return KEY_PREFIX + tenantId + ":" + minuteBucket;
+        return KEY_PREFIX + key + ":" + minuteBucket;
     }
 }

@@ -14,8 +14,8 @@ import java.util.Arrays;
  *   [1..6]   timestamp     6 字节 **小端** 48 位，单位 10 微秒、纪元 2015-01-01T00:00:00Z
  *   [7..12]  signature     6 字节 = SHA-256(secretKey + frameBytes + 上述 7 字节) 的前 6 字节
  * </pre>
- * 其中 {@code frameBytes} 是帧头到 CRC 的全部字节（不含签名块）——即签名覆盖
- * STX 之后的 LEN/INC/COMPAT/SEQ/SYSID/COMPID/MSGID + payload + CRC，与 pymavlink 的
+ * 其中 {@code frameBytes} 是帧头（STX）到 CRC 的全部字节（不含签名块）——即签名覆盖
+ * STX 本身及其后的 LEN/INC/COMPAT/SEQ/SYSID/COMPID/MSGID + payload + CRC，与 pymavlink 的
  * {@code sign_packet()} 同一输入序列。
  * <p>
  * <b>此前的实现为什么是错的</b>：旧版用 HMAC-SHA256 截取前 8 字节、时间戳按大端写入，

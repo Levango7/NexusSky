@@ -26,13 +26,13 @@ import java.nio.ByteBuffer;
  * 19   batteryBudget     u8    电量预算（%）
  * 20   timestamp         u32   时间戳（ms）
  * </pre>
- * CRC_EXTRA = 250（M9 自定义扩展）。
+ * CRC_EXTRA = 229（M9 自定义扩展）。
  */
 public final class CoverageOptimizationMsg extends MavlinkMessage {
 
     public static final int ID = 466;
     public static final int LEN = 24;
-    public static final int CRC_EXTRA = 250;
+    public static final int CRC_EXTRA = 229;
 
     public final long planId;           // 编排计划 ID
     public final int droneId;           // 无人机 ID

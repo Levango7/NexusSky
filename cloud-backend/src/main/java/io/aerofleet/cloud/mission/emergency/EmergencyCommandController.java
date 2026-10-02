@@ -27,20 +27,20 @@ import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundExcep
 /**
  * 应急指挥工作流 REST 端点（接报→研判→部署→执行→评估→总结）。
  * <p>
- * 独立路径前缀 /api/emergency-command/*，提供应急指挥命令的全生命周期管理。
+ * 独立路径前缀 /api/v1/emergency-command/*，提供应急指挥命令的全生命周期管理。
  * <p>
  * 端点清单：
  * <pre>
- * POST /api/emergency-command              创建指挥命令（接报）
- * GET  /api/emergency-command              列出指挥命令（支持阶段筛选）
- * GET  /api/emergency-command/{id}         获取命令详情
- * POST /api/emergency-command/{id}/assess  研判
- * POST /api/emergency-command/{id}/deploy  部署
- * POST /api/emergency-command/{id}/execute 开始执行
- * POST /api/emergency-command/{id}/evaluate 评估
- * POST /api/emergency-command/{id}/close   总结关闭
- * POST /api/emergency-command/{id}/one-click 一键应急响应
- * GET  /api/emergency-command/{id}/history 获取阶段转移历史
+ * POST /api/v1/emergency-command              创建指挥命令（接报）
+ * GET  /api/v1/emergency-command              列出指挥命令（支持阶段筛选）
+ * GET  /api/v1/emergency-command/{id}         获取命令详情
+ * POST /api/v1/emergency-command/{id}/assess  研判
+ * POST /api/v1/emergency-command/{id}/deploy  部署
+ * POST /api/v1/emergency-command/{id}/execute 开始执行
+ * POST /api/v1/emergency-command/{id}/evaluate 评估
+ * POST /api/v1/emergency-command/{id}/close   总结关闭
+ * POST /api/v1/emergency-command/{id}/one-click 一键应急响应
+ * GET  /api/v1/emergency-command/{id}/history 获取阶段转移历史
  * </pre>
  */
 @RestController

@@ -34,11 +34,11 @@ class EmergencyPriorityMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=467、LEN=50、CRC_EXTRA=251")
+    @DisplayName("消息 ID=467、LEN=50、CRC_EXTRA=208")
     void messageIdAndConstants() {
         assertThat(EmergencyPriorityMsg.ID).isEqualTo(467);
         assertThat(EmergencyPriorityMsg.LEN).isEqualTo(50);
-        assertThat(EmergencyPriorityMsg.CRC_EXTRA).isEqualTo(251);
+        assertThat(EmergencyPriorityMsg.CRC_EXTRA).isEqualTo(208);
     }
 
     @Test

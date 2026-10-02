@@ -25,13 +25,13 @@ import java.nio.ByteBuffer;
  * 36   tempC   f32   温度（℃）
  * 40   sysid   u8    源飞机 sysid
  * </pre>
- * CRC_EXTRA = 215（M4 自定义扩展）。
+ * CRC_EXTRA = 150（M4 自定义扩展）。
  */
 public final class ImuDataMsg extends MavlinkMessage {
 
     public static final int ID = 441;
     public static final int LEN = 41;
-    public static final int CRC_EXTRA = 215;
+    public static final int CRC_EXTRA = 150;
 
     public final float accelX;   // m/s²
     public final float accelY;

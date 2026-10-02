@@ -20,13 +20,13 @@ import java.nio.ByteBuffer;
  * 7    gpsLon            i32   经度（1E7 度）
  * 11   requestedSysid    u8    请求接入的目标无人机 sysid
  * </pre>
- * CRC_EXTRA = 248。
+ * CRC_EXTRA = 83。
  */
 public final class GroundTerminalRegisterMsg extends MavlinkMessage {
 
     public static final int ID = 458;
     public static final int LEN = 12;
-    public static final int CRC_EXTRA = 248;
+    public static final int CRC_EXTRA = 83;
 
     /** 终端类型枚举序数。 */
     public static final int TYPE_PHONE = 0;

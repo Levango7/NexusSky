@@ -29,7 +29,7 @@ import io.aerofleet.cloud.security.Role;
 /**
  * 多模态通信自适应态势可视化 REST API（P2-1）。
  * <p>
- * 端点前缀 {@code /api/comm-adapt}，覆盖：
+ * 端点前缀 {@code /api/v1/comm-adapt}，覆盖：
  * <ul>
  *   <li>{@code GET /quality/{sysid}} — 获取单机通信质量</li>
  *   <li>{@code GET /quality/fleet} — 获取机队通信质量总览</li>

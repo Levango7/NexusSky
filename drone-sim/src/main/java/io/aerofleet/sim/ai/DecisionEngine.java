@@ -8,15 +8,27 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * M11 AI 自主决策引擎：周期评估无人机状态，触发决策。
+ * M11 自主决策引擎：周期评估无人机状态，触发决策。
  * 决策类型：RTL(返航) / AVOID(避障) / ADAPT_PATH(自适应航线) / EMERGENCY_LAND(紧急降落)
+ * <p>
+ * <b>当前状态：已通过 {@code AutonomyAdvisor} 接入飞行路径（advisory 模式）。</b>
+ * {@code VirtualDrone.tickOnce()} 每 tick 调用 {@code AutonomyAdvisor}，由它以
+ * 1Hz 周期调用本引擎评估态势；主决策类型发生<b>变化沿</b>时经 STATUSTEXT
+ * 下发一条<b>建议</b>文本。注意两条链路的分工：本引擎<b>只建议、不执行</b>——
+ * 真正生效的应急执行链路仍是 {@code VirtualDrone} 自带的
+ * {@code FailsafeController}（链路丢失/电量临界/GPS 丢失 → RTL/HOLD），
+ * 阈值见 {@code FailsafeThresholds}。
+ * <p>
+ * {@code AiAutonomyWiringTest} 已把「DecisionEngine 已接线」钉成正向断言；
+ * 本引擎内部的策略类（返航/避障/自适应航线）与决策树仍只被 ai 包内引用，
+ * 不要在包外直接调用它们——新增接线属于架构变更，需同步该测试与文档。
  * <p>
  * 本引擎在初版顺序评估基础上增强为：
  * <ol>
  *   <li><b>多策略融合</b>：同时评估返航/避障/自适应航线策略，按融合权重排序输出。</li>
  *   <li><b>权重动态调整</b>：根据态势严重度自动放大对应策略权重。
  *       <ul>
- *         <li>电量 &lt;20%：返航权重 ×3</li>
+ *         <li>电量 &lt;20%：返航权重 ×3（提前量，硬触发仍是 22%）</li>
  *         <li>障碍物 &lt;10m：避障权重 ×3</li>
  *         <li>任务紧急度高(&gt;0.7)：自适应航线权重 ×2</li>
  *         <li>多紧急情况同时出现：按优先级 返航 &gt; 避障 &gt; 自适应</li>
@@ -25,6 +37,11 @@ import java.util.List;
  *   <li><b>决策树</b>：对复杂场景走决策树路径，电量危急时强制返航置顶。</li>
  *   <li><b>决策日志</b>：记录每次评估的输入、权重、决策树路径与选择结果，便于回溯分析。</li>
  * </ol>
+ * <p>
+ * 所谓「自主」在此处的确切含义是<b>规则 + 排序 + 搜索</b>（阈值规则、融合权重排序、
+ * 决策树、A 星（A-star）与 RRT 路径搜索），<b>不含任何机器学习模型</b>：全仓 pom 无
+ * onnxruntime / tensorflow / deeplearning4j 等 ML 依赖。命名沿用产品既有的
+ * 「M11 自主决策」，但不应被读作学习型决策。
  * <p>
  * 注意：drone-sim 模块使用 SLF4J Logger 输出日志。
  */
@@ -38,7 +55,15 @@ public class DecisionEngine {
     private final DecisionTree decisionTree = new DecisionTree();
 
     // ---- 权重动态调整阈值 ----
-    private static final double BATTERY_BOOST_THRESHOLD = 20.0;   // 电量<20% → 返航×3
+    /**
+     * 电量权重放大阈值（百分比）。
+     *
+     * <p><b>与 {@code FailsafeThresholds.BATTERY_CRIT_PCT}（22）刻意不相等</b>：
+     * 这里是「提前放大返航权重」，[20, 22) 区间内权重已被放大但硬触发尚未到达，
+     * 属于有意的提前量。不要把它「修正」成 22——那会让放大区间消失。
+     * 真正决定是否返航的是 {@code FailsafeController}。
+     */
+    private static final double BATTERY_BOOST_THRESHOLD = 20.0;
     private static final double OBSTACLE_BOOST_THRESHOLD = 10.0;  // 障碍物<10m → 避障×3
     private static final double URGENCY_BOOST_THRESHOLD = 0.7;    // 紧急度>0.7 → 自适应×2
     private static final double BATTERY_BOOST_FACTOR = 3.0;
@@ -138,7 +163,7 @@ public class DecisionEngine {
         // 8. 记录决策日志
         recordLog(ctx, rtlWeight, avoidWeight, adaptWeight, treeResult, primary, ranked.size());
 
-        // 9. 控制台输出（替代 slf4j）
+        // 9. SLF4J debug 输出（不设 INFO 级别，避免 5Hz tick 刷屏）
         if (!ranked.isEmpty()) {
             log.debug("[ai] Decisions triggered: count={} top={} tree={} w=[rtl={},avoid={},adapt={}]",
                     ranked.size(), primary.decisionType, treeResult.path, rtlWeight, avoidWeight, adaptWeight);

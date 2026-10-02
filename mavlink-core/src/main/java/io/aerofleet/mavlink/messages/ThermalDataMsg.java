@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
  * 21   sysid        u8     源飞机 sysid
  * 22   reserved     u16    保留（0）
  * </pre>
- * CRC_EXTRA = 203。
+ * CRC_EXTRA = 255。
  */
 public final class ThermalDataMsg extends MavlinkMessage {
 
     public static final int ID = 432;
     public static final int LEN = 24;
-    public static final int CRC_EXTRA = 203;
+    public static final int CRC_EXTRA = 255;
 
     public final float tempMean;
     public final float tempMin;

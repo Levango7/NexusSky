@@ -18,7 +18,7 @@ import java.nio.ByteBuffer;
  * 3    sprayWidth  uint16  cm（×100）
  * 5    reserved    uint8
  * </pre>
- * CRC_EXTRA = 52077（按 MavlinkCrc 对消息名+字段名+类型计算）。
+ * CRC_EXTRA = 124（由 MavlinkMessageChecksum 按官方 message_checksum 算法对消息名+字段签名计算）。
  */
 public final class SprayCommand extends MavlinkMessage {
 

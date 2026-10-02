@@ -23,7 +23,7 @@ import io.aerofleet.cloud.security.Role;
 /**
  * 视频流回传 REST API（P0-1 安防报警→无人机自动出警闭环）。
  * <p>
- * 端点前缀 {@code /api/video-stream}，覆盖：
+ * 端点前缀 {@code /api/v1/video-stream}，覆盖：
  * <ul>
  *   <li>获取无人机视频流 URL（{@code GET /{sysid}/url}）</li>
  *   <li>启动视频流推送（{@code POST /{sysid}/start}）</li>

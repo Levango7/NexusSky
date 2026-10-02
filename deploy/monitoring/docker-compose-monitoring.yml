@@ -26,6 +26,8 @@ services:
     image: prom/alertmanager:v0.27.0
     container_name: nexussky-alertmanager
     volumes:
+      # 无此挂载时 AM 找不到配置文件会崩溃重启循环（prometheus.yml 一直在给 :9093 推告警）
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
@@ -41,12 +43,17 @@ services:
     container_name: nexussky-grafana
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana-dashboard.json:/etc/grafana/provisioning/dashboards/nexussky-dashboard.json:ro
+      # 数据源供给（uid=prometheus 与 dashboard JSON 面板引用对齐）
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/nexussky.yaml:ro
+      # dashboard 供给声明 + JSON 本体（JSON 必须挂到 provider 声明的 path 下，
+      # 直接挂进 provisioning/dashboards/ 会被当成 provider 配置解析失败）
+      - ./grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/nexussky.yaml:ro
+      - ./grafana-dashboard.json:/var/lib/grafana/dashboards/nexussky-dashboard.json:ro
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=nexussky
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/nexussky-dashboard.json
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/nexussky-dashboard.json
     ports:
       - "3000:3000"
     networks:

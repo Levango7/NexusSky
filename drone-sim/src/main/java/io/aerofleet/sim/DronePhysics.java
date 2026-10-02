@@ -4,12 +4,17 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Virtual drone physical state and simplified kinematics.
+ * Virtual drone physical state and simplified kinematics (physics v2).
  * Position is tracked in local meters (north/east) relative to the fixed home
- * reference, plus altitude relative to home. Motion is "move toward target"
- * at constant speed per tick: no real aerodynamics, just plausible telemetry.
+ * reference, plus altitude relative to home. Motion is acceleration-limited
+ * toward the target with bank-bounded turns; attitude is solved from the
+ * real per-tick acceleration vector; battery drains at a mode-weighted rate;
+ * wind leaks a fixed residual into the track and biases the roll estimate.
+ * Plausible telemetry, not real aerodynamics.
  *
- * All mutable fields are confined to the simulator tick thread.
+ * Threading: the simulator tick thread writes all mutable state; other
+ * threads read it through volatile getters, while the command thread swaps
+ * the atomic target snapshot and the manual-steering fields.
  */
 public final class DronePhysics {
 

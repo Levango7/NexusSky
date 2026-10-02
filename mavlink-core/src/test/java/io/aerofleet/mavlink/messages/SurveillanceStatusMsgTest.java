@@ -18,11 +18,11 @@ class SurveillanceStatusMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=479、LEN=14、CRC_EXTRA=263")
+    @DisplayName("消息 ID=479、LEN=14、CRC_EXTRA=184")
     void messageIdAndConstants() {
         assertThat(SurveillanceStatusMsg.ID).isEqualTo(479);
         assertThat(SurveillanceStatusMsg.LEN).isEqualTo(14);
-        assertThat(SurveillanceStatusMsg.CRC_EXTRA).isEqualTo(263);
+        assertThat(SurveillanceStatusMsg.CRC_EXTRA).isEqualTo(184);
     }
 
     @Test

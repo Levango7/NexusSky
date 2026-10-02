@@ -25,7 +25,7 @@ import java.util.List;
  *                          gridIndex u16 + newTerrainType u8 + reserved u8
  * </pre>
  * 内嵌 {@link AffectedCell} record 承载每个受影响网格项。
- * CRC_EXTRA = 243（M8 自定义扩展）。
+ * CRC_EXTRA = 21（M8 自定义扩展）。
  */
 public final class TerrainUpdateMsg extends MavlinkMessage {
 
@@ -38,7 +38,7 @@ public final class TerrainUpdateMsg extends MavlinkMessage {
     public static final int MAX_CELLS = 65535;
     /** LEN 字段填 -1 表示可变长度。 */
     public static final int LEN = -1;
-    public static final int CRC_EXTRA = 243;
+    public static final int CRC_EXTRA = 21;
 
     /** 内嵌受影响网格项：gridIndex + newTerrainType。 */
     public record AffectedCell(int gridIndex, int newTerrainType) {

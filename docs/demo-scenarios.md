@@ -78,10 +78,10 @@
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
-| mavlink-core | 185 | MAVLink 协议编解码、CRC 一致性 |
-| drone-sim | 1222 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
-| cloud-backend | ~1823 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **3230** | **全部通过，0 failures** |
+| mavlink-core | 449 | MAVLink 协议编解码、CRC 一致性 |
+| drone-sim | 1337 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
+| cloud-backend | 2114 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **4048** | **全部通过，0 failures** |
 
 > 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
 
@@ -212,15 +212,15 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 
 | 步骤 | 操作 | API/命令 | 预期结果 |
 |---|---|---|---|
-| 1 | 布控球自动发现 | `POST /api/surveillance/rapid-deploy` (subnet=192.168.1.0/24) | 发现并注册 ≥1 个布控球（海康/大华/宇视） |
-| 2 | 查看已注册设备 | `GET /api/surveillance/devices` | 设备列表含厂商、型号信息 |
-| 3 | 创建联动规则 | `POST /api/alarms/rules` (FIRE+CRITICAL→DEPLOY_DRONE) | ruleId 非空 |
-| 4 | 模拟报警事件 | `POST /api/alarms/events` (FIRE, CRITICAL, lat/lon) | eventId + matchedCount≥1（联动触发） |
-| 5 | 查看报警列表 | `GET /api/alarms/events` | 事件总数 ≥1 |
-| 6 | 确认报警 | `POST /api/alarms/events/{id}/ack` | acknowledged=true |
-| 7 | 创建应急指挥 | `POST /api/emergency-command` (incidentType=火灾) | commandId + currentPhase |
-| 8 | 一键应急响应 | `POST /api/emergency-command/{id}/one-click` | 阶段流转：接报→研判→部署→执行→评估→总结 |
-| 9 | 查看指挥历史 | `GET /api/emergency-command` | 历史命令数 ≥1 |
+| 1 | 布控球自动发现 | `POST /api/v1/surveillance/rapid-deploy` (subnet=192.168.1.0/24) | 发现并注册 ≥1 个布控球（海康/大华/宇视） |
+| 2 | 查看已注册设备 | `GET /api/v1/surveillance/devices` | 设备列表含厂商、型号信息 |
+| 3 | 创建联动规则 | `POST /api/v1/alarms/rules` (FIRE+CRITICAL→DEPLOY_DRONE) | ruleId 非空 |
+| 4 | 模拟报警事件 | `POST /api/v1/alarms/events` (FIRE, CRITICAL, lat/lon) | eventId + matchedCount≥1（联动触发） |
+| 5 | 查看报警列表 | `GET /api/v1/alarms/events` | 事件总数 ≥1 |
+| 6 | 确认报警 | `POST /api/v1/alarms/events/{id}/ack` | acknowledged=true |
+| 7 | 创建应急指挥 | `POST /api/v1/emergency-command` (incidentType=火灾) | commandId + currentPhase |
+| 8 | 一键应急响应 | `POST /api/v1/emergency-command/{id}/one-click` | 阶段流转：接报→研判→部署→执行→评估→总结 |
+| 9 | 查看指挥历史 | `GET /api/v1/emergency-command` | 历史命令数 ≥1 |
 
 #### 预期结果
 
@@ -300,17 +300,17 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 | 步骤 | 操作 | API/命令 | 预期结果 |
 |---|---|---|---|
 | **监控阶段** | | | |
-| 1 | 布控球自动发现 | `POST /api/surveillance/rapid-deploy` | 注册 ≥1 设备 |
-| 2 | 查看设备列表 | `GET /api/surveillance/devices` | 含厂商/型号/状态 |
+| 1 | 布控球自动发现 | `POST /api/v1/surveillance/rapid-deploy` | 注册 ≥1 设备 |
+| 2 | 查看设备列表 | `GET /api/v1/surveillance/devices` | 含厂商/型号/状态 |
 | **告警阶段** | | | |
-| 3 | 创建联动规则 | `POST /api/alarms/rules` (FIRE+CRITICAL→DEPLOY_DRONE) | ruleId 非空 |
-| 4 | 模拟报警事件 | `POST /api/alarms/events` (FIRE, CRITICAL) | eventId + matchedCount≥1 |
-| 5 | 确认报警 | `POST /api/alarms/events/{id}/ack` | acknowledged=true |
+| 3 | 创建联动规则 | `POST /api/v1/alarms/rules` (FIRE+CRITICAL→DEPLOY_DRONE) | ruleId 非空 |
+| 4 | 模拟报警事件 | `POST /api/v1/alarms/events` (FIRE, CRITICAL) | eventId + matchedCount≥1 |
+| 5 | 确认报警 | `POST /api/v1/alarms/events/{id}/ack` | acknowledged=true |
 | **追踪阶段** | | | |
-| 6 | 查看报警事件列表 | `GET /api/alarms/events` | 事件总数≥1 |
-| 7 | 查看应急指挥历史 | `GET /api/emergency-command` | 命令历史 |
+| 6 | 查看报警事件列表 | `GET /api/v1/alarms/events` | 事件总数≥1 |
+| 7 | 查看应急指挥历史 | `GET /api/v1/emergency-command` | 命令历史 |
 | **处置阶段** | | | |
-| 8 | 一键应急响应 | `POST /api/emergency-command/{id}/one-click` | 6阶段自动流转→CLOSED |
+| 8 | 一键应急响应 | `POST /api/v1/emergency-command/{id}/one-click` | 6阶段自动流转→CLOSED |
 | 9 | 故障检测演示 | `scripts\e2e-fault.ps1` | GPS丢失/电池故障/链路中断自动检测 |
 | 10 | Failsafe演示 | `scripts\e2e-failsafe.ps1` | 断链→自主RTL→自主落地 |
 

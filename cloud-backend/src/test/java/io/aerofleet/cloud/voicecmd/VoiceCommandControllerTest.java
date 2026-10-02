@@ -4,14 +4,24 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
+import io.aerofleet.cloud.mission.common.MissionUploadResult;
+import io.aerofleet.mavlink.enums.MavEnums;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.List;
 import java.util.Map;
 
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyFloat;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -21,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@link VoiceCommandController} REST 端点测试。
  * <p>
  * 使用 MockMvc standaloneSetup 测试所有端点，无需 Spring 上下文。
+ * {@link DroneCommandService} 用 Mockito 桩化（全部 ACK ACCEPTED）。
  */
 @DisplayName("VoiceCommandController REST API")
 class VoiceCommandControllerTest {
@@ -32,6 +43,7 @@ class VoiceCommandControllerTest {
     private VoiceCommandParser parser;
     private VoiceCommandExecutor executor;
     private VoiceBroadcaster broadcaster;
+    private DroneCommandService commands;
 
     @BeforeEach
     void setUp() {
@@ -44,7 +56,16 @@ class VoiceCommandControllerTest {
         drone.lastHeartbeatMs = System.currentTimeMillis();
 
         parser = new VoiceCommandParser();
-        executor = new VoiceCommandExecutor(registry);
+        commands = mock(DroneCommandService.class);
+        when(commands.takeoff(anyInt(), anyDouble())).thenReturn(MavEnums.MAV_RESULT_ACCEPTED);
+        when(commands.rtl(anyInt())).thenReturn(MavEnums.MAV_RESULT_ACCEPTED);
+        when(commands.startMission(anyInt())).thenReturn(MavEnums.MAV_RESULT_ACCEPTED);
+        when(commands.command(anyInt(), anyInt(),
+                anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat()))
+                .thenReturn(MavEnums.MAV_RESULT_ACCEPTED);
+        when(commands.toMissionItems(anyList(), anyInt())).thenReturn(List.of());
+        when(commands.uploadMission(anyInt(), anyList())).thenReturn(MissionUploadResult.ok(1));
+        executor = new VoiceCommandExecutor(registry, commands);
         broadcaster = new VoiceBroadcaster(registry);
 
         VoiceCommandController controller = new VoiceCommandController(
@@ -160,6 +181,24 @@ class VoiceCommandControllerTest {
     void confirm_nonExistent() throws Exception {
         mockMvc.perform(post("/api/v1/voice-cmd/confirm/non-existent-id"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("POST /confirm/{pendingId} 确认后下发失败返回 200 + FAILED（而非 404）")
+    void confirm_dispatchFailure_returnsFailed() throws Exception {
+        ParsedCommand cmd = new ParsedCommand("紧急返航");
+        cmd.setAction(ParsedCommand.Action.RETURN);
+        cmd.setSysid(1);
+        cmd.setPriority(ParsedCommand.Priority.HIGH);
+        String pendingId = executor.execute(cmd).getCommandId();
+
+        // 让 rtl 被飞控拒绝（覆盖 setUp 中的 ACCEPTED 桩）
+        when(commands.rtl(1)).thenReturn(MavEnums.MAV_RESULT_DENIED);
+
+        mockMvc.perform(post("/api/v1/voice-cmd/confirm/" + pendingId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.commandId").value(pendingId));
     }
 
     // --- POST /broadcast/{sysid} ---

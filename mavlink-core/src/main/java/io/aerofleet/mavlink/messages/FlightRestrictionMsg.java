@@ -24,7 +24,7 @@ import java.util.List;
  * 8    area[n]          每项 8 字节：lat i32 + lon i32（1E7 度）
  * </pre>
  * 内嵌 {@link GeoPoint} record 承载每个多边形顶点。
- * CRC_EXTRA = 244（M8 自定义扩展）。
+ * CRC_EXTRA = 61（M8 自定义扩展）。
  */
 public final class FlightRestrictionMsg extends MavlinkMessage {
 
@@ -37,7 +37,7 @@ public final class FlightRestrictionMsg extends MavlinkMessage {
     public static final int MAX_VERTICES = 255;
     /** LEN 字段填 -1 表示可变长度。 */
     public static final int LEN = -1;
-    public static final int CRC_EXTRA = 244;
+    public static final int CRC_EXTRA = 61;
 
     /** 限制类型枚举序数。 */
     public static final int TYPE_NO_FLY = 0;

@@ -1,0 +1,20 @@
+# NexusSky Alertmanager 最小可用配置。
+# Prometheus（prometheus.yml 的 alerting 段）把触发的告警推到这里；
+# 本配置只做分组与展示保留（无外部集成通道），告警在 AM Web UI（:9093）可见。
+# 接入钉钉/企微/邮件时在 receivers 下追加对应 integration 配置即可。
+global:
+  resolve_timeout: 5m
+route:
+  receiver: default
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: default
+      repeat_interval: 1h
+receivers:
+  - name: default
+    # 无集成配置：告警仅在 AM UI 展示（合法配置，Alertmanager 0.27 正常启动）。

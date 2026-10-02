@@ -21,13 +21,13 @@ import java.nio.ByteBuffer;
  * 11   groundPointId   u8     地面点标识
  * 12   timestamp       u32    时间戳（ms）
  * </pre>
- * CRC_EXTRA = 239。
+ * CRC_EXTRA = 155。
  */
 public final class SatPassScheduleMsg extends MavlinkMessage {
 
     public static final int ID = 460;
     public static final int LEN = 16;
-    public static final int CRC_EXTRA = 239;
+    public static final int CRC_EXTRA = 155;
 
     public final int satId;              // u16
     public final long passStartMs;       // ms

@@ -1110,7 +1110,7 @@ export function isPanelAvailable(panelName, budgetMode) {
   return available.includes(panelName)
 }
 // ---- Surveillance (安防视频监控 M10) ----
-// 安防设备管理 API 挂载在 /api/surveillance 下（独立于 v1 BASE）
+// 安防设备管理 API 挂载在 /api/v1/surveillance 下（未复用通用 BASE 常量）
 // 支持海康/大华/宇视等厂商设备注册、RTSP 流获取、PTZ 云台控制、子网自动发现
 const SURVEILLANCE_BASE = '/api/v1/surveillance'
 
@@ -1164,7 +1164,7 @@ export async function listSurveillanceEvents(params = {}) {
 }
 
 // ---- Alarms (报警联动 M11) ----
-// 报警事件管理 API 挂载在 /api/alarms 下（独立于 v1 BASE）
+// 报警事件管理 API 挂载在 /api/v1/alarms 下（未复用通用 BASE 常量）
 // 支持 SSE 实时推送、联动规则管理、一键应急响应触发无人机侦察任务
 const ALARM_BASE = '/api/v1/alarms'
 

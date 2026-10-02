@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
  * 12   onlineCameras   u8     在线摄像头数
  * 13   totalCameras    u8     总摄像头数
  * </pre>
- * CRC_EXTRA = 263（M14 自定义扩展）。
+ * CRC_EXTRA = 184（M14 自定义扩展）。
  */
 public final class SurveillanceStatusMsg extends MavlinkMessage {
 
     public static final int ID = 479;
     public static final int LEN = 14;
-    public static final int CRC_EXTRA = 263;
+    public static final int CRC_EXTRA = 184;
 
     public final long lastEventMs;      // 最后事件时间（ms）
     public final long uptimeSec;        // 运行时间（秒）

@@ -13,7 +13,7 @@ import {
 // 设备列表（海康/大华/宇视） + 多画面分屏（1/4/9 宫格） + PTZ 云台控制
 // 设备注册弹窗 + 子网发现 + 底部安防事件流
 // 风格与 EmergencyOrchPanel 一致：卡片布局 + 内联 CSS + CSS 变量
-// 轮询间隔 3s；视频流按协议渲染（HLS 优先原生 <video>，不支持时动态加载 hls.js CDN）
+// 轮询间隔 3s；视频流按协议渲染（HLS 优先原生 <video>，不支持时动态加载本地 hls.js（/vendor））
 // 经验来源：2026-09-16-useeffect-fetch-abortcontroller-race-guard（AbortController 竞态守卫）
 
 const POLL_MS = 3000
@@ -64,8 +64,9 @@ const EVENT_LEVEL_COLOR = {
   info: 'var(--cyan)',
 }
 
-// hls.js CDN 地址（仅当浏览器不支持原生 HLS 时按需加载）
-const HLS_JS_CDN = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js'
+// hls.js 本地路径（源自 devDependency hls.js@1.5.13 的官方构建产物，见 public/vendor/README.md；
+// 仅当浏览器不支持原生 HLS 时按需加载，不依赖外部 CDN）
+const HLS_JS_SRC = '/vendor/hls-1.5.13.min.js'
 
 // 动态加载 hls.js（全局缓存，避免重复注入）
 let hlsJsPromise = null
@@ -74,7 +75,7 @@ function loadHlsJs() {
   hlsJsPromise = new Promise((resolve, reject) => {
     if (window.Hls) return resolve(window.Hls)
     const script = document.createElement('script')
-    script.src = HLS_JS_CDN
+    script.src = HLS_JS_SRC
     script.onload = () => resolve(window.Hls)
     script.onerror = () => reject(new Error('hls.js 加载失败'))
     document.head.appendChild(script)

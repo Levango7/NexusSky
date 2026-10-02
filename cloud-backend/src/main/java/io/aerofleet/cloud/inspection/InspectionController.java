@@ -27,13 +27,13 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code POST /api/inspection/tasks} — 创建巡检任务</li>
- *   <li>{@code GET  /api/inspection/tasks} — 列出巡检任务（支持状态筛选）</li>
- *   <li>{@code GET  /api/inspection/tasks/{id}} — 获取任务详情</li>
- *   <li>{@code POST /api/inspection/tasks/{id}/start} — 启动巡检</li>
- *   <li>{@code POST /api/inspection/tasks/{id}/abort} — 中止巡检</li>
- *   <li>{@code GET  /api/inspection/tasks/{id}/progress} — 查询进度</li>
- *   <li>{@code GET  /api/inspection/templates} — 列出巡检模板预设</li>
+ *   <li>{@code POST /api/v1/inspection/tasks} — 创建巡检任务</li>
+ *   <li>{@code GET  /api/v1/inspection/tasks} — 列出巡检任务（支持状态筛选）</li>
+ *   <li>{@code GET  /api/v1/inspection/tasks/{id}} — 获取任务详情</li>
+ *   <li>{@code POST /api/v1/inspection/tasks/{id}/start} — 启动巡检</li>
+ *   <li>{@code POST /api/v1/inspection/tasks/{id}/abort} — 中止巡检</li>
+ *   <li>{@code GET  /api/v1/inspection/tasks/{id}/progress} — 查询进度</li>
+ *   <li>{@code GET  /api/v1/inspection/templates} — 列出巡检模板预设</li>
  * </ul>
  */
 @RestController

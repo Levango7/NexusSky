@@ -21,14 +21,15 @@ import java.nio.ByteBuffer;
  * 14   sysid       u8     源飞机 sysid
  * 15   reserved    u8     保留（0）
  * 16   reserved2   u16    保留（0）
+ * 18   reserved3   u8[2]  保留（0）
  * </pre>
- * CRC_EXTRA = 201（M3 自定义扩展，按 MAVLink 扩展区间分配）。
+ * CRC_EXTRA = 65（由 MavlinkMessageChecksum 按官方 message_checksum 算法对消息名+字段签名计算）。
  */
 public final class ObstacleReportMsg extends MavlinkMessage {
 
     public static final int ID = 430;
     public static final int LEN = 20;
-    public static final int CRC_EXTRA = 201;
+    public static final int CRC_EXTRA = 65;
 
     public final float distance;       // 米
     public final float direction;      // 度（0-359）

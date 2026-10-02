@@ -1,6 +1,6 @@
 # NexusSky API 快速参考
 
-> 60 个 @RestController · 318 个端点 · 认证: JWT Bearer Token 或 X-API-Key
+> 65 个 @RestController · 344 个端点 · 认证: JWT Bearer Token 或 X-API-Key
 
 ## 无人机控制
 
@@ -21,35 +21,35 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/tracking/{sysid}/track | 获取飞行轨迹 |
-| GET | /api/tracking/{sysid}/replay | 历史轨迹回放 |
-| GET | /api/tracking/{sysid}/last-known | 最后已知位置 |
-| GET | /api/tracking/lost | 失联无人机列表 |
-| GET | /api/tracking/{sysid}/search-guide | 辅助查找信息 |
-| GET | /api/tracking/scan | 触发失联检测扫描 |
+| GET | /api/v1/tracking/{sysid}/track | 获取飞行轨迹 |
+| GET | /api/v1/tracking/{sysid}/replay | 历史轨迹回放 |
+| GET | /api/v1/tracking/{sysid}/last-known | 最后已知位置 |
+| GET | /api/v1/tracking/lost | 失联无人机列表 |
+| GET | /api/v1/tracking/{sysid}/search-guide | 辅助查找信息 |
+| GET | /api/v1/tracking/scan | 触发失联检测扫描 |
 
 ## 电子围栏
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/geofence/zones | 创建围栏区域 |
-| GET | /api/geofence/zones | 列出所有围栏区域 |
-| GET | /api/geofence/zones/{id} | 获取单个围栏区域 |
-| PUT | /api/geofence/zones/{id} | 更新围栏区域 |
-| DELETE | /api/geofence/zones/{id} | 删除围栏区域 |
-| GET | /api/geofence/breaches | 获取越界历史 |
-| POST | /api/geofence/check | 手动触发全量围栏检查 |
+| POST | /api/v1/geofence/zones | 创建围栏区域 |
+| GET | /api/v1/geofence/zones | 列出所有围栏区域 |
+| GET | /api/v1/geofence/zones/{id} | 获取单个围栏区域 |
+| PUT | /api/v1/geofence/zones/{id} | 更新围栏区域 |
+| DELETE | /api/v1/geofence/zones/{id} | 删除围栏区域 |
+| GET | /api/v1/geofence/breaches | 获取越界历史 |
+| POST | /api/v1/geofence/check | 手动触发全量围栏检查 |
 
 ## 远程锁机
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/drone-lock/{sysid}/lock | 锁定无人机 |
-| POST | /api/drone-lock/{sysid}/unlock | 解锁无人机 |
-| GET | /api/drone-lock/{sysid} | 获取锁定状态 |
-| GET | /api/drone-lock/locked | 获取所有已锁定无人机 |
-| GET | /api/drone-lock/all | 获取所有无人机锁定状态 |
-| DELETE | /api/drone-lock/{sysid} | 清除锁定状态记录 |
+| POST | /api/v1/drone-lock/{sysid}/lock | 锁定无人机 |
+| POST | /api/v1/drone-lock/{sysid}/unlock | 解锁无人机 |
+| GET | /api/v1/drone-lock/{sysid} | 获取锁定状态 |
+| GET | /api/v1/drone-lock/locked | 获取所有已锁定无人机 |
+| GET | /api/v1/drone-lock/all | 获取所有无人机锁定状态 |
+| DELETE | /api/v1/drone-lock/{sysid} | 清除锁定状态记录 |
 
 ## 安防监控
 
@@ -71,34 +71,34 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/alarms/events | 接收报警事件 |
-| GET | /api/alarms/events | 查询报警事件列表 |
-| GET | /api/alarms/events/{id} | 获取报警事件详情 |
-| POST | /api/alarms/events/{id}/ack | 确认报警（需 OPERATOR） |
-| POST | /api/alarms/events/ack-batch | 批量确认报警（需 OPERATOR） |
-| POST | /api/alarms/events/{id}/respond | 一键应急响应（需 OPERATOR） |
-| GET | /api/alarms/stream | 报警事件 SSE 实时推送 |
-| GET | /api/alarms/linkage-logs | 查询联动执行日志 |
-| GET | /api/alarms/rules | 列出联动规则 |
-| POST | /api/alarms/rules | 创建联动规则（需 OPERATOR） |
-| PUT | /api/alarms/rules/{id} | 更新联动规则（需 OPERATOR） |
-| DELETE | /api/alarms/rules/{id} | 删除联动规则（需 OPERATOR） |
-| POST | /api/alarms/rules/{id}/test | 测试联动规则（需 OPERATOR） |
+| POST | /api/v1/alarms/events | 接收报警事件 |
+| GET | /api/v1/alarms/events | 查询报警事件列表 |
+| GET | /api/v1/alarms/events/{id} | 获取报警事件详情 |
+| POST | /api/v1/alarms/events/{id}/ack | 确认报警（需 OPERATOR） |
+| POST | /api/v1/alarms/events/ack-batch | 批量确认报警（需 OPERATOR） |
+| POST | /api/v1/alarms/events/{id}/respond | 一键应急响应（需 OPERATOR） |
+| GET | /api/v1/alarms/stream | 报警事件 SSE 实时推送 |
+| GET | /api/v1/alarms/linkage-logs | 查询联动执行日志 |
+| GET | /api/v1/alarms/rules | 列出联动规则 |
+| POST | /api/v1/alarms/rules | 创建联动规则（需 OPERATOR） |
+| PUT | /api/v1/alarms/rules/{id} | 更新联动规则（需 OPERATOR） |
+| DELETE | /api/v1/alarms/rules/{id} | 删除联动规则（需 OPERATOR） |
+| POST | /api/v1/alarms/rules/{id}/test | 测试联动规则（需 OPERATOR） |
 
 ## 应急指挥
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/emergency-command | 创建指挥命令（需 OPERATOR） |
-| GET | /api/emergency-command | 列出指挥命令 |
-| GET | /api/emergency-command/{id} | 获取命令详情 |
-| POST | /api/emergency-command/{id}/assess | 研判（需 OPERATOR） |
-| POST | /api/emergency-command/{id}/deploy | 部署（需 OPERATOR） |
-| POST | /api/emergency-command/{id}/execute | 开始执行（需 OPERATOR） |
-| POST | /api/emergency-command/{id}/evaluate | 评估（需 OPERATOR） |
-| POST | /api/emergency-command/{id}/close | 总结关闭（需 OPERATOR） |
-| POST | /api/emergency-command/{id}/one-click | 一键应急响应（需 OPERATOR） |
-| GET | /api/emergency-command/{id}/history | 获取阶段转移历史 |
+| POST | /api/v1/emergency-command | 创建指挥命令（需 OPERATOR） |
+| GET | /api/v1/emergency-command | 列出指挥命令 |
+| GET | /api/v1/emergency-command/{id} | 获取命令详情 |
+| POST | /api/v1/emergency-command/{id}/assess | 研判（需 OPERATOR） |
+| POST | /api/v1/emergency-command/{id}/deploy | 部署（需 OPERATOR） |
+| POST | /api/v1/emergency-command/{id}/execute | 开始执行（需 OPERATOR） |
+| POST | /api/v1/emergency-command/{id}/evaluate | 评估（需 OPERATOR） |
+| POST | /api/v1/emergency-command/{id}/close | 总结关闭（需 OPERATOR） |
+| POST | /api/v1/emergency-command/{id}/one-click | 一键应急响应（需 OPERATOR） |
+| GET | /api/v1/emergency-command/{id}/history | 获取阶段转移历史 |
 | POST | /api/v1/emergency/orch/start | 启动编排计划（需 OPERATOR） |
 | POST | /api/v1/emergency/orch/{planId}/abort | 中止编排计划（需 OPERATOR） |
 | GET | /api/v1/emergency/orch/{planId} | 查询计划状态 |
@@ -240,8 +240,8 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/auth/login | 用户登录 |
-| POST | /api/auth/refresh | 刷新令牌 |
+| POST | /api/v1/auth/login | 用户登录 |
+| POST | /api/v1/auth/refresh | 刷新令牌 |
 | POST | /api/v1/auth/api-key | 生成 API Key |
 | DELETE | /api/v1/auth/api-key/{keyId} | 撤销 API Key |
 | GET | /api/v1/auth/api-key | 列出当前用户的 API Key |
@@ -257,9 +257,9 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/license/info | 查询当前 License 信息 |
-| POST | /api/license/activate | 激活 License |
-| GET | /api/license/verify | 验证 License 有效性 |
+| GET | /api/v1/license/info | 查询当前 License 信息 |
+| POST | /api/v1/license/activate | 激活 License |
+| GET | /api/v1/license/verify | 验证 License 有效性 |
 
 ## 自动出警
 
@@ -520,3 +520,48 @@
 |------|------|------|
 | GET | /api/v1/openapi/json | 导出 OpenAPI JSON |
 | GET | /api/v1/openapi/yaml | 导出 OpenAPI YAML |
+
+## 监管合规
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/v1/regulator/verify | 实名登记状态验证（需 OPERATOR） |
+| POST | /api/v1/regulator/activate | 激活上报（需 OPERATOR） |
+| POST | /api/v1/regulator/cancel | 注销上报（需 OPERATOR） |
+| GET | /api/v1/regulator/status/{sysid} | 合规状态详情 |
+| GET | /api/v1/regulator/status | 合规状态列表 |
+
+## Remote ID
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/v1/rid/status/{sysid} | RID 状态详情 |
+| GET | /api/v1/rid/status | RID 状态列表 |
+| POST | /api/v1/rid/config | 更新 RID 配置（需 OPERATOR） |
+| POST | /api/v1/rid/broadcast/{sysid}/start | 启动 RID 广播（需 OPERATOR） |
+| POST | /api/v1/rid/broadcast/{sysid}/stop | 停止 RID 广播（需 OPERATOR） |
+
+## 限飞区
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/v1/geofence/restriction/zones | 限飞区列表 |
+| GET | /api/v1/geofence/restriction/status | 缓存状态与连通状态 |
+| POST | /api/v1/geofence/restriction/refresh | 手动刷新缓存（需 OPERATOR） |
+| GET | /api/v1/geofence/intercept/logs | 拦截日志（可按 sysid 过滤） |
+
+## 设备归属
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/v1/devices/unassigned | 待归属设备列表（需 ADMIN） |
+| POST | /api/v1/devices/{sysid} | 登记设备进白名单（需 ADMIN） |
+| DELETE | /api/v1/devices/{sysid} | 撤销设备登记（需 ADMIN） |
+| PUT | /api/v1/devices/{sysid}/tenant | 绑定/解绑租户（需 ADMIN） |
+
+## CV 评测
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/v1/cv-eval/metrics | 三指标聚合查询（可按 source 过滤） |
+| POST | /api/v1/cv-eval/reset | 清空评测窗口（需 OPERATOR） |

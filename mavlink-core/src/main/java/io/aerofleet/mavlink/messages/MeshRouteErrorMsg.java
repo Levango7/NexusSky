@@ -17,13 +17,13 @@ import java.nio.ByteBuffer;
  * 1    hopCount           u8    已经历跳数
  * 2    timestamp          u16   时间戳（ms 截断为 u16，65536ms 回绕）
  * </pre>
- * CRC_EXTRA = 236。timestamp 截断为 u16（65536ms 回绕）。
+ * CRC_EXTRA = 124。timestamp 截断为 u16（65536ms 回绕）。
  */
 public final class MeshRouteErrorMsg extends MavlinkMessage {
 
     public static final int ID = 453;
     public static final int LEN = 4;
-    public static final int CRC_EXTRA = 236;
+    public static final int CRC_EXTRA = 124;
 
     public final int unreachableSysid;
     public final int hopCount;

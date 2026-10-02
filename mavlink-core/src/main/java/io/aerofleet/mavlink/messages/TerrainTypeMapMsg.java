@@ -24,7 +24,7 @@ import java.util.List;
  * 12   mapHeight        u16   网格行数
  * 14   gridCells[n]     u8[]  每网格 TerrainType 序数（0-8），n = mapWidth × mapHeight
  * </pre>
- * CRC_EXTRA = 242（M8 自定义扩展）。
+ * CRC_EXTRA = 107（M8 自定义扩展）。
  */
 public final class TerrainTypeMapMsg extends MavlinkMessage {
 
@@ -35,7 +35,7 @@ public final class TerrainTypeMapMsg extends MavlinkMessage {
     public static final int MAX_CELLS = 65535;
     /** LEN 字段填 -1 表示可变长度。 */
     public static final int LEN = -1;
-    public static final int CRC_EXTRA = 242;
+    public static final int CRC_EXTRA = 107;
 
     public final int mapOriginLat;       // 1E7 度
     public final int mapOriginLon;       // 1E7 度

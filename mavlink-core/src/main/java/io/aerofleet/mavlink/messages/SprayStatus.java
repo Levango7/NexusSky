@@ -23,7 +23,7 @@ import java.nio.ByteBuffer;
  * 10   reserved1               uint8
  * 11   reserved2               uint8
  * </pre>
- * CRC_EXTRA = 58864（按 MavlinkCrc 对消息名+字段名+类型计算）。
+ * CRC_EXTRA = 3（由 MavlinkMessageChecksum 按官方 message_checksum 算法对消息名+字段签名计算）。
  */
 public final class SprayStatus extends MavlinkMessage {
 

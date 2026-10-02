@@ -74,6 +74,16 @@ jobs:
             mvn-${{ runner.os }}-
       - name: Build & test
         run: mvn -B -pl ${{ matrix.module }} -am package
+      - name: Upload surefire reports (docs test-count gate input)
+        # 文档口径门禁（docs-test-count job）的输入：surefire XML 是测试数的唯一权威来源。
+        # if-no-files-found: error——缺 TEST-*.xml 说明测试根本没跑，必须红而不是静默通过。
+        # 路径按本 matrix 模块限定：-am 会连带构建依赖模块，但它们的报告归属各自的 matrix 项。
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: error
+          name: surefire-${{ matrix.module }}
+          path: ${{ matrix.module }}/target/surefire-reports/TEST-*.xml
+          retention-days: 3
       - name: Upload JaCoCo coverage report
         uses: actions/upload-artifact@v4
         # if-no-files-found 默认 warn：模块没有 jacoco 产物时上传会静默"成功"，
@@ -107,6 +117,32 @@ jobs:
         # 不带参数全量跑会在依赖模块上误报"缺产物"。
         run: bash scripts/ci-coverage-threshold.sh --strict ${{ matrix.module }}
 
+  docs-test-count:
+    name: Docs test-count gate
+    runs-on: ubuntu-latest
+    needs: [ java ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download surefire reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: surefire-*
+          path: surefire-reports
+      - name: Align module directory names
+        # download-artifact v4 把每个 artifact 放进以其名字命名的子目录
+        # （surefire-cloud-backend/），而门禁脚本按 <reports-root>/<module>/TEST-*.xml
+        # 取模块名——去掉 surefire- 前缀对齐。
+        run: |
+          cd surefire-reports
+          for d in surefire-*; do
+            mv "$d" "${d#surefire-}"
+          done
+          ls .
+      - name: Docs test-count gate
+        # README/ROADMAP/whitepaper 等口径文档声称的单测数与 surefire 实测必须一致，
+        # 数字漂移即红——权威来源是 XML，不是文档。
+        run: python3 scripts/check-test-count-docs.py --reports-root surefire-reports
+
   frontend:
     name: GCS Web
     runs-on: ubuntu-latest
@@ -123,6 +159,8 @@ jobs:
       - run: npm install
       - name: ESLint check
         run: npm run lint
+      - name: Unit tests (vitest)
+        run: npm test
       - run: npm run build
 
   e2e-smoke:

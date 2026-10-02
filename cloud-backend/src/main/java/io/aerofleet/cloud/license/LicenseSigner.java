@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.license;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,16 +37,32 @@ public class LicenseSigner {
     private static final String KEY_ALGORITHM = "RSA";
     private static final int KEY_SIZE = 2048;
 
-    private final ObjectMapper objectMapper;
+    /**
+     * 签名规范化的唯一基准 mapper：jsr310 + 日期一律 ISO-8601 字符串。
+     * <p>
+     * <b>为什么不用注入的 objectMapper</b>：签名输入必须是「给定同一份 License，
+     * 签发端与部署端算出字节级相同的 JSON」这一确定函数。此前规范化用的是注入
+     * mapper——它随部署配置漂移（典型：{@code WRITE_DATES_AS_TIMESTAMPS}，
+     * Jackson 原生默认开、Spring Boot 默认关）：ISO 签发 + 时间戳模式部署，
+     * 同一份 key 两端算出的签名输入不同 → <b>验签必败，fail-closed 拒绝启动</b>。
+     * 2026-10-03 由 LicenseIssuerTest 的跨 mapper 端到端（ISO 签发 → 原生默认
+     * mapper 部署）暴露。规范化钉死在本类内部，与任何一端的 mapper 配置解耦。
+     */
+    private static final ObjectMapper CANONICAL_MAPPER = new ObjectMapper()
+            .findAndRegisterModules()
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
     private final PublicKey publicKey;
     private final PrivateKey privateKey;
     private final boolean devMode;
 
     /**
      * 开发模式构造器：自动生成 RSA-2048 密钥对。
+     *
+     * @param objectMapper 已不参与签名规范化（见 {@link #CANONICAL_MAPPER} 的说明）；
+     *                     参数保留以兼容既有调用方，后续大版本移除
      */
     public LicenseSigner(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
         this.devMode = true;
         KeyPair keyPair = generateKeyPair();
         this.publicKey = keyPair.getPublic();
@@ -57,13 +74,35 @@ public class LicenseSigner {
      * 生产模式构造器：从配置读取公钥，无私钥（仅验证）。
      *
      * @param publicKeyBase64 Base64 编码的 X.509 公钥
+     * @param objectMapper    已不参与签名规范化（见 {@link #CANONICAL_MAPPER} 的说明）；
+     *                        参数保留以兼容既有调用方，后续大版本移除
      */
     public LicenseSigner(String publicKeyBase64, ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
         this.devMode = false;
         this.privateKey = null;
         this.publicKey = decodePublicKey(publicKeyBase64);
         log.info("LicenseSigner 初始化（生产模式）：已加载外部公钥");
+    }
+
+    /**
+     * 签发模式构造器：外部密钥对（私钥签名 + 配套公钥自验），供 {@link LicenseIssuer} 使用。
+     * <p>
+     * 与开发模式构造器的区别：密钥对来自外部——通常是 {@link LicenseKeyGenerator}
+     * 生成、由签发方安全保管的生产密钥——而非运行时自动生成。用同一个私钥签出的
+     * 所有 License，都能被配置了配套公钥（生产模式构造器）的部署验签，这正是
+     * 「签发端持私钥、部署端只持公钥」的商业授权模型。
+     *
+     * @param objectMapper 已不参与签名规范化（见 {@link #CANONICAL_MAPPER} 的说明）；
+     *                     参数保留以兼容既有调用方，后续大版本移除
+     */
+    LicenseSigner(PrivateKey privateKey, PublicKey publicKey, ObjectMapper objectMapper) {
+        this.devMode = false;
+        if (privateKey == null || publicKey == null) {
+            throw new IllegalArgumentException("签发模式需要同时提供私钥与配套公钥");
+        }
+        this.privateKey = privateKey;
+        this.publicKey = publicKey;
+        log.info("LicenseSigner 初始化（签发模式）：已加载外部密钥对");
     }
 
     /**
@@ -179,18 +218,37 @@ public class LicenseSigner {
     /**
      * 将 LicenseInfo 序列化为用于签名/验证的 JSON。
      * <p>
-     * 排除 signature 和 signerCert 字段，因为这些是签名结果的载体，
-     * 不应参与签名计算本身（否则签名会自引用）。
+     * 排除三个字段：
+     * <ul>
+     *   <li>{@code signature}、{@code signerCert}——签名结果的载体，不应参与签名计算
+     *       （否则签名会自引用）。</li>
+     *   <li>{@code licenseKey}——**它是承载签名的那层信封，不是被签名的内容**。
+     *       2026-10-01 修正：此前它参与了签名计算，而 {@code parseSignedLicense} 又在
+     *       验签**之前**把 {@code licenseKey} 覆写成完整的 key 串（payload + "." + signature）。
+     *       签发方在计算签名时不可能预知自己将要产出的那串 key，于是签方签的 licenseKey
+     *       与验签方算的 licenseKey 必然不同 → <b>任何合法签名的 License 都验不过</b>。
+     *       这个缺陷此前被「验签失败降级为 dev license」掩盖：坏 key 反而拿到全模块授权，
+     *       没人发现签名功能其实从未成功过一次。</li>
+     * </ul>
+     * 排除后，签名只覆盖 License 的**内容**，与它的封装形式解耦。
+     * <p>
+     * <b>规范化 mapper 必须与注入 mapper 解耦</b>（2026-10-03 修正）：此前用注入的
+     * objectMapper 做本序列化，签名输入就成了「License + 本地 mapper 配置」的函数——
+     * 部署端只要 Jackson 日期模式与签发端不同（Jackson 原生默认时间戳模式 vs
+     * Spring Boot 默认 ISO），同一份 key 两端算出的签名输入就不同，合法 License
+     * 验签必败且 fail-closed 拒绝启动。现在统一走 {@link #CANONICAL_MAPPER}：
+     * 签名输入只是 License 内容本身的确定函数，与两端 mapper 配置无关。
      */
     private String serializeForSigning(LicenseInfo info) throws Exception {
-        // 使用 ObjectMapper 序列化，排除 signature 和 signerCert
-        String fullJson = objectMapper.writeValueAsString(info);
-        // 解析回 Map，移除 signature 和 signerCert，再序列化
+        // 使用 CANONICAL_MAPPER 序列化，排除 signature / signerCert / licenseKey
+        String fullJson = CANONICAL_MAPPER.writeValueAsString(info);
+        // 解析回 Map，移除上述字段，再序列化
         @SuppressWarnings("unchecked")
-        java.util.Map<String, Object> map = objectMapper.readValue(fullJson, java.util.Map.class);
+        java.util.Map<String, Object> map = CANONICAL_MAPPER.readValue(fullJson, java.util.Map.class);
         map.remove("signature");
         map.remove("signerCert");
-        return objectMapper.writeValueAsString(map);
+        map.remove("licenseKey");
+        return CANONICAL_MAPPER.writeValueAsString(map);
     }
 
     /**

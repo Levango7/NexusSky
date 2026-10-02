@@ -21,13 +21,13 @@ import java.nio.ByteBuffer;
  * 18   sysId                 u8    发送方系统 ID
  * 19   trajectoryPoints      u8    轨迹点数
  * </pre>
- * CRC_EXTRA = 260（M13 自定义扩展）。
+ * CRC_EXTRA = 139（M13 自定义扩展）。
  */
 public final class PredictionResultMsg extends MavlinkMessage {
 
     public static final int ID = 476;
     public static final int LEN = 20;
-    public static final int CRC_EXTRA = 260;
+    public static final int CRC_EXTRA = 139;
 
     public final int predictedLat;          // 1E7 度
     public final int predictedLon;          // 1E7 度

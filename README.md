@@ -24,10 +24,10 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–M9 扩展消息 420–479），**185 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 420–483，共 51 条），**449 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
-| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（155+ 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
-| `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 39 个功能面板 | 不需要换 |
+| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（344 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
+| `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 38 个功能面板 | 不需要换 |
 
 > **M0a–M4 能力扩展**：组网/环境/编队/喷洒/成像/硬件抽象均在上述四模块内叠加，
 > 未新增顶层模块——详见下文 [能力扩展（M0a–M4）](#能力扩展m0am4) 章节。
@@ -500,10 +500,15 @@ ESP-NOW 用于近距离低延迟机间通讯（百元级），LoRa 用于远距�
 自适应伸缩，而非固定值。
 
 **真实卫星接入预留**：为天通（高轨稳定覆盖）、铱星（低轨低延迟）、星链（低轨星座
-带宽最优）三种卫星通信系统创建了占位实现类（`TiantongSatellitePlaceholder`/
-`IridiumSatellitePlaceholder`/`StarlinkSatellitePlaceholder`），实现统一的
-`SatelliteLink` 接口框架，为未来真实卫星硬件接入预留接口——替换占位为真实驱动时，
+带宽最优）三种卫星通信系统创建了占位实现类（`TiantongSatLinkProvider`/
+`IridiumSatLinkProvider`/`StarlinkSatLinkProvider`），实现统一的
+`SatLinkProvider` 接口，为未来真实卫星硬件接入预留接口——替换占位为真实驱动时，
 上层路由/中继/链路切换逻辑零改动。
+（2026-10-01 更正：原文写的类名 `*SatellitePlaceholder` 与接口名 `SatelliteLink`
+在代码中均不存在，实际为 `*SatLinkProvider` / `SatLinkProvider`；`SatLinkProvider`
+的 Javadoc 里引用的 `TiantongSatProvider` 等三个类名也已过期。三个占位类的每个方法
+都抛 `UnsupportedOperationException("真实星链接入尚未实现，请使用 SimulatedSatLinkProvider")`，
+仿真请用 `SimulatedSatLinkProvider`——**抛错而非返回假数据**是这里正确的做法。）
 
 ### MAVLink 消息 ID 分配（420–467、477–483 段）
 
@@ -571,7 +576,7 @@ DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理�
 - `GET /v1/disaster/status` 灾害模式状态 · `POST /v1/disaster/budget` Budget 模式切换
 - `POST /v1/buzzer/control` 蜂鸣器控制 · `GET /v1/thermal/search` 热源搜救
 
-> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 54 个 Controller、155+ REST 端点。
+> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 65 个 @RestController、344 REST 端点。
 
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
@@ -620,31 +625,37 @@ NexusSky/
 ├── drone-sim/           虚拟无人机（状态机 + 任务协议服务端 + 物理引擎 v2）
 ├── link-sim/            链路损伤代理（延迟/丢包/带宽/分区 + Mesh 中继）
 ├── cloud-backend/       Spring Boot 单体（网关/机队/任务/推送/安全/编排）
-│   └── 33 个功能包：api, security, alarm, surveillance, mission, orch,
-│       scheduling, twin, edge, ai, geofence, drone, health, inspection,
-│       scenario, mapping, show, voicecmd, citytwin, commadapt, autodispatch,
-│       tracking, flightlog, telemetry, gateway, config, metrics, tenant,
-│       audit, license, delivery2, vision
-├── gcs-web/             React GCS（39 个前端组件）
-├── scripts/             start-all.cmd / e2e-smoke.sh / 23 个脚本
+│   └── 37 个功能包：ai, alarm, api, audit, autodispatch, citytwin, commadapt,
+│       config, delivery2, drone, edge, flightlog, gateway, geofence, health,
+│       inspection, license, mapping, metrics, mission, orch, regulator, rid,
+│       scenario, scheduling, security, show, spi, surveillance, telemetry,
+│       tenant, tracking, twin, vision, voicecmd, webhook, write
+├── gcs-web/             React GCS（49 个前端组件，其中 38 个功能面板）
+├── scripts/             start-all.cmd / e2e-smoke.sh / 44 个脚本
 ├── docker-compose.yml   Linux 下一键编排
-├── docs/                14 篇技术文档
-└── .github/workflows/   CI（单测 + 前端构建 + E2E 冒烟）
+├── docs/                30 篇文档
+└── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）
 ```
 
 ## 测试规模
 
-实测于 2026-10-01，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
+实测于 2026-10-02，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 343 |
-| `drone-sim` | 1324 |
+| `mavlink-core` | 449 |
+| `drone-sim` | 1337 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2054 |
+| `cloud-backend` | 2114 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **3869** |
+| **总计** | **4048** |
+
+这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
+**加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
+3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
+脚本刻意**排除** `CHANGELOG.md` 与文档里追述旧值的句子——它们记的是"当时是什么
+状态"，改写等于篡改记录。
 
 注意：这些用例跑在 `test` profile（`dev-mode=true`、`rbac-enabled=false`——
 `application-test.properties:8/:10` 显式设置，所以 base 默认翻 true 不影响它们），
@@ -654,7 +665,8 @@ NexusSky/
 
 ## 代码审查修复记录
 
-5 轮收敛性审查（3 轮全量 + 2 轮验证），累计修复 21 个问题（4 Critical + 12 Major + 5 Minor）：
+6 轮收敛性审查（3 轮全量 + 2 轮验证 + 1 轮接线状态/口径专项），累计修复 52 个问题
+（4 Critical + 12 Major + 5 Minor + 11 P1 + 20 新增）：
 
 | 轮次 | Commit | 修复 | 要点 |
 |---|---|---|---|
@@ -663,6 +675,7 @@ NexusSky/
 | Round 3 | `920ab87` | 5m | 4 个 toLowerCase/toUpperCase 添加 Locale.ROOT；SurveillanceDeviceRegistry 构造器注入 |
 | Round 4 | `7dd8014` | 1C + 2M | 降级模式 coordinationId="AGC-null" 记录互相覆盖；startAirGroundCoordination 竞态条件；阈值清理内存泄漏 |
 | Round 5 | — | 验证收敛 | 无新发现，审查收敛结束 |
+| Round 6 | Unreleased | 11 P1 + 20 新增 | 自主决策/边缘 AI 接线状态核实（未接线钉进 `AiAutonomyWiringTest`）、单测数口径与 CI 门禁（`check-test-count-docs.py`）——明细见 CHANGELOG「Unreleased — 第六轮审查」 |
 
 ## 已知边界（骨架的诚实声明）
 
@@ -694,11 +707,29 @@ NexusSky/
   限制挡住（EPERM），本地用 `gcs-web/scripts/check-frontend.cjs`
   （Babel 语法 + import 图）把关；**真实构建在 CI 跑**（`npm run build`）。
   改前端后推 CI 验证，别信本地静态检查的"绿"就万事大吉。
+- **「自主决策」已接线为 advisory，「边缘 AI」仍是库**（2026-10-02 第六轮审查核实，同日接线）。
+  M11 `io.aerofleet.sim.ai`（14 个类 3513 行）现已通过新增的 `AutonomyAdvisor` 接入
+  `VirtualDrone.tickOnce`：1Hz 评估态势，主决策类型**变化沿**经 STATUSTEXT 下发
+  **建议**（RTL/AVOID=WARNING、EMERGENCY_LAND=CRITICAL、ADAPT_PATH=NOTICE，恢复时
+  INFO 澄清一次），**只建议、不执行任何动作**——真正生效的应急执行链路仍是独立的
+  `FailsafeController`（链路丢失 / 电量临界 / GPS 丢失 → RTL / HOLD）。其余策略 /
+  规划器仍只被 ai 包内引用；M12 `io.aerofleet.sim.edge`（6 个类 1093 行，其中
+  `SensorFusionEngine` 9 维 EKF 521 行、`VideoStreamAnalyzer`
+  帧差 + 连通域 + 质心跟踪 506 行）实现完整、单元测试全绿，但
+  **只被自己的测试引用，没有任何生产调用方**。两处「自主」的准确含义是<b>规则 +
+  排序 + 搜索</b>（阈值规则、融合权重、决策树、A 星 / RRT），<b>不含任何机器学习
+  模型</b>——全仓 pom 无 onnxruntime / tensorflow / ONNX / OpenCV 任何依赖；
+  「边缘 AI 推理」的准确含义是<b>经典 CV 图像处理</b>。
+  安全阈值已收敛到 `FailsafeThresholds`（电池临界 22% / 链路丢失 15s，此前仓库里
+  同一参数曾同时存在 22 / 25 / 20 三个值）。`drone-sim` 的 `AiAutonomyWiringTest`
+  把接线状态钉成断言：DecisionEngine「已接线」是正向断言（静默退线即判红），
+  其余类「未接线」是期望状态（接线即判红并提示同步本节与竞品对比表）——
+  比在文档里写一句「注意」可靠，文档不会自己变红。
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
-  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：342 个端点
-  （190 GET/126 POST/13 PUT/13 DELETE）全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
+  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：344 个端点
+  （190 GET/127 POST/13 PUT/14 DELETE）全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
   写=`OPERATOR`、配置/用户/密钥/租户/围栏/license 面=`ADMIN`，匿名入口只有登录与刷新两处
   `@PermitAll`；漏写注解由 `RbacEndpointCoverageTest` 反射逐个校验并判红，不靠文本扫描
   （awk 版会把签名里的 `@RequestBody` 当注解行，把 272 个未声明少报成 99）。
@@ -708,6 +739,17 @@ NexusSky/
   （prod/staging 显式 true；dev 靠 `dev-mode=true` 旁路；test 显式 false），CI 集成腿 Pass B
   以四向取证：ADMIN 建用户 201、OBSERVER 打 /api/v1/audit/logs 403、
   OBSERVER 读 /api/v1/drones 200、OBSERVER 越级写 /api/v1/geofence/check 403。
+  **License 已改 fail-closed（2026-10-02）**：配了 `aerofleet.license.key` 就等于声明本部署执行
+  授权校验，此时解析或验签失败**拒绝启动**，不再降级为「全模块 + 设备无限制 + 永不过期」的
+  dev license（那等于"被篡改的 key 反而拿到最宽松授权"）。没配 key 仍是开发版，开发/CI 路径不变。
+  同一批还修掉两个让签名功能**从未成功过一次**的缺陷：签名曾覆盖 `licenseKey`（信封）本身，
+  以及覆盖 `isExpired()` 这个**随时间变化**的派生量——后者叠加旧的 fail-open 会导致
+  **License 一到期就自动提权成无限 dev license**。详见 `CHANGELOG.md` 该条目与
+  `LicenseServiceFailClosedTest`(13 例，本模块首批测试)。
+  **凭据加密密钥不再有 base 明文默认值**（2026-10-02）：此前 `aerofleet.encryption.key` 在
+  base 里硬编码 `aerofleet-dev-encryption-key` 且 prod/staging 都未覆盖，等于用一把公开密钥
+  加密安防设备口令与 webhook secret。现在 dev/test 各自声明，prod/staging 走
+  `${AEROFLEET_ENCRYPTION_KEY}` 且无缺省（与 jwt-secret 同一套 fail-fast）。
   License 在缺 key 或验签失败时降级为无限期 dev license（商用门禁当前不成立）
   设备/边缘上报四条腿（`edge/results`、`loRa/alarm`、`offline-alarm/batch-upload|flush`、
   `alarms/events`）要求 OPERATOR 档凭据：注入 `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`
@@ -726,6 +768,13 @@ NexusSky/
 - **持久化已部分实现**：飞行日志（JSONL 与 `flight_log` 表双模式，默认保留 30 天后自动清理）、
   审计日志（`audit_log` 表 + SHA-256 哈希链，默认仍纯内存、保留清理默认关闭）、
   围栏/追踪/安防设备等支持持久化测试；主数据仍为内存态，换数据库是包内替换
+- **视频融合面板（`VideoFusionPanel`）后端未实现**（2026-10-03 第七轮核查发现）：该面板
+  （GCS `videofusion` 视图）调用的 4 个端点 `/api/v1/video-fusion/surveillance/streams`、
+  `/drone/feeds`、`/recording/{id}/start|stop` 在后端**没有对应 Controller**——视频融合是
+  `docs/new-features-plan.md` 的 P2 规划项（前端先行），面板对失败有错误捕获、渲染错误
+  提示而非崩溃。已实现并可用的是 `SurveillancePanel`/`AlarmPanel`（真实端点
+  `/api/v1/surveillance/*`、`/api/v1/alarms/*`）；本文与 PRODUCT-POSITIONING 中
+  「GCS 视频融合面板」一词指后者组合，勿与 `VideoFusionPanel` 组件混淆
 
 ## 集成过程中踩过的坑（对后来者有价值）
 

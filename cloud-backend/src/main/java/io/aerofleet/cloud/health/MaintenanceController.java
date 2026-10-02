@@ -34,12 +34,12 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code GET /api/maintenance/records} — 查询维护记录（支持按 sysid/status 筛选）</li>
- *   <li>{@code POST /api/maintenance/records} — 创建维护记录</li>
- *   <li>{@code PUT /api/maintenance/records/{id}} — 更新维护记录</li>
- *   <li>{@code GET /api/maintenance/predictions} — 获取所有预测性维护建议</li>
- *   <li>{@code GET /api/maintenance/predictions/{sysid}} — 获取单机预测性维护建议</li>
- *   <li>{@code GET /api/maintenance/schedule} — 获取维护计划（按时间排序）</li>
+ *   <li>{@code GET /api/v1/maintenance/records} — 查询维护记录（支持按 sysid/status 筛选）</li>
+ *   <li>{@code POST /api/v1/maintenance/records} — 创建维护记录</li>
+ *   <li>{@code PUT /api/v1/maintenance/records/{id}} — 更新维护记录</li>
+ *   <li>{@code GET /api/v1/maintenance/predictions} — 获取所有预测性维护建议</li>
+ *   <li>{@code GET /api/v1/maintenance/predictions/{sysid}} — 获取单机预测性维护建议</li>
+ *   <li>{@code GET /api/v1/maintenance/schedule} — 获取维护计划（按时间排序）</li>
  * </ul>
  */
 @RestController

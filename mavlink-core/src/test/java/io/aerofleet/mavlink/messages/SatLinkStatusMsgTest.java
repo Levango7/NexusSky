@@ -37,11 +37,11 @@ class SatLinkStatusMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=459、LEN=24、CRC_EXTRA=238")
+    @DisplayName("消息 ID=459、LEN=24、CRC_EXTRA=152")
     void messageIdAndConstants() {
         assertThat(SatLinkStatusMsg.ID).isEqualTo(459);
         assertThat(SatLinkStatusMsg.LEN).isEqualTo(24);
-        assertThat(SatLinkStatusMsg.CRC_EXTRA).isEqualTo(238);
+        assertThat(SatLinkStatusMsg.CRC_EXTRA).isEqualTo(152);
     }
 
     @Test

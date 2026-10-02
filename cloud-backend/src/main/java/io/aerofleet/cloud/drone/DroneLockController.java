@@ -27,12 +27,12 @@ import io.aerofleet.cloud.security.Role;
  * <p>
  * 端点：
  * <ul>
- *   <li>{@code POST /api/drone-lock/{sysid}/lock} — 锁定无人机</li>
- *   <li>{@code POST /api/drone-lock/{sysid}/unlock} — 解锁无人机</li>
- *   <li>{@code GET /api/drone-lock/{sysid}} — 获取锁定状态</li>
- *   <li>{@code GET /api/drone-lock/locked} — 获取所有已锁定无人机</li>
- *   <li>{@code GET /api/drone-lock/all} — 获取所有无人机锁定状态</li>
- *   <li>{@code DELETE /api/drone-lock/{sysid}} — 清除锁定状态记录</li>
+ *   <li>{@code POST /api/v1/drone-lock/{sysid}/lock} — 锁定无人机</li>
+ *   <li>{@code POST /api/v1/drone-lock/{sysid}/unlock} — 解锁无人机</li>
+ *   <li>{@code GET /api/v1/drone-lock/{sysid}} — 获取锁定状态</li>
+ *   <li>{@code GET /api/v1/drone-lock/locked} — 获取所有已锁定无人机</li>
+ *   <li>{@code GET /api/v1/drone-lock/all} — 获取所有无人机锁定状态</li>
+ *   <li>{@code DELETE /api/v1/drone-lock/{sysid}} — 清除锁定状态记录</li>
  * </ul>
  * <p>
  * 认证由 {@link io.aerofleet.cloud.security.SecurityConfig} 统一处理。
