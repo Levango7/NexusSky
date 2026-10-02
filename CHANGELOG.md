@@ -4,6 +4,21 @@
 
 ---
 
+## [Unreleased] — CI 集成测试 Pass B 适配 jwt-secret fail-closed 守卫（2026-10-03）
+
+> c6b069b 的 jwt-secret 守卫上线后，Integration Tests 连红两轮（c6b069b、76f964b）。
+> 守卫按设计工作：Pass B 用 dev profile + dev-mode=false 启动，却和真实部署的
+> 错误形态一样没给显式密钥——空值落入 `@Value` 内置开发默认值，守卫拒启动。
+> 修 harness，不修守卫。
+
+- `scripts/ci-integration-test.sh` Pass B 启动参数显式注入
+  `--aerofleet.security.jwt-secret`（复用 Pass C 的 CI 密钥；变量更名
+  `C_JWT_SECRET` → `CI_JWT_SECRET` 以反映双 Pass 共用）。
+- 守卫语义零改动：dev-mode=false 下空值/内置开发默认值仍一律拒启动；
+  Pass A（dev-mode=true 仅 WARN）与 Pass C（prod 占位符注入）不受影响。
+
+---
+
 ## [Unreleased] — License 端到端签发工具 + 签名规范化跨 mapper 硬化：收口 license 轮未闭合项 ①（2026-10-03）
 
 > 「拿着生产私钥，怎么给客户签一份部署端能验过的 key？」——此前这条真实运营路径

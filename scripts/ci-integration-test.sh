@@ -88,9 +88,12 @@ C_PORT="${C_PORT:-8082}"
 # 这里给出 CI service 容器里同名口令；本地验证可覆盖。
 C_PG_PASSWORD="${SPRING_DATASOURCE_PASSWORD:-ci_pg_password}"
 C_PG_PORT="${PG_PORT:-5432}"
-# JWT 密钥：prod 由 ${AEROFLEET_JWT_SECRET} 注入（无默认值，缺失即启动失败）。
-# 32 字节以上是 HS256 的硬性下限（JwtTokenProvider 未配置 RSA 时回退 HS256）。
-C_JWT_SECRET="${AEROFLEET_JWT_SECRET:-ci_gateway_jwt_secret_at_least_32_chars_000}"
+# JWT 密钥：Pass B 与 Pass C 共用。Pass B 必须显式注入——LicenseService 构造器在
+# dev-mode=false 时对"未配置/内置开发默认值"的 jwt-secret fail-closed 拒启动
+# （守卫是产品行为，不因测试放宽）；Pass C（prod）由 ${AEROFLEET_JWT_SECRET} 占位符
+# 注入（无默认值，缺失即启动失败）。32 字符以上是 HS256 的硬性下限
+# （JwtTokenProvider 未配置 RSA 时回退 HS256），也是 license 激活码 HMAC 的密钥门槛。
+CI_JWT_SECRET="${AEROFLEET_JWT_SECRET:-ci_gateway_jwt_secret_at_least_32_chars_000}"
 C_USERS="${AEROFLEET_USERS:-${CI_USER}:${CI_PASSWORD}:ADMIN}"
 # Redis 端口覆盖（可选）：application-dev.properties:28 把端口硬编码成 6379（无占位符），
 # 本机 6379 若被别的 Redis 占着（如需 AUTH 的外来实例），/actuator/health 会因 redis
@@ -247,10 +250,13 @@ stop_backend "$PID_A" "Pass A cloud-backend"
 # ───────────────────────── 3. Pass B：鉴权生效（dev-mode=false） ─────────────────────────
 echo "[3/6] Pass B —— 同一 profile 但 dev-mode=false，鉴权必须真实生效..."
 LOG_B=$(mktemp)
+# dev-mode=false 触发 LicenseService 的 jwt-secret fail-closed 守卫：空值或内置
+# 开发默认值一律拒启动。Pass B 要像真实部署一样显式给密钥，而不是放宽守卫。
 PID_B=$(start_backend "$LOG_B" "$B_PORT" $REDIS_OVERRIDE \
     --spring.profiles.active=dev \
     $DEV_DB_OVERRIDE \
     --aerofleet.security.dev-mode=false \
+    --aerofleet.security.jwt-secret="$CI_JWT_SECRET" \
     --aerofleet.security.bootstrap-admin-username="$CI_USER" \
     --aerofleet.security.bootstrap-admin-password="$CI_PASSWORD" \
     --aerofleet.security.device-ingest-api-key="$CI_DEVICE_KEY")
@@ -370,7 +376,7 @@ LOG_C=$(mktemp)
 # 为什么用 spring.config 命令行参数而不是环境变量覆盖 profile 内已有键：
 # prod 的日志级别在 profile 内写死为 WARN，只有命令行 --logging.level.*（最高优先级）
 # 才能把 Flyway 的 INFO 放出来当证据。
-PID_C=$(AEROFLEET_JWT_SECRET="$C_JWT_SECRET" \
+PID_C=$(AEROFLEET_JWT_SECRET="$CI_JWT_SECRET" \
     AEROFLEET_USERS="$C_USERS" \
     SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:${C_PG_PORT}/aerofleet_prod" \
     SPRING_DATASOURCE_USERNAME=aerofleet \
