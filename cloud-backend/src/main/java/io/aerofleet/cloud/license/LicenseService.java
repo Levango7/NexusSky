@@ -56,8 +56,12 @@ public class LicenseService {
     /** 全部模块集合 */
     public static final Set<String> ALL_MODULES = Set.of("core", "fleet", "emergency", "network", "advanced");
 
-    /** License Key 中 payload 和 signature 的分隔符 */
-    private static final String KEY_SEPARATOR = ".";
+    /**
+     * License Key 中 payload 和 signature 的分隔符。
+     * 唯一定义在 {@link LicenseIssuer#KEY_SEPARATOR}（签发端），解析端只引用——
+     * wire format 分裂是这一域最贵的故障类型，签发/解析两侧不允许各写一份字面量。
+     */
+    private static final String KEY_SEPARATOR = LicenseIssuer.KEY_SEPARATOR;
 
     private final ObjectMapper objectMapper;
     private final String licenseKeyConfig;
@@ -400,15 +404,17 @@ public class LicenseService {
     /**
      * 生成一个签名版 license key，供管理脚本/测试使用。
      * <p>
-     * 新格式：{@code Base64(JSON(payload)) + "." + Base64(RSA-SHA256(JSON(payload)))}
-     * 仅在开发模式（LicenseSigner 有私钥）下可用。
+     * 新格式：{@code Base64(JSON(payload)) + "." + Base64(RSA-SHA256(JSON(payload)))}。
+     * 组装与自验收敛到 {@link LicenseIssuer#issue}（全仓唯一组装路径）。
+     * 仅在开发模式（{@link LicenseSigner} 有私钥）下可用；生产模式签名器无私钥，
+     * 本方法保持既有契约返回 null。
      *
      * @param tenantId    租户 ID
      * @param productName 产品名
      * @param maxDevices  设备上限
      * @param expiryDate  过期时间（null=永久）
      * @param issuedTo    被授权方
-     * @return 签名版 license key
+     * @return 签名版 license key；无私钥或签发失败时返回 null
      */
     public String generateLicenseKey(String tenantId, String productName, int maxDevices,
                                      Instant expiryDate, String issuedTo) {
@@ -418,6 +424,10 @@ public class LicenseService {
 
     /**
      * 生成一个签名版 license key（含模块授权字段），供管理脚本/测试使用。
+     * <p>
+     * 组装/签名/自验全部委托 {@link LicenseIssuer#issue}——此前本方法内联一份
+     * 「payload+sign 拼接」，与签发工具各写一份，一旦漂移就会出现
+     * 「签出的 key 部署端验不过」这类只在真实签发时爆的问题。
      *
      * @param tenantId           租户 ID
      * @param productName        产品名
@@ -427,7 +437,7 @@ public class LicenseService {
      * @param modules            授权模块集合
      * @param maxApiCallsPerDay  每日 API 调用上限（<=0 无限制）
      * @param maxConcurrentDrones 最大并发无人机数（<=0 无限制）
-     * @return 签名版 license key
+     * @return 签名版 license key；无私钥（生产模式）或签发失败时返回 null
      */
     public String generateLicenseKey(String tenantId, String productName, int maxDevices,
                                      Instant expiryDate, String issuedTo,
@@ -441,15 +451,7 @@ public class LicenseService {
                     modules, maxApiCallsPerDay, maxConcurrentDrones,
                     null, null
             );
-
-            // 序列化 payload（不含 signature/signerCert）
-            String payloadJson = objectMapper.writeValueAsString(info);
-            String payloadBase64 = Base64.getEncoder().encodeToString(payloadJson.getBytes(StandardCharsets.UTF_8));
-
-            // 签名
-            String signature = licenseSigner.sign(info);
-
-            return payloadBase64 + KEY_SEPARATOR + signature;
+            return LicenseIssuer.issue(info, licenseSigner, objectMapper);
         } catch (Exception e) {
             log.error("生成 license key 失败: {}", e.getMessage());
             return null;

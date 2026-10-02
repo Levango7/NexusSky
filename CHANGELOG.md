@@ -4,6 +4,59 @@
 
 ---
 
+## [Unreleased] — License 端到端签发工具 + 签名规范化跨 mapper 硬化：收口 license 轮未闭合项 ①（2026-10-03）
+
+> 「拿着生产私钥，怎么给客户签一份部署端能验过的 key？」——此前这条真实运营路径
+> 无解：`LicenseKeyGenerator` 只出密钥对不出 key；`LicenseService#generateLicenseKey`
+> 能组装 key 但仅开发模式可用（生产签名器无私钥）。本轮补上最后一环，端到端测试
+> 首跑即暴露一个会让「合法 License 在部分部署上验不过」的签名规范化缺陷，一并硬化。
+
+### 1. 新增 `LicenseIssuer`：生产私钥进，可部署 key 出
+
+- `LicenseIssuer.issue(info, signer, mapper)`：全仓**唯一**的 payload+signature
+  组装路径——`LicenseService#generateLicenseKey` 的内联拼接改为委托到这里，
+  `KEY_SEPARATOR` 的唯一定义也移到本类（解析端只引用）。签发/解析两侧各自手拼
+  格式一旦漂移，就是「签出的 key 部署端验不过」这类只在真实签发时爆的问题。
+- **签出即自验**：组装后立即按 `parseSignedLicense` 的验签路径（反序列化 →
+  setSignature → verify）用配套公钥验一遍，私钥/公钥不配对就地报错，绝不让一份
+  「自己都验不过」的 key 离开签发工具。
+- CLI（`main`）：`--private-key-file`（PKCS#8 Base64，容忍 PEM 头尾/折行）+
+  授权参数，输出 key 串与部署端配置片段；公钥缺省由私钥 CRT 参数推导用于自验。
+  **必填项不给危险缺省**：`--max-devices` 必填（防漏配时静默签出无限设备授权）、
+  `--expiry`/`--valid-days` 二选一必填（永久授权不能是「忘了写」的结果）、
+  `--modules` 打错字就地报错（防「模块被静默拒绝」的排障黑洞）。
+- `LicenseSigner` 新增签发模式构造器（外部私钥+配套公钥，包内可见）。
+
+### 2. 签名规范化与部署 mapper 配置解耦（端到端测试暴露的真实缺陷）
+
+- **缺陷**：`serializeForSigning` 用**注入的** ObjectMapper 做签名输入的规范化，
+  签名输入就成了「License + 本地 mapper 配置」的函数。Jackson 的
+  `WRITE_DATES_AS_TIMESTAMPS` 原生默认开、Spring Boot 默认关——**ISO 签发 +
+  时间戳模式的部署，同一份 key 两端算出的签名输入不同 → 合法 License 验签必败，
+  fail-closed 拒绝启动**。此前从未暴露：生产两端都是 Boot mapper（默认 ISO），
+  测试两端共用同一个 mapper，缺口在两者的交叉处。
+- **修复**：规范化钉死到 `LicenseSigner` 内部的 `CANONICAL_MAPPER`（jsr310 +
+  日期一律 ISO），签名输入只是 License 内容本身的确定函数，与两端 mapper 配置
+  无关。注入的 objectMapper 自此不再参与签名（构造器参数保留，标注待后续大版本移除）。
+- **钉子**：`LicenseIssuerTest` 的部署端 mapper 故意保持 Jackson 原生默认
+  （时间戳模式）与签发端（ISO）相反——该配置组合若再引入 mapper 依赖，验签用例
+  立刻变红。
+
+### 3. `LicenseIssuerTest`（15 例）与口径
+
+- 端到端 4 例：签出的 key 被生产模式 `LicenseService` 构造器（fail-closed 加载）
+  接受且字段一致；篡改 payload 拒绝启动；私钥/公钥不配对自验拦截；已过期时间可
+  签出但部署端判定无效（工具只保证密码学正确，不做商业判断）。
+- CLI 8 例：最小参数+默认值、三类必填缺失、`--expiry`/`--valid-days` 互斥与
+  必填、`--valid-days` 计算、模块打错字报错。
+- 密钥 3 例：PEM/折行容忍加载 + CRT 推导等值公钥 + 从文件签发端到端。
+- 委托回归 2 例：dev 模式 `generateLicenseKey` 委托后仍可被生产模式部署接受；
+  生产模式（无私钥）保持 null 契约。
+- 测试基线 4033 → **4048**（cloud-backend 2099 → 2114），口径文档 19 处声称
+  同步更新，`check-test-count-docs.py` 全绿。
+
+---
+
 ## [Unreleased] — LicenseController 激活/查询路径测试：收口 license 轮未闭合项 ②（2026-10-03）
 
 > License fail-closed 轮（025b6a7）留下的「LicenseController 的激活/查询路径仍无
@@ -455,8 +508,10 @@ SCALED_PRESSURE3=143），`RADIO_STATUS(109)` 的 CRC_EXTRA 是 88 而官方为 
 所以生产里不会抛这个异常——但这恰恰说明**代码的正确性依赖了环境的隐式配置**，本身不自洽。
 已把测试的 mapper 对齐 Spring 行为，另用一条独立断言直接钉住"`expired` 不得进入序列化"这个真正的根因。
 
-**本轮未闭合**：① License 签发工具链本身（`LicenseKeyGenerator` 只出密钥对，不出 key）仍无端到端签发脚本；
-② `LicenseController` 的激活/查询路径仍无测试；③ 设备摄取仍是**整部署一把共享 key**（上一批已记，未变）。
+**本轮未闭合**：① License 签发工具链本身（`LicenseKeyGenerator` 只出密钥对，不出 key）仍无端到端签发脚本
+（**→ 已于 2026-10-03 收口：`LicenseIssuer`，见顶部 section**）；
+② `LicenseController` 的激活/查询路径仍无测试（**→ 已于 2026-10-03 收口：`LicenseControllerTest`，见对应 section**）；
+③ 设备摄取仍是**整部署一把共享 key**（上一批已记，未变）。
 
 ---
 
