@@ -94,6 +94,13 @@ C_PG_PORT="${PG_PORT:-5432}"
 # 注入（无默认值，缺失即启动失败）。32 字符以上是 HS256 的硬性下限
 # （JwtTokenProvider 未配置 RSA 时回退 HS256），也是 license 激活码 HMAC 的密钥门槛。
 CI_JWT_SECRET="${AEROFLEET_JWT_SECRET:-ci_gateway_jwt_secret_at_least_32_chars_000}"
+# 字段加密密钥（webhook 凭据、surveillance 摄像头密码等 AES-GCM 列加密）：
+# prod 的 ${AEROFLEET_ENCRYPTION_KEY} 无默认值——2026-10-01 删除了明文默认
+# aerofleet-dev-encryption-key，缺失即启动失败（Pass B 走 dev profile，base 的
+# 空默认值可启动，故只有 Pass C 需要注入）。两个消费方（WebhookService、
+# surveillance.PasswordConverter）都以 SHA-256(密钥串) 派生 AES-128 密钥，
+# 任意非空字符串皆可；此为 CI 专用值，真实部署必须注入独立密钥。
+CI_ENCRYPTION_KEY="${AEROFLEET_ENCRYPTION_KEY:-ci_field_encryption_key_0123456789abcdef}"
 C_USERS="${AEROFLEET_USERS:-${CI_USER}:${CI_PASSWORD}:ADMIN}"
 # Redis 端口覆盖（可选）：application-dev.properties:28 把端口硬编码成 6379（无占位符），
 # 本机 6379 若被别的 Redis 占着（如需 AUTH 的外来实例），/actuator/health 会因 redis
@@ -378,6 +385,7 @@ LOG_C=$(mktemp)
 # 才能把 Flyway 的 INFO 放出来当证据。
 PID_C=$(AEROFLEET_JWT_SECRET="$CI_JWT_SECRET" \
     AEROFLEET_USERS="$C_USERS" \
+    AEROFLEET_ENCRYPTION_KEY="$CI_ENCRYPTION_KEY" \
     SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:${C_PG_PORT}/aerofleet_prod" \
     SPRING_DATASOURCE_USERNAME=aerofleet \
     SPRING_DATASOURCE_PASSWORD="$C_PG_PASSWORD" \

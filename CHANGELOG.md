@@ -4,18 +4,25 @@
 
 ---
 
-## [Unreleased] — CI 集成测试 Pass B 适配 jwt-secret fail-closed 守卫（2026-10-03）
+## [Unreleased] — CI 集成测试适配 fail-closed 配置守卫（jwt-secret / encryption.key）（2026-10-03）
 
-> c6b069b 的 jwt-secret 守卫上线后，Integration Tests 连红两轮（c6b069b、76f964b）。
-> 守卫按设计工作：Pass B 用 dev profile + dev-mode=false 启动，却和真实部署的
-> 错误形态一样没给显式密钥——空值落入 `@Value` 内置开发默认值，守卫拒启动。
-> 修 harness，不修守卫。
+> c6b069b 的配置守卫上线后，Integration Tests 连红三轮（c6b069b、76f964b、7909740）。
+> 守卫均按设计工作，红的是 harness：测试环境启动的进程没有像真实部署一样给全
+> 必需配置。修 harness，不修守卫。
 
-- `scripts/ci-integration-test.sh` Pass B 启动参数显式注入
-  `--aerofleet.security.jwt-secret`（复用 Pass C 的 CI 密钥；变量更名
-  `C_JWT_SECRET` → `CI_JWT_SECRET` 以反映双 Pass 共用）。
-- 守卫语义零改动：dev-mode=false 下空值/内置开发默认值仍一律拒启动；
-  Pass A（dev-mode=true 仅 WARN）与 Pass C（prod 占位符注入）不受影响。
+- **Pass B**（dev profile + dev-mode=false）：`LicenseService` 对空值/内置开发默认值
+  的 jwt-secret 拒绝启动——Pass B 此前不注入密钥，正是守卫要拦的错误形态。修复：
+  启动参数显式注入 `--aerofleet.security.jwt-secret`（复用 Pass C 的 CI 密钥；
+  变量 `C_JWT_SECRET` 更名 `CI_JWT_SECRET`，双 Pass 共用）。
+- **Pass C**（prod profile）：`aerofleet.encryption.key=${AEROFLEET_ENCRYPTION_KEY}`
+  无默认值（2026-10-01 删除明文默认值的既定策略），缺失即 `PlaceholderResolutionException`
+  拒启动。该缺口被 Pass B 掩盖三轮（脚本在 B 即退出，C 从未跑到），Pass B 修复后
+  才暴露。修复：Pass C 环境注入 `AEROFLEET_ENCRYPTION_KEY`（消费方
+  `WebhookService`/`PasswordConverter` 以 SHA-256 派生 AES-128，任意非空串即可，
+  此为 CI 专用值）。至此 prod 四个必填占位符（jwt-secret/users/encryption.key/
+  datasource.password）harness 全部显式供给。
+- 守卫语义零改动：Pass A（dev-mode=true 仅 WARN）不受影响；两处守卫对真实部署
+  的拦截行为不变。
 
 ---
 
