@@ -1,6 +1,6 @@
 # NexusSky API 快速参考
 
-> 65 个 @RestController · 344 个端点 · 认证: JWT Bearer Token 或 X-API-Key
+> 65 个 @RestController · 345 个端点 · 认证: JWT Bearer Token 或 X-API-Key
 
 ## 无人机控制
 
@@ -242,7 +242,8 @@
 |------|------|------|
 | POST | /api/v1/auth/login | 用户登录 |
 | POST | /api/v1/auth/refresh | 刷新令牌 |
-| POST | /api/v1/auth/api-key | 生成 API Key |
+| POST | /api/v1/auth/api-key | 生成 API Key（带 sysid 签发设备 Key） |
+| POST | /api/v1/auth/api-key/{keyId}/rotate | 轮换 API Key（可带宽限期） |
 | DELETE | /api/v1/auth/api-key/{keyId} | 撤销 API Key |
 | GET | /api/v1/auth/api-key | 列出当前用户的 API Key |
 

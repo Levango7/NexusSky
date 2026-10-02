@@ -132,7 +132,7 @@ public Result createTask(@RequestBody TaskRequest req) { ... }
 | 声明优先级 | 方法级覆盖类级（两种注解同规则）；同一元素并存时 `@RequireRole` 胜出（收紧优先）。已由 `RoleInterceptorTest` 逐条钉住（16 例） |
 
 > 注：上表为 2026-10-01 翻转时点的实测快照（总数 342）。截至 2026-10-02 复测，端点方法总数为
-> 344（190 GET / 127 POST / 13 PUT / 14 DELETE / 0 PATCH），仍未声明角色的端点为 0。
+> 345（190 GET / 128 POST / 13 PUT / 14 DELETE / 0 PATCH），仍未声明角色的端点为 0。
 
 两点容易被忽略的事实：
 1. **角色层级是向上满足的**：`hasPermission = userRole.ordinal() <= requiredRole.ordinal()`
@@ -178,20 +178,39 @@ public Result createTask(@RequestBody TaskRequest req) { ... }
 
 ### 3.1 ApiKeyController
 
-`ApiKeyController`（`cloud-backend/src/main/java/io/aerofleet/cloud/security/ApiKeyController.java`）提供三个端点：
+`ApiKeyController`（`cloud-backend/src/main/java/io/aerofleet/cloud/security/ApiKeyController.java`）提供四个端点：
 
 | 端点 | 方法 | 功能 |
 |---|---|---|
-| `POST /api/v1/auth/api-key` | `createApiKey` | 生成 API Key（需 JWT 认证） |
+| `POST /api/v1/auth/api-key` | `createApiKey` | 生成 API Key（需 JWT 认证）；body 带 `sysid` 时签发**设备 Key** |
+| `POST /api/v1/auth/api-key/{keyId}/rotate` | `rotateApiKey` | 轮换 API Key（可带 `graceHours` 宽限期） |
 | `DELETE /api/v1/auth/api-key/{keyId}` | `revokeApiKey` | 撤销 API Key（需 JWT 认证） |
 | `GET /api/v1/auth/api-key` | `listApiKeys` | 列出当前用户的 API Key（脱敏显示） |
 
 **API Key 格式**：`nsk_<32位随机hex>`（前缀 `nsk_` = NexusSky Key）
 
+**设备 Key（`sysid` 绑定）**：`POST /api/v1/auth/api-key` 带 `{"name":..., "sysid":42}` 时签发绑定单台设备的 Key：
+
+- 设备须已在 `DeviceRegistry` 登记（`POST /api/v1/devices/{sysid}`），否则 404；
+- 设备须已归属租户（`PUT /api/v1/devices/{sysid}/tenant`），否则 400 fail-closed——未归属设备的
+  数据任何租户都不可见，发了 Key 就是写黑洞；
+- Key 的 `role` 固定 `OPERATOR`（设备永远不需要 ADMIN）、`tenantId` 取自设备行、`userId` 为空；
+- 租户级非 ADMIN 签发者只能给**本租户**设备签 Key（跨租户 403），全局管理员（无 `tenant_id`
+  claim）与 ADMIN 角色不受限——与撤销/轮换同口径。
+
+**轮换（`POST /{keyId}/rotate {graceHours?}`）**：
+
+- `graceHours=0`（默认）：旧 Key 立即撤销，响应 `oldKeyRevoked=true`；
+- `graceHours>0`（上限 8760=一年）：旧 Key 的 `expiresAt` **缩短**到 `now+graceHours`（若原有
+  剩余更短则保持不变），宽限期内新旧并存，边缘设备可以从容换钥；不撤销，宽限期自然到期；
+- 新 Key 继承旧 Key 的全部绑定（tenantId/userId/sysid/scopes/role）与**剩余有效期**
+  （永久 Key 保持永久；已过期 Key 轮换=重新计时 365 天）；
+- 明文新 Key 仅在轮换响应里返回一次。
+
 **安全设计**：
 - 使用 `SecureRandom` 生成 32 字节随机数（64 hex 字符）
 - 数据库中只存储 SHA-256 哈希（`keyHash`），不存储明文
-- 明文 API Key 仅在创建时返回一次，后续不可查看
+- 明文 API Key 仅在创建/轮换时返回一次，后续不可查看
 - 列表接口返回脱敏 Key（前4后4字符，中间 `****`）
 - 默认有效期 365 天
 
@@ -199,20 +218,33 @@ public Result createTask(@RequestBody TaskRequest req) { ... }
 
 `ApiKeyFilter`（`cloud-backend/src/main/java/io/aerofleet/cloud/security/ApiKeyFilter.java`）在 Spring Security 链中执行：
 
-**认证流程**：
+**认证流程**（缓存优先，认证路径零数据库写）：
 1. 从 `X-API-Key` Header 读取 API Key
 2. 计算 SHA-256 哈希
-3. 查询 `ApiKeyRepository.findByKeyHashAndRevokedFalse(keyHash)`
-4. 检查是否过期
+3. 查 `ApiKeyCache`（60s TTL 内存缓存）；未命中才查库并回填
+4. 检查是否过期（缓存条目不缓存判定结果，`expiresAt` 每次用当前时钟重算）
 5. 设置 `SecurityContextHolder`（`ApiKeyAuthenticationToken`）
-6. 设置 `TenantContext` 和 `ApiKeyContext`（ThreadLocal）
-7. 异步更新 `lastUsedAt`
+6. 设置 `TenantContext` 和 `ApiKeyContext`（ThreadLocal，含 `sysid`）
+7. `lastUsedAt` 交给 `ApiKeyLastUsedTracker` 合并写（30s 周期批量刷库，每 Key 至多每 30s 一次 UPDATE）
 
 **行为规则**：
 - 开发模式（`dev-mode=true`）：跳过
 - 无 `X-API-Key` Header：跳过，交由 JWT 认证链处理
 - API Key 无效：跳过，交由 JWT 认证链处理
 - finally 块始终清理 `ApiKeyContext` 和 `TenantContext`，防止线程池复用导致上下文泄漏
+
+**性能与一致性语义**（`ApiKeyCache` / `ApiKeyLastUsedTracker`）：
+
+- 缓存命中时认证路径**零数据库 IO**（此前是每请求一次 SELECT + 一次同步 UPDATE——遥测
+  高频腿上这是两倍写放大）；
+- **撤销/轮换在本 JVM 内即时生效**（控制器操作后 `invalidate` 对应哈希）；
+  多节点部署下其他节点的正缓存至多 60s 后过期——这是明示的一致性上界，不是漏洞：
+  管理面操作走哪个节点，哪个节点就立即生效，其余节点最迟一分钟收敛。要求跨节点即时
+  撤销的部署应把管理流量固定打到同一节点（LB 会话亲和）或等 TTL 收敛；
+- 不存在/已撤销的 Key 也缓存（负缓存，同样 60s），错误 Key 重复打入库不重复打库——
+  负缓存有 4096 条上限，超出不再新增，防哈希喷射撑爆内存；
+- `lastUsedAt` 语义从"精确到请求"退化为"精确到 30s 周期"（运维观测用途，够用）；
+  进程退出时 `@PreDestroy` 兜底 flush 一次。
 
 ### 3.3 ApiKeyEntity 数据模型
 
@@ -224,9 +256,11 @@ public Result createTask(@RequestBody TaskRequest req) { ... }
 | `keyHash` | String | SHA-256 哈希（64 hex 字符） |
 | `maskedKey` | String | 脱敏 Key（前4后4） |
 | `tenantId` | Integer | 租户 ID |
-| `userId` | Integer | 用户 ID |
+| `userId` | Integer | 用户 ID（设备 Key 恒为 null） |
+| `sysid` | Integer | 设备绑定（1..254；null=普通 Key，非 null=设备 Key，撤销/轮换粒度为单台设备） |
 | `name` | String | 用户自定义名称 |
 | `scopes` | String | 权限范围（JSON 数组字符串） |
+| `role` | String | 角色（设备 Key 固定 OPERATOR；供 `RoleInterceptor` 在纯 Key 调用下判定） |
 | `createdAt` | Instant | 创建时间 |
 | `expiresAt` | Instant | 过期时间 |
 | `lastUsedAt` | Instant | 最后使用时间 |
@@ -253,9 +287,14 @@ RBAC 默认拒绝后，四条上报腿（`POST /api/v1/edge/results`、`/loRa/al
   库里只存 SHA-256 哈希；长度 <16 拒绝引导，避免弱密钥出厂。
 - 轮换=改环境变量重启（同一 keyId 覆写，不会在表里堆积）。
 
-**如实的限制**：这是整个部署**一把共享 key**，不是每机一密钥，撤销粒度只有"整体换 key"；
-启动日志会 WARN 提醒这一点。每设备/租户发放与 SSE 的 `Authorization` 头问题（`EventSource`
-带不了自定义头，故 prod 下 `GET /api/v1/alarms/stream` 当前不可订阅）都还是未闭合项。
+**定位：引导，不是运营**。这把共享 key 解决的是零状态启动（鸡生蛋：先要有账号才能发凭据），
+生产运营应尽快切换到 3.1 的**设备 Key**（每台设备独立签发、独立撤销/轮换，粒度=单机）；
+启动日志会 WARN 提醒这一点。每设备 key 的发放路径：登记设备 → 归属租户 →
+`POST /api/v1/auth/api-key {"name":..., "sysid":N}`（CI `ci-integration-test.sh` Pass B
+断言 8 是这条流程的端到端实证，含"撤销后同 key 再摄取必须 401"的缓存失效验证）。
+
+**仍未闭合**：SSE 的 `Authorization` 头问题（`EventSource` 带不了自定义头，故 prod 下
+`GET /api/v1/alarms/stream` 当前不可订阅）。
 
 ## 4. 租户隔离机制
 
@@ -496,7 +535,11 @@ backend 日志里真实出现过的那一行，例如
 
 ### 7.5 已知边界
 
-- 出厂仍是明文：任何 profile 都未设置 `mavlink.signing.enabled=true`。
+- 出厂默认 `mavlink.signing.enabled=false`——这是**决策**，不是待办（2026-10-03 定）：
+  链路签名要求链上所有端点共享口令，而实际用户的存量无人机/地面站出厂并不配置签名，
+  默认打开等于首启即断链。它按 GB 42590 数据链路安全项的定位留给需要的部署**显式开启**
+  （开启而缺密钥 → 启动即失败，见 7.3，不存在"半开"状态）。默认值翻转的先决条件是
+  真机联调证据（见下"未与真机联调"条），在那之前不动。
 - 口令与密钥库都是**明文**：`secret-key` 写在配置里（走命令行会进进程列表），
   `key-store-path` 指向的 JSON 不做加密，也没有轮换端点。
 - 多机模式（`key-store-path`）现在确实按 sysid 取口令（`MavlinkSignerFactory` →

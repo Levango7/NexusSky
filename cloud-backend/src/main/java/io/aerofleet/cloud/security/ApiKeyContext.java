@@ -27,7 +27,20 @@ public final class ApiKeyContext {
      * @param role     签发时继承的角色（用于 RBAC 判定）
      */
     public static void set(String keyId, Integer tenantId, String scopes, String role) {
-        CONTEXT.set(new ApiKeyInfo(keyId, tenantId, scopes, role));
+        CONTEXT.set(new ApiKeyInfo(keyId, tenantId, scopes, role, null));
+    }
+
+    /**
+     * 设置当前请求的 API Key 信息（设备 Key 场景，带 sysid）。
+     *
+     * @param keyId    API Key ID
+     * @param tenantId 租户 ID
+     * @param scopes   权限范围（JSON 数组字符串）
+     * @param role     签发时继承的角色（用于 RBAC 判定）
+     * @param sysid    绑定的设备 MAVLink sysid（非设备 Key 为 null）
+     */
+    public static void set(String keyId, Integer tenantId, String scopes, String role, Integer sysid) {
+        CONTEXT.set(new ApiKeyInfo(keyId, tenantId, scopes, role, sysid));
     }
 
     /**
@@ -71,6 +84,16 @@ public final class ApiKeyContext {
     }
 
     /**
+     * 获取当前 API Key 绑定的设备 MAVLink sysid（设备 Key）。
+     *
+     * @return sysid，null 表示未通过 API Key 认证或该 Key 不是设备 Key
+     */
+    public static Integer getSysid() {
+        ApiKeyInfo info = CONTEXT.get();
+        return info == null ? null : info.sysid;
+    }
+
+    /**
      * 判断当前请求是否通过 API Key 认证。
      *
      * @return true 表示当前请求使用 API Key 认证
@@ -95,12 +118,14 @@ public final class ApiKeyContext {
         final Integer tenantId;
         final String scopes;
         final String role;
+        final Integer sysid;
 
-        ApiKeyInfo(String keyId, Integer tenantId, String scopes, String role) {
+        ApiKeyInfo(String keyId, Integer tenantId, String scopes, String role, Integer sysid) {
             this.keyId = keyId;
             this.tenantId = tenantId;
             this.scopes = scopes;
             this.role = role;
+            this.sysid = sysid;
         }
     }
 }

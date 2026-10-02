@@ -31,8 +31,9 @@ import java.time.Instant;
  * <p>
  * <b>这是共享静态密钥，不是每机一密钥</b>：一把 key 覆盖整个部署的所有设备与边缘节点，
  * 撤销粒度只有"整体换 key"（改环境变量重启即生效，因为每次启动按同一 keyId 覆写）。
- * 真正的按设备/租户发放是后续项；本类的价值在于让"摄取必须带凭据"从一句契约文档
- * 变成可运行的通路。日志里会 WARN 提醒这一点，别把它当长期方案。
+ * 按设备签发/轮换/撤销请走 {@link ApiKeyController}（POST /api/v1/auth/api-key 带
+ * sysid，粒度=单台设备）；本类只解决"零状态部署先有凭据才能上报"的鸡生蛋问题，
+ * 是引导手段不是运营方案，日志会 WARN 提醒，别把它当长期方案。
  */
 @Component
 public class DeviceIngestKeyBootstrapRunner implements ApplicationRunner {

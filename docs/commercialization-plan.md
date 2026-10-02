@@ -119,7 +119,7 @@
 
 ### 2.1 现有 REST API 审查
 
-**现状**：65 个 @RestController（68 个 Controller 源文件），344 REST API 端点，分布在 36 个业务包。
+**现状**：65 个 @RestController（68 个 Controller 源文件），345 REST API 端点，分布在 36 个业务包。
 
 **API 路径规范审查**：
 
@@ -962,7 +962,7 @@ MetricsCollector
 | 67 | OpenApiExportController | /api/v1/openapi | OpenAPI 导出 | ❌ 管理 |
 | 68 | CvEvalController | /api/v1/cv-eval | 视觉感知评测 | ✅ 可选 |
 
-> **注**：68 个 Controller 源文件中 65 个为 `@RestController`（共 344 个端点，详见 `docs/api-reference.md` 的模块与 Controller 映射表）；`RadarController`、`RotorController`、`ObstacleAvoidanceController` 为 `@Service` 内部组件，不直接暴露 REST 端点。`LoRaRelayController` 基础路径为历史遗留的大小写混排 `/api/v1/loRa`，调用时须原样使用。
+> **注**：68 个 Controller 源文件中 65 个为 `@RestController`（共 345 个端点，详见 `docs/api-reference.md` 的模块与 Controller 映射表）；`RadarController`、`RotorController`、`ObstacleAvoidanceController` 为 `@Service` 内部组件，不直接暴露 REST 端点。`LoRaRelayController` 基础路径为历史遗留的大小写混排 `/api/v1/loRa`，调用时须原样使用。
 
 ## 附录 B：现有安全模块代码审查摘要
 

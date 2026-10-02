@@ -37,6 +37,15 @@ public class ApiKeyEntity {
     @Column(name = "user_id")
     private Integer userId;
 
+    /**
+     * 绑定的设备 MAVLink sysid（设备 Key）。
+     * <p>
+     * NULL = 普通用户/租户级 Key；非 NULL = 设备 Key（role 固定 OPERATOR，
+     * tenantId 与 devices 表该 sysid 行一致，撤销/轮换粒度为单台设备）。
+     */
+    @Column(name = "sysid")
+    private Integer sysid;
+
     @Column(name = "name", nullable = false, length = 100)
     private String name;
 
@@ -98,6 +107,9 @@ public class ApiKeyEntity {
 
     public Integer getUserId() { return userId; }
     public void setUserId(Integer userId) { this.userId = userId; }
+
+    public Integer getSysid() { return sysid; }
+    public void setSysid(Integer sysid) { this.sysid = sysid; }
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }

@@ -41,6 +41,12 @@ public class SecurityConfig {
     @Autowired(required = false)
     private ApiKeyRepository apiKeyRepository;
 
+    @Autowired(required = false)
+    private ApiKeyCache apiKeyCache;
+
+    @Autowired(required = false)
+    private ApiKeyLastUsedTracker apiKeyLastUsedTracker;
+
     public SecurityConfig(JwtTokenProvider jwtTokenProvider) {
         this.jwtTokenProvider = jwtTokenProvider;
     }
@@ -61,6 +67,12 @@ public class SecurityConfig {
             // 由于 Filter 是手动 new 的，需要通过 setter 注入
             if (apiKeyRepository != null) {
                 apiKeyFilter.setApiKeyRepository(apiKeyRepository);
+            }
+            if (apiKeyCache != null) {
+                apiKeyFilter.setApiKeyCache(apiKeyCache);
+            }
+            if (apiKeyLastUsedTracker != null) {
+                apiKeyFilter.setLastUsedTracker(apiKeyLastUsedTracker);
             }
 
             http
