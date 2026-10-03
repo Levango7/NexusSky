@@ -406,6 +406,13 @@ public class SurveillanceController {
             return emitter;
         }
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        // 建立即发一条注释：立即提交 SSE 响应头（200 + text/event-stream），
+        // 客户端无需等待首个设备事件或 15s 心跳即可确认连接已建立
+        try {
+            emitter.send(SseEmitter.event().comment("stream-established"));
+        } catch (Exception e) {
+            log.debug("SSE initial send failed for device {}: {}", id, e.getMessage());
+        }
         String handle = onvifClient.subscribeEvents(d.ip, d.port, d.username, d.password,
                 payload -> {
                     try {

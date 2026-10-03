@@ -299,15 +299,24 @@ public class AlarmController {
      * <p>
      * 客户端通过 EventSource 连接本端点，服务端会：
      * <ol>
+     *   <li>建立连接即发送一条注释（提交响应头，客户端即时确认连接）</li>
      *   <li>每 2 秒轮询 {@link AlarmEventStore} 获取最新事件并推送</li>
      *   <li>每 15 秒发送一次 SSE 心跳注释，保持连接</li>
      * </ol>
      */
-    @Operation(summary = "报警事件 SSE 实时推送", description = "每 2 秒轮询新事件推送，每 15 秒发送心跳")
+    @Operation(summary = "报警事件 SSE 实时推送", description = "建立即发确认注释，每 2 秒轮询新事件推送，每 15 秒发送心跳")
     @ApiResponse(responseCode = "200", description = "SSE 流")
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamEvents() {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        // 建立即发一条注释：立即提交 SSE 响应头（200 + text/event-stream）。
+        // 否则响应头要等首次 send（首个增量事件或 15s 心跳）才发出，
+        // 订阅后无增量事件的静默期里客户端/集成测试会误判连接未建立。
+        try {
+            emitter.send(SseEmitter.event().comment("stream-established"));
+        } catch (Exception e) {
+            log.debug("SSE initial send failed: {}", e.getMessage());
+        }
         // 租户域必须在请求线程捕获：轮询任务跑在调度线程上，ThreadLocal 不可用。
         // 此前轮询直接走 ThreadLocal 版 query，后台线程取到 null 被当成全局管理员，
         // 等于任何已连接的 OBSERVER 都能收到全租户事件。
