@@ -29,3 +29,6 @@ gcs-web/blob-report/
 .playwright/
 # E2E 编排脚本的工作目录在 gcs-web 下，dev profile 的 H2 文件库会落在这里
 gcs-web/data/
+# 多 agent 协作的共享文件（见 COORDINATION.md）：各 agent 之间的留言与状态板，
+# 属本地协调信息而非仓库资产，不入库
+.coord/
