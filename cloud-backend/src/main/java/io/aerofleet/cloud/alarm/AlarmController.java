@@ -5,6 +5,7 @@ import io.aerofleet.cloud.mission.emergency.EmergencyCommandWorkflow;
 import io.aerofleet.cloud.mission.emergency.OneClickEmergencyResponse;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import io.aerofleet.cloud.security.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -307,16 +308,22 @@ public class AlarmController {
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamEvents() {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
-        // 记录已推送的事件数量，用于增量推送
-        int[] lastSeenSize = {store.size()};
+        // 租户域必须在请求线程捕获：轮询任务跑在调度线程上，ThreadLocal 不可用。
+        // 此前轮询直接走 ThreadLocal 版 query，后台线程取到 null 被当成全局管理员，
+        // 等于任何已连接的 OBSERVER 都能收到全租户事件。
+        Integer tenantScope = TenantContext.getEffectiveTenantId();
+        // 记录已推送的事件数量，用于增量推送（口径用 count(scope)：与 query(scope)
+        // 同一容量窗口，保证差值→取页两侧一致）
+        int[] lastSeenSize = {store.count(tenantScope)};
 
         // 事件轮询：每 2 秒检查是否有新事件
         ScheduledFuture<?> pollFuture = sseScheduler.scheduleAtFixedRate(() -> {
             try {
-                int currentSize = store.size();
+                int currentSize = store.count(tenantScope);
                 if (currentSize > lastSeenSize[0]) {
                     // 有新事件，查询最新的事件推送
-                    AlarmEventStore.PageResult result = store.query(0, currentSize - lastSeenSize[0], null, null);
+                    AlarmEventStore.PageResult result =
+                            store.query(0, currentSize - lastSeenSize[0], null, null, tenantScope);
                     for (AlarmEvent e : result.getItems()) {
                         emitter.send(SseEmitter.event()
                                 .name("alarm-event")

@@ -426,6 +426,43 @@ else
     FAILED=1
 fi
 
+echo "   --- Pass B 断言 9：SSE 流令牌（签发→开流 200 → 复用 401 → 无凭证 401）---"
+# EventSource 无法带 Authorization 头：生产链上 /api/v1/alarms/stream 以前必 401。
+# 断言走完整闭环：签发 60s 单次用 token → 开流收到 200 响应头（-m 3 掐断）→
+# 同令牌复用 401（单次用语义端到端）→ 无凭证裸连 401。
+# 开流断言用 -m 3 主动掐断（SSE 正常永不结束），curl 退出 28 被 || true 吞掉，
+# 只取 -w '%{http_code}' 的状态码做证据（与 Pass B 其他 curl 模式一致）。
+if [ -n "$TOKEN" ]; then
+    ST_RAW=$(curl -sS -w $'\n%{http_code}' -X POST \
+        -H "Authorization: Bearer ${TOKEN}" \
+        -H 'Content-Type: application/json' \
+        "http://localhost:${B_PORT}/api/v1/auth/stream-token" 2>/dev/null || true)
+    ST_BODY="${ST_RAW%$'\n'*}"
+    ST_CODE="${ST_RAW##*$'\n'}"
+    assert_status "POST /api/v1/auth/stream-token（签发）" "200" "$ST_CODE"
+    STREAM_TOKEN=$(printf '%s' "$ST_BODY" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+    assert_true "签发响应含非空 stream token" "$STREAM_TOKEN"
+    if [ -n "$STREAM_TOKEN" ]; then
+        # 开流：SSE 响应永不结束，用 -m 3 掐断，收到响应头即 200 证明认证通过
+        SSE_STATUS=$( { curl -sS -N -m 3 -o /dev/null -w '%{http_code}' \
+            "http://localhost:${B_PORT}/api/v1/alarms/stream?streamToken=${STREAM_TOKEN}" 2>/dev/null || true; } )
+        assert_status "GET /api/v1/alarms/stream?streamToken=（开流 → 200 响应头，-m 3 掐断）" "200" "$SSE_STATUS"
+        # 同一 token 重用：消费后条目已原子移除，必 401（与无凭证不同：同 URL、同状态、不同原因）
+        REUSE_STATUS=$(http_status -o /dev/null -w '%{http_code}' \
+            "http://localhost:${B_PORT}/api/v1/alarms/stream?streamToken=${STREAM_TOKEN}" 2>/dev/null || echo "000")
+        assert_status "[关键] 同一 stream token 复用 → 401（单次用语义端到端实证）" "401" "$REUSE_STATUS"
+    else
+        echo "   ❌ 未拿到 stream token，跳过开流断言（签发已判红）"
+        FAILED=1
+    fi
+    # 无凭证裸连：无 token 参数应由授权层统一 401（与 Pass B 匿名访问断言同姿势）
+    assert_status "GET /api/v1/alarms/stream（无凭证 → 401）" "401" \
+        "$(http_status "http://localhost:${B_PORT}/api/v1/alarms/stream" 2>/dev/null || echo '000')"
+else
+    echo "   ❌ 无 token，跳过 SSE 流令牌断言（登录已判红）"
+    FAILED=1
+fi
+
 stop_backend "$PID_B" "Pass B cloud-backend"
 
 # ───────────────────────── 4. Pass C：生产迁移通路（prod profile + PostgreSQL） ─────────────────────────

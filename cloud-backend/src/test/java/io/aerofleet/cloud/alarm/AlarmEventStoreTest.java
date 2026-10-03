@@ -281,4 +281,57 @@ class AlarmEventStoreTest {
         }
         assertThat(store.size()).isEqualTo(threads * perThread);
     }
+
+    // ===== 显式租户域接口（SSE 轮询任务跑在调度线程上，ThreadLocal 不可用）=====
+
+    @Test
+    @DisplayName("query/count 显式租户域：租户 7 只看到自己的事件，计数与查询同口径")
+    void scopedQueryAndCountIsolateTenants() {
+        AlarmEventStore store = createStore();
+        AlarmEvent tenantEvent = event("e-tenant", AlarmEvent.EventType.MOTION, AlarmEvent.Severity.WARN, 100L);
+        AlarmEvent otherEvent = event("e-other", AlarmEvent.EventType.FIRE, AlarmEvent.Severity.CRITICAL, 200L);
+        AlarmEvent unownedEvent = event("e-unowned", AlarmEvent.EventType.DOOR, AlarmEvent.Severity.INFO, 300L);
+        store.store(tenantEvent);
+        store.store(otherEvent);
+        store.store(unownedEvent);
+        // store() 会按当前线程可写租户打标（测试线程为 null=未归属）；
+        // store 持有同一对象引用，事后设定 tenantId 即可构造多租户数据
+        tenantEvent.setTenantId(7);
+        otherEvent.setTenantId(9);
+        unownedEvent.setTenantId(null);
+
+        // 租户 7 视角：只见自己的 1 条（未归属事件对具体租户不可见）
+        AlarmEventStore.PageResult tenantView = store.query(0, 100, null, null, 7);
+        assertThat(tenantView.getTotal()).isEqualTo(1);
+        assertThat(tenantView.getItems()).extracting(AlarmEvent::getId)
+                .containsExactly("e-tenant");
+        assertThat(store.count(7)).isEqualTo(1);
+
+        // 全局管理员视角（null）：全部可见
+        assertThat(store.query(0, 100, null, null, null).getTotal()).isEqualTo(3);
+        assertThat(store.count(null)).isEqualTo(3);
+
+        // NO_ACCESS 哨兵：什么都看不到
+        assertThat(store.query(0, 100, null, null, io.aerofleet.cloud.security.TenantContext.NO_ACCESS)
+                .getTotal()).isZero();
+        assertThat(store.count(io.aerofleet.cloud.security.TenantContext.NO_ACCESS)).isZero();
+    }
+
+    @Test
+    @DisplayName("scoped count 与 scoped query 同一容量窗口（差值→取页口径一致）")
+    void scopedCountMatchesQueryTotal() {
+        AlarmEventStore store = createStore();
+        for (int i = 0; i < 5; i++) {
+            AlarmEvent e = event("e-" + i, AlarmEvent.EventType.MOTION, AlarmEvent.Severity.WARN, 100L + i);
+            store.store(e);
+            e.setTenantId(i % 2 == 0 ? 7 : 9);
+        }
+
+        for (Integer scope : new Integer[]{7, 9, null}) {
+            AlarmEventStore.PageResult view = store.query(0, 100, null, null, scope);
+            assertThat(store.count(scope))
+                    .as("scope=%s 时 count 与 query.total 必须同口径", scope)
+                    .isEqualTo(view.getTotal());
+        }
+    }
 }

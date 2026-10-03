@@ -293,8 +293,53 @@ RBAC 默认拒绝后，四条上报腿（`POST /api/v1/edge/results`、`/loRa/al
 `POST /api/v1/auth/api-key {"name":..., "sysid":N}`（CI `ci-integration-test.sh` Pass B
 断言 8 是这条流程的端到端实证，含"撤销后同 key 再摄取必须 401"的缓存失效验证）。
 
-**仍未闭合**：SSE 的 `Authorization` 头问题（`EventSource` 带不了自定义头，故 prod 下
-`GET /api/v1/alarms/stream` 当前不可订阅）。
+**已闭合（feat/sse-stream-token，2026-10-03）**：
+
+SSE 的 `Authorization` 头问题（`EventSource` 带不了自定义头，故 prod 下
+`GET /api/v1/alarms/stream` 此前不可订阅）已通过短命单次用流令牌解决：
+
+- 前端每次订阅前先 `POST /api/v1/auth/stream-token`（正常认证头：JWT Bearer / API Key），
+  换取 60 秒内有效的一次性 opaque `streamToken`；
+- 再以 `GET .../stream?streamToken=<token>` 开流 —— URL 里只走短命 opaque 令牌，
+  **不把长效 JWT bearer 暴露给访问/代理日志**（这是与 `/ws` 握手 `?token=` 取 JWT 做法的刻意不同：
+  WS 握手是短请求，访问日志暴露面小；SSE 流 URL 会长期驻留）；
+- 令牌在服务端原子消费（`ConcurrentHashMap.remove`），重放同令牌必 401；
+- 同一用户并存上限 8 枚（重连风暴淘汰最早的），全局上限 4096 枚，超限拒发（503）；
+- 租户域（三态：null=全局 / 租户 ID / `NO_ACCESS` 哨兵）随令牌绑定，消费时原样恢复进
+  `TenantContext`，保证 SSE 轮询的租户可见性与请求链一致（修复了此前轮询任务
+  跑在调度线程、`ThreadLocal` 取 `null` 被当成全局管理员的跨租户泄漏）；
+- 多节点部署：令牌存储是 JVM 内 `ConcurrentHashMap`，与 `ApiKeyCache` 同运维语义
+  （撤销传播上界 = 一次 TTL 60 秒，需会话亲和或接受跨节点 401 后前端重签重连）。
+
+设计细节见 `StreamTokenService`、`StreamTokenFilter`、`AuthController#stream-token`
+与本节下方 §3.5。
+
+### 3.5 SSE 流令牌（EventSource 无自定义头的解决）
+
+`StreamTokenService` / `StreamTokenFilter` / `AuthController#stream-token`（`cloud-backend/src/main/java/io/aerofleet/cloud/security/`）解决浏览器 `EventSource` 无法携带 `Authorization` 头的问题：
+
+**为什么不用 JWT-in-query**：与 WebSocket 握手的 `?token=`（那是 JWT、长效 bearer）不同，SSE 流的 URL 会长期驻留在访问/代理日志里，把长效 JWT 放进 URL 等同于把 bearer 暴露给所有能看到访问日志的人。流令牌是**签发式、60 秒 TTL、单次用 opaque 令牌**（Base64url 43 字符，32 字节熵），泄露窗口只有一次连接建立。
+
+**链路**：
+1. 前端 `fetchStreamToken()` → `POST /api/v1/auth/stream-token`（正常认证头：JWT `Bearer` / `X-API-Key`）；
+2. 服务端签发 `token`（绑定签发现场的 `subject` / `role` / `tenantScope` 三态值）；
+3. 前端用 `GET /api/v1/alarms/stream?streamToken=<token>` 或 `GET /api/v1/surveillance/devices/{id}/events?streamToken=<token>` 开流；
+4. `StreamTokenFilter` 在两条 SSE 路径上消费令牌（`ConcurrentHashMap.remove` = 原子单次用），设置 `StreamTokenAuthenticationToken`（`ROLE_STREAM_TOKEN`）；
+5. `RoleInterceptor` 增加第三角色来源（SecurityContext 流令牌 → `getRole()`），与 JWT / API Key 同序解析；
+6. `TenantContext` 恢复签发时的三态租户域（`resolveTenantScope` 的已解析结果原样传入，不重解析、不放大权限）。
+
+**容量与多节点**：
+- 单 `subject` 并存未用令牌 ≤ 8 枚（超出淘汰最早，防重连风暴）；全局 ≤ 4096 枚（超出拒发 503）。
+- 存储为 JVM 内 `ConcurrentHashMap`（与 `ApiKeyCache` 同运维语义）：多节点部署下撤销/失效传播上界 = 60 秒 TTL，需会话亲和（L4 负载均衡）或接受跨节点 401 后前端重签重连（现成 5 秒回退循环已覆盖）。
+- `AlarmController.streamEvents()` 的轮询任务原本跑在调度线程上、直接读 `TenantContext.getEffectiveTenantId()`（后台线程 `null` → 当成全局管理员 → **跨租户泄漏**），本轮修复为在订阅时于请求线程捕获 `tenantScope` 并传入 `store.query(..., tenantScope)` / `store.count(tenantScope)`，保证 SSE 增量推送与租户隔离口径一致。
+
+**与 WS 握手的对称**：
+- `/ws/**` 握手仍用 `?token=`（JWT），因为握手是一次性短请求，访问日志暴露面小；
+- `/api/v1/alarms/stream` / `/api/v1/surveillance/devices/{id}/events` 改用 `?streamToken=`（opaque 短令牌），因为流 URL 长期可见。
+- 两条路径在 `SecurityConfig` 均注册为 `addFilterBefore(StreamTokenFilter, UsernamePasswordAuthenticationFilter.class)`；
+- 开发模式（`dev-mode=true`）跳过过滤（与 `ApiKeyFilter` 同姿势），不破坏现有测试。
+
+**Pass B 断言 9（`ci-integration-test.sh`）** 为本功能提供端到端闭环证据：签发 → 开流 `-m 3` 掐断得到 200 头 → 同令牌重用 401 → 无凭证 401。
 
 ## 4. 租户隔离机制
 

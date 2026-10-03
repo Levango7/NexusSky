@@ -1,10 +1,12 @@
 package io.aerofleet.cloud.security;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -29,13 +31,23 @@ class AuthControllerTest {
 
     private JwtTokenProvider tokenProvider;
     private PasswordEncoder passwordEncoder;
+    private StreamTokenService streamTokenService;
     private AuthController controller;
 
     @BeforeEach
     void setUp() {
         tokenProvider = new JwtTokenProvider(SECRET);
         passwordEncoder = new BCryptPasswordEncoder();
-        controller = new AuthController(tokenProvider, passwordEncoder, USERS_CONFIG, EXPIRY_SECONDS, null);
+        streamTokenService = new StreamTokenService();
+        controller = new AuthController(tokenProvider, passwordEncoder, USERS_CONFIG,
+                EXPIRY_SECONDS, streamTokenService, null);
+    }
+
+    @AfterEach
+    void cleanUp() {
+        SecurityContextHolder.clearContext();
+        ApiKeyContext.clear();
+        TenantContext.clear();
     }
 
     /** 构造一个带 remoteAddr 的 MockHttpServletRequest。 */
@@ -177,7 +189,7 @@ class AuthControllerTest {
     @DisplayName("users 配置第三段可显式指定 ADMIN 角色")
     void login_explicitRoleFromConfig() {
         AuthController rootController = new AuthController(tokenProvider, passwordEncoder,
-                "root:rootpw:ADMIN", EXPIRY_SECONDS, null);
+                "root:rootpw:ADMIN", EXPIRY_SECONDS, new StreamTokenService(), null);
 
         ResponseEntity<Map<String, Object>> resp = rootController.login(body("root", "rootpw"), request());
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
@@ -190,7 +202,7 @@ class AuthControllerTest {
     @DisplayName("口令含冒号且末段不是角色名时整段仍视为口令（不被当角色）")
     void login_passwordWithColonIsNotMistakenForRole() {
         AuthController colonController = new AuthController(tokenProvider, passwordEncoder,
-                "svc:a:b", EXPIRY_SECONDS, null);
+                "svc:a:b", EXPIRY_SECONDS, new StreamTokenService(), null);
 
         assertThat(colonController.login(body("svc", "a:b"), request()).getStatusCode().value()).isEqualTo(200);
         assertThat(colonController.login(body("svc", "a"), request()).getStatusCode().value()).isEqualTo(401);
@@ -200,13 +212,77 @@ class AuthControllerTest {
     @DisplayName("refresh 时用户已不在内存配置中返回 401（与 DB 模式行为一致）")
     void refresh_removedMemoryUser_returns401() {
         AuthController soloController = new AuthController(tokenProvider, passwordEncoder,
-                "solo:solo:ADMIN", EXPIRY_SECONDS, null);
+                "solo:solo:ADMIN", EXPIRY_SECONDS, new StreamTokenService(), null);
         String token = soloController.login(body("solo", "solo"), request())
                 .getBody().get("token").toString();
         assertThat(soloController.refresh("Bearer " + token).getStatusCode().value()).isEqualTo(200);
 
         AuthController withoutSolo = new AuthController(tokenProvider, passwordEncoder,
-                "other:other", EXPIRY_SECONDS, null);
+                "other:other", EXPIRY_SECONDS, new StreamTokenService(), null);
         assertThat(withoutSolo.refresh("Bearer " + token).getStatusCode().value()).isEqualTo(401);
+    }
+
+    // ===== /stream-token（SSE 流令牌签发）=====
+
+    @Test
+    @DisplayName("stream-token：JWT 凭证签发 200 + token + expiresIn=60，消费后绑定签发角色")
+    void streamToken_jwtCredential_issuesToken() {
+        String jwt = controller.login(body("admin", "admin"), request())
+                .getBody().get("token").toString();
+        MockHttpServletRequest req = request();
+        req.addHeader("Authorization", "Bearer " + jwt);
+
+        ResponseEntity<Map<String, Object>> resp = controller.issueStreamToken(req);
+
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        Map<String, Object> respBody = resp.getBody();
+        assertThat(respBody).isNotNull();
+        assertThat(respBody.get("token").toString()).isNotBlank();
+        assertThat(respBody.get("expiresIn")).isEqualTo(60L);
+        // 同一 service 实例消费：令牌绑定签发时的角色（users 配置默认 OPERATOR）
+        StreamTokenService.Grant grant =
+                streamTokenService.consume(respBody.get("token").toString());
+        assertThat(grant).isNotNull();
+        assertThat(grant.role()).isEqualTo("OPERATOR");
+    }
+
+    @Test
+    @DisplayName("stream-token：无任何可解析角色 → 403（fail-closed）")
+    void streamToken_noRole_returns403() {
+        ResponseEntity<Map<String, Object>> resp = controller.issueStreamToken(request());
+
+        assertThat(resp.getStatusCode().value()).isEqualTo(403);
+        assertThat(resp.getBody().get("error")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("stream-token：API Key 角色源同样可签发（无 JWT 头时降级 ApiKeyContext）")
+    void streamToken_apiKeyRole_issuesToken() {
+        ApiKeyContext.set("key-ci-1", 7, "[\"telemetry:write\"]", "OBSERVER", null);
+        try {
+            ResponseEntity<Map<String, Object>> resp = controller.issueStreamToken(request());
+
+            assertThat(resp.getStatusCode().value()).isEqualTo(200);
+            StreamTokenService.Grant grant =
+                    streamTokenService.consume(resp.getBody().get("token").toString());
+            assertThat(grant).isNotNull();
+            assertThat(grant.role()).isEqualTo("OBSERVER");
+            assertThat(grant.tenantScope()).isEqualTo(7);
+        } finally {
+            ApiKeyContext.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("stream-token：签发的令牌单次用，第二次消费为 null")
+    void streamToken_issuedTokenIsSingleUse() {
+        String jwt = controller.login(body("admin", "admin"), request())
+                .getBody().get("token").toString();
+        MockHttpServletRequest req = request();
+        req.addHeader("Authorization", "Bearer " + jwt);
+        String token = controller.issueStreamToken(req).getBody().get("token").toString();
+
+        assertThat(streamTokenService.consume(token)).isNotNull();
+        assertThat(streamTokenService.consume(token)).isNull();
     }
 }

@@ -145,3 +145,31 @@ describe('预算档位面板裁剪', () => {
     expect(api.isPanelAvailable('formation', 'standard')).toBe(true)
   })
 })
+
+describe('SSE 流令牌（alarmStreamUrl / fetchStreamToken / surveillanceStreamUrl）', () => {
+  beforeEach(() => {
+    vi.stubGlobal('location', { protocol: 'https:', host: 'test.local' })
+  })
+
+  it('alarmStreamUrl(token) 构造含 ?streamToken= 的绝对 URL，encodeURIComponent 编码', async () => {
+    const api2 = await import('./api')
+    const url = api2.alarmStreamUrl('t+ok.en')
+    expect(url).toBe('https://test.local/api/v1/alarms/stream?streamToken=t%2Bok.en')
+  })
+
+  it('alarmStreamUrl 无 token 时仍构造基础 URL（无需令牌时的回退形状）', async () => {
+    const api2 = await import('./api')
+    expect(api2.alarmStreamUrl()).toBe('https://test.local/api/v1/alarms/stream')
+  })
+
+  it('surveillanceStreamUrl 也接受 deviceId + streamToken 构造', async () => {
+    const api2 = await import('./api')
+    expect(api2.surveillanceStreamUrl('dev-1', 's_tok_1'))
+      .toBe('https://test.local/api/v1/surveillance/devices/dev-1/events?streamToken=s_tok_1')
+  })
+
+  it('fetchStreamToken 是异步函数（可调用）', async () => {
+    const api2 = await import('./api')
+    expect(typeof api2.fetchStreamToken).toBe('function')
+  })
+})

@@ -121,7 +121,7 @@ public class AlarmEventStore {
      */
     public AlarmEvent getById(String id) {
         AlarmEvent event = repository.findById(id).orElse(null);
-        return isVisibleTo(event) ? event : null;
+        return isVisibleTo(event, TenantContext.getEffectiveTenantId()) ? event : null;
     }
 
     /**
@@ -159,6 +159,21 @@ public class AlarmEventStore {
      * @return 分页结果（含 items/total/page/size）
      */
     public PageResult query(int page, int size, String severityFilter, String typeFilter) {
+        return query(page, size, severityFilter, typeFilter, TenantContext.getEffectiveTenantId());
+    }
+
+    /**
+     * 分页查询事件（显式租户域版本）。
+     * <p>
+     * 给跑在非请求线程上的调用方用（典型：{@code AlarmController} 的 SSE 轮询
+     * 任务跑在调度线程上，ThreadLocal 不可用，必须在订阅时于请求线程捕获
+     * 租户域传进来）。租户域语义与 ThreadLocal 版本一致：null=全局管理员 /
+     * 租户 ID=本租户 / {@link TenantContext#NO_ACCESS}=什么都看不到。
+     * 传 null 不代表「不过滤」，而是「全局管理员视角」——与既有口径一致，
+     * 调用方应原样转发 {@code TenantContext.getEffectiveTenantId()} 的捕获值。
+     */
+    public PageResult query(int page, int size, String severityFilter, String typeFilter,
+                            Integer tenantScope) {
         if (page < 0) {
             page = 0;
         }
@@ -172,7 +187,7 @@ public class AlarmEventStore {
 
         List<AlarmEvent> filtered = new ArrayList<>();
         for (AlarmEvent e : all) {
-            if (!isVisibleTo(e)) {
+            if (!isVisibleTo(e, tenantScope)) {
                 continue;
             }
             if (!matchesFilter(e, severityFilter, typeFilter)) {
@@ -192,6 +207,27 @@ public class AlarmEventStore {
     /** 当前存储事件总数。 */
     public int size() {
         return (int) repository.count();
+    }
+
+    /**
+     * 指定租户域可见的事件数。
+     * <p>
+     * 与 {@link #query(int, int, String, String, Integer)} 基于同一容量窗口
+     * （前 {@code capacity} 条）统计，保证「计数差值 → 取页」的 SSE 增量推送
+     * 两侧口径一致；{@link #size()} 是全表 COUNT，两者在表超过容量窗口时
+     * 会出现差额，增量逻辑应只使用本方法。
+     */
+    public int count(Integer tenantScope) {
+        List<AlarmEvent> all = repository.findAll(
+                PageRequest.of(0, capacity, Sort.by("timestampMs").descending())
+        ).getContent();
+        int count = 0;
+        for (AlarmEvent e : all) {
+            if (isVisibleTo(e, tenantScope)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /** 容量上限。 */
@@ -219,16 +255,18 @@ public class AlarmEventStore {
      *   <li>有效租户为 null —— 全局管理员（含 dev-mode，无 TenantFilter 设置上下文），看全部；</li>
      *   <li>否则仅本租户；事件 tenantId 为 null 视为「未归属」，任何具体租户都看不到。</li>
      * </ul>
-     * 无请求上下文的后台线程（SSE 轮询、联动引擎）取到 null，行为与修复前一致。
+     * 显式租户域参数供非请求线程（SSE 轮询任务）使用——它们必须把请求线程捕获的
+     * {@code TenantContext.getEffectiveTenantId()} 传进来；不传而依赖 ThreadLocal
+     * 会取到 null（后台线程），被当作全局管理员，等于跨租户全量可见。
      *
-     * @param event 事件，可为 null
-     * @return 当前上下文可见返回 true；事件为 null 或他租户返回 false
+     * @param event     事件，可为 null
+     * @param tenantId  有效租户域（null=全局管理员 / 租户 ID / NO_ACCESS）
+     * @return 指定租户域可见返回 true；事件为 null 或他租户返回 false
      */
-    private static boolean isVisibleTo(AlarmEvent event) {
+    private static boolean isVisibleTo(AlarmEvent event, Integer tenantId) {
         if (event == null) {
             return false;
         }
-        Integer tenantId = TenantContext.getEffectiveTenantId();
         return tenantId == null || tenantId.equals(event.getTenantId());
     }
 

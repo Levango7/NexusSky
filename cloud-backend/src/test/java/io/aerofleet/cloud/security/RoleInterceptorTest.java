@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -43,6 +44,8 @@ class RoleInterceptorTest {
     @AfterEach
     void clearApiKeyContext() {
         ApiKeyContext.clear();
+        SecurityContextHolder.clearContext();
+        TenantContext.clear();
     }
 
     /** 无类级注解的控制器：用于方法级与未标注端点。 */
@@ -305,5 +308,63 @@ class RoleInterceptorTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("Authorization", "Bearer tok-admin"))
                 .andExpect(status().isOk());
+    }
+
+    // ===== 第三角色来源：SSE 流令牌（StreamTokenAuthenticationToken in SecurityContext）=====
+
+    @Test
+    @DisplayName("流令牌角色在 JWT / API Key 皆缺席时生效（SSE 端点的真实形态）")
+    void streamTokenRoleIsUsedWhenNoOtherSource() throws Exception {
+        SecurityContextHolder.getContext()
+                .setAuthentication(new StreamTokenAuthenticationToken("op-1", "OPERATOR", 7));
+
+        MockMvc mvc = mockMvc(false, true);
+        mvc.perform(get("/rbac/operator"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/rbac/admin"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("流令牌绑定的角色不放大：OBSERVER 令牌进不了 OPERATOR 端点")
+    void streamTokenDoesNotEscalateBoundRole() throws Exception {
+        SecurityContextHolder.getContext()
+                .setAuthentication(new StreamTokenAuthenticationToken("obs-1", "OBSERVER", null));
+
+        mockMvc(false, true).perform(get("/rbac/operator"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("forbidden: requires role OPERATOR"));
+    }
+
+    @Test
+    @DisplayName("JWT 仍优先于流令牌角色（头凭证在场时流令牌不参与判定）")
+    void jwtTakesPrecedenceOverStreamToken() throws Exception {
+        SecurityContextHolder.getContext()
+                .setAuthentication(new StreamTokenAuthenticationToken("obs-1", "OBSERVER", null));
+
+        mockMvc(false, true).perform(get("/rbac/admin")
+                        .header("Authorization", "Bearer tok-admin"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("API Key 角色优先于流令牌角色（来源顺序：JWT → API Key → 流令牌）")
+    void apiKeyTakesPrecedenceOverStreamToken() throws Exception {
+        SecurityContextHolder.getContext()
+                .setAuthentication(new StreamTokenAuthenticationToken("obs-1", "OBSERVER", null));
+        ApiKeyContext.set("nsk_test", 1, "[\"read\"]", "OPERATOR");
+
+        mockMvc(false, true).perform(get("/rbac/operator"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("流令牌未绑定角色（null）时受保护端点 fail-closed")
+    void streamTokenWithoutRoleFailsClosed() throws Exception {
+        SecurityContextHolder.getContext()
+                .setAuthentication(new StreamTokenAuthenticationToken("legacy-1", null, null));
+
+        mockMvc(false, true).perform(get("/rbac/operator"))
+                .andExpect(status().isForbidden());
     }
 }

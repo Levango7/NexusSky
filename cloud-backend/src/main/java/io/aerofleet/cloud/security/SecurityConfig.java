@@ -47,6 +47,9 @@ public class SecurityConfig {
     @Autowired(required = false)
     private ApiKeyLastUsedTracker apiKeyLastUsedTracker;
 
+    @Autowired(required = false)
+    private StreamTokenService streamTokenService;
+
     public SecurityConfig(JwtTokenProvider jwtTokenProvider) {
         this.jwtTokenProvider = jwtTokenProvider;
     }
@@ -92,6 +95,11 @@ public class SecurityConfig {
                     // ApiKeyFilter 在 oauth2ResourceServer（JWT 认证）之前执行
                     .addFilterBefore(
                             apiKeyFilter,
+                            UsernamePasswordAuthenticationFilter.class)
+                    // StreamTokenFilter 紧随 ApiKeyFilter：只处理两个 SSE 端点的
+                    // ?streamToken= 短令牌（EventSource 带不了认证头），其余直通
+                    .addFilterBefore(
+                            new StreamTokenFilter(devMode, streamTokenService),
                             UsernamePasswordAuthenticationFilter.class)
                     // TenantFilter 在 oauth2ResourceServer 之后执行，
                     // 从 JWT 提取 tenant_id 设置到 TenantContext
