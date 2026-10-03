@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 更新至 2026-10-03，共 65 个 `@RestController`、3 个 `@Service` 辅助类、345 个 REST API 端点
+> 更新至 2026-10-03，共 65 个 `@RestController`、3 个 `@Service` 辅助类、346 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -1104,6 +1104,7 @@ curl -H "Authorization: Bearer <token>" \
 | 方法 | 路径 | 说明 | 请求体 | 响应 |
 |------|------|------|--------|------|
 | POST | `/login` | 用户登录，返回 JWT 令牌 | {username,password} | 200 {token,expiresIn,username} / 400 / 401 / 429 |
+| POST | `/stream-token` | 签发 SSE 流令牌（EventSource 无头通道） | -（认证头携带） | 200 {token,expiresIn:60} / 403（无角色）/ 503（容量满） |
 | POST | `/refresh` | 刷新令牌 | - | 200 {token,expiresIn} / 401 |
 
 #### 端点详情
@@ -1112,6 +1113,16 @@ curl -H "Authorization: Bearer <token>" \
 - 请求体: `{username:String, password:String}`
 - 频率限制: 每 IP 每分钟最多 10 次尝试，超限返回 429
 - 响应: 200 - `{token:String, expiresIn:long, username:String}`；400 - 缺少用户名/密码；401 - 凭据无效；429 - 频率超限
+
+**POST /api/v1/auth/stream-token**（需任何已认证角色：JWT / API Key 均可签发，流令牌本身不可再签）
+- 请求头: `Authorization: Bearer <JWT>` 或 `X-API-Key: <key>`
+- 响应: 200 - `{token:String (43 字符 opaque Base64url), expiresIn:60}`（60 秒 TTL、单次用）；
+  403 - 当前凭证无可解析角色（无 JWT 头也无 API Key 角色记录）；
+  503 - 全局并存令牌已达 4096 上限（拒发，客户端应稍后重试，非永久失败）
+- 语义: 签发时绑定 `subject`（JWT `sub` 或 API Key `keyId`）+ `role`（与 `RoleInterceptor` 同解码顺序，JWT claim 优先，其次 `ApiKeyContext.getRole()`）+ `tenantScope`（签发时 `TenantContext.getEffectiveTenantId()` 三态值：null=全局 / 租户 ID / `NO_ACCESS`），消费时原样恢复进 `TenantContext`。
+- 设计取舍: 与 `/ws` 握手的 `?token=`（那是长效 JWT、握手是一次性短请求、访问日志暴露小）刻意不同 —— SSE 流的 URL 会长期驻留在日志里，故用短命单次 opaque 令牌（60 秒 TTL），重放窗口仅一次连接建立。
+- 消费路径: `GET /api/v1/alarms/stream?streamToken=<token>` / `GET /api/v1/surveillance/devices/{id}/events?streamToken=<token>`
+- Pass B 断言 9（`ci-integration-test.sh`）为本端点提供端到端闭环证据：签发 → 开流 `-m 3` 掐断得到 200 头 → 同令牌复用 401 → 无凭证 401。
 
 **POST /api/v1/auth/refresh**
 - 请求头: `Authorization: Bearer <token>`

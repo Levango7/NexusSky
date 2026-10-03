@@ -11,6 +11,7 @@ import {
   triggerEmergencyResponse,
   listLinkageLogs,
   alarmStreamUrl,
+  fetchStreamToken,
 } from '../api.js'
 import { POLL_MS } from '../utils/panelUtils.js'
 
@@ -114,53 +115,65 @@ export default function AlarmPanel() {
       // 经验：前置检查 —— 在创建 EventSource 之前判断 signal.aborted
       if (controller.signal.aborted) return
 
-      es = new EventSource(alarmStreamUrl)
+      // EventSource 无法携带 Authorization 头：先取 60s 单次用流令牌再开流
+      // （生产链上无令牌开流必 401）。取令牌失败与 SSE 断线同路：5s 后重试
+      fetchStreamToken()
+        .then((token) => {
+          if (controller.signal.aborted || closed) return
+          es = new EventSource(alarmStreamUrl(token))
 
-      es.onopen = () => {
-        if (controller.signal.aborted) { es.close(); return }
-        setSseStatus('open')
-      }
-
-      es.onmessage = (ev) => {
-        // 经验：abort 后不更新任何 state
-        if (controller.signal.aborted) return
-        let data
-        try {
-          data = JSON.parse(ev.data)
-        } catch (e) {
-          return
-        }
-        // 兼容单事件 / 批量事件
-        const incoming = Array.isArray(data) ? data : [data]
-        // 预计算去重 key：退化事件（无任何可识别字段）用递增计数器兜底
-        const incomingKeys = incoming.map((e) => {
-          const key = eventDedupKey(e)
-          return key === null ? '__dedup_' + (dedupCounterRef.current++) : key
-        })
-        setEvents((prev) => {
-          const seen = new Set()
-          for (const e of prev) {
-            const key = eventDedupKey(e)
-            if (key !== null) seen.add(key)
+          es.onopen = () => {
+            if (controller.signal.aborted) { es.close(); return }
+            setSseStatus('open')
           }
-          const fresh = []
-          for (let i = 0; i < incoming.length; i++) {
-            const key = incomingKeys[i]
-            if (seen.has(key)) continue
-            seen.add(key)
-            fresh.push(incoming[i])
-          }
-          return [...fresh, ...prev].slice(0, 200)
-        })
-      }
 
-      es.onerror = () => {
-        if (controller.signal.aborted) return
-        setSseStatus('closed')
-        if (es) es.close()
-        // 断线 5s 自动重连
-        if (!closed) retryTimer = setTimeout(subscribe, 5000)
-      }
+          es.onmessage = (ev) => {
+            // 经验：abort 后不更新任何 state
+            if (controller.signal.aborted) return
+            let data
+            try {
+              data = JSON.parse(ev.data)
+            } catch (e) {
+              return
+            }
+            // 兼容单事件 / 批量事件
+            const incoming = Array.isArray(data) ? data : [data]
+            // 预计算去重 key：退化事件（无任何可识别字段）用递增计数器兜底
+            const incomingKeys = incoming.map((e) => {
+              const key = eventDedupKey(e)
+              return key === null ? '__dedup_' + (dedupCounterRef.current++) : key
+            })
+            setEvents((prev) => {
+              const seen = new Set()
+              for (const e of prev) {
+                const key = eventDedupKey(e)
+                if (key !== null) seen.add(key)
+              }
+              const fresh = []
+              for (let i = 0; i < incoming.length; i++) {
+                const key = incomingKeys[i]
+                if (seen.has(key)) continue
+                seen.add(key)
+                fresh.push(incoming[i])
+              }
+              return [...fresh, ...prev].slice(0, 200)
+            })
+          }
+
+          es.onerror = () => {
+            if (controller.signal.aborted) return
+            setSseStatus('closed')
+            if (es) es.close()
+            // 断线 5s 自动重连（重连会取新流令牌）
+            if (!closed) retryTimer = setTimeout(subscribe, 5000)
+          }
+        })
+        .catch(() => {
+          if (controller.signal.aborted || closed) return
+          setSseStatus('closed')
+          // 取令牌失败（token 过期 / 网络抖动）与断线同路：5s 后重试
+          if (!closed) retryTimer = setTimeout(subscribe, 5000)
+        })
     }
 
     subscribe()

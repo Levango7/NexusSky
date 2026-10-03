@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
@@ -27,6 +28,8 @@ import java.util.Arrays;
  *   <li>{@code Authorization: Bearer} 的 JWT {@code role} claim</li>
  *   <li>API Key 上下文的角色（{@code X-API-Key} 路径，由 {@link ApiKeyFilter} 从
  *       {@link ApiKeyEntity#getRole()} 写入 {@link ApiKeyContext}——SDK 只用 API Key 认证）</li>
+ *   <li>SSE 流令牌的角色（{@code ?streamToken=} 路径，由 {@link StreamTokenFilter} 从
+ *       {@link StreamTokenService} 签发快照写入 SecurityContext——EventSource 带不了认证头）</li>
  * </ol>
  * <p>
  * 跳过校验的条件（任一满足即放行）：
@@ -120,28 +123,43 @@ public class RoleInterceptor implements HandlerInterceptor {
 
     /**
      * 调用方角色：Bearer JWT 的 role claim 优先；无 JWT 时用 API Key 记录的角色
-     * （SDK 只用 X-API-Key，否则加注解后 SDK 写操作会全部 403）。
+     * （SDK 只用 X-API-Key，否则加注解后 SDK 写操作会全部 403）；
+     * 两者皆无时读 SecurityContext 里的流令牌认证（SSE 端点的第三通道）。
      *
-     * @return 角色名，两条来源都拿不到时返回 null
+     * @return 角色名，三条来源都拿不到时返回 null
      */
     private String resolveRole(HttpServletRequest request) {
-        String fromJwt = extractRoleClaim(request);
-        return fromJwt != null ? fromJwt : ApiKeyContext.getRole();
+        String fromJwt = extractRoleClaim(request, jwtDecoder);
+        if (fromJwt != null) {
+            return fromJwt;
+        }
+        String fromApiKey = ApiKeyContext.getRole();
+        if (fromApiKey != null) {
+            return fromApiKey;
+        }
+        if (SecurityContextHolder.getContext().getAuthentication()
+                instanceof StreamTokenAuthenticationToken streamToken) {
+            return streamToken.getRole();
+        }
+        return null;
     }
 
     /**
      * 从 Authorization: Bearer <token> 中解码 JWT，提取 role claim。
+     * <p>
+     * 静态工具：{@link AuthController#issueStreamToken} 签发流令牌时用同一份
+     * 解析逻辑取「当前角色」，保证签发与鉴权两侧的角色口径永不漂移。
      *
      * @return role claim 值，无 token 或解析失败时返回 null
      */
-    private String extractRoleClaim(HttpServletRequest request) {
+    static String extractRoleClaim(HttpServletRequest request, JwtDecoder decoder) {
         String header = request.getHeader("Authorization");
         if (header == null || !header.startsWith("Bearer ")) {
             return null;
         }
         String token = header.substring(7);
         try {
-            Jwt jwt = jwtDecoder.decode(token);
+            Jwt jwt = decoder.decode(token);
             return jwt.getClaimAsString("role");
         } catch (JwtException e) {
             log.debug("RBAC: JWT 解析失败: {}", e.getMessage());

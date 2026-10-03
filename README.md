@@ -26,7 +26,7 @@
 |---|---|---|---|
 | `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 420–483，共 51 条），**449 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
-| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（345 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
+| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（346 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 38 个功能面板 | 不需要换 |
 
 > **M0a–M4 能力扩展**：组网/环境/编队/喷洒/成像/硬件抽象均在上述四模块内叠加，
@@ -304,7 +304,7 @@ c_library_v2 生成头，非手工估值）：
 ## 自动重定向环绕（Batch A：orbit 闭环）
 
 `POST /api/v1/vision/drones/{sysid}/orbit`
-`{"lat":22.5916,"lon":113.9345,"radiusM":25,"altM":60,"photos":4}`
+`{"lat":22.5916,"lon":113.9346,"radiusM":25,"altM":60,"photos":4}`
 
 云端生成 `[takeoff, (waypoint+capture)×N, rtl]` 圆弧任务 → 上传 →
 ARM → startMission → 逐站拍照 → 逐站逆解算定位 → 喂跟踪器 → 返回
@@ -576,7 +576,7 @@ DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理�
 - `GET /v1/disaster/status` 灾害模式状态 · `POST /v1/disaster/budget` Budget 模式切换
 - `POST /v1/buzzer/control` 蜂鸣器控制 · `GET /v1/thermal/search` 热源搜救
 
-> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 65 个 @RestController、345 REST 端点。
+> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 65 个 @RestController、346 REST 端点。
 
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
@@ -646,10 +646,10 @@ NexusSky/
 | `mavlink-core` | 449 |
 | `drone-sim` | 1337 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2150 |
+| `cloud-backend` | 2180 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4084** |
+| **总计** | **4114** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -728,7 +728,7 @@ NexusSky/
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
-  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：345 个端点
+  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：346 个端点
   （190 GET/127 POST/13 PUT/14 DELETE）全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
   写=`OPERATOR`、配置/用户/密钥/租户/围栏/license 面=`ADMIN`，匿名入口只有登录与刷新两处
   `@PermitAll`；漏写注解由 `RbacEndpointCoverageTest` 反射逐个校验并判红，不靠文本扫描

@@ -38,7 +38,12 @@
 
 **顺带发现（未改，本地卫生）**：`cloud-backend/target/classes` 里有一份**从未提交**的孤儿迁移 `V22__flight_log_id_sequence.sql`（FlightLog IDENTITY→SEQUENCE 批处理优化实验：注释完整论证了 Hibernate 对 IDENTITY 无法批 insert、遥测 430 万行/天的写放大，但实体侧 `GenerationType.IDENTITY` 从未同步改，src 自洽无缺失）。该孤儿被 jar 打包带上后与本轮 V22 撞号（Flyway "Found more than one migration with version 22"，本机 IT 才能抓到，CI 全新 checkout 不可见）。已从本地 target 清除；批处理优化本身作为后续独立项（写路径默认关闭，不紧急）。
 
-**本轮未闭合**：多节点撤销传播 60s 上界（文档明示，跨节点即时撤销需广播/共享缓存机制，待多节点部署成为真实场景再评估）；SSE `Authorization` 头问题（不变）；MAVLink 签名遗留项——密钥库明文、时间戳 1ms 粒度、密钥库未命中回退 `defaultKey`、无真机联调（均不变，见签名轮"本轮未闭合"）。
+**本轮未闭合**：多节点撤销传播 60s 上界（文档明示，跨节点即时撤销需广播/共享缓存机制，待多节点部署成为真实场景再评估）；MAVLink 签名遗留项——密钥库明文、时间戳 1ms 粒度、密钥库未命中回退 `defaultKey`、无真机联调（均不变，见签名轮"本轮未闭合"）。
+
+**本轮完成（SSE 流令牌 `feat/sse-stream-token`，2026-10-03）**：
+`POST /api/v1/auth/stream-token` 签发 60s 单次用 opaque 流令牌（`?streamToken=` 开流）；`StreamTokenService`（内存 ConcurrentHashMap、单 subject 上限 8、全局上限 4096、时钟可注入）+ `StreamTokenFilter`（仅拦截两条 SSE 路径、头凭证优先、跳过写 401 交授权层统一拒绝、finally 清 `TenantContext`）+ `RoleInterceptor` 第三角色来源（`StreamTokenAuthenticationToken`）；`AlarmEventStore` 增 `queryScoped` / `countScoped` 显式租户域重载，`AlarmController.streamEvents` 订阅时捕获 `TenantContext.getEffectiveTenantId()` 传入轮询任务（修复调度线程 `null` → 全局管理员的跨租户泄漏）；`SurveillanceController.subscribeEvents` 已内置 `getDevice` 租户可见性（无额外改动）；前端 `api.js` `fetchStreamToken()` + `alarmStreamUrl(token)` + `surveillanceStreamUrl()`，`AlarmPanel.jsx` / `UnifiedCommandPanel.jsx` 订阅改为先取令牌再 `EventSource`；`security-design.md` §3.5 新增、`api-reference.md` 端点 345→346、`CHANGELOG.md` 口径登记。
+
+**新增测试**：`StreamTokenServiceTest`(9)、`StreamTokenFilterTest`(10)、`AuthControllerTest` 扩展（+4 流令牌端点）、`RoleInterceptorTest` 扩展（+5 第三角色源/优先级/fail-closed），`AlarmEventStoreTest` 扩展（+2 scoped 口径）；`gcs-web` `api.test.js` 扩展（SSE URL 构造）。
 
 ---
 

@@ -941,6 +941,8 @@ export const api = {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}` },
   }),
+  // SSE 流令牌：EventSource 带不了 Authorization 头，开流前换 60s 单次用短令牌
+  fetchStreamToken: () => fetchStreamToken(),
 
   // ---- Tenants ----
   listTenants: () => jsonFetch(`${BASE}/tenants`),
@@ -1163,15 +1165,33 @@ export async function listSurveillanceEvents(params = {}) {
   return jsonFetch(`${SURVEILLANCE_BASE}/events${qs ? '?' + qs : ''}`)
 }
 
+// 安防设备事件 SSE 订阅地址（EventSource 用）。
+// 与报警流同机制：先 fetchStreamToken() 换短令牌，再经 ?streamToken= 开流
+export function surveillanceStreamUrl(deviceId, streamToken) {
+  const base = `${location.protocol === 'https:' ? 'https' : 'http'}://${
+    location.host
+  }${SURVEILLANCE_BASE}/devices/${encodeURIComponent(deviceId)}/events`
+  return streamToken ? `${base}?streamToken=${encodeURIComponent(streamToken)}` : base
+}
+
 // ---- Alarms (报警联动 M11) ----
 // 报警事件管理 API 挂载在 /api/v1/alarms 下（未复用通用 BASE 常量）
 // 支持 SSE 实时推送、联动规则管理、一键应急响应触发无人机侦察任务
 const ALARM_BASE = '/api/v1/alarms'
 
-// 报警事件 SSE 订阅地址（EventSource 用）
-export const alarmStreamUrl = `${location.protocol === 'https:' ? 'https' : 'http'}://${
-  location.host
-}${ALARM_BASE}/stream`
+// 签发 SSE 流令牌：EventSource 无法携带 Authorization 头，生产链上开流前
+// 必须先用正常认证换一枚 60s 单次用短令牌（每次建流/重连都取新令牌）
+export async function fetchStreamToken() {
+  const resp = await jsonFetch('/api/v1/auth/stream-token', { method: 'POST' })
+  return resp && resp.token ? resp.token : ''
+}
+
+// 报警事件 SSE 订阅地址（EventSource 用）。
+// 鉴权经 ?streamToken= 短令牌，不把长效 JWT 放进 URL（访问日志可见）
+export function alarmStreamUrl(streamToken) {
+  const base = `${location.protocol === 'https:' ? 'https' : 'http'}://${location.host}${ALARM_BASE}/stream`
+  return streamToken ? `${base}?streamToken=${encodeURIComponent(streamToken)}` : base
+}
 
 // 查询报警事件列表（支持 severity/source/type/since/until/acknowledged 等筛选）
 export async function listAlarmEvents(params = {}) {

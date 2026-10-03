@@ -13,6 +13,7 @@ import {
   triggerEmergencyResponse,
   listLinkageLogs,
   alarmStreamUrl,
+  fetchStreamToken,
   getAirGroundSituation,
   triggerReconFromAlarm,
   triggerPtzTracking,
@@ -243,49 +244,62 @@ export default function UnifiedCommandPanel() {
 
     const subscribe = () => {
       if (controller.signal.aborted) return
-      es = new EventSource(alarmStreamUrl)
 
-      es.onopen = () => {
-        if (controller.signal.aborted) { es.close(); return }
-        setSseStatus('open')
-      }
+      // EventSource 无法携带 Authorization 头：先取 60s 单次用流令牌再开流
+      fetchStreamToken()
+        .then((token) => {
+          if (controller.signal.aborted || closed) return
+          es = new EventSource(alarmStreamUrl(token))
 
-      es.onmessage = (ev) => {
-        if (controller.signal.aborted) return
-        let data
-        try {
-          data = JSON.parse(ev.data)
-        } catch (e) {
-          return
-        }
-        const incoming = Array.isArray(data) ? data : [data]
-        const incomingKeys = incoming.map((e) => {
-          const key = eventDedupKey(e)
-          return key === null ? '__dedup_' + (dedupCounterRef.current++) : key
-        })
-        setAlarmEvents((prev) => {
-          const seen = new Set()
-          for (const e of prev) {
-            const key = eventDedupKey(e)
-            if (key !== null) seen.add(key)
+          es.onopen = () => {
+            if (controller.signal.aborted) { es.close(); return }
+            setSseStatus('open')
           }
-          const fresh = []
-          for (let i = 0; i < incoming.length; i++) {
-            const key = incomingKeys[i]
-            if (seen.has(key)) continue
-            seen.add(key)
-            fresh.push(incoming[i])
-          }
-          return [...fresh, ...prev].slice(0, 100)
-        })
-      }
 
-      es.onerror = () => {
-        if (controller.signal.aborted) return
-        setSseStatus('closed')
-        if (es) es.close()
-        if (!closed) retryTimer = setTimeout(subscribe, 5000)
-      }
+          es.onmessage = (ev) => {
+            if (controller.signal.aborted) return
+            let data
+            try {
+              data = JSON.parse(ev.data)
+            } catch (e) {
+              return
+            }
+            const incoming = Array.isArray(data) ? data : [data]
+            const incomingKeys = incoming.map((e) => {
+              const key = eventDedupKey(e)
+              return key === null ? '__dedup_' + (dedupCounterRef.current++) : key
+            })
+            setAlarmEvents((prev) => {
+              const seen = new Set()
+              for (const e of prev) {
+                const key = eventDedupKey(e)
+                if (key !== null) seen.add(key)
+              }
+              const fresh = []
+              for (let i = 0; i < incoming.length; i++) {
+                const key = incomingKeys[i]
+                if (seen.has(key)) continue
+                seen.add(key)
+                fresh.push(incoming[i])
+              }
+              return [...fresh, ...prev].slice(0, 100)
+            })
+          }
+
+          es.onerror = () => {
+            if (controller.signal.aborted) return
+            setSseStatus('closed')
+            if (es) es.close()
+            // 断线 5s 自动重连（重连会取新流令牌）
+            if (!closed) retryTimer = setTimeout(subscribe, 5000)
+          }
+        })
+        .catch(() => {
+          if (controller.signal.aborted || closed) return
+          setSseStatus('closed')
+          // 取令牌失败（过期 / 网络抖动）与断线同路：5s 后重试
+          if (!closed) retryTimer = setTimeout(subscribe, 5000)
+        })
     }
 
     subscribe()

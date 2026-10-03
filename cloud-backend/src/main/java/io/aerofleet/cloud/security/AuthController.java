@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -47,6 +49,7 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final Map<String, MemoryUser> users; // username -> 编码口令 + 角色
     private final long expirySeconds;
+    private final StreamTokenService streamTokenService;
     /** 可选注入：有 Spring 上下文时使用数据库查询，无上下文时降级为内存模式。 */
     private final UserRepository userRepository;
     /** 默认只使用直连地址；仅在可信代理覆盖转发头时允许开启。 */
@@ -60,10 +63,12 @@ public class AuthController {
                           PasswordEncoder passwordEncoder,
                           @Value("${aerofleet.security.users}") String usersConfig,
                           @Value("${aerofleet.security.jwt-expiry:3600}") long expirySeconds,
+                          StreamTokenService streamTokenService,
                           @Autowired(required = false) UserRepository userRepository) {
         this.tokenProvider = tokenProvider;
         this.passwordEncoder = passwordEncoder;
         this.expirySeconds = expirySeconds;
+        this.streamTokenService = streamTokenService;
         this.users = parseUsers(usersConfig);
         this.userRepository = userRepository;
         if (this.users.isEmpty() && userRepository == null) {
@@ -195,6 +200,54 @@ public class AuthController {
         resp.put("token", newToken);
         resp.put("expiresIn", expirySeconds);
         return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * 签发 SSE 流令牌。
+     * <p>
+     * POST /api/v1/auth/stream-token（需认证）→ {token, expiresIn}
+     * <p>
+     * 浏览器 EventSource 无法携带 Authorization 头，SSE 端点（报警流/安防事件流）
+     * 在生产链上用本端点换取的短命单次用令牌经 {@code ?streamToken=} 参数认证。
+     * 令牌绑定签发现场的角色与租户域（三态值原样恢复），不放大权限。
+     * <p>
+     * 角色取值与 {@link RoleInterceptor} 同口径（JWT role claim 优先，其次
+     * API Key 记录的角色）；流令牌本身不在来源里 —— 流令牌不能再签流令牌，
+     * 天然 fail-closed。全局容量满时返回 503（客户端应稍后重试）。
+     */
+    @PostMapping("/stream-token")
+    public ResponseEntity<Map<String, Object>> issueStreamToken(HttpServletRequest request) {
+        String role = RoleInterceptor.extractRoleClaim(request, tokenProvider.getDecoder());
+        if (role == null) {
+            role = ApiKeyContext.getRole();
+        }
+        if (role == null) {
+            log.warn("流令牌签发被拒: 当前凭证无可解析角色");
+            return errorResponse(HttpStatus.FORBIDDEN, "current credentials carry no role");
+        }
+
+        String subject = resolveCurrentSubject();
+        Integer tenantScope = TenantContext.getEffectiveTenantId();
+        String token = streamTokenService.issue(subject, role, tenantScope);
+        if (token == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE,
+                    "stream token capacity exceeded, retry later");
+        }
+        log.debug("流令牌已签发: subject={}, tenantScope={}", subject, tenantScope);
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("token", token);
+        resp.put("expiresIn", StreamTokenService.TTL_MILLIS / 1000);
+        return ResponseEntity.ok(resp);
+    }
+
+    /** 当前认证主体名（JWT 用户名或 API Key ID），仅用于令牌容量记账与日志。 */
+    private String resolveCurrentSubject() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated() && authentication.getName() != null) {
+            return authentication.getName();
+        }
+        return "unknown";
     }
 
     private ResponseEntity<Map<String, Object>> errorResponse(HttpStatus status, String message) {
