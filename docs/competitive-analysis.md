@@ -114,7 +114,7 @@
 | **协议中立** | ✅ | ❌ 大疆专属 | ✅ | ✅ | N/A |
 | **多机协同调度** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **冲突避免** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **自主决策引擎** | ⚠️ advisory 已接线（建议-only） | ❌ | ❌ | ❌ | ❌ |
+| **自主决策引擎** | ⚠️ advisory + 执行级已接线（执行级默认关闭） | ❌ | ❌ | ❌ | ❌ |
 | **应急 mesh 组网** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **星地中继** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **动态 MAX_HOPS 调整** | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -140,9 +140,11 @@
 > —— 它们的**代码存在且测试全绿，但没有任何生产调用方**，即从未真正执行过：
 >
 > - **自主决策引擎**（`io.aerofleet.sim.ai`，14 类 3513 行）：**advisory 已接线**
->   （2026-10-02）——新增 `AutonomyAdvisor`，`VirtualDrone.tickOnce` 以 1Hz 驱动
->   `DecisionEngine`，主决策类型**变化沿**经 STATUSTEXT 下发**建议**（只建议、
->   不执行动作）。实际生效的应急**执行**链路是 `VirtualDrone` 自带的
+>   （2026-10-02），**执行级已接线**（2026-10-04，默认关闭）——`AutonomyAdvisor`
+>   以 1Hz 驱动 `DecisionEngine`，变化沿播报建议并下发 DECISION_EVENT(30051)；
+>   `AutonomyExecutor` 门控执行（RTL/避障限速），但 **FailsafeController 永远
+>   优先**、仅 ARMED/MISSION 可执行、需 `--autonomy-exec` 显式开启；
+>   ADAPT_PATH 航点注入明确未做。应急**执行**链路仍是 `VirtualDrone` 自带的
 >   `FailsafeController`（链路丢失/电量临界/GPS 丢失 → RTL/HOLD），与 ai 包是
 >   两套并行实现。
 > - **传感器融合**（`SensorFusionEngine`，EKF，9 维状态）：同包内零外部引用；

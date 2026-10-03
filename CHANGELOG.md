@@ -4,6 +4,52 @@
 
 ---
 
+## [Unreleased] — M11 执行级接线：引擎决策驱动飞控动作（默认关闭）+ DECISION_EVENT 首个生产者（2026-10-04）
+
+> ROADMAP M11 的「执行级接线未做」收口：`DecisionEngine` 的融合决策从
+> 「只播报建议」升级为「变化沿播报 + DECISION_EVENT 下发 + 门控执行」。
+> 产品决策的保守取向全部落在仲裁规则里：默认关闭、failsafe 永远优先。
+
+### 1. 执行级：AutonomyExecutor（新增，drone-sim）
+
+- 与 advisory 共用同一变化沿（`AutonomyAdvisor` 新增 decisionListener 回调，
+  单次评估喂两消费者，不重复评估、不引入第二套去抖）；
+- **四条仲裁**：`--autonomy-exec` **默认关闭**（关闭时行为与旧版完全一致）；
+  **FailsafeController 永远优先**（任一触发沿激活即不抢杆并复位限速）；
+  **仅 ARMED/MISSION 可执行**（STANDBY/RTL/HOLD/CRASHED/MANUAL 不接管）；
+  变化沿驱动；
+- **动作映射**：RTL / EMERGENCY_LAND → 与 failsafe 同一条 RTL 程序（仿真无
+  独立原地降落原语，EMERGENCY_LAND 复用 RTL 自动降落终局，Javadoc 已注明）；
+  AVOID → 全局巡航限速 50%（`DronePhysics` 新增 `speedFactor`，作用于
+  stepTowardTarget，决策清除沿自动恢复 1.0）；ADAPT_PATH → **公告级不执行**
+  （航点注入需改任务状态机并触发 `AiAutonomyWiringTest` 未接线守卫，明确未做）；
+- `FailsafeController` 补 `battFailActive()`/`gpsFailActive()` 包内 getter
+  （与既有 `linkFailActive` 对称，供仲裁用）。
+
+### 2. DECISION_EVENT(30051)：从零生产者到机载生产者
+
+- 该消息此前在 drone-sim 无任何生产者（cloud-backend 的 WS 转发永远收不到
+  实例）；现在主决策变化沿即下发：type 码 0=RTL/1=AVOID/2=ADAPT_PATH/
+  3=EMERGENCY_LAND，reason 码与 ai 策略 reason 字符串一一映射（0=low
+  battery … 5=battery optimization，255=未知），GCS/云端自此可见结构化决策
+  事件。与执行开关无关，advisory 模式同样下发。ADAPTIVE_PATH(30052) 仍无
+  生产者（需路径执行原语，维持现状）。
+
+### 3. 测试与文档（+14，drone-sim 1337→1351，Java 4122→4136）
+
+- `AutonomyExecutorTest`（新增 10 例）：四条仲裁与动作映射逐条钉死
+  （记录型假实现，不依赖真实 VirtualDrone）；
+- `AutonomyAdvisorTest`（+2）：listener 变化沿语义（决策沿/清除沿各一次、
+  持续去抖）+ 旧单参构造向后兼容；
+- `DronePhysicsTest`（+2）：speedFactor 夹紧范围 + 0.5 因子对巡航速度的
+  实际压制；
+- 文档同步：ROADMAP M11 状态沿革、README 已知边界、competitive-analysis
+  对比表与标注、`DecisionEngine`/`AiAutonomyWiringTest` 的接线状态 Javadoc
+  （断言逻辑不变——执行级只消费 `FusedDecision`，未触碰未接线策略类，
+  未接线守卫依然全绿）。
+
+---
+
 ## [Unreleased] — MAVLink msgId 治理搬迁：避开官方分配带（2026-10-04）
 
 > 官方治理规则实证：common.xml 拥有 msgId **300-10000** 分配带，本项目自定义消息

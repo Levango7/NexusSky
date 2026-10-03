@@ -9,20 +9,22 @@ import io.aerofleet.sim.ai.FusedDecision;
 import java.util.function.BiConsumer;
 
 /**
- * M11 自主决策引擎的机载 advisory 接线（1Hz，建议-only）。
+ * M11 自主决策引擎的机载接线（1Hz）：advisory 播报 + 变化沿回调。
  *
  * <p><b>职责边界（不要「顺手增强」）</b>：本类把 {@link DecisionEngine} 接进
- * {@code VirtualDrone.tickOnce()} 的飞行路径，但<b>只建议、不执行</b>——
- * 主决策类型发生<b>变化沿</b>时，经 STATUSTEXT 下发一条建议文本，不触碰
- * 飞行状态、不接管控制。真正生效的应急执行链路仍然是
- * {@code FailsafeController}（链路丢失/电量临界/GPS 丢失 → RTL/HOLD），
- * 阈值唯一真相源是 {@link FailsafeThresholds}。若将来要让引擎直接驱动
- * 飞控动作，那是架构变更，必须先过 {@code AiAutonomyWiringTest} 的
- * 文档同步提示，并重审与 FailsafeController 的优先级仲裁。
+ * {@code VirtualDrone.tickOnce()} 的飞行路径。本类自身<b>只建议、不执行</b>——
+ * 主决策类型发生<b>变化沿</b>时，经 STATUSTEXT 下发一条建议文本，不触碰飞行
+ * 状态、不接管控制。同一变化沿还会（若注册）经 {@code decisionListener} 回调
+ * 最新 {@link FusedDecision}，供消费方做两件事：下发 DECISION_EVENT(30051)
+ * 与执行级门控（{@link AutonomyExecutor}：默认关闭、failsafe 永远优先、仅
+ * ARMED/MISSION 可执行——仲裁规则见该类 Javadoc）。真正生效的应急执行链路
+ * 仍然是 {@code FailsafeController}（链路丢失/电量临界/GPS 丢失 → RTL/HOLD），
+ * 阈值唯一真相源是 {@link FailsafeThresholds}。
  *
  * <p><b>节流与去抖</b>：评估周期 {@link #PERIOD_MS}（1Hz，tickOnce 是 20ms，
  * 由本类自行分频）；同一主决策类型持续期间只播报一次（变化沿触发），
  * 恢复无建议时播报一条 INFO 澄清。首次评估无决策时不播报（避免开机刷屏）。
+ * listener 与播报共用同一变化沿语义（清除沿也会回调，fused 无决策）。
  *
  * <p><b>missionUrgency 固定为 0</b>：仿真侧没有「任务紧急度」的自然来源
  * （无任务截止时间/优先级语义），固定 0 表示不放大自适应航线权重。
@@ -38,6 +40,8 @@ public final class AutonomyAdvisor {
 
     private final DecisionEngine engine = new DecisionEngine();
     private final BiConsumer<Integer, String> statusSink;
+    /** 主决策变化沿回调（可空）：供 DECISION_EVENT 下发与执行级消费。 */
+    private final BiConsumer<FusedDecision, Snapshot> decisionListener;
 
     /** 上次评估时刻（ms）；0 表示尚未评估过（首次 tick 立即评估）。 */
     private long lastTickMs = 0;
@@ -47,7 +51,13 @@ public final class AutonomyAdvisor {
     private int evaluationCount = 0;
 
     public AutonomyAdvisor(BiConsumer<Integer, String> statusSink) {
+        this(statusSink, null);
+    }
+
+    public AutonomyAdvisor(BiConsumer<Integer, String> statusSink,
+                           BiConsumer<FusedDecision, Snapshot> decisionListener) {
         this.statusSink = statusSink;
+        this.decisionListener = decisionListener;
     }
 
     /**
@@ -63,7 +73,7 @@ public final class AutonomyAdvisor {
 
     /**
      * 周期评估：节流 → 组装 {@link DecisionContext} →
-     * {@link DecisionEngine#evaluateFused} → 主决策类型变化沿播报。
+     * {@link DecisionEngine#evaluateFused} → 主决策类型变化沿播报 + listener 回调。
      * 任何情况下不抛异常、不执行动作。
      */
     public void tick(long nowMs, Snapshot s) {
@@ -89,6 +99,9 @@ public final class AutonomyAdvisor {
                     "AI advisory cleared - no action recommended");
         }
         lastAnnouncedType = type;
+        if (decisionListener != null) {
+            decisionListener.accept(fused, s);
+        }
     }
 
     /** 最近一次播报的主决策类型（"NONE" = 无建议）；供测试与排障。 */

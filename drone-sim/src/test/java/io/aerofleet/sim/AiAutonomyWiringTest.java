@@ -30,8 +30,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * <ol>
  *   <li>failsafe 阈值只有一个真相源（此前同一参数有三个值：22/25/20）；</li>
  *   <li>DecisionEngine <b>已接线</b>：通过 AutonomyAdvisor 接入
- *       VirtualDrone.tickOnce（advisory-only：1Hz 评估 + STATUSTEXT 建议，
- *       不执行动作）——这条接线不得静默消失；</li>
+ *       VirtualDrone.tickOnce（1Hz 评估 + STATUSTEXT 建议 + DECISION_EVENT(30051)
+ *       下发；执行动作经 AutonomyExecutor 门控：默认关闭、failsafe 优先、
+ *       仅 ARMED/MISSION 可执行）——这条接线不得静默消失；</li>
  *   <li>其余 ai 策略/路径规划器与 edge 包仍<b>无生产调用方</b>——这是
  *       <b>期望状态</b>，不是缺陷；一旦有人把它们接进飞行路径，本测试判红
  *       并提示同步 README 与产品文档的声称；</li>
@@ -97,13 +98,15 @@ class AiAutonomyWiringTest {
     };
 
     @Test
-    @DisplayName("DecisionEngine 已通过 AutonomyAdvisor 接入 VirtualDrone（advisory-only），不得静默退线")
+    @DisplayName("DecisionEngine 已通过 AutonomyAdvisor 接入 VirtualDrone（advisory + 门控执行），不得静默退线")
     void decisionEngineIsWired() {
         assertTrue(hasProductionReference("io.aerofleet.sim.ai.DecisionEngine"),
                 "DecisionEngine 应被 ai 包外的生产代码引用——接线载体是"
                         + " AutonomyAdvisor（io.aerofleet.sim），由 VirtualDrone.tickOnce 以"
-                        + " 1Hz 驱动，仅下发 STATUSTEXT 建议、不执行动作。"
-                        + "若这条失败，说明 advisory 接线被拆掉了：请要么恢复接线，"
+                        + " 1Hz 驱动：STATUSTEXT 建议 + DECISION_EVENT(30051) 下发，"
+                        + " 执行动作经 AutonomyExecutor 门控（--autonomy-exec 开启、"
+                        + " failsafe 优先、仅 ARMED/MISSION 可执行）。"
+                        + "若这条失败，说明接线被拆掉了：请要么恢复接线，"
                         + "要么同步回滚 README/ROADMAP/competitive-analysis 中"
                         + " M11 的状态表述，并把本测试改回未接线断言。");
     }

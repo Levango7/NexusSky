@@ -29,6 +29,12 @@ public final class DronePhysics {
     private final double homeLat;
     private final double homeLon;
     private final double cruiseSpeed;
+    /**
+     * 执行级自主避障的全局速度因子（M11）：作用于 stepTowardTarget 的 speedCmd，
+     * 1.0=不限制；由 {@code AutonomyExecutor} 在 AVOID 决策期间压低、决策清除后复位。
+     * volatile: 决策回调线程写，tick 线程读。
+     */
+    private volatile double speedFactor = 1.0;
 
     // --- state ---
     // volatile: tick 线程写，其他线程通过 getter 读取，保证跨线程可见性
@@ -121,6 +127,16 @@ public final class DronePhysics {
     /** Same target but with an explicit speed override (e.g. RTL approach). */
     public void setTarget(double north, double east, double alt, double speed) {
         target.set(new TargetState(north, east, alt, speed));
+    }
+
+    /** M11 执行级避障：设置全局速度因子，夹紧到 [0.05, 1.0]（1.0=不限制）。 */
+    public void setSpeedFactor(double factor) {
+        this.speedFactor = Math.max(0.05, Math.min(1.0, factor));
+    }
+
+    /** 当前全局速度因子（1.0=不限制）。 */
+    public double speedFactor() {
+        return speedFactor;
     }
 
     /** Hold position at current spot at the given altitude (hover / takeoff / land). */
@@ -351,7 +367,8 @@ public final class DronePhysics {
         double dz = ts.alt - alt;
         double distXy = Math.hypot(dn, de);
 
-        double speedCmd = Double.isNaN(ts.speed) ? cruiseSpeed : Math.max(0, ts.speed);
+        double speedCmd = (Double.isNaN(ts.speed) ? cruiseSpeed : Math.max(0, ts.speed))
+                * speedFactor;
 
         if (distXy > ACCEPT_XY) {
             // ---- v2: acceleration-limited velocity steering ----

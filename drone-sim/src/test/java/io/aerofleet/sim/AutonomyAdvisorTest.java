@@ -1,6 +1,7 @@
 package io.aerofleet.sim;
 
 import io.aerofleet.mavlink.enums.MavEnums;
+import io.aerofleet.sim.ai.FusedDecision;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -141,5 +142,52 @@ class AutonomyAdvisorTest {
         assertEquals(MavEnums.MAV_SEVERITY_WARNING, AutonomyAdvisor.severityOf("AVOID"));
         assertEquals(MavEnums.MAV_SEVERITY_NOTICE, AutonomyAdvisor.severityOf("ADAPT_PATH"));
         assertEquals(MavEnums.MAV_SEVERITY_INFO, AutonomyAdvisor.severityOf("SOMETHING_NEW"));
+    }
+
+    // ------------------------------------------------------------------
+    // 决策变化沿 listener（DECISION_EVENT 下发与执行级的消费入口）
+    // ------------------------------------------------------------------
+
+    /** 录制 decisionListener 回调，断言变化沿语义。 */
+    private static final class RecordingListener
+            implements BiConsumer<FusedDecision, AutonomyAdvisor.Snapshot> {
+        final List<String> types = new ArrayList<>();
+        final List<Boolean> hasDecision = new ArrayList<>();
+
+        @Override
+        public void accept(FusedDecision fused, AutonomyAdvisor.Snapshot snap) {
+            types.add(fused.hasDecision() ? fused.primary.decisionType : "NONE");
+            hasDecision.add(fused.hasDecision());
+        }
+    }
+
+    @Test
+    @DisplayName("decisionListener 与播报共用变化沿：决策沿/清除沿各回调一次，持续期间去抖")
+    void decisionListenerFiresOnChangeEdgesOnly() {
+        RecordingSink sink = new RecordingSink();
+        RecordingListener listener = new RecordingListener();
+        AutonomyAdvisor advisor = new AutonomyAdvisor(sink, listener);
+        advisor.tick(1000, healthy());          // 首评无决策：不播报、不回调
+        assertTrue(listener.types.isEmpty(), "首评无决策不应回调（与播报口径一致）");
+        advisor.tick(2000, snapshot(18, true)); // NONE→RTL 决策沿
+        assertEquals(List.of("RTL"), listener.types);
+        advisor.tick(3000, snapshot(18, true)); // 同决策持续：去抖
+        assertEquals(1, listener.types.size(), "同一决策持续期间不应重复回调");
+        advisor.tick(4000, healthy());          // RTL→NONE 清除沿
+        assertEquals(2, listener.types.size());
+        assertEquals("NONE", listener.types.get(1));
+        assertEquals(Boolean.FALSE, listener.hasDecision.get(1), "清除沿回调的 fused 应无决策");
+    }
+
+    @Test
+    @DisplayName("未注册 listener 时行为与旧构造完全一致（向后兼容）")
+    void nullListenerKeepsLegacyBehavior() {
+        RecordingSink sink = new RecordingSink();
+        AutonomyAdvisor advisor = new AutonomyAdvisor(sink);
+        advisor.tick(1000, snapshot(18, true));
+        advisor.tick(2000, snapshot(18, true));
+        advisor.tick(3000, healthy());
+        assertEquals(2, sink.texts.size(), "单参构造的播报序列应与改造前一致");
+        assertEquals("NONE", advisor.lastPrimaryDecision());
     }
 }

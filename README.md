@@ -651,12 +651,12 @@ NexusSky/
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 454 |
-| `drone-sim` | 1337 |
+| `drone-sim` | 1351 |
 | `link-sim` | 117 |
 | `cloud-backend` | 2183 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4122** |
+| **总计** | **4136** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -778,11 +778,18 @@ NexusSky/
   build 保护。`vite build` 在本仓开发沙箱里曾被 stdio 管道限制挡住（EPERM），本地另用
   `gcs-web/scripts/check-frontend.cjs`（Babel 语法 + import 图）把关；`npm run check`
   把两者串起来。
-- **「自主决策」已接线为 advisory，「边缘 AI」仍是库**（2026-10-02 第六轮审查核实，同日接线）。
-  M11 `io.aerofleet.sim.ai`（14 个类 3513 行）现已通过新增的 `AutonomyAdvisor` 接入
+- **「自主决策」advisory + 执行级均已接线（执行级默认关闭），「边缘 AI」仍是库**
+  （2026-10-02 第六轮审查 + advisory 接线；2026-10-04 执行级接线）。
+  M11 `io.aerofleet.sim.ai`（14 个类 3513 行）通过 `AutonomyAdvisor` 接入
   `VirtualDrone.tickOnce`：1Hz 评估态势，主决策类型**变化沿**经 STATUSTEXT 下发
   **建议**（RTL/AVOID=WARNING、EMERGENCY_LAND=CRITICAL、ADAPT_PATH=NOTICE，恢复时
-  INFO 澄清一次），**只建议、不执行任何动作**——真正生效的应急执行链路仍是独立的
+  INFO 澄清一次），同一变化沿下发 `DECISION_EVENT(30051)`（该消息首次有了机载
+  生产者——cloud-backend 的 WS 转发此前永远收不到实例）并交 `AutonomyExecutor`
+  **门控执行**：RTL/EMERGENCY_LAND 走与 failsafe 同一条 RTL 程序、AVOID 压全局
+  巡航限速 50%。四条仲裁：`--autonomy-exec` **默认关闭**、**FailsafeController
+  永远优先**（任一触发沿激活即不抢杆并复位限速）、仅 ARMED/MISSION 可执行、
+  变化沿驱动；ADAPT_PATH 仍为公告级（航点注入需改任务状态机，明确未做）。
+  真正生效的应急执行链路仍是独立的
   `FailsafeController`（链路丢失 / 电量临界 / GPS 丢失 → RTL / HOLD）。其余策略 /
   规划器仍只被 ai 包内引用；M12 `io.aerofleet.sim.edge`（6 个类 1093 行，其中
   `SensorFusionEngine` 9 维 EKF 521 行、`VideoStreamAnalyzer`

@@ -58,6 +58,16 @@ final class FailsafeController {
         return linkFailActive;
     }
 
+    /** True while the battery-critical failsafe has fired (M11 执行级仲裁用). */
+    boolean battFailActive() {
+        return battFailActive;
+    }
+
+    /** True while the GPS-loss failsafe has fired (M11 执行级仲裁用). */
+    boolean gpsFailActive() {
+        return gpsFailActive;
+    }
+
     /**
      * Evaluate all triggers once per tick.
      *

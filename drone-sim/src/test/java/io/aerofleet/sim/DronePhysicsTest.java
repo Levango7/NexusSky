@@ -157,4 +157,39 @@ class DronePhysicsTest {
             prev = now;
         }
     }
+
+    // ------------------------------------------------------------------
+    // M11 执行级避障限速：全局速度因子
+    // ------------------------------------------------------------------
+
+    @Test
+    void speedFactorClampsToValidRange() {
+        DronePhysics p = new DronePhysics(22.5907, 113.9345, 10, 8.0);
+        assertEquals(1.0, p.speedFactor(), EPS, "default factor must be 1.0 (no limit)");
+        p.setSpeedFactor(2.0);
+        assertEquals(1.0, p.speedFactor(), EPS, "factor above 1 must clamp to 1.0");
+        p.setSpeedFactor(0.0);
+        assertEquals(0.05, p.speedFactor(), EPS, "factor below floor must clamp to 0.05");
+        p.setSpeedFactor(0.5);
+        assertEquals(0.5, p.speedFactor(), EPS);
+    }
+
+    @Test
+    void speedFactorCapsCruiseSpeed() {
+        DronePhysics capped = new DronePhysics(22.5907, 113.9345, 0, 8.0);
+        DronePhysics full = new DronePhysics(22.5907, 113.9345, 0, 8.0);
+        capped.setSpeedFactor(0.5);
+        capped.setTarget(200, 0, 10);
+        full.setTarget(200, 0, 10);
+        // 6 s: both past the acceleration phase (3 m/s^2 reaches 8 m/s in <3 s),
+        // so capped settles at 4 m/s while full cruises at 8 m/s.
+        run(capped, 20 * 6);
+        run(full, 20 * 6);
+        assertTrue(capped.groundSpeed() < 0.75 * full.groundSpeed(),
+                "capped (x0.5) should cruise clearly slower: capped="
+                        + capped.groundSpeed() + " full=" + full.groundSpeed());
+        assertTrue(capped.groundSpeed() > 1.0,
+                "capped should still be moving, got " + capped.groundSpeed());
+        assertTrue(capped.north() < full.north(), "capped should cover less ground");
+    }
 }

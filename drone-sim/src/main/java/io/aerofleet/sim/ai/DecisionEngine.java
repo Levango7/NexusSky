@@ -11,10 +11,13 @@ import java.util.List;
  * M11 自主决策引擎：周期评估无人机状态，触发决策。
  * 决策类型：RTL(返航) / AVOID(避障) / ADAPT_PATH(自适应航线) / EMERGENCY_LAND(紧急降落)
  * <p>
- * <b>当前状态：已通过 {@code AutonomyAdvisor} 接入飞行路径（advisory 模式）。</b>
+ * <b>当前状态：已通过 {@code AutonomyAdvisor} 接入飞行路径（2026-10 起含执行级）。</b>
  * {@code VirtualDrone.tickOnce()} 每 tick 调用 {@code AutonomyAdvisor}，由它以
  * 1Hz 周期调用本引擎评估态势；主决策类型发生<b>变化沿</b>时经 STATUSTEXT
- * 下发一条<b>建议</b>文本。注意两条链路的分工：本引擎<b>只建议、不执行</b>——
+ * 下发一条<b>建议</b>文本，同一变化沿回调消费方：下发 DECISION_EVENT(30051)
+ * 并交 {@code AutonomyExecutor} 做<b>门控执行</b>（RTL/EMERGENCY_LAND→RTL
+ * 程序、AVOID→避障限速；默认关闭 {@code --autonomy-exec}、failsafe 永远优先，
+ * 仲裁见该类 Javadoc）。引擎自身仍不触碰飞行状态——所有飞控动作经门控层落地，
  * 真正生效的应急执行链路仍是 {@code VirtualDrone} 自带的
  * {@code FailsafeController}（链路丢失/电量临界/GPS 丢失 → RTL/HOLD），
  * 阈值见 {@code FailsafeThresholds}。

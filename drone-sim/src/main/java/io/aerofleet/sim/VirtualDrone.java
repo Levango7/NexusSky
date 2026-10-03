@@ -5,6 +5,7 @@ import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.Attitude;
 import io.aerofleet.mavlink.messages.CommandAck;
 import io.aerofleet.mavlink.messages.CommandLong;
+import io.aerofleet.mavlink.messages.DecisionEventMsg;
 import io.aerofleet.mavlink.messages.GlobalPositionInt;
 import io.aerofleet.mavlink.messages.GpsRawInt;
 import io.aerofleet.mavlink.messages.Heartbeat;
@@ -37,6 +38,7 @@ import io.aerofleet.mavlink.enums.ScanMode;
 import io.aerofleet.mavlink.security.MavlinkSigner;
 import io.aerofleet.mavlink.security.SigningKeyManager;
 import io.aerofleet.mavlink.security.TimestampTracker;
+import io.aerofleet.sim.ai.FusedDecision;
 import io.aerofleet.sim.mesh.MeshRouter;
 import io.aerofleet.sim.orch.OrchestrationEngine;
 import io.aerofleet.sim.rid.RidBroadcaster;
@@ -122,11 +124,19 @@ public final class VirtualDrone implements AutoCloseable {
     /** 避障启用标志（volatile 保证接收线程写与 tick 线程读可见性）。 */
     private volatile boolean obstacleEnabled = false;
     /**
-     * M11 自主决策 advisory 接线：1Hz 组装态势快照喂给 {@link AutonomyAdvisor}，
-     * 主决策类型变化沿经 STATUSTEXT 下发<b>建议</b>（不执行动作——
-     * 真正生效的应急链路仍是 {@code FailsafeController}）。
+     * M11 执行级接线：门控执行（--autonomy-exec 开启 + failsafe 空闲 +
+     * ARMED/MISSION 才动作；RTL/EMERGENCY_LAND→RTL 程序、AVOID→避障限速）。
+     * 仲裁规则见 {@link AutonomyExecutor}。
      */
-    private final AutonomyAdvisor autonomyAdvisor = new AutonomyAdvisor(this::pushStatus);
+    private final AutonomyExecutor autonomyExecutor = new AutonomyExecutor(new AutonomyFlightControl());
+    /**
+     * M11 自主决策接线：1Hz 组装态势快照喂给 {@link AutonomyAdvisor}，
+     * 变化沿经 STATUSTEXT 下发<b>建议</b>，同一变化沿回调
+     * {@link #onFusedDecision} 下发 DECISION_EVENT(30051) 并交执行级门控
+     * （执行级不抢 FailsafeController 的杆，仲裁见 {@link AutonomyExecutor}）。
+     */
+    private final AutonomyAdvisor autonomyAdvisor =
+            new AutonomyAdvisor(this::pushStatus, this::onFusedDecision);
     /**
      * M4 硬件抽象数据源（FR-01/FR-07/FR-12/FR-15）：null 表示未注入，不产生硬件上报（DFX 4.5）。
      * 由 setter 注入（供 e2e 脚本/配置注入），tickOnce 按各自频率分频调用。
@@ -1253,8 +1263,9 @@ public final class VirtualDrone implements AutoCloseable {
         }
         checkBattery();
 
-        // M11 自主决策 advisory（1Hz，建议-only）：坠毁后不再评估（对残骸发
-        // 返航建议没有意义）；链路黑盒期间本段已被上方 return 跳过。
+        // M11 自主决策（1Hz）：变化沿播报建议 + 下发 DECISION_EVENT(30051) +
+        // 执行级门控（--autonomy-exec 开启时 RTL/避障限速生效）。坠毁后不再
+        // 评估（对残骸发返航建议没有意义）；链路黑盒期间本段已被上方 return 跳过。
         if (state != FlightState.CRASHED) {
             autonomyAdvisor.tick(nowMs, buildAdvisorySnapshot(nowMs));
         }
@@ -2319,6 +2330,115 @@ public final class VirtualDrone implements AutoCloseable {
             lastStatus = text;
         } catch (IOException e) {
             SimLog.error("statustext send failed", e);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // M11 决策变化沿消费：DECISION_EVENT 下发 + 执行级门控
+    // ------------------------------------------------------------------
+
+    /**
+     * 主决策变化沿回调（{@link AutonomyAdvisor} decisionListener，含清除沿）：
+     * <ol>
+     *   <li>有决策沿 → 下发 {@code DECISION_EVENT(30051)}。本机是该消息的
+     *       <b>第一个生产者</b>——cloud-backend 的 WS 转发与 GCS 侧此前
+     *       收不到任何实例；</li>
+     *   <li>无条件交给 {@link AutonomyExecutor} 门控（开关/状态/failsafe
+     *       仲裁在该类，本方法不做判断）。</li>
+     * </ol>
+     */
+    private void onFusedDecision(FusedDecision fused, AutonomyAdvisor.Snapshot snap) {
+        if (fused.hasDecision()) {
+            emitDecisionEvent(fused);
+        }
+        autonomyExecutor.onDecision(fused);
+    }
+
+    /** 下发 DECISION_EVENT(30051)；发送失败只记日志，不影响变化沿链路。 */
+    private void emitDecisionEvent(FusedDecision fused) {
+        try {
+            send(new DecisionEventMsg(
+                    (float) fused.primary.triggerValue,
+                    (float) fused.primary.confidence,
+                    System.currentTimeMillis(),
+                    config.sysid,
+                    decisionTypeCodeOf(fused.primary.decisionType),
+                    reasonCodeOf(fused.primary.reason)));
+        } catch (IOException e) {
+            SimLog.warn("decision event send failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * DecisionEventMsg.decisionType 码：0=RTL, 1=避障(AVOID),
+     * 2=自适应航径(ADAPT_PATH), 3=紧急降落(EMERGENCY_LAND), 255=未知。
+     */
+    static int decisionTypeCodeOf(String decisionType) {
+        switch (decisionType) {
+            case "RTL":            return 0;
+            case "AVOID":          return 1;
+            case "ADAPT_PATH":     return 2;
+            case "EMERGENCY_LAND": return 3;
+            default:               return 255;
+        }
+    }
+
+    /**
+     * DecisionEventMsg.reason 触发原因码（协议未定义枚举，此处固定映射表，
+     * 与 ai 策略的 reason 字符串一一对应，255=未知）：
+     * 0=low battery, 1=link lost, 2=GPS degraded, 3=strong wind,
+     * 4=obstacle ahead, 5=battery optimization。
+     */
+    static int reasonCodeOf(String reason) {
+        if (reason == null) {
+            return 255;
+        }
+        switch (reason) {
+            case "low battery":          return 0;
+            case "link lost":            return 1;
+            case "GPS degraded":         return 2;
+            case "strong wind":          return 3;
+            case "battery optimization": return 5;
+            default: return reason.startsWith("obstacle") ? 4 : 255;
+        }
+    }
+
+    /**
+     * M11 执行级飞控原语：{@link AutonomyExecutor.FlightControl} 的
+     * VirtualDrone 实现（非静态内部类，直接触达状态机与物理层）。
+     */
+    private final class AutonomyFlightControl implements AutonomyExecutor.FlightControl {
+        @Override
+        public boolean autonomyExecEnabled() {
+            return config.autonomyExecEnabled;
+        }
+
+        @Override
+        public boolean inExecutableState() {
+            return state == FlightState.ARMED || state == FlightState.MISSION;
+        }
+
+        @Override
+        public boolean failsafeActive() {
+            return failsafe.linkFailActive() || failsafe.battFailActive()
+                    || failsafe.gpsFailActive();
+        }
+
+        @Override
+        public void engageRtl(String aiReason) {
+            if (state == FlightState.MISSION) {
+                // 与 failsafe RTL 同口径：任务被打断后 MISSION_CURRENT 保持合理 seq
+                missionNotifiedComplete = false;
+            }
+            SimLog.warn("AI EXECUTION: " + aiReason + " -> RTL");
+            pushStatus(MavEnums.MAV_SEVERITY_WARNING,
+                    "AI execution: RTL engaged (" + aiReason + ")");
+            startRtl();
+        }
+
+        @Override
+        public void setAvoidSpeedFactor(double factor) {
+            physics.setSpeedFactor(factor);
         }
     }
 

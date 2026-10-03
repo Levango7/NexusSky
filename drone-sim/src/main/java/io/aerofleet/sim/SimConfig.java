@@ -109,6 +109,9 @@ public final class SimConfig {
     public final boolean rejectUnsigned;
     /** 签名是否启用（signingKey 或 signingKeyStore 非空时启用）。 */
     public final boolean signingEnabled;
+    // ---- M11 执行级自主参数 ----
+    /** 执行级自主开关（--autonomy-exec）。false 时仅播报建议 + DECISION_EVENT，不下发执行动作，既有行为不变（DFX 4.5）。 */
+    public final boolean autonomyExecEnabled;
 
     private SimConfig(int port, int sysid, double lat, double lon, double speed,
                       String name, String scenario, String bindIp, boolean failsafe,
@@ -128,8 +131,9 @@ public final class SimConfig {
                            boolean ridEnabled, double ridInterval,
                            String serialNo, String operatorId,
                            double operatorLat, double operatorLon,
-                            int uaType, String selfIdDesc,
-                            String signingKey, String signingKeyStore, boolean rejectUnsigned) {
+                             int uaType, String selfIdDesc,
+                             String signingKey, String signingKeyStore, boolean rejectUnsigned,
+                             boolean autonomyExecEnabled) {
         this.port = port;
         this.sysid = sysid;
         this.lat = lat;
@@ -176,6 +180,7 @@ public final class SimConfig {
         this.rejectUnsigned = rejectUnsigned;
         this.signingEnabled = (signingKey != null && !signingKey.isEmpty())
                 || (signingKeyStore != null && !signingKeyStore.isEmpty());
+        this.autonomyExecEnabled = autonomyExecEnabled;
     }
 
     /** Defaults: Shenzhen University Town area, 8 m/s cruise, port 14540, sysid 1. */
@@ -192,7 +197,7 @@ public final class SimConfig {
                 null,
                 null,
                 false, 1.0, "UNKNOWN-1", "", 0.0, 0.0, 1, "NexusSky drone",
-                "", "", false);
+                "", "", false, false);
     }
 
     /**
@@ -261,6 +266,8 @@ public final class SimConfig {
         String signingKey = "";
         String signingKeyStore = "";
         boolean rejectUnsigned = false;
+        // M11 执行级自主默认值（advisory 播报与 DECISION_EVENT 下发不受此开关限制）
+        boolean autonomyExecEnabled = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -372,6 +379,7 @@ public final class SimConfig {
                     case "signing-key" -> signingKey = value;
                     case "signing-key-store" -> signingKeyStore = value;
                     case "reject-unsigned" -> rejectUnsigned = true;
+                    case "autonomy-exec" -> autonomyExecEnabled = true;
                     default -> {
                         SimLog.warn("Unknown option --" + key);
                         printUsage();
@@ -433,7 +441,7 @@ public final class SimConfig {
                 emergencyBudgetConfig,
                 ridEnabled, ridInterval, serialNo, operatorId,
                 operatorLat, operatorLon, uaType, selfIdDesc,
-                signingKey, signingKeyStore, rejectUnsigned);
+                signingKey, signingKeyStore, rejectUnsigned, autonomyExecEnabled);
     }
 
     public static void printUsage() {
@@ -515,6 +523,7 @@ public final class SimConfig {
         log.info("[sim]   --signing-key      MAVLink v2 signing secret key (default empty = disabled)");
         log.info("[sim]   --signing-key-store path to multi-key JSON file for multi-drone signing");
         log.info("[sim]   --reject-unsigned  reject unsigned frames when signing is enabled (flag)");
+        log.info("[sim]   --autonomy-exec    enable execution-level autonomy: RTL/avoid-speed-cap (default off; advisory + DECISION_EVENT always on)");
     }
 
     /**

@@ -22,7 +22,7 @@
 - **真实卫星接入预留**：天通/铱星/星链三种卫星通信系统占位实现类，统一 SatelliteLink
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
-   4122 单测全绿（Java surefire 实测；前端已有 vitest 单测 24 例——api.js 会话/预算
+   4136 单测全绿（Java surefire 实测；前端已有 vitest 单测 24 例——api.js 会话/预算
    档位/WS URL 与 Scene3DUtils 坐标契约，Playwright E2E 仍缺，见
    docs/devops-enhancement-plan.md CI7）
   > 第六轮（2026-10-02）明细见 CHANGELOG「Unreleased — 第六轮审查」。此前此处写
@@ -148,14 +148,18 @@
 
 依赖：Baseline（DeviceRegistry 多机状态）。
 
-### M11 自主决策引擎（AI 飞行策略） ⚠️ advisory 已接线（建议-only）；执行级接线未做（2026-10-02）
+### M11 自主决策引擎（AI 飞行策略） ⚠️ 执行级已接线（默认关闭）；ADAPT_PATH 航点注入未做（2026-10-04）
 
 > **状态沿革**：第六轮审查发现全部代码（`io.aerofleet.sim.ai` 14 类 3513 行）只被
 > 单元测试引用、从未执行，状态由「✅ 已完成」改为「库已完成 / 未接线」。同日完成
 > **advisory 接线**：新增 `AutonomyAdvisor`，`VirtualDrone.tickOnce` 以 1Hz 驱动
-> `DecisionEngine` 评估态势，主决策类型**变化沿**经 STATUSTEXT 下发建议文本——
-> **只建议、不执行**；真正生效的应急执行链路仍是独立的 `FailsafeController`。
-> 执行级接线（引擎直接驱动飞控动作）仍属产品决策，未做。M12 的
+> `DecisionEngine` 评估态势，主决策类型**变化沿**经 STATUSTEXT 下发建议文本。
+> 2026-10-04 完成**执行级接线**：新增 `AutonomyExecutor`，与 advisory 共用同一
+> 变化沿——RTL / EMERGENCY_LAND 经与 failsafe 同一条 RTL 程序落地，AVOID 压全局
+> 巡航限速 50%，`DECISION_EVENT(30051)` 首次有了机载生产者。四条仲裁：
+> **默认关闭**（`--autonomy-exec`）、**FailsafeController 永远优先**（任一触发沿
+> 激活即不抢杆并复位限速）、**仅 ARMED/MISSION 可执行**、变化沿驱动。
+> ADAPT_PATH 仍为公告级（航点注入需改任务状态机，明确未做）。M12 的
 > `SensorFusionEngine`（EKF）与 `VideoStreamAnalyzer`（经典 CV）仍为未接线库。
 
 | 交付物 | 说明 |
@@ -171,7 +175,8 @@
 ### M12 边缘计算节点（机载 AI 推理 + 传感器融合） ⚠️ 边缘协调已上线；机载 AI 库未接线（第六轮审查 2026-10-02 修正）
 
 > **状态更正**：此前标「✅ 已完成」。第六轮审查核实：边缘协调链路（cloud-backend
-> `/api/v1/edge/*` 任务分发与结果聚合）真实可用；但「机载 AI 推理」部分与 M11 同状态——
+> `/api/v1/edge/*` 任务分发与结果聚合）真实可用；但「机载 AI 推理」部分仍是
+> 未接线库（M11 的 ai 包已于 2026-10-04 完成执行级接线，edge 包不在此列）——
 > `io.aerofleet.sim.edge` 6 类 1093 行（`SensorFusionEngine` 9 维 EKF、`VideoStreamAnalyzer`
 > 经典 CV）实现完整、单测全绿，**只被自己的测试引用，无生产调用方**（完整口径见
 > README「已知边界」）。
@@ -344,6 +349,6 @@ M7 ──► E4(5G-A通感)
 1. 每个里程碑走完整 SDD；单个里程碑内尽量原子化（2–4h/任务）。
 2. 代码严格落在已有模块边界内：`cloud-backend`(调度/API)、`drone-sim`(载荷/执行)、
    `mavlink-core`(新消息)、`link-sim`(中继/链路)、`gcs-web`(观察)。
-3. 每个里程碑必须有回归基线：现有 4122 单测（Java） + e2e 脚本不回归。
+3. 每个里程碑必须有回归基线：现有 4136 单测（Java） + e2e 脚本不回归。
 4. 边界诚实声明：工作量 = 协议抽象 + 假数据源，非真硬件实现。
 5. **MAVLink msgId 全局唯一且避开官方分配带**：2026-10 治理搬迁后自定义消息统一使用私有方言段 **30000-30099**（common.xml 官方拥有 msgId 300-10000 分配带，旧 420-483 段位于其中，420/437/440 已与官方 RADIO_RC_CHANNELS / AVAILABLE_MODES_MONITOR / ILLUMINATOR_STATUS 实锤冲突，全部 51 条已等差平移 +29580）。已分配：30000-30021(M0a-M4)、30030-30047(M5-M9)、30048-30056(M10-M13)、30057-30059(4a 安防报警)、30060-30063(P2 灾害应急通讯组网扩展)；新增从 **30064+** 起分配，30064-30099 为增长预留。冲突防护：`scripts/mavlink-compatibility-check.py --self-test` 内嵌 392 个官方已分配 msgId 快照逐条核对。Phase 2 预估 msgId 区间：C2(RID) 使用 `OPEN_DRONE_ID_*` 官方消息族（msgId 12900-12999，MAVLink 官方分配），C5(signing) 使用 MAVLink v2 签名帧（不占新 msgId），其余 C/F/E 系列按需从 30064+ 分配。
