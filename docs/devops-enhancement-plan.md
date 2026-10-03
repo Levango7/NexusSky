@@ -147,7 +147,7 @@ push/PR → [java (矩阵) + frontend (并行)] → e2e-smoke (串行) → integ
 | CI4 | **Docker 镜像构建+推送** | 🔴 高 | CI 不构建 Docker 镜像，无法实现 CD |
 | CI5 | **Helm chart 验证** | 🟡 中 | 无 `helm lint` / `helm template` 验证 |
 | CI6 | **K8s manifest 验证** | 🟡 中 | 无 kubeconform/kubeval 校验 |
-| CI7 | **前端测试** | 🟡 中 | vitest 单测已上线（24 例：api.js 会话/预算档位/WS URL + Scene3DUtils 坐标契约，CI 已跑 `npm test`）；Playwright E2E 仍缺 |
+| CI7 | **前端测试** | 🟢 低 | vitest 单测 146 例（CI `npm test` 门禁）+ **Playwright 真浏览器 E2E 4 例**（2026-10-04 补齐，CI job `gcs-e2e`：真后端 dev profile + drone-sim，编排见 `gcs-web/e2e/ci-run.sh`）。E2E 落地时顺带修复了一个只有真浏览器才暴露的 WS 握手 NPE（`TelemetryWebSocketHandler` 往 ConcurrentHashMap 写 null 租户，把 dev 模式与无租户用户的遥测连接以 1011 打死） |
 | CI8 | **覆盖率强制门槛** | 🟡 中 | `continue-on-error: true` 使门槛失效 |
 | CI9 | **代码风格检查** | 🟢 低 | 无 checkstyle/spotless 强制检查 |
 

@@ -22,7 +22,7 @@
 - **真实卫星接入预留**：天通/铱星/星链三种卫星通信系统占位实现类，统一 SatelliteLink
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
-   4114 单测全绿（Java surefire 实测；前端已有 vitest 单测 24 例——api.js 会话/预算
+   4117 单测全绿（Java surefire 实测；前端已有 vitest 单测 24 例——api.js 会话/预算
    档位/WS URL 与 Scene3DUtils 坐标契约，Playwright E2E 仍缺，见
    docs/devops-enhancement-plan.md CI7）
   > 第六轮（2026-10-02）明细见 CHANGELOG「Unreleased — 第六轮审查」。此前此处写
@@ -344,6 +344,6 @@ M7 ──► E4(5G-A通感)
 1. 每个里程碑走完整 SDD；单个里程碑内尽量原子化（2–4h/任务）。
 2. 代码严格落在已有模块边界内：`cloud-backend`(调度/API)、`drone-sim`(载荷/执行)、
    `mavlink-core`(新消息)、`link-sim`(中继/链路)、`gcs-web`(观察)。
-3. 每个里程碑必须有回归基线：现有 4114 单测（Java） + e2e 脚本不回归。
+3. 每个里程碑必须有回归基线：现有 4117 单测（Java） + e2e 脚本不回归。
 4. 边界诚实声明：工作量 = 协议抽象 + 假数据源，非真硬件实现。
 5. **MAVLink msgId 全局唯一**：已分配 420-441(M0a-M4)、450-467(M5-M9)、468-476(M10-M13)、477-479(4a 安防报警)、480-483(P2 灾害应急通讯组网扩展)，新增从 484+ 起分配。Phase 2 预估 msgId 区间：C2(RID) 使用 `OPEN_DRONE_ID_*` 官方消息族（msgId 12900-12999，MAVLink 官方分配），C5(signing) 使用 MAVLink v2 签名帧（不占新 msgId），其余 C/F/E 系列按需从 484+ 分配。

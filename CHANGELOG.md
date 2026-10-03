@@ -4,6 +4,57 @@
 
 ---
 
+## [Unreleased] — CI7 补齐：Playwright 真浏览器 E2E + 顺带修复 WS 握手 NPE（2026-10-04）
+
+> 收口 devops-enhancement-plan 的 CI7「Playwright E2E 仍缺」。落地过程撞出一个
+> **只有真浏览器才暴露的后端缺陷**：遥测 WebSocket 在两类最常见连接下必被 NPE 打死。
+
+### 1. WS 握手 NPE：dev 模式与无租户用户的遥测连不上（真 bug，非测试问题）
+
+`TelemetryWebSocketHandler.afterConnectionEstablished` 把租户 ID 写进
+`session.getAttributes()`——Spring 的实现是 `ConcurrentHashMap`，**不接受 null value**，
+写 null 抛 NPE，异常一路冒到 `ExceptionWebSocketHandlerDecorator`，连接以
+**CloseStatus 1011** 关闭。客户端症状是"遥测刚连上又断"，且日志里只有 NPE 没有业务线索。
+
+- **触发面正是最常见的两类连接**：`extractTenantId` 在 dev 模式（无 token）与
+  「token 有效但用户无租户归属」时都返回 null——后者是三态租户域设计里的
+  **合法状态**（全局管理员/未归属用户），不是异常输入；
+- **修复**：取不到就不写属性（读取侧本来就按 null 处理：限流分支与断连清理
+  都有 null 判断，不写 = 全局会话，与 `dispatch` 的可见性判定一致）；
+- **回归**：`TelemetryWsHandshakeNpeTest`(3 例) —— dev 模式连接 / 无租户 token 连接 /
+  无租户属性断连，三条都断言「不抛异常且连接进了广播表」。改前第一条即红；
+- **实证**：修前 E2E 的 WS 用例 12s 收 0 帧，修后 0.9s 收到首帧。
+
+### 2. Playwright E2E 4 例 + CI job `gcs-e2e`
+
+- **覆盖面刻意选 vitest/jsdom 看不见的那一层**：模块加载期副作用（three.js/maplibre
+  在真浏览器的实际初始化）、WS 遥测流真的连上后端并推帧、ErrorBoundary（面板组件崩了
+  应显示错误面板而非白屏）、登录门。**不用 route 拦截**——要测的正是被拦截的那段链路；
+- **编排**（`gcs-web/e2e/`）：`start-backend.mjs` 拉起 drone-sim + cloud-backend
+  （dev profile，端口 18099 避开本机 8080——那是常驻容器占用，不是 NexusSky 的），
+  双重判活（后端健康 + 模拟器 sysid 上线，因为遥测 WS 只在有在线设备时才有帧）；
+  `ci-run.sh` 起停+跑测试，CI 与本地跑同一份代码；
+- **vite preview 补 proxy**：此前只有 dev server 有 `/api` `/ws` 代理，preview 没有——
+  E2E 跑真实构建产物时请求会落到静态目录变成 404，这是"假绿"最短路径；
+  后端地址可用 `AF_BACKEND_ORIGIN` 覆盖；
+- **CI 接线的一处坑**：起后端与跑测试必须在**同一个 step**。GitHub Actions 每个 run 是
+  独立 shell，前一个 step 里 `&` 起的进程会随 step 结束被回收，后端活不到测试那一步
+  （症状是连接被拒，很难第一眼归因）；
+- **本机端口坑**：4173 在部分 Windows 上落在 Hyper-V/WSL 保留段，listen 直接 EACCES
+  （无进程占用，别去查进程），默认改用 4273，可用 `AF_GCS_PORT` 覆盖。
+
+### 本轮验证
+
+`cloud-backend` **2183/2183 全绿**（较上轮 2180 净 +3，即新增回归用例）；Playwright
+**4/4 通过**（本地按 CI 路径 `bash e2e/ci-run.sh` 实跑，含进程清理 EXIT trap）；
+`vitest 146/146`、`lint 0 error`、`vite build` 通过；文档单测数口径经
+`scripts/check-test-count-docs.py` 校验一致（4114→4117 / 2180→2183，9 文档）。
+
+**已知边界**：E2E 4 例覆盖「加载/连通/不崩」这条主干，不做视觉回归与多浏览器矩阵
+（当前仅 chromium）；组件内部逻辑仍由 vitest 146 例负责，两者分层不重叠。
+
+---
+
 ## [Unreleased] — 合并前端测试第二批：146 例 vitest + 飞行安全二次确认 + 遥测曲线混机修复（2026-10-04）
 
 > 合并 `fix/frontend-tests-and-flight-safety`（6 提交：vitest 基建 / MapView 选中态恒
@@ -67,7 +118,7 @@
 
 **新增测试**：`StreamTokenServiceTest`(9)、`StreamTokenFilterTest`(10)、`AuthControllerTest` 扩展（+4 流令牌端点）、`RoleInterceptorTest` 扩展（+5 第三角色源/优先级/fail-closed），`AlarmEventStoreTest` 扩展（+2 scoped 口径）；`gcs-web` `api.test.js` 扩展（SSE URL 构造）。
 
-**CI 收口修复**（`bddd0a4`，2026-10-03）：首轮 CI 红两处——(1) Docs test-count gate：4 个漏同步文档（`pricing-strategy`/`demo-scenarios`/`customer-onboarding-guide`/`low-altitude-economy-demand-research`）仍声称 4084/2150，已对齐 4114/2180（`check-test-count-docs.py` 全部一致）；(2) Integration Tests Pass B 断言 9 开流得 `000`：`SseEmitter` 响应头要等首次 `send()` 才提交，而静默期（无增量事件）首次发送是 15s 心跳，超出 `-m 3` 取证窗口——修复为两个 SSE 端点（`AlarmController.streamEvents`/`SurveillanceController.subscribeEvents`）**建立即发一条 `stream-established` 注释**，响应头即刻提交（也是 SSE 最佳实践：客户端即时确认连接）。本地实跑 IT 全绿（断言 9 四连绿：签发 200/开流 200/复用 401/无凭证 401），`AlarmControllerTest` 29/29 绿，master CI 19/19 job success。
+**CI 收口修复**（`bddd0a4`，2026-10-03）：首轮 CI 红两处——(1) Docs test-count gate：4 个漏同步文档（`pricing-strategy`/`demo-scenarios`/`customer-onboarding-guide`/`low-altitude-economy-demand-research`）仍声称 4084/2150，已对齐 4117/2183（`check-test-count-docs.py` 全部一致）；(2) Integration Tests Pass B 断言 9 开流得 `000`：`SseEmitter` 响应头要等首次 `send()` 才提交，而静默期（无增量事件）首次发送是 15s 心跳，超出 `-m 3` 取证窗口——修复为两个 SSE 端点（`AlarmController.streamEvents`/`SurveillanceController.subscribeEvents`）**建立即发一条 `stream-established` 注释**，响应头即刻提交（也是 SSE 最佳实践：客户端即时确认连接）。本地实跑 IT 全绿（断言 9 四连绿：签发 200/开流 200/复用 401/无凭证 401），`AlarmControllerTest` 29/29 绿，master CI 19/19 job success。
 
 ---
 

@@ -21,3 +21,11 @@ flight-logs-retention-test/
 dependency-reduced-pom.xml
 __pycache__/
 *.pyc
+# Playwright E2E 产物：后端编排日志与测试报告/回放，跑一次就生成
+gcs-web/.e2e-logs/
+gcs-web/test-results/
+gcs-web/playwright-report/
+gcs-web/blob-report/
+.playwright/
+# E2E 编排脚本的工作目录在 gcs-web 下，dev profile 的 H2 文件库会落在这里
+gcs-web/data/
