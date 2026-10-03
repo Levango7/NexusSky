@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 更新至 2026-10-02，共 65 个 `@RestController`、3 个 `@Service` 辅助类、344 个 REST API 端点
+> 更新至 2026-10-03，共 65 个 `@RestController`、3 个 `@Service` 辅助类、345 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -13,10 +13,14 @@
 >
 > **设备与边缘上报的凭据（对外契约）**：`POST /api/v1/edge/results`、`POST /api/v1/loRa/alarm`、
 > `POST /api/v1/offline-alarm/batch-upload`、`POST /api/v1/offline-alarm/flush`、
-> `POST /api/v1/alarms/events` 要求 `OPERATOR` 档凭据。部署方注入
-> `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`（>=16 位）即可在启动时引导一条
-> `keyId=device-ingest` 的共享 API Key（库里只存 SHA-256 哈希）；不注入则这些端点在
-> 生产模式下不可用。注意这是**整个部署一把共享 key**，不是每机一密钥，撤销粒度只有整体轮换。
+> `POST /api/v1/alarms/events` 要求 `OPERATOR` 档凭据。凭据有两条路：
+> 1. **运营态（推荐）**：ADMIN 给每台设备签独立 Key——登记设备（`POST /api/v1/devices/{sysid}`）、
+>    归属租户（`PUT /api/v1/devices/{sysid}/tenant`）、签发（`POST /api/v1/auth/api-key` 带
+>    `sysid`）。每机一密钥，撤销/轮换粒度=单台设备（见"API Key 管理"章节）。
+> 2. **零状态引导**：部署方注入 `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`（>=16 位），
+>    启动时引导一条 `keyId=device-ingest` 的共享 API Key（库里只存 SHA-256 哈希）；
+>    不注入则不介入。**这是整个部署一把共享 key**，只解决"新部署还没有账号发凭据"的
+>    冷启动，运营请切换到设备 Key。
 > 另：告警 SSE（`GET /api/v1/alarms/stream`）走 `EventSource`，无法携带 `Authorization` 头，
 > 因此生产模式下当前不可订阅（已知未闭合项）。
 
@@ -2010,16 +2014,26 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 
 | 方法 | 路径 | 说明 | 请求体 | 响应 |
 |------|------|------|--------|------|
-| POST | `` | 生成 API Key（明文仅返回一次） | {name,scopes?,expiresAt?} | 201 {keyId,apiKey,maskedKey,name,scopes,createdAt,expiresAt,warning} / 400 |
-| DELETE | `/{keyId}` | 撤销 API Key | - | 200 {keyId,revoked:true} / 403 / 404 |
-| GET | `` | 列出当前用户的 API Key（脱敏显示） | - | 200 List<{keyId,maskedKey,name,scopes,createdAt,expiresAt,lastUsedAt,revoked}> |
+| POST | `` | 生成 API Key（明文仅返回一次；带 `sysid` 签发设备 Key） | {name,scopes?,expiresAt?,sysid?} | 201 {keyId,apiKey,maskedKey,name,scopes,role,sysid?,createdAt,expiresAt,warning} / 400 / 404 |
+| POST | `/{keyId}/rotate` | 轮换 API Key（新明文仅返回一次） | {graceHours?:int(0..8760)} | 201 {keyId,apiKey,oldKeyId,oldKeyRevoked\|oldKeyExpiresAt,graceHours} / 400 / 403 / 404 |
+| DELETE | `/{keyId}` | 撤销 API Key（本 JVM 缓存即时失效） | - | 200 {keyId,revoked:true} / 403 / 404 |
+| GET | `` | 列出当前用户的 API Key（脱敏显示） | - | 200 List<{keyId,maskedKey,name,scopes,sysid?,createdAt,expiresAt,lastUsedAt,revoked}> |
 
 #### 端点详情
 
 **POST /api/v1/auth/api-key**
-- 请求体: `{name:String, scopes?:[String], expiresAt?:String(ISO-8601, 默认365天)}`
-- 响应: 201 - `{keyId, apiKey:"nsk_<64hex>", maskedKey:"nsk_****<last4>", name, scopes, createdAt, expiresAt, warning:"This is the only time the full API Key will be shown."}`
+- 请求体: `{name:String, scopes?:[String], expiresAt?:String(ISO-8601, 默认365天), sysid?:int(1..254)}`
+- 响应: 201 - `{keyId, apiKey:"nsk_<64hex>", maskedKey:"nsk_****<last4>", name, scopes, role, sysid?, createdAt, expiresAt, warning:"This is the only time the full API Key will be shown."}`
+- 设备 Key（带 `sysid`）: 设备须已登记（404）且已归属租户（400 fail-closed）；
+  `role` 固定 `OPERATOR`、`tenantId` 取自设备行、租户级非 ADMIN 签发者仅限本租户设备（403）
 - 安全设计: 数据库只存储 SHA-256 哈希，明文 API Key 仅在创建时返回一次
+
+**POST /api/v1/auth/api-key/{keyId}/rotate**
+- 请求体: `{graceHours?:int}`（默认 0=立即撤销旧 Key；1..8760=宽限期，旧 Key 的
+  `expiresAt` 缩短到 `now+graceHours`，宽限期内新旧并存）
+- 响应: 201 - `{keyId(新), apiKey(新明文，仅此一次), oldKeyId, oldKeyRevoked|oldKeyExpiresAt, graceHours}`
+- 新 Key 继承旧 Key 的全部绑定（tenantId/userId/sysid/scopes/role）与剩余有效期
+- 撤销/轮换在本 JVM 即时生效；多节点下其余节点至多 60s（缓存 TTL）后收敛
 
 **DELETE /api/v1/auth/api-key/{keyId}**
 - 路径参数: `keyId` (String) - API Key 标识（非完整 Key）
@@ -2027,10 +2041,20 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 
 **curl 示例**:
 ```bash
-# 生成 API Key
+# 生成普通 API Key
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
   -d '{"name":"SDK集成Key","scopes":["drone:read","mission:write"]}' \
   http://localhost:8080/api/v1/auth/api-key
+
+# 给设备 sysid=42 签发独立摄取 Key（须先登记并归属租户）
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"name":"drone-42","sysid":42}' \
+  http://localhost:8080/api/v1/auth/api-key
+
+# 轮换（2 小时宽限期：新旧并存，边缘设备从容换钥）
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"graceHours":2}' \
+  http://localhost:8080/api/v1/auth/api-key/nsk_7_ab12cd34/rotate
 
 # 列出 API Key
 curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/auth/api-key
@@ -2413,7 +2437,7 @@ es.onerror = (e) => {
 | LoRa 回传 | LoRaRelayController | /api/v1/loRa | 2 |
 | 用户管理 | UserController | /api/v1/users | 5 |
 | 租户管理 | TenantController | /api/v1/tenants | 5 |
-| API Key 管理 | ApiKeyController | /api/v1/auth/api-key | 3 |
+| API Key 管理 | ApiKeyController | /api/v1/auth/api-key | 4 |
 | Webhook 管理 | WebhookController | /api/v1/webhooks | 3 |
 | OpenAPI 导出 | OpenApiExportController | /api/v1/openapi | 2 |
 | 监管合规 | RegulatorController | /api/v1/regulator | 5 |
@@ -2421,6 +2445,6 @@ es.onerror = (e) => {
 | 限飞区 | RestrictionController | /api/v1/geofence | 4 |
 | 设备归属 | DeviceProvisioningController | /api/v1/devices | 4 |
 | 视觉感知 | CvEvalController | /api/v1/cv-eval | 2 |
-| **合计** | **65 个 @RestController** | | **344** |
+| **合计** | **65 个 @RestController** | | **345** |
 
-> **注**: 项目共 68 个 Controller 源文件（67 个 `*Controller.java` + `delivery2/DeliveryController2.java`），其中 65 个为 `@RestController`。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。65 个 `@RestController` 共 344 个端点。
+> **注**: 项目共 68 个 Controller 源文件（67 个 `*Controller.java` + `delivery2/DeliveryController2.java`），其中 65 个为 `@RestController`。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。65 个 `@RestController` 共 345 个端点。

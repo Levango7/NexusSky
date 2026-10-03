@@ -26,7 +26,7 @@
 |---|---|---|---|
 | `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 420–483，共 51 条），**449 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
-| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（344 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
+| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（345 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 38 个功能面板 | 不需要换 |
 
 > **M0a–M4 能力扩展**：组网/环境/编队/喷洒/成像/硬件抽象均在上述四模块内叠加，
@@ -576,7 +576,7 @@ DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理�
 - `GET /v1/disaster/status` 灾害模式状态 · `POST /v1/disaster/budget` Budget 模式切换
 - `POST /v1/buzzer/control` 蜂鸣器控制 · `GET /v1/thermal/search` 热源搜救
 
-> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 65 个 @RestController、344 REST 端点。
+> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 65 个 @RestController、345 REST 端点。
 
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
@@ -646,10 +646,10 @@ NexusSky/
 | `mavlink-core` | 449 |
 | `drone-sim` | 1337 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2114 |
+| `cloud-backend` | 2150 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4048** |
+| **总计** | **4084** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -728,7 +728,7 @@ NexusSky/
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
-  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：344 个端点
+  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：345 个端点
   （190 GET/127 POST/13 PUT/14 DELETE）全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
   写=`OPERATOR`、配置/用户/密钥/租户/围栏/license 面=`ADMIN`，匿名入口只有登录与刷新两处
   `@PermitAll`；漏写注解由 `RbacEndpointCoverageTest` 反射逐个校验并判红，不靠文本扫描
@@ -752,10 +752,15 @@ NexusSky/
   `${AEROFLEET_ENCRYPTION_KEY}` 且无缺省（与 jwt-secret 同一套 fail-fast）。
   License 在缺 key 或验签失败时降级为无限期 dev license（商用门禁当前不成立）
   设备/边缘上报四条腿（`edge/results`、`loRa/alarm`、`offline-alarm/batch-upload|flush`、
-  `alarms/events`）要求 OPERATOR 档凭据：注入 `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`
-  （>=16 位）即由 `DeviceIngestKeyBootstrapRunner` 引导一条 `keyId=device-ingest` 的共享
-  API Key（库里只存哈希，留空完全不介入）；IT Pass B 断言 7 已实测该通路 200/伪造 key 401。
-  注意这是**整个部署一把共享 key**，不是每机一密钥
+  `alarms/events`）要求 OPERATOR 档凭据，凭据有两条路（2026-10-03 收口"整部署一把共享
+  key"项）：**运营态**是 per-device key——登记设备（`POST /api/v1/devices/{sysid}`）→
+  归属租户（`PUT .../tenant`）→ ADMIN 签发 `POST /api/v1/auth/api-key {"name":...,"sysid":N}`，
+  每机一密钥，`POST /{keyId}/rotate`（可带宽限期）与 `DELETE /{keyId}` 的撤销/轮换粒度=
+  单台设备，认证侧 60s TTL 缓存在本 JVM 即时失效；**零状态引导**是注入
+  `AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY`（>=16 位）由 `DeviceIngestKeyBootstrapRunner`
+  引导一条 `keyId=device-ingest` 的共享 API Key（库里只存哈希，留空完全不介入）——它只解决
+  冷启动，不是每机一密钥的运营方案。IT Pass B 断言 7/8 已实测两条通路（共享 key 200/伪造
+  key 401；per-device 签发→摄取→撤销→同 key 再摄取 401）
   prod 接真机还有一条硬前置：设备白名单（`aerofleet.udp.device-whitelist-enabled=true`，仅 prod）
   必须与注册表持久化（`aerofleet.device-registry.persist=true`）**成对**打开，并经
   `POST /api/v1/devices/{sysid}`（ADMIN）显式登记设备，撤销用同路径的 `DELETE`（内存条目与

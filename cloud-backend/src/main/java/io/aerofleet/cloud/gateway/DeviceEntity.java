@@ -37,10 +37,6 @@ public class DeviceEntity {
     @Column(name = "name")
     private String name;
 
-    /** 设备认证 token（provisioning/auth 时使用）。 */
-    @Column(name = "device_token")
-    private String deviceToken;
-
     /** 租户 ID（数据隔离）。 */
     @Column(name = "tenant_id")
     private Integer tenantId;
@@ -100,14 +96,6 @@ public class DeviceEntity {
 
     public void setName(String name) {
         this.name = name;
-    }
-
-    public String getDeviceToken() {
-        return deviceToken;
-    }
-
-    public void setDeviceToken(String deviceToken) {
-        this.deviceToken = deviceToken;
     }
 
     public Integer getTenantId() {

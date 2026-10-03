@@ -4,6 +4,44 @@
 
 ---
 
+## [Unreleased] — per-device 摄取凭据：设备 Key 签发/轮换/撤销 + 认证缓存（收口"整部署一把共享 key"）（2026-10-03）
+
+> **本轮验证**：`mvn -pl cloud-backend test` **2150/2150 全绿**（较上轮 2114 净 +36：
+> `ApiKeyCacheTest` 9 / `ApiKeyLastUsedTrackerTest` 6 / `ApiKeyFilterCachedTest` 8 /
+> `ApiKeyControllerDeviceKeyTest` 13；全仓 4084）。本机 `scripts/ci-integration-test.sh`
+> 实跑：Pass A 全绿；**Pass B 断言 1–8 全绿**（新增断言 8 = per-device 全流程 9 条，
+> 见下）；Pass C 本机红（本地 PG 无 `aerofleet` 用户，属环境差异——CI 由 service 容器
+> 供给凭据，与本轮改动无关）。本机实跑需 Git Bash + JDK17 前置 PATH + 一次性 Redis
+> 容器（`REDIS_PORT` 覆盖：本机 6379 是要 AUTH 的外来实例）。口径对账：
+> `check-test-count-docs.py` 全部一致（4084，8 文档 18 处同步）；REST 端点 344 → **345**
+> （+rotate；9 文档同步，GET/POST/PUT/DELETE 分布实测 190/128/13/14）。
+> **为什么需要缓存**：此前 `ApiKeyFilter` 每个认证成功的请求做 1 次 SELECT + 1 次
+> **同步** `save()` 刷 `lastUsedAt`——遥测高频腿上等于双倍写放大，这正是"共享 key 能用
+> 但不能上量"的隐藏成本之一。
+
+| # | 类别 | 问题 | 修复 |
+|---|---|---|---|
+| 1 | 撤销粒度 | 摄取凭据只有"整部署一把共享 key"（`DeviceIngestKeyBootstrapRunner`），撤销/轮换粒度=整体换 key 重启；一台边缘设备失窃就要全部署换钥 | `api_keys` 加 `sysid` 列（V22，NULL=普通 Key 语义不变）：`POST /api/v1/auth/api-key {"name":...,"sysid":N}` 签发**设备 Key**——设备须已登记（404）且已归属租户（**400 fail-closed**：未归属设备的数据任何租户都不可见，发 Key 就是写黑洞）；`role` 固定 OPERATOR（设备永不需要 ADMIN）、`tenantId` 取自设备行、`userId` 空；租户级非 ADMIN 只能给本租户设备签（403），与撤销/轮换同口径 |
+| 2 | 无轮换路径 | 换 key 只有"撤销旧+建新"两步手工操作，间隙断流 | `POST /{keyId}/rotate {graceHours?}`（0..8760）：0=旧 Key 立即撤销；>0=旧 Key `expiresAt` **缩短**到 `now+grace`（不撤销、宽限期内新旧并存、边缘设备从容换钥、自然到期）；新 Key 继承全部绑定（tenantId/userId/sysid/scopes/role）与**剩余有效期**（永久保持永久；已过期 Key 轮换=重新计时 365 天） |
+| 3 | 认证路径性能 | 每请求 1 SELECT + 1 同步 UPDATE（`lastUsedAt` 精确到请求——运维观测用途配不上这个代价） | `ApiKeyCache`：60s TTL 正/负缓存，命中**零数据库 IO**；`expiresAt` 不缓存判定结果、每次用当前时钟重算（TTL 内到期不续命）；负缓存 4096 条上限防哈希喷射撑爆内存。`ApiKeyLastUsedTracker`：30s 周期合并刷 `lastUsedAt`（每 Key 至多每 30s 一次 UPDATE）+ `@PreDestroy` 兜底 flush；语义从"精确到请求"退化为"精确到 30s" |
+| 4 | 撤销时效 | （缓存引入后的必答题）撤销多久生效 | 撤销/轮换后控制器 `invalidate` 对应哈希——**本 JVM 即时生效**（IT Pass B 断言 8 末条端到端实证：撤销后同 key 再摄取必须 401，缓存失效逻辑坏了这条就红）。多节点下其余节点至多 60s（TTL）收敛，这是**明示的一致性上界**而非漏洞，已写进 security-design §3.2（要求跨节点即时的部署走 LB 会话亲和） |
+| 5 | mint 数据源错误 | 本机 IT 实测抓到：mint 读 `devices` 表判"设备是否已登记"，但 dev/test 的 `device-registry.persist=false`——provisioning/心跳只写内存注册表，表恒空 → 刚 `POST /api/v1/devices/201` 拿 201、紧接着签 Key 就 404 | mint 改读 `DeviceRegistry.isKnownDevice()/tenantOf()`——注册表才是两种 persist 模式一致的"已登记"真值源 |
+| 6 | 死列清理 | `devices.device_token`：V1 建表起全仓零读写调用方（有列无功能，曾误导侦察） | V22 `DROP COLUMN`；设备认证统一走 `api_keys`，`DeviceEntity` 同步删字段 |
+| 7 | CI 门禁 | Pass B 此前只覆盖共享 key 通路（断言 7） | 新增 Pass B **断言 8**（9 条）：ADMIN 建租户（API 建，不假定 id=1——dev H2 无租户种子，写死会在 provisioning 的租户存在性校验上 404）→ 登记 sysid=201 并归属 → 签设备 Key（断言明文仅此一次返回）→ 摄取 200 → `DELETE` 撤销 → **同 key 再摄取必须 401**（缓存失效端到端证据——单测只能证明 invalidate 被调用，这里证明端到端真的失效） |
+| 8 | 口径文档 | 测试数/端点数/凭据契约三处声称过期 | 4084 单测（8 文档 18 处）；345 端点（9 文档，含 sales-pitch 数字锚点）；`security-design.md` §3 重写（设备 Key/轮换语义/缓存一致性上界）、§3.4 引导定位改为"引导非运营"；`api-reference.md` 补 rotate 端点与 sysid 参数、凭据契约改为两条路；README 同步 |
+
+**新增测试**：`ApiKeyCacheTest`(9：TTL 正/负缓存、到期不续命、invalidate、负缓存上限、时钟注入)；`ApiKeyLastUsedTrackerTest`(6：合并写、周期 flush、退出兜底、异常不杀调度)；`ApiKeyFilterCachedTest`(8：缓存命中零 DB IO、未命中查一次回填、撤销/不存在负缓存、失效重查、无缓存退化路径)——**测试姿势钉子**：上下文是 ThreadLocal 且 `finally` 必清理（生产线程池语义），一切断言在**链内快照**，doFilter 返回后再读恒 null（本轮 3 条用例首写全红正是栽在测试姿势而非产品缺陷，诊断用例逐项排除后定位）；`ApiKeyControllerDeviceKeyTest`(13：绑定/哈希口径/越界/未归属 400/跨租户 403/宽限期截短而非放宽/继承剩余有效期/立即撤销/缓存失效调用)。
+
+**决策记录——MAVLink 签名默认值（`mavlink.signing.enabled`）**：**维持 false**（2026-10-03 定，security-design §7.5 落档）。依据实际用户需求：链路签名要求链上**所有**端点共享口令，而存量无人机/地面站出厂不配置签名——默认打开等于首启断链，与"部署即飞"的产品承诺冲突；GB 42590 数据链路安全项的定位是**需要的部署显式开启**（开启而缺密钥已由 `MavlinkSigningConfiguration` + `afterPropertiesSet()` fail-fast，不存在"半开"状态）。默认值翻转的先决条件是真机（PX4）联调证据，现有互通证据止于 pymavlink 已知答案向量 + 自环。
+
+**登记项处置**（本轮清点）：③ 设备摄取共享 key → **本轮收口**；M11 执行级接线 → **维持缓期**（引擎直接驱动飞控动作是安全域变更，需要人审门禁/演练/回滚设计，不塞进凭据轮）；Playwright E2E → **维持缓期**（CI 浏览器基建成本 vs 现有 HTTP 层 e2e + vitest 覆盖，PoC 阶段收益不成立）；H2 数据文件 → **核实已闭环**（无 git 跟踪文件，`.gitignore:15-19` 全路径覆盖）；`@RequireRole` fail-closed → **核实已于 2026-09-30 轮翻转**，无残留。
+
+**顺带发现（未改，本地卫生）**：`cloud-backend/target/classes` 里有一份**从未提交**的孤儿迁移 `V22__flight_log_id_sequence.sql`（FlightLog IDENTITY→SEQUENCE 批处理优化实验：注释完整论证了 Hibernate 对 IDENTITY 无法批 insert、遥测 430 万行/天的写放大，但实体侧 `GenerationType.IDENTITY` 从未同步改，src 自洽无缺失）。该孤儿被 jar 打包带上后与本轮 V22 撞号（Flyway "Found more than one migration with version 22"，本机 IT 才能抓到，CI 全新 checkout 不可见）。已从本地 target 清除；批处理优化本身作为后续独立项（写路径默认关闭，不紧急）。
+
+**本轮未闭合**：多节点撤销传播 60s 上界（文档明示，跨节点即时撤销需广播/共享缓存机制，待多节点部署成为真实场景再评估）；SSE `Authorization` 头问题（不变）；MAVLink 签名遗留项——密钥库明文、时间戳 1ms 粒度、密钥库未命中回退 `defaultKey`、无真机联调（均不变，见签名轮"本轮未闭合"）。
+
+---
+
 ## [Unreleased] — CI 集成测试适配 fail-closed 配置守卫（jwt-secret / encryption.key）（2026-10-03）
 
 > c6b069b 的配置守卫上线后，Integration Tests 连红三轮（c6b069b、76f964b、7909740）。
@@ -533,7 +571,8 @@ SCALED_PRESSURE3=143），`RADIO_STATUS(109)` 的 CRC_EXTRA 是 88 而官方为 
 **本轮未闭合**：① License 签发工具链本身（`LicenseKeyGenerator` 只出密钥对，不出 key）仍无端到端签发脚本
 （**→ 已于 2026-10-03 收口：`LicenseIssuer`，见顶部 section**）；
 ② `LicenseController` 的激活/查询路径仍无测试（**→ 已于 2026-10-03 收口：`LicenseControllerTest`，见对应 section**）；
-③ 设备摄取仍是**整部署一把共享 key**（上一批已记，未变）。
+③ 设备摄取仍是**整部署一把共享 key**（上一批已记，未变）
+   （**→ 已于 2026-10-03 收口：设备 Key 签发/轮换/撤销 + 认证缓存，见顶部 section**）。
 
 ---
 

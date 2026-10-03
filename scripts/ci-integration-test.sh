@@ -10,7 +10,9 @@
 #   现在拆成两趟真实断言：
 #     Pass A（dev profile，dev-mode=true）  ：无鉴权冒烟 —— 文档/指标类端点可用；
 #     Pass B（dev profile + dev-mode=false）：鉴权生效 —— 匿名 401 / 错误口令 401 /
-#                                             坏 token 401 / 合法 token 200。
+#                                             坏 token 401 / 合法 token 200 / RBAC 成对
+#                                             证据 / 共享 key 摄取 / per-device key
+#                                             全流程（签发→摄取→撤销→即失效）。
 #   任何一条断言不匹配即 FAILED=1，脚本末尾 exit 1；不再有任何 || true / echo ⚠️ 继续。
 #
 # 为什么 Pass B 不直接换 profile：
@@ -374,6 +376,55 @@ assert_status "POST /api/v1/alarms/events（引导出的 device-ingest key → 2
 assert_status "[对照] POST /api/v1/alarms/events（错误 key → 401，证明不是恒放行）" "401" \
     "$(http_status -X POST -H "X-API-Key: nsk_this_key_does_not_exist_000000" -H 'Content-Type: application/json' \
         -d "$EVENTS_BODY" "http://localhost:${B_PORT}/api/v1/alarms/events")"
+
+echo "   --- Pass B 断言 8：per-device key 全流程（签发→摄取→撤销→即失效）---"
+# 上面断言 7 用的是引导共享 key（一把 key 覆盖所有设备）。这条验证运营态的正路：
+# 每台设备一把独立 key（api_keys.sysid 绑定单机，撤销粒度=单台设备）。
+# 链路：建租户 → 登记 devices.sysid=201 并归属该租户 → ADMIN 给该设备签 Key
+#       → 用它摄取 200 → 撤销 → 再摄取必须 401。
+# 最后一条是全链路里最值钱的断言：撤销时控制器会 invalidate 内存缓存，
+# 若失效逻辑坏了，60s TTL 内旧 key 仍会 200（单测只能证明 invalidate 被调用，
+# 这里证明端到端真的失效）。租户用 API 建而不是假定 id=1 存在——dev H2
+# 没有任何租户种子，写死 1 会在 provisioning 的租户存在性校验上 404。
+if [ -n "$TOKEN" ]; then
+    TENANT_RAW=$(curl -sS -w $'\n%{http_code}' -X POST "http://localhost:${B_PORT}/api/v1/tenants" \
+        -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"name":"CI Per-Device 流程","code":"ci-per-device"}')
+    assert_status "POST /api/v1/tenants（ADMIN 建租户 → 201）" "201" "${TENANT_RAW##*$'\n'}"
+    CI_TENANT_ID=$(printf '%s' "${TENANT_RAW%$'\n'*}" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+    assert_true "建租户返回非空 id" "$CI_TENANT_ID"
+
+    assert_status "POST /api/v1/devices/201（登记设备并归属租户 → 201）" "201" \
+        "$(http_status -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+            -d "{\"tenantId\":${CI_TENANT_ID}}" "http://localhost:${B_PORT}/api/v1/devices/201")"
+
+    MINT_RAW=$(curl -sS -w $'\n%{http_code}' -X POST "http://localhost:${B_PORT}/api/v1/auth/api-key" \
+        -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"name":"ci-device-201","sysid":201}')
+    assert_status "POST /api/v1/auth/api-key（给 sysid=201 签设备 Key → 201）" "201" "${MINT_RAW##*$'\n'}"
+    CI_DEV_KEY=$(printf '%s' "${MINT_RAW%$'\n'*}" | sed -n 's/.*"apiKey":"\([^"]*\)".*/\1/p')
+    CI_DEV_KEY_ID=$(printf '%s' "${MINT_RAW%$'\n'*}" | sed -n 's/.*"keyId":"\([^"]*\)".*/\1/p')
+    assert_true "签 Key 响应含明文 apiKey（仅此一次返回）" "$CI_DEV_KEY"
+    assert_true "签 Key 响应含 keyId" "$CI_DEV_KEY_ID"
+
+    if [ -n "$CI_DEV_KEY" ]; then
+        assert_status "POST /api/v1/alarms/events（设备 Key 摄取 → 200）" "200" \
+            "$(http_status -X POST -H "X-API-Key: ${CI_DEV_KEY}" -H 'Content-Type: application/json' \
+                -d "$EVENTS_BODY" "http://localhost:${B_PORT}/api/v1/alarms/events")"
+        assert_status "DELETE /api/v1/auth/api-key/${CI_DEV_KEY_ID}（撤销 → 200）" "200" \
+            "$(http_status -X DELETE -H "Authorization: Bearer ${TOKEN}" \
+                "http://localhost:${B_PORT}/api/v1/auth/api-key/${CI_DEV_KEY_ID}")"
+        assert_status "[关键] 撤销后同 key 再摄取 → 401（缓存失效端到端实证）" "401" \
+            "$(http_status -X POST -H "X-API-Key: ${CI_DEV_KEY}" -H 'Content-Type: application/json' \
+                -d "$EVENTS_BODY" "http://localhost:${B_PORT}/api/v1/alarms/events")"
+    else
+        echo "   ❌ 未拿到设备 Key，跳过摄取/撤销断言（签 Key 已判红）"
+        FAILED=1
+    fi
+else
+    echo "   ❌ 无 token，跳过 per-device key 断言（登录已判红）"
+    FAILED=1
+fi
 
 stop_backend "$PID_B" "Pass B cloud-backend"
 
