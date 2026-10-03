@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * M3 感知成像增强自定义消息编解码单测（FR-19/20/21/22/23）：
- * 430-434 encode→decode 往返一致、decode 分发、msgId 无冲突、字段单位精度。
+ * 30010-30014 encode→decode 往返一致、decode 分发、msgId 无冲突、字段单位精度。
  */
 class PerceptionMsgTest {
 
@@ -24,7 +24,7 @@ class PerceptionMsgTest {
         return MavlinkMessage.decode(r.frame);
     }
 
-    // ===== OBSTACLE_REPORT (430) =====
+    // ===== OBSTACLE_REPORT (30010) =====
 
     @Test
     void obstacleReportRoundtrip() {
@@ -45,10 +45,10 @@ class PerceptionMsgTest {
         assertEquals(4, msg.threat, "threat ordinal 4 = CRITICAL");
         assertEquals(1, msg.type, "type ordinal 1 = static obstacle");
         assertEquals(20, ObstacleReportMsg.LEN, "payload length 20 bytes");
-        assertEquals(430, ObstacleReportMsg.ID);
+        assertEquals(30010, ObstacleReportMsg.ID);
     }
 
-    // ===== MULTISPECTRAL_DATA (431) =====
+    // ===== MULTISPECTRAL_DATA (30011) =====
 
     @Test
     void multispectralDataRoundtrip() {
@@ -70,10 +70,10 @@ class PerceptionMsgTest {
         assertTrue(msg.vegetationCoverage >= 0 && msg.vegetationCoverage <= 1,
                 "coverage in [0,1]");
         assertEquals(24, MultispectralDataMsg.LEN);
-        assertEquals(431, MultispectralDataMsg.ID);
+        assertEquals(30011, MultispectralDataMsg.ID);
     }
 
-    // ===== THERMAL_DATA (432) =====
+    // ===== THERMAL_DATA (30012) =====
 
     @Test
     void thermalDataRoundtrip() {
@@ -94,10 +94,10 @@ class PerceptionMsgTest {
         ThermalDataMsg msg = new ThermalDataMsg(30f, 5f, 90f, 15f, 0L, 2, 1);
         assertTrue(msg.tempMax >= msg.tempMin, "tempMax >= tempMin");
         assertEquals(24, ThermalDataMsg.LEN);
-        assertEquals(432, ThermalDataMsg.ID);
+        assertEquals(30012, ThermalDataMsg.ID);
     }
 
-    // ===== DEPTH_DATA (433) =====
+    // ===== DEPTH_DATA (30013) =====
 
     @Test
     void depthDataRoundtrip() {
@@ -117,10 +117,10 @@ class PerceptionMsgTest {
         assertTrue(msg.nearestDirection >= 0 && msg.nearestDirection < 360,
                 "direction in [0,360)");
         assertEquals(20, DepthDataMsg.LEN);
-        assertEquals(433, DepthDataMsg.ID);
+        assertEquals(30013, DepthDataMsg.ID);
     }
 
-    // ===== VISION_DETECTION (434) =====
+    // ===== VISION_DETECTION (30014) =====
 
     @Test
     void visionDetectionRoundtrip() {
@@ -143,7 +143,7 @@ class PerceptionMsgTest {
         assertTrue(msg.confidence >= 0 && msg.confidence <= 1, "confidence in [0,1]");
         assertEquals(255, VisionDetectionMsg.TRACK_ID_NONE, "TRACK_ID_NONE = 0xFF");
         assertEquals(20, VisionDetectionMsg.LEN);
-        assertEquals(434, VisionDetectionMsg.ID);
+        assertEquals(30014, VisionDetectionMsg.ID);
     }
 
     // ===== decode 分发注册 =====
@@ -153,7 +153,7 @@ class PerceptionMsgTest {
         MavlinkMessage decoded = roundtrip(
                 new ObstacleReportMsg(5f, 0f, 0L, 0, 0, 1));
         assertTrue(decoded instanceof ObstacleReportMsg,
-                "msgId=430 should dispatch to ObstacleReportMsg");
+                "msgId=30010 should dispatch to ObstacleReportMsg");
     }
 
     @Test
@@ -161,7 +161,7 @@ class PerceptionMsgTest {
         MavlinkMessage decoded = roundtrip(
                 new MultispectralDataMsg(0f, 0f, 0f, 0f, 0L, 1));
         assertTrue(decoded instanceof MultispectralDataMsg,
-                "msgId=431 should dispatch to MultispectralDataMsg");
+                "msgId=30011 should dispatch to MultispectralDataMsg");
     }
 
     @Test
@@ -169,7 +169,7 @@ class PerceptionMsgTest {
         MavlinkMessage decoded = roundtrip(
                 new ThermalDataMsg(0f, 0f, 0f, 0f, 0L, 0, 1));
         assertTrue(decoded instanceof ThermalDataMsg,
-                "msgId=432 should dispatch to ThermalDataMsg");
+                "msgId=30012 should dispatch to ThermalDataMsg");
     }
 
     @Test
@@ -177,7 +177,7 @@ class PerceptionMsgTest {
         MavlinkMessage decoded = roundtrip(
                 new DepthDataMsg(0f, 0f, 0f, 0L, 1));
         assertTrue(decoded instanceof DepthDataMsg,
-                "msgId=433 should dispatch to DepthDataMsg");
+                "msgId=30013 should dispatch to DepthDataMsg");
     }
 
     @Test
@@ -185,7 +185,7 @@ class PerceptionMsgTest {
         MavlinkMessage decoded = roundtrip(
                 new VisionDetectionMsg(0f, 0f, 0f, 0, 0, 1, 0L));
         assertTrue(decoded instanceof VisionDetectionMsg,
-                "msgId=434 should dispatch to VisionDetectionMsg");
+                "msgId=30014 should dispatch to VisionDetectionMsg");
     }
 
     // ===== msgId 注册与无冲突 =====
@@ -201,18 +201,18 @@ class PerceptionMsgTest {
 
     @Test
     void msgIdLengthsCorrect() {
-        assertEquals(20, MavlinkMessageInfo.lengthOf(430));
-        assertEquals(24, MavlinkMessageInfo.lengthOf(431));
-        assertEquals(24, MavlinkMessageInfo.lengthOf(432));
-        assertEquals(20, MavlinkMessageInfo.lengthOf(433));
-        assertEquals(20, MavlinkMessageInfo.lengthOf(434));
+        assertEquals(20, MavlinkMessageInfo.lengthOf(30010));
+        assertEquals(24, MavlinkMessageInfo.lengthOf(30011));
+        assertEquals(24, MavlinkMessageInfo.lengthOf(30012));
+        assertEquals(20, MavlinkMessageInfo.lengthOf(30013));
+        assertEquals(20, MavlinkMessageInfo.lengthOf(30014));
     }
 
     @Test
     void msgIdNoConflictWithExistingOrM2() {
         int[] existing = {0, 1, 2, 24, 30, 33, 42, 43, 44, 47, 51, 69, 73, 74, 76, 77, 40,
-                109, 242, 253, 259, 260, 262, 263, 271, 420, 421, 422, 423, 424, 425, 426};
-        int[] m3Ids = {430, 431, 432, 433, 434};
+                109, 242, 253, 259, 260, 262, 263, 271, 30000, 30001, 30002, 30003, 30004, 30005, 30006};
+        int[] m3Ids = {30010, 30011, 30012, 30013, 30014};
         for (int existingId : existing) {
             for (int m3Id : m3Ids) {
                 assertNotEquals(existingId, m3Id,
@@ -229,9 +229,9 @@ class PerceptionMsgTest {
 
     @Test
     void msgIdDoesNotOverlapM2Range() {
-        // M2 使用 423-426，M3 使用 430-434，中间 427-429 保留给 M2 扩展
-        for (int m2Id = 423; m2Id <= 429; m2Id++) {
-            for (int m3Id = 430; m3Id <= 434; m3Id++) {
+        // M2 使用 30003-30006，M3 使用 30010-30014，中间 30007-30009 保留给 M2 扩展
+        for (int m2Id = 30003; m2Id <= 30009; m2Id++) {
+            for (int m3Id = 30010; m3Id <= 30014; m3Id++) {
                 assertNotEquals(m2Id, m3Id, "M3 must not overlap M2 reserved range");
             }
         }

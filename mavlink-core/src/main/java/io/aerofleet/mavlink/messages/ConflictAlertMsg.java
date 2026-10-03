@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * CONFLICT_ALERT (msgId=469, LEN=12) —— NexusSky M10 多机协同冲突告警自定义扩展消息。
+ * CONFLICT_ALERT (msgId=30049, LEN=12) —— NexusSky M10 多机协同冲突告警自定义扩展消息。
  * <p>
  * 承载多机冲突告警：冲突类型 + 冲突方系统 ID + 严重程度 + 最小距离 + 冲突倒计时。
  * <p>
@@ -24,7 +24,7 @@ import java.nio.ByteBuffer;
  */
 public final class ConflictAlertMsg extends MavlinkMessage {
 
-    public static final int ID = 469;
+    public static final int ID = 30049;
     public static final int LEN = 12;
     public static final int CRC_EXTRA = 86;
 

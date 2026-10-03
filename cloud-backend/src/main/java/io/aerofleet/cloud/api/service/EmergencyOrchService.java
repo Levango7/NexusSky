@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 应急任务编排服务（M9，FR-30）。
  * <p>
  * 维护编排计划状态（{@link ConcurrentHashMap}，线程安全），提供启动/中止/查询/
- * 重规划/优先级调整等业务能力，并接收 MAVLink 465/466/467 上报更新计划状态。
+ * 重规划/优先级调整等业务能力，并接收 MAVLink 30045/30046/30047 上报更新计划状态。
  * <p>
  * 4 种场景预设：0=地震 / 1=泥石流 / 2=火灾 / 3=自定义。
  * 4 级优先级队列：1=SEARCH_RESCUE / 2=COMMAND / 3=MAPPING / 4=ROUTINE。
@@ -333,7 +333,7 @@ public class EmergencyOrchService {
     // =====================================================================
 
     /**
-     * EMERGENCY_MISSION_PLAN (465) 上报回调：更新计划阶段/状态/覆盖/连通率。
+     * EMERGENCY_MISSION_PLAN (30045) 上报回调：更新计划阶段/状态/覆盖/连通率。
      */
     public void onEmergencyMissionPlan(long planId, int scenarioType, int phase, int phaseStatus,
                                        int droneCount, int coverageRate, int connectRate, int priority) {
@@ -366,7 +366,7 @@ public class EmergencyOrchService {
     }
 
     /**
-     * COVERAGE_OPTIMIZATION (466) 上报回调：记录单架无人机覆盖部署方案。
+     * COVERAGE_OPTIMIZATION (30046) 上报回调：记录单架无人机覆盖部署方案。
      */
     public void onCoverageOptimization(long planId, int droneId, int cellType, int relayRole,
                                        int txPower, int expectedCoverage, int batteryBudget) {
@@ -391,7 +391,7 @@ public class EmergencyOrchService {
     }
 
     /**
-     * EMERGENCY_PRIORITY (467) 上报回调：记录优先级调度事件。
+     * EMERGENCY_PRIORITY (30047) 上报回调：记录优先级调度事件。
      */
     public void onEmergencyPriority(long planId, long taskId, int priority, int action,
                                     long preemptedTaskId, String reason) {

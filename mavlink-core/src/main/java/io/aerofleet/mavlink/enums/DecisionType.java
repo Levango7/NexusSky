@@ -1,7 +1,7 @@
 package io.aerofleet.mavlink.enums;
 
 /**
- * 决策类型枚举（M11 自主决策，msgId=471 DecisionEventMsg）。
+ * 决策类型枚举（M11 自主决策，msgId=30051 DecisionEventMsg）。
  * <p>
  * 取值为 ordinal()，编入 MAVLink u8 字段。
  * <ul>

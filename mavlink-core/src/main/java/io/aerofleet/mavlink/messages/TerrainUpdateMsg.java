@@ -9,7 +9,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * TERRAIN_UPDATE (msgId=463, LEN=可变 9+n×4) —— NexusSky M8 复杂地形适配自定义扩展消息。
+ * TERRAIN_UPDATE (msgId=30043, LEN=可变 9+n×4) —— NexusSky M8 复杂地形适配自定义扩展消息。
  * <p>
  * 承载地形变更通知：地形版本号 + 变更原因 + 受影响网格列表（网格索引 + 新地形类型），
  * 由 drone-sim {@code TerrainChangeMonitor} 在灾害事件触发后广播至所有相关模块（FR-29）。
@@ -29,7 +29,7 @@ import java.util.List;
  */
 public final class TerrainUpdateMsg extends MavlinkMessage {
 
-    public static final int ID = 463;
+    public static final int ID = 30043;
     /** 固定头部长度。 */
     public static final int HEADER_LEN = 9;
     /** 每受影响网格项长度。 */

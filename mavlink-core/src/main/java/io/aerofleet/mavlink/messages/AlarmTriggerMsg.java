@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * ALARM_TRIGGER (msgId=477, LEN=68) —— NexusSky M14 安防报警自定义扩展消息。
+ * ALARM_TRIGGER (msgId=30057, LEN=68) —— NexusSky M14 安防报警自定义扩展消息。
  * <p>
  * 地面报警触发消息（安防设备→无人机通知）：承载报警类型 + 严重程度 + 来源设备 +
  * 报警位置（纬度/经度/海拔）+ 时间戳 + 描述。
@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  */
 public final class AlarmTriggerMsg extends MavlinkMessage {
 
-    public static final int ID = 477;
+    public static final int ID = 30057;
     public static final int LEN = 68;
     public static final int CRC_EXTRA = 64;
     private static final int DESCRIPTION_LEN = 50;

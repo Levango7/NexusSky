@@ -9,7 +9,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * TERRAIN_TYPE_MAP (msgId=462, LEN=可变 14+n×1) —— NexusSky M8 复杂地形适配自定义扩展消息。
+ * TERRAIN_TYPE_MAP (msgId=30042, LEN=可变 14+n×1) —— NexusSky M8 复杂地形适配自定义扩展消息。
  * <p>
  * 承载地形分区图下发：原点经纬度 + 网格分辨率 + 网格行列数 + 每网格地形类型序数（0-8），
  * 由 drone-sim {@code TerrainClassifier} 产出于灾区建图后下发至 cloud-backend 与其他节点（FR-28）。
@@ -28,7 +28,7 @@ import java.util.List;
  */
 public final class TerrainTypeMapMsg extends MavlinkMessage {
 
-    public static final int ID = 462;
+    public static final int ID = 30042;
     /** 固定头部长度。 */
     public static final int HEADER_LEN = 14;
     /** 网格数上限（u16 × u16 = 65535 × 65535，但实际受 payload 长度限制）。 */

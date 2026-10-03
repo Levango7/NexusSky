@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * OBSTACLE_REPORT (msgId=430, LEN=20) —— NexusSky M3 自定义扩展消息。
+ * OBSTACLE_REPORT (msgId=30010, LEN=20) —— NexusSky M3 自定义扩展消息。
  * 承载障碍物检测报告（距离/方向/威胁等级/障碍类型/sysid），由 drone-sim 5Hz
  * {@code ObstacleDetector} 产出并上报至 cloud-backend（FR-19）。
  * <p>
@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  */
 public final class ObstacleReportMsg extends MavlinkMessage {
 
-    public static final int ID = 430;
+    public static final int ID = 30010;
     public static final int LEN = 20;
     public static final int CRC_EXTRA = 65;
 

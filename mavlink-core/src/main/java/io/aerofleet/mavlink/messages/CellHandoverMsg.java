@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * CELL_HANDOVER (msgId=457, LEN=5) —— NexusSky M6 跨无人机漫游切换信令。
+ * CELL_HANDOVER (msgId=30037, LEN=5) —— NexusSky M6 跨无人机漫游切换信令。
  * <p>
  * 承载终端在机间覆盖区无缝切换的信令：terminalId + 源机 + 目标机 + 切换原因，
  * 经 M5 mesh 自愈网络路由传输（FR-MSG-04 / FR-HO-03 / FR-HO-04）。
@@ -23,7 +23,7 @@ import java.nio.ByteBuffer;
  */
 public final class CellHandoverMsg extends MavlinkMessage {
 
-    public static final int ID = 457;
+    public static final int ID = 30037;
     public static final int LEN = 5;
     public static final int CRC_EXTRA = 247;
 

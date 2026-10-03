@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * EMERGENCY_MISSION_PLAN (msgId=465) 编解码单测（M9 应急任务编排）。
+ * EMERGENCY_MISSION_PLAN (msgId=30045) 编解码单测（M9 应急任务编排）。
  */
-@DisplayName("EmergencyMissionPlanMsg 编解码 (msgId=465)")
+@DisplayName("EmergencyMissionPlanMsg 编解码 (msgId=30045)")
 class EmergencyMissionPlanMsgTest {
 
     private static EmergencyMissionPlanMsg roundtrip(EmergencyMissionPlanMsg msg) {
@@ -39,9 +39,9 @@ class EmergencyMissionPlanMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=465、LEN=25、CRC_EXTRA=106")
+    @DisplayName("消息 ID=30045、LEN=25、CRC_EXTRA=106")
     void messageIdAndConstants() {
-        assertThat(EmergencyMissionPlanMsg.ID).isEqualTo(465);
+        assertThat(EmergencyMissionPlanMsg.ID).isEqualTo(30045);
         assertThat(EmergencyMissionPlanMsg.LEN).isEqualTo(25);
         assertThat(EmergencyMissionPlanMsg.CRC_EXTRA).isEqualTo(106);
     }
@@ -52,14 +52,14 @@ class EmergencyMissionPlanMsgTest {
         EmergencyMissionPlanMsg msg = new EmergencyMissionPlanMsg(
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         assertThat(msg.encode()).hasSize(25);
-        assertThat(msg.messageId()).isEqualTo(465);
+        assertThat(msg.messageId()).isEqualTo(30045);
     }
 
     @Test
     @DisplayName("短 payload 容忍解码：仅 5 字节时还原 planId+scenarioType，其余填 0")
     void decodeShortPayloadTolerant() {
         byte[] shortPayload = new byte[]{0x39, 0x30, 0x00, 0x00, 0x02};
-        MavlinkFrame frame = new MavlinkFrame(5, 0, 0, 0, 1, 1, 465, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(5, 0, 0, 0, 1, 1, 30045, shortPayload, 0);
         EmergencyMissionPlanMsg msg = EmergencyMissionPlanMsg.decode(frame);
 
         assertThat(msg.planId).isEqualTo(12345L);

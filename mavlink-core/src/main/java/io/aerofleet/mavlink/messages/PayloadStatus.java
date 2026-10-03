@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * PAYLOAD_STATUS (msgId=426, LEN=10) —— NexusSky 自定义扩展消息（M2 喷洒物流，FR-29）。
+ * PAYLOAD_STATUS (msgId=30006, LEN=10) —— NexusSky 自定义扩展消息（M2 喷洒物流，FR-29）。
  * <p>
  * 承载当前负载/抛投状态，由 drone-sim 1Hz 周期下传。
  * <p>
@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
  */
 public final class PayloadStatus extends MavlinkMessage {
 
-    public static final int ID = 426;
+    public static final int ID = 30006;
     public static final int LEN = 10;
 
     public final int gripperState;            // 枚举 {0,1,2,3,4,5}

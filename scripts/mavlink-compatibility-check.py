@@ -4,7 +4,7 @@ NexusSky MAVLink 协议兼容性验证脚本。
 
 验证内容：
   1. 标准 MAVLink 消息（HEARTBEAT, ATTITUDE, GLOBAL_POSITION_INT 等）编解码正确性
-  2. NexusSky 扩展消息（msgId 420-483）编解码一致性
+  2. NexusSky 扩展消息（msgId 30000-30063，私有方言段 30000-30099）编解码一致性
   3. MAVLink v1 vs v2 帧兼容性
   4. 与 cloud-backend（UDP 14550）的端到端往返验证
   5. （需 pymavlink）标准消息 CRC_EXTRA 与 pymavlink 官方定义逐条比对
@@ -68,8 +68,8 @@ MAVLINK_MESSAGE_INFO = os.path.join(
     'MavlinkMessageInfo.java')
 
 _ROW = re.compile(
-    r'(?:INFOS\[(\d+)\]|EXTENDED_INFOS\.put\((\d+))'
-    r'\s*=\s*new Info\((-?\d+),\s*(\d+)\);\s*//\s*([A-Z][A-Z0-9_]*)')
+    r'(?:INFOS\[(\d+)\]\s*=\s*new Info\(|EXTENDED_INFOS\.put\((\d+),\s*new Info\()'
+    r'\s*(-?\d+),\s*(\d+)\)+;\s*//\s*([A-Z][A-Z0-9_]*)')
 
 
 def load_message_table(path=MAVLINK_MESSAGE_INFO):
@@ -90,9 +90,83 @@ def load_message_table(path=MAVLINK_MESSAGE_INFO):
 
 ALL_MESSAGES = load_message_table()
 MSG_MAP = {m[0]: m for m in ALL_MESSAGES}
-# 自定义扩展（msgId >= 420 且不属于官方 OPEN_DRONE_ID 扩展区）
-EXTENSION_MESSAGES = [m for m in ALL_MESSAGES if m[0] >= 420 and m[0] < 12900]
+# 自定义扩展（私有方言段 30000-30099；官方 OPEN_DRONE_ID 12900-12999 属官方消息不计入）
+EXTENSION_MESSAGES = [m for m in ALL_MESSAGES if 30000 <= m[0] < 30100]
 STANDARD_MESSAGES = [m for m in ALL_MESSAGES if m not in EXTENSION_MESSAGES]
+
+# ───────────── 官方方言 msgId 分配快照（冲突检查用） ─────────────
+# 来源：mavlink/mavlink 仓库 message_definitions/v1.0 全部方言（2026-10 快照，
+# 392 个已分配 msgId）。common.xml 官方拥有 300-10000 分配带，私有方言可用任意
+# 区间但应避开官方已分配 id。离线嵌入避免运行时依赖 pymavlink；官方新增分配后
+# 应刷新本表（--cross-check 用 pymavlink 在线核对作为补强）。
+OFFICIAL_MSGIDS = {
+    0: 'minimal', 1: 'common', 2: 'common', 4: 'common', 5: 'common', 6: 'common',
+    7: 'common', 8: 'common', 11: 'common', 20: 'common', 21: 'common', 22: 'common',
+    23: 'common', 24: 'common', 25: 'common', 26: 'common', 27: 'common', 28: 'common',
+    29: 'common', 30: 'common', 31: 'common', 32: 'common', 33: 'standard', 34: 'common',
+    35: 'common', 36: 'common', 37: 'common', 38: 'common', 39: 'common', 40: 'common',
+    41: 'common', 42: 'common', 43: 'common', 44: 'common', 45: 'common', 46: 'common',
+    47: 'common', 48: 'common', 49: 'common', 50: 'common', 51: 'common', 54: 'common',
+    55: 'common', 61: 'common', 62: 'common', 63: 'common', 64: 'common', 65: 'common',
+    66: 'common', 67: 'common', 69: 'common', 70: 'common', 73: 'common', 74: 'common',
+    75: 'common', 76: 'common', 77: 'common', 80: 'common', 81: 'common', 82: 'common',
+    83: 'common', 84: 'common', 85: 'common', 86: 'common', 87: 'common', 89: 'common',
+    90: 'common', 91: 'common', 92: 'common', 93: 'common', 100: 'common', 101: 'common',
+    102: 'common', 103: 'common', 104: 'common', 105: 'common', 106: 'common', 107: 'common',
+    108: 'common', 109: 'common', 110: 'common', 111: 'common', 112: 'common', 113: 'common',
+    114: 'common', 115: 'common', 116: 'common', 117: 'common', 118: 'common', 119: 'common',
+    120: 'common', 121: 'common', 122: 'common', 123: 'common', 124: 'common', 125: 'common',
+    126: 'common', 127: 'common', 128: 'common', 129: 'common', 130: 'common', 131: 'common',
+    132: 'common', 133: 'common', 134: 'common', 135: 'common', 136: 'common', 137: 'common',
+    138: 'common', 139: 'common', 140: 'common', 141: 'common', 142: 'common', 143: 'common',
+    144: 'common', 146: 'common', 147: 'common', 148: 'standard', 149: 'common', 150: 'ardupilotmega',
+    151: 'ardupilotmega', 152: 'ardupilotmega', 153: 'ardupilotmega', 154: 'ardupilotmega', 155: 'ardupilotmega', 156: 'ardupilotmega',
+    157: 'ardupilotmega', 158: 'ardupilotmega', 160: 'ardupilotmega', 161: 'ardupilotmega', 162: 'common', 163: 'ardupilotmega',
+    164: 'ardupilotmega', 165: 'ardupilotmega', 166: 'ardupilotmega', 167: 'ardupilotmega', 168: 'ardupilotmega', 169: 'ardupilotmega',
+    170: 'ardupilotmega', 171: 'ardupilotmega', 172: 'ardupilotmega', 173: 'ardupilotmega', 174: 'ardupilotmega', 175: 'ardupilotmega',
+    176: 'ardupilotmega', 177: 'ardupilotmega', 178: 'ardupilotmega', 179: 'ardupilotmega', 180: 'paparazzi', 181: 'paparazzi',
+    182: 'paparazzi', 183: 'paparazzi', 184: 'paparazzi', 185: 'ardupilotmega', 186: 'ardupilotmega', 191: 'ardupilotmega',
+    192: 'common', 193: 'ardupilotmega', 194: 'ardupilotmega', 195: 'ardupilotmega', 200: 'ardupilotmega', 201: 'ardupilotmega',
+    214: 'ardupilotmega', 215: 'ardupilotmega', 216: 'ardupilotmega', 217: 'ardupilotmega', 218: 'ardupilotmega', 219: 'ardupilotmega',
+    223: 'ASLUAV', 224: 'ASLUAV', 225: 'common', 226: 'ardupilotmega', 230: 'common', 231: 'common',
+    232: 'common', 233: 'common', 234: 'common', 235: 'common', 241: 'common', 242: 'common',
+    243: 'common', 244: 'common', 245: 'common', 246: 'common', 247: 'common', 248: 'common',
+    249: 'common', 250: 'common', 251: 'common', 252: 'common', 253: 'common', 254: 'common',
+    256: 'common', 257: 'common', 258: 'common', 259: 'common', 260: 'common', 261: 'common',
+    262: 'common', 263: 'common', 264: 'common', 265: 'common', 266: 'common', 267: 'common',
+    268: 'common', 269: 'common', 270: 'common', 271: 'common', 275: 'common', 276: 'common',
+    277: 'common', 280: 'common', 281: 'common', 282: 'common', 283: 'common', 284: 'common',
+    285: 'common', 286: 'common', 287: 'common', 288: 'common', 290: 'common', 291: 'common',
+    292: 'development', 295: 'common', 296: 'common', 299: 'common', 300: 'common', 301: 'common',
+    310: 'common', 311: 'common', 320: 'common', 321: 'common', 322: 'common', 323: 'common',
+    324: 'common', 330: 'common', 331: 'common', 332: 'common', 333: 'common', 334: 'common',
+    335: 'common', 336: 'common', 339: 'common', 340: 'common', 345: 'common', 350: 'common',
+    354: 'development', 355: 'development', 360: 'common', 361: 'common', 369: 'development', 370: 'common',
+    371: 'common', 372: 'common', 373: 'common', 375: 'common', 376: 'common', 380: 'common',
+    385: 'common', 386: 'common', 387: 'common', 388: 'common', 390: 'common', 395: 'common',
+    396: 'common', 397: 'common', 400: 'common', 401: 'common', 410: 'common', 411: 'common',
+    412: 'common', 413: 'common', 414: 'development', 415: 'development', 420: 'common', 421: 'development',
+    435: 'common', 436: 'common', 437: 'common', 440: 'common', 441: 'development', 442: 'development',
+    510: 'development', 511: 'development', 512: 'development', 513: 'development', 514: 'development', 515: 'development',
+    516: 'development', 517: 'development', 8002: 'ASLUAV', 8003: 'ASLUAV', 8004: 'ASLUAV', 8005: 'ASLUAV',
+    8006: 'ASLUAV', 8007: 'ASLUAV', 8008: 'ASLUAV', 8009: 'ASLUAV', 8010: 'ASLUAV', 8011: 'ASLUAV',
+    8012: 'ASLUAV', 8013: 'ASLUAV', 8014: 'ASLUAV', 8015: 'ASLUAV', 8016: 'ASLUAV', 9000: 'common',
+    9005: 'common', 10001: 'uAvionix', 10002: 'uAvionix', 10003: 'uAvionix', 10004: 'uAvionix', 10005: 'uAvionix',
+    10006: 'uAvionix', 10007: 'uAvionix', 10008: 'uAvionix', 10151: 'loweheiser', 11000: 'ardupilotmega', 11001: 'ardupilotmega',
+    11002: 'ardupilotmega', 11003: 'ardupilotmega', 11004: 'ardupilotmega', 11005: 'ardupilotmega', 11010: 'ardupilotmega', 11011: 'ardupilotmega',
+    11020: 'ardupilotmega', 11030: 'ardupilotmega', 11031: 'ardupilotmega', 11032: 'ardupilotmega', 11033: 'ardupilotmega', 11034: 'ardupilotmega',
+    11035: 'ardupilotmega', 11036: 'ardupilotmega', 11037: 'ardupilotmega', 11038: 'ardupilotmega', 11039: 'ardupilotmega', 11040: 'ardupilotmega',
+    11041: 'ardupilotmega', 11042: 'ardupilotmega', 11043: 'ardupilotmega', 11044: 'ardupilotmega', 11060: 'ardupilotmega', 12900: 'common',
+    12901: 'common', 12902: 'common', 12903: 'common', 12904: 'common', 12905: 'common', 12915: 'common',
+    12918: 'common', 12919: 'common', 12920: 'common', 17000: 'test', 17150: 'python_array_test', 17151: 'python_array_test',
+    17153: 'python_array_test', 17154: 'python_array_test', 17155: 'python_array_test', 17156: 'python_array_test', 17157: 'python_array_test', 17158: 'python_array_test',
+    42000: 'icarous', 42001: 'icarous', 50001: 'cubepilot', 50002: 'cubepilot', 50003: 'cubepilot', 50004: 'cubepilot',
+    50005: 'cubepilot', 52000: 'csAirLink', 52001: 'csAirLink', 52501: 'marsh', 52502: 'marsh', 52503: 'marsh',
+    52504: 'marsh', 52505: 'marsh', 52600: 'stemstudios', 52601: 'stemstudios', 60000: 'storm32', 60010: 'storm32',
+    60011: 'storm32', 60012: 'storm32', 60013: 'storm32', 60014: 'storm32', 60020: 'storm32', 60040: 'storm32',
+    60041: 'storm32', 60045: 'storm32', 60046: 'storm32', 60047: 'storm32', 60050: 'AVSSUAS', 60051: 'AVSSUAS',
+    60052: 'AVSSUAS', 60053: 'AVSSUAS',
+}
 
 # ───────────────────────── CRC-16/X.25 ─────────────────────────
 
@@ -359,7 +433,7 @@ def decode_mission_item_int(payload: bytes) -> dict:
 def encode_spray_status(enabled=1, rate=250, remaining=50000,
                         coverage=75, low_chem=0, drift=0,
                         flow_corr=0) -> bytes:
-    """SPRAY_STATUS (msgId=423, LEN=12) —— NexusSky M2 喷洒物流扩展消息。
+    """SPRAY_STATUS (msgId=30003, LEN=12) —— NexusSky M2 喷洒物流扩展消息。
     字段：enabled(u8) + rate(u16) + remaining(u16) + coverage(u8) + low_chem(u8)
          + drift(i16) + flow_corr(u8) + reserved(u8) + reserved(u8)
     """
@@ -466,15 +540,15 @@ def test_standard_messages_codec():
 
 
 def test_extension_messages_codec():
-    """NexusSky 扩展消息（420-476）编解码一致性。"""
-    step("NexusSky 扩展消息（420-476）编解码一致性")
+    """NexusSky 扩展消息（30000-30063）编解码一致性。"""
+    step("NexusSky 扩展消息（30000-30063）编解码一致性")
 
     # SPRAY_STATUS（具体字段编解码）
     ss = encode_spray_status(enabled=1, rate=250, remaining=48000,
                              coverage=60, low_chem=0, drift=-150, flow_corr=5)
-    frame = pack_v2(DRONE_SYSID, DRONE_COMPID, 0, 423, ss)
+    frame = pack_v2(DRONE_SYSID, DRONE_COMPID, 0, 30003, ss)
     info = unpack(frame)
-    check("SPRAY_STATUS 帧解包 msg_id=423", info["msg_id"] == 423)
+    check("SPRAY_STATUS 帧解包 msg_id=30003", info["msg_id"] == 30003)
     check("SPRAY_STATUS CRC 校验通过", info["crc_ok"])
     dec = decode_spray_status(info["payload"])
     check("SPRAY_STATUS rate 往返一致", dec["rate"] == 250)
@@ -482,7 +556,7 @@ def test_extension_messages_codec():
     check("SPRAY_STATUS drift 往返一致", dec["drift"] == -150)
 
     # 所有扩展消息的帧层透传往返（含可变长度消息）
-    step("扩展消息帧层透传往返（全部 420-476）")
+    step("扩展消息帧层透传往返（全部 30000-30063）")
     for msg_id, name, length, crc_extra in EXTENSION_MESSAGES:
         # 可变长度用 8 字节示例 payload；定长用声明长度
         plen = 8 if length < 0 else length
@@ -521,16 +595,16 @@ def test_v1_v2_compatibility():
 
     # v1 不能发送 msgId > 255 的扩展消息
     try:
-        pack_v1(DRONE_SYSID, DRONE_COMPID, 0, 423, b"\x00" * 12)
-        fail("v1 应拒绝 msgId=423（>255）")
+        pack_v1(DRONE_SYSID, DRONE_COMPID, 0, 30003, b"\x00" * 12)
+        fail("v1 应拒绝 msgId=30003（>255）")
     except ValueError:
-        ok("v1 正确拒绝 msgId=423（扩展消息必须用 v2）")
+        ok("v1 正确拒绝 msgId=30003（扩展消息必须用 v2）")
 
     # v2 能发送扩展消息
     ss = encode_spray_status()
-    frame_ext = pack_v2(DRONE_SYSID, DRONE_COMPID, 0, 423, ss)
+    frame_ext = pack_v2(DRONE_SYSID, DRONE_COMPID, 0, 30003, ss)
     info_ext = unpack(frame_ext)
-    check("v2 扩展消息 msg_id=423 CRC 校验通过", info_ext["crc_ok"])
+    check("v2 扩展消息 msg_id=30003 CRC 校验通过", info_ext["crc_ok"])
 
     # 混合流：v1 和 v2 帧交替，解包器自动识别
     mixed = frame_v1 + frame_v2
@@ -549,10 +623,29 @@ def test_msg_id_no_conflict():
     check("标准消息与扩展消息 ID 无重叠", len(overlap) == 0,
           f"重叠={overlap}" if overlap else "")
 
-    # 扩展消息 ID 应在 420-476 区间
-    out_of_range = [mid for mid in ext_ids if mid < 420 or mid > 476]
-    check("扩展消息 ID 均在 420-476 区间", len(out_of_range) == 0,
+    # 扩展消息 ID 应在私有方言段 30000-30099（官方分配带 300-10000 之外）
+    out_of_range = [mid for mid in ext_ids if mid < 30000 or mid > 30099]
+    check("扩展消息 ID 均在私有方言段 30000-30099", len(out_of_range) == 0,
           f"越界={out_of_range}" if out_of_range else "")
+
+
+def test_official_allocation_no_conflict():
+    """私有扩展 msgId 不得命中官方方言已分配的 msgId（嵌入快照，离线可用）。
+
+    2026-10 治理搬迁（420-483 → 30000-30063）的动机：旧段落在 common.xml 官方
+    分配带 300-10000 内，官方随时可能启用（420/437/440 已实锤冲突）。本检查
+    保证搬迁后不再出现同类冲突。
+    """
+    step("私有扩展与官方分配无冲突（嵌入快照）")
+    check("官方分配快照已加载（>= 350 条）", len(OFFICIAL_MSGIDS) >= 350,
+          f"实际 {len(OFFICIAL_MSGIDS)} 条")
+    conflicts = [(mid, name, OFFICIAL_MSGIDS[mid])
+                 for mid, name, _l, _c in EXTENSION_MESSAGES if mid in OFFICIAL_MSGIDS]
+    check("扩展消息不与官方已分配 msgId 冲突", not conflicts,
+          f"冲突={conflicts}" if conflicts else "")
+    band_hits = sorted(mid for mid in OFFICIAL_MSGIDS if 30000 <= mid < 30100)
+    check("私有方言段 30000-30099 无官方分配占用", not band_hits,
+          f"命中={band_hits}" if band_hits else "")
 
 
 def run_self_test():
@@ -563,6 +656,7 @@ def run_self_test():
 
     test_crc_known_vector()
     test_msg_id_no_conflict()
+    test_official_allocation_no_conflict()
     test_standard_messages_codec()
     test_extension_messages_codec()
     test_v1_v2_compatibility()
@@ -670,9 +764,9 @@ def run_roundtrip_test(host=CLOUD_HOST, port=CLOUD_PORT):
     ok(f"已发送 MISSION_ITEM_INT ({len(frame)} 字节)")
 
     # 5. 发送扩展消息 SPRAY_STATUS
-    step("发送 SPRAY_STATUS（NexusSky 扩展 msg_id=423）")
+    step("发送 SPRAY_STATUS（NexusSky 扩展 msg_id=30003）")
     ss = encode_spray_status(enabled=1, rate=250, remaining=50000, coverage=50)
-    frame = pack_v2(DRONE_SYSID, DRONE_COMPID, seq, 423, ss)
+    frame = pack_v2(DRONE_SYSID, DRONE_COMPID, seq, 30003, ss)
     seq += 1
     send_frame(sock, frame, addr)
     ok(f"已发送 SPRAY_STATUS ({len(frame)} 字节)")
@@ -745,8 +839,8 @@ def cross_check_with_pymavlink():
 
     checked = mismatch = missing = 0
     for msg_id, name, _length, crc in ALL_MESSAGES:
-        if 420 <= msg_id < 12900:
-            continue                      # 自定义扩展，官方无定义可比
+        if 30000 <= msg_id < 30100:
+            continue                      # 私有方言段扩展，官方无定义可比
         if msg_id not in official:
             continue
         ref = official[msg_id]
@@ -757,7 +851,7 @@ def cross_check_with_pymavlink():
                  f"（官方该 msgId 是 {official_names.get(msg_id, '?')}，"
                  f"本表登记为 {name}）")
     for msg_id, name, _length, crc in ALL_MESSAGES:
-        if 420 <= msg_id < 12900:
+        if 30000 <= msg_id < 30100:
             continue
         if msg_id not in official:
             missing += 1

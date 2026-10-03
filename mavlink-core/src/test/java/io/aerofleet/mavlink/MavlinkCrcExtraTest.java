@@ -61,57 +61,57 @@ class MavlinkCrcExtraTest {
 
     /** {@code {msgId, 消息名, 字段签名}}；由 scripts/mavlink-crc-extra-gen.py --emit-java 生成。 */
     private static final Object[][] SIGNATURES = {
-        {420, "LED_CONTROL", new Field[]{F(U8, "colorR"), F(U8, "colorG"), F(U8, "colorB"), F(U8, "pattern"), F(U8, "brightness"), F(U8, "freq"), F(U8, "flags"), F(U32, "phaseStartUs"), F(U8, "targetSystem"), F(U8, "targetComp"), F(U8, "reserved"), F(U8, "ledIndex"), F(U16, "transitionMs"), F(U8, "reserved2")}},
-        {421, "ENVIRONMENT_ALERT", new Field[]{F(U8, "alertType"), F(U8, "severity"), F(I16, "value"), F(I16, "threshold"), F(CH, "text", 40)}},
-        {422, "ENVIRONMENT_STATUS", new Field[]{F(U8, "humidity"), F(U8, "weather"), F(U8, "rainRate"), F(I16, "temperature"), F(U16, "windSpeed"), F(U16, "windDirection"), F(I16, "gust"), F(U16, "visibility")}},
-        {423, "SPRAY_STATUS", new Field[]{F(U8, "enabled"), F(U16, "rate"), F(U16, "remainingChemical"), F(U8, "coveragePercent"), F(U8, "lowChemical"), F(I16, "driftOffsetAngle"), F(U8, "flowCorrectionPercent"), F(U8, "reserved1"), F(U8, "reserved2")}},
-        {424, "SPRAY_COMMAND", new Field[]{F(U8, "command"), F(U16, "targetRate"), F(U16, "sprayWidth"), F(U8, "reserved")}},
-        {425, "GRIPPER_COMMAND", new Field[]{F(U8, "command"), F(U8, "payloadId"), F(U16, "payloadWeight"), F(U16, "payloadVolume"), F(U8, "reserved")}},
-        {426, "PAYLOAD_STATUS", new Field[]{F(U8, "gripperState"), F(U16, "currentPayloadWeight"), F(U16, "currentPayloadVolume"), F(U8, "remainingSites"), F(U8, "currentSiteIndex"), F(U16, "dropAccuracyCm"), F(U8, "reserved")}},
-        {430, "OBSTACLE_REPORT", new Field[]{F(F32, "distance"), F(F32, "direction"), F(U32, "timestamp"), F(U8, "threat"), F(U8, "type"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2"), F(U8, "reserved3", 2)}},
-        {431, "MULTISPECTRAL_DATA", new Field[]{F(F32, "ndviMean"), F(F32, "ndviMin"), F(F32, "ndviMax"), F(F32, "vegetationCoverage"), F(U32, "timestamp"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2")}},
-        {432, "THERMAL_DATA", new Field[]{F(F32, "tempMean"), F(F32, "tempMin"), F(F32, "tempMax"), F(F32, "tempStdDev"), F(U32, "timestamp"), F(U8, "hotspotCount"), F(U8, "sysid"), F(U16, "reserved")}},
-        {433, "DEPTH_DATA", new Field[]{F(F32, "nearestDistance"), F(F32, "nearestDirection"), F(F32, "pointCloudDensity"), F(U32, "pointCount"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2")}},
-        {434, "VISION_DETECTION", new Field[]{F(F32, "u"), F(F32, "v"), F(F32, "confidence"), F(U8, "kind"), F(U8, "trackId"), F(U8, "sysid"), F(U32, "timestamp"), F(U8, "reserved")}},
-        {437, "RADAR_SCAN", new Field[]{F(U8, "mode"), F(F32, "beamAzim"), F(F32, "beamElev"), F(U16, "scanPeriodMs"), F(U8, "targetCount"), F(U8, "sysid"), F(U32, "timestamp"), F(U8, "reserved"), F(U16, "reserved2")}},
-        {438, "RADAR_TARGET", new Field[]{F(U16, "targetId"), F(F32, "distance"), F(F32, "azimDeg"), F(F32, "elevDeg"), F(F32, "radialVelocity"), F(F32, "rcs"), F(U8, "trackState"), F(U8, "sysid"), F(U32, "timestamp")}},
-        {439, "ROTOR_TELEMETRY", new Field[]{F(U8, "rotorIndex"), F(F32, "rpm"), F(F32, "thrust"), F(F32, "power"), F(F32, "totalThrust"), F(F32, "totalPower"), F(U8, "sysid"), F(U16, "reserved")}},
-        {440, "LIDAR_DATA", new Field[]{F(F32, "nearestDistance"), F(U32, "pointCount"), F(F32, "density"), F(F32, "avgIntensity"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2")}},
-        {441, "IMU_DATA", new Field[]{F(F32, "accelX"), F(F32, "accelY"), F(F32, "accelZ"), F(F32, "gyroX"), F(F32, "gyroY"), F(F32, "gyroZ"), F(F32, "magX"), F(F32, "magY"), F(F32, "magZ"), F(F32, "tempC"), F(U8, "sysid")}},
-        {450, "MESH_HEARTBEAT", new Field[]{F(U8, "sysid"), F(I32, "lat"), F(I32, "lon"), F(I32, "alt"), F(U8, "batteryPercent"), F(U8, "neighborCount"), F(U32, "timestamp"), F(U8, "reserved"), F(U32, "reserved2")}},
-        {451, "MESH_ROUTE_REQUEST", new Field[]{F(U8, "sourceSysid"), F(U8, "targetSysid"), F(U16, "broadcastId"), F(U8, "hopCount"), F(U16, "originMetric"), F(U32, "timestamp"), F(U8, "reserved")}},
-        {452, "MESH_ROUTE_REPLY", new Field[]{F(U8, "sourceSysid"), F(U8, "targetSysid"), F(U8, "hopCount"), F(U16, "metric"), F(U32, "timestamp"), F(U8, "reserved")}},
-        {453, "MESH_ROUTE_ERROR", new Field[]{F(U8, "unreachableSysid"), F(U8, "hopCount"), F(U16, "timestamp")}},
-        {454, "MESH_NEIGHBOR_TABLE", new Field[]{F(U8, "sysid"), F(U8, "neighborCount"), F(U32, "timestamp"), F(U8, "neighborsSysid", 255), F(I8, "neighborsRssi", 255), F(U8, "neighborsLinkQuality", 255), F(U8, "neighborsReserved", 255)}},
-        {455, "CELL_TOWER_STATUS", new Field[]{F(U8, "sysid"), F(U8, "cellType"), F(I32, "centerLat"), F(I32, "centerLon"), F(U16, "coverageRadiusM"), F(U16, "connectedTerminals"), F(U8, "capacityUtilization")}},
-        {456, "CELL_TOWER_CONFIG", new Field[]{F(U8, "sysid"), F(U8, "cellType"), F(I8, "txPowerDbm"), F(U16, "maxTerminals"), F(U16, "frequencyChannel")}},
-        {457, "CELL_HANDOVER", new Field[]{F(U16, "terminalId"), F(U8, "fromSysid"), F(U8, "toSysid"), F(U8, "handoverReason")}},
-        {458, "GROUND_TERMINAL_REGISTER", new Field[]{F(U16, "terminalId"), F(U8, "terminalType"), F(I32, "gpsLat"), F(I32, "gpsLon"), F(U8, "requestedSysid")}},
-        {459, "SAT_LINK_STATUS", new Field[]{F(U16, "satId"), F(U8, "visible"), F(U8, "elevationDeg"), F(U16, "azimuthDeg"), F(U16, "delayMs"), F(U8, "bandwidthMbps"), F(U32, "windowEndMs"), F(U8, "sharedUsers"), F(U32, "timestamp"), F(U8, "simFlag"), F(U8, "reserved"), F(U32, "reserved2")}},
-        {460, "SAT_PASS_SCHEDULE", new Field[]{F(U16, "satId"), F(U32, "passStartMs"), F(U32, "passEndMs"), F(U8, "maxElevationDeg"), F(U8, "groundPointId"), F(U32, "timestamp")}},
-        {461, "HIERARCHICAL_ROUTE_DECISION", new Field[]{F(U8, "sourceLayer"), F(U8, "targetLayer"), F(U8, "chosenLayer"), F(U16, "estimatedDelayMs"), F(U8, "pathHopCount"), F(U8, "pathNodes", 8), F(U8, "strategy"), F(U8, "reasonLen"), F(CH, "reasonChars", 14), F(U32, "timestamp")}},
-        {462, "TERRAIN_TYPE_MAP", new Field[]{F(I32, "mapOriginLat"), F(I32, "mapOriginLon"), F(U16, "gridResolution"), F(U16, "mapWidth"), F(U16, "mapHeight"), F(U8, "gridCells", 255)}},
-        {463, "TERRAIN_UPDATE", new Field[]{F(U32, "terrainVersion"), F(U8, "changeReason"), F(U16, "affectedCount"), F(U16, "reserved"), F(U16, "affectedCellsGridIndex", 255), F(U8, "affectedCellsNewTerrainType", 255), F(U8, "affectedCellsReserved", 255)}},
-        {464, "FLIGHT_RESTRICTION", new Field[]{F(U8, "restrictionType"), F(F32, "limitValue"), F(U8, "vertexCount"), F(U16, "reserved"), F(I32, "areaLat", 255), F(I32, "areaLon", 255)}},
-        {465, "EMERGENCY_MISSION_PLAN", new Field[]{F(U32, "planId"), F(U8, "scenarioType"), F(U8, "phase"), F(U8, "phaseStatus"), F(I32, "disasterCenterLat"), F(I32, "disasterCenterLon"), F(U16, "disasterRadius"), F(U8, "droneCount"), F(U8, "coverageRate"), F(U8, "connectRate"), F(U8, "priority"), F(U32, "timestamp")}},
-        {466, "COVERAGE_OPTIMIZATION", new Field[]{F(U32, "planId"), F(U8, "droneId"), F(I32, "targetLat"), F(I32, "targetLon"), F(I16, "targetAlt"), F(U8, "cellType"), F(U8, "relayRole"), F(U8, "txPower"), F(U8, "expectedCoverage"), F(U8, "batteryBudget"), F(U32, "timestamp")}},
-        {467, "EMERGENCY_PRIORITY", new Field[]{F(U32, "planId"), F(U32, "taskId"), F(U8, "priority"), F(U8, "action"), F(U32, "preemptedTaskId"), F(CH, "reason", 32), F(U32, "timestamp")}},
-        {468, "TASK_ASSIGNMENT", new Field[]{F(U32, "taskId"), F(I32, "targetLat"), F(I32, "targetLon"), F(I16, "targetAlt"), F(U8, "sysId"), F(U8, "taskType"), F(U8, "priority"), F(U8, "assignedSysId")}},
-        {469, "CONFLICT_ALERT", new Field[]{F(F32, "minDistance"), F(F32, "timeToConflict"), F(U8, "sysId"), F(U8, "conflictType"), F(U8, "conflictingSysId"), F(U8, "severity")}},
-        {470, "TASK_STATUS", new Field[]{F(U32, "taskId"), F(U32, "timestamp"), F(U8, "sysId"), F(U8, "status"), F(U8, "progressPercent")}},
-        {471, "DECISION_EVENT", new Field[]{F(F32, "triggerValue"), F(F32, "confidence"), F(U32, "timestamp"), F(U8, "sysId"), F(U8, "decisionType"), F(U8, "reason")}},
-        {472, "ADAPTIVE_PATH", new Field[]{F(I32, "newLat"), F(I32, "newLon"), F(F32, "windSpeed"), F(U16, "originalWaypointSeq"), F(I16, "newAlt"), F(U16, "windDirection"), F(U8, "sysId"), F(U8, "adjustmentReason")}},
-        {473, "EDGE_TASK_STATUS", new Field[]{F(U32, "edgeTaskId"), F(U32, "processingTimeMs"), F(U16, "resultSize"), F(U8, "sysId"), F(U8, "taskType"), F(U8, "status")}},
-        {474, "SENSOR_FUSION_DATA", new Field[]{F(I32, "fusedLat"), F(I32, "fusedLon"), F(I32, "fusedAlt"), F(F32, "fusedVelocity"), F(F32, "accuracy"), F(U16, "fusedHeading"), F(U8, "sysId"), F(U8, "sensorMask")}},
-        {475, "TWIN_STATE_SYNC", new Field[]{F(I32, "twinLat"), F(I32, "twinLon"), F(I32, "twinAlt"), F(U32, "syncTimestamp"), F(F32, "twinVelocity"), F(F32, "driftMeters"), F(U16, "twinHeading"), F(U8, "sysId"), F(U8, "twinBattery")}},
-        {476, "PREDICTION_RESULT", new Field[]{F(I32, "predictedLat"), F(I32, "predictedLon"), F(I32, "predictedAlt"), F(F32, "confidence"), F(U16, "predictionHorizonSec"), F(U8, "sysId"), F(U8, "trajectoryPoints")}},
-        {477, "ALARM_TRIGGER", new Field[]{F(U32, "timestamp"), F(I32, "lat"), F(I32, "lon"), F(U16, "sourceDeviceId"), F(I16, "alt"), F(U8, "alarmType"), F(U8, "severity"), F(CH, "description", 50)}},
-        {478, "ALARM_ACK", new Field[]{F(U32, "alarmId"), F(U32, "timestamp"), F(U16, "estimatedArrivalSec"), F(U8, "droneSysid"), F(U8, "ackResult")}},
-        {479, "SURVEILLANCE_STATUS", new Field[]{F(U32, "lastEventMs"), F(U32, "uptimeSec"), F(U16, "deviceId"), F(U8, "deviceType"), F(U8, "status"), F(U8, "onlineCameras"), F(U8, "totalCameras")}},
-        {480, "QOS_ROUTE_DECISION", new Field[]{F(U32, "timestamp"), F(U16, "bandwidthAlloc"), F(U8, "routeId"), F(U8, "priorityClass"), F(U8, "sourceSysid"), F(U8, "targetSysid"), F(U8, "reserved", 2)}},
-        {481, "CLUSTER_FORMATION", new Field[]{F(U32, "timestamp"), F(U16, "clusterRadius"), F(U8, "clusterId"), F(U8, "clusterHead"), F(U8, "members", 8), F(U8, "memberCount"), F(U8, "reserved")}},
-        {482, "DISASTER_MODE_STATUS", new Field[]{F(U32, "timestamp"), F(U8, "mode"), F(U8, "triggerReason"), F(U8, "affectedNodes"), F(U8, "recoveryRate")}},
-        {483, "BUZZER_CONTROL", new Field[]{F(U8, "sysid"), F(U8, "on"), F(U8, "pattern"), F(U8, "volume"), F(U16, "durationSec"), F(U8, "reserved")}},
+        {30000, "LED_CONTROL", new Field[]{F(U8, "colorR"), F(U8, "colorG"), F(U8, "colorB"), F(U8, "pattern"), F(U8, "brightness"), F(U8, "freq"), F(U8, "flags"), F(U32, "phaseStartUs"), F(U8, "targetSystem"), F(U8, "targetComp"), F(U8, "reserved"), F(U8, "ledIndex"), F(U16, "transitionMs"), F(U8, "reserved2")}},
+        {30001, "ENVIRONMENT_ALERT", new Field[]{F(U8, "alertType"), F(U8, "severity"), F(I16, "value"), F(I16, "threshold"), F(CH, "text", 40)}},
+        {30002, "ENVIRONMENT_STATUS", new Field[]{F(U8, "humidity"), F(U8, "weather"), F(U8, "rainRate"), F(I16, "temperature"), F(U16, "windSpeed"), F(U16, "windDirection"), F(I16, "gust"), F(U16, "visibility")}},
+        {30003, "SPRAY_STATUS", new Field[]{F(U8, "enabled"), F(U16, "rate"), F(U16, "remainingChemical"), F(U8, "coveragePercent"), F(U8, "lowChemical"), F(I16, "driftOffsetAngle"), F(U8, "flowCorrectionPercent"), F(U8, "reserved1"), F(U8, "reserved2")}},
+        {30004, "SPRAY_COMMAND", new Field[]{F(U8, "command"), F(U16, "targetRate"), F(U16, "sprayWidth"), F(U8, "reserved")}},
+        {30005, "GRIPPER_COMMAND", new Field[]{F(U8, "command"), F(U8, "payloadId"), F(U16, "payloadWeight"), F(U16, "payloadVolume"), F(U8, "reserved")}},
+        {30006, "PAYLOAD_STATUS", new Field[]{F(U8, "gripperState"), F(U16, "currentPayloadWeight"), F(U16, "currentPayloadVolume"), F(U8, "remainingSites"), F(U8, "currentSiteIndex"), F(U16, "dropAccuracyCm"), F(U8, "reserved")}},
+        {30010, "OBSTACLE_REPORT", new Field[]{F(F32, "distance"), F(F32, "direction"), F(U32, "timestamp"), F(U8, "threat"), F(U8, "type"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2"), F(U8, "reserved3", 2)}},
+        {30011, "MULTISPECTRAL_DATA", new Field[]{F(F32, "ndviMean"), F(F32, "ndviMin"), F(F32, "ndviMax"), F(F32, "vegetationCoverage"), F(U32, "timestamp"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2")}},
+        {30012, "THERMAL_DATA", new Field[]{F(F32, "tempMean"), F(F32, "tempMin"), F(F32, "tempMax"), F(F32, "tempStdDev"), F(U32, "timestamp"), F(U8, "hotspotCount"), F(U8, "sysid"), F(U16, "reserved")}},
+        {30013, "DEPTH_DATA", new Field[]{F(F32, "nearestDistance"), F(F32, "nearestDirection"), F(F32, "pointCloudDensity"), F(U32, "pointCount"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2")}},
+        {30014, "VISION_DETECTION", new Field[]{F(F32, "u"), F(F32, "v"), F(F32, "confidence"), F(U8, "kind"), F(U8, "trackId"), F(U8, "sysid"), F(U32, "timestamp"), F(U8, "reserved")}},
+        {30017, "RADAR_SCAN", new Field[]{F(U8, "mode"), F(F32, "beamAzim"), F(F32, "beamElev"), F(U16, "scanPeriodMs"), F(U8, "targetCount"), F(U8, "sysid"), F(U32, "timestamp"), F(U8, "reserved"), F(U16, "reserved2")}},
+        {30018, "RADAR_TARGET", new Field[]{F(U16, "targetId"), F(F32, "distance"), F(F32, "azimDeg"), F(F32, "elevDeg"), F(F32, "radialVelocity"), F(F32, "rcs"), F(U8, "trackState"), F(U8, "sysid"), F(U32, "timestamp")}},
+        {30019, "ROTOR_TELEMETRY", new Field[]{F(U8, "rotorIndex"), F(F32, "rpm"), F(F32, "thrust"), F(F32, "power"), F(F32, "totalThrust"), F(F32, "totalPower"), F(U8, "sysid"), F(U16, "reserved")}},
+        {30020, "LIDAR_DATA", new Field[]{F(F32, "nearestDistance"), F(U32, "pointCount"), F(F32, "density"), F(F32, "avgIntensity"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2")}},
+        {30021, "IMU_DATA", new Field[]{F(F32, "accelX"), F(F32, "accelY"), F(F32, "accelZ"), F(F32, "gyroX"), F(F32, "gyroY"), F(F32, "gyroZ"), F(F32, "magX"), F(F32, "magY"), F(F32, "magZ"), F(F32, "tempC"), F(U8, "sysid")}},
+        {30030, "MESH_HEARTBEAT", new Field[]{F(U8, "sysid"), F(I32, "lat"), F(I32, "lon"), F(I32, "alt"), F(U8, "batteryPercent"), F(U8, "neighborCount"), F(U32, "timestamp"), F(U8, "reserved"), F(U32, "reserved2")}},
+        {30031, "MESH_ROUTE_REQUEST", new Field[]{F(U8, "sourceSysid"), F(U8, "targetSysid"), F(U16, "broadcastId"), F(U8, "hopCount"), F(U16, "originMetric"), F(U32, "timestamp"), F(U8, "reserved")}},
+        {30032, "MESH_ROUTE_REPLY", new Field[]{F(U8, "sourceSysid"), F(U8, "targetSysid"), F(U8, "hopCount"), F(U16, "metric"), F(U32, "timestamp"), F(U8, "reserved")}},
+        {30033, "MESH_ROUTE_ERROR", new Field[]{F(U8, "unreachableSysid"), F(U8, "hopCount"), F(U16, "timestamp")}},
+        {30034, "MESH_NEIGHBOR_TABLE", new Field[]{F(U8, "sysid"), F(U8, "neighborCount"), F(U32, "timestamp"), F(U8, "neighborsSysid", 255), F(I8, "neighborsRssi", 255), F(U8, "neighborsLinkQuality", 255), F(U8, "neighborsReserved", 255)}},
+        {30035, "CELL_TOWER_STATUS", new Field[]{F(U8, "sysid"), F(U8, "cellType"), F(I32, "centerLat"), F(I32, "centerLon"), F(U16, "coverageRadiusM"), F(U16, "connectedTerminals"), F(U8, "capacityUtilization")}},
+        {30036, "CELL_TOWER_CONFIG", new Field[]{F(U8, "sysid"), F(U8, "cellType"), F(I8, "txPowerDbm"), F(U16, "maxTerminals"), F(U16, "frequencyChannel")}},
+        {30037, "CELL_HANDOVER", new Field[]{F(U16, "terminalId"), F(U8, "fromSysid"), F(U8, "toSysid"), F(U8, "handoverReason")}},
+        {30038, "GROUND_TERMINAL_REGISTER", new Field[]{F(U16, "terminalId"), F(U8, "terminalType"), F(I32, "gpsLat"), F(I32, "gpsLon"), F(U8, "requestedSysid")}},
+        {30039, "SAT_LINK_STATUS", new Field[]{F(U16, "satId"), F(U8, "visible"), F(U8, "elevationDeg"), F(U16, "azimuthDeg"), F(U16, "delayMs"), F(U8, "bandwidthMbps"), F(U32, "windowEndMs"), F(U8, "sharedUsers"), F(U32, "timestamp"), F(U8, "simFlag"), F(U8, "reserved"), F(U32, "reserved2")}},
+        {30040, "SAT_PASS_SCHEDULE", new Field[]{F(U16, "satId"), F(U32, "passStartMs"), F(U32, "passEndMs"), F(U8, "maxElevationDeg"), F(U8, "groundPointId"), F(U32, "timestamp")}},
+        {30041, "HIERARCHICAL_ROUTE_DECISION", new Field[]{F(U8, "sourceLayer"), F(U8, "targetLayer"), F(U8, "chosenLayer"), F(U16, "estimatedDelayMs"), F(U8, "pathHopCount"), F(U8, "pathNodes", 8), F(U8, "strategy"), F(U8, "reasonLen"), F(CH, "reasonChars", 14), F(U32, "timestamp")}},
+        {30042, "TERRAIN_TYPE_MAP", new Field[]{F(I32, "mapOriginLat"), F(I32, "mapOriginLon"), F(U16, "gridResolution"), F(U16, "mapWidth"), F(U16, "mapHeight"), F(U8, "gridCells", 255)}},
+        {30043, "TERRAIN_UPDATE", new Field[]{F(U32, "terrainVersion"), F(U8, "changeReason"), F(U16, "affectedCount"), F(U16, "reserved"), F(U16, "affectedCellsGridIndex", 255), F(U8, "affectedCellsNewTerrainType", 255), F(U8, "affectedCellsReserved", 255)}},
+        {30044, "FLIGHT_RESTRICTION", new Field[]{F(U8, "restrictionType"), F(F32, "limitValue"), F(U8, "vertexCount"), F(U16, "reserved"), F(I32, "areaLat", 255), F(I32, "areaLon", 255)}},
+        {30045, "EMERGENCY_MISSION_PLAN", new Field[]{F(U32, "planId"), F(U8, "scenarioType"), F(U8, "phase"), F(U8, "phaseStatus"), F(I32, "disasterCenterLat"), F(I32, "disasterCenterLon"), F(U16, "disasterRadius"), F(U8, "droneCount"), F(U8, "coverageRate"), F(U8, "connectRate"), F(U8, "priority"), F(U32, "timestamp")}},
+        {30046, "COVERAGE_OPTIMIZATION", new Field[]{F(U32, "planId"), F(U8, "droneId"), F(I32, "targetLat"), F(I32, "targetLon"), F(I16, "targetAlt"), F(U8, "cellType"), F(U8, "relayRole"), F(U8, "txPower"), F(U8, "expectedCoverage"), F(U8, "batteryBudget"), F(U32, "timestamp")}},
+        {30047, "EMERGENCY_PRIORITY", new Field[]{F(U32, "planId"), F(U32, "taskId"), F(U8, "priority"), F(U8, "action"), F(U32, "preemptedTaskId"), F(CH, "reason", 32), F(U32, "timestamp")}},
+        {30048, "TASK_ASSIGNMENT", new Field[]{F(U32, "taskId"), F(I32, "targetLat"), F(I32, "targetLon"), F(I16, "targetAlt"), F(U8, "sysId"), F(U8, "taskType"), F(U8, "priority"), F(U8, "assignedSysId")}},
+        {30049, "CONFLICT_ALERT", new Field[]{F(F32, "minDistance"), F(F32, "timeToConflict"), F(U8, "sysId"), F(U8, "conflictType"), F(U8, "conflictingSysId"), F(U8, "severity")}},
+        {30050, "TASK_STATUS", new Field[]{F(U32, "taskId"), F(U32, "timestamp"), F(U8, "sysId"), F(U8, "status"), F(U8, "progressPercent")}},
+        {30051, "DECISION_EVENT", new Field[]{F(F32, "triggerValue"), F(F32, "confidence"), F(U32, "timestamp"), F(U8, "sysId"), F(U8, "decisionType"), F(U8, "reason")}},
+        {30052, "ADAPTIVE_PATH", new Field[]{F(I32, "newLat"), F(I32, "newLon"), F(F32, "windSpeed"), F(U16, "originalWaypointSeq"), F(I16, "newAlt"), F(U16, "windDirection"), F(U8, "sysId"), F(U8, "adjustmentReason")}},
+        {30053, "EDGE_TASK_STATUS", new Field[]{F(U32, "edgeTaskId"), F(U32, "processingTimeMs"), F(U16, "resultSize"), F(U8, "sysId"), F(U8, "taskType"), F(U8, "status")}},
+        {30054, "SENSOR_FUSION_DATA", new Field[]{F(I32, "fusedLat"), F(I32, "fusedLon"), F(I32, "fusedAlt"), F(F32, "fusedVelocity"), F(F32, "accuracy"), F(U16, "fusedHeading"), F(U8, "sysId"), F(U8, "sensorMask")}},
+        {30055, "TWIN_STATE_SYNC", new Field[]{F(I32, "twinLat"), F(I32, "twinLon"), F(I32, "twinAlt"), F(U32, "syncTimestamp"), F(F32, "twinVelocity"), F(F32, "driftMeters"), F(U16, "twinHeading"), F(U8, "sysId"), F(U8, "twinBattery")}},
+        {30056, "PREDICTION_RESULT", new Field[]{F(I32, "predictedLat"), F(I32, "predictedLon"), F(I32, "predictedAlt"), F(F32, "confidence"), F(U16, "predictionHorizonSec"), F(U8, "sysId"), F(U8, "trajectoryPoints")}},
+        {30057, "ALARM_TRIGGER", new Field[]{F(U32, "timestamp"), F(I32, "lat"), F(I32, "lon"), F(U16, "sourceDeviceId"), F(I16, "alt"), F(U8, "alarmType"), F(U8, "severity"), F(CH, "description", 50)}},
+        {30058, "ALARM_ACK", new Field[]{F(U32, "alarmId"), F(U32, "timestamp"), F(U16, "estimatedArrivalSec"), F(U8, "droneSysid"), F(U8, "ackResult")}},
+        {30059, "SURVEILLANCE_STATUS", new Field[]{F(U32, "lastEventMs"), F(U32, "uptimeSec"), F(U16, "deviceId"), F(U8, "deviceType"), F(U8, "status"), F(U8, "onlineCameras"), F(U8, "totalCameras")}},
+        {30060, "QOS_ROUTE_DECISION", new Field[]{F(U32, "timestamp"), F(U16, "bandwidthAlloc"), F(U8, "routeId"), F(U8, "priorityClass"), F(U8, "sourceSysid"), F(U8, "targetSysid"), F(U8, "reserved", 2)}},
+        {30061, "CLUSTER_FORMATION", new Field[]{F(U32, "timestamp"), F(U16, "clusterRadius"), F(U8, "clusterId"), F(U8, "clusterHead"), F(U8, "members", 8), F(U8, "memberCount"), F(U8, "reserved")}},
+        {30062, "DISASTER_MODE_STATUS", new Field[]{F(U32, "timestamp"), F(U8, "mode"), F(U8, "triggerReason"), F(U8, "affectedNodes"), F(U8, "recoveryRate")}},
+        {30063, "BUZZER_CONTROL", new Field[]{F(U8, "sysid"), F(U8, "on"), F(U8, "pattern"), F(U8, "volume"), F(U16, "durationSec"), F(U8, "reserved")}},
     };
 
     static Stream<Object[]> customMessages() {
@@ -235,57 +235,57 @@ class MavlinkCrcExtraTest {
     /** 反射取消息类里的 CRC_EXTRA 常量；类不存在或没有该常量时返回 null。 */
     private static Integer classConstant(int msgId) {
         String cls = switch (msgId) {
-            case 420 -> "LedControlMsg";
-            case 421 -> "EnvironmentAlert";
-            case 422 -> "EnvironmentStatus";
-            case 423 -> "SprayStatus";
-            case 424 -> "SprayCommand";
-            case 425 -> "GripperCommand";
-            case 426 -> "PayloadStatus";
-            case 430 -> "ObstacleReportMsg";
-            case 431 -> "MultispectralDataMsg";
-            case 432 -> "ThermalDataMsg";
-            case 433 -> "DepthDataMsg";
-            case 434 -> "VisionDetectionMsg";
-            case 437 -> "RadarScanMsg";
-            case 438 -> "RadarTargetMsg";
-            case 439 -> "RotorTelemetryMsg";
-            case 440 -> "LidarDataMsg";
-            case 441 -> "ImuDataMsg";
-            case 450 -> "MeshHeartbeatMsg";
-            case 451 -> "MeshRouteRequestMsg";
-            case 452 -> "MeshRouteReplyMsg";
-            case 453 -> "MeshRouteErrorMsg";
-            case 454 -> "MeshNeighborTableMsg";
-            case 455 -> "CellTowerStatusMsg";
-            case 456 -> "CellTowerConfigMsg";
-            case 457 -> "CellHandoverMsg";
-            case 458 -> "GroundTerminalRegisterMsg";
-            case 459 -> "SatLinkStatusMsg";
-            case 460 -> "SatPassScheduleMsg";
-            case 461 -> "HierarchicalRouteDecisionMsg";
-            case 462 -> "TerrainTypeMapMsg";
-            case 463 -> "TerrainUpdateMsg";
-            case 464 -> "FlightRestrictionMsg";
-            case 465 -> "EmergencyMissionPlanMsg";
-            case 466 -> "CoverageOptimizationMsg";
-            case 467 -> "EmergencyPriorityMsg";
-            case 468 -> "TaskAssignmentMsg";
-            case 469 -> "ConflictAlertMsg";
-            case 470 -> "TaskStatusMsg";
-            case 471 -> "DecisionEventMsg";
-            case 472 -> "AdaptivePathMsg";
-            case 473 -> "EdgeTaskStatusMsg";
-            case 474 -> "SensorFusionDataMsg";
-            case 475 -> "TwinStateSyncMsg";
-            case 476 -> "PredictionResultMsg";
-            case 477 -> "AlarmTriggerMsg";
-            case 478 -> "AlarmAckMsg";
-            case 479 -> "SurveillanceStatusMsg";
-            case 480 -> "QoSRouteDecisionMsg";
-            case 481 -> "ClusterFormationMsg";
-            case 482 -> "DisasterModeStatusMsg";
-            case 483 -> "BuzzerControlMsg";
+            case 30000 -> "LedControlMsg";
+            case 30001 -> "EnvironmentAlert";
+            case 30002 -> "EnvironmentStatus";
+            case 30003 -> "SprayStatus";
+            case 30004 -> "SprayCommand";
+            case 30005 -> "GripperCommand";
+            case 30006 -> "PayloadStatus";
+            case 30010 -> "ObstacleReportMsg";
+            case 30011 -> "MultispectralDataMsg";
+            case 30012 -> "ThermalDataMsg";
+            case 30013 -> "DepthDataMsg";
+            case 30014 -> "VisionDetectionMsg";
+            case 30017 -> "RadarScanMsg";
+            case 30018 -> "RadarTargetMsg";
+            case 30019 -> "RotorTelemetryMsg";
+            case 30020 -> "LidarDataMsg";
+            case 30021 -> "ImuDataMsg";
+            case 30030 -> "MeshHeartbeatMsg";
+            case 30031 -> "MeshRouteRequestMsg";
+            case 30032 -> "MeshRouteReplyMsg";
+            case 30033 -> "MeshRouteErrorMsg";
+            case 30034 -> "MeshNeighborTableMsg";
+            case 30035 -> "CellTowerStatusMsg";
+            case 30036 -> "CellTowerConfigMsg";
+            case 30037 -> "CellHandoverMsg";
+            case 30038 -> "GroundTerminalRegisterMsg";
+            case 30039 -> "SatLinkStatusMsg";
+            case 30040 -> "SatPassScheduleMsg";
+            case 30041 -> "HierarchicalRouteDecisionMsg";
+            case 30042 -> "TerrainTypeMapMsg";
+            case 30043 -> "TerrainUpdateMsg";
+            case 30044 -> "FlightRestrictionMsg";
+            case 30045 -> "EmergencyMissionPlanMsg";
+            case 30046 -> "CoverageOptimizationMsg";
+            case 30047 -> "EmergencyPriorityMsg";
+            case 30048 -> "TaskAssignmentMsg";
+            case 30049 -> "ConflictAlertMsg";
+            case 30050 -> "TaskStatusMsg";
+            case 30051 -> "DecisionEventMsg";
+            case 30052 -> "AdaptivePathMsg";
+            case 30053 -> "EdgeTaskStatusMsg";
+            case 30054 -> "SensorFusionDataMsg";
+            case 30055 -> "TwinStateSyncMsg";
+            case 30056 -> "PredictionResultMsg";
+            case 30057 -> "AlarmTriggerMsg";
+            case 30058 -> "AlarmAckMsg";
+            case 30059 -> "SurveillanceStatusMsg";
+            case 30060 -> "QoSRouteDecisionMsg";
+            case 30061 -> "ClusterFormationMsg";
+            case 30062 -> "DisasterModeStatusMsg";
+            case 30063 -> "BuzzerControlMsg";
             default -> null;
         };
         if (cls == null) {

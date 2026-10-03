@@ -96,7 +96,7 @@ public abstract class MavlinkMessage {
                 return EnvironmentStatus.decode(frame);
             case EnvironmentAlert.ID:
                 return EnvironmentAlert.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M2 喷洒物流，msgId 423-426，FR-26~FR-29）----
+            // ---- NexusSky 自定义扩展消息（M2 喷洒物流，msgId 30003-30006，FR-26~FR-29）----
             case SprayStatus.ID:
                 return SprayStatus.decode(frame);
             case SprayCommand.ID:
@@ -105,7 +105,7 @@ public abstract class MavlinkMessage {
                 return GripperCommand.decode(frame);
             case PayloadStatus.ID:
                 return PayloadStatus.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M3 感知成像增强，msgId 430-434）----
+            // ---- NexusSky 自定义扩展消息（M3 感知成像增强，msgId 30010-30014）----
             case ObstacleReportMsg.ID:
                 return ObstacleReportMsg.decode(frame);
             case MultispectralDataMsg.ID:
@@ -116,7 +116,7 @@ public abstract class MavlinkMessage {
                 return DepthDataMsg.decode(frame);
             case VisionDetectionMsg.ID:
                 return VisionDetectionMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M4 硬件抽象，msgId 437-441）----
+            // ---- NexusSky 自定义扩展消息（M4 硬件抽象，msgId 30017-30021）----
             case RadarScanMsg.ID:
                 return RadarScanMsg.decode(frame);
             case RadarTargetMsg.ID:
@@ -127,7 +127,7 @@ public abstract class MavlinkMessage {
                 return LidarDataMsg.decode(frame);
             case ImuDataMsg.ID:
                 return ImuDataMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M5 应急 mesh 自愈组网，msgId 450-454）----
+            // ---- NexusSky 自定义扩展消息（M5 应急 mesh 自愈组网，msgId 30030-30034）----
             case MeshHeartbeatMsg.ID:
                 return MeshHeartbeatMsg.decode(frame);
             case MeshRouteRequestMsg.ID:
@@ -138,7 +138,7 @@ public abstract class MavlinkMessage {
                 return MeshRouteErrorMsg.decode(frame);
             case MeshNeighborTableMsg.ID:
                 return MeshNeighborTableMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M6 移动基站载荷抽象，msgId 455-458）----
+            // ---- NexusSky 自定义扩展消息（M6 移动基站载荷抽象，msgId 30035-30038）----
             case CellTowerStatusMsg.ID:
                 return CellTowerStatusMsg.decode(frame);
             case CellTowerConfigMsg.ID:
@@ -147,64 +147,64 @@ public abstract class MavlinkMessage {
                 return CellHandoverMsg.decode(frame);
             case GroundTerminalRegisterMsg.ID:
                 return GroundTerminalRegisterMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M7 星-空-地多层级中继，msgId 459-461）----
+            // ---- NexusSky 自定义扩展消息（M7 星-空-地多层级中继，msgId 30039-30041）----
             case SatLinkStatusMsg.ID:
                 return SatLinkStatusMsg.decode(frame);
             case SatPassScheduleMsg.ID:
                 return SatPassScheduleMsg.decode(frame);
             case HierarchicalRouteDecisionMsg.ID:
                 return HierarchicalRouteDecisionMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M8 复杂地形适配，msgId 462-464）----
+            // ---- NexusSky 自定义扩展消息（M8 复杂地形适配，msgId 30042-30044）----
             case TerrainTypeMapMsg.ID:
                 return TerrainTypeMapMsg.decode(frame);
             case TerrainUpdateMsg.ID:
                 return TerrainUpdateMsg.decode(frame);
             case FlightRestrictionMsg.ID:
                 return FlightRestrictionMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M9 应急任务编排，msgId 465-467）----
+            // ---- NexusSky 自定义扩展消息（M9 应急任务编排，msgId 30045-30047）----
             case EmergencyMissionPlanMsg.ID:
                 return EmergencyMissionPlanMsg.decode(frame);
             case CoverageOptimizationMsg.ID:
                 return CoverageOptimizationMsg.decode(frame);
             case EmergencyPriorityMsg.ID:
                 return EmergencyPriorityMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M10 多机协同任务分配，msgId 468-470）----
+            // ---- NexusSky 自定义扩展消息（M10 多机协同任务分配，msgId 30048-30050）----
             case TaskAssignmentMsg.ID:
                 return TaskAssignmentMsg.decode(frame);
             case ConflictAlertMsg.ID:
                 return ConflictAlertMsg.decode(frame);
             case TaskStatusMsg.ID:
                 return TaskStatusMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M11 自主决策，msgId 471-472）----
+            // ---- NexusSky 自定义扩展消息（M11 自主决策，msgId 30051-30052）----
             case DecisionEventMsg.ID:
                 return DecisionEventMsg.decode(frame);
             case AdaptivePathMsg.ID:
                 return AdaptivePathMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M12 边缘计算与传感器融合，msgId 473-474）----
+            // ---- NexusSky 自定义扩展消息（M12 边缘计算与传感器融合，msgId 30053-30054）----
             case EdgeTaskStatusMsg.ID:
                 return EdgeTaskStatusMsg.decode(frame);
             case SensorFusionDataMsg.ID:
                 return SensorFusionDataMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M13 数字孪生与轨迹预测，msgId 475-476）----
+            // ---- NexusSky 自定义扩展消息（M13 数字孪生与轨迹预测，msgId 30055-30056）----
             case TwinStateSyncMsg.ID:
                 return TwinStateSyncMsg.decode(frame);
             case PredictionResultMsg.ID:
                 return PredictionResultMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（M14 安防报警，msgId 477-479）----
+            // ---- NexusSky 自定义扩展消息（M14 安防报警，msgId 30057-30059）----
             case AlarmTriggerMsg.ID:
                 return AlarmTriggerMsg.decode(frame);
             case AlarmAckMsg.ID:
                 return AlarmAckMsg.decode(frame);
             case SurveillanceStatusMsg.ID:
                 return SurveillanceStatusMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（P2 灾害应急通讯组网，msgId 480-482）----
+            // ---- NexusSky 自定义扩展消息（P2 灾害应急通讯组网，msgId 30060-30062）----
             case QoSRouteDecisionMsg.ID:
                 return QoSRouteDecisionMsg.decode(frame);
             case ClusterFormationMsg.ID:
                 return ClusterFormationMsg.decode(frame);
             case DisasterModeStatusMsg.ID:
                 return DisasterModeStatusMsg.decode(frame);
-            // ---- NexusSky 自定义扩展消息（P3 灾害应急搜救信号，msgId=483）----
+            // ---- NexusSky 自定义扩展消息（P3 灾害应急搜救信号，msgId=30063）----
             case BuzzerControlMsg.ID:
                 return BuzzerControlMsg.decode(frame);
             // ---- C2 开放无人机标识（OPEN_DRONE_ID_*，msgId=12900-12905）----

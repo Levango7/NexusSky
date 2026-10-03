@@ -1,7 +1,7 @@
 package io.aerofleet.mavlink.enums;
 
 /**
- * 任务状态枚举（M10 多机协同任务状态，msgId=470 TaskStatusMsg）。
+ * 任务状态枚举（M10 多机协同任务状态，msgId=30050 TaskStatusMsg）。
  * <p>
  * 取值为 ordinal()，编入 MAVLink u8 字段。
  * <ul>

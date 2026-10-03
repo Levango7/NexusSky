@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * EMERGENCY_PRIORITY (msgId=467) 编解码单测（M9 应急任务编排）。
+ * EMERGENCY_PRIORITY (msgId=30047) 编解码单测（M9 应急任务编排）。
  */
-@DisplayName("EmergencyPriorityMsg 编解码 (msgId=467)")
+@DisplayName("EmergencyPriorityMsg 编解码 (msgId=30047)")
 class EmergencyPriorityMsgTest {
 
     private static EmergencyPriorityMsg roundtrip(EmergencyPriorityMsg msg) {
@@ -34,9 +34,9 @@ class EmergencyPriorityMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=467、LEN=50、CRC_EXTRA=208")
+    @DisplayName("消息 ID=30047、LEN=50、CRC_EXTRA=208")
     void messageIdAndConstants() {
-        assertThat(EmergencyPriorityMsg.ID).isEqualTo(467);
+        assertThat(EmergencyPriorityMsg.ID).isEqualTo(30047);
         assertThat(EmergencyPriorityMsg.LEN).isEqualTo(50);
         assertThat(EmergencyPriorityMsg.CRC_EXTRA).isEqualTo(208);
     }
@@ -47,7 +47,7 @@ class EmergencyPriorityMsgTest {
         EmergencyPriorityMsg msg = new EmergencyPriorityMsg(
                 0, 0, 0, 0, 0, "", 0);
         assertThat(msg.encode()).hasSize(50);
-        assertThat(msg.messageId()).isEqualTo(467);
+        assertThat(msg.messageId()).isEqualTo(30047);
     }
 
     @Test
@@ -87,7 +87,7 @@ class EmergencyPriorityMsgTest {
             0x32, 0x09, 0x01, 0x00,  // taskId=67890
             0x01                     // priority=1
         };
-        MavlinkFrame frame = new MavlinkFrame(9, 0, 0, 0, 1, 1, 467, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(9, 0, 0, 0, 1, 1, 30047, shortPayload, 0);
         EmergencyPriorityMsg msg = EmergencyPriorityMsg.decode(frame);
 
         assertThat(msg.planId).isEqualTo(12345L);

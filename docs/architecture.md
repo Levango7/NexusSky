@@ -223,19 +223,19 @@ graph TB
 | msgId | 消息 | 里程碑 | 说明 |
 |---|---|---|---|
 | 0-240 | 标准 MAVLink | — | HEARTBEAT/ATTITUDE/GLOBAL_POSITION_INT 等 |
-| 420 | LedControlMsg | M1 | 灯光控制 |
-| 421-422 | EnvironmentAlert/Status | M0b | 环境气象 |
-| 423-426 | Spray/Gripper/Payload | M2 | 喷洒物流 |
-| 430-434 | Obstacle/Multispectral/Thermal/Depth/Vision | M3 | 成像增强 |
-| 437-441 | Radar/Rotor/LiDAR/IMU | M4 | 硬件抽象 |
-| 450-454 | MeshHeartbeat/RouteReq/Reply/Err/Neighbor | M5 | mesh 组网 |
-| 455-458 | CellTower/Handover/TerminalRegister | M6 | 移动基站 |
-| 459-461 | SatLink/PassSchedule/HierarchicalRoute | M7 | 星地中继 |
-| 462-464 | TerrainType/Update/FlightRestriction | M8 | 地形适配 |
-| 465-467 | EmergencyMission/Coverage/Priority | M9 | 应急编排 |
-| 468-470 | TaskAssignment/ConflictAlert/TaskStatus | M10 | 集群调度 |
-| 471-472 | DecisionEvent/AdaptivePath | M11 | 自主决策 |
-| 473-474 | EdgeTaskStatus/SensorFusionData | M12 | 边缘计算 |
-| 475-476 | TwinStateSync/PredictionResult | M13 | 数字孪生 |
-| 477-479 | AlarmTrigger/AlarmAck/SurveillanceStatus | 4a | 安防报警 |
-| 480-483 | QoSRouteDecision/ClusterFormation/DisasterModeStatus/BuzzerControl | P2 | 灾害应急通讯组网扩展 |
+| 30000 | LedControlMsg | M1 | 灯光控制 |
+| 30001-30002 | EnvironmentAlert/Status | M0b | 环境气象 |
+| 30003-30006 | Spray/Gripper/Payload | M2 | 喷洒物流 |
+| 30010-30014 | Obstacle/Multispectral/Thermal/Depth/Vision | M3 | 成像增强 |
+| 30017-30021 | Radar/Rotor/LiDAR/IMU | M4 | 硬件抽象 |
+| 30030-30034 | MeshHeartbeat/RouteReq/Reply/Err/Neighbor | M5 | mesh 组网 |
+| 30035-30038 | CellTower/Handover/TerminalRegister | M6 | 移动基站 |
+| 30039-30041 | SatLink/PassSchedule/HierarchicalRoute | M7 | 星地中继 |
+| 30042-30044 | TerrainType/Update/FlightRestriction | M8 | 地形适配 |
+| 30045-30047 | EmergencyMission/Coverage/Priority | M9 | 应急编排 |
+| 30048-30050 | TaskAssignment/ConflictAlert/TaskStatus | M10 | 集群调度 |
+| 30051-30052 | DecisionEvent/AdaptivePath | M11 | 自主决策 |
+| 30053-30054 | EdgeTaskStatus/SensorFusionData | M12 | 边缘计算 |
+| 30055-30056 | TwinStateSync/PredictionResult | M13 | 数字孪生 |
+| 30057-30059 | AlarmTrigger/AlarmAck/SurveillanceStatus | 4a | 安防报警 |
+| 30060-30063 | QoSRouteDecision/ClusterFormation/DisasterModeStatus/BuzzerControl | P2 | 灾害应急通讯组网扩展 |

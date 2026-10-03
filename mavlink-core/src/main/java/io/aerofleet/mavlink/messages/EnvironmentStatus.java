@@ -6,11 +6,12 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * ENVIRONMENT_STATUS (msgId=422, LEN=13) —— NexusSky 自定义扩展消息。
+ * ENVIRONMENT_STATUS (msgId=30002, LEN=13) —— NexusSky 自定义扩展消息。
  * 承载环境状态五元组 + 阵风 + 能见度 + 降雨率，由 drone-sim 1Hz 周期下传（FR-24）。
  * <p>
- * 注：design.md 原设计 msgId=420，但 M1 swarm_performance 的 LedControlMsg 已占用 420，
- * 为避免冲突调整为 422（MAVLink 扩展区间 400-65535，合法）。
+ * 注：msgId 演进史——design.md 原设计 420，为避让仓内 LedControlMsg 调整为 422；
+ * 2026-10 按官方治理搬迁至私有区 30000-30099（官方 common.xml 拥有 300-10000 分配带，
+ * 420-483 属官方可随时占用的区间，详见 docs/sitl-integration.md §7）。
  * <p>
  * 字段布局（小端，按 MAVLink 惯例 uint8 先，然后 int16/uint16）：
  * <pre>
@@ -28,7 +29,7 @@ import java.nio.ByteBuffer;
  */
 public final class EnvironmentStatus extends MavlinkMessage {
 
-    public static final int ID = 422;  // 原设计 420，因 LedControlMsg 冲突调整为 422
+    public static final int ID = 30002;  // 演进史：420 → 422（避让 LedControl）→ 30002（官方治理搬迁）
     public static final int LEN = 13;
 
     public final int temperature;    // c°C

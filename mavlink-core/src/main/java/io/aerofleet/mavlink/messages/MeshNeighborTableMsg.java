@@ -9,7 +9,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * MESH_NEIGHBOR_TABLE (msgId=454, LEN=可变 6+n×4) —— NexusSky M5 拓扑快照上报消息。
+ * MESH_NEIGHBOR_TABLE (msgId=30034, LEN=可变 6+n×4) —— NexusSky M5 拓扑快照上报消息。
  * <p>
  * 各节点周期上报本地邻居表至 cloud-backend，云端聚合为全网拓扑快照供 REST/WebSocket 查询（FR-27）。
  * <p>
@@ -27,7 +27,7 @@ import java.util.List;
  */
 public final class MeshNeighborTableMsg extends MavlinkMessage {
 
-    public static final int ID = 454;
+    public static final int ID = 30034;
     /** 固定头部长度。 */
     public static final int HEADER_LEN = 6;
     /** 每邻居项长度。 */

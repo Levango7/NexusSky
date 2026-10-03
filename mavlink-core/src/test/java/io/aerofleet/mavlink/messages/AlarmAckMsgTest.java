@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * ALARM_ACK (msgId=478) 编解码单测（M14 安防报警）。
+ * ALARM_ACK (msgId=30058) 编解码单测（M14 安防报警）。
  */
-@DisplayName("AlarmAckMsg 编解码 (msgId=478)")
+@DisplayName("AlarmAckMsg 编解码 (msgId=30058)")
 class AlarmAckMsgTest {
 
     private static AlarmAckMsg roundtrip(AlarmAckMsg msg) {
@@ -18,9 +18,9 @@ class AlarmAckMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=478、LEN=12、CRC_EXTRA=200")
+    @DisplayName("消息 ID=30058、LEN=12、CRC_EXTRA=200")
     void messageIdAndConstants() {
-        assertThat(AlarmAckMsg.ID).isEqualTo(478);
+        assertThat(AlarmAckMsg.ID).isEqualTo(30058);
         assertThat(AlarmAckMsg.LEN).isEqualTo(12);
         assertThat(AlarmAckMsg.CRC_EXTRA).isEqualTo(200);
     }
@@ -44,7 +44,7 @@ class AlarmAckMsgTest {
     void encodeLength() {
         AlarmAckMsg msg = new AlarmAckMsg(0, 0, 0, 0, 0);
         assertThat(msg.encode()).hasSize(12);
-        assertThat(msg.messageId()).isEqualTo(478);
+        assertThat(msg.messageId()).isEqualTo(30058);
     }
 
     @Test
@@ -98,7 +98,7 @@ class AlarmAckMsgTest {
             0x39, 0x30, 0x00, 0x00,  // alarmId=12345
             0x01                     // timestamp 低字节（不完整，不读）
         };
-        MavlinkFrame frame = new MavlinkFrame(5, 0, 0, 0, 1, 1, 478, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(5, 0, 0, 0, 1, 1, 30058, shortPayload, 0);
         AlarmAckMsg msg = AlarmAckMsg.decode(frame);
 
         assertThat(msg.alarmId).isEqualTo(12345L);

@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * SURVEILLANCE_STATUS (msgId=479, LEN=14) —— NexusSky M14 安防报警自定义扩展消息。
+ * SURVEILLANCE_STATUS (msgId=30059, LEN=14) —— NexusSky M14 安防报警自定义扩展消息。
  * <p>
  * 安防设备状态回传：承载设备 ID + 设备类型 + 状态 + 在线/总摄像头数 +
  * 最后事件时间 + 运行时间。
@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
  */
 public final class SurveillanceStatusMsg extends MavlinkMessage {
 
-    public static final int ID = 479;
+    public static final int ID = 30059;
     public static final int LEN = 14;
     public static final int CRC_EXTRA = 184;
 

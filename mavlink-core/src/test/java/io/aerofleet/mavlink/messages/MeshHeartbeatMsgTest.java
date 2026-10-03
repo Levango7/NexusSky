@@ -7,11 +7,11 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * MESH_HEARTBEAT (msgId=450) 编解码单测（M5 应急 mesh，FR-09）。
+ * MESH_HEARTBEAT (msgId=30030) 编解码单测（M5 应急 mesh，FR-09）。
  * <p>
  * 覆盖 encode→decode 往返一致、常量正确性、payload 长度、短 payload 容忍解码、toString。
  */
-@DisplayName("MeshHeartbeatMsg 编解码 (msgId=450)")
+@DisplayName("MeshHeartbeatMsg 编解码 (msgId=30030)")
 class MeshHeartbeatMsgTest {
 
     /** toFrame → decode 往返。 */
@@ -37,9 +37,9 @@ class MeshHeartbeatMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=450、LEN=24、CRC_EXTRA=193")
+    @DisplayName("消息 ID=30030、LEN=24、CRC_EXTRA=193")
     void messageIdAndConstants() {
-        assertThat(MeshHeartbeatMsg.ID).isEqualTo(450);
+        assertThat(MeshHeartbeatMsg.ID).isEqualTo(30030);
         assertThat(MeshHeartbeatMsg.LEN).isEqualTo(24);
         assertThat(MeshHeartbeatMsg.CRC_EXTRA).isEqualTo(193);
     }
@@ -49,14 +49,14 @@ class MeshHeartbeatMsgTest {
     void encodeLength() {
         MeshHeartbeatMsg msg = new MeshHeartbeatMsg(1, 0, 0, 0, 100, 0, 0L);
         assertThat(msg.encode()).hasSize(24);
-        assertThat(msg.messageId()).isEqualTo(450);
+        assertThat(msg.messageId()).isEqualTo(30030);
     }
 
     @Test
     @DisplayName("短 payload 容忍解码：仅 1 字节时只还原 sysid，其余填 0")
     void decodeShortPayloadTolerant() {
         byte[] shortPayload = new byte[]{42};
-        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 1, 1, 450, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 1, 1, 30030, shortPayload, 0);
         MeshHeartbeatMsg msg = MeshHeartbeatMsg.decode(frame);
 
         assertThat(msg.sysid).isEqualTo(42);

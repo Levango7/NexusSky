@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * MESH_ROUTE_ERROR (msgId=453, LEN=4) —— NexusSky M5 AODV-lite 路由错误消息。
+ * MESH_ROUTE_ERROR (msgId=30033, LEN=4) —— NexusSky M5 AODV-lite 路由错误消息。
  * <p>
  * 链路断或邻居超时触发 RERR 通知，收到 RERR 的节点删除受影响路由并继续传播（FR-03/13/14）。
  * <p>
@@ -21,7 +21,7 @@ import java.nio.ByteBuffer;
  */
 public final class MeshRouteErrorMsg extends MavlinkMessage {
 
-    public static final int ID = 453;
+    public static final int ID = 30033;
     public static final int LEN = 4;
     public static final int CRC_EXTRA = 124;
 

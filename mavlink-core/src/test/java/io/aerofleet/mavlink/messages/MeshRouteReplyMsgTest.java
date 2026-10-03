@@ -8,9 +8,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 /**
- * MESH_ROUTE_REPLY (msgId=452) 编解码单测（M5 AODV-lite，FR-02/02a）。
+ * MESH_ROUTE_REPLY (msgId=30032) 编解码单测（M5 AODV-lite，FR-02/02a）。
  */
-@DisplayName("MeshRouteReplyMsg 编解码 (msgId=452)")
+@DisplayName("MeshRouteReplyMsg 编解码 (msgId=30032)")
 class MeshRouteReplyMsgTest {
 
     private static MeshRouteReplyMsg roundtrip(MeshRouteReplyMsg msg) {
@@ -50,7 +50,7 @@ class MeshRouteReplyMsgTest {
     @DisplayName("短 payload 容忍解码：仅 1 字节时还原 source，其余填 0")
     void decodeShortPayloadTolerant() {
         byte[] shortPayload = new byte[]{33};
-        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 1, 1, 452, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 1, 1, 30032, shortPayload, 0);
         MeshRouteReplyMsg msg = MeshRouteReplyMsg.decode(frame);
 
         assertThat(msg.sourceSysid).isEqualTo(33);
@@ -60,9 +60,9 @@ class MeshRouteReplyMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=452、LEN=10")
+    @DisplayName("消息 ID=30032、LEN=10")
     void messageIdAndLen() {
-        assertThat(MeshRouteReplyMsg.ID).isEqualTo(452);
+        assertThat(MeshRouteReplyMsg.ID).isEqualTo(30032);
         assertThat(MeshRouteReplyMsg.LEN).isEqualTo(10);
     }
 }

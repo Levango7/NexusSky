@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * CLUSTER_FORMATION (msgId=481, LEN=18) —— NexusSky P2 灾害应急通讯组网扩展消息。
+ * CLUSTER_FORMATION (msgId=30061, LEN=18) —— NexusSky P2 灾害应急通讯组网扩展消息。
  * <p>
  * 分簇结构通知：告知 mesh 节点当前簇 ID、簇头、成员列表与簇半径。
  * <p>
@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
  */
 public final class ClusterFormationMsg extends MavlinkMessage {
 
-    public static final int ID = 481;
+    public static final int ID = 30061;
     public static final int LEN = 18;
     public static final int CRC_EXTRA = 241;
     private static final int MEMBERS_LEN = 8;

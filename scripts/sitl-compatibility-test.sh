@@ -11,7 +11,7 @@
 #   3. HEARTBEAT 上线验证 → cloud-backend 识别无人机
 #   4. GLOBAL_POSITION_INT 遥测路由验证
 #   5. MISSION_ITEM_INT 任务管理验证
-#   6. NexusSky 扩展消息（420-476）编解码验证
+#   6. NexusSky 扩展消息（30000-30063）编解码验证
 #   7. 清理与退出
 #
 # 前置：
@@ -265,13 +265,13 @@ else
 fi
 
 # ─────────────────── 8. NexusSky 扩展消息验证 ───────────────────
-step "8. NexusSky 扩展消息（420-476）编解码验证"
-echo "   （已在步骤 1 离线自检中覆盖全部 44 条扩展消息的帧层往返）"
-echo "   扩展消息区间: 420(LED_CONTROL) ~ 476(PREDICTION_RESULT)"
-echo "   含 3 条可变长度消息: MESH_NEIGHBOR_TABLE(454), TERRAIN_TYPE_MAP(462), TERRAIN_UPDATE(463), FLIGHT_RESTRICTION(464)"
+step "8. NexusSky 扩展消息（30000-30063）编解码验证"
+echo "   （已在步骤 1 离线自检中覆盖全部 51 条扩展消息的帧层往返）"
+echo "   扩展消息区间: 30000(LED_CONTROL) ~ 30063(BUZZER_CONTROL)，私有方言段 30000-30099"
+echo "   含 4 条可变长度消息: MESH_NEIGHBOR_TABLE(30034), TERRAIN_TYPE_MAP(30042), TERRAIN_UPDATE(30043), FLIGHT_RESTRICTION(30044)"
 # 原写法是 "[ '$FAIL' = '0' ] || true"：check 用 eval 执行这个串，尾巴上的 `|| true`
 # 让断言**恒真**——无论前面有没有失败项都会打 ✅，而且它断言的还是"$FAIL"（全局累计值）
-# 而不是被测对象本身。现在断言步骤 1 自检的真实结果（420-476 扩展消息的帧层往返就在其中）。
+# 而不是被测对象本身。现在断言步骤 1 自检的真实结果（30000-30063 扩展消息的帧层往返就在其中）。
 check "扩展消息编解码已在离线自检中验证（步骤 1 自检通过）" "[ '$SELF_TEST_OK' = 'true' ]"
 
 # ─────────────────── 9. SITL 特有验证（如 SITL 就绪） ───────────────────

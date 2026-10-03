@@ -9,9 +9,9 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * HIERARCHICAL_ROUTE_DECISION (msgId=461) 编解码单测（M7 星-空-地多层级中继，FR-5.3）。
+ * HIERARCHICAL_ROUTE_DECISION (msgId=30041) 编解码单测（M7 星-空-地多层级中继，FR-5.3）。
  */
-@DisplayName("HierarchicalRouteDecisionMsg 编解码 (msgId=461)")
+@DisplayName("HierarchicalRouteDecisionMsg 编解码 (msgId=30041)")
 class HierarchicalRouteDecisionMsgTest {
 
     private static HierarchicalRouteDecisionMsg roundtrip(HierarchicalRouteDecisionMsg msg) {
@@ -38,9 +38,9 @@ class HierarchicalRouteDecisionMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=461、LEN=34、CRC_EXTRA=217")
+    @DisplayName("消息 ID=30041、LEN=34、CRC_EXTRA=217")
     void messageIdAndConstants() {
-        assertThat(HierarchicalRouteDecisionMsg.ID).isEqualTo(461);
+        assertThat(HierarchicalRouteDecisionMsg.ID).isEqualTo(30041);
         assertThat(HierarchicalRouteDecisionMsg.LEN).isEqualTo(34);
         assertThat(HierarchicalRouteDecisionMsg.CRC_EXTRA).isEqualTo(217);
     }
@@ -51,7 +51,7 @@ class HierarchicalRouteDecisionMsgTest {
         HierarchicalRouteDecisionMsg msg = new HierarchicalRouteDecisionMsg(
                 0, 4, 1, 20, List.of(1, 2), 0, "L1 可达", 0L);
         assertThat(msg.encode()).hasSize(34);
-        assertThat(msg.messageId()).isEqualTo(461);
+        assertThat(msg.messageId()).isEqualTo(30041);
     }
 
     @Test
@@ -90,7 +90,7 @@ class HierarchicalRouteDecisionMsgTest {
     @DisplayName("短 payload 容忍解码")
     void decodeShortPayloadTolerant() {
         byte[] shortPayload = new byte[]{0, 4, 1};
-        MavlinkFrame frame = new MavlinkFrame(3, 0, 0, 0, 1, 1, 461, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(3, 0, 0, 0, 1, 1, 30041, shortPayload, 0);
         HierarchicalRouteDecisionMsg msg = HierarchicalRouteDecisionMsg.decode(frame);
 
         assertThat(msg.sourceLayer).isEqualTo(0);
@@ -100,8 +100,8 @@ class HierarchicalRouteDecisionMsgTest {
     }
 
     @Test
-    @DisplayName("msgId 461 全局唯一")
+    @DisplayName("msgId 30041 全局唯一")
     void msgIdGloballyUnique() {
-        assertThat(HierarchicalRouteDecisionMsg.ID).isNotIn(459, 460, 450, 454);
+        assertThat(HierarchicalRouteDecisionMsg.ID).isNotIn(30039, 30040, 30030, 30034);
     }
 }

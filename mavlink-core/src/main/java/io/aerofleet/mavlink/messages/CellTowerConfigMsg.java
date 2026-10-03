@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * CELL_TOWER_CONFIG (msgId=456, LEN=7) —— NexusSky M6 移动基站载荷配置下发指令。
+ * CELL_TOWER_CONFIG (msgId=30036, LEN=7) —— NexusSky M6 移动基站载荷配置下发指令。
  * <p>
  * 由 GCS（sysid=255）或 cloud-backend 下发，携带制式、发射功率、最大终端数、频段等配置参数，
  * drone-sim {@code CellTowerPayload.applyConfig} 消费（FR-MSG-03 / FR-CT-05）。
@@ -24,7 +24,7 @@ import java.nio.ByteBuffer;
  */
 public final class CellTowerConfigMsg extends MavlinkMessage {
 
-    public static final int ID = 456;
+    public static final int ID = 30036;
     public static final int LEN = 7;
     public static final int CRC_EXTRA = 190;
 

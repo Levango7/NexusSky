@@ -96,7 +96,7 @@ class DisasterCommServiceTest {
     // =====================================================================
 
     @Test
-    @DisplayName("onQoSRouteDecision (msgId=480) 更新 QoS 队列状态")
+    @DisplayName("onQoSRouteDecision (msgId=30060) 更新 QoS 队列状态")
     void onQoSRouteDecisionUpdatesQueue() {
         DisasterCommService svc = new DisasterCommService(null);
         QoSRouteDecisionMsg msg = new QoSRouteDecisionMsg(
@@ -115,7 +115,7 @@ class DisasterCommServiceTest {
     }
 
     @Test
-    @DisplayName("onClusterFormation (msgId=481) 更新分簇拓扑")
+    @DisplayName("onClusterFormation (msgId=30061) 更新分簇拓扑")
     void onClusterFormationUpdatesCluster() {
         DisasterCommService svc = new DisasterCommService(null);
         int[] members = {1, 2, 3, 0, 0, 0, 0, 0};
@@ -141,7 +141,7 @@ class DisasterCommServiceTest {
     }
 
     @Test
-    @DisplayName("onDisasterModeStatus (msgId=482) 更新灾害模式状态为 active")
+    @DisplayName("onDisasterModeStatus (msgId=30062) 更新灾害模式状态为 active")
     void onDisasterModeStatusActive() {
         DisasterCommService svc = new DisasterCommService(null);
         DisasterModeStatusMsg msg = new DisasterModeStatusMsg(
@@ -160,7 +160,7 @@ class DisasterCommServiceTest {
     }
 
     @Test
-    @DisplayName("onDisasterModeStatus (msgId=482) 更新灾害模式状态为 inactive")
+    @DisplayName("onDisasterModeStatus (msgId=30062) 更新灾害模式状态为 inactive")
     void onDisasterModeStatusInactive() {
         DisasterCommService svc = new DisasterCommService(null);
         // 先激活

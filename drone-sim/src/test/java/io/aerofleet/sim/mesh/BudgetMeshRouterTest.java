@@ -236,9 +236,9 @@ class BudgetMeshRouterTest {
         assertThat(EspNowTransport.isAllowedMsgId(0)).isTrue();    // HEARTBEAT
         assertThat(EspNowTransport.isAllowedMsgId(30)).isTrue();   // ATTITUDE
         assertThat(EspNowTransport.isAllowedMsgId(76)).isTrue();   // COMMAND_LONG
-        assertThat(EspNowTransport.isAllowedMsgId(477)).isTrue();  // AlarmTriggerMsg
-        assertThat(EspNowTransport.isAllowedMsgId(478)).isTrue();  // AlarmAckMsg
-        assertThat(EspNowTransport.isAllowedMsgId(479)).isTrue();  // SurveillanceStatusMsg
+        assertThat(EspNowTransport.isAllowedMsgId(30057)).isTrue();  // AlarmTriggerMsg
+        assertThat(EspNowTransport.isAllowedMsgId(30058)).isTrue();  // AlarmAckMsg
+        assertThat(EspNowTransport.isAllowedMsgId(30059)).isTrue();  // SurveillanceStatusMsg
     }
 
     @Test

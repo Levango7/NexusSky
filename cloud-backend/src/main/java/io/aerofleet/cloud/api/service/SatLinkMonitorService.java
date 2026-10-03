@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 卫星链路监控服务（M7 星-空-地多层级中继，FR-5.4/5.3）。
  * <p>
- * 接收各节点上报的 SatLinkStatus(459) / SatPassSchedule(460) / HierarchicalRouteDecision(461)，
+ * 接收各节点上报的 SatLinkStatus(30039) / SatPassSchedule(30040) / HierarchicalRouteDecision(30041)，
  * 维护全局链路状态快照、过境计划与路由决策历史，提供只读查询。
  * <p>
  * 内部 ConcurrentHashMap，线程安全。version 递增标记状态变化。

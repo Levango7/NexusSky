@@ -24,7 +24,7 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 420–483，共 51 条），**449 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**454 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（346 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 38 个功能面板 | 不需要换 |
@@ -330,7 +330,7 @@ ARM → startMission → 逐站拍照 → 逐站逆解算定位 → 喂跟踪器
 
 十二个里程碑在骨架之上叠加了组网、环境、编队、喷洒、成像、硬件抽象、灾害应急通讯组网
 与空地一体化应急指挥能力，均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按
-420–467、477–483 段分配。
+30000–30047、30057–30063 段分配。
 
 ### M0a — Mesh 组网落地
 
@@ -341,13 +341,13 @@ ARM → startMission → 逐站拍照 → 逐站逆解算定位 → 喂跟踪器
 ### M0b — 环境气象机制
 
 引入环境模型（温度/湿度/天气/风力）与告警引擎 `EnvAlertEngine`（温度/湿度/
-风力/能见度阈值告警），通过 `EnvironmentAlert`(421)/`EnvironmentStatus`(422)
+风力/能见度阈值告警），通过 `EnvironmentAlert`(30001)/`EnvironmentStatus`(30002)
 MAVLink 消息下发。风偏修正与雨衰叠加进入链路损伤模型；REST 端点
 `/api/v1/env/alerts` 暴露告警查询。
 
 ### M1 — 编队表演
 
-`LedControlMsg`(420)+`LightPattern` 枚举驱动机载灯效；`FormationGeometry`
+`LedControlMsg`(30000)+`LightPattern` 枚举驱动机载灯效；`FormationGeometry`
 提供圆形/线形/V形/菱形队形几何，`FormationService` 管理创建→变换→解散状态机，
 `FormationKeeper` 持续保持队形与位置修正。REST `/api/v1/formation/*` 下发指令，
 WebSocket 以 1Hz 推送编队状态，前端 `FormationPanel.jsx` 可视化操控；
@@ -356,7 +356,7 @@ WebSocket 以 1Hz 推送编队状态，前端 `FormationPanel.jsx` 可视化操�
 ### M2 — 喷洒物流
 
 执行器模型（`Actuator`/`SprayPump`/`Gripper`/`PayloadModel`）+ 喷洒/夹爪/载荷
-MAVLink 消息(423–426)。`SprayTaskService` 调度喷洒任务，`DeliveryService`
+MAVLink 消息(30003–30006)。`SprayTaskService` 调度喷洒任务，`DeliveryService`
 编排物流配送序列；REST `/api/v1/spray/*` 与 `/api/v1/delivery/*` 对外暴露。
 
 ### M3 — 成像增强
@@ -364,14 +364,14 @@ MAVLink 消息(423–426)。`SprayTaskService` 调度喷洒任务，`DeliverySer
 `VisionSource` 统一投影/模拟视觉感知源，接入多光谱/热成像/深度多源数据
 （`Multispectral`/`Thermal`/`Depth`）。`ObstacleDetector` 做障碍检测，
 `ObstacleAvoidanceController` 按威胁等级映射避障命令（CRITICAL→悬停、HIGH→避障）。
-对应 MAVLink 消息 430–434，REST `/api/v1/obstacle/*`、`/api/v1/multispectral/*`、
+对应 MAVLink 消息 30010–30014，REST `/api/v1/obstacle/*`、`/api/v1/multispectral/*`、
 `/api/v1/thermal/*`，WebSocket 推送障碍报告，前端 `VisionPanel.jsx` 展示。
 
 ### M4 — 硬件抽象
 
 引入相控阵雷达（`PhasedArrayRadar`）、旋翼气动（`RotorAerodynamics`）、
 LiDAR（`LiDARSource`）、IMU（`ImuSource`）四类硬件抽象与各自 Simulated 实现，
-MAVLink 消息 437–441（`RadarScan`/`RadarTarget`/`RotorTelemetry`/`LidarData`/`ImuData`）。
+MAVLink 消息 30017–30021（`RadarScan`/`RadarTarget`/`RotorTelemetry`/`LidarData`/`ImuData`）。
 `VirtualDrone` 集成硬件层并支持物理模型切换（运动学↔气动），`ObstacleDetector`
 融合 LiDAR 数据。REST `/api/v1/radar/*`、`/api/v1/rotor/*`、`/api/v1/lidar/*`、
 `/api/v1/imu/*`，WebSocket 以 1Hz 推送硬件数据。
@@ -379,21 +379,21 @@ MAVLink 消息 437–441（`RadarScan`/`RadarTarget`/`RotorTelemetry`/`LidarData
 ### M5 — 应急 Mesh 自愈组网
 
 AODV-lite 多跳动态路由（`MeshRouter`/`RouteTable`/`NeighborTable`/`RreqCache`），
-支持路由发现、自愈重构、链路质量评估。MAVLink 消息 450–454（MeshHeartbeat/
+支持路由发现、自愈重构、链路质量评估。MAVLink 消息 30030–30034（MeshHeartbeat/
 RouteRequest/RouteReply/RouteError/NeighborTable），`link-sim` 新增 `MultiHopRelayConfig`
 多跳中继配置。REST `/api/v1/mesh/*`，前端 `MeshTopologyPanel.jsx` 可视化拓扑。
 
 ### M6 — 移动基站载荷抽象
 
 无人机搭载 LTE/WiFi/LoRa 基站载荷（`CellTowerFactory`/`CoverageArea`/`HandoverManager`），
-支持覆盖区计算、终端接入管理、越区切换。MAVLink 消息 455–458（CellTowerStatus/
+支持覆盖区计算、终端接入管理、越区切换。MAVLink 消息 30035–30038（CellTowerStatus/
 Config/Handover/GroundTerminalRegister），REST `/api/v1/celltowers/*`，
 前端 `CellTowerPanel.jsx` 可视化基站拓扑。
 
 ### M7 — 星-空-地多层级中继
 
 LEO 卫星 + HAPS 高空平台 + Mesh 三层级中继（`HierarchicalRouter`/`LeoConstellation`/
-`HapsRelayNode`），支持卫星过境窗口预测、层级路由决策、链路切换。MAVLink 消息 459–461
+`HapsRelayNode`），支持卫星过境窗口预测、层级路由决策、链路切换。MAVLink 消息 30039–30041
 （SatLinkStatus/SatPassSchedule/HierarchicalRouteDecision），REST `/api/v1/satlink/*`，
 前端 `SatLinkPanel.jsx` 可视化中继链路。
 
@@ -401,7 +401,7 @@ LEO 卫星 + HAPS 高空平台 + Mesh 三层级中继（`HierarchicalRouter`/`Le
 
 山地/森林/沼泽/城市等地形分类与 RF 衰减建模（`TerrainGrid`/`TerrainClassifier`/
 `EnhancedRadioEnvironment`/`FlightConstraintChecker`），支持地形变化监测、
-飞行约束检查、覆盖范围地形衰减。MAVLink 消息 462–464（TerrainTypeMap/
+飞行约束检查、覆盖范围地形衰减。MAVLink 消息 30042–30044（TerrainTypeMap/
 TerrainUpdate/FlightRestriction），REST `/api/v1/terrain/*`，
 前端 `TerrainMapPanel.jsx` 可视化地形地图。
 
@@ -412,7 +412,7 @@ TerrainUpdate/FlightRestriction），REST `/api/v1/terrain/*`，
 覆盖优化算法（`CoverageOptimizer`）贪心+局部优化部署方案，动态重构器
 （`DynamicReconfigurator`）处理无人机损毁/电量不足，优先级调度器
 （`PriorityScheduler`）四级抢占式调度（搜救>指挥>测绘>常规），场景预设
-（`ScenarioPresetFactory`）支持地震/泥石流/火灾一键启动。MAVLink 消息 465–467
+（`ScenarioPresetFactory`）支持地震/泥石流/火灾一键启动。MAVLink 消息 30045–30047
 （EmergencyMissionPlan/CoverageOptimization/EmergencyPriority），
 REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进度。
 
@@ -430,8 +430,8 @@ REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进�
 **GCS 视频融合面板**：`SurveillancePanel`（设备列表/多画面分屏/PTZ 控制）+
 `AlarmPanel`（SSE 实时报警/联动规则管理/一键应急响应）。
 
-**MAVLink 报警消息**：`AlarmTriggerMsg`(477)/`AlarmAckMsg`(478)/
-`SurveillanceStatusMsg`(479)。
+**MAVLink 报警消息**：`AlarmTriggerMsg`(30057)/`AlarmAckMsg`(30058)/
+`SurveillanceStatusMsg`(30059)。
 
 **应急指挥工作流**：六阶段（接报 → 研判 → 部署 → 执行 → 评估 → 总结），
 一键应急响应自动走完全流程。
@@ -440,12 +440,12 @@ REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进�
 
 在 M5–M9 与 4a 应急能力之上，P2 进一步扩展灾害场景下的通讯组网与搜救指挥能力，
 覆盖 QoS 保障、分簇路由、异构链路桥接、Budget 模式、丐版 Mesh、热源搜救等 11 个子模块，
-均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按 480–483 段分配。
+均沿用既有 MAVLink/REST/WebSocket 三段式架构，新消息 ID 按 30060–30063 段分配。
 
 **QoS 优先级队列 + 分簇路由**：灾害场景下通讯资源极度受限，QoS 引擎按业务优先级
 （搜救 > 指挥 > 测绘 > 常规）分配带宽与转发资源；分簇路由将无人机群按地理/拓扑
 自动分簇，簇头负责簇内聚合与簇间转发，减少全局路由开销。MAVLink 消息
-`QoSRouteDecisionMsg`(480) / `ClusterFormationMsg`(481) 下发路由决策与簇 formation。
+`QoSRouteDecisionMsg`(30060) / `ClusterFormationMsg`(30061) 下发路由决策与簇 formation。
 
 **异构链路桥接 + 灾区通信隔离**：灾害现场往往存在 WiFi/LTE/LoRa/卫星等多种链路
 碎片化覆盖，异构链路桥接层自动探测可用链路并按策略切换/聚合；灾区通信隔离确保
@@ -484,7 +484,7 @@ ESP-NOW 用于近距离低延迟机间通讯（百元级），LoRa 用于远距�
 
 **AMG8833 热源搜救 + LED/蜂鸣器控制**：AMG8833 红外热传感器阵列（8×8 像素）
 用于灾害废墟下热源检测与人员搜救；LED/蜂鸣器控制提供机载声光指引，
-帮助地面搜救人员定位无人机与标记发现的目标。MAVLink 消息 `BuzzerControlMsg`(483)
+帮助地面搜救人员定位无人机与标记发现的目标。MAVLink 消息 `BuzzerControlMsg`(30063)
 下发蜂鸣器开关/频率/时长指令。
 
 **GCS Emergency UI 适配**：前端 Emergency UI 适配 Budget 模式与灾害态势面板，
@@ -510,25 +510,32 @@ ESP-NOW 用于近距离低延迟机间通讯（百元级），LoRa 用于远距�
 都抛 `UnsupportedOperationException("真实星链接入尚未实现，请使用 SimulatedSatLinkProvider")`，
 仿真请用 `SimulatedSatLinkProvider`——**抛错而非返回假数据**是这里正确的做法。）
 
-### MAVLink 消息 ID 分配（420–467、477–483 段）
+### MAVLink 消息 ID 分配（私有方言段 30000–30099）
+
+> 2026-10 治理搬迁：自定义消息原用 msgId 420-483，位于 common.xml 官方分配带
+> 300-10000 内（420/437/440 已与官方 RADIO_RC_CHANNELS / AVAILABLE_MODES_MONITOR /
+> ILLUMINATOR_STATUS 实锤冲突），全部 51 条已等差平移 +29580 至私有方言段
+> 30000-30099（30064-30099 为增长预留）。CRC_EXTRA 与 payload 布局不变；
+> `scripts/mavlink-compatibility-check.py --self-test` 内嵌 392 个官方已分配
+> msgId 快照逐条核对无冲突。
 
 | 范围 | 里程碑 | 消息 |
 |---|---|---|
-| 420 | M1 | LedControlMsg |
-| 421–422 | M0b | EnvironmentAlert, EnvironmentStatus |
-| 423–426 | M2 | SprayStatus, SprayCommand, GripperCommand, PayloadStatus |
-| 430–434 | M3 | ObstacleReport, MultispectralData, ThermalData, DepthData, VisionDetection |
-| 437–441 | M4 | RadarScan, RadarTarget, RotorTelemetry, LidarData, ImuData |
-| 450–454 | M5 | MeshHeartbeat, MeshRouteRequest, MeshRouteReply, MeshRouteError, MeshNeighborTable |
-| 455–458 | M6 | CellTowerStatus, CellTowerConfig, CellHandover, GroundTerminalRegister |
-| 459–461 | M7 | SatLinkStatus, SatPassSchedule, HierarchicalRouteDecision |
-| 462–464 | M8 | TerrainTypeMap, TerrainUpdate, FlightRestriction |
-| 465–467 | M9 | EmergencyMissionPlan, CoverageOptimization, EmergencyPriority |
-| 477–479 | 4a | AlarmTriggerMsg, AlarmAckMsg, SurveillanceStatusMsg |
-| 480 | P2 | QoSRouteDecisionMsg |
-| 481 | P2 | ClusterFormationMsg |
-| 482 | P2 | DisasterModeStatusMsg |
-| 483 | P2 | BuzzerControlMsg |
+| 30000 | M1 | LedControlMsg |
+| 30001–30002 | M0b | EnvironmentAlert, EnvironmentStatus |
+| 30003–30006 | M2 | SprayStatus, SprayCommand, GripperCommand, PayloadStatus |
+| 30010–30014 | M3 | ObstacleReport, MultispectralData, ThermalData, DepthData, VisionDetection |
+| 30017–30021 | M4 | RadarScan, RadarTarget, RotorTelemetry, LidarData, ImuData |
+| 30030–30034 | M5 | MeshHeartbeat, MeshRouteRequest, MeshRouteReply, MeshRouteError, MeshNeighborTable |
+| 30035–30038 | M6 | CellTowerStatus, CellTowerConfig, CellHandover, GroundTerminalRegister |
+| 30039–30041 | M7 | SatLinkStatus, SatPassSchedule, HierarchicalRouteDecision |
+| 30042–30044 | M8 | TerrainTypeMap, TerrainUpdate, FlightRestriction |
+| 30045–30047 | M9 | EmergencyMissionPlan, CoverageOptimization, EmergencyPriority |
+| 30057–30059 | 4a | AlarmTriggerMsg, AlarmAckMsg, SurveillanceStatusMsg |
+| 30060 | P2 | QoSRouteDecisionMsg |
+| 30061 | P2 | ClusterFormationMsg |
+| 30062 | P2 | DisasterModeStatusMsg |
+| 30063 | P2 | BuzzerControlMsg |
 
 ## 飞行日志（flightlog，JSONL 落盘）
 
@@ -619,7 +626,7 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 NexusSky/
 ├── mavlink-core/        协议栈（无依赖，可直接复用到任何 Java 项目）
 │   ├── MavlinkFrame / MavlinkParser / MavlinkCrc / MavlinkMessageInfo
-│   ├── messages/        标准 MAVLink 消息 + 扩展消息（420–483 段）
+│   ├── messages/        标准 MAVLink 消息 + 扩展消息（30000–30063 段）
 │   ├── enums/MavEnums  官方枚举常量
 │   └── transport/      UDP 传输
 ├── drone-sim/           虚拟无人机（状态机 + 任务协议服务端 + 物理引擎 v2）
@@ -643,13 +650,13 @@ NexusSky/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 449 |
+| `mavlink-core` | 454 |
 | `drone-sim` | 1337 |
 | `link-sim` | 117 |
 | `cloud-backend` | 2183 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4117** |
+| **总计** | **4122** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -742,7 +749,7 @@ NexusSky/
 
 - 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
 - 微服务/K8s 暂不引入：模块化单体已够当前规模，拆分时机见设计文档讨论
-- MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（420–483）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
+- MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（30000–30063）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
 - **链路签名（MAVLink v2 signing）自 2026-10-01 起与官方逐字节对等**：签名块 13 字节
   （LINK_ID 1 + TIMESTAMP 6 **小端** + SIGNATURE 6 = `sha256_48`，即
   `SHA-256(secret + 帧头至CRC + linkId + timestamp)` 前 6 字节），重放规则改为"同流严格递增

@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * EnvironmentStatus / EnvironmentAlert 消息编解码单测（FR-24/25/26/27）：
- * 422/421 encode→decode 往返一致、decode 分发、msgId 无冲突、字段单位精度。
+ * 30002/30001 encode→decode 往返一致、decode 分发、msgId 无冲突、字段单位精度。
  */
 class EnvironmentMessageTest {
 
@@ -55,7 +55,7 @@ class EnvironmentMessageTest {
         MavlinkMessage decoded = roundtrip(msg);
         assertNotNull(decoded);
         assertTrue(decoded instanceof EnvironmentStatus,
-                "msgId=422 should dispatch to EnvironmentStatus");
+                "msgId=30002 should dispatch to EnvironmentStatus");
     }
 
     @Test
@@ -64,7 +64,7 @@ class EnvironmentMessageTest {
         MavlinkMessage decoded = roundtrip(msg);
         assertNotNull(decoded);
         assertTrue(decoded instanceof EnvironmentAlert,
-                "msgId=421 should dispatch to EnvironmentAlert");
+                "msgId=30001 should dispatch to EnvironmentAlert");
     }
 
     @Test
@@ -77,17 +77,17 @@ class EnvironmentMessageTest {
 
     @Test
     void msgIdNoConflict() {
-        // 421/422 已注册且不在既有 msgId 集合
+        // 30001/30002 已注册且不在既有 msgId 集合
         assertTrue(MavlinkMessageInfo.isKnown(EnvironmentStatus.ID));
         assertTrue(MavlinkMessageInfo.isKnown(EnvironmentAlert.ID));
         assertEquals(13, MavlinkMessageInfo.lengthOf(EnvironmentStatus.ID));
         assertEquals(46, MavlinkMessageInfo.lengthOf(EnvironmentAlert.ID));
-        // 确认不与既有消息冲突（既有集合不含 421/422）
+        // 确认不与既有消息冲突（既有集合不含 30001/30002）
         int[] existing = {0, 1, 2, 24, 30, 33, 42, 43, 44, 47, 51, 69, 73, 74, 76, 77, 40,
-                109, 242, 253, 259, 260, 262, 263, 271, 420};
+                109, 242, 253, 259, 260, 262, 263, 271, 30000};
         for (int id : existing) {
-            assertNotEquals(id, EnvironmentStatus.ID, "422 must not conflict with existing " + id);
-            assertNotEquals(id, EnvironmentAlert.ID, "421 must not conflict with existing " + id);
+            assertNotEquals(id, EnvironmentStatus.ID, "30002 must not conflict with existing " + id);
+            assertNotEquals(id, EnvironmentAlert.ID, "30001 must not conflict with existing " + id);
         }
     }
 

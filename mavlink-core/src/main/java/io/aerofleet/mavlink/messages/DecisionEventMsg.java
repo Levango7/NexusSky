@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * DECISION_EVENT (msgId=471, LEN=15) —— NexusSky M11 自主决策事件自定义扩展消息。
+ * DECISION_EVENT (msgId=30051, LEN=15) —— NexusSky M11 自主决策事件自定义扩展消息。
  * <p>
  * 承载自主决策事件：决策类型 + 触发原因 + 触发值 + 置信度 + 时间戳。
  * <p>
@@ -24,7 +24,7 @@ import java.nio.ByteBuffer;
  */
 public final class DecisionEventMsg extends MavlinkMessage {
 
-    public static final int ID = 471;
+    public static final int ID = 30051;
     public static final int LEN = 15;
     public static final int CRC_EXTRA = 104;
 

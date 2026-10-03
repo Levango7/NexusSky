@@ -23,7 +23,7 @@
 | 报警事件接收 | `AlarmController` + `AlarmEventStore` | ✅ |
 | 报警联动引擎 | `AlarmLinkageEngine` + `AlarmLinkageRule` | ✅ |
 | 报警→无人机调度 | `AlarmToOrchBridge` | ✅ |
-| MAVLink 报警消息 | `AlarmTriggerMsg(477)` / `AlarmAckMsg(478)` / `SurveillanceStatusMsg(479)` | ✅ |
+| MAVLink 报警消息 | `AlarmTriggerMsg(30057)` / `AlarmAckMsg(30058)` / `SurveillanceStatusMsg(30059)` | ✅ |
 | 应急指挥工作流 | `OneClickEmergencyResponse` 六阶段 | ✅ |
 | GCS 视频面板 | `SurveillancePanel` + `AlarmPanel` | ✅ |
 
@@ -179,7 +179,7 @@ AlarmEvent 生成 (AlarmLinkageEngine)
     │         ├──> 安防 PTZ 联动跟踪目标
     │         └──> 返航
     │
-    └──> AlarmTriggerMsg(477) 广播到 mesh
+    └──> AlarmTriggerMsg(30057) 广播到 mesh
               │
               ▼
          GCS AlarmPanel 实时显示
@@ -246,10 +246,10 @@ M4 已实现四类硬件抽象：
 
 | 硬件类型 | 抽象接口 | 模拟实现 | MAVLink 消息 |
 | --- | --- | --- | --- |
-| 相控阵雷达 | `PhasedArrayRadar` | `SimulatedRadar` | RadarScan(437)/RadarTarget(438) |
-| 旋翼气动 | `RotorAerodynamics` | `SimulatedRotorAerodynamics` | RotorTelemetry(439) |
-| LiDAR | `LiDARSource` | `SimulatedLiDARSource` | LidarData(440) |
-| IMU | `ImuSource` | `SimulatedImuSource` | ImuData(441) |
+| 相控阵雷达 | `PhasedArrayRadar` | `SimulatedRadar` | RadarScan(30017)/RadarTarget(30018) |
+| 旋翼气动 | `RotorAerodynamics` | `SimulatedRotorAerodynamics` | RotorTelemetry(30019) |
+| LiDAR | `LiDARSource` | `SimulatedLiDARSource` | LidarData(30020) |
+| IMU | `ImuSource` | `SimulatedImuSource` | ImuData(30021) |
 
 **M4 关键设计原则**：软件层协议抽象 + 模拟器假数据源，未来接真硬件替换数据源而非架构。
 

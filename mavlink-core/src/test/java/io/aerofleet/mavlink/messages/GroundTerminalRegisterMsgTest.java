@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * GROUND_TERMINAL_REGISTER (msgId=458) 编解码单测（M6 移动基站载荷抽象，FR-MSG-05）。
+ * GROUND_TERMINAL_REGISTER (msgId=30038) 编解码单测（M6 移动基站载荷抽象，FR-MSG-05）。
  */
-@DisplayName("GroundTerminalRegisterMsg 编解码 (msgId=458)")
+@DisplayName("GroundTerminalRegisterMsg 编解码 (msgId=30038)")
 class GroundTerminalRegisterMsgTest {
 
     private static GroundTerminalRegisterMsg roundtrip(GroundTerminalRegisterMsg msg) {
@@ -32,9 +32,9 @@ class GroundTerminalRegisterMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=458、LEN=12、CRC_EXTRA=83")
+    @DisplayName("消息 ID=30038、LEN=12、CRC_EXTRA=83")
     void messageIdAndConstants() {
-        assertThat(GroundTerminalRegisterMsg.ID).isEqualTo(458);
+        assertThat(GroundTerminalRegisterMsg.ID).isEqualTo(30038);
         assertThat(GroundTerminalRegisterMsg.LEN).isEqualTo(12);
         assertThat(GroundTerminalRegisterMsg.CRC_EXTRA).isEqualTo(83);
     }
@@ -44,14 +44,14 @@ class GroundTerminalRegisterMsgTest {
     void encodeLength() {
         GroundTerminalRegisterMsg msg = new GroundTerminalRegisterMsg(0, 0, 0, 0, 0);
         assertThat(msg.encode()).hasSize(12);
-        assertThat(msg.messageId()).isEqualTo(458);
+        assertThat(msg.messageId()).isEqualTo(30038);
     }
 
     @Test
     @DisplayName("短 payload 容忍解码：仅 3 字节时还原 terminalId + terminalType")
     void decodeShortPayloadTolerant() {
         byte[] shortPayload = new byte[]{0x01, 0x00, 0x02};
-        MavlinkFrame frame = new MavlinkFrame(3, 0, 0, 0, 1, 1, 458, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(3, 0, 0, 0, 1, 1, 30038, shortPayload, 0);
         GroundTerminalRegisterMsg msg = GroundTerminalRegisterMsg.decode(frame);
 
         assertThat(msg.terminalId).isEqualTo(1);

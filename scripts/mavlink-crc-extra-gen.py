@@ -34,7 +34,7 @@ MAVLink 的 CRC_EXTRA 不是随便取的常数，而是由「消息名 + 字段�
 
 交叉验证
 --------
-1) `--selftest`：用本脚本的算法重算 25 条**标准** MAVLink 消息的 CRC_EXTRA，
+1) `--selftest`：用本脚本的算法重算 23 条**标准** MAVLink 消息的 CRC_EXTRA，
    必须与 pymavlink 解析出的官方值逐一相等。算法对，则实现对。
 2) `--pymavlink`：把自定义消息的字段签名写成 XML 交给 pymavlink 官方
    `message_checksum` 重新计算，与本脚本结果比对。两条独立代码路径必须一致。
@@ -501,7 +501,7 @@ def main():
     table = os.path.join(MSG_DIR, 'MavlinkMessageInfo.java')
     src = open(table, encoding='utf-8').read()
     for info in sorted(custom, key=lambda i: i['msg_id']):
-        m = re.search(r'(?:INFOS\[%d\]|EXTENDED_INFOS\.put\(%d)\s*=\s*new Info\(-?\d+,\s*(\d+)\)' % (info['msg_id'], info['msg_id']), src)
+        m = re.search(r'(?:INFOS\[%d\]\s*=\s*new Info\(|EXTENDED_INFOS\.put\(%d,\s*new Info\()-?\d+,\s*(\d+)\)' % (info['msg_id'], info['msg_id']), src)
         old = int(m.group(1)) if m else None
         note = []
         if info.get('misaligned'):

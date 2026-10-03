@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * SAT_LINK_STATUS (msgId=459) 编解码单测（M7 星-空-地多层级中继，FR-5.4）。
+ * SAT_LINK_STATUS (msgId=30039) 编解码单测（M7 星-空-地多层级中继，FR-5.4）。
  */
-@DisplayName("SatLinkStatusMsg 编解码 (msgId=459)")
+@DisplayName("SatLinkStatusMsg 编解码 (msgId=30039)")
 class SatLinkStatusMsgTest {
 
     private static SatLinkStatusMsg roundtrip(SatLinkStatusMsg msg) {
@@ -37,9 +37,9 @@ class SatLinkStatusMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=459、LEN=24、CRC_EXTRA=152")
+    @DisplayName("消息 ID=30039、LEN=24、CRC_EXTRA=152")
     void messageIdAndConstants() {
-        assertThat(SatLinkStatusMsg.ID).isEqualTo(459);
+        assertThat(SatLinkStatusMsg.ID).isEqualTo(30039);
         assertThat(SatLinkStatusMsg.LEN).isEqualTo(24);
         assertThat(SatLinkStatusMsg.CRC_EXTRA).isEqualTo(152);
     }
@@ -49,14 +49,14 @@ class SatLinkStatusMsgTest {
     void encodeLength() {
         SatLinkStatusMsg msg = SatLinkStatusMsg.simulated(1, 0, 0, 0, 50, 50, 0L, 0, 0L);
         assertThat(msg.encode()).hasSize(24);
-        assertThat(msg.messageId()).isEqualTo(459);
+        assertThat(msg.messageId()).isEqualTo(30039);
     }
 
     @Test
     @DisplayName("短 payload 容忍解码：仅 2 字节时只还原 satId")
     void decodeShortPayloadTolerant() {
         byte[] shortPayload = new byte[]{42, 0};
-        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 1, 1, 459, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 1, 1, 30039, shortPayload, 0);
         SatLinkStatusMsg msg = SatLinkStatusMsg.decode(frame);
 
         assertThat(msg.satId).isEqualTo(42);
@@ -76,9 +76,9 @@ class SatLinkStatusMsgTest {
     }
 
     @Test
-    @DisplayName("msgId 459 全局唯一：不与 450-454 冲突")
+    @DisplayName("msgId 30039 全局唯一：不与 30030-30034 冲突")
     void msgIdGloballyUnique() {
-        assertThat(SatLinkStatusMsg.ID).isNotIn(450, 451, 452, 453, 454);
-        assertThat(SatLinkStatusMsg.ID).isNotIn(420, 421, 422, 423, 424, 425, 426);
+        assertThat(SatLinkStatusMsg.ID).isNotIn(30030, 30031, 30032, 30033, 30034);
+        assertThat(SatLinkStatusMsg.ID).isNotIn(30000, 30001, 30002, 30003, 30004, 30005, 30006);
     }
 }

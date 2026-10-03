@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * ROTOR_TELEMETRY (msgId=439, LEN=24) —— NexusSky M4 硬件抽象自定义扩展消息。
+ * ROTOR_TELEMETRY (msgId=30019, LEN=24) —— NexusSky M4 硬件抽象自定义扩展消息。
  * 承载旋翼气动遥测（旋翼序号/转速/推力/功耗/总推力/总功耗/sysid），由 drone-sim
  * {@code SimulatedRotorAerodynamics} 产出并上报至 cloud-backend（FR-20）。
  * <p>
@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
  */
 public final class RotorTelemetryMsg extends MavlinkMessage {
 
-    public static final int ID = 439;
+    public static final int ID = 30019;
     public static final int LEN = 24;
     public static final int CRC_EXTRA = 112;
 

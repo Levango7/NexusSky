@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * IMU_DATA (msgId=441, LEN=41) —— NexusSky M4 硬件抽象自定义扩展消息。
+ * IMU_DATA (msgId=30021, LEN=41) —— NexusSky M4 硬件抽象自定义扩展消息。
  * 承载 IMU 原始数据（加速度三轴/角速度三轴/磁场三轴/温度/sysid），由 drone-sim
  * {@code SimulatedImuSource} 产出并上报至 cloud-backend（FR-22）。
  * <p>
@@ -29,7 +29,7 @@ import java.nio.ByteBuffer;
  */
 public final class ImuDataMsg extends MavlinkMessage {
 
-    public static final int ID = 441;
+    public static final int ID = 30021;
     public static final int LEN = 41;
     public static final int CRC_EXTRA = 150;
 

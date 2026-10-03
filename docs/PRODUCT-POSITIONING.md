@@ -68,7 +68,7 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
 
 - **能力**：AODV-lite 多跳动态路由（`MeshRouter` / `RouteTable` /
   `NeighborTable` / `RreqCache`），支持路由发现、自愈重构、链路质量评估。
-- **协议**：MAVLink 消息 450–454（MeshHeartbeat / RouteRequest /
+- **协议**：MAVLink 消息 30030–30034（MeshHeartbeat / RouteRequest /
   RouteReply / RouteError / NeighborTable）。
 - **接口**：REST `/api/v1/mesh/*`，前端 `MeshTopologyPanel.jsx` 拓扑可视化。
 - **实现状态**：模拟器 + link-sim 多跳中继下 e2e 通过；RERR 处理遵循
@@ -86,7 +86,7 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
   - M7 LEO 卫星 + HAPS 高空平台 + Mesh 三层级中继
     （`HierarchicalRouter` / `LeoConstellation` / `HapsRelayNode`），
     支持卫星过境窗口预测、层级路由决策、链路切换。
-- **协议**：MAVLink 消息 455–458（基站）、459–461（星地中继）。
+- **协议**：MAVLink 消息 30035–30038（基站）、30039–30041（星地中继）。
 - **接口**：REST `/api/v1/celltowers/*`、`/api/v1/satlink/*`。
 - **实现状态**：模型与算法已实现，e2e 在 link-sim 损伤链路下跑通；
   Starlink 画像（25s 通 / 2.5s 黑洞，9.6% 丢包）下完整任务流 PASS。
@@ -103,7 +103,7 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
   （`TerrainGrid` / `TerrainClassifier` / `EnhancedRadioEnvironment` /
   `FlightConstraintChecker`），支持地形变化监测、飞行约束检查、
   覆盖范围地形衰减。
-- **协议**：MAVLink 消息 462–464（TerrainTypeMap / TerrainUpdate /
+- **协议**：MAVLink 消息 30042–30044（TerrainTypeMap / TerrainUpdate /
   FlightRestriction）。
 - **接口**：REST `/api/v1/terrain/*`，前端 `TerrainMapPanel.jsx`。
 - **实现状态**：地形分类与 RF 衰减模型已实现，e2e 在 `--terrain hill:...`
@@ -123,7 +123,7 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
     一键应急响应自动走完全流程。
   - **GCS 视频融合面板**：`SurveillancePanel`（设备列表 / 多画面分屏 / PTZ）+
     `AlarmPanel`（SSE 实时报警 / 联动规则管理 / 一键应急）。
-- **协议**：MAVLink 消息 477–479（AlarmTrigger / AlarmAck / SurveillanceStatus）。
+- **协议**：MAVLink 消息 30057–30059（AlarmTrigger / AlarmAck / SurveillanceStatus）。
 - **实现状态**：协议层与编排引擎已实现，前端面板已接入；ONVIF 协议兼容性
   在三大厂商设备上未做现场联调。
 - **边界**：报警联动规则为内存态配置，未持久化；视频流为 RTSP 透传，
@@ -138,7 +138,7 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
   - `DynamicReconfigurator` 处理无人机损毁 / 电量不足；
   - `PriorityScheduler` 四级抢占式调度（搜救 > 指挥 > 测绘 > 常规）；
   - `ScenarioPresetFactory` 支持地震 / 泥石流 / 火灾一键启动。
-- **协议**：MAVLink 消息 465–467（EmergencyMissionPlan /
+- **协议**：MAVLink 消息 30045–30047（EmergencyMissionPlan /
   CoverageOptimization / EmergencyPriority）。
 - **接口**：REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx`。
 - **实现状态**：编排引擎与场景预设已实现，e2e 在模拟器多机场景下跑通

@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * ALARM_ACK (msgId=478, LEN=12) —— NexusSky M14 安防报警自定义扩展消息。
+ * ALARM_ACK (msgId=30058, LEN=12) —— NexusSky M14 安防报警自定义扩展消息。
  * <p>
  * 无人机确认收到报警：承载报警事件 ID + 确认的无人机 sysid + 确认结果 +
  * 预计到达时间 + 时间戳。
@@ -24,7 +24,7 @@ import java.nio.ByteBuffer;
  */
 public final class AlarmAckMsg extends MavlinkMessage {
 
-    public static final int ID = 478;
+    public static final int ID = 30058;
     public static final int LEN = 12;
     public static final int CRC_EXTRA = 200;
 

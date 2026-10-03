@@ -9,12 +9,12 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * M8 复杂地形适配消息（msgId 462-464）编解码单测（FR-28/29/30）。
+ * M8 复杂地形适配消息（msgId 30042-30044）编解码单测（FR-28/29/30）。
  */
-@DisplayName("Terrain 消息编解码 (msgId 462-464)")
+@DisplayName("Terrain 消息编解码 (msgId 30042-30044)")
 class TerrainMessageTest {
 
-    // ===== TerrainTypeMapMsg (462) =====
+    // ===== TerrainTypeMapMsg (30042) =====
 
     private static TerrainTypeMapMsg roundtripMap(TerrainTypeMapMsg msg) {
         return TerrainTypeMapMsg.decode(msg.toFrame(1, 1, 0));
@@ -37,9 +37,9 @@ class TerrainMessageTest {
     }
 
     @Test
-    @DisplayName("TerrainTypeMap ID=462 / LEN=-1 / CRC_EXTRA=242")
+    @DisplayName("TerrainTypeMap ID=30042 / LEN=-1 / CRC_EXTRA=242")
     void terrainTypeMapConstants() {
-        assertThat(TerrainTypeMapMsg.ID).isEqualTo(462);
+        assertThat(TerrainTypeMapMsg.ID).isEqualTo(30042);
         assertThat(TerrainTypeMapMsg.LEN).isEqualTo(-1);
         assertThat(TerrainTypeMapMsg.CRC_EXTRA).isEqualTo(107);
     }
@@ -49,7 +49,7 @@ class TerrainMessageTest {
     void terrainTypeMapEncodeLength() {
         TerrainTypeMapMsg msg = new TerrainTypeMapMsg(0, 0, 10, 2, 2, List.of(0, 1, 2, 3));
         assertThat(msg.encode()).hasSize(14 + 4);
-        assertThat(msg.messageId()).isEqualTo(462);
+        assertThat(msg.messageId()).isEqualTo(30042);
     }
 
     @Test
@@ -61,7 +61,7 @@ class TerrainMessageTest {
         assertThat(back.cellCount()).isZero();
     }
 
-    // ===== TerrainUpdateMsg (463) =====
+    // ===== TerrainUpdateMsg (30043) =====
 
     private static TerrainUpdateMsg roundtripUpdate(TerrainUpdateMsg msg) {
         return TerrainUpdateMsg.decode(msg.toFrame(1, 1, 0));
@@ -87,9 +87,9 @@ class TerrainMessageTest {
     }
 
     @Test
-    @DisplayName("TerrainUpdate ID=463 / CRC_EXTRA=243")
+    @DisplayName("TerrainUpdate ID=30043 / CRC_EXTRA=243")
     void terrainUpdateConstants() {
-        assertThat(TerrainUpdateMsg.ID).isEqualTo(463);
+        assertThat(TerrainUpdateMsg.ID).isEqualTo(30043);
         assertThat(TerrainUpdateMsg.CRC_EXTRA).isEqualTo(21);
     }
 
@@ -110,7 +110,7 @@ class TerrainMessageTest {
         assertThat(back.affectedCount()).isZero();
     }
 
-    // ===== FlightRestrictionMsg (464) =====
+    // ===== FlightRestrictionMsg (30044) =====
 
     private static FlightRestrictionMsg roundtripRestriction(FlightRestrictionMsg msg) {
         return FlightRestrictionMsg.decode(msg.toFrame(1, 1, 0));
@@ -136,9 +136,9 @@ class TerrainMessageTest {
     }
 
     @Test
-    @DisplayName("FlightRestriction ID=464 / CRC_EXTRA=244")
+    @DisplayName("FlightRestriction ID=30044 / CRC_EXTRA=244")
     void flightRestrictionConstants() {
-        assertThat(FlightRestrictionMsg.ID).isEqualTo(464);
+        assertThat(FlightRestrictionMsg.ID).isEqualTo(30044);
         assertThat(FlightRestrictionMsg.CRC_EXTRA).isEqualTo(61);
     }
 
@@ -152,11 +152,11 @@ class TerrainMessageTest {
     }
 
     @Test
-    @DisplayName("msgId 462-464 全局唯一：不与 450-461 冲突")
+    @DisplayName("msgId 30042-30044 全局唯一：不与 30030-30041 冲突")
     void msgIdsGloballyUnique() {
-        assertThat(TerrainTypeMapMsg.ID).isNotIn(450, 451, 452, 453, 454, 459, 460, 461);
-        assertThat(TerrainUpdateMsg.ID).isNotIn(450, 451, 452, 453, 454, 459, 460, 461, 462);
-        assertThat(FlightRestrictionMsg.ID).isNotIn(450, 451, 452, 453, 454, 459, 460, 461, 462, 463);
+        assertThat(TerrainTypeMapMsg.ID).isNotIn(30030, 30031, 30032, 30033, 30034, 30039, 30040, 30041);
+        assertThat(TerrainUpdateMsg.ID).isNotIn(30030, 30031, 30032, 30033, 30034, 30039, 30040, 30041, 30042);
+        assertThat(FlightRestrictionMsg.ID).isNotIn(30030, 30031, 30032, 30033, 30034, 30039, 30040, 30041, 30042, 30043);
         // 三者互不相同
         assertThat(TerrainTypeMapMsg.ID).isNotEqualTo(TerrainUpdateMsg.ID);
         assertThat(TerrainUpdateMsg.ID).isNotEqualTo(FlightRestrictionMsg.ID);

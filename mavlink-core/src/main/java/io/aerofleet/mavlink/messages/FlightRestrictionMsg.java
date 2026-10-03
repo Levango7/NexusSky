@@ -9,7 +9,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * FLIGHT_RESTRICTION (msgId=464, LEN=可变 8+n×8) —— NexusSky M8 复杂地形适配自定义扩展消息。
+ * FLIGHT_RESTRICTION (msgId=30044, LEN=可变 8+n×8) —— NexusSky M8 复杂地形适配自定义扩展消息。
  * <p>
  * 承载飞行限制通告：限制类型 + 限制值 + 限制区域多边形顶点列表，
  * 由 drone-sim {@code FlightConstraintChecker} 产出并通告至飞控与地面站（FR-30）。
@@ -28,7 +28,7 @@ import java.util.List;
  */
 public final class FlightRestrictionMsg extends MavlinkMessage {
 
-    public static final int ID = 464;
+    public static final int ID = 30044;
     /** 固定头部长度。 */
     public static final int HEADER_LEN = 8;
     /** 每顶点项长度。 */

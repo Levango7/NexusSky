@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * ENVIRONMENT_ALERT (msgId=421, LEN=46) —— NexusSky 自定义扩展消息。
+ * ENVIRONMENT_ALERT (msgId=30001, LEN=46) —— NexusSky 自定义扩展消息。
  * 承载环境告警事件（类型 + 级别 + 实测值 + 阈值 + 人类可读描述），由告警引擎触发下传（FR-25）。
  * <p>
  * 字段布局（小端）：
@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
  */
 public final class EnvironmentAlert extends MavlinkMessage {
 
-    public static final int ID = 421;
+    public static final int ID = 30001;
     public static final int LEN = 46;
     public static final int TEXT_LEN = 40;
 

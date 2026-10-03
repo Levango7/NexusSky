@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * MULTISPECTRAL_DATA (msgId=431, LEN=24) —— NexusSky M3 自定义扩展消息。
+ * MULTISPECTRAL_DATA (msgId=30011, LEN=24) —— NexusSky M3 自定义扩展消息。
  * 承载多光谱 NDVI 计算结果摘要（均值/最小/最大/植被覆盖率 + sysid），由 drone-sim
  * {@code SimulatedMultispectralSource} 产出（FR-20）。
  * <p>
@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
  */
 public final class MultispectralDataMsg extends MavlinkMessage {
 
-    public static final int ID = 431;
+    public static final int ID = 30011;
     public static final int LEN = 24;
     public static final int CRC_EXTRA = 100;
 

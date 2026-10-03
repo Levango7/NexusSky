@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * SprayStatus / SprayCommand / GripperCommand / PayloadStatus 消息编解码单测（FR-26~FR-29）：
- * 423-426 encode→decode 往返一致、decode 分发、msgId 无冲突、短 payload 容忍。
+ * 30003-30006 encode→decode 往返一致、decode 分发、msgId 无冲突、短 payload 容忍。
  */
 class SprayMessageTest {
 
@@ -24,7 +24,7 @@ class SprayMessageTest {
         return MavlinkMessage.decode(r.frame);
     }
 
-    // ---- FR-26 SprayStatus (423) 往返 ----
+    // ---- FR-26 SprayStatus (30003) 往返 ----
 
     @Test
     void sprayStatusEncodeDecodeRoundtrip() {
@@ -46,7 +46,7 @@ class SprayMessageTest {
         assertEquals(-3.0, msg.driftOffsetAngle / 100.0, 1e-9, "-300 cdeg = -3.0 deg");
     }
 
-    // ---- FR-27 SprayCommand (424) 往返 ----
+    // ---- FR-27 SprayCommand (30004) 往返 ----
 
     @Test
     void sprayCommandEncodeDecodeRoundtrip() {
@@ -75,7 +75,7 @@ class SprayMessageTest {
         assertEquals(5.0, msg.sprayWidth / 100.0, 1e-9, "500 cm = 5.0 m");
     }
 
-    // ---- FR-28 GripperCommand (425) 往返 ----
+    // ---- FR-28 GripperCommand (30005) 往返 ----
 
     @Test
     void gripperCommandEncodeDecodeRoundtrip() {
@@ -107,7 +107,7 @@ class SprayMessageTest {
         assertEquals(15.0, msg.payloadVolume / 10.0, 1e-9, "150 cL = 15 L");
     }
 
-    // ---- FR-29 PayloadStatus (426) 往返 ----
+    // ---- FR-29 PayloadStatus (30006) 往返 ----
 
     @Test
     void payloadStatusEncodeDecodeRoundtrip() {
@@ -138,28 +138,28 @@ class SprayMessageTest {
     void decodeDispatches423() {
         SprayStatus msg = new SprayStatus(true, 100, 5000, 50, false, 0, 100);
         MavlinkMessage decoded = roundtrip(msg);
-        assertTrue(decoded instanceof SprayStatus, "msgId=423 → SprayStatus");
+        assertTrue(decoded instanceof SprayStatus, "msgId=30003 → SprayStatus");
     }
 
     @Test
     void decodeDispatches424() {
         SprayCommand msg = new SprayCommand(0, 100, 400);
         MavlinkMessage decoded = roundtrip(msg);
-        assertTrue(decoded instanceof SprayCommand, "msgId=424 → SprayCommand");
+        assertTrue(decoded instanceof SprayCommand, "msgId=30004 → SprayCommand");
     }
 
     @Test
     void decodeDispatches425() {
         GripperCommand msg = new GripperCommand(0, 1, 1000, 50);
         MavlinkMessage decoded = roundtrip(msg);
-        assertTrue(decoded instanceof GripperCommand, "msgId=425 → GripperCommand");
+        assertTrue(decoded instanceof GripperCommand, "msgId=30005 → GripperCommand");
     }
 
     @Test
     void decodeDispatches426() {
         PayloadStatus msg = new PayloadStatus(0, 0, 0, 0, 0, 0);
         MavlinkMessage decoded = roundtrip(msg);
-        assertTrue(decoded instanceof PayloadStatus, "msgId=426 → PayloadStatus");
+        assertTrue(decoded instanceof PayloadStatus, "msgId=30006 → PayloadStatus");
     }
 
     // ---- msgId 无冲突 ----
@@ -176,7 +176,7 @@ class SprayMessageTest {
         assertEquals(GripperCommand.LEN, MavlinkMessageInfo.lengthOf(GripperCommand.ID));
         assertEquals(PayloadStatus.LEN, MavlinkMessageInfo.lengthOf(PayloadStatus.ID));
 
-        // 确认 423-426 互不冲突
+        // 确认 30003-30006 互不冲突
         assertNotEquals(SprayStatus.ID, SprayCommand.ID);
         assertNotEquals(SprayStatus.ID, GripperCommand.ID);
         assertNotEquals(SprayStatus.ID, PayloadStatus.ID);
@@ -186,7 +186,7 @@ class SprayMessageTest {
 
         // 确认不与既有消息冲突
         int[] existing = {0, 1, 2, 24, 30, 33, 42, 43, 44, 47, 51, 69, 73, 74, 76, 77, 40,
-                109, 242, 253, 259, 260, 262, 263, 271, 420, 421, 422};
+                109, 242, 253, 259, 260, 262, 263, 271, 30000, 30001, 30002};
         int[] m2Ids = {SprayStatus.ID, SprayCommand.ID, GripperCommand.ID, PayloadStatus.ID};
         for (int existingId : existing) {
             for (int m2Id : m2Ids) {

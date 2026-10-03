@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * CELL_HANDOVER (msgId=457) 编解码单测（M6 移动基站载荷抽象，FR-MSG-04）。
+ * CELL_HANDOVER (msgId=30037) 编解码单测（M6 移动基站载荷抽象，FR-MSG-04）。
  */
-@DisplayName("CellHandoverMsg 编解码 (msgId=457)")
+@DisplayName("CellHandoverMsg 编解码 (msgId=30037)")
 class CellHandoverMsgTest {
 
     private static CellHandoverMsg roundtrip(CellHandoverMsg msg) {
@@ -30,9 +30,9 @@ class CellHandoverMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=457、LEN=5、CRC_EXTRA=247")
+    @DisplayName("消息 ID=30037、LEN=5、CRC_EXTRA=247")
     void messageIdAndConstants() {
-        assertThat(CellHandoverMsg.ID).isEqualTo(457);
+        assertThat(CellHandoverMsg.ID).isEqualTo(30037);
         assertThat(CellHandoverMsg.LEN).isEqualTo(5);
         assertThat(CellHandoverMsg.CRC_EXTRA).isEqualTo(247);
     }
@@ -42,14 +42,14 @@ class CellHandoverMsgTest {
     void encodeLength() {
         CellHandoverMsg msg = new CellHandoverMsg(0, 0, 0, 0);
         assertThat(msg.encode()).hasSize(5);
-        assertThat(msg.messageId()).isEqualTo(457);
+        assertThat(msg.messageId()).isEqualTo(30037);
     }
 
     @Test
     @DisplayName("短 payload 容忍解码：空 payload 时全部填 0")
     void decodeShortPayloadTolerant() {
         byte[] emptyPayload = new byte[]{};
-        MavlinkFrame frame = new MavlinkFrame(0, 0, 0, 0, 1, 1, 457, emptyPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(0, 0, 0, 0, 1, 1, 30037, emptyPayload, 0);
         CellHandoverMsg msg = CellHandoverMsg.decode(frame);
 
         assertThat(msg.terminalId).isZero();

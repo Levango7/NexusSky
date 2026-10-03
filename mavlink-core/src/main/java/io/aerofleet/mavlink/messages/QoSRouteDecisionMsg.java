@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * QOS_ROUTE_DECISION (msgId=480, LEN=12) —— NexusSky P2 灾害应急通讯组网扩展消息。
+ * QOS_ROUTE_DECISION (msgId=30060, LEN=12) —— NexusSky P2 灾害应急通讯组网扩展消息。
  * <p>
  * QoS 路由决策通知：告知 mesh 节点当前路由的优先级类别与带宽分配。
  * <p>
@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
  */
 public final class QoSRouteDecisionMsg extends MavlinkMessage {
 
-    public static final int ID = 480;
+    public static final int ID = 30060;
     public static final int LEN = 12;
     public static final int CRC_EXTRA = 121;
 

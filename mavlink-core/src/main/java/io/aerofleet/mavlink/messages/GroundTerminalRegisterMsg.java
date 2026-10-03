@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * GROUND_TERMINAL_REGISTER (msgId=458, LEN=12) —— NexusSky M6 地面终端注册请求消息。
+ * GROUND_TERMINAL_REGISTER (msgId=30038, LEN=12) —— NexusSky M6 地面终端注册请求消息。
  * <p>
  * 由地面终端（手机/对讲机/传感器）发起，携带终端 ID、类型、GPS 坐标、请求接入的目标无人机 sysid，
  * drone-sim {@code CellTowerPayload.handleRegister} 消费（FR-MSG-05 / FR-TERM-06）。
@@ -24,7 +24,7 @@ import java.nio.ByteBuffer;
  */
 public final class GroundTerminalRegisterMsg extends MavlinkMessage {
 
-    public static final int ID = 458;
+    public static final int ID = 30038;
     public static final int LEN = 12;
     public static final int CRC_EXTRA = 83;
 

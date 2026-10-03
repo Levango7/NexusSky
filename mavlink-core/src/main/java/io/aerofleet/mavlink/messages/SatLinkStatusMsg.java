@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * SAT_LINK_STATUS (msgId=459, LEN=24) —— NexusSky M7 星-空-地多层级中继自定义扩展消息。
+ * SAT_LINK_STATUS (msgId=30039, LEN=24) —— NexusSky M7 星-空-地多层级中继自定义扩展消息。
  * <p>
  * 周期上报每颗可见卫星的链路状态：仰角、方位角、延迟、带宽、窗口结束时间（FR-5.4）。
  * 由 drone-sim {@code SatRelayEngine} 周期产出并 UDP 上报到 cloud-backend。
@@ -31,7 +31,7 @@ import java.nio.ByteBuffer;
  */
 public final class SatLinkStatusMsg extends MavlinkMessage {
 
-    public static final int ID = 459;
+    public static final int ID = 30039;
     public static final int LEN = 24;
     public static final int CRC_EXTRA = 152;
 

@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * M4 硬件抽象自定义消息编解码单测（FR-18/FR-19/FR-20/FR-21/FR-22/FR-23）：
- * 437-441 encode→decode 往返一致、msgId 正确、decode 分发。
+ * 30017-30021 encode→decode 往返一致、msgId 正确、decode 分发。
  */
 class HardwareMsgTest {
 
@@ -23,7 +23,7 @@ class HardwareMsgTest {
         return MavlinkMessage.decode(r.frame);
     }
 
-    // ===== RADAR_SCAN (437) =====
+    // ===== RADAR_SCAN (30017) =====
 
     @Test
     void radarScanEncodeDecode() {
@@ -36,11 +36,11 @@ class HardwareMsgTest {
         assertEquals(orig.targetCount, back.targetCount);
         assertEquals(orig.sysid, back.sysid);
         assertEquals(orig.timestamp, back.timestamp);
-        assertEquals(437, RadarScanMsg.ID);
+        assertEquals(30017, RadarScanMsg.ID);
         assertEquals(20, RadarScanMsg.LEN);
     }
 
-    // ===== RADAR_TARGET (438) =====
+    // ===== RADAR_TARGET (30018) =====
 
     @Test
     void radarTargetEncodeDecode() {
@@ -56,11 +56,11 @@ class HardwareMsgTest {
         assertEquals(orig.trackState, back.trackState);
         assertEquals(orig.sysid, back.sysid);
         assertEquals(orig.timestamp, back.timestamp);
-        assertEquals(438, RadarTargetMsg.ID);
+        assertEquals(30018, RadarTargetMsg.ID);
         assertEquals(28, RadarTargetMsg.LEN);
     }
 
-    // ===== ROTOR_TELEMETRY (439) =====
+    // ===== ROTOR_TELEMETRY (30019) =====
 
     @Test
     void rotorTelemetryEncodeDecode() {
@@ -74,11 +74,11 @@ class HardwareMsgTest {
         assertEquals(orig.totalThrust, back.totalThrust, 1e-6f);
         assertEquals(orig.totalPower, back.totalPower, 1e-6f);
         assertEquals(orig.sysid, back.sysid);
-        assertEquals(439, RotorTelemetryMsg.ID);
+        assertEquals(30019, RotorTelemetryMsg.ID);
         assertEquals(24, RotorTelemetryMsg.LEN);
     }
 
-    // ===== LIDAR_DATA (440) =====
+    // ===== LIDAR_DATA (30020) =====
 
     @Test
     void lidarDataEncodeDecode() {
@@ -89,11 +89,11 @@ class HardwareMsgTest {
         assertEquals(orig.density, back.density, 1e-6f);
         assertEquals(orig.avgIntensity, back.avgIntensity, 1e-6f);
         assertEquals(orig.sysid, back.sysid);
-        assertEquals(440, LidarDataMsg.ID);
+        assertEquals(30020, LidarDataMsg.ID);
         assertEquals(20, LidarDataMsg.LEN);
     }
 
-    // ===== IMU_DATA (441) =====
+    // ===== IMU_DATA (30021) =====
 
     @Test
     void imuDataEncodeDecode() {
@@ -112,7 +112,7 @@ class HardwareMsgTest {
         assertEquals(orig.magZ, back.magZ, 1e-6f);
         assertEquals(orig.tempC, back.tempC, 1e-6f);
         assertEquals(orig.sysid, back.sysid);
-        assertEquals(441, ImuDataMsg.ID);
+        assertEquals(30021, ImuDataMsg.ID);
         assertEquals(41, ImuDataMsg.LEN);
     }
 
@@ -120,7 +120,7 @@ class HardwareMsgTest {
 
     @Test
     void allRegisteredInDispatch() {
-        // 验证 437-441 在 MavlinkMessage.decode 中有对应分支
+        // 验证 30017-30021 在 MavlinkMessage.decode 中有对应分支
         assertNotNull(roundtrip(new RadarScanMsg(0, 0, 0, 1000, 0, 1, 0)));
         assertNotNull(roundtrip(new RadarTargetMsg(0, 100, 0, 0, 0, 0, 0, 1, 0)));
         assertNotNull(roundtrip(new RotorTelemetryMsg(0, 0, 0, 0, 0, 0, 1)));

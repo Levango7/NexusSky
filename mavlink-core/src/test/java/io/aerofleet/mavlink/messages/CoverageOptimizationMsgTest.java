@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * COVERAGE_OPTIMIZATION (msgId=466) 编解码单测（M9 应急任务编排）。
+ * COVERAGE_OPTIMIZATION (msgId=30046) 编解码单测（M9 应急任务编排）。
  */
-@DisplayName("CoverageOptimizationMsg 编解码 (msgId=466)")
+@DisplayName("CoverageOptimizationMsg 编解码 (msgId=30046)")
 class CoverageOptimizationMsgTest {
 
     private static CoverageOptimizationMsg roundtrip(CoverageOptimizationMsg msg) {
@@ -38,9 +38,9 @@ class CoverageOptimizationMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=466、LEN=24、CRC_EXTRA=229")
+    @DisplayName("消息 ID=30046、LEN=24、CRC_EXTRA=229")
     void messageIdAndConstants() {
-        assertThat(CoverageOptimizationMsg.ID).isEqualTo(466);
+        assertThat(CoverageOptimizationMsg.ID).isEqualTo(30046);
         assertThat(CoverageOptimizationMsg.LEN).isEqualTo(24);
         assertThat(CoverageOptimizationMsg.CRC_EXTRA).isEqualTo(229);
     }
@@ -51,14 +51,14 @@ class CoverageOptimizationMsgTest {
         CoverageOptimizationMsg msg = new CoverageOptimizationMsg(
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         assertThat(msg.encode()).hasSize(24);
-        assertThat(msg.messageId()).isEqualTo(466);
+        assertThat(msg.messageId()).isEqualTo(30046);
     }
 
     @Test
     @DisplayName("短 payload 容忍解码：仅 5 字节时还原 planId+droneId，其余填 0")
     void decodeShortPayloadTolerant() {
         byte[] shortPayload = new byte[]{0x39, 0x30, 0x00, 0x00, 0x07};
-        MavlinkFrame frame = new MavlinkFrame(5, 0, 0, 0, 1, 1, 466, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(5, 0, 0, 0, 1, 1, 30046, shortPayload, 0);
         CoverageOptimizationMsg msg = CoverageOptimizationMsg.decode(frame);
 
         assertThat(msg.planId).isEqualTo(12345L);

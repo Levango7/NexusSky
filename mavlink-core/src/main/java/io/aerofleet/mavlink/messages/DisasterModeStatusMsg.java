@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * DISASTER_MODE_STATUS (msgId=482, LEN=8) —— NexusSky P2 灾害应急通讯组网扩展消息。
+ * DISASTER_MODE_STATUS (msgId=30062, LEN=8) —— NexusSky P2 灾害应急通讯组网扩展消息。
  * <p>
  * 灾害模式状态通知：告知 mesh 节点当前灾害模式是否激活、触发原因、受影响节点数与恢复率。
  * <p>
@@ -23,7 +23,7 @@ import java.nio.ByteBuffer;
  */
 public final class DisasterModeStatusMsg extends MavlinkMessage {
 
-    public static final int ID = 482;
+    public static final int ID = 30062;
     public static final int LEN = 8;
     public static final int CRC_EXTRA = 137;
 

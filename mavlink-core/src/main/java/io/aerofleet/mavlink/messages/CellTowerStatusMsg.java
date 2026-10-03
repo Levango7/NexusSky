@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * CELL_TOWER_STATUS (msgId=455, LEN=15) —— NexusSky M6 移动基站载荷抽象自定义扩展消息。
+ * CELL_TOWER_STATUS (msgId=30035, LEN=15) —— NexusSky M6 移动基站载荷抽象自定义扩展消息。
  * <p>
  * 承载无人机基站周期状态广播：sysid + 制式 + 覆盖中心 + 覆盖半径 + 已接入终端数 + 容量利用率，
  * 由 drone-sim {@code CellTowerPayload} 1Hz 产出并广播（FR-MSG-02 / FR-CAP-05）。
@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
  */
 public final class CellTowerStatusMsg extends MavlinkMessage {
 
-    public static final int ID = 455;
+    public static final int ID = 30035;
     public static final int LEN = 15;
     public static final int CRC_EXTRA = 21;
 

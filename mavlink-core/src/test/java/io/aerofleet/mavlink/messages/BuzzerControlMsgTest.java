@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * BuzzerControlMsg 编解码单测（千元级灾害应急搜救信号）：
- * msgId=483 往返一致、全蜂鸣器模式支持、CRC_EXTRA 注册一致。
+ * msgId=30063 往返一致、全蜂鸣器模式支持、CRC_EXTRA 注册一致。
  */
 class BuzzerControlMsgTest {
 
@@ -23,7 +23,7 @@ class BuzzerControlMsgTest {
         MavlinkParser.ParseResult r = new MavlinkParser().parse(ByteBuffer.wrap(frame.encodeV2()));
         assertNotNull(r, "parser must accept the frame (CRC registered?)");
         MavlinkMessage decoded = MavlinkMessage.decode(r.frame);
-        assertNotNull(decoded, "decode must dispatch msgId=483 to BuzzerControlMsg");
+        assertNotNull(decoded, "decode must dispatch msgId=30063 to BuzzerControlMsg");
         assertTrue(decoded instanceof BuzzerControlMsg, "decoded should be BuzzerControlMsg");
         return (BuzzerControlMsg) decoded;
     }
@@ -73,18 +73,18 @@ class BuzzerControlMsgTest {
     }
 
     @Test
-    @DisplayName("msgId 为 483")
+    @DisplayName("msgId 为 30063")
     void msgIdIs483() {
-        assertEquals(483, BuzzerControlMsg.ID);
+        assertEquals(30063, BuzzerControlMsg.ID);
         BuzzerControlMsg msg = new BuzzerControlMsg(1, true, 0, 5, 10);
-        assertEquals(483, msg.messageId());
+        assertEquals(30063, msg.messageId());
     }
 
     @Test
     @DisplayName("CRC_EXTRA 注册一致")
     void crcExtraCorrect() {
         assertTrue(MavlinkMessageInfo.isKnown(BuzzerControlMsg.ID),
-                "msgId=483 should be registered");
+                "msgId=30063 should be registered");
         assertEquals(BuzzerControlMsg.LEN, MavlinkMessageInfo.lengthOf(BuzzerControlMsg.ID),
                 "registered LEN should match BuzzerControlMsg.LEN");
         assertEquals(BuzzerControlMsg.CRC_EXTRA, MavlinkMessageInfo.crcExtraOf(BuzzerControlMsg.ID),

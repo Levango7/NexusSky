@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * ADAPTIVE_PATH (msgId=472, LEN=20) —— NexusSky M11 自适应航径调整自定义扩展消息。
+ * ADAPTIVE_PATH (msgId=30052, LEN=20) —— NexusSky M11 自适应航径调整自定义扩展消息。
  * <p>
  * 承载航径自适应调整：原始航点序号 + 新目标位置 + 调整原因 + 风速 + 风向。
  * <p>
@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
  */
 public final class AdaptivePathMsg extends MavlinkMessage {
 
-    public static final int ID = 472;
+    public static final int ID = 30052;
     public static final int LEN = 20;
     public static final int CRC_EXTRA = 208;
 

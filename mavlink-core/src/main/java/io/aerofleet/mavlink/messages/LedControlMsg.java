@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * LED_CONTROL（自定义扩展 msgId=420, LEN=18, CRC_EXTRA=72）。
+ * LED_CONTROL（自定义扩展 msgId=30000, LEN=18, CRC_EXTRA=72）。
  * GCS/编队调度 → 飞机：灯光控制命令，承载灯效模式 + 颜色 + 亮度 + 频率 + 相位起点。
  *
  * 字段布局（小端，LEN=18）：
@@ -29,7 +29,7 @@ import java.nio.ByteBuffer;
  */
 public final class LedControlMsg extends MavlinkMessage {
 
-    public static final int ID = 420;           // 自定义扩展 msgId
+    public static final int ID = 30000;           // 自定义扩展 msgId
     public static final int LEN = 18;
     public static final int CRC_EXTRA = 72;    // 自定义 CRC_EXTRA（标注为扩展消息）
 

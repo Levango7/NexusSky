@@ -43,7 +43,7 @@ class PerformanceBenchmarkTest {
     @DisplayName("P1-1: MavlinkMessageInfo.isKnown 数组查找 vs HashMap 查找吞吐量")
     void testMavlinkMessageInfoIsKnownThroughput() {
         int iterations = 10_000_000;
-        int[] msgIds = {0, 30, 76, 450, 465, 467}; // 代表性 msgId
+        int[] msgIds = {0, 30, 76, 30030, 30045, 30047}; // 代表性 msgId
 
         // 预热
         for (int i = 0; i < WARMUP; i++) {
@@ -70,7 +70,7 @@ class PerformanceBenchmarkTest {
     @DisplayName("P1-1: MavlinkMessageInfo.lengthOf 数组查找吞吐量")
     void testMavlinkMessageInfoLengthOfThroughput() {
         int iterations = 10_000_000;
-        int[] msgIds = {0, 30, 76, 450, 465, 467};
+        int[] msgIds = {0, 30, 76, 30030, 30045, 30047};
 
         // 预热
         for (int i = 0; i < WARMUP; i++) {
@@ -97,7 +97,7 @@ class PerformanceBenchmarkTest {
     @DisplayName("P1-1: MavlinkMessageInfo.crcExtraOf 数组查找吞吐量")
     void testMavlinkMessageInfoCrcExtraOfThroughput() {
         int iterations = 10_000_000;
-        int[] msgIds = {0, 30, 76, 450, 465, 467};
+        int[] msgIds = {0, 30, 76, 30030, 30045, 30047};
 
         // 预热
         for (int i = 0; i < WARMUP; i++) {

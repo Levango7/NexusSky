@@ -4,6 +4,77 @@
 
 ---
 
+## [Unreleased] — MAVLink msgId 治理搬迁：避开官方分配带（2026-10-04）
+
+> 官方治理规则实证：common.xml 拥有 msgId **300-10000** 分配带，本项目自定义消息
+> 420-483 全段落在其内，其中 420/437/440 已与官方消息**实锤冲突**。全部 51 条
+> 等差平移 +29580 至私有方言段 30000-30099，代码/脚本/文档一次原子搬迁。
+
+### 1. 官方碰撞实锤（搬迁动机）
+
+- 官方 common.xml：**420=RADIO_RC_CHANNELS、437=AVAILABLE_MODES_MONITOR、
+  440=ILLUMINATOR_STATUS**（活跃条目）；development.xml：421=RC_CHANNELS_OVERRIDE_V2、
+  441=GNSS_INTEGRITY。旧段任何一号被官方启用，两端同名异构消息即互以 CRC 拒收；
+- 官方治理规则（MAVLink 消息 ID 治理页）：私有方言**可使用 300-10000 之外的任意
+  区间**。全量官方方言快照（392 个已分配 msgId）核实 **30000-30099 为空**，
+  最近邻 17158 / 42000；
+- **顺带发现（未修，登记后续项）**：MAV_CMD 命令空间同样撞车——官方
+  `MAV_CMD_INJECT_FAILURE=420` 与 `MAV_CMD_NEXUS_RADAR_CONFIG=420` 冲突
+  （421 未分配）。命令 id 与消息 id 是两个独立空间，另行搬迁。
+
+### 2. 搬迁映射与代码改造
+
+- **映射**：newId = oldId + 29580（420→30000 … 483→30063）；CRC_EXTRA 与 payload
+  布局不变（CRC_EXTRA 由字段签名决定，与 msgId 无关）；30064-30099 为增长预留；
+- **批量落地**：按「已分配 id 集合」（420-426/430-434/437-441/450-483）精确匹配，
+  生产+测试 94 文件 554 处替换；HTTP 429 限流码、测试数 449、像素 640×480、
+  EnvironmentAlert 构造字段值 480/450 等误报受保护零命中；
+- **MavlinkMessageInfo**：51 条 `INFOS[4xx]` 数组槽位改写为
+  `EXTENDED_INFOS.put(300xx,…)`——查找逻辑
+  `msgId < 512 ? INFOS[msgId] : EXTENDED_INFOS.get(msgId)` 零改动自动支持 30000+ 段；
+- **飞行日志不受影响**：FlightLog 存领域 JSON（type/sysid/lat/lon…），不含原始
+  msgId，历史数据与回放零迁移。
+
+### 3. MavlinkFrame 校验加固（搭配搬迁）
+
+- `decodeV2()` 一直**不校验 CRC**（生产路径由 MavlinkParser 流式校验，但工具/测试
+  直接调 decodeV2 时是裸奔）——Javadoc 补警告；
+- 新增 `decodeV2Verified(byte[])`：解析后按 v2 语义强校验 CRC（含 CRC_EXTRA），
+  不符/未注册 msgId 抛 `MavlinkException`（含 expected/received 十六进制）；实例侧
+  `verifyChecksum()` + `computeExpectedCrcV2()`（覆盖范围与 Parser 逐字节一致）；
+- v1 语义注意：v1 帧归一化后 inc/compat=0，但 v1 官方 CRC 不覆盖这两字节，
+  verifyChecksum 仅对 v2 原生帧结论正确（v1 由 Parser 按 v1 公式校验）——Javadoc 注明；
+- 新增 `MavlinkFrameVerifiedDecodeTest`(5 例)：官方帧/搬迁带帧/篡改 payload/
+  签名帧/未知 msgId。mavlink-core 449→454，Java 全仓 4117→4122。
+
+### 4. 兼容性脚本：修出两个潜伏 bug + 新增官方占用快照检查
+
+- **compat-check.py 潜伏 bug**：解析 MavlinkMessageInfo 的正则从未匹配
+  `EXTENDED_INFOS.put(...)` 条目（实际是 `, new Info(` 与 `));`，正则预期
+  `= new Info(` 与 `);`）——OPEN_DRONE_ID 6 条一直没进校验表，搬迁后 51 条
+  全部失明才暴露。修复后校验表 25→82 条（标准 31 + 扩展 51）；
+- **crc-extra-gen.py 同类 bug**：表查找正则同样不认 put() 条目，51 条全报
+  「表中无此项」；修复后 51 条「仓库=重算」全对、0 CHANGED——顺带完成搬迁后
+  Javadoc msgId 与注册表一致性的独立复核；
+- **新增官方分配冲突检查**：compat-check 内嵌 392 个官方已分配 msgId 快照
+  （id→方言，2026-10），`--self-test` 核对：扩展消息无一命中官方分配、私有段
+  30000-30099 无官方占用、快照加载量 ≥350。`--cross-check`（pymavlink 在线核对）
+  保留为补强；跳过区从 420-12900 收窄为 30000-30100；
+- 自检 140 项全绿（含 51 条扩展消息 v2 帧往返、4 条可变长度消息）。
+
+### 5. 文档同步
+
+- README/ROADMAP/architecture/integration-guide/sdk-reference/sitl-integration/
+  PRODUCT-POSITIONING/sales-pitch-deck/whitepaper 等 16 文件 278 处批量同步
+  （按已分配 id 集合映射，LoRa 433MHz/640×480/HTTP 429/测试数 449 等误报受保护）；
+- ROADMAP 执行纪律 #5 重写（旧「新增从 484+ 起分配」作废 → 私有段治理 +
+  30064+ 增长预留）；product-brief「尚未完成冲突分析」过期声明改写为已核结论；
+  sitl-integration §7 补治理搬迁说明；README 分配表章节补冲突史与快照核对说明；
+- 历史快照不篡改：CHANGELOG 旧条目与 commercialization-plan「更新前/后」对比表
+  保持原样。
+
+---
+
 ## [Unreleased] — CI7 补齐：Playwright 真浏览器 E2E + 顺带修复 WS 握手 NPE（2026-10-04）
 
 > 收口 devops-enhancement-plan 的 CI7「Playwright E2E 仍缺」。落地过程撞出一个

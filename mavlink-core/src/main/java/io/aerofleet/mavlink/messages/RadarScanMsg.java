@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * RADAR_SCAN (msgId=437, LEN=20) —— NexusSky M4 硬件抽象自定义扩展消息。
+ * RADAR_SCAN (msgId=30017, LEN=20) —— NexusSky M4 硬件抽象自定义扩展消息。
  * 承载雷达扫描状态（扫描模式/波束方位/俯仰/扫描周期/已探测目标数/sysid），由 drone-sim
  * {@code SimulatedRadar} 产出并上报至 cloud-backend（FR-18）。
  * <p>
@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  */
 public final class RadarScanMsg extends MavlinkMessage {
 
-    public static final int ID = 437;
+    public static final int ID = 30017;
     public static final int LEN = 20;
     public static final int CRC_EXTRA = 251;
 

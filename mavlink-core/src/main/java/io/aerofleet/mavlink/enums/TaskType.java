@@ -1,7 +1,7 @@
 package io.aerofleet.mavlink.enums;
 
 /**
- * 任务类型枚举（M10 多机协同任务分配，msgId=468 TaskAssignmentMsg）。
+ * 任务类型枚举（M10 多机协同任务分配，msgId=30048 TaskAssignmentMsg）。
  * <p>
  * 取值为 ordinal()，编入 MAVLink u8 字段。
  * <ul>

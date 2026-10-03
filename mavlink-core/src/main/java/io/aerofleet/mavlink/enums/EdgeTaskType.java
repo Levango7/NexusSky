@@ -1,7 +1,7 @@
 package io.aerofleet.mavlink.enums;
 
 /**
- * 边缘任务类型枚举（M12 边缘计算，msgId=473 EdgeTaskStatusMsg）。
+ * 边缘任务类型枚举（M12 边缘计算，msgId=30053 EdgeTaskStatusMsg）。
  * <p>
  * 取值为 ordinal()，编入 MAVLink u8 字段。
  * <ul>

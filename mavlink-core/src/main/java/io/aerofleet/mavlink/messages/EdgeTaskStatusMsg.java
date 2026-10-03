@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * EDGE_TASK_STATUS (msgId=473, LEN=13) —— NexusSky M12 边缘计算任务状态自定义扩展消息。
+ * EDGE_TASK_STATUS (msgId=30053, LEN=13) —— NexusSky M12 边缘计算任务状态自定义扩展消息。
  * <p>
  * 承载边缘计算任务执行状态：任务 ID + 任务类型 + 状态 + 处理耗时 + 结果大小。
  * <p>
@@ -24,7 +24,7 @@ import java.nio.ByteBuffer;
  */
 public final class EdgeTaskStatusMsg extends MavlinkMessage {
 
-    public static final int ID = 473;
+    public static final int ID = 30053;
     public static final int LEN = 13;
     public static final int CRC_EXTRA = 46;
 

@@ -1,7 +1,7 @@
 package io.aerofleet.mavlink.enums;
 
 /**
- * 航径调整原因枚举（M11 自适应航径，msgId=472 AdaptivePathMsg）。
+ * 航径调整原因枚举（M11 自适应航径，msgId=30052 AdaptivePathMsg）。
  * <p>
  * 取值为 ordinal()，编入 MAVLink u8 字段。
  * <ul>

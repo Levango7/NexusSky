@@ -17,7 +17,7 @@
 4. [NexusSky 与 SITL 对接配置](#4-nexussky-与-sitl-对接配置)
 5. [兼容性验证清单](#5-兼容性验证清单)
 6. [验证脚本使用指南](#6-验证脚本使用指南)
-7. [NexusSky 扩展消息（420-483）](#7-nexussky-扩展消息420-483)
+7. [NexusSky 扩展消息（30000-30063）](#7-nexussky-扩展消息420-30063)
 8. [常见问题和解决方案](#8-常见问题和解决方案)
 9. [已知边界与限制](#9-已知边界与限制)
 
@@ -245,19 +245,19 @@ cloud-backend `UdpGateway` + `TelemetryIngestService` 已实现以下兼容处�
 - [ ] **命令协议**：COMMAND_LONG / COMMAND_ACK
 - [ ] **v1/v2 兼容**：v1 帧（STX=0xFE）与 v2 帧（STX=0xFD）混合流自动识别
 - [ ] **CRC 校验**：所有帧 CRC-16/X.25 校验通过
-- [ ] **扩展消息**：420-483 全部 51 条编解码一致（含可变长度消息）
+- [ ] **扩展消息**：30000-30063 全部 51 条编解码一致（含可变长度消息）
 
 ### 5.3 NexusSky 扩展消息验证
 
-- [ ] **M2 喷洒物流**（423-426）：SPRAY_STATUS / SPRAY_COMMAND / GRIPPER_COMMAND / PAYLOAD_STATUS
-- [ ] **M0b 环境气象**（421-422）：ENVIRONMENT_ALERT / ENVIRONMENT_STATUS
-- [ ] **M3 感知成像**（430-434）：OBSTACLE_REPORT / MULTISPECTRAL_DATA / THERMAL_DATA / DEPTH_DATA / VISION_DETECTION
-- [ ] **M4 硬件抽象**（437-441）：RADAR_SCAN / RADAR_TARGET / ROTOR_TELEMETRY / LIDAR_DATA / IMU_DATA
-- [ ] **M5 Mesh 自愈**（450-454）：含可变长度 MESH_NEIGHBOR_TABLE
-- [ ] **M6 移动基站**（455-458）
-- [ ] **M7 星-空-地中继**（459-461）
-- [ ] **M8 地形适配**（462-464）：含 3 条可变长度消息
-- [ ] **M9-M13**（465-476）：应急编排 / 多机协同 / 自主决策 / 边缘融合 / 数字孪生
+- [ ] **M2 喷洒物流**（30003-30006）：SPRAY_STATUS / SPRAY_COMMAND / GRIPPER_COMMAND / PAYLOAD_STATUS
+- [ ] **M0b 环境气象**（30001-30002）：ENVIRONMENT_ALERT / ENVIRONMENT_STATUS
+- [ ] **M3 感知成像**（30010-30014）：OBSTACLE_REPORT / MULTISPECTRAL_DATA / THERMAL_DATA / DEPTH_DATA / VISION_DETECTION
+- [ ] **M4 硬件抽象**（30017-30021）：RADAR_SCAN / RADAR_TARGET / ROTOR_TELEMETRY / LIDAR_DATA / IMU_DATA
+- [ ] **M5 Mesh 自愈**（30030-30034）：含可变长度 MESH_NEIGHBOR_TABLE
+- [ ] **M6 移动基站**（30035-30038）
+- [ ] **M7 星-空-地中继**（30039-30041）
+- [ ] **M8 地形适配**（30042-30044）：含 3 条可变长度消息
+- [ ] **M9-M13**（30045-30056）：应急编排 / 多机协同 / 自主决策 / 边缘融合 / 数字孪生
 
 ---
 
@@ -284,7 +284,7 @@ python3 scripts/mavlink-compatibility-check.py --list-messages
 **验证内容**：
 1. CRC-16/X.25 标准测试向量
 2. 标准 MAVLink 消息（HEARTBEAT / ATTITUDE / GLOBAL_POSITION_INT / MISSION_ITEM_INT）编解码往返
-3. NexusSky 扩展消息（420-483）帧层透传往返（全部 51 条）
+3. NexusSky 扩展消息（30000-30063）帧层透传往返（全部 51 条）
 4. MAVLink v1 vs v2 帧兼容性（混合流自动识别、扩展消息 v1 拒绝）
 5. 消息 ID 无冲突检查
 6. 端到端：发送帧到 cloud-backend UDP 14550，接收 GCS 心跳响应
@@ -318,30 +318,39 @@ python3 scripts/mavlink-compatibility-check.py --list-messages
 
 ---
 
-## 7. NexusSky 扩展消息（420-483）
+## 7. NexusSky 扩展消息（30000-30063）
 
 NexusSky 在 MAVLink 标准消息之外定义了 51 条自定义扩展消息，
-msgId 区间 **420-483**，与 MAVLink 官方消息无冲突。
+msgId 区间 **30000-30063**（私有方言段 30000-30099），与 MAVLink 官方消息无冲突。
+
+> **治理搬迁说明（2026-10）**：扩展消息原先使用 msgId 420-483，该段位于 common.xml
+> 官方分配带 300-10000 内，其中 420/437/440 已与官方消息实锤冲突（420=RADIO_RC_CHANNELS、
+> 437=AVAILABLE_MODES_MONITOR、440=ILLUMINATOR_STATUS）。全部 51 条消息已等差平移
+> +29580 至私有方言段（MAVLink 治理规则：私有方言可使用 300-10000 之外的任意区间）。
+> CRC_EXTRA 与 payload 布局不变（CRC_EXTRA 由字段签名决定，与 msgId 无关）；飞行日志
+> 存领域 JSON、不含原始 msgId，历史数据与回放不受影响。
+> `scripts/mavlink-compatibility-check.py --self-test` 内嵌 392 个官方已分配 msgId
+> 快照，逐条核对私有段无冲突。
 
 ### 7.1 消息总览
 
 | 模块 | msgId 范围 | 消息数 | 说明 |
 |------|-----------|--------|------|
-| LED 控制 | 420 | 1 | LED_CONTROL |
-| M0b 环境气象 | 421-422 | 2 | ENVIRONMENT_ALERT / STATUS |
-| M2 喷洒物流 | 423-426 | 4 | SPRAY_STATUS / COMMAND / GRIPPER / PAYLOAD |
-| M3 感知成像 | 430-434 | 5 | OBSTACLE / MULTISPECTRAL / THERMAL / DEPTH / VISION |
-| M4 硬件抽象 | 437-441 | 5 | RADAR_SCAN / TARGET / ROTOR / LIDAR / IMU |
-| M5 Mesh 自愈 | 450-454 | 5 | 含可变长度 MESH_NEIGHBOR_TABLE |
-| M6 移动基站 | 455-458 | 4 | CELL_TOWER / HANDOVER / GROUND_TERMINAL |
-| M7 多层中继 | 459-461 | 3 | SAT_LINK / PASS_SCHEDULE / HIERARCHICAL_ROUTE |
-| M8 地形适配 | 462-464 | 3 | 全部可变长度 |
-| M9 应急编排 | 465-467 | 3 | EMERGENCY_MISSION / COVERAGE / PRIORITY |
-| M10 多机协同 | 468-470 | 3 | TASK_ASSIGNMENT / CONFLICT_ALERT / TASK_STATUS |
-| M11 自主决策 | 471-472 | 2 | DECISION_EVENT / ADAPTIVE_PATH |
-| M12 边缘融合 | 473-474 | 2 | EDGE_TASK_STATUS / SENSOR_FUSION_DATA |
-| M13 数字孪生 | 475-476 | 2 | TWIN_STATE_SYNC / PREDICTION_RESULT |
-| 后续扩展（安防/通信/集群/灾害） | 477-483 | 7 | ALARM_TRIGGER / ALARM_ACK / SURVEILLANCE_STATUS / QOS_ROUTE_DECISION / CLUSTER_FORMATION / DISASTER_MODE_STATUS / BUZZER_CONTROL |
+| LED 控制 | 30000 | 1 | LED_CONTROL |
+| M0b 环境气象 | 30001-30002 | 2 | ENVIRONMENT_ALERT / STATUS |
+| M2 喷洒物流 | 30003-30006 | 4 | SPRAY_STATUS / COMMAND / GRIPPER / PAYLOAD |
+| M3 感知成像 | 30010-30014 | 5 | OBSTACLE / MULTISPECTRAL / THERMAL / DEPTH / VISION |
+| M4 硬件抽象 | 30017-30021 | 5 | RADAR_SCAN / TARGET / ROTOR / LIDAR / IMU |
+| M5 Mesh 自愈 | 30030-30034 | 5 | 含可变长度 MESH_NEIGHBOR_TABLE |
+| M6 移动基站 | 30035-30038 | 4 | CELL_TOWER / HANDOVER / GROUND_TERMINAL |
+| M7 多层中继 | 30039-30041 | 3 | SAT_LINK / PASS_SCHEDULE / HIERARCHICAL_ROUTE |
+| M8 地形适配 | 30042-30044 | 3 | 全部可变长度 |
+| M9 应急编排 | 30045-30047 | 3 | EMERGENCY_MISSION / COVERAGE / PRIORITY |
+| M10 多机协同 | 30048-30050 | 3 | TASK_ASSIGNMENT / CONFLICT_ALERT / TASK_STATUS |
+| M11 自主决策 | 30051-30052 | 2 | DECISION_EVENT / ADAPTIVE_PATH |
+| M12 边缘融合 | 30053-30054 | 2 | EDGE_TASK_STATUS / SENSOR_FUSION_DATA |
+| M13 数字孪生 | 30055-30056 | 2 | TWIN_STATE_SYNC / PREDICTION_RESULT |
+| 后续扩展（安防/通信/集群/灾害） | 30057-30063 | 7 | ALARM_TRIGGER / ALARM_ACK / SURVEILLANCE_STATUS / QOS_ROUTE_DECISION / CLUSTER_FORMATION / DISASTER_MODE_STATUS / BUZZER_CONTROL |
 
 ### 7.2 CRC_EXTRA 计算
 
@@ -353,10 +362,10 @@ msgId 区间 **420-483**，与 MAVLink 官方消息无冲突。
 ### 7.3 可变长度消息
 
 4 条消息使用可变长度（`LEN=-1`）：
-- `MESH_NEIGHBOR_TABLE` (454)
-- `TERRAIN_TYPE_MAP` (462)
-- `TERRAIN_UPDATE` (463)
-- `FLIGHT_RESTRICTION` (464)
+- `MESH_NEIGHBOR_TABLE` (30034)
+- `TERRAIN_TYPE_MAP` (30042)
+- `TERRAIN_UPDATE` (30043)
+- `FLIGHT_RESTRICTION` (30044)
 
 验证脚本对可变长度消息使用 8 字节示例 payload 进行帧层往返测试。
 
@@ -465,7 +474,7 @@ PYTHON=python ./scripts/sitl-compatibility-test.sh
 
 ### 9.2 协议兼容边界
 
-- **扩展消息**：PX4 / ArduPilot SITL 不发送 NexusSky 扩展消息（420-483），
+- **扩展消息**：PX4 / ArduPilot SITL 不发送 NexusSky 扩展消息（30000-30063），
   扩展消息兼容性通过离线自检和 drone-sim 验证
 - **MAVLink v1**：扩展消息（msgId > 255）无法用 v1 帧发送，必须用 v2
 - **可变长度消息**：4 条可变长度消息的帧层验证使用固定示例 payload，
@@ -579,7 +588,7 @@ ALL PX4 SITL TESTS PASSED
 | 编译时间 | PX4 SITL 首次编译约 20-40 分钟 | 仅首次需要 |
 | GPS 解锁 | SITL 的 GPS 信号依赖 EKF，ARM 前可能需等待 GPS 3D fix | 可设 `COM_ARM_WO_GPS=1` 绕过 |
 | Datalink Failsafe | PX4 在链路静默 ~15s 后触发 RTL | cloud-backend 的 1Hz GCS 心跳应维持链路 |
-| 扩展消息 | PX4 SITL 不发送 NexusSky 扩展消息（420-483） | 扩展消息通过离线自检和 drone-sim 验证 |
+| 扩展消息 | PX4 SITL 不发送 NexusSky 扩展消息（30000-30063） | 扩展消息通过离线自检和 drone-sim 验证 |
 | 无硬件链路 | SITL 无法验证串口 / CAN / I2C 等硬件接口 | 需真机测试覆盖 |
 | 实时性 | SITL 非硬实时，高负载时仿真步长可能抖动 | 不影响协议验证，影响时序敏感场景 |
 

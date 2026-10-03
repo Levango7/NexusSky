@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * LIDAR_DATA (msgId=440, LEN=20) —— NexusSky M4 硬件抽象自定义扩展消息。
+ * LIDAR_DATA (msgId=30020, LEN=20) —— NexusSky M4 硬件抽象自定义扩展消息。
  * 承载 LiDAR 点云数据摘要（最近距离/点数/密度/平均强度/sysid），由 drone-sim
  * {@code SimulatedLiDARSource} 产出并上报至 cloud-backend（FR-21）。
  * <p>
@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
  */
 public final class LidarDataMsg extends MavlinkMessage {
 
-    public static final int ID = 440;
+    public static final int ID = 30020;
     public static final int LEN = 20;
     public static final int CRC_EXTRA = 153;
 

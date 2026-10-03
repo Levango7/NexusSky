@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * TASK_STATUS (msgId=470, LEN=11) —— NexusSky M10 多机协同任务状态自定义扩展消息。
+ * TASK_STATUS (msgId=30050, LEN=11) —— NexusSky M10 多机协同任务状态自定义扩展消息。
  * <p>
  * 承载单架无人机任务执行状态：任务 ID + 状态 + 进度百分比 + 时间戳。
  * <p>
@@ -23,7 +23,7 @@ import java.nio.ByteBuffer;
  */
 public final class TaskStatusMsg extends MavlinkMessage {
 
-    public static final int ID = 470;
+    public static final int ID = 30050;
     public static final int LEN = 11;
     public static final int CRC_EXTRA = 104;
 

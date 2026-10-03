@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * ALARM_TRIGGER (msgId=477) 编解码单测（M14 安防报警）。
+ * ALARM_TRIGGER (msgId=30057) 编解码单测（M14 安防报警）。
  */
-@DisplayName("AlarmTriggerMsg 编解码 (msgId=477)")
+@DisplayName("AlarmTriggerMsg 编解码 (msgId=30057)")
 class AlarmTriggerMsgTest {
 
     private static AlarmTriggerMsg roundtrip(AlarmTriggerMsg msg) {
@@ -18,9 +18,9 @@ class AlarmTriggerMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=477、LEN=68、CRC_EXTRA=64")
+    @DisplayName("消息 ID=30057、LEN=68、CRC_EXTRA=64")
     void messageIdAndConstants() {
-        assertThat(AlarmTriggerMsg.ID).isEqualTo(477);
+        assertThat(AlarmTriggerMsg.ID).isEqualTo(30057);
         assertThat(AlarmTriggerMsg.LEN).isEqualTo(68);
         assertThat(AlarmTriggerMsg.CRC_EXTRA).isEqualTo(64);
     }
@@ -49,7 +49,7 @@ class AlarmTriggerMsgTest {
         AlarmTriggerMsg msg = new AlarmTriggerMsg(
                 0, 0, 0, 0, 0, 0, 0, "");
         assertThat(msg.encode()).hasSize(68);
-        assertThat(msg.messageId()).isEqualTo(477);
+        assertThat(msg.messageId()).isEqualTo(30057);
     }
 
     @Test
@@ -120,7 +120,7 @@ class AlarmTriggerMsgTest {
             0x00, 0x00, 0x00, 0x01,  // timestamp=0x01000000 (LE) = 16777216
             0x01, 0x00, 0x00, 0x00   // lat=1
         };
-        MavlinkFrame frame = new MavlinkFrame(8, 0, 0, 0, 1, 1, 477, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(8, 0, 0, 0, 1, 1, 30057, shortPayload, 0);
         AlarmTriggerMsg msg = AlarmTriggerMsg.decode(frame);
 
         assertThat(msg.timestamp).isEqualTo(16777216L);

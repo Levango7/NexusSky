@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * GRIPPER_COMMAND (msgId=425, LEN=7) —— NexusSky 自定义扩展消息（M2 喷洒物流，FR-28）。
+ * GRIPPER_COMMAND (msgId=30005, LEN=7) —— NexusSky 自定义扩展消息（M2 喷洒物流，FR-28）。
  * <p>
  * 承载抛投控制命令（抓取/投放/复位），由云端/GCS 事件驱动下发到 drone-sim。
  * <p>
@@ -23,7 +23,7 @@ import java.nio.ByteBuffer;
  */
 public final class GripperCommand extends MavlinkMessage {
 
-    public static final int ID = 425;
+    public static final int ID = 30005;
     public static final int LEN = 7;
 
     /** command 枚举值。 */

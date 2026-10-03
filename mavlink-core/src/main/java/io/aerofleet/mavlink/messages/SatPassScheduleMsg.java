@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * SAT_PASS_SCHEDULE (msgId=460, LEN=16) —— NexusSky M7 卫星过境计划预告消息。
+ * SAT_PASS_SCHEDULE (msgId=30040, LEN=16) —— NexusSky M7 卫星过境计划预告消息。
  * <p>
  * 预告卫星可见窗口的起止时间与最大仰角，供 GCS 可视化与任务规划参考（FR-5.1）。
  * 由 drone-sim {@code LinkWindowCalculator} 计算产出并 UDP 上报到 cloud-backend。
@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
  */
 public final class SatPassScheduleMsg extends MavlinkMessage {
 
-    public static final int ID = 460;
+    public static final int ID = 30040;
     public static final int LEN = 16;
     public static final int CRC_EXTRA = 155;
 

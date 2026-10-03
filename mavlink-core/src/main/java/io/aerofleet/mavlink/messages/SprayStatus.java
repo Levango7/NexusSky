@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * SPRAY_STATUS (msgId=423, LEN=12) —— NexusSky 自定义扩展消息（M2 喷洒物流，FR-26）。
+ * SPRAY_STATUS (msgId=30003, LEN=12) —— NexusSky 自定义扩展消息（M2 喷洒物流，FR-26）。
  * <p>
  * 承载当前喷洒状态，由 drone-sim 2Hz 周期下传。
  * <p>
@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  */
 public final class SprayStatus extends MavlinkMessage {
 
-    public static final int ID = 423;
+    public static final int ID = 30003;
     public static final int LEN = 12;
 
     public final boolean enabled;

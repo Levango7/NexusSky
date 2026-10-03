@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * MESH_ROUTE_REQUEST (msgId=451, LEN=12) —— NexusSky M5 AODV-lite 路由请求消息。
+ * MESH_ROUTE_REQUEST (msgId=30031, LEN=12) —— NexusSky M5 AODV-lite 路由请求消息。
  * <p>
  * 源节点广播寻找到目标节点的路径，中间节点转发并建立反向路由，目标节点回传 RREP（FR-01）。
  * <p>
@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
  */
 public final class MeshRouteRequestMsg extends MavlinkMessage {
 
-    public static final int ID = 451;
+    public static final int ID = 30031;
     public static final int LEN = 12;
     public static final int CRC_EXTRA = 54;
 

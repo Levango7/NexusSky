@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 灾害通信监控服务（P2 灾害应急通讯组网扩展）。
  * <p>
  * 管理灾害模式状态（active/inactive）、分簇拓扑信息、QoS 优先级队列状态、
- * 异构链路桥接状态。通过 {@code @EventListener} 接收 MAVLink msgId 480-482 消息。
+ * 异构链路桥接状态。通过 {@code @EventListener} 接收 MAVLink msgId 30060-30062 消息。
  * <p>
  * 线程安全：内部使用 {@link ConcurrentHashMap} + {@link AtomicLong}。
  */
@@ -200,11 +200,11 @@ public class DisasterCommService {
     }
 
     // =====================================================================
-    // @EventListener：监听 MavlinkMessageEvent 处理 msgId 480-482
+    // @EventListener：监听 MavlinkMessageEvent 处理 msgId 30060-30062
     // =====================================================================
 
     /**
-     * QoS_ROUTE_DECISION (msgId=480)：更新 QoS 优先级队列状态。
+     * QoS_ROUTE_DECISION (msgId=30060)：更新 QoS 优先级队列状态。
      */
     @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.QoSRouteDecisionMsg).ID")
     public void onQoSRouteDecision(MavlinkMessageEvent event) {
@@ -220,7 +220,7 @@ public class DisasterCommService {
     }
 
     /**
-     * CLUSTER_FORMATION (msgId=481)：更新分簇拓扑信息。
+     * CLUSTER_FORMATION (msgId=30061)：更新分簇拓扑信息。
      */
     @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.ClusterFormationMsg).ID")
     public void onClusterFormation(MavlinkMessageEvent event) {
@@ -242,7 +242,7 @@ public class DisasterCommService {
     }
 
     /**
-     * DISASTER_MODE_STATUS (msgId=482)：更新灾害模式状态。
+     * DISASTER_MODE_STATUS (msgId=30062)：更新灾害模式状态。
      */
     @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.DisasterModeStatusMsg).ID")
     public void onDisasterModeStatus(MavlinkMessageEvent event) {

@@ -14,7 +14,7 @@ import java.util.List;
  * 星-空-地多层级中继引擎（M7，运行时封装）。
  * <p>
  * 持有 LEO 星座、HAPS 节点列表、层级路由器，由 {@code VirtualDrone.tickOnce} 周期驱动。
- * 产出 SatLinkStatus(459) / SatPassSchedule(460) / HierarchicalRouteDecision(461) 消息并 UDP 上报。
+ * 产出 SatLinkStatus(30039) / SatPassSchedule(30040) / HierarchicalRouteDecision(30041) 消息并 UDP 上报。
  * <p>
  * 生命周期：{@link #start()} → {@link #tick(long)} 周期驱动 → {@link #close()} 主动退出。
  */

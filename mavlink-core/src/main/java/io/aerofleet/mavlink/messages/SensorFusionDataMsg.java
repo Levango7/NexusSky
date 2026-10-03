@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * SENSOR_FUSION_DATA (msgId=474, LEN=24) —— NexusSky M12 多源传感器融合数据自定义扩展消息。
+ * SENSOR_FUSION_DATA (msgId=30054, LEN=24) —— NexusSky M12 多源传感器融合数据自定义扩展消息。
  * <p>
  * 承载融合后的位姿数据：融合经纬度/高度/航向/速度 + 精度 + 传感器位掩码。
  * <p>
@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
  */
 public final class SensorFusionDataMsg extends MavlinkMessage {
 
-    public static final int ID = 474;
+    public static final int ID = 30054;
     public static final int LEN = 24;
     public static final int CRC_EXTRA = 39;
 

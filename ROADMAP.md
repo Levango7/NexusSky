@@ -22,7 +22,7 @@
 - **真实卫星接入预留**：天通/铱星/星链三种卫星通信系统占位实现类，统一 SatelliteLink
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
-   4117 单测全绿（Java surefire 实测；前端已有 vitest 单测 24 例——api.js 会话/预算
+   4122 单测全绿（Java surefire 实测；前端已有 vitest 单测 24 例——api.js 会话/预算
    档位/WS URL 与 Scene3DUtils 坐标契约，Playwright E2E 仍缺，见
    docs/devops-enhancement-plan.md CI7）
   > 第六轮（2026-10-02）明细见 CHANGELOG「Unreleased — 第六轮审查」。此前此处写
@@ -87,7 +87,7 @@
 | 自愈重构 | 邻居超时 → 标记链路断 → 触发 RERR → 受影响节点重新 RREQ |
 | 路由度量 | 跳数 × W1 + RSSI × W2 + 端到端延迟 × W3 |
 | 网状拓扑 | 不限链式，支持任意 DAG/网格拓扑 |
-| MAVLink 新消息 | MeshHeartbeat(450) / MeshRouteRequest(451) / MeshRouteReply(452) / MeshRouteError(453) / MeshNeighborTable(454) |
+| MAVLink 新消息 | MeshHeartbeat(30030) / MeshRouteRequest(30031) / MeshRouteReply(30032) / MeshRouteError(30033) / MeshNeighborTable(30034) |
 
 依赖：M0a（一跳中继基础）。**M5 是 M6/M7/M8/M9 的核心地基。**
 
@@ -99,7 +99,7 @@
 | 容量模型 | 并发用户数 / 吞吐量 / 时延，超载触发拒绝或负载均衡 |
 | 终端接入仿真 | 地面终端（手机/对讲机/传感器）注册、心跳、漫游切换 |
 | 跨无人机漫游 | 终端从机 A 覆盖区移到机 B 覆盖区，无缝切换 |
-| MAVLink 新消息 | CellTowerStatus(455) / CellTowerConfig(456) / CellHandover(457) / GroundTerminalRegister(458) |
+| MAVLink 新消息 | CellTowerStatus(30035) / CellTowerConfig(30036) / CellHandover(30037) / GroundTerminalRegister(30038) |
 
 依赖：M5（mesh 自愈组网提供机间通信 backbone）。
 
@@ -111,7 +111,7 @@
 | 层级路由 | 近端优先：L1 可达不升 L2；不可达逐级升级 |
 | 卫星链路模型 | 高延迟(50-500ms)、可中断（过境窗口）、带宽受限 |
 | 跨层级切换 | 按策略：延迟最优 / 带宽最优 / 可靠性最优 |
-| MAVLink 新消息 | SatLinkStatus(459) / SatPassSchedule(460) / HierarchicalRouteDecision(461) |
+| MAVLink 新消息 | SatLinkStatus(30039) / SatPassSchedule(30040) / HierarchicalRouteDecision(30041) |
 
 依赖：M5（mesh 路由基础）。
 
@@ -122,7 +122,7 @@
 | RF 传播增强 | 植被衰减(ITU-R P.833)、建筑穿透(ITU-R P.2109)、沼泽反射、多径、机间传播 |
 | 飞行约束 | 限飞区（自然保护区）、安全高度（超高层附近）、风切变（山地）、沼泽禁飞 |
 | 灾害地形变更 | 地震→建筑倒塌→遮挡模型动态更新；泥石流→地形高程变更 |
-| MAVLink 新消息 | TerrainTypeMap(462) / TerrainUpdate(463) / FlightRestriction(464) |
+| MAVLink 新消息 | TerrainTypeMap(30042) / TerrainUpdate(30043) / FlightRestriction(30044) |
 
 依赖：M5（mesh 路由需地形感知做 NLOS 中继规划）。
 
@@ -134,7 +134,7 @@
 | 动态重构 | 无人机损毁 / 电量不足 → 重新规划拓扑 + 通知终端漫游 |
 | 优先级调度 | 搜救通讯 > 指挥通讯 > 灾区测绘 > 常规巡检 |
 | 灾害场景预设 | 地震/泥石流/火灾 预设场景，一键启动对应编排 |
-| MAVLink 新消息 | EmergencyMissionPlan(465) / CoverageOptimization(466) / EmergencyPriority(467) |
+| MAVLink 新消息 | EmergencyMissionPlan(30045) / CoverageOptimization(30046) / EmergencyPriority(30047) |
 
 依赖：M5 + M6 + M7 + M8（全部完成后才能编排）。
 
@@ -144,7 +144,7 @@
 | 任务分配引擎 | 综合评分算法：能力匹配(40%) + 电量因子(30%) + 距离因子(20%) + 优先级(10%) |
 | 冲突避免 | 航迹交叉检测 + 时空预留 + 安全距离约束 |
 | 任务队列管理 | 优先级队列 + 全量重分配（无人机损毁后触发） |
-| MAVLink 新消息 | TaskAssignmentMsg(468) / ConflictAlertMsg(469) / TaskStatusMsg(470) |
+| MAVLink 新消息 | TaskAssignmentMsg(30048) / ConflictAlertMsg(30049) / TaskStatusMsg(30050) |
 
 依赖：Baseline（DeviceRegistry 多机状态）。
 
@@ -164,7 +164,7 @@
 | 返航策略 | 电量/GPS/链路触发，最短安全路径 |
 | 避障策略 | 雷达/视觉感知输入 → 速度限制 / 航点偏移 / 紧急悬停 |
 | 自适应航迹 | 风/天气感知 → 航迹动态调整（复用 M0b 气象数据） |
-| MAVLink 新消息 | DecisionEventMsg(471) / AdaptivePathMsg(472) |
+| MAVLink 新消息 | DecisionEventMsg(30051) / AdaptivePathMsg(30052) |
 
 依赖：M0b（气象数据）、M4（雷达感知）。
 
@@ -182,7 +182,7 @@
 | 视频流分析 | 视频帧捕获 → 目标检测(模拟) → 结果回传 |
 | 传感器融合 | IMU + GPS + 气压 + 视觉 → 融合状态估计（卡尔曼滤波简化） |
 | 边缘协调 | cloud-backend 统一调度边缘任务分发 + 结果聚合 |
-| MAVLink 新消息 | EdgeTaskStatusMsg(473) / SensorFusionDataMsg(474) |
+| MAVLink 新消息 | EdgeTaskStatusMsg(30053) / SensorFusionDataMsg(30054) |
 
 依赖：M3（感知成像）、M11（决策引擎）。
 
@@ -199,7 +199,7 @@
 | 轨迹预测 | 基于运动学模型 + 历史航迹 → 短期轨迹预测 |
 | 场景回放 | 历史飞行数据 → 时间轴回放 + 对比分析 |
 | 孪生对比 | 物理实体 vs 虚拟孪生 → 偏差检测 + 告警 |
-| MAVLink 新消息 | TwinStateSyncMsg(475) / PredictionResultMsg(476) |
+| MAVLink 新消息 | TwinStateSyncMsg(30055) / PredictionResultMsg(30056) |
 
 依赖：M12（边缘传感器融合数据源）。
 
@@ -222,7 +222,7 @@
 | LED/蜂鸣器控制 | 机载声光指引，帮助地面搜救人员定位无人机与标记目标 |
 | LoRa 回传通道 | 窄带备用链路，主链路全部中断时保障最低限度指令传达 |
 | GCS Emergency UI 适配 | Budget 模式切换/丐版 Mesh 拓扑可视化/热源搜救标记/声光控制面板 |
-| MAVLink 新消息 | QoSRouteDecisionMsg(480) / ClusterFormationMsg(481) / DisasterModeStatusMsg(482) / BuzzerControlMsg(483) |
+| MAVLink 新消息 | QoSRouteDecisionMsg(30060) / ClusterFormationMsg(30061) / DisasterModeStatusMsg(30062) / BuzzerControlMsg(30063) |
 
 依赖：M5–M9（应急组网/基站/中继/地形/编排）、4a（空地一体化应急指挥）。
 
@@ -344,6 +344,6 @@ M7 ──► E4(5G-A通感)
 1. 每个里程碑走完整 SDD；单个里程碑内尽量原子化（2–4h/任务）。
 2. 代码严格落在已有模块边界内：`cloud-backend`(调度/API)、`drone-sim`(载荷/执行)、
    `mavlink-core`(新消息)、`link-sim`(中继/链路)、`gcs-web`(观察)。
-3. 每个里程碑必须有回归基线：现有 4117 单测（Java） + e2e 脚本不回归。
+3. 每个里程碑必须有回归基线：现有 4122 单测（Java） + e2e 脚本不回归。
 4. 边界诚实声明：工作量 = 协议抽象 + 假数据源，非真硬件实现。
-5. **MAVLink msgId 全局唯一**：已分配 420-441(M0a-M4)、450-467(M5-M9)、468-476(M10-M13)、477-479(4a 安防报警)、480-483(P2 灾害应急通讯组网扩展)，新增从 484+ 起分配。Phase 2 预估 msgId 区间：C2(RID) 使用 `OPEN_DRONE_ID_*` 官方消息族（msgId 12900-12999，MAVLink 官方分配），C5(signing) 使用 MAVLink v2 签名帧（不占新 msgId），其余 C/F/E 系列按需从 484+ 分配。
+5. **MAVLink msgId 全局唯一且避开官方分配带**：2026-10 治理搬迁后自定义消息统一使用私有方言段 **30000-30099**（common.xml 官方拥有 msgId 300-10000 分配带，旧 420-483 段位于其中，420/437/440 已与官方 RADIO_RC_CHANNELS / AVAILABLE_MODES_MONITOR / ILLUMINATOR_STATUS 实锤冲突，全部 51 条已等差平移 +29580）。已分配：30000-30021(M0a-M4)、30030-30047(M5-M9)、30048-30056(M10-M13)、30057-30059(4a 安防报警)、30060-30063(P2 灾害应急通讯组网扩展)；新增从 **30064+** 起分配，30064-30099 为增长预留。冲突防护：`scripts/mavlink-compatibility-check.py --self-test` 内嵌 392 个官方已分配 msgId 快照逐条核对。Phase 2 预估 msgId 区间：C2(RID) 使用 `OPEN_DRONE_ID_*` 官方消息族（msgId 12900-12999，MAVLink 官方分配），C5(signing) 使用 MAVLink v2 签名帧（不占新 msgId），其余 C/F/E 系列按需从 30064+ 分配。

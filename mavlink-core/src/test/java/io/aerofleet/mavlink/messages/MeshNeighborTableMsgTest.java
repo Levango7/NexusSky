@@ -9,11 +9,11 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * MESH_NEIGHBOR_TABLE (msgId=454) 编解码单测（M5 拓扑快照上报，FR-27）。
+ * MESH_NEIGHBOR_TABLE (msgId=30034) 编解码单测（M5 拓扑快照上报，FR-27）。
  * <p>
  * 可变长度消息，覆盖空邻居、多邻居往返、null 列表、上限截断、截断解码。
  */
-@DisplayName("MeshNeighborTableMsg 编解码 (msgId=454)")
+@DisplayName("MeshNeighborTableMsg 编解码 (msgId=30034)")
 class MeshNeighborTableMsgTest {
 
     private static MeshNeighborTableMsg roundtrip(MeshNeighborTableMsg msg) {
@@ -87,7 +87,7 @@ class MeshNeighborTableMsgTest {
         payload[7] = (byte) -50;   // rssi
         payload[8] = 0;            // quality
         payload[9] = 0;            // reserved
-        MavlinkFrame frame = new MavlinkFrame(payload.length, 0, 0, 0, 1, 1, 454, payload, 0);
+        MavlinkFrame frame = new MavlinkFrame(payload.length, 0, 0, 0, 1, 1, 30034, payload, 0);
         MeshNeighborTableMsg msg = MeshNeighborTableMsg.decode(frame);
 
         assertThat(msg.sysid).isEqualTo(1);
@@ -96,9 +96,9 @@ class MeshNeighborTableMsgTest {
     }
 
     @Test
-    @DisplayName("常量：ID=454、HEADER_LEN=6、ENTRY_LEN=4、MAX_NEIGHBORS=255")
+    @DisplayName("常量：ID=30034、HEADER_LEN=6、ENTRY_LEN=4、MAX_NEIGHBORS=255")
     void constants() {
-        assertThat(MeshNeighborTableMsg.ID).isEqualTo(454);
+        assertThat(MeshNeighborTableMsg.ID).isEqualTo(30034);
         assertThat(MeshNeighborTableMsg.HEADER_LEN).isEqualTo(6);
         assertThat(MeshNeighborTableMsg.NEIGHBOR_ENTRY_LEN).isEqualTo(4);
         assertThat(MeshNeighborTableMsg.MAX_NEIGHBORS).isEqualTo(255);

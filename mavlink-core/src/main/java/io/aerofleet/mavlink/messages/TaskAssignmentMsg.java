@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * TASK_ASSIGNMENT (msgId=468, LEN=18) —— NexusSky M10 多机协同任务分配自定义扩展消息。
+ * TASK_ASSIGNMENT (msgId=30048, LEN=18) —— NexusSky M10 多机协同任务分配自定义扩展消息。
  * <p>
  * 承载单架无人机任务分配：任务 ID + 任务类型 + 优先级 + 目标位置 + 被分配系统 ID。
  * <p>
@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
  */
 public final class TaskAssignmentMsg extends MavlinkMessage {
 
-    public static final int ID = 468;
+    public static final int ID = 30048;
     public static final int LEN = 18;
     public static final int CRC_EXTRA = 144;
 

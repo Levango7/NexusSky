@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * COVERAGE_OPTIMIZATION (msgId=466, LEN=24) —— NexusSky M9 应急任务编排自定义扩展消息。
+ * COVERAGE_OPTIMIZATION (msgId=30046, LEN=24) —— NexusSky M9 应急任务编排自定义扩展消息。
  * <p>
  * 承载单架无人机覆盖优化部署方案：目标位置 + 基站类型 + 中继角色 + 发射功率 +
  * 预期覆盖贡献 + 电量预算 + 时间戳。
@@ -30,7 +30,7 @@ import java.nio.ByteBuffer;
  */
 public final class CoverageOptimizationMsg extends MavlinkMessage {
 
-    public static final int ID = 466;
+    public static final int ID = 30046;
     public static final int LEN = 24;
     public static final int CRC_EXTRA = 229;
 

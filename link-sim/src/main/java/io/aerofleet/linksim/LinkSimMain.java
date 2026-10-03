@@ -327,7 +327,7 @@ public final class LinkSimMain {
     }
 
     /**
-     * M0b 雨衰叠加：从 ENVIRONMENT_STATUS（msgId=422）帧松耦合读取 weather + rainRate，
+     * M0b 雨衰叠加：从 ENVIRONMENT_STATUS（msgId=30002）帧松耦合读取 weather + rainRate，
      * 更新下行 EnvAwareImpairmentEngine 环境状态。
      * <p>
      * MAVLink v2 帧布局：STX(1) | LEN(1) | INC(1) | COMPAT(1) | SEQ(1) | SID(1) | CID(1) | MSGID(3B LE) | PAYLOAD | CRC(2)。
@@ -340,7 +340,7 @@ public final class LinkSimMain {
             return;
         }
         int msgId = (data[7] & 0xFF) | ((data[8] & 0xFF) << 8) | ((data[9] & 0xFF) << 16);
-        if (msgId != 422) {  // ENVIRONMENT_STATUS.ID
+        if (msgId != 30002) {  // ENVIRONMENT_STATUS.ID
             return;
         }
         int payloadLen = data[1] & 0xFF;

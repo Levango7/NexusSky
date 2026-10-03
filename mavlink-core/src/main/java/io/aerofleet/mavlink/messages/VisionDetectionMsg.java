@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * VISION_DETECTION (msgId=434, LEN=20) —— NexusSky M3 自定义扩展消息。
+ * VISION_DETECTION (msgId=30014, LEN=20) —— NexusSky M3 自定义扩展消息。
  * 承载单个视觉检测结果（u/v/kind/confidence/trackId + sysid），由 drone-sim
  * {@code SimulatedVisionSource} 产出（FR-23）。一个帧内多个目标分多条消息上报。
  * <p>
@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  */
 public final class VisionDetectionMsg extends MavlinkMessage {
 
-    public static final int ID = 434;
+    public static final int ID = 30014;
     public static final int LEN = 20;
     public static final int CRC_EXTRA = 100;
     /** trackId 字段未关联时的占位值（255）。 */

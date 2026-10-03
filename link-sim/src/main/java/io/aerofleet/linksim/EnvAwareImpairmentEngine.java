@@ -10,7 +10,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * 本类持一个 base 引用，先调 base.verdict() 得既有判决，再叠加雨衰影响。
  * <p>
  * 环境状态由外部通过 {@link #updateEnvironment(int, int)} 松耦合更新
- * （link-sim 监听 ENVIRONMENT_STATUS msgId=422 帧读取 weather + rainRate）。
+ * （link-sim 监听 ENVIRONMENT_STATUS msgId=30002 帧读取 weather + rainRate）。
  * <p>
  * 包私有——由同包 {@link LinkSimMain} 在 --env-coupled 启用时构造。
  */

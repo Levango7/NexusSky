@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * CELL_TOWER_CONFIG (msgId=456) 编解码单测（M6 移动基站载荷抽象，FR-MSG-03）。
+ * CELL_TOWER_CONFIG (msgId=30036) 编解码单测（M6 移动基站载荷抽象，FR-MSG-03）。
  */
-@DisplayName("CellTowerConfigMsg 编解码 (msgId=456)")
+@DisplayName("CellTowerConfigMsg 编解码 (msgId=30036)")
 class CellTowerConfigMsgTest {
 
     private static CellTowerConfigMsg roundtrip(CellTowerConfigMsg msg) {
@@ -31,9 +31,9 @@ class CellTowerConfigMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=456、LEN=7、CRC_EXTRA=190")
+    @DisplayName("消息 ID=30036、LEN=7、CRC_EXTRA=190")
     void messageIdAndConstants() {
-        assertThat(CellTowerConfigMsg.ID).isEqualTo(456);
+        assertThat(CellTowerConfigMsg.ID).isEqualTo(30036);
         assertThat(CellTowerConfigMsg.LEN).isEqualTo(7);
         assertThat(CellTowerConfigMsg.CRC_EXTRA).isEqualTo(190);
     }
@@ -43,14 +43,14 @@ class CellTowerConfigMsgTest {
     void encodeLength() {
         CellTowerConfigMsg msg = new CellTowerConfigMsg(1, 0, 0, 0, 0);
         assertThat(msg.encode()).hasSize(7);
-        assertThat(msg.messageId()).isEqualTo(456);
+        assertThat(msg.messageId()).isEqualTo(30036);
     }
 
     @Test
     @DisplayName("短 payload 容忍解码：仅 1 字节时只还原 sysid")
     void decodeShortPayloadTolerant() {
         byte[] shortPayload = new byte[]{7};
-        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 255, 190, 456, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 255, 190, 30036, shortPayload, 0);
         CellTowerConfigMsg msg = CellTowerConfigMsg.decode(frame);
 
         assertThat(msg.sysid).isEqualTo(7);

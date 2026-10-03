@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * RADAR_TARGET (msgId=438, LEN=28) —— NexusSky M4 硬件抽象自定义扩展消息。
+ * RADAR_TARGET (msgId=30018, LEN=28) —— NexusSky M4 硬件抽象自定义扩展消息。
  * 承载雷达目标报告（目标 ID/距离/方位/俯仰/径向速度/RCS/跟踪状态/sysid），由 drone-sim
  * {@code SimulatedRadar} 产出并上报至 cloud-backend（FR-19）。
  * <p>
@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  */
 public final class RadarTargetMsg extends MavlinkMessage {
 
-    public static final int ID = 438;
+    public static final int ID = 30018;
     public static final int LEN = 28;
     public static final int CRC_EXTRA = 152;
 

@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * EMERGENCY_PRIORITY (msgId=467, LEN=50) —— NexusSky M9 应急任务编排自定义扩展消息。
+ * EMERGENCY_PRIORITY (msgId=30047, LEN=50) —— NexusSky M9 应急任务编排自定义扩展消息。
  * <p>
  * 承载优先级调度事件：planId + taskId + 优先级 + 动作 + 被抢占任务 ID + 原因 + 时间戳。
  * <p>
@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
  */
 public final class EmergencyPriorityMsg extends MavlinkMessage {
 
-    public static final int ID = 467;
+    public static final int ID = 30047;
     public static final int LEN = 50;
     public static final int CRC_EXTRA = 208;
     private static final int REASON_LEN = 32;

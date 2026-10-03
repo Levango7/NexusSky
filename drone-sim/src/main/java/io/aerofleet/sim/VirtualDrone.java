@@ -198,7 +198,7 @@ public final class VirtualDrone implements AutoCloseable {
     private final boolean meshEnabled;
     /**
      * M7 星-空-地多层级中继引擎（FR-5.1~5.5）：null 当 !config.satRelayEnabled（既有行为不变，DFX 4.5）。
-     * 由构造器创建，tickOnce 每 tick 调 satRelayEngine.tick()，产出 459/460/461 消息。
+     * 由构造器创建，tickOnce 每 tick 调 satRelayEngine.tick()，产出 30039/30040/30041 消息。
      */
     private final SatRelayEngine satRelayEngine;
     /** sat-relay 引擎启用标志（config.satRelayEnabled 的快照，避免 tickOnce 每次读 config）。 */
@@ -608,8 +608,8 @@ public final class VirtualDrone implements AutoCloseable {
                     // FR-12 灯光控制消息：更新 ledState + 回 COMMAND_ACK
                     handleLedControl(led);
                 }
-                // M5 mesh 路由消息分发（msgId 450-453，FR-01~22a）
-                // 注意 MeshNeighborTableMsg(454) 不在 drone-sim 内部处理（仅发送不接收）
+                // M5 mesh 路由消息分发（msgId 30030-30033，FR-01~22a）
+                // 注意 MeshNeighborTableMsg(30034) 不在 drone-sim 内部处理（仅发送不接收）
                 if (meshEnabled) {
                     java.net.InetSocketAddress meshSrcAddr =
                             (java.net.InetSocketAddress) transport.getLastPeer();
@@ -624,7 +624,7 @@ public final class VirtualDrone implements AutoCloseable {
                         meshRouter.onRouteError(mer, meshSrcAddr, frame.getSystemId());
                     }
                 }
-                // M6 移动基站载荷消息分发（msgId 456-458，FR-CT-05 / FR-TERM-06 / FR-HO-03）
+                // M6 移动基站载荷消息分发（msgId 30036-30038，FR-CT-05 / FR-TERM-06 / FR-HO-03）
                 if (celltowerEnabled) {
                     if (msg instanceof io.aerofleet.mavlink.messages.CellTowerConfigMsg ctc) {
                         handleCellTowerConfig(ctc, frame.getSystemId());
@@ -1512,7 +1512,7 @@ public final class VirtualDrone implements AutoCloseable {
             if (actuatorsEnabled) {
                 sendPayloadStatus();
             }
-            // M4 LiDAR 数据 1Hz（FR-21）：lidarSource 注入时下传 LidarDataMsg(440)
+            // M4 LiDAR 数据 1Hz（FR-21）：lidarSource 注入时下传 LidarDataMsg(30020)
             if (lidarSource != null) {
                 sendLidarData();
             }
@@ -1525,17 +1525,17 @@ public final class VirtualDrone implements AutoCloseable {
         if (tickCount % 4 == 0) {
             sendGlobalPosition();
             sendAttitude();
-            // M3 避障检测 5Hz（FR-14）：obstacleDetector 启用时调 detect() → ObstacleReportMsg(430) 上报
+            // M3 避障检测 5Hz（FR-14）：obstacleDetector 启用时调 detect() → ObstacleReportMsg(30010) 上报
             // 与既有 5Hz 遥测同分频，未注入时不产生感知上报（DFX 4.5）
             if (obstacleDetector != null && obstacleEnabled) {
                 runObstacleDetection();
             }
-            // M4 气动遥测 5Hz（FR-20）：rotorAero 启用时下传 RotorTelemetryMsg(439)
+            // M4 气动遥测 5Hz（FR-20）：rotorAero 启用时下传 RotorTelemetryMsg(30019)
             if (rotorAero != null && rotorConfig != null && "aero".equals(physicsModel)) {
                 sendRotorTelemetry();
             }
         }
-        // M4 IMU 数据 10Hz（FR-22）：imuSource 注入时下传 ImuDataMsg(441)
+        // M4 IMU 数据 10Hz（FR-22）：imuSource 注入时下传 ImuDataMsg(30021)
         if (imuSource != null && tickCount % 2 == 0) {
             sendImuData();
         }
@@ -1905,7 +1905,7 @@ public final class VirtualDrone implements AutoCloseable {
     // ------------------------------------------------------------------
 
     /**
-     * FR-26 2Hz 喷洒状态上报：下传 SPRAY_STATUS(423) 消息。
+     * FR-26 2Hz 喷洒状态上报：下传 SPRAY_STATUS(30003) 消息。
      * 由 telemetryRates 2Hz 分频块调用，actuatorsEnabled 时生效。
      */
     private void sendSprayStatus() throws IOException {
@@ -1920,7 +1920,7 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     /**
-     * FR-29 1Hz 负载状态上报：下传 PAYLOAD_STATUS(426) 消息。
+     * FR-29 1Hz 负载状态上报：下传 PAYLOAD_STATUS(30006) 消息。
      * 由 telemetryRates 1Hz 分频块调用，actuatorsEnabled 时生效。
      */
     private void sendPayloadStatus() throws IOException {
@@ -1982,13 +1982,13 @@ public final class VirtualDrone implements AutoCloseable {
     // ------------------------------------------------------------------
 
     /**
-     * FR-14 5Hz 避障检测：调 obstacleDetector.detect() → ObstacleReportMsg(430) 上报。
+     * FR-14 5Hz 避障检测：调 obstacleDetector.detect() → ObstacleReportMsg(30010) 上报。
      * 异常 try-catch + WARN 日志，不中断 tick 循环（异常 5.4.2）。
      */
     private void runObstacleDetection() {
         try {
             ObstacleDetector.ObstacleReport report = obstacleDetector.detect();
-            // 经 ObstacleReportMsg(430) 上报至 cloud-backend
+            // 经 ObstacleReportMsg(30010) 上报至 cloud-backend
             float dist = report.distance() == Double.MAX_VALUE
                     ? Float.MAX_VALUE : (float) report.distance();
             send(new ObstacleReportMsg(
@@ -2173,7 +2173,7 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     /**
-     * FR-06 雷达扫描：调 radar.scan() → RadarTargetMsg(438) + RadarScanMsg(437) 上报。
+     * FR-06 雷达扫描：调 radar.scan() → RadarTargetMsg(30018) + RadarScanMsg(30017) 上报。
      * 按 scanPeriodMs 周期触发（由 telemetryRates 1Hz 分频块调用时检查周期）。
      */
     private void runRadarScan() {
@@ -2196,7 +2196,7 @@ public final class VirtualDrone implements AutoCloseable {
                 targets.add(new SyntheticTarget(t.id, t.north, t.east, 0, velN, velE, 0, kindStr));
             }
             java.util.List<RadarTargetReport> reports = radar.scan(radarConfig, targets);
-            // 上报每个目标 → RadarTargetMsg(438)
+            // 上报每个目标 → RadarTargetMsg(30018)
             for (RadarTargetReport r : reports) {
                 send(new RadarTargetMsg(
                         r.targetId(), (float) r.distance(), (float) r.azimDeg(),
@@ -2204,7 +2204,7 @@ public final class VirtualDrone implements AutoCloseable {
                         r.trackState().ordinal(), config.sysid,
                         r.timestamp()));
             }
-            // 上报扫描状态 → RadarScanMsg(437)
+            // 上报扫描状态 → RadarScanMsg(30017)
             send(new RadarScanMsg(
                     radarConfig.mode().ordinal(),
                     (float) radarConfig.azimCenter(), (float) radarConfig.elevCenter(),
@@ -2215,7 +2215,7 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     /**
-     * FR-20 气动遥测上报 5Hz：下传 RotorTelemetryMsg(439)。
+     * FR-20 气动遥测上报 5Hz：下传 RotorTelemetryMsg(30019)。
      * <p>
      * M4 代码审查 #8：复用 tickOnce 缓存的 lastAeroResult 而非重新调 rotorAero.compute()，
      * 避免 20Hz tick + 5Hz 遥测重复计算。缓存为空时跳过本次上报。
@@ -2240,7 +2240,7 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     /**
-     * FR-21 LiDAR 数据上报 1Hz：下传 LidarDataMsg(440)。
+     * FR-21 LiDAR 数据上报 1Hz：下传 LidarDataMsg(30020)。
      */
     private void sendLidarData() {
         try {
@@ -2254,7 +2254,7 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     /**
-     * FR-22 IMU 数据上报 10Hz：下传 ImuDataMsg(441)。
+     * FR-22 IMU 数据上报 10Hz：下传 ImuDataMsg(30021)。
      */
     private void sendImuData() {
         try {

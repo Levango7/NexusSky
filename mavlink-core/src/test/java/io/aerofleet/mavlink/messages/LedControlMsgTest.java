@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * LedControlMsg 编解码单测（FR-10/12，tasks T11）：
- * msgId=420 往返一致、全灯效模式支持、phaseStartUs 大值精度、CRC_EXTRA 注册一致。
+ * msgId=30000 往返一致、全灯效模式支持、phaseStartUs 大值精度、CRC_EXTRA 注册一致。
  */
 class LedControlMsgTest {
 
@@ -23,7 +23,7 @@ class LedControlMsgTest {
         MavlinkParser.ParseResult r = new MavlinkParser().parse(ByteBuffer.wrap(frame.encodeV2()));
         assertNotNull(r, "parser must accept the frame (CRC registered?)");
         MavlinkMessage decoded = MavlinkMessage.decode(r.frame);
-        assertNotNull(decoded, "decode must dispatch msgId=420 to LedControlMsg");
+        assertNotNull(decoded, "decode must dispatch msgId=30000 to LedControlMsg");
         assertTrue(decoded instanceof LedControlMsg, "decoded should be LedControlMsg");
         return (LedControlMsg) decoded;
     }
@@ -70,16 +70,16 @@ class LedControlMsgTest {
 
     @Test
     void msgIdIs420() {
-        assertEquals(420, LedControlMsg.ID);
+        assertEquals(30000, LedControlMsg.ID);
         LedControlMsg msg = new LedControlMsg(1, 1, 0, 0, 0, 0, 0, 0,
                 false, false, 0L, 0, 0);
-        assertEquals(420, msg.messageId());
+        assertEquals(30000, msg.messageId());
     }
 
     @Test
     void crcExtraCorrect() {
         assertTrue(MavlinkMessageInfo.isKnown(LedControlMsg.ID),
-                "msgId=420 should be registered");
+                "msgId=30000 should be registered");
         assertEquals(LedControlMsg.LEN, MavlinkMessageInfo.lengthOf(LedControlMsg.ID),
                 "registered LEN should match LedControlMsg.LEN");
         assertEquals(LedControlMsg.CRC_EXTRA, MavlinkMessageInfo.crcExtraOf(LedControlMsg.ID),

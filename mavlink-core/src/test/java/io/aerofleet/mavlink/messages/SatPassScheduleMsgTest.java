@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * SAT_PASS_SCHEDULE (msgId=460) 编解码单测（M7 星-空-地多层级中继，FR-5.1）。
+ * SAT_PASS_SCHEDULE (msgId=30040) 编解码单测（M7 星-空-地多层级中继，FR-5.1）。
  */
-@DisplayName("SatPassScheduleMsg 编解码 (msgId=460)")
+@DisplayName("SatPassScheduleMsg 编解码 (msgId=30040)")
 class SatPassScheduleMsgTest {
 
     private static SatPassScheduleMsg roundtrip(SatPassScheduleMsg msg) {
@@ -33,9 +33,9 @@ class SatPassScheduleMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=460、LEN=16、CRC_EXTRA=155")
+    @DisplayName("消息 ID=30040、LEN=16、CRC_EXTRA=155")
     void messageIdAndConstants() {
-        assertThat(SatPassScheduleMsg.ID).isEqualTo(460);
+        assertThat(SatPassScheduleMsg.ID).isEqualTo(30040);
         assertThat(SatPassScheduleMsg.LEN).isEqualTo(16);
         assertThat(SatPassScheduleMsg.CRC_EXTRA).isEqualTo(155);
     }
@@ -45,7 +45,7 @@ class SatPassScheduleMsgTest {
     void encodeLength() {
         SatPassScheduleMsg msg = new SatPassScheduleMsg(1, 0L, 1000L, 45, 0, 0L);
         assertThat(msg.encode()).hasSize(16);
-        assertThat(msg.messageId()).isEqualTo(460);
+        assertThat(msg.messageId()).isEqualTo(30040);
     }
 
     @Test
@@ -59,7 +59,7 @@ class SatPassScheduleMsgTest {
     @DisplayName("短 payload 容忍解码")
     void decodeShortPayloadTolerant() {
         byte[] shortPayload = new byte[]{15, 0};
-        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 1, 1, 460, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 1, 1, 30040, shortPayload, 0);
         SatPassScheduleMsg msg = SatPassScheduleMsg.decode(frame);
 
         assertThat(msg.satId).isEqualTo(15);
@@ -67,8 +67,8 @@ class SatPassScheduleMsgTest {
     }
 
     @Test
-    @DisplayName("msgId 460 全局唯一")
+    @DisplayName("msgId 30040 全局唯一")
     void msgIdGloballyUnique() {
-        assertThat(SatPassScheduleMsg.ID).isNotIn(459, 461, 450, 454);
+        assertThat(SatPassScheduleMsg.ID).isNotIn(30039, 30041, 30030, 30034);
     }
 }

@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * PREDICTION_RESULT (msgId=476, LEN=20) —— NexusSky M13 轨迹预测结果自定义扩展消息。
+ * PREDICTION_RESULT (msgId=30056, LEN=20) —— NexusSky M13 轨迹预测结果自定义扩展消息。
  * <p>
  * 承载轨迹预测结果：预测经纬度/高度 + 预测时域 + 置信度 + 轨迹点数。
  * <p>
@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
  */
 public final class PredictionResultMsg extends MavlinkMessage {
 
-    public static final int ID = 476;
+    public static final int ID = 30056;
     public static final int LEN = 20;
     public static final int CRC_EXTRA = 139;
 

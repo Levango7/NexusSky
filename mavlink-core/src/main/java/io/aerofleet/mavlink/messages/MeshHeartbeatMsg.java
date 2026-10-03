@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * MESH_HEARTBEAT (msgId=450, LEN=24) —— NexusSky M5 应急 mesh 自愈组网自定义扩展消息。
+ * MESH_HEARTBEAT (msgId=30030, LEN=24) —— NexusSky M5 应急 mesh 自愈组网自定义扩展消息。
  * <p>
  * 承载节点周期性 HELLO 广播：sysid + 经纬高 + 电量 + 邻居数 + 时间戳，由 drone-sim
  * {@code MeshRouter} 周期产出并 UDP 广播到 mesh 组播地址（FR-09）。
@@ -28,7 +28,7 @@ import java.nio.ByteBuffer;
  */
 public final class MeshHeartbeatMsg extends MavlinkMessage {
 
-    public static final int ID = 450;
+    public static final int ID = 30030;
     public static final int LEN = 24;
     public static final int CRC_EXTRA = 193;
 

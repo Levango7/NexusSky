@@ -162,7 +162,7 @@ gateway.TelemetryIngestService 依赖：
    ```java
    @Component
    public class RadarMessageListener {
-       @EventListener(condition = "#event.msgId == 437")
+       @EventListener(condition = "#event.msgId == 30017")
        public void onRadarScan(MavlinkMessageEvent event) { ... }
    }
    ```
@@ -257,7 +257,7 @@ public class DecisionEngine {
 
 | 功能域 | 当前状态 | 插件化价值 | 优先级 |
 |---|---|---|---|
-| **载荷类型** | 硬编码（Spray/Gripper/Payload msgId 423-426） | 🔴 高 — 不同行业需要不同载荷 | P0 |
+| **载荷类型** | 硬编码（Spray/Gripper/Payload msgId 30003-30006） | 🔴 高 — 不同行业需要不同载荷 | P0 |
 | **通信协议** | 硬编码（UDP MAVLink only） | 🔴 高 — 需支持 MQTT/HTTP/gRPC | P0 |
 | **AI 决策策略** | 硬编码 3 策略 | 🟡 中 — 新场景需新策略 | P1 |
 | **传感器类型** | 硬编码（Radar/LiDAR/IMU/Thermal） | 🟡 中 — 新传感器接入频繁 | P1 |

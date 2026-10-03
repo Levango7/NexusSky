@@ -187,6 +187,10 @@ public final class MavlinkFrame {
      * <p>
      * 解析流程：校验 STX=0xFD → 解析 LEN/INC/COMPAT/SEQ/SID/CID/MSGID/PAYLOAD/CRC →
      * 若 INC bit 0 置位且长度足够则解析签名数据（linkId + timestamp + signature）。
+     * <p>
+     * 注意：本方法只做结构解析，<b>不校验 CRC</b>（CRC 字段仅被读出存放）。
+     * 需要一次性强校验时用 {@link #decodeV2Verified(byte[])}；
+     * 生产流式接收路径用 {@link MavlinkParser}（解析时逐帧校验，坏帧自动跳过）。
      *
      * @param raw 原始字节序列
      * @return 解析后的 MavlinkFrame 实例
@@ -237,6 +241,64 @@ public final class MavlinkFrame {
 
         return new MavlinkFrame(len, inc, compat, seq, sid, cid, msgId,
                 payload, crc, linkId, timestamp, signature);
+    }
+
+    /**
+     * 按 v2 语义计算本帧的期望 CRC-16/X.25：len + incompat + compat + seq + sysid + compid +
+     * msgId 3 字节 + payload + CRC_EXTRA，覆盖范围与 {@link MavlinkParser} 的 computeCrc
+     * 完全一致。CRC_EXTRA 取自 {@link MavlinkMessageInfo} 注册表，msgId 未注册时抛
+     * {@link MavlinkException}。
+     */
+    private int computeExpectedCrcV2() {
+        int expected = MavlinkCrc.init();
+        expected = MavlinkCrc.accumulate(expected, payloadLength);
+        expected = MavlinkCrc.accumulate(expected, incompatibilityFlags);
+        expected = MavlinkCrc.accumulate(expected, compatibilityFlags);
+        expected = MavlinkCrc.accumulate(expected, sequence);
+        expected = MavlinkCrc.accumulate(expected, systemId);
+        expected = MavlinkCrc.accumulate(expected, componentId);
+        expected = MavlinkCrc.accumulate(expected, messageId & 0xFF);
+        expected = MavlinkCrc.accumulate(expected, (messageId >> 8) & 0xFF);
+        expected = MavlinkCrc.accumulate(expected, (messageId >> 16) & 0xFF);
+        expected = MavlinkCrc.accumulate(expected, payload, 0, payload.length);
+        expected = MavlinkCrc.accumulate(expected, MavlinkMessageInfo.crcExtraOf(messageId));
+        return expected;
+    }
+
+    /**
+     * 校验本帧 CRC（v2 语义，含 CRC_EXTRA）。
+     * <p>
+     * v1 帧经 {@link MavlinkParser} 归一化后 incompat/compat 为 0，但 v1 官方 CRC 不覆盖
+     * 这两个字节，因此本方法仅对 v2 原生帧给出正确结论；v1 帧的 CRC 由 Parser 在
+     * ingestion 时按 v1 公式校验。
+     *
+     * @return CRC 一致返回 true
+     * @throws MavlinkException msgId 未注册（无 CRC_EXTRA 可查）时
+     */
+    public boolean verifyChecksum() {
+        return computeExpectedCrcV2() == crc;
+    }
+
+    /**
+     * 解析并强校验 v2 帧：{@link #decodeV2(byte[])} 的校验版。
+     * <p>
+     * 结构解析成功后额外校验 CRC：不一致或 msgId 未注册时抛 {@link MavlinkException}。
+     * 适合测试与工具代码对单帧做一次性强校验；生产流式接收用 {@link MavlinkParser}。
+     *
+     * @param raw 原始字节序列
+     * @return CRC 校验通过的帧
+     * @throws IllegalArgumentException 结构不合法（STX 错误/长度不足）
+     * @throws MavlinkException CRC 不一致或 msgId 未注册
+     */
+    public static MavlinkFrame decodeV2Verified(byte[] raw) {
+        MavlinkFrame frame = decodeV2(raw);
+        int expected = frame.computeExpectedCrcV2();
+        if (expected != frame.crc) {
+            throw new MavlinkException("v2 帧 CRC 校验失败: msgId=" + frame.messageId
+                    + ", expected=0x" + Integer.toHexString(expected)
+                    + ", received=0x" + Integer.toHexString(frame.crc));
+        }
+        return frame;
     }
 
     public int getPayloadLength() {

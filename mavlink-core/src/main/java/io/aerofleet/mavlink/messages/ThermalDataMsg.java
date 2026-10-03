@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * THERMAL_DATA (msgId=432, LEN=24) —— NexusSky M3 自定义扩展消息。
+ * THERMAL_DATA (msgId=30012, LEN=24) —— NexusSky M3 自定义扩展消息。
  * 承载热成像温度场分析摘要（均值/最小/最高/标准差/热点数 + sysid），由 drone-sim
  * {@code SimulatedThermalSource} 产出（FR-21）。
  * <p>
@@ -26,7 +26,7 @@ import java.nio.ByteBuffer;
  */
 public final class ThermalDataMsg extends MavlinkMessage {
 
-    public static final int ID = 432;
+    public static final int ID = 30012;
     public static final int LEN = 24;
     public static final int CRC_EXTRA = 255;
 

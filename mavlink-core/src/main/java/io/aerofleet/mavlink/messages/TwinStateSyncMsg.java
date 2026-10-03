@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * TWIN_STATE_SYNC (msgId=475, LEN=28) —— NexusSky M13 数字孪生状态同步自定义扩展消息。
+ * TWIN_STATE_SYNC (msgId=30055, LEN=28) —— NexusSky M13 数字孪生状态同步自定义扩展消息。
  * <p>
  * 承载数字孪生实体与物理实体的状态同步：孪生经纬度/高度/航向/速度/电量 + 同步时间戳 + 漂移量。
  * <p>
@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  */
 public final class TwinStateSyncMsg extends MavlinkMessage {
 
-    public static final int ID = 475;
+    public static final int ID = 30055;
     public static final int LEN = 28;
     public static final int CRC_EXTRA = 208;
 

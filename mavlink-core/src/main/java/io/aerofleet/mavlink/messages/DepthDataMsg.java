@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * DEPTH_DATA (msgId=433, LEN=20) —— NexusSky M3 自定义扩展消息。
+ * DEPTH_DATA (msgId=30013, LEN=20) —— NexusSky M3 自定义扩展消息。
  * 承载深度感知数据摘要（最近距离/方向/点云密度/点数 + sysid），由 drone-sim
  * {@code SimulatedDepthSource} 产出（FR-22）。
  * <p>
@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
  */
 public final class DepthDataMsg extends MavlinkMessage {
 
-    public static final int ID = 433;
+    public static final int ID = 30013;
     public static final int LEN = 20;
     public static final int CRC_EXTRA = 171;
 

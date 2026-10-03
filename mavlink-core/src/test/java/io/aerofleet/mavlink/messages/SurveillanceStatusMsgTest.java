@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * SURVEILLANCE_STATUS (msgId=479) 编解码单测（M14 安防报警）。
+ * SURVEILLANCE_STATUS (msgId=30059) 编解码单测（M14 安防报警）。
  */
-@DisplayName("SurveillanceStatusMsg 编解码 (msgId=479)")
+@DisplayName("SurveillanceStatusMsg 编解码 (msgId=30059)")
 class SurveillanceStatusMsgTest {
 
     private static SurveillanceStatusMsg roundtrip(SurveillanceStatusMsg msg) {
@@ -18,9 +18,9 @@ class SurveillanceStatusMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=479、LEN=14、CRC_EXTRA=184")
+    @DisplayName("消息 ID=30059、LEN=14、CRC_EXTRA=184")
     void messageIdAndConstants() {
-        assertThat(SurveillanceStatusMsg.ID).isEqualTo(479);
+        assertThat(SurveillanceStatusMsg.ID).isEqualTo(30059);
         assertThat(SurveillanceStatusMsg.LEN).isEqualTo(14);
         assertThat(SurveillanceStatusMsg.CRC_EXTRA).isEqualTo(184);
     }
@@ -47,7 +47,7 @@ class SurveillanceStatusMsgTest {
         SurveillanceStatusMsg msg = new SurveillanceStatusMsg(
                 0, 0, 0, 0, 0, 0, 0);
         assertThat(msg.encode()).hasSize(14);
-        assertThat(msg.messageId()).isEqualTo(479);
+        assertThat(msg.messageId()).isEqualTo(30059);
     }
 
     @Test
@@ -120,7 +120,7 @@ class SurveillanceStatusMsgTest {
             0x01, 0x00, 0x00, 0x00,  // uptimeSec=1
             0x01                     // deviceId 高字节缺失（不完整，不读）
         };
-        MavlinkFrame frame = new MavlinkFrame(9, 0, 0, 0, 1, 1, 479, shortPayload, 0);
+        MavlinkFrame frame = new MavlinkFrame(9, 0, 0, 0, 1, 1, 30059, shortPayload, 0);
         SurveillanceStatusMsg msg = SurveillanceStatusMsg.decode(frame);
 
         assertThat(msg.lastEventMs).isEqualTo(12345L);

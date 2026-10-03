@@ -44,9 +44,9 @@ public final class EspNowTransport implements AutoCloseable {
             0,    // HEARTBEAT
             30,   // ATTITUDE
             76,   // COMMAND_LONG
-            477,  // AlarmTriggerMsg（自定义）
-            478,  // AlarmAckMsg（自定义）
-            479   // SurveillanceStatusMsg（自定义）
+            30057,  // AlarmTriggerMsg（自定义）
+            30058,  // AlarmAckMsg（自定义）
+            30059   // SurveillanceStatusMsg（自定义）
     };
 
     /** 信道标识符 → 共享 ESP-NOW 广播信道的全局映射。 */

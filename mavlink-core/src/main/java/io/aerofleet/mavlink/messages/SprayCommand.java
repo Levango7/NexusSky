@@ -6,7 +6,7 @@ import io.aerofleet.mavlink.PayloadCodec;
 import java.nio.ByteBuffer;
 
 /**
- * SPRAY_COMMAND (msgId=424, LEN=6) —— NexusSky 自定义扩展消息（M2 喷洒物流，FR-27）。
+ * SPRAY_COMMAND (msgId=30004, LEN=6) —— NexusSky 自定义扩展消息（M2 喷洒物流，FR-27）。
  * <p>
  * 承载喷洒控制命令（开/关/设流量/紧急停喷），由云端/GCS 事件驱动下发到 drone-sim。
  * <p>
@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
  */
 public final class SprayCommand extends MavlinkMessage {
 
-    public static final int ID = 424;
+    public static final int ID = 30004;
     public static final int LEN = 6;
 
     /** command 枚举值。 */
