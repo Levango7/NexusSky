@@ -111,7 +111,12 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
 
         // Extract and store client IP for connection-limit checks
         String clientIp = extractClientIp(session);
-        session.getAttributes().put(ATTR_CLIENT_IP, clientIp);
+        // ConcurrentHashMap 不接受 null value：写 null 会抛 NPE 并把整条连接
+        // 以 1011 打死（客户端表现为"遥测连上了又立刻断"）。取不到就干脆不写，
+        // 读取侧本来就按 null 处理（见下方限流分支与断连清理）。
+        if (clientIp != null) {
+            session.getAttributes().put(ATTR_CLIENT_IP, clientIp);
+        }
 
         // Check per-IP connection limit
         if (clientIp != null && maxConnectionsPerIp > 0) {
@@ -127,7 +132,11 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
 
         // Extract and store tenant ID for connection-limit checks
         Integer tenantId = extractTenantId(session);
-        session.getAttributes().put(ATTR_TENANT_ID, tenantId);
+        // 同上：dev 模式与"token 无租户归属"都会得到 null（全局域），
+        // 此时不写属性 = 全局会话，dispatch 的可见性判定按 null 语义走。
+        if (tenantId != null) {
+            session.getAttributes().put(ATTR_TENANT_ID, tenantId);
+        }
 
         // Check per-tenant connection limit
         if (tenantId != null && maxConnectionsPerTenant > 0) {
