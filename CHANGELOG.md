@@ -45,6 +45,8 @@
 
 **新增测试**：`StreamTokenServiceTest`(9)、`StreamTokenFilterTest`(10)、`AuthControllerTest` 扩展（+4 流令牌端点）、`RoleInterceptorTest` 扩展（+5 第三角色源/优先级/fail-closed），`AlarmEventStoreTest` 扩展（+2 scoped 口径）；`gcs-web` `api.test.js` 扩展（SSE URL 构造）。
 
+**CI 收口修复**（`bddd0a4`，2026-10-03）：首轮 CI 红两处——(1) Docs test-count gate：4 个漏同步文档（`pricing-strategy`/`demo-scenarios`/`customer-onboarding-guide`/`low-altitude-economy-demand-research`）仍声称 4084/2150，已对齐 4114/2180（`check-test-count-docs.py` 全部一致）；(2) Integration Tests Pass B 断言 9 开流得 `000`：`SseEmitter` 响应头要等首次 `send()` 才提交，而静默期（无增量事件）首次发送是 15s 心跳，超出 `-m 3` 取证窗口——修复为两个 SSE 端点（`AlarmController.streamEvents`/`SurveillanceController.subscribeEvents`）**建立即发一条 `stream-established` 注释**，响应头即刻提交（也是 SSE 最佳实践：客户端即时确认连接）。本地实跑 IT 全绿（断言 9 四连绿：签发 200/开流 200/复用 401/无凭证 401），`AlarmControllerTest` 29/29 绿，master CI 19/19 job success。
+
 ---
 
 ## [Unreleased] — CI 集成测试适配 fail-closed 配置守卫（jwt-secret / encryption.key）（2026-10-03）
