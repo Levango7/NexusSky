@@ -663,6 +663,67 @@ NexusSky/
 `cloud-backend/src/test/java/io/aerofleet/cloud/security/chain/HttpAuthChainTest.java`
 与 `api/ws/TelemetryWsTenantIsolationTest.java`（以 `dev-mode=false` 起完整过滤器链）。
 
+### 前端测试（2026-10-01 建立）
+
+此前前端**零测试**（`package.json` 无 test 脚本、`src` 下无测试文件，仅有
+`scripts/check-frontend.cjs` 这个不含行为断言的语法/import 图检查器），
+与后端 3869 例形成断层。现引入 vitest 3 + jsdom + Testing Library：
+
+| 命令 | 作用 |
+|---|---|
+| `npm run test` | `vitest run`，CI 的 GCS Web job 门禁 |
+| `npm run test:watch` | 监听模式 |
+| `npm run test:coverage` | v8 覆盖率 |
+| `npm run check` | 语法/import 图检查 + 单测 |
+
+首批 **46 例**（5 个文件），刻意只覆盖三类**已确认缺陷**与相关契约：
+
+- `test/droneSelection.test.js`（8）——`selected` 是**对象**而非机号这条契约。
+  修复前 `MapView` 两处写 `selected === sysid`，恒 false，「选中机标记高亮」与
+  「选中机轨迹渐变」两段代码从未执行过，且运行期零信号。
+- `test/telemetryHistory.test.jsx`（7）——历史曾把所有机型的遥测塞进**同一个扁平
+  数组**而消费端从不过滤 sysid，2 架机以上时曲线把不同飞机的数据交错画在一起。
+  现按 sysid 分桶（每桶 300 点 = 5Hz×60s，与图表窗口配套）。
+- `test/telemetryCharts.test.jsx`（7）——曲线渲染侧的 sysid 过滤，含「该机无数据时
+  不借用别机数值」「实时点带 sysid 不被过滤掉」两条边界。
+- `test/flightCommands.test.jsx`（18）——飞行命令二次确认。`arm`/`disarm`/`takeoff`/
+  `start_mission`/`kill` 五个不可逆命令取消时不得下发；**`rtl` 刻意不确认**
+  （应急回收动作不该被模态框挡住，QGC / Mission Planner 同样如此，此处有断言固化）。
+- `test/joystickDisarm.test.jsx`（6）——摇杆上锁按钮的二次确认，含「取消时**不得**
+  掐断正在进行的发送循环」这条顺序回归（确认必须早于停发，否则取消会留下
+  摇杆死区而飞机仍在飞）。
+
+覆盖率阈值暂未设：前端基线原为零，一上来卡阈值只会让 CI 立刻变红。
+先由 CI 实测产出基线，之后按模块逐步抬高。
+
+### 前端测试第二批：组件逻辑与单一真相源（2026-10-02）
+
+第二批补 **72 例**（118 例总量）。做法是先把**与 React 无关的纯逻辑**从组件里
+抽到 `src/utils/`，再对其做行为断言——挂载整个组件树才够得着的逻辑，恰恰是
+最该被测的那部分。
+
+新增模块：`utils/statusMeta.js`、`utils/battery.js`、`utils/geo.js`、`utils/format.js`。
+
+抽出过程中发现两个此前没被记录的问题：
+
+1. **电量分级有 6 份，且分成两套互不相同的阈值**——`DashboardPanel` / `DroneList` /
+   `TelemetryCharts` / `TelemetryPanel` 用 20/40，`EmergencyOrchPanel` /
+   `UnifiedCommandPanel` 用 15/30。同一架飞机在总览面板显示绿色、在指挥表格里
+   显示黄色，操作员会以为数据不一致。已统一为 20/40，阈值集中在
+   `BATT_CRIT_AT` / `BATT_WARN_AT`。
+2. **`Number('') === 0`**——原 `battClass` / `battColor` 只判 `b == null`，
+   空串电量会被当成 0% 显示成红色告警。`battLevel` 补上空串与 NaN 判定。
+
+| 文件 | 例数 | 覆盖 |
+|---|---|---|
+| `test/battery.test.js` | 10 | 判级边界、三个访问器全域一致性、全域单调性 |
+| `test/statusMeta.test.js` | 14 | 优先级/严重度规范化 +「返回值必定可查表」不变式 |
+| `test/geoFormat.test.js` | 26 | 球面距离（1° 纬度 ≈ 111.19 km、广州→深圳 100 km 量级）、圆形布局（落圆周 / 角距均匀）、格式化与档位配色 |
+| `test/singleSourceOfTruth.test.js` | 22 | **价值最高的一组**：逐函数扫描 `src/components` 禁止再出现本地定义；钉住 12 个引用方确实从 `utils` 导入；禁止内联电量阈值 |
+
+最后这组是防「抽了 utils 又复制一份回去」被悄悄回退的——没有它，下次有人
+复制一份不会有任何测试变红。
+
 ## 代码审查修复记录
 
 6 轮收敛性审查（3 轮全量 + 2 轮验证 + 1 轮接线状态/口径专项），累计修复 52 个问题
@@ -703,10 +764,13 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端本地只做静态检查**：vite build 在本仓开发沙箱里被 stdio 管道
-  限制挡住（EPERM），本地用 `gcs-web/scripts/check-frontend.cjs`
-  （Babel 语法 + import 图）把关；**真实构建在 CI 跑**（`npm run build`）。
-  改前端后推 CI 验证，别信本地静态检查的"绿"就万事大吉。
+- **前端测试覆盖 146 例**（vitest，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+  2026-10-04 并入第二批组件逻辑测试；`npm run test` 实测 146/146，分布在
+  `gcs-web/test/` 与 `gcs-web/src/` 两处）：`npm run test` 已在 CI 的 GCS Web job 门禁。
+  选的是**已确认缺陷**加相关契约，不是全量覆盖——49 个组件里绝大多数仍只有 lint +
+  build 保护。`vite build` 在本仓开发沙箱里曾被 stdio 管道限制挡住（EPERM），本地另用
+  `gcs-web/scripts/check-frontend.cjs`（Babel 语法 + import 图）把关；`npm run check`
+  把两者串起来。
 - **「自主决策」已接线为 advisory，「边缘 AI」仍是库**（2026-10-02 第六轮审查核实，同日接线）。
   M11 `io.aerofleet.sim.ai`（14 个类 3513 行）现已通过新增的 `AutonomyAdvisor` 接入
   `VirtualDrone.tickOnce`：1Hz 评估态势，主决策类型**变化沿**经 STATUSTEXT 下发

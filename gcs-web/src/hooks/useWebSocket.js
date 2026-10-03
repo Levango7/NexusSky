@@ -1,11 +1,17 @@
 import { useState, useRef, useEffect } from 'react'
 import { getWsUrl } from '../api.js'
 
+/** 每台机的遥测历史保留点数。与 TelemetryCharts 的 60s 窗口配套（5Hz × 60s = 300）。 */
+const HISTORY_PER_DRONE = 300
+
 /**
  * WebSocket 实时数据管理 hook
  * 管理 wsState 及所有 WebSocket 推送数据：
  * alerts, formations, meshTopology, satLinkData, terrainData, cellTowerData,
  * telemetryHistory, multiTracks
+ *
+ * telemetryHistory 的形状是 `{ [sysid]: Point[] }`（按机分桶）——消费方应取
+ * `telemetryHistory[sysid]`，不要把它当扁平数组遍历。
  *
  * 关键约束：selectedSysid 通过 ref 读取，WebSocket 只连接一次，不因 selectedSysid 变化重连
  * 经验来源：2026-09-13-yjs-multi-provider-destroy-order（effect 依赖与 ref 解耦模式）
@@ -21,7 +27,7 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
   const [satLinkData, setSatLinkData] = useState(null)
   const [terrainData, setTerrainData] = useState(null)
   const [cellTowerData, setCellTowerData] = useState(null)
-  const [telemetryHistory, setTelemetryHistory] = useState([])
+  const [telemetryHistory, setTelemetryHistory] = useState({})
   const [multiTracks, setMultiTracks] = useState({})
 
   const wsRef = useRef(null)
@@ -61,7 +67,13 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
             const next = [...existing, point]
             return { ...prev, [sysid]: next.length > 30 ? next.slice(next.length - 30) : next }
           })
-          // 追加遥测历史数据点（保留最近 120 个）
+          // 追加遥测历史数据点。
+          // 2026-10-01 修复：此前所有机型的点被塞进**同一个扁平数组**，
+          // 而消费端（TelemetryCharts 的 series()）从不过滤 sysid ——
+          // 2 架机以上时电量/高度/速度曲线会把不同飞机的数据交错画在一起。
+          // 现在按 sysid 分桶，每桶独立保留最近 HISTORY_PER_DRONE 个点。
+          // 容量依据：图表窗口 60s（TelemetryCharts.WINDOW_MS），遥测 1-5Hz，
+          // 5Hz×60s=300 点刚好铺满窗口；再多是浪费内存（窗口外会被 series 丢弃）。
           const d = msg.data || {}
           setTelemetryHistory((prev) => {
             const point = {
@@ -73,8 +85,12 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
               groundspeed: d.groundspeed,
               heading: d.heading,
             }
-            const next = [...prev, point]
-            return next.length > 120 ? next.slice(next.length - 120) : next
+            const bucket = prev[msg.sysid] || []
+            const next = [...bucket, point]
+            return {
+              ...prev,
+              [msg.sysid]: next.length > HISTORY_PER_DRONE ? next.slice(next.length - HISTORY_PER_DRONE) : next,
+            }
           })
         } else if (msg.type === 'alert') {
           setAlerts((prev) => [{ ...msg.data, ts: Date.now(), sysid: msg.sysid }, ...prev.slice(0, 49)])

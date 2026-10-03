@@ -1,4 +1,6 @@
 import React, { useMemo } from 'react'
+import { haversine } from './utils/geo'
+import { fmtDur } from './utils/format'
 import MapView from './components/MapView.jsx'
 import DroneList from './components/DroneList.jsx'
 import TelemetryPanel from './components/TelemetryPanel.jsx'
@@ -93,22 +95,7 @@ function PanelWrapper({ children }) {
   )
 }
 
-function haversine(a, b) {
-  const R = 6371000
-  const dLa = ((b.lat - a.lat) * Math.PI) / 180
-  const dLo = ((b.lon - a.lon) * Math.PI) / 180
-  const la1 = (a.lat * Math.PI) / 180
-  const la2 = (b.lat * Math.PI) / 180
-  const h = Math.sin(dLa / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLo / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(h))
-}
-
-function fmtDur(sec) {
-  if (!sec || sec < 0) return '--:--'
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
+// 距离与时长格式化：见 utils/geo
 
 export default function App() {
   // 认证状态
@@ -608,7 +595,11 @@ export default function App() {
             />
           </ErrorBoundary>
           <ErrorBoundary>
-            <TelemetryCharts telemetry={telemetry} history={telemetryHistory} />
+            <TelemetryCharts
+              telemetry={telemetry}
+              history={selectedSysid != null ? telemetryHistory[selectedSysid] : undefined}
+              sysid={selectedSysid}
+            />
           </ErrorBoundary>
           <ErrorBoundary>
             <AlertFeed alerts={alerts} />

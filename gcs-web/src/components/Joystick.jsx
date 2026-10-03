@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react'
 import { api } from '../api.js'
+import { confirmText } from '../utils/flightSafety.js'
 
 // 偏航瞬时按钮的发送值：MANUAL_CONTROL.r 后端校验范围 [-1000,1000]，取 ±400
 const YAW_RATE = 400
@@ -98,6 +99,11 @@ export default function Joystick({ drone }) {
   }
 
   const disarm = async () => {
+    // 二次确认必须在**停发之前**：否则用户点「取消」会留下
+    // sendingRef=false 且没有下发上锁——摇杆变成死区而飞机仍在飞。
+    // 这是 2026-10-01 加确认时最容易踩的顺序坑。
+    if (!window.confirm(confirmText('disarm', drone))) return
+
     sendingRef.current = false
     if (timerRef.current) clearTimeout(timerRef.current)
     stickHeldRef.current = false

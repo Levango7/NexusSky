@@ -1,4 +1,5 @@
 import React from 'react'
+import { battClass } from '../utils/battery'
 
 const MODE_LABEL = {
   STANDBY: '待命',
@@ -62,9 +63,5 @@ export default function DroneList({ drones, selectedSysid, onSelect }) {
   )
 }
 
-function battClass(b) {
-  if (b == null) return ''
-  if (b <= 20) return 'batt-crit'
-  if (b <= 40) return 'batt-warn'
-  return 'batt-ok'
-}
+
+

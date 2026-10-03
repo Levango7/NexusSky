@@ -5,6 +5,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 // v6 打包器环境下 worker 无法靠 import.meta.url 自动定位，需显式注册；
 // ?worker&url 让 Vite 产出自包含 worker chunk（?url 会漏掉其 shared 依赖）
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+import { isDroneSelected } from '../utils/droneSelection.js'
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl)
 
@@ -540,7 +541,7 @@ export default function MapView({
       if (lat == null || lon == null) return
 
       const color = getDroneColor(sysid)
-      const isSelected = selected === sysid
+      const isSelected = isDroneSelected(selected, sysid)
       const isOnline = online !== false
 
       const existing = droneMarkersRef.current[sysid]
@@ -647,7 +648,7 @@ export default function MapView({
 
       const numSysid = Number(sysid)
       const color = getDroneColor(numSysid)
-      const isSelected = selected === numSysid
+      const isSelected = isDroneSelected(selected, numSysid)
 
       if (isSelected && colorMode !== 'single') {
         const trackPoints = multiTracks[sysid]

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { battClass } from '../utils/battery'
 
 const MODE_LABEL = {
   STANDBY: '待命',
@@ -51,11 +52,19 @@ function AttitudeIndicator({ roll = 0, pitch = 0 }) {
   )
 }
 
+// 危险飞行命令的二次确认：判据、文案与「rtl 刻意不确认」的理由都在
+// src/utils/flightSafety.js（TelemetryPanel 与 Joystick 共用，避免两处各写一份）。
+// 这里同时再导出，是为了让测试能按组件路径引用；真正的实现只有一处。
+import { confirmText } from '../utils/flightSafety.js'
+export { confirmText }
+
 export default function TelemetryPanel({ drone, telemetry, onCommand }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
 
   const cmd = async (type, alt) => {
+    const prompt = confirmText(type, drone, alt)
+    if (prompt != null && !window.confirm(prompt)) return
     setBusy(true)
     setResult(null)
     try {
@@ -100,7 +109,7 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
           </div>
           <div className="hud-cell">
             <label>电量 BAT</label>
-            <b className={batteryClass(t.battery)}>{t.battery != null ? t.battery : '--'}</b>
+            <b className={battClass(t.battery)}>{t.battery != null ? t.battery : '--'}</b>
             <span className="unit">%</span>
           </div>
           <div className="hud-cell">
@@ -162,12 +171,7 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
   )
 }
 
-function batteryClass(b) {
-  if (b == null) return ''
-  if (b <= 20) return 'batt-crit'
-  if (b <= 40) return 'batt-warn'
-  return 'batt-ok'
-}
+// 电池条分级：见 utils/battery
 
 // 信号条（E1）：-50 dBm 满格 -> -100 dBm 断，4 格量化
 function SignalBars({ dbm }) {

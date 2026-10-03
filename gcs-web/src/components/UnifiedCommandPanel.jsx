@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { PRIORITY_META, SEVERITY_META, normPriority, normSeverity } from '../utils/statusMeta'
+import { battColorVar } from '../utils/battery'
 import {
   api,
   emergencyOrch,
@@ -71,52 +73,13 @@ const DRONE_STATUS_COLOR = {
   LOST: 'var(--crit)',
 }
 
-// 优先级 → 颜色 + 排序权重
-const PRIORITY_META = {
-  P0: { label: 'P0 紧急', color: 'var(--crit)', weight: 0 },
-  P1: { label: 'P1 高', color: 'var(--warn)', weight: 1 },
-  P2: { label: 'P2 中', color: 'var(--gold)', weight: 2 },
-  P3: { label: 'P3 低', color: 'var(--cyan)', weight: 3 },
-  HIGH: { label: '高', color: 'var(--crit)', weight: 0 },
-  MEDIUM: { label: '中', color: 'var(--warn)', weight: 1 },
-  LOW: { label: '低', color: 'var(--cyan)', weight: 2 },
-}
-
-function normPriority(p) {
-  if (!p) return 'P3'
-  const u = String(p).toUpperCase()
-  if (PRIORITY_META[u]) return u
-  if (u.startsWith('P0')) return 'P0'
-  if (u.startsWith('P1')) return 'P1'
-  if (u.startsWith('P2')) return 'P2'
-  if (u.startsWith('P3')) return 'P3'
-  return 'P3'
-}
+// 优先级/严重度元数据与规范化：见 utils/statusMeta（与 EmergencyOrchPanel、AlarmPanel 共用单一实现）
 
 // 安防设备在线状态 → 颜色
 const ONLINE_COLOR = {
   online: 'var(--ok)',
   offline: 'var(--dim)',
   error: 'var(--crit)',
-}
-
-// 报警严重程度 → 颜色
-const SEVERITY_META = {
-  CRITICAL: { color: 'var(--crit)', label: '严重', weight: 0 },
-  WARN: { color: 'var(--warn)', label: '警告', weight: 1 },
-  WARNING: { color: 'var(--warn)', label: '警告', weight: 1 },
-  INFO: { color: 'var(--cyan)', label: '信息', weight: 2 },
-  ERROR: { color: 'var(--crit)', label: '错误', weight: 0 },
-}
-
-function normSeverity(s) {
-  if (!s) return 'INFO'
-  const u = String(s).toUpperCase()
-  if (SEVERITY_META[u]) return u
-  if (u.includes('CRIT')) return 'CRITICAL'
-  if (u.includes('WARN')) return 'WARN'
-  if (u.includes('ERR')) return 'ERROR'
-  return 'INFO'
 }
 
 // PTZ 控制按钮
@@ -978,8 +941,6 @@ export default function UnifiedCommandPanel() {
                   const status = String(d.status || d.state || (d.online ? 'ONLINE' : 'OFFLINE')).toUpperCase()
                   const statusColor = DRONE_STATUS_COLOR[status] || (d.online ? 'var(--ok)' : 'var(--dim)')
                   const batt = d.batteryPct != null ? d.batteryPct : (d.battery != null ? d.battery : null)
-                  const battNum = Number(batt)
-                  const battColor = batt == null ? 'var(--dim)' : battNum <= 15 ? 'var(--crit)' : battNum <= 30 ? 'var(--warn)' : 'var(--ok)'
                   return (
                     <div key={sysid} style={{
                       padding: '3px 4px', display: 'flex', alignItems: 'center', gap: 4,
@@ -989,8 +950,8 @@ export default function UnifiedCommandPanel() {
                       <span style={{ fontSize: 10, color: 'var(--text)', fontFamily: 'var(--mono)', flex: 1 }}>
                         UAV-{sysid}
                       </span>
-                      <span style={{ fontSize: 9, color: battColor, fontFamily: 'var(--mono)' }}>
-                        {batt != null ? `${battNum.toFixed(0)}%` : '--'}
+                      <span style={{ fontSize: 9, color: battColorVar(batt), fontFamily: 'var(--mono)' }}>
+                        {batt != null ? `${Number(batt).toFixed(0)}%` : '--'}
                       </span>
                       <span style={{ fontSize: 9, color: statusColor }}>
                         {status}

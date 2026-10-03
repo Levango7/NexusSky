@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react'
+import { battClass, battColor, battLevel } from '../utils/battery'
 
 /**
  * 仪表盘汇总面板
@@ -16,9 +17,8 @@ import React, { useMemo } from 'react'
  */
 
 const CYAN = '#00d4ff'
-const OK = '#2de2a5'
-const WARN = '#ffb224'
-const CRIT = '#ff5d5d'
+const OK = '#2de2a5'   // 调色板用（在线数），电量色见 utils/battery
+const CRIT = '#ff5d5d'  // 调色板用（告警数），电量色见 utils/battery
 
 const MODE_LABEL = {
   STANDBY: '待命',
@@ -27,20 +27,6 @@ const MODE_LABEL = {
   MISSION: '任务中',
   RTL: '返航',
   unknown: '未知',
-}
-
-function battClass(b) {
-  if (b == null) return ''
-  if (b <= 20) return 'batt-crit'
-  if (b <= 40) return 'batt-warn'
-  return 'batt-ok'
-}
-
-function battColor(b) {
-  if (b == null) return 'var(--dim)'
-  if (b <= 20) return CRIT
-  if (b <= 40) return WARN
-  return OK
 }
 
 // 电池条（横向）
@@ -146,11 +132,12 @@ export default function DashboardPanel({ drones, onSelect }) {
     const avgBatt = battVals.length > 0 ? battVals.reduce((a, b) => a + b, 0) / battVals.length : null
     const altVals = list.map((d) => d.relativeAlt).filter((a) => a != null)
     const maxAlt = altVals.length > 0 ? Math.max(...altVals) : null
-    // 告警数：离线 + 电量<=20 + GPS 降级
+    // 告警数：离线 + 电量处于严重档 + GPS 降级
+    // 电量判级复用 utils/battery，避免"颜色改了但告警计数没改"
     let alerts = 0
     for (const d of list) {
       if (!d.online) alerts++
-      if (d.battery != null && d.battery <= 20) alerts++
+      if (battLevel(d.battery) === 'crit') alerts++
       if (d.gpsHealthy === false) alerts++
     }
     return { online, total: list.length, avgBatt, maxAlt, alerts }

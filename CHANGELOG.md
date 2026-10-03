@@ -4,6 +4,28 @@
 
 ---
 
+## [Unreleased] — 合并前端测试第二批：146 例 vitest + 飞行安全二次确认 + 遥测曲线混机修复（2026-10-04）
+
+> 合并 `fix/frontend-tests-and-flight-safety`（6 提交：vitest 基建 / MapView 选中态恒
+> false / 遥测曲线混机 / 危险命令二次确认 / 两批共 122 例组件逻辑测试 / 文档）入 master。
+> 合并处 4 冲突 + 3 处语义碰撞，逐项解决后本地 `npm run test` 146/146 绿、
+> lint 0 error、`vite build` 成功（EXIT=0）。
+
+| # | 问题 | 处理 |
+|---|---|---|
+| 1 | `package.json` 冲突（两线各自加了 vitest） | scripts 取并集（test/watch/coverage/check）；依赖保留 master 的 `vitest@^5.0.3`、`hls.js`、`three`，补分支的 `jsdom`；`@vitest/coverage-v8` 从分支的 `^3.2.7` **对齐到 `^5.0.3`**——3.2.7 的 peer 是 vitest 3.2.7，与 vitest 5 冲突会让 `npm install` 直接失败（peer dep 解析错误），且 registry 已有 5.0.3 |
+| 2 | `package-lock.json` 冲突（2008 行） | 不手解，`npm install` 按解决后的 package.json 重新生成 |
+| 3 | **vitest 静默漏跑 master 的两处测试（假绿）** | 分支的 `vitest.config.js` 只 include `test/**`，而诚实化轮建的 `src/api.test.js`、`src/components/Scene3DUtils.test.js` 在 `src/` 下——合并后 CI 会绿着漏跑 24 例。include 扩为 `['test/**', 'src/**']`，两个路径都被断言到（`11 passed (11)` 文件数可证） |
+| 4 | **摇杆测试与 Pointer Events 实现语义碰撞（1/146 红）** | 诚实化轮把 Joystick 重写为 Pointer Events（`onPointerDown` + `setPointerCapture`），分支的 `joystickDisarm.test.jsx` 仍用 `fireEvent.mouseDown`——jsdom 里 mouse 事件不触发 pointer handler，`sendJoystick` 0 次调用。测试改 `fireEvent.pointerDown`（对齐当前实现，组件不动）；`test/setup.js` 补 `setPointerCapture`/`releasePointerCapture`/`hasPointerCapture` 空实现——jsdom 缺这三个 API 时组件直接抛 TypeError，症状表现为"事件没触发"，排查易走偏 |
+| 5 | `ci.yml` 冲突（两线加了同一个 vitest 步骤） | 合并为单步骤，保留第二批的注释并补合并说明 |
+| 6 | README 冲突 | master 侧「前端只做静态检查」的声称在诚实化轮加 vitest 后已过时（正是两线口径打架点），取分支的「前端测试覆盖」段 + 保留 master 的自主决策 advisory 段；覆盖数字按 `npm run test` **实测 146** 写，不按提交消息估算 |
+
+**已知边界（合并后不变）**：前端 49 个组件里绝大多数仍只有 lint + build 保护，vitest
+覆盖的是已确认缺陷与相关契约；CI 门禁为 `npm run lint`（0 error 门槛）+ `npm run test`
++ `npm run build`。
+
+---
+
 ## [Unreleased] — per-device 摄取凭据：设备 Key 签发/轮换/撤销 + 认证缓存（收口"整部署一把共享 key"）（2026-10-03）
 
 > **本轮验证**：`mvn -pl cloud-backend test` **2150/2150 全绿**（较上轮 2114 净 +36：
