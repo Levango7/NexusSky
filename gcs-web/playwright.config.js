@@ -36,7 +36,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npm run build && npm run preview -- --port ${PREVIEW_PORT} --strictPort`,
+    // --host 127.0.0.1 必须与上面的 BASE_URL 同为 IPv4：不指定时 vite preview 绑的是
+    // localhost，而 GitHub runner 上 localhost 先解析到 ::1（Vite 只监听 IPv6），
+    // Playwright 轮询 127.0.0.1 永远连不上，最终报
+    // "Timed out waiting 180000ms from config.webServer"。
+    command: `npm run build && npm run preview -- --host 127.0.0.1 --port ${PREVIEW_PORT} --strictPort`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
