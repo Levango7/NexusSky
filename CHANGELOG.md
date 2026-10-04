@@ -4,6 +4,47 @@
 
 ---
 
+## [Unreleased] — 自定义 MAV_CMD 整带搬入私有区 30080-30099（2026-10-04）
+
+> 与 2026-10 消息 ID 治理同源的遗留问题：8 条自定义命令（环境配置 310-312、
+> 喷洒/抛投/载荷 320-322、雷达/旋翼配置 420/421）原先直接占用 MAVLink 官方与
+> 方言的命令分配带，其中 420/421 与 ArduPilot 方言实锤冲突（420=NAV_GUIDED_ENABLE、
+> 421=NAV_CONTINUE_AND_CHANGE_ALT）。按消息治理同一标准（官方带**整带**避开，
+> 而非只躲已知值），全部 8 条搬入私有区命令子段 30080-30099：
+> 310→30080 / 311→30081 / 312→30082 / 320→30083 / 321→30084 / 322→30085 /
+> 420→30086 / 421→30087（命令与消息分属不同命名空间，分段纯为日志可读性）。
+
+### 1. 常量收口与双侧接线
+
+- 8 个常量统一收口在 `MavEnums.MAV_CMD_NEXUS_*`（mavlink-core），云端 4 个
+  下发方（RadarController/RotorController/SprayTaskService/DeliveryService）
+  与机载 VirtualDrone 的 switch 派发 case 全部改为引用同一份常量——两侧
+  漂移自此不可能；
+- 修正两处不诚实注释：RadarController/RotorController 曾声称「不与 MAVLink
+  common 冲突」（实际 420/421 已实锤冲突），已改为如实陈述搬迁背景；
+- 清理死引用：SprayTaskService/DeliveryService 注释引用的「spec.md §4.3
+  命令 id 分配」文档已不存在于仓库，改引 MavEnums 常量定义。
+
+### 2. 双测试钉扎（防静默回退）
+
+- `NexusCommandIdZoneTest`（mavlink-core）：8 常量必须落在 30080-30099 且
+  两两互异、映射保序——谁把常量改回官方带，构建即红；
+- `NexusCommandDispatchTest`（drone-sim）：真实 UDP 往返（编码 CommandLong →
+  运行中的 VirtualDrone → COMMAND_ACK），8 条新 ID 逐一验证机载派发命中
+  （非 UNSUPPORTED）——case 标签没跟上常量搬迁，构建即红。测试需装配
+  `--env=1 --actuators=1` 并注入雷达/气动，否则 handler 以 UNSUPPORTED
+  短路、与 default 分支不可区分（该短路语义本身未改）。
+
+### 3. 已知边界（如实声明）
+
+- 310/311/312/322 四条命令在仓库内无生产者（sim 端 handler 存在、云端无
+  下发方），疑似供 SITL/外部工具经 REST raw 直通使用；本次仅迁值未补链路，
+  补齐属后续项；
+- REST `/drones/{id}/command` 的 `raw` 直通端点接受任意 cmd id（0-65535），
+> 治理靠约定与守卫测试，不在该端点强制白名单。
+
+---
+
 ## [Unreleased] — M13 孪生实时同步接线：TwinSyncListener 事件驱动喂孪生 + 30055 首个生产者（2026-10-04）
 
 > ROADMAP 最后一个 ⚠️ 里程碑段收口：`DigitalTwinService.syncTwin` 从「只有测试

@@ -64,6 +64,31 @@ public final class MavEnums {
     public static final int MAV_CMD_COMPONENT_ARM_DISARM = 400;
     public static final int MAV_CMD_MISSION_START = 300;
 
+    // ---- NexusSky 自定义 MAV_CMD（私有区命令子段 30080-30099，2026-10-04 自官方带整带搬迁）----
+    // 治理依据同消息 ID（docs/sitl-integration.md §7）：MAVLink 官方与方言的命令
+    // 分配带覆盖 0-334 与 42xxx 等区间，自定义命令必须整带避开，而非只躲已实锤
+    // 冲突的值（ArduPilot 方言 420=NAV_GUIDED_ENABLE、421=NAV_CONTINUE_AND_CHANGE_ALT）。
+    // 命令与消息是两个命名空间，数值本可重叠，但为日志/排障可读性，命令取私有区
+    // 上段 30080+，与消息段 30000-30063（见 §7.1）保持视觉分离。新旧映射保持相对次序：
+    // 310→30080 / 311→30081 / 312→30082 / 320→30083 / 321→30084 / 322→30085
+    // / 420→30086 / 421→30087。
+    /** 环境配置：设置风场（原 MAV_CMD 310）。 */
+    public static final int MAV_CMD_NEXUS_ENV_SET_WIND = 30080;
+    /** 环境配置：设置天气（原 MAV_CMD 311）。 */
+    public static final int MAV_CMD_NEXUS_ENV_SET_WEATHER = 30081;
+    /** 环境配置：设置告警阈值（原 MAV_CMD 312）。 */
+    public static final int MAV_CMD_NEXUS_ENV_SET_THRESHOLDS = 30082;
+    /** 喷洒控制（原 MAV_CMD 320）。 */
+    public static final int MAV_CMD_NEXUS_SPRAY_CONTROL = 30083;
+    /** 抛投/夹爪控制（原 MAV_CMD 321）。 */
+    public static final int MAV_CMD_NEXUS_GRIPPER_CONTROL = 30084;
+    /** 载荷状态查询（原 MAV_CMD 322）。 */
+    public static final int MAV_CMD_NEXUS_PAYLOAD_QUERY = 30085;
+    /** 雷达扫描配置（原 MAV_CMD 420，曾与 ArduPilot NAV_GUIDED_ENABLE 实锤冲突）。 */
+    public static final int MAV_CMD_NEXUS_RADAR_CONFIG = 30086;
+    /** 旋翼气动配置（原 MAV_CMD 421，曾与 ArduPilot NAV_CONTINUE_AND_CHANGE_ALT 实锤冲突）。 */
+    public static final int MAV_CMD_NEXUS_ROTOR_CONFIG = 30087;
+
     // ---- MAV_FRAME ----
     public static final int MAV_FRAME_GLOBAL = 0;
     public static final int MAV_FRAME_LOCAL_NED = 1;

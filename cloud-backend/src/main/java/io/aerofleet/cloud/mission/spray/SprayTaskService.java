@@ -6,6 +6,7 @@ import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.security.TenantContext;
+import io.aerofleet.mavlink.enums.MavEnums;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,8 +35,8 @@ public class SprayTaskService {
 
     private static final Logger log = LoggerFactory.getLogger(SprayTaskService.class);
 
-    /** MAV_CMD 320：喷洒控制（spec.md §4.3 命令 id 分配）。 */
-    private static final int MAV_CMD_SPRAY_CONTROL = 320;
+    /** 喷洒控制命令（原 MAV_CMD 320，2026-10-04 搬入私有区 30000-30099，见 MavEnums）。 */
+    private static final int MAV_CMD_SPRAY_CONTROL = MavEnums.MAV_CMD_NEXUS_SPRAY_CONTROL;
 
     /** SPRAY_COMMAND 枚举值（与 mavlink-core SprayCommand 常量一致）。 */
     private static final int SPRAY_ENABLE = 0;

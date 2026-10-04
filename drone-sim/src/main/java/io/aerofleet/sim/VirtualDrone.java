@@ -812,17 +812,21 @@ public final class VirtualDrone implements AutoCloseable {
                     result = MavEnums.MAV_RESULT_UNSUPPORTED;
                 }
             }
-            // M0b 环境配置命令（FR-28）：310=set-wind / 311=set-weather / 312=set-thresholds
-            case 310 -> result = handleEnvSetWind(cmd, senderSysid);
-            case 311 -> result = handleEnvSetWeather(cmd, senderSysid);
-            case 312 -> result = handleEnvSetThresholds(cmd, senderSysid);
-            // M2 喷洒/抛投控制命令（FR-14/FR-20/FR-21，spec.md §4.3 命令 id 分配）
-            case 320 -> result = handleSprayControl(cmd, senderSysid);
-            case 321 -> result = handleGripperControl(cmd, senderSysid);
-            case 322 -> result = handlePayloadQuery(senderSysid);
-            // M4 硬件配置命令（FR-03/FR-26，420=radar config / 421=rotor config）
-            case 420 -> result = handleRadarConfig(cmd, senderSysid);
-            case 421 -> result = handleRotorConfigCmd(cmd, senderSysid);
+            // M0b 环境配置命令（FR-28）：NEXUS 私有区命令 30080-30082
+            //（原 310/311/312，2026-10-04 搬出 MAVLink 官方/方言分配带，见 MavEnums）
+            case MavEnums.MAV_CMD_NEXUS_ENV_SET_WIND -> result = handleEnvSetWind(cmd, senderSysid);
+            case MavEnums.MAV_CMD_NEXUS_ENV_SET_WEATHER -> result = handleEnvSetWeather(cmd, senderSysid);
+            case MavEnums.MAV_CMD_NEXUS_ENV_SET_THRESHOLDS -> result = handleEnvSetThresholds(cmd, senderSysid);
+            // M2 喷洒/抛投控制命令（FR-14/FR-20/FR-21）：NEXUS 私有区命令 30083-30085
+            //（原 320/321/322，2026-10-04 搬出 MAVLink 官方/方言分配带）
+            case MavEnums.MAV_CMD_NEXUS_SPRAY_CONTROL -> result = handleSprayControl(cmd, senderSysid);
+            case MavEnums.MAV_CMD_NEXUS_GRIPPER_CONTROL -> result = handleGripperControl(cmd, senderSysid);
+            case MavEnums.MAV_CMD_NEXUS_PAYLOAD_QUERY -> result = handlePayloadQuery(senderSysid);
+            // M4 硬件配置命令（FR-03/FR-26）：NEXUS 私有区命令 30086/30087
+            //（原 420/421，曾与 ArduPilot 方言 NAV_GUIDED_ENABLE /
+            // NAV_CONTINUE_AND_CHANGE_ALT 实锤冲突，2026-10-04 整带搬迁）
+            case MavEnums.MAV_CMD_NEXUS_RADAR_CONFIG -> result = handleRadarConfig(cmd, senderSysid);
+            case MavEnums.MAV_CMD_NEXUS_ROTOR_CONFIG -> result = handleRotorConfigCmd(cmd, senderSysid);
             default -> {
                 SimLog.info("unsupported command " + cmd.command);
                 result = MavEnums.MAV_RESULT_UNSUPPORTED;
@@ -1767,10 +1771,10 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     // ------------------------------------------------------------------
-    // M0b 环境配置命令（FR-28，command 310/311/312）
+    // M0b 环境配置命令（FR-28，NEXUS 私有区命令 30080-30082）
     // ------------------------------------------------------------------
 
-    /** MAV_CMD 310：设置风速/风向（FR-28）。param1=风速 m/s，param2=风向 deg。 */
+    /** MAV_CMD 30080（原 310）：设置风速/风向（FR-28）。param1=风速 m/s，param2=风向 deg。 */
     private int handleEnvSetWind(CommandLong cmd, int senderSysid) {
         if (envModel == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
         if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
@@ -1783,7 +1787,7 @@ public final class VirtualDrone implements AutoCloseable {
         return MavEnums.MAV_RESULT_ACCEPTED;
     }
 
-    /** MAV_CMD 311：设置天气/降雨率（FR-28）。param1=weatherCode[0-4]，param2=rainRate[0-255]。 */
+    /** MAV_CMD 30081（原 311）：设置天气/降雨率（FR-28）。param1=weatherCode[0-4]，param2=rainRate[0-255]。 */
     private int handleEnvSetWeather(CommandLong cmd, int senderSysid) {
         if (envModel == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
         if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
@@ -1796,7 +1800,7 @@ public final class VirtualDrone implements AutoCloseable {
         return MavEnums.MAV_RESULT_ACCEPTED;
     }
 
-    /** MAV_CMD 312：设置告警阈值（FR-28）。param1=windWarn，param2=windCrit。 */
+    /** MAV_CMD 30082（原 312）：设置告警阈值（FR-28）。param1=windWarn，param2=windCrit。 */
     private int handleEnvSetThresholds(CommandLong cmd, int senderSysid) {
         if (envModel == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
         if (senderSysid != GCS_SYSID) return MavEnums.MAV_RESULT_DENIED;
@@ -1832,11 +1836,11 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     // ------------------------------------------------------------------
-    // M2 喷洒/抛投控制命令（FR-14/FR-20/FR-21，command 320/321/322）
+    // M2 喷洒/抛投控制命令（FR-14/FR-20/FR-21，NEXUS 私有区命令 30083-30085）
     // ------------------------------------------------------------------
 
     /**
-     * MAV_CMD 320：喷洒控制（FR-14）。
+     * MAV_CMD 30083（原 320）：喷洒控制（FR-14）。
      * param1=command 枚举（0=ENABLE/1=DISABLE/2=SET_RATE/3=EMERGENCY_STOP），
      * param2=targetRate mL/s，param3=sprayWidth cm。
      */
@@ -1873,7 +1877,7 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     /**
-     * MAV_CMD 321：抛投控制（FR-20/FR-21）。
+     * MAV_CMD 30084（原 321）：抛投控制（FR-20/FR-21）。
      * param1=command 枚举（0=GRAB/1=RELEASE/2=RESET），
      * param2=payloadId，param3=payloadWeight kg，param4=payloadVolume L。
      */
@@ -1914,7 +1918,7 @@ public final class VirtualDrone implements AutoCloseable {
         }
     }
 
-    /** MAV_CMD 322：负载查询（FR-34）→ 立即发送 PAYLOAD_STATUS 消息。 */
+    /** MAV_CMD 30085（原 322）：负载查询（FR-34）→ 立即发送 PAYLOAD_STATUS 消息。 */
     private int handlePayloadQuery(int senderSysid) throws java.io.IOException {
         if (gripper == null) return MavEnums.MAV_RESULT_UNSUPPORTED;
         sendPayloadStatus();
@@ -2291,7 +2295,7 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     /**
-     * MAV_CMD 420：雷达扫描配置命令（FR-03）。
+     * MAV_CMD 30086（原 420）：雷达扫描配置命令（FR-03）。
      * param1=mode, param2=azimCenter, param3=azimWidth, param4=elevCenter,
      * param5=beamWidth, param6=range, param7=scanPeriodMs。
      */
@@ -2315,7 +2319,7 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     /**
-     * MAV_CMD 421：旋翼气动配置命令（FR-26）。
+     * MAV_CMD 30087（原 421）：旋翼气动配置命令（FR-26）。
      * param1=rotorCount, param2=diameter, param3=pitch, param4=maxRpm, param5=airDensity。
      */
     private int handleRotorConfigCmd(CommandLong cmd, int senderSysid) {

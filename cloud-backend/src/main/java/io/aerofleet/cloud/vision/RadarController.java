@@ -2,6 +2,7 @@ package io.aerofleet.cloud.vision;
 
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.mission.common.DroneCommandService;
+import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.enums.ScanMode;
 
 import io.aerofleet.mavlink.messages.RadarScanMsg;
@@ -35,8 +36,9 @@ public class RadarController {
 
     private static final Logger log = LoggerFactory.getLogger(RadarController.class);
 
-    /** 自定义命令 ID：雷达扫描配置（NexusSky 扩展，不与 MAVLink common 冲突）。 */
-    private static final int MAV_CMD_NEXUS_RADAR_CONFIG = 420;
+    /** 自定义命令 ID：雷达扫描配置（NexusSky 扩展，私有区 30000-30099；原 420 曾与
+     * ArduPilot 方言 NAV_GUIDED_ENABLE 实锤冲突，2026-10-04 整带搬迁，见 MavEnums）。 */
+    private static final int MAV_CMD_NEXUS_RADAR_CONFIG = MavEnums.MAV_CMD_NEXUS_RADAR_CONFIG;
 
     /** 每架机维护的目标列表上限，超过时淘汰最旧目标。 */
     private static final int MAX_TARGETS_PER_DRONE = 64;

@@ -2,6 +2,7 @@ package io.aerofleet.cloud.vision;
 
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.mission.common.DroneCommandService;
+import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.RotorTelemetryMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,8 +30,9 @@ public class RotorController {
 
     private static final Logger log = LoggerFactory.getLogger(RotorController.class);
 
-    /** 自定义命令 ID：旋翼气动配置（NexusSky 扩展，不与 MAVLink common 冲突）。 */
-    private static final int MAV_CMD_NEXUS_ROTOR_CONFIG = 421;
+    /** 自定义命令 ID：旋翼气动配置（NexusSky 扩展，私有区 30000-30099；原 421 曾与
+     * ArduPilot 方言 NAV_CONTINUE_AND_CHANGE_ALT 实锤冲突，2026-10-04 整带搬迁，见 MavEnums）。 */
+    private static final int MAV_CMD_NEXUS_ROTOR_CONFIG = MavEnums.MAV_CMD_NEXUS_ROTOR_CONFIG;
 
     private final ConcurrentHashMap<Integer, RotorConfig> configs = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, RotorTelemetry> telemetries = new ConcurrentHashMap<>();
