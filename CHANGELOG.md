@@ -4,6 +4,67 @@
 
 ---
 
+## [Unreleased] — deploy 三路径收口：helm 资源名 release 化 / 内置 PG / NetworkPolicy 断链修复（2026-10-05）
+
+### 1. helm 资源名 release 化（同命名空间可并存多 release）
+
+- 缺口背景：chart 所有资源名是静态的（cloud-backend / nexussky-config /
+  flight-logs ...），同 namespace 装第二个 release（staging+prod、蓝绿）必撞名；
+- 新增 `_helpers.tpl`（标准 fullname 模式 + 各组件命名助手 +
+  nexussky.datasourceUrl 计算），10 类资源名全部改为 `<release>-<component>`；
+  chart 内交叉引用（Deployment envFrom / PVC claimName / Ingress backend /
+  HPA scaleTarget / NOTES.txt rollout 命令）同步改引助手，渲染实证一致；
+- **gcs-web 反代上游去硬编码**：镜像内 nginx.conf 原本写死
+  `cloud-backend:8080`，Service 改名后必断。改造为 nginx 官方镜像的
+  templates 机制——`deploy/docker/nginx.conf` 用 `${NS_BACKEND_HOST}`/
+  `${NS_BACKEND_PORT}` 占位，Dockerfile.web 复制到 /etc/nginx/templates/ 并
+  `ENV` 内置缺省值 `cloud-backend:8080`（compose/原生 k8s 行为不变），helm
+  路径由 chart 注入 `<release>-cloud-backend`。docker 实证：envsubst 渲染
+  正确、`nginx -t` 通过；
+- 副作用收益：helm 的 flight-logs PVC 名与原生 k8s 的 `flight-logs` 不再
+  共享 claimName——Round D 遗留的「双栈并存争抢同名 PVC」开放项随之消除。
+
+### 2. helm / 原生 k8s 补内置 PostgreSQL（评估/演示开箱即用）
+
+- 缺口背景：configmap 的 `SPRING_DATASOURCE_URL` 指向 `postgres:5432`，但
+  helm 与原生 k8s 均无 postgres 定义——prod profile readiness 探针含 db
+  分量，此前只能"集群自备 PG"，否则 Pod 永远 NotReady（Round D 遗留开放项）；
+- helm：新增 `templates/postgres.yaml`（`database.builtin.enabled=true` 时
+  部署，默认 false），单副本 StatefulSet + volumeClaimTemplates（PVC
+  `<release>-postgres-pgdata-<ordinal>`）+ pg_isready 双探针 + 非 root
+  (uid 70) + PGDATA 指 PVC 子目录规避 lost+found；启用后数据源 URL 由
+  `nexussky.datasourceUrl` 自动计算指向内置实例（忽略 database.url），
+  凭据沿用 database.username/password 与 PG 容器 env 同源；
+- 原生 k8s：新增 `deploy/k8s/postgres.yaml`（Service 名 `postgres` 对齐
+  configmap 的 jdbc URL，与 compose 同口径），gcs-web 清单显式注入
+  NS_BACKEND_HOST/PORT 便于排查；
+- 生产定位不变：内置 PG 仅评估/演示，文档明示生产用外部 PG /
+  CloudNativePG Operator（备份、HA、升级由专业组件负责）。
+
+### 3. NetworkPolicy 核查：修复两个策略强制型 CNI 下的必然断链
+
+- **Ingress 控制器被挡死**：策略只放行「本命名空间 → 8080/TCP」，而
+  nginx ingress 控制器 Pod 在独立命名空间——ingress 启用时全部路由
+  503/超时。修复：helm 按 `ingress.controllerNamespace`（新增 values，
+  默认 ingress-nginx）、ingress.enabled 时追加放行；原生清单同步放行
+  ingress-nginx 命名空间；
+- **MAVLink 回包被挡死**：cloud-backend UDP 网关从 14550 端口探测 sim
+  （GCS HEARTBEAT），sim 回包/遥测发回 backend:14550/UDP——只放行
+  8080/TCP 时回包全丢，飞行链路静默失效。修复：同命名空间规则追加
+  14550/UDP（helm + 原生两份）；
+- 两个问题在 flannel/kind 默认（不执行 NetworkPolicy）的集群上不会暴露，
+  Calico/Cilium 下必现，故此前未被发现。
+
+### 4. 验证
+
+- helm lint 0 failed；`helm template` 三组场景实证：默认 release 名 /
+  staging + builtin PG（10 类资源名 + 全部交叉引用一致）/ ingress 开关
+  （关闭时无 Ingress 资源、NetworkPolicy 相应剔除控制器规则）；
+- 原生 k8s 14 清单 18 文档 YAML 全解析通过；compose config（五哑 env）
+  exit 0；docker 实证 nginx 模板渲染 + `nginx -t` 通过。
+
+---
+
 ## [Unreleased] — M13 收尾：孪生喂入 GLOBAL_POSITION_INT 兜底（2026-10-05）
 
 ### 1. 无边缘栈设备进孪生（补齐 2026-10-04 留下的明确边界）

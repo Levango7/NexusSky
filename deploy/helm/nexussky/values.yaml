@@ -12,6 +12,13 @@ imageRegistry: ""
 imageTag: "0.1.0"
 imagePullPolicy: IfNotPresent
 
+# 资源名 release 化（2026-10-05）：所有资源名带 <release> 前缀（如
+# <release>-cloud-backend），同 namespace 可并存多个 release（staging/prod、
+# 蓝绿）。此前静态名（cloud-backend 等）双 release 必撞名。
+# nameOverride / fullnameOverride：helm 标准覆盖项，一般无需设置。
+nameOverride: ""
+fullnameOverride: ""
+
 # 命名空间
 namespace: nexussky
 
@@ -120,12 +127,31 @@ security:
 # driver 硬编码 org.postgresql.Driver；DB 写通路只在 CI Pass C 的真 PG 上有门禁
 # （ci-integration-test.sh:43「H2 掩盖 PG 方言风险」），换成 H2 会绕开全部验证。
 database:
+  # 外部 PG 的连接串（builtin.enabled=false 时生效）
   url: "jdbc:postgresql://postgres:5432/aerofleet_prod"
   driver: "org.postgresql.Driver"
   username: "aerofleet"
   password: "REPLACE_WITH_DB_PASSWORD"
   # schema 由启动时的 Flyway 迁移建立后校验（与 prod 同口径）；update 会绕开迁移脚本
   ddlAuto: "validate"
+  # 内置 PG（评估/演示）：enabled=true 时 chart 部署单副本 postgres StatefulSet，
+  # SPRING_DATASOURCE_URL 自动指向 <release>-postgres:5432/<database>（忽略上面的
+  # url，凭据沿用 username/password）。生产请保持 false 用外部 PG / Operator
+  # （备份、HA、升级由专业组件负责）。
+  builtin:
+    enabled: false
+    image: "postgres:15-alpine"
+    database: "aerofleet_prod"
+    storage: 10Gi
+    # 留空 = 用集群默认 StorageClass
+    storageClassName: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
 
 # ---- Ingress ----
 ingress:
@@ -134,6 +160,9 @@ ingress:
   host: nexussky.local
   # WebSocket 长连接超时（秒）
   wsTimeout: "3600"
+  # Ingress 控制器所在命名空间：NetworkPolicy 需放行它跨命名空间转发流量到
+  # cloud-backend:8080（nginx-ingress 惯例部署在 ingress-nginx）。
+  controllerNamespace: ingress-nginx
 # ---- 飞行日志持久化存储 ----
 flightLogs:
   storage: 5Gi

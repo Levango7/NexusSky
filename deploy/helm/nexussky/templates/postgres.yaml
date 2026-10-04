@@ -1,0 +1,136 @@
+{{- if .Values.database.builtin.enabled }}
+# 内置 PostgreSQL（可选，database.builtin.enabled=true 时部署）
+# 定位：评估/演示环境的开箱即用 DB——prod profile 的 readiness 探针含 db 分量，
+# 没有可达 PG 时 Pod 永远 NotReady，此前 chart 不带 DB 只能"自带 PG"。
+# 生产环境建议置 enabled=false 用外部 PG / CloudNativePG Operator
+# （备份、高可用、版本升级由专业组件负责）。
+#
+# 数据源联动：启用后 SPRING_DATASOURCE_URL 由 _helpers 的
+# nexussky.datasourceUrl 计算，指向 <fullname>-postgres:5432/<builtin.database>，
+# 忽略 database.url（外部 PG 专用）；凭据沿用 database.username/password，
+# 与 POSTGRES_USER/POSTGRES_PASSWORD 同源。
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexussky.postgresFullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: pg
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "nexussky.postgresFullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: postgres
+spec:
+  # 单副本：内置定位是评估/演示，不做 HA（生产用外部 PG/Operator）
+  replicas: 1
+  serviceName: {{ include "nexussky.postgresFullname" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexussky
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: postgres
+    spec:
+      # postgres:15-alpine 以 uid 70（postgres 用户）运行，满足 runAsNonRoot
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        fsGroup: 70
+      containers:
+        - name: postgres
+          image: {{ .Values.database.builtin.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            # 刻意不开 readOnlyRootFilesystem：PG initdb 需写 /var/lib/postgresql
+            # 之外的临时路径（/var/run/postgresql 等），只读根会逼出成片 emptyDir，
+            # 收益抵不过复杂度；写面已由 PVC + emptyDir 显式限定。
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.database.builtin.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.database.username | quote }}
+            # POSTGRES_PASSWORD 只在首次 initdb 生效；改密后直接改此值不会改库内口令
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nexussky.secretFullname" . }}
+                  key: SPRING_DATASOURCE_PASSWORD
+            # PG_DATA 指到 PVC 子目录：volumeClaimTemplates 挂载点根目录归
+            # storageclass provisioner 所有（非 root 无权 chown），lost+found
+            # 会让 initdb 报"directory exists but is not empty"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: pg
+              containerPort: 5432
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.database.username | quote }}, "-d", {{ .Values.database.builtin.database | quote }}]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.database.username | quote }}, "-d", {{ .Values.database.builtin.database | quote }}]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.database.builtin.resources | nindent 12 }}
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+            # readOnlyRootFilesystem 未开，/tmp 可写；/var/run/postgresql 由
+            # PG 镜像 entrypoint 自建，无需额外卷
+  # 每副本独立卷（StatefulSet 正确形态；PVC 名 <release>-postgres-pgdata-<ordinal>）
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+        labels:
+          app.kubernetes.io/name: nexussky
+          app.kubernetes.io/instance: {{ .Release.Name }}
+          app.kubernetes.io/component: postgres
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.database.builtin.storage }}
+        {{- if .Values.database.builtin.storageClassName }}
+        storageClassName: {{ .Values.database.builtin.storageClassName }}
+        {{- end }}
+{{- end }}

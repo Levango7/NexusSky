@@ -38,6 +38,14 @@ spec:
         - name: gcs-web
           image: nexussky/gcs-web:0.1.0
           imagePullPolicy: IfNotPresent
+          # nginx 反代上游：镜像 /etc/nginx/templates 启动时经 envsubst 渲染，
+          # 上游地址来自这两个 env（原生清单 Service 名与镜像缺省一致，显式写出
+          # 便于排查；helm 路径 Service 名带 release 前缀，由 chart 注入覆盖）
+          env:
+            - name: NS_BACKEND_HOST
+              value: "cloud-backend"
+            - name: NS_BACKEND_PORT
+              value: "8080"
           securityContext:
             runAsNonRoot: true
             readOnlyRootFilesystem: true

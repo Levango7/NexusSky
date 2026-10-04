@@ -1,10 +1,21 @@
-# NetworkPolicy: 限制 actuator/prometheus 端点仅集群内访问
-# cloud-backend 的管理端点仅允许同 namespace 的 Pod 访问
+# NetworkPolicy: cloud-backend 入站收口
+# 核查修复（2026-10-05，Round E）——此前版本有两个在策略强制型 CNI（Calico/Cilium）
+# 下必然踩中的断链，默认不装策略执行插件的集群（flannel/kind 默认）发现不了：
+#
+# 1) Ingress 控制器被挡死：策略只放行「本命名空间 → 8080/TCP」，而 nginx ingress
+#    控制器 Pod 部署在独立命名空间（ingress-nginx），ingress.enabled=true 时全部
+#    路由（/api /ws /actuator /）都会被拒 → 503/超时。修复：ingress.enabled 时
+#    追加放行控制器命名空间（values ingress.controllerNamespace 可配）。
+# 2) MAVLink 回包被挡死：cloud-backend UDP 网关从 14550 端口探测 sim（GCS
+#    HEARTBEAT），sim 的回包/遥测发回 backend:14550/UDP；策略只放行 8080/TCP，
+#    回包全丢——飞行链路静默失效。修复：同命名空间规则追加 14550/UDP。
+#    （sim 经 REST 注册上报地址，backend 按源地址直连 Pod IP，不经 Service，
+#    故 Service 无需暴露 UDP 端口。）
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: cloud-backend-actuator-restrict
+  name: {{ include "nexussky.actuatorRestrictFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky
@@ -19,6 +30,7 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    # 同命名空间 Pod：REST/WS（8080/TCP）+ MAVLink UDP 网关回包（14550/UDP）
     - from:
         - namespaceSelector:
             matchLabels:
@@ -27,3 +39,16 @@ spec:
       ports:
         - port: {{ .Values.cloudBackend.port }}
           protocol: TCP
+        - port: 14550
+          protocol: UDP
+    {{- if .Values.ingress.enabled }}
+    # Ingress 控制器命名空间（nginx-ingress 默认 ingress-nginx）：
+    # 控制器 Pod 跨命名空间转发 /api /ws /actuator / 到 backend:8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.ingress.controllerNamespace }}
+      ports:
+        - port: {{ .Values.cloudBackend.port }}
+          protocol: TCP
+    {{- end }}

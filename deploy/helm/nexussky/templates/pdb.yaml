@@ -6,7 +6,7 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: cloud-backend
+  name: {{ include "nexussky.cloudBackendFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky
@@ -24,7 +24,7 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: gcs-web
+  name: {{ include "nexussky.gcsWebFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky

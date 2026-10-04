@@ -10,9 +10,14 @@ NexusSky 已部署！
 Swagger UI：http://{{ .Values.ingress.host }}/swagger-ui.html
 健康检查：http://{{ .Values.ingress.host }}/actuator/health
 
+资源名带 release 前缀（{{ include "nexussky.fullname" . }}-<component>）：
+{{- if .Values.database.builtin.enabled }}
+  内置 PostgreSQL：{{ include "nexussky.postgresFullname" . }}（评估/演示用途；生产建议外部 PG）
+{{- end }}
+
 验证：
   kubectl -n {{ .Values.namespace }} get pods
-  kubectl -n {{ .Values.namespace }} rollout status deployment/cloud-backend
+  kubectl -n {{ .Values.namespace }} rollout status deployment/{{ include "nexussky.cloudBackendFullname" . }}
 
 ⚠️ 安全提醒：
   - 若 security.jwtSecret 仍为占位符，请立即用 --set security.jwtSecret=... 覆盖

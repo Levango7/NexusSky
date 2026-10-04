@@ -1,10 +1,12 @@
 # PersistentVolumeClaim: flight-logs
 # cloud-backend 飞行日志持久化存储
+# 名带 release 前缀：与 deploy/k8s/pvc-flight-logs.yaml 的静态名 flight-logs
+# 不再共享同一 claimName——此前双栈并存会争抢同名 PVC（Round D 遗留开放项）。
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: flight-logs
+  name: {{ include "nexussky.flightLogsFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky

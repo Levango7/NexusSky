@@ -6,7 +6,7 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: cloud-backend
+  name: {{ include "nexussky.cloudBackendFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky
@@ -16,7 +16,7 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: cloud-backend
+    name: {{ include "nexussky.cloudBackendFullname" . }}
   minReplicas: {{ .Values.cloudBackend.hpa.minReplicas }}
   maxReplicas: {{ .Values.cloudBackend.hpa.maxReplicas }}
   metrics:
@@ -31,7 +31,7 @@ spec:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: gcs-web
+  name: {{ include "nexussky.gcsWebFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky
@@ -41,7 +41,7 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: gcs-web
+    name: {{ include "nexussky.gcsWebFullname" . }}
   minReplicas: {{ .Values.gcsWeb.hpa.minReplicas }}
   maxReplicas: {{ .Values.gcsWeb.hpa.maxReplicas }}
   metrics:

@@ -3,7 +3,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: cloud-backend
+  name: {{ include "nexussky.cloudBackendFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky
@@ -24,7 +24,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: drone-sim
+  name: {{ include "nexussky.droneSimFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky
@@ -45,7 +45,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: gcs-web
+  name: {{ include "nexussky.gcsWebFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky

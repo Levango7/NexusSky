@@ -5,7 +5,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cloud-backend
+  name: {{ include "nexussky.cloudBackendFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky
@@ -53,9 +53,9 @@ spec:
               protocol: TCP
           envFrom:
             - configMapRef:
-                name: nexussky-config
+                name: {{ include "nexussky.configFullname" . }}
             - secretRef:
-                name: nexussky-secret
+                name: {{ include "nexussky.secretFullname" . }}
           # 就绪探针：readinessState+db 全 UP 才接流量（PG 不可达时摘流量而非重启）
           readinessProbe:
             httpGet:
@@ -94,14 +94,14 @@ spec:
       volumes:
         - name: flight-logs
           persistentVolumeClaim:
-            claimName: flight-logs
+            claimName: {{ include "nexussky.flightLogsFullname" . }}
         - name: tmp
           emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: drone-sim
+  name: {{ include "nexussky.droneSimFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky
@@ -136,7 +136,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gcs-web
+  name: {{ include "nexussky.gcsWebFullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: nexussky
@@ -170,6 +170,15 @@ spec:
         - name: gcs-web
           image: "{{ .Values.imageRegistry }}{{ .Values.gcsWeb.image }}:{{ .Values.imageTag }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          # nginx 反代上游（/api、/ws、/actuator → cloud-backend）：镜像内
+          # /etc/nginx/templates 在启动时经 envsubst 渲染，上游地址来自这两个
+          # env（见 Dockerfile.web / deploy/docker/nginx.conf）。Service 名已
+          # release 化，不能再用镜像缺省值 cloud-backend。
+          env:
+            - name: NS_BACKEND_HOST
+              value: {{ include "nexussky.cloudBackendFullname" . | quote }}
+            - name: NS_BACKEND_PORT
+              value: {{ .Values.cloudBackend.port | quote }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 101
