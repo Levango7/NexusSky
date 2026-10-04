@@ -1,0 +1,20 @@
+services:
+  drone-sim-1:
+    image: eclipse-temurin:17-jre
+    # 与根 docker-compose.yml 同因修复：jar 在 /app，镜像 WORKDIR=/，
+    # 缺 working_dir 时相对 jar 名解析到 / → "Unable to access jarfile" 秒退。
+    # 验收看 docker ps 的 Up 与 docker logs，不看 compose 的 Started 回显。
+    working_dir: /app
+    volumes:
+      - ./drone-sim/target:/app
+    command: java -jar aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar --sysid=1 --port=14540 --autonomy-exec
+    network_mode: host
+    restart: unless-stopped
+  drone-sim-2:
+    image: eclipse-temurin:17-jre
+    working_dir: /app
+    volumes:
+      - ./drone-sim/target:/app
+    command: java -jar aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar --sysid=2 --port=14541 --autonomy-exec
+    network_mode: host
+    restart: unless-stopped

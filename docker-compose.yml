@@ -8,6 +8,10 @@ version: "3.8"
 services:
   drone-sim:
     image: eclipse-temurin:17-jre
+    # jar 挂在 /app，而官方镜像 WORKDIR=/：不设 working_dir 时相对 jar 名会解析成
+    # /aerofleet-drone-sim-….jar → "Unable to access jarfile" 秒退。
+    # 判定面是 docker ps 的 Up 与 docker logs，不是 compose 的 Started 回显。
+    working_dir: /app
     volumes:
       - ./drone-sim/target:/app
     command: java -jar aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar --port 14540
@@ -15,6 +19,7 @@ services:
 
   cloud-backend:
     image: eclipse-temurin:17-jre
+    working_dir: /app
     volumes:
       - ./cloud-backend/target:/app
     command: java -jar aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
