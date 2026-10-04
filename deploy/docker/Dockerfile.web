@@ -30,7 +30,8 @@ RUN mkdir -p /var/cache/nginx /run && chown -R nginx:nginx /var/cache/nginx /run
 # Nginx 镜像内置 nginx 用户，切换为非 Root 运行（安全加固）
 USER nginx
 
-EXPOSE 80
+# 非 root 无法绑定 80（特权端口），容器内监听 8080；对外端口由 Service / compose 映射
+EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-    CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1
+    CMD wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1

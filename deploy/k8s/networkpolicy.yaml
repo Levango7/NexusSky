@@ -24,7 +24,7 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: nexussky
+      # NetworkPolicyPort 无 name 字段（该字段属于 Service），命名端口应写在 port 上
       ports:
-        - name: http
-          port: 8080
+        - port: 8080
           protocol: TCP

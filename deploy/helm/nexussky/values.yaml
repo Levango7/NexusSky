@@ -61,7 +61,12 @@ droneSim:
 gcsWeb:
   replicaCount: 1
   image: nexussky/gcs-web
+  # Service / Ingress 对外端口
   port: 80
+  # 容器内 nginx 监听端口：nginx 以非 root（镜像 USER nginx）运行，无法绑定 <1024
+  # 特权端口（bind() 0.0.0.0:80 Permission denied），故容器内用 8080；
+  # Service 经 targetPort: http 转发到它，对外端口不变。
+  containerPort: 8080
   serviceType: NodePort
   nodePort: 30080
   resources:

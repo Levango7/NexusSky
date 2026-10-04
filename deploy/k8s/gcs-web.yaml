@@ -30,6 +30,9 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # 必须给数字 uid：镜像 USER 是名字 nginx，仅设 runAsNonRoot 时 kubelet 无法
+        # 校验非 root（CreateContainerConfigError: image has non-numeric user nginx）
+        runAsUser: 101
         fsGroup: 101
       containers:
         - name: gcs-web
@@ -43,8 +46,10 @@ spec:
               drop:
                 - ALL
           ports:
+            # nginx 以非 root 运行，容器内监听 8080（非特权端口）；
+            # Service port 80 经 targetPort: http 转发到此
             - name: http
-              containerPort: 80
+              containerPort: 8080
               protocol: TCP
           readinessProbe:
             httpGet:
@@ -65,6 +70,18 @@ spec:
             limits:
               cpu: "200m"
               memory: "128Mi"
+          # readOnlyRootFilesystem 下 nginx 需可写的 pid 与临时目录，否则
+          # mkdir() "/var/cache/nginx/client_temp" failed: Read-only file system
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /run
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
       restartPolicy: Always
 ---
 apiVersion: v1

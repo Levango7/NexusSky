@@ -161,13 +161,26 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: gcs-web
     spec:
+      # 与 deploy/k8s/gcs-web.yaml 保持同一套加固口径
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
       containers:
         - name: gcs-web
           image: "{{ .Values.imageRegistry }}{{ .Values.gcsWeb.image }}:{{ .Values.imageTag }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
-              containerPort: {{ .Values.gcsWeb.port }}
+              containerPort: {{ .Values.gcsWeb.containerPort }}
               protocol: TCP
           readinessProbe:
             httpGet:
@@ -183,3 +196,16 @@ spec:
             periodSeconds: 15
           resources:
             {{- toYaml .Values.gcsWeb.resources | nindent 12 }}
+          # readOnlyRootFilesystem 下 nginx 需可写的 pid 与临时目录，否则
+          # mkdir() "/var/cache/nginx/client_temp" failed: Read-only file system
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /run
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+

@@ -23,7 +23,7 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.namespace }}
+      # NetworkPolicyPort 无 name 字段（旧写法会触发 unknown field 告警）
       ports:
-        - name: http
-          port: {{ .Values.cloudBackend.port }}
+        - port: {{ .Values.cloudBackend.port }}
           protocol: TCP

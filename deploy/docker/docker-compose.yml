@@ -147,7 +147,8 @@ services:
       dockerfile: deploy/docker/Dockerfile.web
     image: nexussky/gcs-web:1.0.0
     ports:
-      - "23000:80"
+      # nginx 容器内监听 8080（非 root 不能绑 80）；宿主机仍暴露 23000
+      - "23000:8080"
     depends_on:
       cloud-backend:
         condition: service_healthy
