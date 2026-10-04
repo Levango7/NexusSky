@@ -4,6 +4,40 @@
 
 ---
 
+## [Unreleased] — 工程遗留清理：SimConfig 布尔开关解析加固 + 两项零生产者收口（2026-10-04）
+
+### 1. SimConfig 布尔开关解析加固（行为变更；仓库内无既有用法受影响）
+
+- 原实现把无 `=` 的布尔开关的下一个 token 当 value 吞掉（`--env
+  --actuators=1` 会静默丢掉后者），且布尔开关作为末参数时整个被
+  「Ignoring unknown argument」静默丢弃。该坑由上一条 CHANGELOG 的派发守卫
+  测试实锤（曾因 `--env --actuators` 写法假红一次）；
+- 加固后 9 个布尔开关（env / actuators / mesh / sat-relay / terrain-adapt /
+  celltower / rid / reject-unsigned / autonomy-exec）**裸写即生效、不吞下一
+  token、可作末参数**；值参数缺值时告警改为「needs a value」更准确；
+- 仓库内脚本与文档全部使用 `=` 形式（如 e2e-rid.ps1 的 `--rid=on`），无既有
+  用法依赖旧的吞 token 行为；新增 `SimConfigBooleanFlagTest` 8 例钉扎
+  （含「连续裸写 9 开关全生效」——原实现会隔一个丢一个）。
+
+### 2. 两项零生产者收口：证据裁定为设计边界，不接假线
+
+- **ADAPTIVE_PATH(30052)**：唯一决策生产者是刻意未接线的
+  `AdaptivePathStrategy`（`AiAutonomyWiringTest` 未接线守卫钉着），且其
+  ADAPT_PATH 决策不带 path 字段——现在强行接线只能往线上塞编造的新航点
+  坐标，比不发更糟。收口为刻意边界（README「已知边界」已声明），接上的
+  前置条件正是 M11 明确延后的 ADAPT_PATH 执行级（任务状态机航点注入）；
+- **环境配置命令（30080-30082）与载荷查询（30085）**：环境命令是 M0b 的
+  机载本地控制面（M0b 立项范围是模型+告警+消息，云端环境控制 API 从未
+  立项）；载荷查询是 1Hz 周期 PAYLOAD_STATUS 遥测之外的按需冗余触发。
+  上一条 CHANGELOG 曾把「补链路」列为后续项，本轮证据裁定为设计边界，
+  收口不再作为待办。
+
+### 3. 计数
+
+drone-sim 1366 → 1374（+8），全仓 4162 → 4170。
+
+---
+
 ## [Unreleased] — 自定义 MAV_CMD 整带搬入私有区 30080-30099（2026-10-04）
 
 > 与 2026-10 消息 ID 治理同源的遗留问题：8 条自定义命令（环境配置 310-312、

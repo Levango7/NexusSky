@@ -7,6 +7,8 @@ import io.aerofleet.sim.satrelay.SatRelayConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Set;
+
 /**
  * Command line configuration for the virtual drone simulator.
  * Parsed from simple --key=value / --key value style arguments.
@@ -14,6 +16,17 @@ import org.slf4j.LoggerFactory;
 public final class SimConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SimConfig.class);
+
+    /**
+     * 布尔开关集合（裸写即生效，不接受值）。2026-10-04 解析加固引入：
+     * 原实现把无 {@code =} 的开关的下一个 token 当 value 吞掉——
+     * {@code --env --actuators=1} 会静默丢掉后者；且开关作为末参数时
+     * 整个被「Ignoring unknown argument」静默丢弃。布尔开关自此两不走：
+     * 不吞下一 token、不要求后随参数。
+     */
+    private static final Set<String> BOOLEAN_FLAGS = Set.of(
+            "env", "actuators", "mesh", "sat-relay", "terrain-adapt",
+            "celltower", "rid", "reject-unsigned", "autonomy-exec");
 
     public final int port;
     public final int sysid;
@@ -277,11 +290,17 @@ public final class SimConfig {
             if (arg.startsWith("--") && eq > 2) {
                 key = arg.substring(2, eq);
                 value = arg.substring(eq + 1);
+            } else if (arg.startsWith("--") && BOOLEAN_FLAGS.contains(arg.substring(2))) {
+                // 布尔开关：裸写即生效，不吞下一个 token（见 BOOLEAN_FLAGS 注释）
+                key = arg.substring(2);
+                value = "";
             } else if (arg.startsWith("--") && i + 1 < args.length) {
                 key = arg.substring(2);
                 value = args[++i];
             } else {
-                SimLog.warn("Ignoring unknown argument: " + arg);
+                SimLog.warn(arg.startsWith("--")
+                        ? "Flag " + arg + " needs a value; ignored"
+                        : "Ignoring unknown argument: " + arg);
                 continue;
             }
             // M5 mesh 子参数收集（除 --mesh 开关外，其余 mesh-* 参数透传给 MeshRouterConfig.parse）
