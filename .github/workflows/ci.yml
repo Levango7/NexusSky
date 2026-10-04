@@ -524,7 +524,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/levango7/nexussky-${{ matrix.module }}
+          # 镜像名与 chart / raw k8s / compose 统一为 <registry>/nexussky/<module>
+          # （chart 侧由 imageRegistry + cloudBackend|droneSim|gcsWeb.image 拼出，见 values.yaml）
+          images: ghcr.io/levango7/nexussky/${{ matrix.module }}
           tags: |
             type=raw,value=latest
             type=sha,format=short

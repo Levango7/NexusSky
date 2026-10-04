@@ -2,7 +2,12 @@
 # 用法：helm install nexussky deploy/helm/nexussky -n nexussky --create-namespace
 # 覆盖：helm install nexussky deploy/helm/nexussky -f my-values.yaml
 
-# 全局镜像仓库与 tag（不硬编码，便于 CI 注入）
+# 全局镜像仓库前缀与 tag（不硬编码，便于 CI 注入）
+# 最终镜像 = <imageRegistry><组件 image>:<imageTag>，组件 image 形如 nexussky/<module>。
+# CI（.github/workflows/ci.yml）推送目标是 ghcr.io/levango7/nexussky/<module>，tag 为 latest 与 sha-<short>；
+# 用 CI 产物部署需成对设置，例如：
+#   --set imageRegistry=ghcr.io/levango7/ --set imageTag=latest
+# 留空则按 Docker Hub 的 nexussky/<module> 解析（默认 tag 0.1.0）。
 imageRegistry: ""
 imageTag: "0.1.0"
 imagePullPolicy: IfNotPresent
