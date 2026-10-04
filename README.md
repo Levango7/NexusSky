@@ -653,10 +653,10 @@ NexusSky/
 | `mavlink-core` | 457 |
 | `drone-sim` | 1382 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2191 |
+| `cloud-backend` | 2198 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4178** |
+| **总计** | **4185** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -836,9 +836,12 @@ NexusSky/
   "twin-state-sync" 帧。**gcs-web 已消费该帧**（2026-10-04；数字孪生面板新增
   「实时孪生同步」卡片：每机孪生位置/航向/速度/电量/漂移 + 在线/失联判定，
   `useWebSocket` 按 sysid 分桶、单位换算收口纯函数 `utils/twinSync.js`，9 例
-  vitest 钉扎）。**已知边界**：未运行机载边缘栈的
-  设备不发 30054、因而不进孪生（GPI 兜底明确未做）；`driftMeters` 是相邻两次同步
-  的位移，非与独立实测的偏差（孪生与物理态云内同源）。
+  vitest 钉扎）。**GPI 兜底**（2026-10-05）：无新鲜融合态的设备（从未收到
+  30054 或距上次超过 3s——即未运行机载边缘栈 EdgeInferenceRunner，或边缘栈
+  停发）由 `GLOBAL_POSITION_INT(33)` 原始 GPS 兜底喂孪生（alt 同为 AMSL、
+  速度取 vx/vy/vz 合矢量、hdg=65535 未知回退 0 北向），融合态新鲜时 GPI 不
+  竞争；此前「未运行边缘栈的设备不进孪生」的边界自此消除。**仍存的语义边界**：
+  `driftMeters` 是相邻两次同步的位移，非与独立实测的偏差（孪生与物理态云内同源）。
 - **自定义 MAV_CMD 已整带搬入私有区 30080-30099**（2026-10-04；原 310-312/
   320-322/420/421 位于官方/方言分配带，其中 420/421 与 ArduPilot 方言实锤冲突。
   常量收口 `MavEnums.MAV_CMD_NEXUS_*`，双测试钉扎：私有区守卫 + 真实 UDP

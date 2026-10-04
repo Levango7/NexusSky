@@ -4,6 +4,38 @@
 
 ---
 
+## [Unreleased] — M13 收尾：孪生喂入 GLOBAL_POSITION_INT 兜底（2026-10-05）
+
+### 1. 无边缘栈设备进孪生（补齐 2026-10-04 留下的明确边界）
+
+- 缺口背景：`TwinSyncListener` 此前只认 SENSOR_FUSION_DATA(30054) 融合态喂
+  `DigitalTwinService.syncTwin`——未运行机载边缘栈（EdgeInferenceRunner）的
+  设备不发 30054，因而**永远不进孪生**；2026-10-04 接线时该边界被明确记录为
+  「GPI 兜底链路明确未做」，本轮补齐；
+- `TwinSyncListener` 新增 `GLOBAL_POSITION_INT(33)` 事件监听：该 sysid 无新鲜
+  融合态（从未收到 30054，或距上次超过 `FUSION_STALE_MS=3s`——边缘栈正常 2Hz，
+  3s 无即视为未运行/停发）时用原始 GPS 兜底喂 `syncTwin`；融合态新鲜时 GPI
+  不竞争（融合态是更好的物理态估计，优先级不反转）；
+- 换算口径：alt 用 AMSL（与融合态 fusedAlt 同基准）；速度取 vx/vy/vz 合矢量
+  （cm/s → m/s）；hdg=65535（MAVLink 规范未知哨兵）回退 0（北向，生态惯例）；
+  电量沿用 SYS_STATUS 记录，未见时 battery=-1（与融合态路径同规则）；
+- GPI 兜底路径与融合态路径共享同一 1Hz 节流与 TWIN_STATE_SYNC(30055) 发布
+  （每 sysid 独立），GCS 数字孪生面板无需任何改动即可看到兜底设备。
+
+### 2. 测试与文档
+
+- 新增 `TwinSyncListenerTest` 7 例（8→15）：GPI 兜底喂入（含电量沿用）/
+  融合态新鲜时让位 / 过期后接管 / hdg 未知回退 0 / 兜底同样发布 30055 且共享
+  节流 / per-sysid 独立 / 消息体损坏隔离（不抛异常不写入）；实测 15/15 全绿；
+- Java 测试计数 4178→4185（cloud-backend 2191→2198），计数门禁
+  `check-test-count-docs.py` 18 处声称同步更新（README/ROADMAP/whitepaper/
+  sales-pitch-deck/pricing-strategy/demo-scenarios/customer-onboarding-guide/
+  low-altitude-economy-demand-research）；
+- 文档同步：README M13 段「已知边界」翻转为 GPI 兜底已实现（保留 driftMeters
+  语义边界）、ROADMAP M13 状态沿革补 2026-10-05 一句、标题补「GPI 兜底」。
+
+---
+
 ## [Unreleased] — M11 收尾：决策三帧 GCS 可视化（AI 决策面板，2026-10-05）
 
 ### 1. 决策事件 / 自适应航迹 / 边缘任务三帧的前端消费

@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.twin;
 
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
+import io.aerofleet.mavlink.messages.GlobalPositionInt;
 import io.aerofleet.mavlink.messages.MavlinkMessage;
 import io.aerofleet.mavlink.messages.SensorFusionDataMsg;
 import io.aerofleet.mavlink.messages.SysStatus;
@@ -51,6 +52,11 @@ class TwinSyncListenerTest {
     private static SensorFusionDataMsg fusion(int latE7, int lonE7, int altMm,
                                               float velocity, int headingCdeg) {
         return new SensorFusionDataMsg(latE7, lonE7, altMm, velocity, 3.0f, headingCdeg, SYSID, 3);
+    }
+
+    private static GlobalPositionInt gpi(int latE7, int lonE7, int altMm,
+                                         int vx, int vy, int vz, int hdgCdeg) {
+        return new GlobalPositionInt(0, latE7, lonE7, altMm, altMm, vx, vy, vz, hdgCdeg);
     }
 
     private List<MavlinkMessageEvent> publishedEvents() {
@@ -169,6 +175,95 @@ class TwinSyncListenerTest {
                         new SysStatus(0, 0, 0, 350, 11_100, 180, 80), 1000);
 
         assertThatCode(() -> listener.onSensorFusionData(bogus)).doesNotThrowAnyException();
+
+        assertThat(twinService.getTwin(SYSID)).isNull();
+    }
+
+    @Test
+    @DisplayName("GPI 兜底：无融合态的设备（无边缘栈）用 GLOBAL_POSITION_INT 进孪生，电量沿用 SYS_STATUS")
+    void gpiFallbackFeedsSyncTwinWhenNoFusion() {
+        listener.onSysStatus(event(SYSID, new SysStatus(0, 0, 0, 350, 11_100, 180, 70), 900));
+        listener.onGlobalPositionInt(event(SYSID,
+                gpi(310_000_000, 1_210_000_000, 40_000, 300, 400, 0, 12_345), 1000));
+
+        TwinState s = twinService.getTwin(SYSID);
+        assertThat(s.lat).isEqualTo(31.0);
+        assertThat(s.lon).isEqualTo(121.0);
+        assertThat(s.alt).isEqualTo(40.0);
+        assertThat(s.heading).isEqualTo(123.45);
+        assertThat(s.velocity).isEqualTo(5.0);
+        assertThat(s.battery).isEqualTo(70.0);
+    }
+
+    @Test
+    @DisplayName("GPI 兜底让位：融合态新鲜（<3s）时 GPI 不竞争，孪生保持融合态位置")
+    void gpiFallbackIgnoredWhileFusionFresh() {
+        listener.onSensorFusionData(event(SYSID,
+                fusion(300_000_000, 1_200_000_000, 50_000, 5.0f, 9000), 1000));
+        listener.onGlobalPositionInt(event(SYSID,
+                gpi(310_000_000, 1_210_000_000, 40_000, 300, 400, 0, 12_345), 2000));
+
+        assertThat(twinService.getTwin(SYSID).lat).isEqualTo(30.0);
+    }
+
+    @Test
+    @DisplayName("GPI 兜底接管：融合态过期（>3s，边缘栈停发）后 GPI 恢复孪生喂入")
+    void gpiFallbackTakesOverAfterFusionStale() {
+        listener.onSensorFusionData(event(SYSID,
+                fusion(300_000_000, 1_200_000_000, 50_000, 5.0f, 9000), 1000));
+        listener.onGlobalPositionInt(event(SYSID,
+                gpi(310_000_000, 1_210_000_000, 40_000, 300, 400, 0, 12_345), 4500));
+
+        assertThat(twinService.getTwin(SYSID).lat).isEqualTo(31.0);
+    }
+
+    @Test
+    @DisplayName("GPI hdg=65535（未知）回退 heading=0（北向，MAVLink 惯例）")
+    void gpiHdgUnknownMapsToZero() {
+        listener.onGlobalPositionInt(event(SYSID,
+                gpi(310_000_000, 1_210_000_000, 40_000, 0, 0, 0, 65535), 1000));
+
+        assertThat(twinService.getTwin(SYSID).heading).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("GPI 兜底也发布 TWIN_STATE_SYNC(30055)，与融合态共享同一 1Hz 节流")
+    void gpiFallbackPublishesTwinStateSync() {
+        listener.onGlobalPositionInt(event(SYSID,
+                gpi(310_000_000, 1_210_000_000, 40_000, 300, 400, 0, 12_345), 1000));
+        listener.onGlobalPositionInt(event(SYSID,
+                gpi(310_100_000, 1_210_000_000, 40_000, 300, 400, 0, 12_345), 1500));
+
+        List<TwinStateSyncMsg> msgs = publishedTwinSyncs();
+        assertThat(msgs).hasSize(1);
+        assertThat(msgs.get(0).twinLat).isEqualTo(310_000_000);
+        assertThat(msgs.get(0).twinHeading).isEqualTo(12_345);
+        assertThat(msgs.get(0).twinVelocity).isEqualTo(5.0f);
+        assertThat(msgs.get(0).twinBattery).isEqualTo(255);
+    }
+
+    @Test
+    @DisplayName("GPI 兜底 per-sysid 独立：A 有新鲜融合态不受影响，B 纯 GPI 正常兜底")
+    void gpiFallbackPerSysidIsIndependent() {
+        listener.onSensorFusionData(event(SYSID,
+                fusion(300_000_000, 1_200_000_000, 50_000, 5.0f, 9000), 1000));
+        listener.onGlobalPositionInt(event(9,
+                gpi(320_000_000, 1_220_000_000, 30_000, 0, 0, 0, 9000), 1000));
+        listener.onGlobalPositionInt(event(SYSID,
+                gpi(310_000_000, 1_210_000_000, 40_000, 300, 400, 0, 12_345), 1500));
+
+        assertThat(twinService.getTwin(SYSID).lat).isEqualTo(30.0);
+        assertThat(twinService.getTwin(9).lat).isEqualTo(32.0);
+    }
+
+    @Test
+    @DisplayName("GPI 消息体损坏（cast 失败）只影响本条：不抛异常、不写入孪生")
+    void malformedGpiIsIsolated() {
+        MavlinkMessageEvent bogus =
+                new MavlinkMessageEvent(new Object(), SYSID, GlobalPositionInt.ID,
+                        new SysStatus(0, 0, 0, 350, 11_100, 180, 80), 1000);
+
+        assertThatCode(() -> listener.onGlobalPositionInt(bogus)).doesNotThrowAnyException();
 
         assertThat(twinService.getTwin(SYSID)).isNull();
     }
