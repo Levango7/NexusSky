@@ -8,7 +8,7 @@ const HISTORY_PER_DRONE = 300
  * WebSocket 实时数据管理 hook
  * 管理 wsState 及所有 WebSocket 推送数据：
  * alerts, formations, meshTopology, satLinkData, terrainData, cellTowerData,
- * telemetryHistory, multiTracks, twinStates
+ * telemetryHistory, multiTracks, twinStates, decisionEvents, adaptivePaths, edgeTasks
  *
  * telemetryHistory 的形状是 `{ [sysid]: Point[] }`（按机分桶）——消费方应取
  * `telemetryHistory[sysid]`，不要把它当扁平数组遍历。
@@ -33,6 +33,14 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
   // 形状 { [sysid]: { ...data, receivedAt } }，保留 MAVLink 原始单位，
   // 单位换算由 utils/twinSync.js 的纯函数在消费侧做（便于直测）。
   const [twinStates, setTwinStates] = useState({})
+
+  // M11 AI 自主决策三帧（"decision-event" 30051 / "adaptive-path" 30052 /
+  // "edge-task-status" 30053）：事件流数组，新帧头插、各留最近 50 条（与 alerts 同模式）。
+  // 决策/航迹改写/边缘任务是离散事件而非可覆盖状态，不能按 sysid 只留最新。
+  // 形状 [{ ...data, sysid, receivedAt }]，归一化由 utils/aiDecision.js 在消费侧做。
+  const [decisionEvents, setDecisionEvents] = useState([])
+  const [adaptivePaths, setAdaptivePaths] = useState([])
+  const [edgeTasks, setEdgeTasks] = useState([])
 
   const wsRef = useRef(null)
 
@@ -130,6 +138,15 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
             ...prev,
             [msg.sysid]: { ...(msg.data || {}), receivedAt: Date.now() },
           }))
+        } else if (msg.type === 'decision-event') {
+          // M11 决策事件（DECISION_EVENT 30051，决策引擎变化沿）：新帧头插，保留最近 50 条
+          setDecisionEvents((prev) => [{ ...(msg.data || {}), sysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'adaptive-path') {
+          // M11 自适应航迹改写（ADAPTIVE_PATH 30052，仅真实路径变化时下发）
+          setAdaptivePaths((prev) => [{ ...(msg.data || {}), sysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'edge-task-status') {
+          // M12 边缘任务状态（EDGE_TASK_STATUS 30053，机载边缘栈逐任务上报）
+          setEdgeTasks((prev) => [{ ...(msg.data || {}), sysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
         }
       }
     }
@@ -152,5 +169,8 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
     telemetryHistory,
     multiTracks,
     twinStates,
+    decisionEvents,
+    adaptivePaths,
+    edgeTasks,
   }
 }

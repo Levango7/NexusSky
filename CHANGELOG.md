@@ -4,6 +4,37 @@
 
 ---
 
+## [Unreleased] — M11 收尾：决策三帧 GCS 可视化（AI 决策面板，2026-10-05）
+
+### 1. 决策事件 / 自适应航迹 / 边缘任务三帧的前端消费
+
+- 缺口背景：cloud-backend `TelemetryWebSocketHandler` 早已把
+  decision-event(30051) / adaptive-path(30052) / edge-task-status(30053)
+  按租户广播到 /ws/telemetry，且三者在 drone-sim 均有真实生产者
+  （`VirtualDrone.emitDecisionEvent` / `executeAdaptivePath` 同拍公告 /
+  `EdgeInferenceRunner` 逐任务上报），但 gcs-web 零消费——AI 为什么改航、
+  改成了什么，操作员在 GCS 里不可见（与 M13 twin-state-sync 此前同款缺口）；
+- 新增「AI 决策」面板（gcs-web tab `aidecision`，`AiDecisionPanel`）：
+  决策事件流（类型/原因/置信度/触发值，按决策类型着色）、自适应航迹改写
+  （原航点 → 新航点坐标/新高度/风速风向/原因码）、边缘任务（类型/耗时/
+  结果大小/状态）三条事件流，空态给触发条件指引（区分「没数据」与「功能没开」）；
+- `useWebSocket` 新增 `decisionEvents` / `adaptivePaths` / `edgeTasks` 三个
+  事件流 state（离散事件非可覆盖状态，头插各留最近 50 条，与 alerts 同模式）；
+- 单位换算与码表收口纯函数 `utils/aiDecision.js`（1E7 度 / cdeg→度换算，
+  decisionType/reason/adjustmentReason/taskType/status 五张码表与
+  drone-sim 生产端映射一一对应，未知码回退「码 N」）。
+
+### 2. 测试与文档
+
+- 新增 `gcs-web/test/aiDecision.test.js` 13 例：三帧归一化纯函数
+  （全字段换算 / 未知码回退 / 字段缺失 → null / 非对象输入不炸）+
+  hook 集成（三帧各入各流头插 / 50 条上限 / 异常帧兜底不干扰其他状态）；
+  前端 155→168 例（168/168 实测全绿）；
+- 文档同步：README（M11 段前端消费 + 前端测试计数 155→168）、
+  ROADMAP M11 标题补「GCS 可视化 2026-10-05」与状态沿革一句。
+
+---
+
 ## [Unreleased] — M11 收尾：ADAPT_PATH 执行级接线 + ADAPTIVE_PATH(30052) 首个生产者（2026-10-04）
 
 ### 1. ADAPT_PATH 从公告级升级为执行级（撤销上一条「刻意边界」）

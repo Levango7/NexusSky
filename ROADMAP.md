@@ -22,9 +22,9 @@
 - **真实卫星接入预留**：天通/铱星/星链三种卫星通信系统占位实现类，统一 SatelliteLink
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
-   4178 单测全绿（Java surefire 实测；前端已有 155 例 vitest——api.js 会话/预算
-   档位/WS URL、组件逻辑、孪生同步换算与分桶，Playwright E2E 仍缺，见
-   docs/devops-enhancement-plan.md CI7）
+   4178 单测全绿（Java surefire 实测；前端已有 168 例 vitest——api.js 会话/预算
+    档位/WS URL、组件逻辑、孪生同步换算与分桶、M11 决策三帧归一化；Playwright
+    真浏览器 E2E 4 例已于 2026-10-04 补齐，见 docs/devops-enhancement-plan.md CI7）
   > 第六轮（2026-10-02）明细见 CHANGELOG「Unreleased — 第六轮审查」。此前此处写
   > 「6 轮 / 32 问题 / 3230 单测」，其中 3230 已过期两年多、且第 6 轮在 CHANGELOG
   > 无记录——第六轮补齐了这条记录，单测数则由新增的 CI 门禁持续保证不会再次过期。
@@ -148,7 +148,7 @@
 
 依赖：Baseline（DeviceRegistry 多机状态）。
 
-### M11 自主决策引擎（AI 飞行策略） ✅ advisory + 执行级 + ADAPT_PATH 任务改写均已接线（执行级默认关闭，2026-10-04）
+### M11 自主决策引擎（AI 飞行策略） ✅ advisory + 执行级 + ADAPT_PATH 任务改写均已接线（执行级默认关闭，2026-10-04；GCS 可视化 2026-10-05）
 
 > **状态沿革**：第六轮审查发现全部代码（`io.aerofleet.sim.ai` 14 类 3513 行）只被
 > 单元测试引用、从未执行，状态由「✅ 已完成」改为「库已完成 / 未接线」。同日完成
@@ -167,7 +167,11 @@
 > 表达且 clamp ≤1.0（只能降不能升），路径无变化则不发公告。M12 的
 > `SensorFusionEngine`（EKF）与 `VideoStreamAnalyzer`（经典 CV）已于同日经
 > `EdgeInferenceRunner` 接入（见下节），「其余策略/规划器仍只被 ai 包内引用」
-> 的边界收窄为其余 7 类。
+> 的边界收窄为其余 7 类。2026-10-05 补齐 **GCS 可视化**：决策三帧
+> （30051 / 30052 / 30053）此前经 cloud-backend WS 转发后在前端零消费，
+> gcs-web 新增「AI 决策」面板（tab `aidecision`）展示决策事件流 / 自适应
+> 航迹改写 / 边缘任务三条事件流（`utils/aiDecision.js` 纯函数归一化，13 例
+> vitest）——AI 为什么改航、改成了什么，操作员自此在 GCS 可见。
 
 | 交付物 | 说明 |
 |---|---|

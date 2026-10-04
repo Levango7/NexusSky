@@ -31,6 +31,7 @@ import CommAdaptPanel from './components/CommAdaptPanel.jsx'
 import MappingPanel from './components/MappingPanel.jsx'
 import VoiceCmdPanel from './components/VoiceCmdPanel.jsx'
 import CityTwinPanel from './components/CityTwinPanel.jsx'
+import AiDecisionPanel from './components/AiDecisionPanel.jsx'
 import DeliveryPanel from './components/DeliveryPanel.jsx'
 import ShowPanel from './components/ShowPanel.jsx'
 import DisasterCommPanel from './components/DisasterCommPanel.jsx'
@@ -126,6 +127,9 @@ export default function App() {
     telemetryHistory,
     multiTracks,
     twinStates,
+    decisionEvents,
+    adaptivePaths,
+    edgeTasks,
   } = useWebSocket(selectedSysidRef, setTelemetry)
 
   // UI 状态（视图、时钟、移动端侧栏、丐版模式）
@@ -203,6 +207,7 @@ export default function App() {
               { key: 'cveval', label: 'CV评测' },
               { key: 'dronelock', label: '锁机' },
               { key: 'autodispatch', label: '自动出警' },
+              { key: 'aidecision', label: 'AI 决策' },
               { key: 'scenariolib', label: '场景库' },
               { key: 'inspection', label: '智能巡检' },
               { key: 'health', label: '健康管理' },
@@ -383,6 +388,14 @@ export default function App() {
       ) : view === 'autodispatch' ? (
         <PanelWrapper>
           <AutoDispatchPanel />
+        </PanelWrapper>
+      ) : view === 'aidecision' ? (
+        <PanelWrapper>
+          <AiDecisionPanel
+            decisionEvents={decisionEvents}
+            adaptivePaths={adaptivePaths}
+            edgeTasks={edgeTasks}
+          />
         </PanelWrapper>
       ) : view === 'scenariolib' ? (
         <PanelWrapper>
