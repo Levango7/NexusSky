@@ -2,6 +2,8 @@ package io.aerofleet.sim;
 
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.enums.MavEnums;
+import io.aerofleet.mavlink.messages.AdaptivePathMsg;
+import io.aerofleet.mavlink.enums.AdjustmentReason;
 import io.aerofleet.mavlink.messages.Attitude;
 import io.aerofleet.mavlink.messages.CommandAck;
 import io.aerofleet.mavlink.messages.CommandLong;
@@ -38,6 +40,8 @@ import io.aerofleet.mavlink.enums.ScanMode;
 import io.aerofleet.mavlink.security.MavlinkSigner;
 import io.aerofleet.mavlink.security.SigningKeyManager;
 import io.aerofleet.mavlink.security.TimestampTracker;
+import io.aerofleet.sim.ai.AdaptivePathResult;
+import io.aerofleet.sim.ai.AdaptivePathStrategy;
 import io.aerofleet.sim.ai.FusedDecision;
 import io.aerofleet.sim.mesh.MeshRouter;
 import io.aerofleet.sim.orch.OrchestrationEngine;
@@ -47,6 +51,8 @@ import io.aerofleet.sim.satrelay.SatRelayEngine;
 
 import java.io.IOException;
 import java.net.SocketAddress;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -125,10 +131,18 @@ public final class VirtualDrone implements AutoCloseable {
     private volatile boolean obstacleEnabled = false;
     /**
      * M11 执行级接线：门控执行（--autonomy-exec 开启 + failsafe 空闲 +
-     * ARMED/MISSION 才动作；RTL/EMERGENCY_LAND→RTL 程序、AVOID→避障限速）。
-     * 仲裁规则见 {@link AutonomyExecutor}。
+     * ARMED/MISSION 才动作；RTL/EMERGENCY_LAND→RTL 程序、AVOID→避障限速、
+     * ADAPT_PATH→自适应航线改写）。仲裁规则见 {@link AutonomyExecutor}。
      */
     private final AutonomyExecutor autonomyExecutor = new AutonomyExecutor(new AutonomyFlightControl());
+    /**
+     * M11 自适应航线策略（2026-10-04 执行级接线）：ADAPT_PATH 决策沿触发时对
+     * 剩余任务航段跑 {@link AdaptivePathStrategy#adaptPath}。旧接口
+     * {@code evaluate} 仍由 DecisionEngine 经 advisory 链路间接调用。
+     */
+    private final AdaptivePathStrategy adaptivePath = new AdaptivePathStrategy();
+    /** ADAPT_PATH 执行级的最小转弯半径（Dubins 圆弧半径，米）。 */
+    private static final double ADAPT_TURN_RADIUS_M = 30.0;
     /**
      * M11 自主决策接线：1Hz 组装态势快照喂给 {@link AutonomyAdvisor}，
      * 变化沿经 STATUSTEXT 下发<b>建议</b>，同一变化沿回调
@@ -2417,6 +2431,132 @@ public final class VirtualDrone implements AutoCloseable {
         }
     }
 
+    // ------------------------------------------------------------------
+    // M11 执行级：ADAPT_PATH 自适应航线改写（2026-10-04 接线）
+    // ------------------------------------------------------------------
+
+    /**
+     * 执行 ADAPT_PATH 决策（包内可见：{@code AdaptivePathExecutionTest} 直调，
+     * 生产入口是 {@link AutonomyExecutor} 的门控回调）。
+     *
+     * <p><b>语义</b>：对剩余任务航段（当前航点..末航点，前置当前实际位置）跑
+     * {@link AdaptivePathStrategy#adaptPath}——Dubins 平滑（&gt;5° 尖角以
+     * {@link #ADAPT_TURN_RADIUS_M} 半径圆弧替换）+ 风修正航向 + 能耗最优速度。
+     * 结果分两路落地：
+     * <ol>
+     *   <li><b>路径改写</b>：平滑在尖角处插点（点数必增，Dubins 不改直段坐标），
+     *       此时用平滑结果替换任务尾部并重定位当前段目标，随后经
+     *       ADAPTIVE_PATH(30052) 公告第一个新航点——该消息的<b>第一个生产者</b>
+     *       （此前全仓零生产者，属刻意边界）；未插点（无尖角）则任务原样保留，
+     *       也不发 30052——没有真实变化就不公告；</li>
+     *   <li><b>当前段调速</b>：按能耗最优速度下调全局速度因子（顺风提速在
+     *       物理层不可表达：{@code setSpeedFactor} 上限 1.0，只能降不能升）。</li>
+     * </ol>
+     *
+     * <p><b>守卫（任一不满足即静默返回，advisory 链路不受影响）</b>：
+     * 非 MISSION 态（ARMED 无任务几何可改）；任务上传会话进行中；剩余项不全
+     * 是 NAV_WAYPOINT（TAKEOFF/RTL/LAND/JUMP 不是可平滑的几何航点）；剩余
+     * 航点 &lt; 2（单点尾无平滑意义）。
+     *
+     * <p>风向语义：策略要「风吹来的方向」（气象惯例），而仿真风向量
+     * （{@code windVector}/{@code applyWind}）是空气推进方向，二者相差 180°。
+     *
+     * <p>包内可见 + 异常就地吞掉：执行级失败只损失本次适配，不得影响
+     * tickOnce 链路（与 {@code AutonomyExecutor#onDecision} 同口径）。
+     */
+    void executeAdaptivePath(String reason) {
+        try {
+            if (state != FlightState.MISSION || missions.isUploading()) {
+                return;
+            }
+            for (int i = currentSeq; i < missions.size(); i++) {
+                MissionItemInt it = missions.get(i);
+                if (it == null || it.command != MavEnums.MAV_CMD_NAV_WAYPOINT) {
+                    return;
+                }
+            }
+            int remaining = missions.size() - currentSeq;
+            if (remaining < 2) {
+                return;
+            }
+            // 剩余路径 = [当前位置, 当前航点, ..., 末航点]，坐标 [lat, lon, alt]
+            List<double[]> path = new ArrayList<>(remaining + 1);
+            path.add(new double[]{physics.lat(), physics.lon(), physics.alt()});
+            for (int i = currentSeq; i < missions.size(); i++) {
+                MissionItemInt it = missions.get(i);
+                path.add(new double[]{it.lat(), it.lon(), it.z});
+            }
+            // 合成风与 buildAdvisorySnapshot 同源：场景风 + 环境风向量叠加
+            double windN = reusableScenarioWind[0];
+            double windE = reusableScenarioWind[1];
+            if (envModel != null && envEnabled) {
+                windN += reusableEnvWind[0];
+                windE += reusableEnvWind[1];
+            }
+            double windSpeed = Math.hypot(windN, windE);
+            double windDirDeg = windSpeed < 1e-9 ? 0.0
+                    : (Math.toDegrees(Math.atan2(-windE, -windN)) + 360.0) % 360.0;
+
+            AdaptivePathResult result = adaptivePath.adaptPath(path, windSpeed, windDirDeg,
+                    physics.cruiseSpeed(), physics.batteryRemainingPct(), ADAPT_TURN_RADIUS_M);
+            List<double[]> smoothed = result.correctedPath;
+            if (smoothed.size() < remaining + 1) {
+                return;   // 策略对非法输入返回空表：防御，正常不会走到
+            }
+            // 新尾 = 平滑结果去掉首点（首点是当前位置，不是航点）
+            MissionItemInt template = missions.get(currentSeq);
+            List<MissionItemInt> newTail = new ArrayList<>(smoothed.size() - 1);
+            for (int i = 1; i < smoothed.size(); i++) {
+                double[] p = smoothed.get(i);
+                newTail.add(new MissionItemInt(config.sysid, COMPONENT_ID, currentSeq + i - 1,
+                        template.frame, MavEnums.MAV_CMD_NAV_WAYPOINT, template.current,
+                        template.autocontinue, 0f, 0f, 0f, 0f,
+                        (int) Math.round(p[0] * 1e7), (int) Math.round(p[1] * 1e7),
+                        (float) p[2], template.missionType));
+            }
+            // Dubins 只在尖角处插点：点数不变 = 未触发平滑 = 任务无变化
+            if (newTail.size() != remaining) {
+                missions.replaceTail(currentSeq, newTail);
+                beginCurrentLeg();
+                double[] first = smoothed.get(1);
+                send(new AdaptivePathMsg(
+                        (int) Math.round(first[0] * 1e7),
+                        (int) Math.round(first[1] * 1e7),
+                        (float) windSpeed,
+                        currentSeq,
+                        (int) Math.round(first[2]),
+                        (int) Math.round(windDirDeg * 100.0),
+                        config.sysid,
+                        adjustmentReasonOf(reason)));
+                SimLog.info("AI EXECUTION: path adapted, mission tail " + remaining
+                        + " -> " + newTail.size() + " items (seq " + currentSeq + "+)");
+                pushStatus(MavEnums.MAV_SEVERITY_NOTICE,
+                        "AI execution: path adapted (" + (newTail.size() - remaining)
+                                + " smoothing waypoints inserted)");
+            }
+            // 当前段能耗最优速度：物理层因子上限 1.0，顺风提速不可表达
+            if (!result.segmentSpeeds.isEmpty() && result.segmentSpeeds.get(0) > 0.0) {
+                physics.setSpeedFactor(Math.min(1.0,
+                        result.segmentSpeeds.get(0) / physics.cruiseSpeed()));
+            }
+        } catch (Exception e) {
+            SimLog.warn("adaptive path execution failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 决策原因 → AdaptivePathMsg.adjustmentReason 码（{@link AdjustmentReason}
+     * 的 ordinal）。当前 ADAPT_PATH 决策源只有
+     * {@code AdaptivePathStrategy.evaluate} 的两种 reason；未知原因回退 WIND
+     * 而不是发明协议外的码值。
+     */
+    static int adjustmentReasonOf(String reason) {
+        if (reason != null && reason.contains("battery")) {
+            return AdjustmentReason.BATTERY.ordinal();
+        }
+        return AdjustmentReason.WIND.ordinal();
+    }
+
     /**
      * M11 执行级飞控原语：{@link AutonomyExecutor.FlightControl} 的
      * VirtualDrone 实现（非静态内部类，直接触达状态机与物理层）。
@@ -2448,6 +2588,11 @@ public final class VirtualDrone implements AutoCloseable {
             pushStatus(MavEnums.MAV_SEVERITY_WARNING,
                     "AI execution: RTL engaged (" + aiReason + ")");
             startRtl();
+        }
+
+        @Override
+        public void adaptPath(String aiReason) {
+            executeAdaptivePath(aiReason);
         }
 
         @Override

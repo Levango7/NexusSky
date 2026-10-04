@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class AutonomyExecutorTest {
 
-    /** 记录型飞控假实现：断言 RTL 调用序列与限速因子序列。 */
+    /** 记录型飞控假实现：断言 RTL/adaptive 调用序列与限速因子序列。 */
     private static final class RecordingControl implements AutonomyExecutor.FlightControl {
         boolean enabled = true;
         boolean executable = true;
@@ -33,6 +33,7 @@ class AutonomyExecutorTest {
         boolean throwOnEngage = false;
         final List<String> rtlCalls = new ArrayList<>();
         final List<Double> speedCalls = new ArrayList<>();
+        final List<String> adaptCalls = new ArrayList<>();
 
         @Override
         public boolean autonomyExecEnabled() {
@@ -55,6 +56,11 @@ class AutonomyExecutorTest {
                 throw new IllegalStateException("boom");
             }
             rtlCalls.add(aiReason);
+        }
+
+        @Override
+        public void adaptPath(String aiReason) {
+            adaptCalls.add(aiReason);
         }
 
         @Override
@@ -142,12 +148,25 @@ class AutonomyExecutorTest {
     }
 
     @Test
-    @DisplayName("ADAPT_PATH 公告级不执行：不 RTL、限速保持 1.0（航点注入明确未实现）")
-    void adaptPathIsAnnouncementOnly() {
+    @DisplayName("ADAPT_PATH 执行级（2026-10-04 接线）：可执行态触发一次 adaptPath，先复位限速且不 RTL")
+    void adaptPathExecutesInExecutableState() {
         RecordingControl control = new RecordingControl();
         AutonomyExecutor executor = new AutonomyExecutor(control);
         executor.onDecision(fused("ADAPT_PATH", "strong wind"));
+        assertEquals(List.of("strong wind"), control.adaptCalls,
+                "ADAPT_PATH 变化沿应恰好触发一次自适应执行");
         assertTrue(control.rtlCalls.isEmpty(), "ADAPT_PATH 不得触发 RTL");
+        assertEquals(List.of(1.0), control.speedCalls, "适配前先复位限速（调速由执行实现自理）");
+    }
+
+    @Test
+    @DisplayName("ADAPT_PATH 在不可执行态不执行：只复位限速")
+    void adaptPathInNonExecutableStateIsIgnored() {
+        RecordingControl control = new RecordingControl();
+        control.executable = false;
+        AutonomyExecutor executor = new AutonomyExecutor(control);
+        executor.onDecision(fused("ADAPT_PATH", "strong wind"));
+        assertTrue(control.adaptCalls.isEmpty(), "不可执行态不得改写任务");
         assertEquals(List.of(1.0), control.speedCalls);
     }
 

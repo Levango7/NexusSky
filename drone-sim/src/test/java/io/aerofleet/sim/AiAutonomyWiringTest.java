@@ -38,7 +38,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  *       输出 30053/30054）——这两条接线不得静默消失；</li>
  *   <li>其余 ai 策略/路径规划器仍<b>无生产调用方</b>——这是
  *       <b>期望状态</b>，不是缺陷；一旦有人把它们接进飞行路径，本测试判红
- *       并提示同步 README 与产品文档的声称；</li>
+ *       并提示同步 README 与产品文档的声称（AdaptivePathStrategy 已于
+ *       2026-10-04 接入 M11 执行级，移出本列表）；</li>
  *   <li>drone-sim 不引入 ML 运行时依赖（「自主决策」是规则+排序+搜索，
  *       「边缘 AI」是经典 CV）。</li>
  * </ol>
@@ -90,7 +91,6 @@ class AiAutonomyWiringTest {
 
     private static final String[] UNWIRED_CLASSES = {
             "io.aerofleet.sim.ai.ReturnToHomeStrategy",
-            "io.aerofleet.sim.ai.AdaptivePathStrategy",
             "io.aerofleet.sim.ai.ObstacleAvoidanceStrategy",
             "io.aerofleet.sim.ai.AutoAvoidanceStrategy",
             "io.aerofleet.sim.ai.SwarmCoordinationStrategy",
@@ -111,6 +111,22 @@ class AiAutonomyWiringTest {
                         + "若这条失败，说明接线被拆掉了：请要么恢复接线，"
                         + "要么同步回滚 README/ROADMAP/competitive-analysis 中"
                         + " M11 的状态表述，并把本测试改回未接线断言。");
+    }
+
+    @Test
+    @DisplayName("AdaptivePathStrategy 已接入 M11 执行级（VirtualDrone ADAPT_PATH 改写），不得静默退线")
+    void adaptivePathStrategyIsWired() {
+        assertTrue(hasProductionReference("io.aerofleet.sim.ai.AdaptivePathStrategy"),
+                "AdaptivePathStrategy 应被 ai 包外的生产代码引用——接线载体是"
+                        + " VirtualDrone.executeAdaptivePath（io.aerofleet.sim），由"
+                        + " AutonomyExecutor 的 ADAPT_PATH 门控回调触发"
+                        + "（--autonomy-exec 开启、failsafe 优先、仅 MISSION 且剩余"
+                        + " 全为 NAV_WAYPOINT 时）：对剩余航段跑 adaptPath（Dubins 平滑"
+                        + " + 风修正 + 能耗调速），尖角插点后改写任务尾部并经"
+                        + " ADAPTIVE_PATH(30052) 公告——该消息的第一个生产者。"
+                        + "若这条失败，说明执行级接线被拆掉了：请要么恢复接线，"
+                        + "要么同步回滚 README/ROADMAP/competitive-analysis 中"
+                        + " ADAPT_PATH 执行级的表述，并把本类移回 UNWIRED_CLASSES。");
     }
 
     @Test

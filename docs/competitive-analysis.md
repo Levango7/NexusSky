@@ -142,9 +142,13 @@
 >
 > - **自主决策引擎**（`io.aerofleet.sim.ai`，14 类 3513 行）：advisory + 执行级均
 >   已接线——`AutonomyAdvisor` 以 1Hz 驱动 `DecisionEngine`，变化沿播报建议并下发
->   DECISION_EVENT(30051)；`AutonomyExecutor` 门控执行（RTL/避障限速），但
->   **FailsafeController 永远优先**、仅 ARMED/MISSION 可执行、需 `--autonomy-exec`
->   显式开启（**默认关闭**）；ADAPT_PATH 航点注入明确未做。应急**执行**链路仍是
+>   DECISION_EVENT(30051)；`AutonomyExecutor` 门控执行（RTL/避障限速/
+>   ADAPT_PATH 任务改写），但**FailsafeController 永远优先**、仅 ARMED/MISSION
+>   可执行、需 `--autonomy-exec` 显式开启（**默认关闭**）。ADAPT_PATH 执行级
+>   2026-10-04 补齐：剩余航段跑 `AdaptivePathStrategy` 三算法（风补偿/能耗速度/
+>   Dubins 平滑），尖角插点经 `MissionStore.replaceTail` 改写任务尾部并公告
+>   ADAPTIVE_PATH(30052) 真实新航点（此前全仓零生产者）；能耗速度经限速表达
+>   且只能降不能升（clamp ≤1.0）。应急**执行**链路仍是
 >   `VirtualDrone` 自带的 `FailsafeController`（链路丢失/电量临界/GPS 丢失 →
 >   RTL/HOLD），与 ai 包是两套并行实现。该行 ⚠️ 指向措辞：「AI」实为规则 + 排序 +
 >   搜索，无任何机器学习模型。
@@ -157,10 +161,10 @@
 >   该行 ⚠️ 指向本质：是**经典 CV 算法而非机器学习模型**；全仓 pom 无
 >   onnxruntime/tensorflow/ONNX 任何 ML 依赖。
 >
-> 接线状态由 `drone-sim` 的 `AiAutonomyWiringTest` 钉成断言：DecisionEngine 与 edge
-> 两引擎「已接线」是正向断言（静默退线即判红），其余 8 个 ai 类「未接线」是期望
-> 状态——一旦接线即判红并提示同步本表。这比在文档里写一句「注意」可靠——文档
-> 不会自己变红。
+> 接线状态由 `drone-sim` 的 `AiAutonomyWiringTest` 钉成断言：DecisionEngine、
+> `AdaptivePathStrategy`（2026-10-04 执行级接线）与 edge 两引擎「已接线」是正向
+> 断言（静默退线即判红），其余 7 个 ai 类「未接线」是期望状态——一旦接线即判红
+> 并提示同步本表。这比在文档里写一句「注意」可靠——文档不会自己变红。
 
 ### 3.1 技术指标对比
 

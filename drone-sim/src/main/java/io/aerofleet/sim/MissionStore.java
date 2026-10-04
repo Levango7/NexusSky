@@ -117,6 +117,27 @@ public final class MissionStore {
         return items.get(seq);
     }
 
+    /**
+     * 用新航点列表替换 {@code fromSeq} 起的剩余任务项（M11 执行级 ADAPT_PATH 专用）。
+     * <p>
+     * 前缀项（0..fromSeq-1）原样保留；新项的 seq 必须由调用方从 {@code fromSeq} 起
+     * 连续编号（与上传协议的 seq 语义一致）。仅允许在非上传会话期间调用——
+     * 上传中途改写会破坏请求-应答状态机，此时静默拒绝（执行级失败只影响本次
+     * 适配，不外抛）。
+     *
+     * @param fromSeq  被替换的首个序号（0 &le; fromSeq &le; size）
+     * @param newItems 替换项（可为空表，等效截断任务）
+     */
+    public void replaceTail(int fromSeq, List<MissionItemInt> newItems) {
+        if (uploading || fromSeq < 0 || fromSeq > items.size() || newItems == null) {
+            return;
+        }
+        List<MissionItemInt> merged = new ArrayList<>(items.subList(0, fromSeq));
+        merged.addAll(newItems);
+        items = merged;
+        hasMission = !items.isEmpty();
+    }
+
     public List<MissionItemInt> all() {
         return items;
     }

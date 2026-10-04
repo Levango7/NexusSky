@@ -85,10 +85,10 @@ class NexusCommandDispatchTest {
     @Test
     @DisplayName("8 条私有区命令全部被机载 switch 命中（回显 ACK 且非 UNSUPPORTED）")
     void allNexusCommandsDispatched() throws Exception {
-        // 注意：SimConfig.parse 的无值开关会吞掉下一个 token 当 value，
-        // 因此布尔开关必须写成 --env=1 / --actuators=1 形式，不能裸写。
+        // 布尔开关 2026-10-04 解析加固后裸写安全（BOOLEAN_FLAGS 集合，不吞后续 token）；
+        // --failsafe=off 仍需显式赋值（它是带值开关）。
         SimConfig config = SimConfig.parse(new String[]{
-                "--port=" + DRONE_PORT, "--failsafe=off", "--env=1", "--actuators=1"});
+                "--port=" + DRONE_PORT, "--failsafe=off", "--env", "--actuators"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             // 雷达/气动默认不装配，handler 会以 UNSUPPORTED 短路——先注入模拟实现。

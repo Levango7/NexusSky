@@ -416,4 +416,71 @@ class MissionStoreTest {
             assertThat(store.hasMission()).isFalse();
         }
     }
+
+    // ==================== replaceTail（M11 执行级 ADAPT_PATH 专用） ====================
+
+    @Nested
+    @DisplayName("replaceTail 任务尾部改写")
+    class ReplaceTail {
+
+        private void uploadItems(int count) {
+            store.beginUpload(count);
+            for (int i = 0; i < count; i++) {
+                store.onItem(item(i));
+            }
+            store.commit();
+        }
+
+        @Test
+        @DisplayName("正常改写：前缀保留、尾部替换为给定项")
+        void replaceTail_swapsSuffixAndKeepsPrefix() {
+            uploadItems(3);
+            store.replaceTail(1, java.util.Arrays.asList(item(1), item(2), item(3), item(4)));
+            assertThat(store.size()).isEqualTo(5);
+            assertThat(store.get(0)).isNotNull();
+            // 前缀项还是原对象，尾部是替换后的 seq 连续编号
+            assertThat(store.get(0).seq).isZero();
+            assertThat(store.get(4).seq).isEqualTo(4);
+        }
+
+        @Test
+        @DisplayName("fromSeq=0：整任务替换")
+        void replaceTail_fromZero_replacesAll() {
+            uploadItems(3);
+            store.replaceTail(0, java.util.Arrays.asList(item(0), item(1)));
+            assertThat(store.size()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("空替换表：等效截断任务，hasMission 翻转为 false")
+        void replaceTail_emptyList_truncates() {
+            uploadItems(3);
+            store.replaceTail(2, java.util.Collections.emptyList());
+            assertThat(store.size()).isEqualTo(2);
+            assertThat(store.hasMission()).isTrue();
+            store.replaceTail(0, java.util.Collections.emptyList());
+            assertThat(store.hasMission()).isFalse();
+        }
+
+        @Test
+        @DisplayName("上传会话期间静默拒绝：不破坏请求-应答状态机")
+        void replaceTail_duringUpload_isIgnored() {
+            store.beginUpload(3);
+            store.onItem(item(0));
+            store.replaceTail(0, java.util.Arrays.asList(item(0), item(1)));
+            // 上传中的 items 不被改写（仍等待 seq 1、2）
+            assertThat(store.isUploading()).isTrue();
+            assertThat(store.nextExpectedSeq()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("越界与 null 守卫：fromSeq<0 / >size / null 列表均静默拒绝")
+        void replaceTail_invalidArgs_isIgnored() {
+            uploadItems(2);
+            store.replaceTail(-1, java.util.Arrays.asList(item(0)));
+            store.replaceTail(3, java.util.Arrays.asList(item(3)));
+            store.replaceTail(0, null);
+            assertThat(store.size()).isEqualTo(2);
+        }
+    }
 }

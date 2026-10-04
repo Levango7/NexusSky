@@ -9,21 +9,22 @@ import java.util.Collections;
 import java.util.List;
 
 /**
-
- * <b>当前状态：未接入生产路径</b>——本类只被自己的单元测试与同包的 {@link DecisionEngine} 引用， {@code VirtualDrone} 不调用它（应急链路实际走 {@code FailsafeController}）。见 {@code AiAutonomyWiringTest}。
- * <p>
- * <b>advisory 接线后的精确状态</b>：{@code DecisionEngine} 已通过
- * {@code AutonomyAdvisor} 以 advisory 模式接入 {@code VirtualDrone}（1Hz 节流），
- * 本类<b>旧接口</b> {@link #evaluate(double, double)} 会随该链路<b>间接执行</b>
- * （只产出建议，不执行动作）。「未接入」按 {@code AiAutonomyWiringTest} 的定义指
- * <b>无包外生产调用方</b>——本类仍满足；但下文的三大真实算法
- * （风补偿 / 能耗优化 / Dubins 平滑，综合接口 {@link #adaptPath}）
- * <b>零生产调用方，从未执行</b>。
+ * <b>当前状态：已接入生产路径</b>（2026-10-04 M11 执行级接线，接线守卫见
+ * {@code AiAutonomyWiringTest#adaptivePathStrategyIsWired}）：
+ * <ul>
+ *   <li>旧接口 {@link #evaluate(double, double)} 经 {@link DecisionEngine} →
+ *       {@code AutonomyAdvisor} 以 advisory 模式接入 {@code VirtualDrone}（1Hz）；</li>
+ *   <li>综合接口 {@link #adaptPath}（风补偿 / 能耗优化 / Dubins 平滑）由
+ *       {@code VirtualDrone.executeAdaptivePath} 调用——ADAPT_PATH 决策沿经
+ *       {@code AutonomyExecutor} 门控（--autonomy-exec、failsafe 优先、仅
+ *       MISSION 态全 NAV_WAYPOINT 尾）后，对剩余任务航段跑本策略，尖角插点
+ *       改写任务尾部并经 ADAPTIVE_PATH(30052) 公告。</li>
+ * </ul>
  * <p>
  * M11 自适应航线策略。
  * <p>
- * 保留旧接口 {@link #evaluate(double, double)} 供 {@link DecisionEngine} 调用（向后兼容）。
- * 新增真实自适应航线算法，包含三大能力：
+ * 旧接口 {@link #evaluate(double, double)} 供 {@link DecisionEngine} 调用（决策生产）。
+ * 三大真实算法能力：
  * <ol>
  *   <li><b>风补偿</b>：{@link #computeWindCorrectedHeading} 基于风修正角（WCA）公式
  *       调整航向，使无人机在侧风/逆风下仍能沿期望航线飞行。

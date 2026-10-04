@@ -646,17 +646,17 @@ NexusSky/
 
 ## 测试规模
 
-实测于 2026-10-02，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
+实测于 2026-10-04，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
 
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 457 |
-| `drone-sim` | 1374 |
+| `drone-sim` | 1382 |
 | `link-sim` | 117 |
 | `cloud-backend` | 2191 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4170** |
+| **总计** | **4178** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -779,24 +779,30 @@ NexusSky/
   build 保护。`vite build` 在本仓开发沙箱里曾被 stdio 管道限制挡住（EPERM），本地另用
   `gcs-web/scripts/check-frontend.cjs`（Babel 语法 + import 图）把关；`npm run check`
   把两者串起来。
-- **「自主决策」advisory + 执行级均已接线（执行级默认关闭），「边缘 AI」两算法
-  引擎已接线（被动观测、默认常开）**（2026-10-02 第六轮审查；2026-10-04 三步
-  接线：advisory / 执行级 / 边缘）。
+- **「自主决策」advisory + 执行级均已接线（执行级默认关闭，ADAPT_PATH 执行级
+  2026-10-04 补齐），「边缘 AI」两算法引擎已接线（被动观测、默认常开）**
+  （2026-10-02 第六轮审查；2026-10-04 四步接线：advisory / 执行级 / 边缘 /
+  ADAPT_PATH 任务改写）。
   M11 `io.aerofleet.sim.ai`（14 个类 3513 行）通过 `AutonomyAdvisor` 接入
   `VirtualDrone.tickOnce`：1Hz 评估态势，主决策类型**变化沿**经 STATUSTEXT 下发
   **建议**（RTL/AVOID=WARNING、EMERGENCY_LAND=CRITICAL、ADAPT_PATH=NOTICE，恢复时
   INFO 澄清一次），同一变化沿下发 `DECISION_EVENT(30051)`（该消息首次有了机载
   生产者——cloud-backend 的 WS 转发此前永远收不到实例）并交 `AutonomyExecutor`
   **门控执行**：RTL/EMERGENCY_LAND 走与 failsafe 同一条 RTL 程序、AVOID 压全局
-  巡航限速 50%。四条仲裁：`--autonomy-exec` **默认关闭**、**FailsafeController
-  永远优先**（任一触发沿激活即不抢杆并复位限速）、仅 ARMED/MISSION 可执行、
-  变化沿驱动；ADAPT_PATH 仍为公告级（航点注入需改任务状态机，明确未做；其公告消息
-  ADAPTIVE_PATH(30052) 因此全仓零生产者——载荷语义要求真实的新航点坐标，规划器
-  未接线时编造坐标上线比不发更糟，属刻意边界而非遗漏，接上的前置条件正是
-  ADAPT_PATH 执行级接线）。
+  巡航限速 50%、ADAPT_PATH 走 `VirtualDrone.executeAdaptivePath` 任务改写。四条
+  仲裁：`--autonomy-exec` **默认关闭**、**FailsafeController 永远优先**（任一触发沿
+  激活即不抢杆并复位限速）、仅 ARMED/MISSION 可执行、变化沿驱动。ADAPT_PATH
+  执行级（2026-10-04 接线）：对剩余任务航段（要求全部 NAV_WAYPOINT 且 ≥2 个）
+  跑 `AdaptivePathStrategy.adaptPath` 真实三算法（风补偿 WCA / 能耗最优速度 /
+  Dubins 30m 圆弧尖角平滑），尖角被插点改写时经 `MissionStore.replaceTail`
+  原地替换任务尾部并重定位当前航段，同一拍公告 **`ADAPTIVE_PATH(30052)`**——
+  该消息首次有了生产者，公告的是真实几何（新航点坐标取自平滑后路径第一点，
+  非编造）；能耗最优速度经巡航限速因子表达，物理层 clamp [0.05,1.0] 故**只能
+  降不能升**（顺风提速不可表达，刻意边界）；路径未被平滑改动时**不发 30052**
+  （无变化不公告）。
   真正生效的应急执行链路仍是独立的
   `FailsafeController`（链路丢失 / 电量临界 / GPS 丢失 → RTL / HOLD）。其余策略 /
-  规划器仍只被 ai 包内引用。M12 `io.aerofleet.sim.edge`（其中
+  规划器（避障 A 星/RRT、RTL 滑翔等）仍只被 ai 包内引用。M12 `io.aerofleet.sim.edge`（其中
   `SensorFusionEngine` 9 维 EKF 521 行、`VideoStreamAnalyzer`
   帧差 + 连通域 + 质心跟踪 506 行）经 `EdgeInferenceRunner` 接入同一遥测主循环：
   2Hz 喂 GPS（`reportedLat/Lon`，3m 噪声）/ IMU 速度 / LiDAR(注入式在环时) 观测，
@@ -809,11 +815,12 @@ NexusSky/
   排序 + 搜索</b>（阈值规则、融合权重、决策树、A 星 / RRT），<b>不含任何机器学习
   模型</b>——全仓 pom 无 onnxruntime / tensorflow / ONNX / OpenCV 任何依赖；
   「边缘 AI 推理」的准确含义是<b>经典 CV 图像处理</b>。
-  安全阈值已收敛到 `FailsafeThresholds`（电池临界 22% / 链路丢失 15s，此前仓库里
-  同一参数曾同时存在 22 / 25 / 20 三个值）。`drone-sim` 的 `AiAutonomyWiringTest`
-  把接线状态钉成断言：DecisionEngine 与 edge 两引擎「已接线」是正向断言（静默
-  退线即判红），其余 8 个 ai 类「未接线」是期望状态（接线即判红并提示同步本节
-  与竞品对比表）——比在文档里写一句「注意」可靠，文档不会自己变红。
+   安全阈值已收敛到 `FailsafeThresholds`（电池临界 22% / 链路丢失 15s，此前仓库里
+   同一参数曾同时存在 22 / 25 / 20 三个值）。`drone-sim` 的 `AiAutonomyWiringTest`
+   把接线状态钉成断言：DecisionEngine、`AdaptivePathStrategy`（2026-10-04 执行级
+   接线）与 edge 两引擎「已接线」是正向断言（静默退线即判红），其余 7 个 ai 类
+   「未接线」是期望状态（接线即判红并提示同步本节与竞品对比表）——比在文档里
+   写一句「注意」可靠，文档不会自己变红。
 - **数字孪生「实时镜像」已接线**（2026-10-04；此前第六轮审查曾核实孪生恒为空）。
   `TwinSyncListener`（cloud-backend）监听 MAVLink 事件总线：SYS_STATUS(1) 记电量、
   SENSOR_FUSION_DATA(30054) 换算 **M12 EKF 融合态**（而非 GLOBAL_POSITION_INT 原始

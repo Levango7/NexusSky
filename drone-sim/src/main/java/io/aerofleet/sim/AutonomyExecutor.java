@@ -28,9 +28,12 @@ import io.aerofleet.sim.ai.FusedDecision;
  *   <li>AVOID → 避障限速：全局速度因子压到 {@link #AVOID_SPEED_FACTOR}
  *       （{@code DronePhysics.setSpeedFactor}，作用于巡航/导航速度）；决策
  *       清除沿后恢复 1.0；</li>
- *   <li>ADAPT_PATH → <b>不执行</b>（公告级）：航点注入需要把
- *       AdaptivePathStrategy 的规划结果写进任务状态机，属于更大的架构变更
- *       （会触发 {@code AiAutonomyWiringTest} 的未接线守卫），本轮明确不做；</li>
+ *   <li>ADAPT_PATH → 自适应航线（2026-10-04 执行级接线，此前公告级不执行）：
+ *       {@code adaptPath} 由 {@code VirtualDrone} 实现——对剩余任务航段跑
+ *       {@code AdaptivePathStrategy.adaptPath}（Dubins 平滑 + 风修正 + 能耗
+ *       调速），尖角航段插入平滑点后改写任务尾部并经 ADAPTIVE_PATH(30052)
+ *       公告真实新航点（该消息的第一个生产者）；限速按当前段能耗最优速度
+ *       下调（物理层因子上限 1.0，顺风提速不可表达，见实现注记）；</li>
  *   <li>NONE（清除沿）/ 未知类型 → 复位限速。</li>
  * </ul>
  *
@@ -56,6 +59,9 @@ public final class AutonomyExecutor {
 
         /** 执行 RTL 程序（与 failsafe 同一条：爬升→回家→降落）。 */
         void engageRtl(String aiReason);
+
+        /** 执行自适应航线：对剩余任务航段跑策略并按结果改写任务尾部/调速。 */
+        void adaptPath(String aiReason);
 
         /** 设置避障限速因子（1.0 = 恢复）。 */
         void setAvoidSpeedFactor(double factor);
@@ -100,8 +106,14 @@ public final class AutonomyExecutor {
             }
             case "AVOID" -> control.setAvoidSpeedFactor(
                     control.inExecutableState() ? AVOID_SPEED_FACTOR : 1.0);
-            // ADAPT_PATH：公告级，不执行（见类 Javadoc）
-            case "ADAPT_PATH" -> control.setAvoidSpeedFactor(1.0);
+            // ADAPT_PATH：执行级接线（2026-10-04），实现与边界见类 Javadoc
+            case "ADAPT_PATH" -> {
+                control.setAvoidSpeedFactor(1.0);
+                if (control.inExecutableState()) {
+                    DecisionResult primary = fused.primary;
+                    control.adaptPath(primary.reason);
+                }
+            }
             // NONE / 未知类型：复位
             default -> control.setAvoidSpeedFactor(1.0);
         }

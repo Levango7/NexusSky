@@ -536,6 +536,11 @@ public final class DronePhysics {
         return airborneSeconds;
     }
 
+    /** Configured cruise speed (m/s); M11 执行级能耗调速以此为基线。 */
+    public double cruiseSpeed() {
+        return cruiseSpeed;
+    }
+
     /** Battery voltage 15.8V -> 14.0V linear over mode-weighted flight time (E4). */
     public double batteryVoltage() {
         double f = Math.min(1.0, drainSeconds / BATTERY_SECONDS);

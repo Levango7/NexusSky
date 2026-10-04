@@ -22,8 +22,8 @@
 - **真实卫星接入预留**：天通/铱星/星链三种卫星通信系统占位实现类，统一 SatelliteLink
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
-   4170 单测全绿（Java surefire 实测；前端已有 vitest 单测 24 例——api.js 会话/预算
-   档位/WS URL 与 Scene3DUtils 坐标契约，Playwright E2E 仍缺，见
+   4178 单测全绿（Java surefire 实测；前端已有 155 例 vitest——api.js 会话/预算
+   档位/WS URL、组件逻辑、孪生同步换算与分桶，Playwright E2E 仍缺，见
    docs/devops-enhancement-plan.md CI7）
   > 第六轮（2026-10-02）明细见 CHANGELOG「Unreleased — 第六轮审查」。此前此处写
   > 「6 轮 / 32 问题 / 3230 单测」，其中 3230 已过期两年多、且第 6 轮在 CHANGELOG
@@ -148,7 +148,7 @@
 
 依赖：Baseline（DeviceRegistry 多机状态）。
 
-### M11 自主决策引擎（AI 飞行策略） ⚠️ 执行级已接线（默认关闭）；ADAPT_PATH 航点注入未做（2026-10-04）
+### M11 自主决策引擎（AI 飞行策略） ✅ advisory + 执行级 + ADAPT_PATH 任务改写均已接线（执行级默认关闭，2026-10-04）
 
 > **状态沿革**：第六轮审查发现全部代码（`io.aerofleet.sim.ai` 14 类 3513 行）只被
 > 单元测试引用、从未执行，状态由「✅ 已完成」改为「库已完成 / 未接线」。同日完成
@@ -159,10 +159,15 @@
 > 巡航限速 50%，`DECISION_EVENT(30051)` 首次有了机载生产者。四条仲裁：
 > **默认关闭**（`--autonomy-exec`）、**FailsafeController 永远优先**（任一触发沿
 > 激活即不抢杆并复位限速）、**仅 ARMED/MISSION 可执行**、变化沿驱动。
-> ADAPT_PATH 仍为公告级（航点注入需改任务状态机，明确未做）。M12 的
+> 同日补齐 **ADAPT_PATH 执行级**：`VirtualDrone.executeAdaptivePath` 对剩余
+> 任务航段（全 NAV_WAYPOINT 且 ≥2 个）跑 `AdaptivePathStrategy.adaptPath`
+> 三算法（风补偿 / 能耗最优速度 / Dubins 30m 圆弧尖角平滑），尖角插点经
+> `MissionStore.replaceTail` 原地改写任务尾部，同一拍公告
+> `ADAPTIVE_PATH(30052)` 真实新航点（此前全仓零生产者）；能耗速度经巡航限速
+> 表达且 clamp ≤1.0（只能降不能升），路径无变化则不发公告。M12 的
 > `SensorFusionEngine`（EKF）与 `VideoStreamAnalyzer`（经典 CV）已于同日经
-> `EdgeInferenceRunner` 接入（见下节），本节所述「其余策略/规划器仍只被 ai 包
-> 内引用」的边界不变。
+> `EdgeInferenceRunner` 接入（见下节），「其余策略/规划器仍只被 ai 包内引用」
+> 的边界收窄为其余 7 类。
 
 | 交付物 | 说明 |
 |---|---|
@@ -368,6 +373,6 @@ M7 ──► E4(5G-A通感)
 1. 每个里程碑走完整 SDD；单个里程碑内尽量原子化（2–4h/任务）。
 2. 代码严格落在已有模块边界内：`cloud-backend`(调度/API)、`drone-sim`(载荷/执行)、
    `mavlink-core`(新消息)、`link-sim`(中继/链路)、`gcs-web`(观察)。
-3. 每个里程碑必须有回归基线：现有 4170 单测（Java） + e2e 脚本不回归。
+3. 每个里程碑必须有回归基线：现有 4178 单测（Java） + e2e 脚本不回归。
 4. 边界诚实声明：工作量 = 协议抽象 + 假数据源，非真硬件实现。
 5. **MAVLink msgId 全局唯一且避开官方分配带**：2026-10 治理搬迁后自定义消息统一使用私有方言段 **30000-30099**（common.xml 官方拥有 msgId 300-10000 分配带，旧 420-483 段位于其中，420/437/440 已与官方 RADIO_RC_CHANNELS / AVAILABLE_MODES_MONITOR / ILLUMINATOR_STATUS 实锤冲突，全部 51 条已等差平移 +29580）。已分配：30000-30021(M0a-M4)、30030-30047(M5-M9)、30048-30056(M10-M13)、30057-30059(4a 安防报警)、30060-30063(P2 灾害应急通讯组网扩展)；新增从 **30064+** 起分配，30064-30099 为增长预留。**自定义 MAV_CMD 同步治理（2026-10）**：8 条自定义命令（原 310-312/320-322/420/421）已搬入私有区命令子段 **30080-30087**（命令与消息分属不同命名空间，数值不冲突；分段纯为日志可读性，常量收口 `MavEnums.MAV_CMD_NEXUS_*`，守卫测试防回退）。冲突防护：`scripts/mavlink-compatibility-check.py --self-test` 内嵌 392 个官方已分配 msgId 快照逐条核对。Phase 2 预估 msgId 区间：C2(RID) 使用 `OPEN_DRONE_ID_*` 官方消息族（msgId 12900-12999，MAVLink 官方分配），C5(signing) 使用 MAVLink v2 签名帧（不占新 msgId），其余 C/F/E 系列按需从 30064+ 分配。

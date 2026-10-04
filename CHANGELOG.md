@@ -4,6 +4,56 @@
 
 ---
 
+## [Unreleased] — M11 收尾：ADAPT_PATH 执行级接线 + ADAPTIVE_PATH(30052) 首个生产者（2026-10-04）
+
+### 1. ADAPT_PATH 从公告级升级为执行级（撤销上一条「刻意边界」）
+
+- `AutonomyExecutor.FlightControl` 新增 `adaptPath(String aiReason)`；
+  ADAPT_PATH 决策沿既有四条仲裁（`--autonomy-exec` 默认关闭、
+  FailsafeController 永远优先、仅 ARMED/MISSION、变化沿驱动）门控后，
+  不再只是复位限速的「公告级」——现在真实调用
+  `VirtualDrone.executeAdaptivePath`（drone-sim）；
+- `executeAdaptivePath`：对剩余任务航段（守卫：全部 NAV_WAYPOINT 且 ≥2 个、
+  非上传会话）以 [当前位置, 剩余航点] 为路径跑
+  `AdaptivePathStrategy.adaptPath` 真实三算法（风补偿 WCA / 能耗最优速度 /
+  Dubins 30m 圆弧尖角平滑，综合接口此前全仓零生产调用方）；风场取场景风+
+  环境风合成向量，风向换算为气象惯例「吹来的方向」；
+- 尖角被插点改写时经新增 `MissionStore.replaceTail` 原地替换任务尾部并
+  重定位当前航段，同一拍公告 **ADAPTIVE_PATH(30052)**——载荷为真实几何
+  （平滑后路径第一点坐标），该消息首次有了生产者；路径无变化**不发公告**
+  （无变化不公告，不编造坐标）；能耗最优速度经巡航限速因子表达，物理层
+  clamp [0.05, 1.0] 故只能降不能升（顺风提速不可表达，刻意边界）；
+- 接线守卫翻转：`AdaptivePathStrategy` 移出 `AiAutonomyWiringTest`
+  UNWIRED_CLASSES（8→7）并加正向断言 `adaptivePathStrategyIsWired`
+  （静默退线即判红）；`AdaptivePathStrategy` 类头 javadoc 同步翻转。
+
+### 2. 测试与文档
+
+- 新增 `AdaptivePathExecutionTest`（真实 UDP 集成，端口 24780）：Mission
+  Protocol 握手上传 Z 字形 3 航点任务 → ARM → MISSION_START → 直调
+  `executeAdaptivePath` → 断言 30052 真实下发（originalWaypointSeq=0、
+  原因码 WIND、新航点在本场 ≤500m）且 MISSION_CURRENT.total 从 3 增至 19
+  （两个 90° 尖角各插 8 个圆弧采样点，实测日志 `mission tail 3 -> 19`）；
+- `MissionStoreTest` 新增 ReplaceTail 组 5 例（前缀保留 / fromSeq=0 整换 /
+  空表截断 / 上传中拒绝 / 越界与 null 守卫）；`AutonomyExecutorTest`
+  ADAPT_PATH 用例从「仅公告」改写为「可执行态触发一次 / 不可执行态忽略」；
+- `NexusCommandDispatchTest` 修正过时注释（布尔开关加固后裸写安全，
+  `--env=1` 写法改为裸写 `--env`，吃自家狗粮）；
+- 文档同步：README M11 段（四步接线 + 30052 首个生产者 + 「其余 8 类」→7）、
+  测试规模计数 1374→1382 / 总计 4170→4178、ROADMAP M11 改标 ✅、
+  competitive-analysis 接线断言说明、demo-scenarios 测试基线表（并修正
+  一处长期漏改的过时基线句 3230→4178）。
+
+### 3. 保持已知状态（未做假接线）
+
+- ADAPT_PATH 改写只在**任务态**生效：剩余航段含非 NAV_WAYPOINT 指令
+  （如拍照、悬停）时整体跳过不改写（避免破坏指令语义），明确未做按指令
+  类型分段平滑；
+- 顺风段能耗最优速度高于巡航速度时不可表达（限速因子 clamp ≤1.0）；
+- 其余 7 个 ai 类（避障 A 星/RRT、RTL 滑翔等）仍为未接线期望状态。
+
+---
+
 ## [Unreleased] — M13 收尾：gcs-web 消费 twin-state-sync 帧（2026-10-04）
 
 ### 1. 前端消费链路（此前「已知边界」，本条撤销该边界）
