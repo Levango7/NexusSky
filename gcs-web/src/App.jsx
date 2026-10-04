@@ -125,6 +125,7 @@ export default function App() {
     cellTowerData,
     telemetryHistory,
     multiTracks,
+    twinStates,
   } = useWebSocket(selectedSysidRef, setTelemetry)
 
   // UI 状态（视图、时钟、移动端侧栏、丐版模式）
@@ -409,7 +410,7 @@ export default function App() {
         </PanelWrapper>
       ) : view === 'citytwin' ? (
         <PanelWrapper>
-          <CityTwinPanel />
+          <CityTwinPanel twinStates={twinStates} />
         </PanelWrapper>
       ) : view === 'delivery' ? (
         <PanelWrapper>

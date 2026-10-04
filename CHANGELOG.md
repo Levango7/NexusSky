@@ -4,6 +4,31 @@
 
 ---
 
+## [Unreleased] — M13 收尾：gcs-web 消费 twin-state-sync 帧（2026-10-04）
+
+### 1. 前端消费链路（此前「已知边界」，本条撤销该边界）
+
+- `useWebSocket` 新增 `twinStates` 分桶（`{ [sysid]: { ...data, receivedAt } }`），
+  消费 WS "twin-state-sync" 帧（TwinSyncListener 1Hz 发布的 TWIN_STATE_SYNC 30055），
+  与 telemetryHistory 同款「按机分桶只留最新」语义；
+- 数字孪生面板（CityTwinPanel）新增「实时孪生同步」卡片：每机孪生位置/高度/
+  航向/速度/电量/漂移 + 5s 新鲜度在线/失联判定；未消费到帧时给出边界提示
+  （仅带机载边缘栈的无人机进孪生）。漂移字段带 tooltip 说明语义为相邻两次
+  同步的位移（云内同源估计），不冒充实测偏差；
+- 单位换算（1E7 度 / mm→m / cdeg→deg / battery 255=未知）收口纯函数
+  `gcs-web/src/utils/twinSync.js`，非对象输入返回 null 不抛异常；
+- 新增 9 例 vitest（`test/twinSync.test.js`：换算 5 + 新鲜度 1 + hook 分桶 3），
+  前端实测 155/155；`npm run lint` 0 error（新增代码零告警）；
+- 同步更新 README（孪生 bullet 边界句 + 前端测试规模 146→155）、ROADMAP M13
+  边界句、TwinSyncListener javadoc。
+
+### 2. 剩余边界（保持已知状态，未做假接线）
+
+- 未运行机载边缘栈的设备不发 30054、因而不进孪生（GLOBAL_POSITION_INT 兜底
+  明确未做）——本条 CHANGELOG 不改变该状态。
+
+---
+
 ## [Unreleased] — 工程遗留清理：SimConfig 布尔开关解析加固 + 两项零生产者收口（2026-10-04）
 
 ### 1. SimConfig 布尔开关解析加固（行为变更；仓库内无既有用法受影响）

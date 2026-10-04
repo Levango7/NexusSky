@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>每次同步后按 1Hz 节拍（每 sysid 独立）发布 {@link TwinStateSyncMsg}(30055)
  *       ——该消息此前全仓零生产者；经 TelemetryWebSocketHandler 的 WS_TYPE_MAP 以
  *       "twin-state-sync" 帧广播给 GCS（租户可见性与其他遥测帧同规则）。
- *       gcs-web 前端尚未消费该帧，属已知边界。</li>
+ *       gcs-web 数字孪生面板「实时孪生同步」卡片已消费该帧（2026-10-04）。</li>
  * </ul>
  * 监听器在 UDP 接收线程上同步执行，任何异常就地吞掉——Spring 事件组播中一个监听器
  * 抛异常会中断同帧其余监听器，孪生故障不应影响 WS 转发与 regulator 上报。

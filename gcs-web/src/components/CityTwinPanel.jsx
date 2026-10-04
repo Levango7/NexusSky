@@ -11,9 +11,10 @@ import {
   listCityMarkers,
 } from '../api.js'
 import { POLL_MS, fmtTime, pick, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
+import { normalizeTwinState, twinSyncFreshness } from '../utils/twinSync.js'
 
 // P3 数字孪生城市面板
-// 城市模型管理 + 实时态势 + 灾害模拟 + 态势标绘
+// 城市模型管理 + 实时态势 + 灾害模拟 + 态势标绘 + M13 每机实时孪生同步
 // 风格与 TrackingPanel / GeofencePanel 一致
 
 
@@ -53,7 +54,15 @@ const MARKER_TYPE_META = {
 }
 
 
-export default function CityTwinPanel() {
+export default function CityTwinPanel({ twinStates }) {
+  // ---- M13 每机孪生同步（WS "twin-state-sync" 帧，App 注入）----
+  // twinStates 形状 { [sysid]: rawFrameData }，此处只做归一化 + 排序展示。
+  const twinRows = Object.entries(twinStates || {})
+    .map(([sysid, raw]) => normalizeTwinState(raw, raw.receivedAt))
+    .filter(Boolean)
+    .sort((a, b) => (a.sysid ?? 0) - (b.sysid ?? 0))
+  const twinNow = Date.now()
+
   // ---- 城市模型列表 ----
   const [models, setModels] = useState([])
   const [modelsError, setModelsError] = useState(null)
@@ -328,6 +337,51 @@ export default function CityTwinPanel() {
             ) : (
               <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无态势数据</div>
             )}
+          </div>
+
+          {/* M13 每机实时孪生同步（WS 帧，非 REST 轮询） */}
+          <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 11, color: 'var(--text)' }}>实时孪生同步（{twinRows.length}）</span>
+              <span style={{ fontSize: 9, color: 'var(--dim-2)' }}>TWIN_STATE_SYNC · 1Hz</span>
+            </div>
+            <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+              {twinRows.length === 0 ? (
+                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center', lineHeight: 1.6 }}>
+                  暂无孪生同步帧<br />
+                  <span style={{ fontSize: 9 }}>仅带机载边缘栈（传感器融合上报）的无人机进孪生；其余设备不在此列，属已知边界</span>
+                </div>
+              ) : (
+                twinRows.map((t, i) => {
+                  const freshness = twinSyncFreshness(t, twinNow)
+                  return (
+                    <div key={t.sysid != null ? t.sysid : `twin-${i}`} style={{ padding: '5px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${freshness === 'fresh' ? 'var(--ok)' : 'var(--dim)'}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 10, color: 'var(--cyan)', fontWeight: 'bold' }}>
+                          #{t.sysid != null ? t.sysid : '?'}
+                          <span style={{ color: freshness === 'fresh' ? 'var(--ok)' : 'var(--warn)', fontWeight: 'normal', marginLeft: 6 }}>
+                            {freshness === 'fresh' ? '在线' : '失联'}
+                          </span>
+                        </span>
+                        <span style={{ fontSize: 9, color: 'var(--dim-2)', fontFamily: 'var(--mono)' }}>
+                          {t.lat != null && t.lon != null ? `${t.lat.toFixed(5)}, ${t.lon.toFixed(5)}` : '--'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                        <span>高度 <b style={{ color: 'var(--text)' }}>{t.altM != null ? `${t.altM.toFixed(1)} m` : '--'}</b></span>
+                        <span>航向 <b style={{ color: 'var(--text)' }}>{t.headingDeg != null ? `${t.headingDeg.toFixed(0)}°` : '--'}</b></span>
+                        <span>速度 <b style={{ color: 'var(--text)' }}>{t.velocity != null ? `${t.velocity.toFixed(1)} m/s` : '--'}</b></span>
+                        <span>电量 <b style={{ color: 'var(--text)' }}>{t.battery != null ? `${t.battery}%` : '--'}</b></span>
+                        <span title="相邻两次同步的位置位移（云端同源估计，非独立实测偏差）">
+                          漂移 <b style={{ color: 'var(--text)' }}>{t.driftM != null ? `${t.driftM.toFixed(1)} m` : '--'}</b>
+                        </span>
+                        <span>同步 <b style={{ color: 'var(--text)' }}>{((twinNow - t.receivedAt) / 1000).toFixed(0)}s 前</b></span>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
           </div>
 
           {/* 态势标绘 */}

@@ -771,9 +771,10 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 146 例**（vitest，2026-10-01 首批 + 2026-10-02 诚实化轮 +
-  2026-10-04 并入第二批组件逻辑测试；`npm run test` 实测 146/146，分布在
-  `gcs-web/test/` 与 `gcs-web/src/` 两处）：`npm run test` 已在 CI 的 GCS Web job 门禁。
+- **前端测试覆盖 155 例**（vitest，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+  2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例；`npm run test` 实测
+  155/155，分布在 `gcs-web/test/` 与 `gcs-web/src/` 两处）：`npm run test` 已在 CI 的
+  GCS Web job 门禁。
   选的是**已确认缺陷**加相关契约，不是全量覆盖——49 个组件里绝大多数仍只有 lint +
   build 保护。`vite build` 在本仓开发沙箱里曾被 stdio 管道限制挡住（EPERM），本地另用
   `gcs-web/scripts/check-frontend.cjs`（Babel 语法 + import 图）把关；`npm run check`
@@ -818,7 +819,10 @@ NexusSky/
   SENSOR_FUSION_DATA(30054) 换算 **M12 EKF 融合态**（而非 GLOBAL_POSITION_INT 原始
   GPS——兑现 ROADMAP「M13 依赖 M12」）喂 `DigitalTwinService.syncTwin`，并以 1Hz
   节拍发布 TWIN_STATE_SYNC(30055)（此前全仓零生产者）经 /ws/telemetry 广播
-  "twin-state-sync" 帧。**已知边界**：gcs-web 前端尚未消费该帧；未运行机载边缘栈的
+  "twin-state-sync" 帧。**gcs-web 已消费该帧**（2026-10-04；数字孪生面板新增
+  「实时孪生同步」卡片：每机孪生位置/航向/速度/电量/漂移 + 在线/失联判定，
+  `useWebSocket` 按 sysid 分桶、单位换算收口纯函数 `utils/twinSync.js`，9 例
+  vitest 钉扎）。**已知边界**：未运行机载边缘栈的
   设备不发 30054、因而不进孪生（GPI 兜底明确未做）；`driftMeters` 是相邻两次同步
   的位移，非与独立实测的偏差（孪生与物理态云内同源）。
 - **自定义 MAV_CMD 已整带搬入私有区 30080-30099**（2026-10-04；原 310-312/

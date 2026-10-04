@@ -8,7 +8,7 @@ const HISTORY_PER_DRONE = 300
  * WebSocket 实时数据管理 hook
  * 管理 wsState 及所有 WebSocket 推送数据：
  * alerts, formations, meshTopology, satLinkData, terrainData, cellTowerData,
- * telemetryHistory, multiTracks
+ * telemetryHistory, multiTracks, twinStates
  *
  * telemetryHistory 的形状是 `{ [sysid]: Point[] }`（按机分桶）——消费方应取
  * `telemetryHistory[sysid]`，不要把它当扁平数组遍历。
@@ -29,6 +29,10 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
   const [cellTowerData, setCellTowerData] = useState(null)
   const [telemetryHistory, setTelemetryHistory] = useState({})
   const [multiTracks, setMultiTracks] = useState({})
+  // M13 每机孪生同步（TwinSyncListener 1Hz 发布 30055 → WS "twin-state-sync" 帧）。
+  // 形状 { [sysid]: { ...data, receivedAt } }，保留 MAVLink 原始单位，
+  // 单位换算由 utils/twinSync.js 的纯函数在消费侧做（便于直测）。
+  const [twinStates, setTwinStates] = useState({})
 
   const wsRef = useRef(null)
 
@@ -120,6 +124,12 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
         } else if (msg.type === 'celltower-topology') {
           // 基站拓扑变化推送（CellTowerPusher 2Hz，M6）
           setCellTowerData(msg)
+        } else if (msg.type === 'twin-state-sync') {
+          // 每机孪生同步（TwinSyncListener 1Hz 节流，M13）：按 sysid 分桶只留最新
+          setTwinStates((prev) => ({
+            ...prev,
+            [msg.sysid]: { ...(msg.data || {}), receivedAt: Date.now() },
+          }))
         }
       }
     }
@@ -141,5 +151,6 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
     cellTowerData,
     telemetryHistory,
     multiTracks,
+    twinStates,
   }
 }

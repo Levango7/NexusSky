@@ -211,7 +211,8 @@
 > 「依赖 M12 边缘传感器融合数据源」，融合态是更好的物理态估计），并在每次同步后以
 > 1Hz 节拍发布 `TWIN_STATE_SYNC(30055)`——该消息此前全仓零生产者，现经
 > /ws/telemetry 以 "twin-state-sync" 帧按租户可见性广播给 GCS。REST predict/compare
-> 自此基于真实遥测工作。已知边界：gcs-web 前端尚未消费 twin-state-sync 帧；未运行
+> 自此基于真实遥测工作。gcs-web 数字孪生面板已消费该帧（2026-10-04「实时孪生
+> 同步」卡片）。已知边界：未运行
 > 机载边缘栈（EdgeInferenceRunner）的设备不发 30054、因而不进孪生（GPI 兜底明确
 > 未做）；`driftMeters` 语义为相邻两次同步的位移（孪生与物理态云内同源，非与独立
 > 实测的偏差）。
