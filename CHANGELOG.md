@@ -4,6 +4,46 @@
 
 ---
 
+## [Unreleased] — M13 孪生实时同步接线：TwinSyncListener 事件驱动喂孪生 + 30055 首个生产者（2026-10-04）
+
+> ROADMAP 最后一个 ⚠️ 里程碑段收口：`DigitalTwinService.syncTwin` 从「只有测试
+> 调用、真实运行孪生恒为空」升级为事件驱动的生产链路，REST predict/compare 自此
+> 基于真实遥测工作。
+
+### 1. TwinSyncListener（新增，cloud-backend twin 包）
+
+- 监听 `MavlinkMessageEvent`（TelemetryIngestService 解码后发布的事件总线，
+  与 TerrainMapService 等既有消费者同一模式）：SYS_STATUS(1) 记录每 sysid
+  最新电量；SENSOR_FUSION_DATA(30054) 换算融合态（1E7/mm/cdeg 还原）喂
+  `syncTwin`；
+- **喂入源选 M12 EKF 融合态而非 GLOBAL_POSITION_INT 原始 GPS**——兑现 ROADMAP
+  「M13 依赖 M12（边缘传感器融合数据源）」，融合态是比原始观测更好的物理态估计；
+  电量未见 SYS_STATUS 时 battery=-1（REST 侧未知）；
+- 每次同步后按 1Hz 节拍（每 sysid 独立）发布 `TWIN_STATE_SYNC(30055)`——该消息
+  此前全仓零生产者；经 TelemetryWebSocketHandler 的 WS_TYPE_MAP 以
+  "twin-state-sync" 帧按租户可见性广播给 GCS；
+- 监听器异常就地吞掉：Spring 事件组播中一个监听器抛异常会中断同帧其余监听器，
+  孪生故障不得影响 WS 转发与 regulator 上报（UDP 接收线程上的隔离语义）。
+
+### 2. 已知边界（如实声明）
+
+- gcs-web 前端尚未消费 twin-state-sync 帧（帧已可达，消费属前端后续项）；
+- 未运行机载边缘栈（EdgeInferenceRunner）的设备不发 30054、因而不进孪生——
+  GLOBAL_POSITION_INT 兜底链路明确未做；
+- `driftMeters` 语义为相邻两次同步的位移（孪生与物理态云内同源，非与独立实测
+  的偏差），compare REST 的近似口径不变。
+
+### 3. 测试与文档（+8，cloud-backend 2183→2191，Java 4150→4158）
+
+- `TwinSyncListenerTest`（新增 8 例）：融合态换算精确值（1E7/mm/cdeg 还原 +
+  电量未知 -1）、SYS_STATUS 电量进入下次同步、30055 字段与孪生态一一对应 +
+  事件时间戳取 syncTimestamp、电量未知发 255 哨兵（MAVLink 惯例）、1Hz 节流
+  每 sysid 独立（节流窗口内只同步不发布）、位移漂移进入第二次发布、发布链路
+  故障隔离（孪生态照常更新）、消息体损坏（cast 失败）只影响本条；
+- 文档同步：ROADMAP M13 状态沿革（⚠️→✅）、README 已知边界新增孪生条目。
+
+---
+
 ## [Unreleased] — M12 边缘 AI 接线：EKF + 经典 CV 接入遥测主循环 + 30053/30054 首个生产者（2026-10-04）
 
 > ROADMAP M12 收口：`io.aerofleet.sim.edge` 两算法引擎从「只被自己的测试引用」

@@ -653,10 +653,10 @@ NexusSky/
 | `mavlink-core` | 454 |
 | `drone-sim` | 1365 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2183 |
+| `cloud-backend` | 2191 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4150** |
+| **总计** | **4158** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -810,6 +810,14 @@ NexusSky/
   把接线状态钉成断言：DecisionEngine 与 edge 两引擎「已接线」是正向断言（静默
   退线即判红），其余 8 个 ai 类「未接线」是期望状态（接线即判红并提示同步本节
   与竞品对比表）——比在文档里写一句「注意」可靠，文档不会自己变红。
+- **数字孪生「实时镜像」已接线**（2026-10-04；此前第六轮审查曾核实孪生恒为空）。
+  `TwinSyncListener`（cloud-backend）监听 MAVLink 事件总线：SYS_STATUS(1) 记电量、
+  SENSOR_FUSION_DATA(30054) 换算 **M12 EKF 融合态**（而非 GLOBAL_POSITION_INT 原始
+  GPS——兑现 ROADMAP「M13 依赖 M12」）喂 `DigitalTwinService.syncTwin`，并以 1Hz
+  节拍发布 TWIN_STATE_SYNC(30055)（此前全仓零生产者）经 /ws/telemetry 广播
+  "twin-state-sync" 帧。**已知边界**：gcs-web 前端尚未消费该帧；未运行机载边缘栈的
+  设备不发 30054、因而不进孪生（GPI 兜底明确未做）；`driftMeters` 是相邻两次同步
+  的位移，非与独立实测的偏差（孪生与物理态云内同源）。
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
