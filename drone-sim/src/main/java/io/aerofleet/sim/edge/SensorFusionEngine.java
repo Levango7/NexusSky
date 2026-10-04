@@ -33,10 +33,12 @@ import org.slf4j.LoggerFactory;
  *
  * <p>矩阵统一用 {@code double[][]} 表示，向量用 {@code double[]} 表示。
  *
- * <p><b>当前状态：未接入生产路径。</b>本类目前只被自己的单元测试引用，没有消费者，
- * 飞行位姿由 {@code VirtualDrone} 的 {@code DronePhysics} 直接积分得出。
- * 因此本类的测试全绿<b>不能</b>证明飞行器实际使用了 EKF 融合。
- * {@code AiAutonomyWiringTest} 把这个事实钉成断言，接线时会失败并提示同步文档。
+ * <p><b>当前状态：已接入生产路径（2026-10-04）。</b>接线载体是
+ * {@code io.aerofleet.sim.EdgeInferenceRunner}：{@code VirtualDrone} 的 20Hz tick
+ * 用「伪 IMU」（速度差分加速度）驱动预测，2Hz 以带噪 GPS（3m）+ IMU 速度观测 +
+ * （注入式 LiDAR 源在环时的）LiDAR 高程做序贯更新，1Hz 经 SENSOR_FUSION_DATA(30054)
+ * 下发融合位姿。注意诚实边界：融合结果<b>不回写</b> {@code DronePhysics}——飞控仍用
+ * 真值积分，30054 是下行观测增强遥测，不是导航输入。
  */
 public class SensorFusionEngine {
 
@@ -191,6 +193,18 @@ public class SensorFusionEngine {
         R[0][0] = sq(accuracy);
         update(new double[]{alt}, H, R);
         sensorMask |= 8;
+    }
+
+    /**
+     * IMU 速度观测更新（异步入口，接线后由 {@code EdgeInferenceRunner} 以 2Hz 调用）。
+     * <p>
+     * 与 {@link #fuse} 兼容路径内部的 IMU 通道同一实现：观测 [vLat, vLon] 由
+     * 航向 + 速度分解而来。纯加速度注入（{@link #predict}）无法收敛初始速度——
+     * 速度状态从 0 出发、恒速时加速度恒为 0，必须靠速度观测把状态拉到真值附近，
+     * 否则 {@link #getFusedState()} 的航向/速度输出没有意义。
+     */
+    public synchronized void updateVelocity(double headingDeg, double velocityMps, double accuracyMps) {
+        updateImuVelocity(headingDeg, velocityMps, accuracyMps);
     }
 
     /**

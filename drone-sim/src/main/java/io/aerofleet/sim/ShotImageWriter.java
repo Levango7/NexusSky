@@ -74,6 +74,53 @@ public final class ShotImageWriter {
         };
     }
 
+    /**
+     * Render one shot to a RAW 8-bit grayscale frame (w×h, row-major, origin
+     * top-left) for the onboard edge vision chain (M12, 2026-10-04).
+     *
+     * Same geometry contract as {@link #render(CameraModel.Shot)}: the shot's
+     * (u,v) live in the 1920x1080 pinhole space and are uniformly scaled, so a
+     * detection centroid here solves to the same ground truth. Differences
+     * vs the JPEG path, both deliberate:
+     *   - no JPEG encode: the edge {@code VideoStreamAnalyzer} eats raw gray
+     *     bytes, so no ImageIO round-trip and no IOException;
+     *   - noise floor sigma is 6 (vs 12): the downstream frame-differencing
+     *     threshold is 30, and differencing two N(35,12) floors gives sigma≈17
+     *     which would light ~8% of pixels as false motion. sigma=6 keeps the
+     *     diff sigma≈8.5 so only real blob movement crosses the threshold.
+     * Blobs render as uniform bright (220) filled circles - frame differencing
+     * is intensity-based, colour carries no information for this consumer.
+     */
+    public static byte[] renderGray(CameraModel.Shot shot, int w, int h) {
+        if (w <= 0 || h <= 0) {
+            throw new IllegalArgumentException("w/h must be positive, got " + w + "x" + h);
+        }
+        double sx = w / 1920.0;
+        double sy = h / 1080.0;
+        byte[] out = new byte[w * h];
+        Random rnd = new Random(shot.frameSeq * 0x9E3779B9L);
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (byte) clampGauss(rnd, 35, 6);
+        }
+        double blobScale = w / 640.0;
+        for (CameraModel.CapturedTarget t : shot.targets) {
+            int cx = (int) Math.round(t.u * sx);
+            int cy = (int) Math.round(t.v * sy);
+            int r = Math.max(1, (int) Math.round(shot.altM / 12.0 * blobScale));
+            for (int y = cy - r; y <= cy + r; y++) {
+                for (int x = cx - r; x <= cx + r; x++) {
+                    if (x < 0 || x >= w || y < 0 || y >= h) {
+                        continue;
+                    }
+                    if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r) {
+                        out[y * w + x] = (byte) 220;
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
     /** Deterministic gaussian-ish noise: mean + sigma * (sum of 3 uniforms - 1.5). */
     private static int clampGauss(Random rnd, double mean, double sigma) {
         double v = (rnd.nextDouble() + rnd.nextDouble() + rnd.nextDouble() - 1.5) * 2 * sigma;

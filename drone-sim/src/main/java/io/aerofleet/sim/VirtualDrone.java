@@ -138,6 +138,13 @@ public final class VirtualDrone implements AutoCloseable {
     private final AutonomyAdvisor autonomyAdvisor =
             new AutonomyAdvisor(this::pushStatus, this::onFusedDecision);
     /**
+     * M12 边缘推理接线（2026-10-04）：EKF 传感器融合 + 视频分析两条<b>被动观测</b>
+     * 链路，由 telemetryRates 每 tick 驱动，输出 SENSOR_FUSION_DATA(30054) 与
+     * EDGE_TASK_STATUS(30053)。默认常开（不驱动飞控动作，与雷达/IMU 遥测同级），
+     * 诚实性边界见 {@link EdgeInferenceRunner}。
+     */
+    private final EdgeInferenceRunner edgeInference = new EdgeInferenceRunner(new EdgeHostImpl());
+    /**
      * M4 硬件抽象数据源（FR-01/FR-07/FR-12/FR-15）：null 表示未注入，不产生硬件上报（DFX 4.5）。
      * 由 setter 注入（供 e2e 脚本/配置注入），tickOnce 按各自频率分频调用。
      */
@@ -1550,6 +1557,9 @@ public final class VirtualDrone implements AutoCloseable {
         if (imuSource != null && tickCount % 2 == 0) {
             sendImuData();
         }
+        // M12 边缘推理（2026-10-04 接线）：EKF 融合 + 视频分析，被动观测不驱动飞控，
+        // 内部自行分频（预测 20Hz / 更新与视觉 2Hz / 下发 1Hz），默认常开。
+        edgeInference.tick(System.currentTimeMillis(), dt);
         // 2 Hz: every 10 ticks
         if (tickCount % 10 == 0) {
             sendVfrHud();
@@ -2439,6 +2449,68 @@ public final class VirtualDrone implements AutoCloseable {
         @Override
         public void setAvoidSpeedFactor(double factor) {
             physics.setSpeedFactor(factor);
+        }
+    }
+
+    /**
+     * M12 边缘推理宿主：把机载观测/真值喂给 {@link EdgeInferenceRunner}。
+     * GPS 走 reportedLat/Lon（含 3m 噪声，与 EKF 的 R_gps 量级一致）；
+     * 伪 IMU 用速度差分；LiDAR 位 = 注入式 LiDARSource 在环。
+     */
+    private final class EdgeHostImpl implements EdgeInferenceRunner.Host {
+        @Override
+        public int sysid() {
+            return config.sysid;
+        }
+
+        @Override
+        public double gpsLat() {
+            return physics.reportedLat(EdgeInferenceRunner.GPS_ACCURACY_M);
+        }
+
+        @Override
+        public double gpsLon() {
+            return physics.reportedLon(EdgeInferenceRunner.GPS_ACCURACY_M);
+        }
+
+        @Override
+        public double gpsAltM() {
+            return physics.alt();
+        }
+
+        @Override
+        public double velNorthMps() {
+            return physics.groundSpeed() * Math.cos(physics.yawRad());
+        }
+
+        @Override
+        public double velEastMps() {
+            return physics.groundSpeed() * Math.sin(physics.yawRad());
+        }
+
+        @Override
+        public double velUpMps() {
+            return physics.vz();
+        }
+
+        @Override
+        public Double lidarAltM() {
+            // 点云 nearestDistance 依赖波束几何（可能打到障碍物），高度通道取真实 AGL；
+            // sensorMask 的 LiDAR 位语义是「注入式 LiDAR 硬件在环」。
+            return lidarSource != null ? physics.alt() : null;
+        }
+
+        @Override
+        public CameraModel.Shot captureShot() {
+            // 与 handleImageCapture 同一投影链，但不 drainForPhoto（被动观测不耗能）
+            return camera.capture(physics.north(), physics.east(), physics.alt(),
+                    physics.rollRad(), physics.pitchRad(), physics.yawRad(),
+                    groundTargets, config.lat, config.lon);
+        }
+
+        @Override
+        public void send(MavlinkMessage msg) throws IOException {
+            VirtualDrone.this.send(msg);
         }
     }
 

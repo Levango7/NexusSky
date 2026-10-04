@@ -121,8 +121,8 @@
 | **真实卫星接入预留** | ✅ | ❌ | ❌ | ❌ | N/A |
 | **数字孪生** | ✅ | ❌ | ❌ | ❌ | 部分 |
 | **轨迹预测** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **边缘 AI 推理** | ⚠️ 经典 CV，非模型 | ❌ | ❌ | ❌ | ❌ |
-| **传感器融合** | ⚠️ EKF 库已实现未接线 | ❌ | ❌ | ❌ | ❌ |
+| **边缘 AI 推理** | ⚠️ 经典 CV 非模型，已接线 | ❌ | ❌ | ❌ | ❌ |
+| **传感器融合** | ✅ EKF 已接线（观测级） | ❌ | ❌ | ❌ | ❌ |
 | **Web GCS** | ✅ | ✅ | ❌ | ❌ | ❌ |
 | **REST API** | ✅ | ✅ | ❌ | ❌ | N/A |
 | **WebSocket 实时** | ✅ | ✅ | ❌ | ❌ | N/A |
@@ -135,33 +135,39 @@
 | **喷洒物流** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **应急编排** | ✅ | ❌ | ❌ | ❌ | ❌ |
 
-> **⚠️ 标注含义（2026-10-02 第六轮审查补；自主决策同日 advisory 接线）**：本表用
-> ✅ 表示「已实现且已接入运行路径」。三项此前误标为 ✅，第六轮审查核实后改标
-> —— 它们的**代码存在且测试全绿，但没有任何生产调用方**，即从未真正执行过：
+> **⚠️ 标注含义（2026-10-02 第六轮审查补；2026-10-04 自主决策执行级与边缘两引擎
+> 接线）**：本表 ✅ 表示「已实现且已接入运行路径」。三项（自主决策引擎 / 传感器
+> 融合 / 边缘 AI 推理）此前误标为 ✅，第六轮审查核实其**代码存在且测试全绿但无
+> 任何生产调用方**后改标 ⚠️；2026-10-04 起三项全部补齐接线，当前状态：
 >
-> - **自主决策引擎**（`io.aerofleet.sim.ai`，14 类 3513 行）：**advisory 已接线**
->   （2026-10-02），**执行级已接线**（2026-10-04，默认关闭）——`AutonomyAdvisor`
->   以 1Hz 驱动 `DecisionEngine`，变化沿播报建议并下发 DECISION_EVENT(30051)；
->   `AutonomyExecutor` 门控执行（RTL/避障限速），但 **FailsafeController 永远
->   优先**、仅 ARMED/MISSION 可执行、需 `--autonomy-exec` 显式开启；
->   ADAPT_PATH 航点注入明确未做。应急**执行**链路仍是 `VirtualDrone` 自带的
->   `FailsafeController`（链路丢失/电量临界/GPS 丢失 → RTL/HOLD），与 ai 包是
->   两套并行实现。
-> - **传感器融合**（`SensorFusionEngine`，EKF，9 维状态）：同包内零外部引用；
->   飞行位姿由 `DronePhysics` 直接积分。
-> - **边缘 AI 推理**（`VideoStreamAnalyzer`）：帧差 + 连通域 + 质心跟踪，是**经典 CV
->   算法而非机器学习模型**；全仓 pom 无 onnxruntime/tensorflow/ONNX 任何 ML 依赖。
+> - **自主决策引擎**（`io.aerofleet.sim.ai`，14 类 3513 行）：advisory + 执行级均
+>   已接线——`AutonomyAdvisor` 以 1Hz 驱动 `DecisionEngine`，变化沿播报建议并下发
+>   DECISION_EVENT(30051)；`AutonomyExecutor` 门控执行（RTL/避障限速），但
+>   **FailsafeController 永远优先**、仅 ARMED/MISSION 可执行、需 `--autonomy-exec`
+>   显式开启（**默认关闭**）；ADAPT_PATH 航点注入明确未做。应急**执行**链路仍是
+>   `VirtualDrone` 自带的 `FailsafeController`（链路丢失/电量临界/GPS 丢失 →
+>   RTL/HOLD），与 ai 包是两套并行实现。该行 ⚠️ 指向措辞：「AI」实为规则 + 排序 +
+>   搜索，无任何机器学习模型。
+> - **传感器融合**（`SensorFusionEngine`，EKF，9 维状态）：已接线——
+>   `EdgeInferenceRunner` 2Hz 喂 GPS / IMU 速度 / LiDAR(在环时) 观测，1Hz 下发
+>   SENSOR_FUSION_DATA(30054)；**观测级**：融合结果不回写 `DronePhysics`，
+>   飞行位姿仍由真值直接积分。
+> - **边缘 AI 推理**（`VideoStreamAnalyzer`）：已接线——2Hz 拍帧（`renderGray`
+>   160×90 原始灰度）做帧差 + 连通域 + 质心跟踪，检出即发 EDGE_TASK_STATUS(30053)。
+>   该行 ⚠️ 指向本质：是**经典 CV 算法而非机器学习模型**；全仓 pom 无
+>   onnxruntime/tensorflow/ONNX 任何 ML 依赖。
 >
-> 这一点由 `drone-sim` 的 `AiAutonomyWiringTest` 钉成断言：DecisionEngine「已接线」
-> 是正向断言（静默退线即判红），其余类「未接线」是期望状态——一旦接线即判红并
-> 提示同步本表。这比在文档里写一句「注意」可靠——文档不会自己变红。
+> 接线状态由 `drone-sim` 的 `AiAutonomyWiringTest` 钉成断言：DecisionEngine 与 edge
+> 两引擎「已接线」是正向断言（静默退线即判红），其余 8 个 ai 类「未接线」是期望
+> 状态——一旦接线即判红并提示同步本表。这比在文档里写一句「注意」可靠——文档
+> 不会自己变红。
 
 ### 3.1 技术指标对比
 
 | 指标 | NexusSky | 大疆 Cloud API | PX4 SDK | MAVProxy | AirSim |
 |---|---|---|---|---|---|
 | **扩展消息数量** | 51 条 (msgId 30000-30063，区间含空号) | N/A | N/A | N/A | N/A |
-| **测试基线** | 4020 tests | N/A | N/A | N/A | N/A |
+| **测试基线** | 4150 tests | N/A | N/A | N/A | N/A |
 
 ---
 

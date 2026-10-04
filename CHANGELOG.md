@@ -4,6 +4,57 @@
 
 ---
 
+## [Unreleased] — M12 边缘 AI 接线：EKF + 经典 CV 接入遥测主循环 + 30053/30054 首个生产者（2026-10-04）
+
+> ROADMAP M12 收口：`io.aerofleet.sim.edge` 两算法引擎从「只被自己的测试引用」
+> 升级为机载生产路径。与 M11 执行级刻意不对称：被动观测默认常开——
+> 观测无风险，抢杆才有。
+
+### 1. EdgeInferenceRunner（新增，drone-sim，~250 行）
+
+- `VirtualDrone` 遥测主循环（`telemetryRates`）IMU 块后挂载 tick（20Hz 入口），
+  三阶段互相隔离（predict / update+emit / vision，任一阶段抛异常只影响本阶段
+  本轮，`SimLog.warn` 后继续）；
+- **传感器融合链路**：伪 IMU 加速度 = 速度差分（20Hz predict），2Hz 喂
+  GPS（`reportedLat/Lon`，3m 噪声——与飞控同源噪声而非真值）、IMU 速度观测、
+  LiDAR(注入式在环时取真实 AGL)；1Hz 下发 `SENSOR_FUSION_DATA(30054)`
+  （lat/lon 1e7 定点、alt mm、航向归一化 cdeg）；
+- **视频分析链路**：2Hz 拍帧，`ShotImageWriter.renderGray`（新增，160×90 原始
+  灰度，均匀缩放自 1920×1080 相机模型；噪声 σ=6——沿用 JPEG 路径的 σ=12 会让
+  帧差点亮 ~8% 假运动，σ=6 时帧差 σ≈8.5 低于检测阈值 30）喂
+  `VideoStreamAnalyzer` 帧差检测，检出即发 `EDGE_TASK_STATUS(30053)`
+  （resultSize=标签 UTF-8 字节数）；
+- `EdgeNode` 作为机载侧任务登记簿（submitTask/getTaskStatus），融合与视频
+  各一路任务 id；`SensorFusionEngine` 新增 `updateVelocity`（IMU 速度观测入口，
+  解决纯加速度注入无法收敛初始速度的问题：恒速→零加速度→速度状态恒 0）；
+- **被动观测语义**：融合结果不回写 `DronePhysics`（飞控仍用真值积分），不驱动
+  任何执行机构；无开关、默认常开（与雷达/IMU 遥测同级）。
+
+### 2. 30053/30054：从零生产者到机载生产者
+
+- `EDGE_TASK_STATUS(30053)` 与 `SENSOR_FUSION_DATA(30054)` 此前在 drone-sim
+  无任何生产者；现在分别以视频检出沿与 1Hz 融合节拍下发，GCS/云端自此可见
+  边缘任务状态与融合态。taskType 取 `EdgeTaskType` 枚举序（0=视频分析/
+  1=传感器融合），status 用完成(2)/失败(3)；融合任务 resultSize 固定为
+  30054 payload 长度(24)。ADAPTIVE_PATH(30052) 仍无生产者（维持现状）。
+
+### 3. 测试与文档（+14，drone-sim 1351→1365，Java 4136→4150）
+
+- `EdgeInferenceRunnerTest`（新增 10 例）：视觉 2Hz 节拍与 30053 字段、
+  帧间位移真实检出（u 960→1100）与悬停零检出、null 相机跳周期、
+  30054 精确字段值与 sensorMask（GPS+IMU=3，+LiDAR=11）、东向速度航向收敛
+  8500-9500 cdeg、dt=0 时钟停摆不崩、EdgeNode 登记、send 故障隔离
+  （失败周期不消耗任务 id）；
+- `ShotImageWriterTest`（新增 3 例）：灰度帧尺寸与噪声地板、逐帧确定性、
+  亮斑投影位置灰度值；
+- `AiAutonomyWiringTest`：UNWIRED_CLASSES 从 10 减为 8（移出两个 edge 引擎），
+  新增 `edgeEnginesAreWired` 正向断言（静默退线即判红）；
+- 文档同步：ROADMAP M12 状态沿革、README 已知边界、competitive-analysis
+  对比表两行与标注块重写（⚠️ 语义收窄为「措辞诚实性」标注）、
+  `SensorFusionEngine`/`VideoStreamAnalyzer` 接线状态 Javadoc。
+
+---
+
 ## [Unreleased] — M11 执行级接线：引擎决策驱动飞控动作（默认关闭）+ DECISION_EVENT 首个生产者（2026-10-04）
 
 > ROADMAP M11 的「执行级接线未做」收口：`DecisionEngine` 的融合决策从

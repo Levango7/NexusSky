@@ -26,17 +26,21 @@ import static org.junit.jupiter.api.Assertions.fail;
  * 真正生效的应急链路是 {@link FailsafeController}。一个只看测试通过率的读者
  * 会得出「自主决策已完成」的结论，与事实相反。
  *
- * <p>本测试把四件事钉死：
+ * <p>本测试把五件事钉死：
  * <ol>
  *   <li>failsafe 阈值只有一个真相源（此前同一参数有三个值：22/25/20）；</li>
  *   <li>DecisionEngine <b>已接线</b>：通过 AutonomyAdvisor 接入
  *       VirtualDrone.tickOnce（1Hz 评估 + STATUSTEXT 建议 + DECISION_EVENT(30051)
  *       下发；执行动作经 AutonomyExecutor 门控：默认关闭、failsafe 优先、
  *       仅 ARMED/MISSION 可执行）——这条接线不得静默消失；</li>
- *   <li>其余 ai 策略/路径规划器与 edge 包仍<b>无生产调用方</b>——这是
+ *   <li>edge 包两个算法库（SensorFusionEngine/VideoStreamAnalyzer）<b>已接线</b>
+ *       （2026-10-04）：载体是 EdgeInferenceRunner（被动观测链路，默认常开，
+ *       输出 30053/30054）——这两条接线不得静默消失；</li>
+ *   <li>其余 ai 策略/路径规划器仍<b>无生产调用方</b>——这是
  *       <b>期望状态</b>，不是缺陷；一旦有人把它们接进飞行路径，本测试判红
  *       并提示同步 README 与产品文档的声称；</li>
- *   <li>drone-sim 不引入 ML 运行时依赖（「自主决策」是规则+排序+搜索）。</li>
+ *   <li>drone-sim 不引入 ML 运行时依赖（「自主决策」是规则+排序+搜索，
+ *       「边缘 AI」是经典 CV）。</li>
  * </ol>
  */
 class AiAutonomyWiringTest {
@@ -93,8 +97,6 @@ class AiAutonomyWiringTest {
             "io.aerofleet.sim.ai.EmergencyReturnStrategy",
             "io.aerofleet.sim.ai.PathPlanner",
             "io.aerofleet.sim.ai.DecisionTree",
-            "io.aerofleet.sim.edge.SensorFusionEngine",
-            "io.aerofleet.sim.edge.VideoStreamAnalyzer",
     };
 
     @Test
@@ -112,8 +114,25 @@ class AiAutonomyWiringTest {
     }
 
     @Test
-    @DisplayName("其余 ai 策略/规划器与 edge 包仍无生产调用方（期望状态；接线后本测试会判红提示更新文档）")
-    void aiAndEdgePackagesAreNotYetWired() {
+    @DisplayName("edge 包 SensorFusionEngine/VideoStreamAnalyzer 已通过 EdgeInferenceRunner 接入，不得静默退线")
+    void edgeEnginesAreWired() {
+        assertTrue(hasProductionReference("io.aerofleet.sim.edge.SensorFusionEngine"),
+                "SensorFusionEngine 应被 edge 包外的生产代码引用——接线载体是"
+                        + " EdgeInferenceRunner（io.aerofleet.sim），由 VirtualDrone 的"
+                        + " 20Hz tick 驱动 EKF 融合并经 SENSOR_FUSION_DATA(30054) 下发。"
+                        + "若这条失败，说明 M12 接线被拆掉了：请要么恢复接线，要么同步回滚"
+                        + " README/ROADMAP/competitive-analysis 中 M12 的状态表述。");
+        assertTrue(hasProductionReference("io.aerofleet.sim.edge.VideoStreamAnalyzer"),
+                "VideoStreamAnalyzer 应被 edge 包外的生产代码引用——接线载体是"
+                        + " EdgeInferenceRunner（io.aerofleet.sim），2Hz 渲染合成灰度帧"
+                        + " 做帧差/连通域/跟踪并经 EDGE_TASK_STATUS(30053) 上报。"
+                        + "若这条失败，说明 M12 接线被拆掉了：请要么恢复接线，要么同步回滚"
+                        + " README/ROADMAP/competitive-analysis 中 M12 的状态表述。");
+    }
+
+    @Test
+    @DisplayName("其余 ai 策略/规划器仍无生产调用方（期望状态；接线后本测试会判红提示更新文档）")
+    void aiStrategiesAreNotYetWired() {
         List<String> nowWired = new ArrayList<>();
         for (String className : UNWIRED_CLASSES) {
             if (hasProductionReference(className)) {
@@ -121,11 +140,12 @@ class AiAutonomyWiringTest {
             }
         }
         if (!nowWired.isEmpty()) {
-            fail("这些类现在有了生产调用方，说明 M11/M12 已接入飞行路径："
+            fail("这些 ai 策略/规划器类现在有了生产调用方，超出了既定接线范围"
+                    + "（M11 执行级只消费 FusedDecision、M12 只接 edge 包）："
                     + String.join(", ", nowWired)
                     + "。请同步更新：(1) README「已知边界」中「未接入生产路径」的表述；"
                     + "(2) docs/competitive-analysis.md 对应行的能力标注；"
-                    + "(3) ROADMAP.md M11 的完成状态；"
+                    + "(3) ROADMAP.md M11/M12 的完成状态；"
                     + "(4) 本测试的 UNWIRED_CLASSES 列表。");
         }
     }

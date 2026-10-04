@@ -651,12 +651,12 @@ NexusSky/
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 454 |
-| `drone-sim` | 1351 |
+| `drone-sim` | 1365 |
 | `link-sim` | 117 |
 | `cloud-backend` | 2183 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4136** |
+| **总计** | **4150** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -778,8 +778,9 @@ NexusSky/
   build 保护。`vite build` 在本仓开发沙箱里曾被 stdio 管道限制挡住（EPERM），本地另用
   `gcs-web/scripts/check-frontend.cjs`（Babel 语法 + import 图）把关；`npm run check`
   把两者串起来。
-- **「自主决策」advisory + 执行级均已接线（执行级默认关闭），「边缘 AI」仍是库**
-  （2026-10-02 第六轮审查 + advisory 接线；2026-10-04 执行级接线）。
+- **「自主决策」advisory + 执行级均已接线（执行级默认关闭），「边缘 AI」两算法
+  引擎已接线（被动观测、默认常开）**（2026-10-02 第六轮审查；2026-10-04 三步
+  接线：advisory / 执行级 / 边缘）。
   M11 `io.aerofleet.sim.ai`（14 个类 3513 行）通过 `AutonomyAdvisor` 接入
   `VirtualDrone.tickOnce`：1Hz 评估态势，主决策类型**变化沿**经 STATUSTEXT 下发
   **建议**（RTL/AVOID=WARNING、EMERGENCY_LAND=CRITICAL、ADAPT_PATH=NOTICE，恢复时
@@ -791,18 +792,24 @@ NexusSky/
   变化沿驱动；ADAPT_PATH 仍为公告级（航点注入需改任务状态机，明确未做）。
   真正生效的应急执行链路仍是独立的
   `FailsafeController`（链路丢失 / 电量临界 / GPS 丢失 → RTL / HOLD）。其余策略 /
-  规划器仍只被 ai 包内引用；M12 `io.aerofleet.sim.edge`（6 个类 1093 行，其中
+  规划器仍只被 ai 包内引用。M12 `io.aerofleet.sim.edge`（其中
   `SensorFusionEngine` 9 维 EKF 521 行、`VideoStreamAnalyzer`
-  帧差 + 连通域 + 质心跟踪 506 行）实现完整、单元测试全绿，但
-  **只被自己的测试引用，没有任何生产调用方**。两处「自主」的准确含义是<b>规则 +
+  帧差 + 连通域 + 质心跟踪 506 行）经 `EdgeInferenceRunner` 接入同一遥测主循环：
+  2Hz 喂 GPS（`reportedLat/Lon`，3m 噪声）/ IMU 速度 / LiDAR(注入式在环时) 观测，
+  1Hz 下发 `SENSOR_FUSION_DATA(30054)`；2Hz 拍帧经 `ShotImageWriter.renderGray`
+  （160×90 原始灰度，噪声 σ=6——JPEG 路径的 σ=12 帧差会点亮 ~8% 假运动）喂
+  视频分析，检出即发 `EDGE_TASK_STATUS(30053)`（视频 / 融合各一路任务 id）；
+  `EdgeNode` 为机载侧任务登记簿。**被动观测、默认常开、无开关**：融合结果不回写
+  `DronePhysics`（飞控仍用真值）、不驱动执行机构——与 M11 执行级的「默认关闭」
+  刻意不对称（观测无风险，抢杆才有）。两处「自主」的准确含义是<b>规则 +
   排序 + 搜索</b>（阈值规则、融合权重、决策树、A 星 / RRT），<b>不含任何机器学习
   模型</b>——全仓 pom 无 onnxruntime / tensorflow / ONNX / OpenCV 任何依赖；
   「边缘 AI 推理」的准确含义是<b>经典 CV 图像处理</b>。
   安全阈值已收敛到 `FailsafeThresholds`（电池临界 22% / 链路丢失 15s，此前仓库里
   同一参数曾同时存在 22 / 25 / 20 三个值）。`drone-sim` 的 `AiAutonomyWiringTest`
-  把接线状态钉成断言：DecisionEngine「已接线」是正向断言（静默退线即判红），
-  其余类「未接线」是期望状态（接线即判红并提示同步本节与竞品对比表）——
-  比在文档里写一句「注意」可靠，文档不会自己变红。
+  把接线状态钉成断言：DecisionEngine 与 edge 两引擎「已接线」是正向断言（静默
+  退线即判红），其余 8 个 ai 类「未接线」是期望状态（接线即判红并提示同步本节
+  与竞品对比表）——比在文档里写一句「注意」可靠，文档不会自己变红。
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
