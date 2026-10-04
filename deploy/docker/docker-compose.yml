@@ -10,8 +10,6 @@
 #   2026-09-13-spring-boot-actuator-health-endpoint-smoke-test-mismatch
 #   2026-09-14-health-endpoint-unify-by-tech-stack
 
-version: "3.8"
-
 services:
   # ===== Redis 缓存：cloud-backend 依赖 =====
   redis:
