@@ -12,8 +12,9 @@ data:
   AEROFLEET_SECURITY_DEV_MODE: {{ .Values.security.devMode | quote }}
   AEROFLEET_SECURITY_ALLOWED_ORIGINS: {{ .Values.security.allowedOrigins | quote }}
   AEROFLEET_SECURITY_JWT_EXPIRY: {{ .Values.security.jwtExpiry | quote }}
-  AEROFLEET_SECURITY_USERS: {{ .Values.security.users | quote }}
   SPRING_DATASOURCE_URL: {{ .Values.database.url | quote }}
   SPRING_DATASOURCE_DRIVER_CLASS_NAME: {{ .Values.database.driver | quote }}
   SPRING_JPA_HIBERNATE_DDL_AUTO: {{ .Values.database.ddlAuto | quote }}
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
+  # 飞行日志目录：必须与 Deployment 的 flight-logs 卷 mountPath 一致（/app/logs）
+  AEROFLEET_FLIGHTLOG_DIR: "/app/logs"

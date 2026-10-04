@@ -26,12 +26,18 @@ cloudBackend:
   # 健康检查端点（统一 /actuator/health）
   healthPath: /actuator/health
   # HPA 自动扩缩配置
+  # 默认关闭：cloud-backend 当前有状态（WS 会话/设备注册表在进程内、UDP 网关单接收点），
+  # 多副本会分裂实时遥测。待状态外部化后再置 enabled=true 并调大 maxReplicas。
   hpa:
-    minReplicas: 2
-    maxReplicas: 10
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 1
     cpuUtilization: 70
   # PDB 中断预算
+  # 默认关闭：单副本时 minAvailable>=1 会永久阻塞节点 drain（见 deploy/k8s/pdb-cloud-backend.yaml）。
+  # 待状态外部化、副本数 >=2 后再置 enabled=true。
   pdb:
+    enabled: false
     minAvailable: 1
 
 # ---- drone-sim ----
@@ -76,15 +82,34 @@ security:
   devMode: "false"
   # JWT 密钥：生产必须覆盖（至少 32 字符）
   jwtSecret: "REPLACE_WITH_STRONG_JWT_SECRET_AT_LEAST_32_CHARS"
+  # 凭据加密密钥（AES-GCM）：prod 无缺省 fail-fast，缺失则后端拒绝启动——必填
+  encryptionKey: "REPLACE_WITH_STRONG_ENCRYPTION_KEY_AT_LEAST_32_CHARS"
   jwtExpiry: "3600"
   allowedOrigins: "http://nexussky.local,http://localhost:3000"
-  users: "admin:admin"
+  # 内置用户（username:password[:ROLE]）。刻意留空，不提供 admin:admin 之类可猜默认口令。
+  # 必须通过 --set security.users='admin:<强口令>:ADMIN' 或外部 IDP/DB 账号提供，否则无人可登录。
+  # （AuthController：users 为空且 UserRepository 可用时放行——prod 有 DB，启动不会失败。）
+  users: ""
+  # 首次管理员引导（AdminBootstrapRunner）：仅在非空时于启动阶段在 DB 创建/重置该 ADMIN 账号。
+  # 口令要求 >= 8 位，否则拒绝引导（AdminBootstrapRunner:58-61）。这是 prod 下建出首个
+  # 可用账号的通路——prod 登录先查 UserRepository，内存 users 表被忽略，AEROFLEET_USERS 建不出可用账号。
+  # 仅在首次部署临时设置；登录改密后立刻清空再 helm upgrade（引导口令以明文存于 Secret）。
+  # 留空=完全不介入，适合已有 ADMIN 的日常升级。
+  bootstrapAdminPassword: ""
+  # 引导出的 ADMIN 用户名（默认 admin）与所属租户 ID（默认 1），对应 AdminBootstrapRunner:40-41。
+  # 注意：tenantId=1 是租户范围内的管理员；全局管理员（tenantId=null）无法经引导 env 得到，
+  # 需走 DB 或建用户端点（POST /api/v1/users）。仅在 bootstrapAdminPassword 非空时才被读取。
+  bootstrapAdminUsername: "admin"
+  bootstrapAdminTenantId: "1"
 
-# ---- 数据库（默认 H2 内存库，生产替换） ----
+# ---- 数据库（PostgreSQL，与 prod profile 口径一致） ----
+# 必须指向可达的 PG 实例：dev/prod 两个 profile 的数据源缺省都是 PG，prod 的
+# driver 硬编码 org.postgresql.Driver；DB 写通路只在 CI Pass C 的真 PG 上有门禁
+# （ci-integration-test.sh:43「H2 掩盖 PG 方言风险」），换成 H2 会绕开全部验证。
 database:
-  url: "jdbc:h2:mem:aerofleet"
-  driver: "org.h2.Driver"
-  username: "sa"
+  url: "jdbc:postgresql://postgres:5432/aerofleet_prod"
+  driver: "org.postgresql.Driver"
+  username: "aerofleet"
   password: "REPLACE_WITH_DB_PASSWORD"
   # schema 由启动时的 Flyway 迁移建立后校验（与 prod 同口径）；update 会绕开迁移脚本
   ddlAuto: "validate"
@@ -100,3 +125,7 @@ ingress:
 flightLogs:
   storage: 5Gi
   storageClassName: standard
+  # 访问模式：默认 ReadWriteOnce（与单副本部署一致）。
+  # 扩到 >=2 副本时不要简单改 RWX——多副本共享同一目录写同日 JSONL 会交错；
+  # 正确做法是改 StatefulSet + volumeClaimTemplates（每副本独立卷）。
+  accessMode: ReadWriteOnce

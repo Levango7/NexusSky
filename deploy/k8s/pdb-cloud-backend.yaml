@@ -1,5 +1,7 @@
 # PodDisruptionBudget for cloud-backend
-# 保证至少 1 个副本可用，防止 voluntary disruption（如 drain）导致服务中断
+# 注意：cloud-backend 目前单副本有状态。minAvailable>=1 会让节点 drain 永久阻塞
+# （desired=1、available=1，驱逐即违反预算），因此这里取 0=不阻止自愿中断。
+# 待状态外部化并扩容到 >=2 副本后，再改回 minAvailable: 1。
 # 用法：kubectl apply -f deploy/k8s/pdb-cloud-backend.yaml -n nexussky
 ---
 apiVersion: policy/v1
@@ -11,7 +13,7 @@ metadata:
     app.kubernetes.io/name: nexussky
     app.kubernetes.io/component: cloud-backend
 spec:
-  minAvailable: 1
+  minAvailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: nexussky

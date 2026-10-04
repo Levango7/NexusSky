@@ -1,5 +1,7 @@
 # PodDisruptionBudget: cloud-backend + gcs-web
 # 保证至少 minAvailable 个副本可用
+# cloud-backend 默认关闭（单副本时 minAvailable>=1 会阻塞 drain）——见 values.yaml cloudBackend.pdb.enabled
+{{- if .Values.cloudBackend.pdb.enabled }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -17,6 +19,7 @@ spec:
       app.kubernetes.io/name: nexussky
       app.kubernetes.io/instance: {{ .Release.Name }}
       app.kubernetes.io/component: cloud-backend
+{{- end }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

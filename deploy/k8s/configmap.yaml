@@ -15,9 +15,15 @@ data:
   AEROFLEET_SECURITY_DEV_MODE: "false"
   # CORS 允许的前端来源（Ingress 暴露的域名）
   AEROFLEET_SECURITY_ALLOWED_ORIGINS: "http://nexussky.local,http://localhost:3000"
-  # H2 内存库连接（生产应替换为外部 DB，见 secret + 此处 url）
-  SPRING_DATASOURCE_URL: "jdbc:h2:mem:aerofleet"
-  SPRING_DATASOURCE_DRIVER_CLASS_NAME: "org.h2.Driver"
+  # PostgreSQL 连接（与 prod profile 的 driver 口径一致，见 application-prod.properties:32-36）。
+  # 必须指向可达的 PG 实例：dev/prod 两个 profile 的数据源缺省都是 PG，prod 的
+  # driver 硬编码 org.postgresql.Driver；DB 写通路只在 CI Pass C 的真 PG 上有门禁
+  # （ci-integration-test.sh:43「H2 掩盖 PG 方言风险」），换成 H2 会绕开全部验证。
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/aerofleet_prod"
+  SPRING_DATASOURCE_DRIVER_CLASS_NAME: "org.postgresql.Driver"
+  # 飞行日志目录：必须与 Deployment 的 flight-logs 卷 mountPath 一致（/app/logs），
+  # 否则日志落在只读根文件系统上的临时路径，写入失败/重启即丢。
+  AEROFLEET_FLIGHTLOG_DIR: "/app/logs"
   # schema 由启动时的 Flyway 迁移建立后校验（与 prod 同口径）；
   # update 会让 Hibernate 隐式建表/补列，绕开迁移脚本
   SPRING_JPA_HIBERNATE_DDL_AUTO: "validate"
@@ -25,5 +31,4 @@ data:
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
   # JWT 有效期（秒）
   AEROFLEET_SECURITY_JWT_EXPIRY: "3600"
-  # 内置用户（生产应使用外部 IDP）
-  AEROFLEET_SECURITY_USERS: "admin:admin"
+  # 内置用户已迁入 secret（AEROFLEET_USERS），此处不再明文保留

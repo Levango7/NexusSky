@@ -1,5 +1,8 @@
-# HorizontalPodAutoscaler for cloud-backend
-# 自动扩缩：min=2, max=10, CPU>70% 触发扩容
+# HorizontalPodAutoscaler for cloud-backend —— 默认禁用横向扩容
+# 原因：cloud-backend 当前是有状态单体（WebSocket 会话 + 设备注册表在进程内，
+# MAVLink UDP 网关为单接收点），多副本会导致实时遥测分裂。
+# 故 min=max=1（与 Deployment replicas:1 一致，HPA 不生效）；
+# 待状态外部化（Redis 广播 + 外部化会话/注册表）后再把 maxReplicas 调回 >1。
 # 用法：kubectl apply -f deploy/k8s/hpa-cloud-backend.yaml -n nexussky
 ---
 apiVersion: autoscaling/v2
@@ -15,8 +18,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: cloud-backend
-  minReplicas: 2
-  maxReplicas: 10
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
     - type: Resource
       resource:

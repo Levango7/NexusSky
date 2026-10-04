@@ -29,10 +29,23 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: cloud-backend
     spec:
+      # 与 deploy/k8s/cloud-backend.yaml 保持同一套加固口径
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
       containers:
         - name: cloud-backend
           image: "{{ .Values.imageRegistry }}{{ .Values.cloudBackend.image }}:{{ .Values.imageTag }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: {{ .Values.cloudBackend.port }}
@@ -66,6 +79,20 @@ spec:
             failureThreshold: 12
           resources:
             {{- toYaml .Values.cloudBackend.resources | nindent 12 }}
+          # 飞行日志（JSONL）持久化卷：挂载路径必须与 AEROFLEET_FLIGHTLOG_DIR 一致
+          # （configmap 设为 /app/logs），否则日志仍落在容器临时层、重启即丢。
+          volumeMounts:
+            - name: flight-logs
+              mountPath: /app/logs
+            # readOnlyRootFilesystem 下 /tmp 必须可写（Spring/Tomcat 需要）
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: flight-logs
+          persistentVolumeClaim:
+            claimName: flight-logs
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment

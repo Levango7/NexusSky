@@ -1,5 +1,8 @@
 # PersistentVolumeClaim for flight-logs
-# cloud-backend 飞行日志持久化存储
+# cloud-backend 飞行日志持久化存储（单副本）
+# accessModes=ReadWriteOnce 与单副本部署一致，不能被多个 Pod 同时挂载。
+# 扩到 >=2 副本时不要只改 RWX：多副本共享目录写同日 JSONL 会交错，
+# 正确做法是改用 StatefulSet + volumeClaimTemplates（每副本独立卷）。
 # 用法：kubectl apply -f deploy/k8s/pvc-flight-logs.yaml -n nexussky
 ---
 apiVersion: v1

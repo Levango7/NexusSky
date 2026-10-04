@@ -1,5 +1,7 @@
 # HorizontalPodAutoscaler: cloud-backend + gcs-web
 # 参数化 min/max/CPU阈值，通过 values.yaml 配置
+# cloud-backend 默认关闭（有状态，多副本会分裂实时遥测）——见 values.yaml cloudBackend.hpa.enabled
+{{- if .Values.cloudBackend.hpa.enabled }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -24,6 +26,7 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.cloudBackend.hpa.cpuUtilization }}
+{{- end }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

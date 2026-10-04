@@ -12,7 +12,7 @@ metadata:
     app.kubernetes.io/component: cloud-backend
 spec:
   accessModes:
-    - ReadWriteOnce
+    - {{ .Values.flightLogs.accessMode }}
   resources:
     requests:
       storage: {{ .Values.flightLogs.storage }}
