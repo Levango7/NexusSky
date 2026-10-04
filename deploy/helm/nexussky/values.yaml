@@ -23,8 +23,11 @@ cloudBackend:
     limits:
       cpu: 1000m
       memory: 1Gi
-  # 健康检查端点（统一 /actuator/health）
-  healthPath: /actuator/health
+  # 探针端点：readiness 只看 readinessState+db，liveness 只看 livenessState
+  # （chart 不部署 redis，聚合 /actuator/health 会因 redis 分量 DOWN 恒 503；
+  # 分组 include 由 configmap 模板的 MANAGEMENT_ENDPOINT_HEALTH_GROUP_* 设定）
+  readinessPath: /actuator/health/readiness
+  livenessPath: /actuator/health/liveness
   # HPA 自动扩缩配置
   # 默认关闭：cloud-backend 当前有状态（WS 会话/设备注册表在进程内、UDP 网关单接收点），
   # 多副本会分裂实时遥测。待状态外部化后再置 enabled=true 并调大 maxReplicas。

@@ -29,6 +29,13 @@ data:
   SPRING_JPA_HIBERNATE_DDL_AUTO: "validate"
   # Actuator 端点暴露（与 application.properties 对齐）
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
+  # 探针解耦：本清单不部署 redis（Redis 仅 RedisRateLimiter 使用，失联时优雅放行，
+  # 见 RedisRateLimiter），聚合 /actuator/health 会因 redis 分量 DOWN 恒 503，不能作探针。
+  # 显式开启探针分组端点，readiness 只看 readinessState+db（PG 可用才接流量）；
+  # liveness 只看 livenessState（redis/Prometheus 等可选组件不参与重启决策）。
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "readinessState,db"
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_LIVENESS_INCLUDE: "livenessState"
   # JWT 有效期（秒）
   AEROFLEET_SECURITY_JWT_EXPIRY: "3600"
   # 内置用户已迁入 secret（AEROFLEET_USERS），此处不再明文保留

@@ -1,6 +1,7 @@
 # NexusSky cloud-backend Deployment + Service
 # Spring Boot REST + WebSocket + MAVLink 网关
-# 健康检查：/actuator/health（与 application.properties、docker-compose、helm 统一）
+# 健康检查：探针走 /actuator/health/{readiness,liveness} 分组端点——本清单不部署 redis，
+# 聚合 /actuator/health 会因 redis 分量 DOWN 恒 503（configmap 已设分组 include）。
 # 来源：经验库 2026-09-13-spring-boot-actuator-health-endpoint-smoke-test-mismatch
 # 用法：kubectl apply -f deploy/k8s/cloud-backend.yaml -n nexussky
 ---
@@ -54,19 +55,19 @@ spec:
                 name: nexussky-config
             - secretRef:
                 name: nexussky-secret
-          # 就绪探针：通过 /actuator/health 才接流量
+          # 就绪探针：readinessState+db 全 UP 才接流量（PG 不可达时摘流量而非重启）
           readinessProbe:
             httpGet:
-              path: /actuator/health
+              path: /actuator/health/readiness
               port: http
             initialDelaySeconds: 20
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
-          # 存活探针：失败则重启容器
+          # 存活探针：只看 livenessState（redis 等可选组件 DOWN 不触发重启）
           livenessProbe:
             httpGet:
-              path: /actuator/health
+              path: /actuator/health/liveness
               port: http
             initialDelaySeconds: 40
             periodSeconds: 15
@@ -75,7 +76,7 @@ spec:
           # 启动探针：Spring Boot 冷启动给足宽限
           startupProbe:
             httpGet:
-              path: /actuator/health
+              path: /actuator/health/liveness
               port: http
             periodSeconds: 10
             failureThreshold: 12

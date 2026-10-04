@@ -16,5 +16,11 @@ data:
   SPRING_DATASOURCE_DRIVER_CLASS_NAME: {{ .Values.database.driver | quote }}
   SPRING_JPA_HIBERNATE_DDL_AUTO: {{ .Values.database.ddlAuto | quote }}
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
+  # 探针解耦：chart 不部署 redis（Redis 仅 RedisRateLimiter 使用，失联时优雅放行，
+  # 见 RedisRateLimiter.tryAcquire），聚合 /actuator/health 会因 redis 分量 DOWN 恒 503。
+  # readiness 只看 readinessState+db（PG 可用才接流量）；liveness 只看 livenessState。
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "readinessState,db"
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_LIVENESS_INCLUDE: "livenessState"
   # 飞行日志目录：必须与 Deployment 的 flight-logs 卷 mountPath 一致（/app/logs）
   AEROFLEET_FLIGHTLOG_DIR: "/app/logs"
