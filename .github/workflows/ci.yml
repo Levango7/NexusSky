@@ -194,6 +194,10 @@ jobs:
           key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
           restore-keys: mvn-${{ runner.os }}-
       - name: Build backend + drone-sim jars
+        # 覆盖 job 级 defaults.run.working-directory（gcs-web）：本步必须在仓库根跑 Maven，
+        # 否则 mvn -pl cloud-backend 会因 gcs-web/ 下没有 pom.xml 直接报
+        # "Could not find the selected project in the reactor: cloud-backend" 并退出。
+        working-directory: ${{ github.workspace }}
         run: mvn -B -q -pl cloud-backend,drone-sim -am package -DskipTests
       - run: npm install
       # 浏览器本体单独缓存：每次重下 ~150MB，CI 时长直接翻倍
