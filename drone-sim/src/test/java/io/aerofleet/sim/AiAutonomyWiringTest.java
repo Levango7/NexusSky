@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * 真正生效的应急链路是 {@link FailsafeController}。一个只看测试通过率的读者
  * 会得出「自主决策已完成」的结论，与事实相反。
  *
- * <p>本测试把五件事钉死：
+ * <p>本测试把六件事钉死：
  * <ol>
  *   <li>failsafe 阈值只有一个真相源（此前同一参数有三个值：22/25/20）；</li>
  *   <li>DecisionEngine <b>已接线</b>：通过 AutonomyAdvisor 接入
@@ -40,6 +40,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  *       <b>期望状态</b>，不是缺陷；一旦有人把它们接进飞行路径，本测试判红
  *       并提示同步 README 与产品文档的声称（AdaptivePathStrategy 已于
  *       2026-10-04 接入 M11 执行级，移出本列表）；</li>
+ *   <li>UNWIRED_CLASSES 清单对 ai 包的<b>行为类完备</b>（2026-10-05）——新增
+ *       策略/规划器不显式归类（未接线断言或已接线断言）即判红，防止新类
+ *       静默逃逸守卫；数据/值类型（AdaptivePathResult/DecisionContext/
+ *       DecisionLogEntry/DecisionResult/FusedDecision）随已接线引擎被消费，
+ *       不属行为类；</li>
  *   <li>drone-sim 不引入 ML 运行时依赖（「自主决策」是规则+排序+搜索，
  *       「边缘 AI」是经典 CV）。</li>
  * </ol>
@@ -184,6 +189,49 @@ class AiAutonomyWiringTest {
                     className + " 未接入生产路径这件事必须写进它的 Javadoc，"
                             + "否则读者看到「实现完整 + 测试全绿」会误以为它在运行");
         }
+    }
+
+    /**
+     * 数据/值类型白名单：它们是已接线引擎的组成部分（如
+     * {@code AdaptivePathResult} 是 {@code adaptPath} 的返回值、
+     * {@code FusedDecision} 是 AutonomyExecutor 的输入），「被包外生产代码
+     * 引用」是接线本身的产物，不属于「策略/规划器」，不进 UNWIRED_CLASSES。
+     */
+    private static final java.util.Set<String> AI_DATA_CLASSES = java.util.Set.of(
+            "AdaptivePathResult", "DecisionContext", "DecisionLogEntry",
+            "DecisionResult", "FusedDecision");
+
+    @Test
+    @DisplayName("UNWIRED_CLASSES 对 ai 包行为类完备：新增策略/规划器不归类即判红")
+    void unwiredListCoversAllAiBehavioralClasses() throws IOException {
+        Path aiDir = Path.of("src", "main", "java", "io", "aerofleet", "sim", "ai");
+        if (!Files.isDirectory(aiDir)) {
+            aiDir = Path.of("drone-sim", "src", "main", "java", "io", "aerofleet", "sim", "ai");
+        }
+        assertTrue(Files.isDirectory(aiDir), "ai 包目录不存在？工作目录应在 drone-sim 或仓库根");
+        java.util.Set<String> classified = new java.util.HashSet<>();
+        for (String cn : UNWIRED_CLASSES) {
+            classified.add(simpleName(cn));
+        }
+        classified.add("DecisionEngine");        // 已接线：decisionEngineIsWired
+        classified.add("AdaptivePathStrategy");  // 已接线：adaptivePathStrategyIsWired
+        List<String> unclassified;
+        try (Stream<Path> files = Files.list(aiDir)) {
+            unclassified = files
+                    .map(p -> p.getFileName().toString())
+                    .filter(n -> n.endsWith(".java"))
+                    .map(n -> n.substring(0, n.length() - ".java".length()))
+                    .filter(n -> !AI_DATA_CLASSES.contains(n))
+                    .filter(n -> !classified.contains(n))
+                    .toList();
+        }
+        assertTrue(unclassified.isEmpty(),
+                "ai 包出现了未归类的行为类：" + String.join(", ", unclassified)
+                        + "。新策略/规划器必须二选一：(1) 未接线——加入"
+                        + " UNWIRED_CLASSES 并在其 Javadoc 写明「未接入生产路径」；"
+                        + "(2) 已接线——新增正向接线断言并同步 README/ROADMAP/"
+                        + "competitive-analysis。只有随已接线引擎消费的数据/值类型"
+                        + "才可进 AI_DATA_CLASSES。");
     }
 
     @Test

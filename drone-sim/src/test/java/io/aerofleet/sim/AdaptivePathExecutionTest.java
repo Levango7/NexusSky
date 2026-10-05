@@ -38,6 +38,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 负向契约（非 NAV_WAYPOINT 尾不改写、无尖角不发 30052）由
  * {@code MissionStoreTest}（replaceTail 守卫）与策略单测覆盖，不做基于
  * 「等一段时间没收到帧」的脆弱断言。
+ *
+ * <p><b>复合任务尾</b>（2026-10-05）：任务含非航点指令（拍照/悬停/RTL）时，
+ * 只平滑剩余头部连续 NAV_WAYPOINT 段，段终点之后的项原样拼接（仅重编 seq）。
+ * 此前含任何非航点指令的尾整体跳过——一条拍照指令就废掉全部适配。
  */
 @DisplayName("M11 ADAPT_PATH 执行级：任务改写 + ADAPTIVE_PATH(30052) 真实下发")
 class AdaptivePathExecutionTest {
@@ -101,6 +105,53 @@ class AdaptivePathExecutionTest {
         }
     }
 
+    @Test
+    @DisplayName("复合任务尾（Z 字形 + 拍照 + RTL）：头部航点段照常平滑，拍照/RTL 项原样保留仅重编 seq")
+    void compoundTailAdaptsPrefixAndPreservesNonWaypoints() throws Exception {
+        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--autonomy-exec"});
+        try (VirtualDrone drone = new VirtualDrone(config);
+             DatagramSocket gcs = new DatagramSocket()) {
+            drone.start();
+            InetAddress addr = InetAddress.getLoopbackAddress();
+            int[] seq = {0};
+
+            // Z 字形两航点（一个 90° 尖角）+ 拍照(IMAGE_START_CAPTURE) + RTL：
+            // 旧守卫下这条任务整体跳过（尾含非航点指令），新语义只平滑前缀段
+            uploadCompoundMission(gcs, addr, seq);
+            sendCommand(gcs, addr, seq, MavEnums.MAV_CMD_COMPONENT_ARM_DISARM, 1, 0, 0, 0, 0, 0, 0);
+            sendCommand(gcs, addr, seq, MavEnums.MAV_CMD_MISSION_START, 0, 0, 0, 0, 0, 0, 0);
+
+            drone.executeAdaptivePath("strong wind");
+
+            // 30052 照常公告（前缀段 2 航点含 1 尖角，Dubins 必插点）
+            AdaptivePathMsg announced = awaitFrame(gcs, AdaptivePathMsg.ID, AdaptivePathMsg::decode);
+            assertThat(announced.originalWaypointSeq).isEqualTo(0);
+
+            // 复合尾断言（直读快照，不经 UDP 二次猜测）：
+            java.util.List<MissionItemInt> items = drone.missionItemsSnapshot();
+            assertThat(items.size()).as("尖角插点后任务应变大（4 → >4）").isGreaterThan(4);
+            // seq 从 0 连续编号到 size-1（拼接后无空洞、无重复）
+            for (int i = 0; i < items.size(); i++) {
+                assertThat(items.get(i).seq).as("seq 应连续，i=" + i).isEqualTo(i);
+            }
+            // 头部全是 NAV_WAYPOINT（平滑产物）
+            for (MissionItemInt it : items.subList(0, items.size() - 2)) {
+                assertThat(it.command).isEqualTo(MavEnums.MAV_CMD_NAV_WAYPOINT);
+            }
+            // 倒数第二项 = 拍照指令原样保留（指令/参数/坐标一字不动）
+            MissionItemInt photo = items.get(items.size() - 2);
+            assertThat(photo.command).isEqualTo(MavEnums.MAV_CMD_IMAGE_START_CAPTURE);
+            assertThat(photo.param1).isEqualTo(7.5f);
+            assertThat(photo.param2).isEqualTo(3.25f);
+            assertThat(photo.x).isEqualTo((int) Math.round((HOME_LAT + 0.001) * 1e7));
+            assertThat(photo.y).isEqualTo((int) Math.round((HOME_LON + 0.001) * 1e7));
+            assertThat(photo.z).isEqualTo(30f);
+            // 末项 = RTL 原样保留
+            MissionItemInt rtl = items.get(items.size() - 1);
+            assertThat(rtl.command).isEqualTo(MavEnums.MAV_CMD_NAV_RETURN_TO_LAUNCH);
+        }
+    }
+
     // ------------------------------------------------------------------
     // GCS 侧协议助手（模式来源：NexusCommandDispatchTest）
     // ------------------------------------------------------------------
@@ -126,6 +177,41 @@ class AdaptivePathExecutionTest {
             sent++;
         }
         assertThat(sent).as("任务上传应完成（跟随 MISSION_REQUEST_INT 逐项发送）").isEqualTo(latLonAlt.length);
+        MissionAckMsg ack = awaitFrame(gcs, MissionAckMsg.ID, MissionAckMsg::decode);
+        assertThat(ack.type).isEqualTo(MavEnums.MAV_MISSION_ACCEPTED);
+    }
+
+    /** 复合任务上传：WP → WP（90° 尖角）→ DO_DIGICAM_CONTROL → NAV_RETURN_TO_LAUNCH。 */
+    private void uploadCompoundMission(DatagramSocket gcs, InetAddress addr, int[] seq)
+            throws Exception {
+        double northLat = HOME_LAT + 120.0 / 111320.0;
+        double eastLon = HOME_LON + 120.0 / (111320.0 * Math.cos(Math.toRadians(HOME_LAT)));
+        MissionItemInt[] plan = {
+                new MissionItemInt(1, AUTOPILOT_COMP, 0, MavEnums.MAV_FRAME_GLOBAL,
+                        MavEnums.MAV_CMD_NAV_WAYPOINT, 0, 1, 0f, 0f, 0f, 0f,
+                        (int) Math.round(northLat * 1e7), (int) Math.round(HOME_LON * 1e7), 30f, 0),
+                new MissionItemInt(1, AUTOPILOT_COMP, 1, MavEnums.MAV_FRAME_GLOBAL,
+                        MavEnums.MAV_CMD_NAV_WAYPOINT, 0, 1, 0f, 0f, 0f, 0f,
+                        (int) Math.round(northLat * 1e7), (int) Math.round(eastLon * 1e7), 30f, 0),
+                new MissionItemInt(1, AUTOPILOT_COMP, 2, MavEnums.MAV_FRAME_GLOBAL,
+                        MavEnums.MAV_CMD_IMAGE_START_CAPTURE, 0, 1, 7.5f, 3.25f, 0f, 0f,
+                        (int) Math.round((HOME_LAT + 0.001) * 1e7),
+                        (int) Math.round((HOME_LON + 0.001) * 1e7), 30f, 0),
+                new MissionItemInt(1, AUTOPILOT_COMP, 3, MavEnums.MAV_FRAME_GLOBAL,
+                        MavEnums.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 1, 0f, 0f, 0f, 0f, 0, 0, 0f, 0),
+        };
+        send(gcs, addr, seq, new MissionCountMsg(plan.length, 1, AUTOPILOT_COMP, 0, 0));
+        int sent = 0;
+        long deadline = System.currentTimeMillis() + FRAME_TIMEOUT_MS;
+        while (sent < plan.length && System.currentTimeMillis() < deadline) {
+            MissionRequestInt req = pollFrame(gcs, MissionRequestInt.ID, MissionRequestInt::decode);
+            if (req == null) {
+                continue;
+            }
+            send(gcs, addr, seq, plan[req.seq]);
+            sent++;
+        }
+        assertThat(sent).as("复合任务上传应完成").isEqualTo(plan.length);
         MissionAckMsg ack = awaitFrame(gcs, MissionAckMsg.ID, MissionAckMsg::decode);
         assertThat(ack.type).isEqualTo(MavEnums.MAV_MISSION_ACCEPTED);
     }

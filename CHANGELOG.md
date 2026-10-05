@@ -4,6 +4,48 @@
 
 ---
 
+## [Unreleased] — ADAPT_PATH 复合任务尾 + ai 包未接线守卫完备性（2026-10-05）
+
+### 1. ADAPT_PATH 复合任务尾：一条拍照指令不再废掉全部适配
+
+- 缺口背景（Round B 遗留开放项）：`VirtualDrone.executeAdaptivePath` 的守卫
+  要求剩余任务**全部**是 NAV_WAYPOINT——含任何非航点指令（拍照/悬停/RTL/
+  LAND）的尾整体跳过，而「航点串 + 相机触发 + 返航」正是真实航测任务的
+  典型形态；
+- 新语义：只平滑剩余**头部连续 NAV_WAYPOINT 段**（≥2 个），段终点之后的项
+  原样拼接——仅重编 seq，指令/坐标/参数一字不动（相机触发点与悬停语义
+  不被平滑改写）；段之后的航点段不再平滑（部分适配是诚实边界，不做跨指令
+  段的几何拼接）；
+- 实现复用 `MissionStore.replaceTail` 既有能力（任意 fromSeq + 调用方连续
+  编号），无新存储 API；`VirtualDrone` 新增包内可见
+  `missionItemsSnapshot()`（测试断言复合尾保留/seq 连续性用，javadoc 注明
+  生产代码不得经此绕过上传会话守卫）；
+- 测试：`AdaptivePathExecutionTest` 新增复合尾用例（WP+WP+拍照+RTL 四项
+  任务走真实 UDP 上传握手 → 断言 30052 照常公告、任务 4→12（1 尖角 × 8
+  插点）、seq 0..N-1 连续、拍照项参数/坐标逐字段原样、RTL 项保留）。
+
+### 2. ai 包 7 类「未接线」断言语义复核 + 完备性守卫
+
+- 复核结论：UNWIRED_CLASSES 7 类（避障 A*/RRT、RTL 滑翔、集群协同、应急
+  返航、路径规划器、决策树）清单对 ai 包**行为类**完备；ai 包另 5 类为
+  数据/值类型（AdaptivePathResult/DecisionContext/DecisionLogEntry/
+  DecisionResult/FusedDecision），是已接线引擎的组成部分，不属「策略/
+  规划器」；
+- 洞与补法：新增行为类曾可静默逃逸守卫（清单只查已知类）。新增完备性
+  测试：枚举 ai 包全部类，凡不在「7 未接线 ∪ 2 已接线 ∪ 5 数据类」者
+  判红，并提示归类路径（未接线断言 + Javadoc，或正向接线断言 + 三处文档
+  同步）；数据类白名单在测试中显式声明并说明豁免理由；
+- `AiAutonomyWiringTest` 9→10 例，类 Javadoc「五件事」→「六件事」。
+
+### 3. 验证与计数
+
+- drone-sim 1391/1391 全绿（1389 + 2 新增）；计数门禁全仓口径 4196 同步
+  后全绿；
+- 文档：README M11 执行级（复合尾语义 + 守卫完备性）、ROADMAP M11 沿革
+  与标题同步。
+
+---
+
 ## [Unreleased] — WS_TYPE_MAP 零生产者帧收口：30014/30056 接线 + 6 帧边界固化（2026-10-05）
 
 ### 1. 逐帧排查结论（13 帧全部核实）

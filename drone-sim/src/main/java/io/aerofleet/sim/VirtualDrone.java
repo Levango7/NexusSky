@@ -2439,24 +2439,26 @@ public final class VirtualDrone implements AutoCloseable {
      * 执行 ADAPT_PATH 决策（包内可见：{@code AdaptivePathExecutionTest} 直调，
      * 生产入口是 {@link AutonomyExecutor} 的门控回调）。
      *
-     * <p><b>语义</b>：对剩余任务航段（当前航点..末航点，前置当前实际位置）跑
-     * {@link AdaptivePathStrategy#adaptPath}——Dubins 平滑（&gt;5° 尖角以
-     * {@link #ADAPT_TURN_RADIUS_M} 半径圆弧替换）+ 风修正航向 + 能耗最优速度。
-     * 结果分两路落地：
+     * <p><b>语义</b>：对剩余任务的<b>头部连续 NAV_WAYPOINT 段</b>（前置当前
+     * 实际位置）跑 {@link AdaptivePathStrategy#adaptPath}——Dubins 平滑（&gt;5°
+     * 尖角以 {@link #ADAPT_TURN_RADIUS_M} 半径圆弧替换）+ 风修正航向 + 能耗最优
+     * 速度。结果分两路落地：
      * <ol>
      *   <li><b>路径改写</b>：平滑在尖角处插点（点数必增，Dubins 不改直段坐标），
-     *       此时用平滑结果替换任务尾部并重定位当前段目标，随后经
-     *       ADAPTIVE_PATH(30052) 公告第一个新航点——该消息的<b>第一个生产者</b>
-     *       （此前全仓零生产者，属刻意边界）；未插点（无尖角）则任务原样保留，
-     *       也不发 30052——没有真实变化就不公告；</li>
+     *       此时用平滑段 + 原样后缀（仅重编 seq）替换任务尾部并重定位当前段
+     *       目标，随后经 ADAPTIVE_PATH(30052) 公告第一个新航点——该消息的
+     *       <b>第一个生产者</b>（此前全仓零生产者，属刻意边界）；未插点（无
+     *       尖角）则任务原样保留，也不发 30052——没有真实变化就不公告；</li>
      *   <li><b>当前段调速</b>：按能耗最优速度下调全局速度因子（顺风提速在
      *       物理层不可表达：{@code setSpeedFactor} 上限 1.0，只能降不能升）。</li>
      * </ol>
      *
      * <p><b>守卫（任一不满足即静默返回，advisory 链路不受影响）</b>：
-     * 非 MISSION 态（ARMED 无任务几何可改）；任务上传会话进行中；剩余项不全
-     * 是 NAV_WAYPOINT（TAKEOFF/RTL/LAND/JUMP 不是可平滑的几何航点）；剩余
-     * 航点 &lt; 2（单点尾无平滑意义）。
+     * 非 MISSION 态（ARMED 无任务几何可改）；任务上传会话进行中；剩余<b>头部
+     * 连续 NAV_WAYPOINT 段</b> &lt; 2（复合任务尾语义，2026-10-05：非航点指令
+     * ——拍照/悬停/RTL/LAND/JUMP——是段终点，位置与参数原样保留，段之后的
+     * 航点不再平滑；此前含任何非航点指令的尾整体跳过，一条拍照指令就废掉
+     * 全部适配）。
      *
      * <p>风向语义：策略要「风吹来的方向」（气象惯例），而仿真风向量
      * （{@code windVector}/{@code applyWind}）是空气推进方向，二者相差 180°。
@@ -2469,20 +2471,23 @@ public final class VirtualDrone implements AutoCloseable {
             if (state != FlightState.MISSION || missions.isUploading()) {
                 return;
             }
-            for (int i = currentSeq; i < missions.size(); i++) {
-                MissionItemInt it = missions.get(i);
+            // 复合任务尾：只平滑剩余头部连续 NAV_WAYPOINT 段 [currentSeq, wpEnd)
+            int wpEnd = currentSeq;
+            while (wpEnd < missions.size()) {
+                MissionItemInt it = missions.get(wpEnd);
                 if (it == null || it.command != MavEnums.MAV_CMD_NAV_WAYPOINT) {
-                    return;
+                    break;
                 }
+                wpEnd++;
             }
-            int remaining = missions.size() - currentSeq;
-            if (remaining < 2) {
+            int wpRun = wpEnd - currentSeq;
+            if (wpRun < 2) {
                 return;
             }
-            // 剩余路径 = [当前位置, 当前航点, ..., 末航点]，坐标 [lat, lon, alt]
-            List<double[]> path = new ArrayList<>(remaining + 1);
+            // 段内路径 = [当前位置, 段首航点, ..., 段末航点]，坐标 [lat, lon, alt]
+            List<double[]> path = new ArrayList<>(wpRun + 1);
             path.add(new double[]{physics.lat(), physics.lon(), physics.alt()});
-            for (int i = currentSeq; i < missions.size(); i++) {
+            for (int i = currentSeq; i < wpEnd; i++) {
                 MissionItemInt it = missions.get(i);
                 path.add(new double[]{it.lat(), it.lon(), it.z});
             }
@@ -2500,22 +2505,35 @@ public final class VirtualDrone implements AutoCloseable {
             AdaptivePathResult result = adaptivePath.adaptPath(path, windSpeed, windDirDeg,
                     physics.cruiseSpeed(), physics.batteryRemainingPct(), ADAPT_TURN_RADIUS_M);
             List<double[]> smoothed = result.correctedPath;
-            if (smoothed.size() < remaining + 1) {
+            if (smoothed.size() < wpRun + 1) {
                 return;   // 策略对非法输入返回空表：防御，正常不会走到
             }
-            // 新尾 = 平滑结果去掉首点（首点是当前位置，不是航点）
-            MissionItemInt template = missions.get(currentSeq);
-            List<MissionItemInt> newTail = new ArrayList<>(smoothed.size() - 1);
-            for (int i = 1; i < smoothed.size(); i++) {
-                double[] p = smoothed.get(i);
-                newTail.add(new MissionItemInt(config.sysid, COMPONENT_ID, currentSeq + i - 1,
-                        template.frame, MavEnums.MAV_CMD_NAV_WAYPOINT, template.current,
-                        template.autocontinue, 0f, 0f, 0f, 0f,
-                        (int) Math.round(p[0] * 1e7), (int) Math.round(p[1] * 1e7),
-                        (float) p[2], template.missionType));
-            }
-            // Dubins 只在尖角处插点：点数不变 = 未触发平滑 = 任务无变化
-            if (newTail.size() != remaining) {
+            // Dubins 只在尖角处插点：段内点数不变 = 未触发平滑 = 任务无变化
+            if (smoothed.size() - 1 != wpRun) {
+                // 新段 = 平滑结果去掉首点（首点是当前位置，不是航点）
+                MissionItemInt template = missions.get(currentSeq);
+                List<MissionItemInt> newTail = new ArrayList<>(
+                        smoothed.size() - 1 + (missions.size() - wpEnd));
+                for (int i = 1; i < smoothed.size(); i++) {
+                    double[] p = smoothed.get(i);
+                    newTail.add(new MissionItemInt(config.sysid, COMPONENT_ID, currentSeq + i - 1,
+                            template.frame, MavEnums.MAV_CMD_NAV_WAYPOINT, template.current,
+                            template.autocontinue, 0f, 0f, 0f, 0f,
+                            (int) Math.round(p[0] * 1e7), (int) Math.round(p[1] * 1e7),
+                            (float) p[2], template.missionType));
+                }
+                // 段终点之后的项原样拼接：仅重编 seq，指令/坐标/参数一字不动
+                for (int i = wpEnd; i < missions.size(); i++) {
+                    MissionItemInt it = missions.get(i);
+                    if (it == null) {
+                        return;   // 病态任务（上传会话外不应有 null）：宁可放弃本次适配
+                    }
+                    newTail.add(new MissionItemInt(it.targetSystem, it.targetComponent,
+                            currentSeq + newTail.size(), it.frame, it.command, it.current,
+                            it.autocontinue, it.param1, it.param2, it.param3, it.param4,
+                            it.x, it.y, it.z, it.missionType));
+                }
+                int oldTailSize = missions.size() - currentSeq;
                 missions.replaceTail(currentSeq, newTail);
                 beginCurrentLeg();
                 double[] first = smoothed.get(1);
@@ -2528,10 +2546,10 @@ public final class VirtualDrone implements AutoCloseable {
                         (int) Math.round(windDirDeg * 100.0),
                         config.sysid,
                         adjustmentReasonOf(reason)));
-                SimLog.info("AI EXECUTION: path adapted, mission tail " + remaining
+                SimLog.info("AI EXECUTION: path adapted, mission tail " + oldTailSize
                         + " -> " + newTail.size() + " items (seq " + currentSeq + "+)");
                 pushStatus(MavEnums.MAV_SEVERITY_NOTICE,
-                        "AI execution: path adapted (" + (newTail.size() - remaining)
+                        "AI execution: path adapted (" + (newTail.size() - oldTailSize)
                                 + " smoothing waypoints inserted)");
             }
             // 当前段能耗最优速度：物理层因子上限 1.0，顺风提速不可表达
@@ -2542,6 +2560,15 @@ public final class VirtualDrone implements AutoCloseable {
         } catch (Exception e) {
             SimLog.warn("adaptive path execution failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * 任务项快照（包内可见：{@code AdaptivePathExecutionTest} 断言复合尾
+     * 保留/seq 连续性用）。生产代码应走 {@link MissionStore} 的正规 API，
+     * 不要经此绕过上传会话守卫。
+     */
+    List<MissionItemInt> missionItemsSnapshot() {
+        return java.util.Collections.unmodifiableList(new ArrayList<>(missions.all()));
     }
 
     /**
