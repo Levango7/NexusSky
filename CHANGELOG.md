@@ -4,6 +4,21 @@
 
 ---
 
+## [Unreleased] — 覆盖率棘轮上调：cloud-backend 0.60 → 0.65（2026-10-06）
+
+- **现象**：master 近期红 run 里确定性的一条是 `Coverage threshold consistency`
+  步骤判红——cloud-backend 实测 LINE 覆盖率已达策略值 65%
+  （CI 实测 16138/24689=65.36%；本机 16271/24835=65.52%），而 `cloud-backend/pom.xml`
+  仍声明 0.60。门禁本身在如实报警「台账漂移」，与功能代码无关；
+- **修复**：`cloud-backend/pom.xml` jacoco check `<minimum>` 0.60 → 0.65，
+  `.github/workflows/ci.yml` 注释表同步（三处声明恢复自洽，本地
+  `bash scripts/ci-coverage-threshold.sh --strict cloud-backend` 判 ✅）；
+- **余量警告**：0.65 距 CI 实测 65.36% 仅 0.36pt，覆盖率回落 0.4pt 即转红——
+  这是「实测向下取整到 5%」棘轮口径的固有代价。日后再调阈值需连策略口径一并说明，
+  不得只改 pom。
+
+---
+
 ## [Unreleased] — Java 兼容性修复：sdk-java release 缺陷 + 多 JDK 策略与门禁（2026-10-06）
 
 ### 1. 修复 sdk-java 的「静默兼容性欺诈」【P0，对外交付缺陷】
