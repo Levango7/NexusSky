@@ -1,5 +1,8 @@
 package io.aerofleet.cloud.twin;
 
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
+import io.aerofleet.mavlink.messages.PredictionResultMsg;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.web.bind.annotation.*;
 import java.util.*;
 import io.aerofleet.cloud.security.RequireRole;
@@ -13,12 +16,15 @@ public class TwinController {
     private final DigitalTwinService twinService;
     private final PredictionService predictionService;
     private final TwinComparisonService comparisonService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TwinController(DigitalTwinService twinService, PredictionService predictionService,
-                          TwinComparisonService comparisonService) {
+                          TwinComparisonService comparisonService,
+                          ApplicationEventPublisher eventPublisher) {
         this.twinService = twinService;
         this.predictionService = predictionService;
         this.comparisonService = comparisonService;
+        this.eventPublisher = eventPublisher;
     }
 
     @GetMapping("/state")
@@ -31,7 +37,37 @@ public class TwinController {
     public PredictionResult predict(@PathVariable int sysid, @RequestParam(defaultValue = "30") int horizon) {
         TwinState s = twinService.getTwin(sysid);
         if (s == null) return new PredictionResult(sysid, Collections.emptyList(), horizon, 0);
-        return predictionService.predict(sysid, s.lat, s.lon, s.alt, s.heading, s.velocity, horizon);
+        PredictionResult result = predictionService.predict(
+                sysid, s.lat, s.lon, s.alt, s.heading, s.velocity, horizon);
+        publishPredictionFrame(result);
+        return result;
+    }
+
+    /**
+     * 把预测结果发布为 PREDICTION_RESULT(30056) 事件：TelemetryWebSocketHandler
+     * 按 WS_TYPE_MAP 以 "prediction-result" 帧转发给 GCS（2026-10-05 起 30056
+     * 全仓首个生产者，此前协议帧定义了但无人产出）。
+     * <p>
+     * 语义：predictedLat/Lon/Alt 取<b>预测时域末端点</b>（horizon 秒后的落点），
+     * trajectoryPoints 为完整轨迹点数，conf 为模型置信度；事件 sysid 用被预测
+     * 无人机的 sysid（WS 转发侧按它做租户可见性判定）。空轨迹（孪生无状态等）
+     * 不发布。compare 端点内部的 1 秒近似预测属虚实对比用途，不在此发布。
+     */
+    private void publishPredictionFrame(PredictionResult r) {
+        if (r.trajectoryPoints.isEmpty()) {
+            return;
+        }
+        double[] last = r.trajectoryPoints.get(r.trajectoryPoints.size() - 1);
+        PredictionResultMsg msg = new PredictionResultMsg(
+                (int) Math.round(last[0] * 1e7),
+                (int) Math.round(last[1] * 1e7),
+                (int) Math.round(last[2] * 1000.0),
+                (float) r.confidence,
+                r.horizonSec,
+                r.sysid,
+                r.trajectoryPoints.size());
+        eventPublisher.publishEvent(new MavlinkMessageEvent(
+                this, r.sysid, PredictionResultMsg.ID, msg, System.currentTimeMillis()));
     }
 
     @GetMapping("/compare/{sysid}")

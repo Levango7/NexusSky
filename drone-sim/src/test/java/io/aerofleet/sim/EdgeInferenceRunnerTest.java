@@ -3,6 +3,7 @@ package io.aerofleet.sim;
 import io.aerofleet.mavlink.messages.MavlinkMessage;
 import io.aerofleet.mavlink.messages.EdgeTaskStatusMsg;
 import io.aerofleet.mavlink.messages.SensorFusionDataMsg;
+import io.aerofleet.mavlink.messages.VisionDetectionMsg;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -306,5 +309,63 @@ class EdgeInferenceRunnerTest {
                 "故障后下一视觉周期（t=500）的 30053 正常发出且任务 id 未跳号");
         assertEquals(0, taskMsgs(h, 0).get(0).edgeTaskId, "失败的周期不消耗任务 id");
         assertEquals("COMPLETED", r.edgeTaskStatus("video-0"));
+    }
+
+    // ------------------------------------------------------------------
+    // 视觉检测上报（VISION_DETECTION 30014）
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("目标移动 → 第二周期逐目标发 30014：kind=person、u/v 为 160×90 像素坐标、跟踪 ID 互异")
+    void movingTargetEmitsVisionDetectionPerTarget() {
+        FakeHost h = new FakeHost();
+        CameraModel.Shot s1 = shot(1, 60.0, 960, 540);
+        CameraModel.Shot s2 = shot(2, 60.0, 1100, 540);
+        CameraModel.Shot[] seq = {s1, s2, s2};
+        AtomicInteger i = new AtomicInteger();
+        h.shots = () -> seq[Math.min(i.getAndIncrement(), seq.length - 1)];
+        EdgeInferenceRunner r = new EdgeInferenceRunner(h);
+        drive(r, 0, 1200, DT);
+
+        List<VisionDetectionMsg> visions = new ArrayList<>();
+        for (MavlinkMessage m : h.sent) {
+            if (m instanceof VisionDetectionMsg v) {
+                visions.add(v);
+            }
+        }
+        // 首周期仅缓存前帧、第三周期无位移 → 只有第二周期产出 30014；
+        // 帧差点亮新旧两处（160 宽下 u 80→92），两个 r=1 圆斑（area≈5）均判 person
+        assertEquals(2, visions.size(), "仅第二周期的两个亮区各发一条 30014");
+        for (VisionDetectionMsg v : visions) {
+            assertEquals(7, v.sysid);
+            assertEquals(1, v.kind, "3×3 圆斑 area≈5、aspect=1.0 → person(1)");
+            assertTrue(v.u >= 75 && v.u <= 97, "u 应在旧/新 blob 中心（80.5/91.5）附近: " + v.u);
+            assertTrue(v.v >= 40 && v.v <= 50, "v 应在 45.5 附近: " + v.v);
+            assertTrue(v.confidence >= 0.5f && v.confidence <= 0.6f,
+                    "置信度 = min(1, 0.5+area/1000) ≈ 0.505: " + v.confidence);
+            assertTrue(v.trackId >= 1 && v.trackId <= 254, "u8 有效范围内的跟踪 ID: " + v.trackId);
+        }
+        assertNotEquals(visions.get(0).trackId, visions.get(1).trackId, "两亮区各自新建跟踪");
+    }
+
+    @Test
+    @DisplayName("悬停场景（无帧间位移）不产生任何 30014")
+    void stationarySceneEmitsNoVisionDetection() {
+        FakeHost h = stationaryHost();
+        EdgeInferenceRunner r = new EdgeInferenceRunner(h);
+        drive(r, 0, 1200, DT);
+        for (MavlinkMessage m : h.sent) {
+            assertFalse(m instanceof VisionDetectionMsg, "无运动 → 不应发 30014");
+        }
+    }
+
+    @Test
+    @DisplayName("visionKindOf：vehicle→0、person→1、unknown/其他/null→-1（跳过不上报）")
+    void visionKindMappingMatchesProtocol() {
+        assertEquals(0, EdgeInferenceRunner.visionKindOf("vehicle"));
+        assertEquals(1, EdgeInferenceRunner.visionKindOf("person"));
+        assertEquals(-1, EdgeInferenceRunner.visionKindOf("unknown"));
+        assertEquals(-1, EdgeInferenceRunner.visionKindOf("animal"));
+        assertEquals(-1, EdgeInferenceRunner.visionKindOf(null));
     }
 }

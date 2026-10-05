@@ -4,7 +4,7 @@ import io.aerofleet.mavlink.messages.MavlinkMessage;
 import io.aerofleet.mavlink.enums.EdgeTaskType;
 import io.aerofleet.mavlink.messages.EdgeTaskStatusMsg;
 import io.aerofleet.mavlink.messages.SensorFusionDataMsg;
-import io.aerofleet.sim.edge.AnalysisResult;
+import io.aerofleet.mavlink.messages.VisionDetectionMsg;
 import io.aerofleet.sim.edge.EdgeNode;
 import io.aerofleet.sim.edge.EdgeTask;
 import io.aerofleet.sim.edge.FusedState;
@@ -28,7 +28,9 @@ import java.io.IOException;
  *       经 {@code ShotImageWriter.renderGray} 渲染成 160×90 灰度帧喂
  *       {@link VideoStreamAnalyzer}（帧差 + 连通域 + 质心跟踪），
  *       每周期发一条 EDGE_TASK_STATUS(30053, taskType=VIDEO_ANALYSIS)，
- *       resultSize = 检测标签序列化字节数。</li>
+ *       resultSize = 检测标签序列化字节数；同时每个已分类目标（vehicle/person）
+ *       发一条 VISION_DETECTION(30014)，承载 u/v 像素坐标 + kind + 置信度 +
+ *       质心跟踪 ID（unknown 亮区不占协议 kind 枚举，跳过不上报）。</li>
  * </ul>
  *
  * <h2>为什么默认常开（与 M11 执行级的 {@code --autonomy-exec} 不同）</h2>
@@ -216,7 +218,7 @@ final class EdgeInferenceRunner {
     // 视频分析链路
     // ------------------------------------------------------------------
 
-    /** 2Hz：渲染灰度帧 → 帧差/连通域/跟踪 → 30053(VIDEO_ANALYSIS)。 */
+    /** 2Hz：渲染灰度帧 → 帧差/连通域/跟踪 → 30053(VIDEO_ANALYSIS) + 逐目标 30014。 */
     private void visionCycle(long nowMs) throws IOException {
         boolean due = lastVisionMs < 0 || nowMs - lastVisionMs >= VISION_PERIOD_MS;
         if (!due) {
@@ -230,13 +232,47 @@ final class EdgeInferenceRunner {
         String taskId = "video-" + videoTaskSeq;
         edgeNode().submitTask(new EdgeTask(taskId, EdgeTaskType.VIDEO_ANALYSIS.name()));
         byte[] frame = ShotImageWriter.renderGray(shot, FRAME_W, FRAME_H);
-        AnalysisResult result = video.analyzeFrame(frame);
-        int resultSize = String.join(",", result.detectedObjects)
+        VideoStreamAnalyzer.DetailedResult result = video.analyzeFrameDetailed(frame);
+        StringBuilder labels = new StringBuilder();
+        for (VideoStreamAnalyzer.DetectionRecord r : result.records) {
+            if (labels.length() > 0) {
+                labels.append(',');
+            }
+            labels.append(r.label);
+        }
+        int resultSize = labels.toString()
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
         host.send(new EdgeTaskStatusMsg(videoTaskSeq, result.processingTimeMs,
                 resultSize, host.sysid(),
                 EdgeTaskType.VIDEO_ANALYSIS.ordinal(), STATUS_COMPLETED));
+        // 逐目标 VISION_DETECTION(30014)：u/v 为 160×90 渲染帧像素坐标（0-based），
+        // kind 映射 0=vehicle/1=person；unknown（无形状依据的帧差亮区）不占协议
+        // kind 枚举，跳过不上报；跟踪 ID 超 u8 有效范围（>254）按协议 0xFF 占位。
+        for (VideoStreamAnalyzer.DetectionRecord r : result.records) {
+            int kind = visionKindOf(r.label);
+            if (kind < 0) {
+                continue;
+            }
+            int trackId = r.trackId <= 254 ? r.trackId : VisionDetectionMsg.TRACK_ID_NONE;
+            host.send(new VisionDetectionMsg((float) r.u, (float) r.v,
+                    (float) r.confidence, kind, trackId, host.sysid(), nowMs));
+        }
         videoTaskSeq++;
+    }
+
+    /**
+     * 视频检测 label → VISION_DETECTION(30014) kind 码：0=vehicle, 1=person。
+     * 协议 kind 枚举（0=vehicle, 1=person, 2=animal, ...）没有 unknown 档——
+     * 帧差亮区中无形状归类依据的 unknown 不映射任何 kind，返回 -1 由调用方跳过。
+     */
+    static int visionKindOf(String label) {
+        if ("vehicle".equals(label)) {
+            return 0;
+        }
+        if ("person".equals(label)) {
+            return 1;
+        }
+        return -1;
     }
 
     // ------------------------------------------------------------------

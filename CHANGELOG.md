@@ -4,6 +4,66 @@
 
 ---
 
+## [Unreleased] — WS_TYPE_MAP 零生产者帧收口：30014/30056 接线 + 6 帧边界固化（2026-10-05）
+
+### 1. 逐帧排查结论（13 帧全部核实）
+
+/ws/telemetry 转发表（WS_TYPE_MAP）13 类帧逐一核查生产者：7 类有真实生产者
+（本日新增 2 类），6 类维持协议预留边界（依据见下）。
+
+### 2. VISION_DETECTION(30014) 接线——drone-sim 边缘视觉逐目标上报
+
+- 缺口背景：机载视觉链路（帧差 + 连通域 + 质心跟踪）真实产出逐目标检测，但
+  只发 EDGE_TASK_STATUS(30053) 任务状态，检测结果（标签/位置/跟踪）被丢弃，
+  30014 全仓零生产者；
+- `VideoStreamAnalyzer` 新增 `analyzeFrameDetailed`：与 `analyzeFrame` 共享同
+  一管线，保留逐目标记录——边界框中心 (u,v) 像素坐标 + 类别 + 单目标置信度 +
+  本帧质心跟踪关联 ID（匹配既有或新建，`updateTracking` 新增带 ID 输出的重载）；
+- `EdgeInferenceRunner.visionCycle`：每个已分类目标（vehicle→kind 0、person→
+  kind 1）发一条 30014，u/v 为 160×90 渲染帧像素坐标，trackId 超 u8 有效范围
+  （>254）按协议 0xFF 占位；unknown 亮区（无形状归类依据的帧差区域）不占
+  协议 kind 枚举，跳过不上报——该取舍在消息注释与测试中固化；
+- 30053 的 resultSize 语义不变（检测标签序列化字节数），AnalyzeFrame 向后
+  兼容由 delegation 实现并有等价性测试钉扎。
+
+### 3. PREDICTION_RESULT(30056) 接线——孪生预测结果发布
+
+- 缺口背景：M13 预测服务（`PredictionService`，运动学模型）与 REST 端点真实
+  存在，但 30056 全仓零生产者；
+- `TwinController` /predict 端点在孪生有状态时把预测发布为 MavlinkMessageEvent：
+  predictedLat/Lon/Alt 取时域末端点（horizon 秒后的落点，1E7/1E7/mm 精度），
+  trajectoryPoints 为完整轨迹点数，事件 sysid 用被预测无人机（WS 转发侧按它做
+  租户可见性判定），经 WS_TYPE_MAP 以 "prediction-result" 帧广播；
+- 空轨迹（孪生无状态）不发布；compare 端点内部的 1 秒近似预测属虚实对比用途，
+  不发布。
+
+### 4. 6 类帧维持协议预留边界（依据，非缺口）
+
+- task-assignment(30048)：`TaskRequest.taskId` 为字符串，消息 u32 字段无法
+  无损承载（哈希映射无法与 REST 面 taskId 关联）——属协议改造决策；
+- conflict-alert(30049)：冲突检查 API 输入为两机位置/速度（无 sysid 对），
+  `ConflictResult` 无 severity 概念——产出需先扩 API 语义；
+- task-status(30050)：M10 调度任务无执行进度跟踪（无链路更新 progressPercent，
+  机载执行走 MISSION 协议）；
+- alarm-trigger(30057)/alarm-ack(30058)：消息语义是「安防设备→无人机通知 +
+  机载确认」的 MAVLink 下行闭环，机载无 30057 接收/应答处理；报警联动实际走
+  AlarmLinkageEngine→AutoDispatchService 云内调用；
+- surveillance-status(30059)：`SurveillanceDevice` 模型无摄像头数量/运行时长
+  字段（消息要求 onlineCameras/totalCameras/uptimeSec）——产出需先扩设备模型。
+
+### 5. 验证与计数
+
+- 新增 9 测：VideoStreamAnalyzerTest +4（逐目标记录/跟踪关联/unknown 保留/
+  向后兼容等价）、EdgeInferenceRunnerTest +3（移动目标逐帧 30014/悬停零帧/
+  kind 映射）、TwinControllerTest +2（/predict 发布 30056 字段/无状态不发布，
+  @RecordApplicationEvents 捕获）；
+- drone-sim 1389/1389、cloud-backend 2200/2200 全绿；计数门禁全仓口径
+  4194 同步后全绿；
+- 文档：README（M12/M13 条目 + 新增 13 帧收口边界条目）、ROADMAP M13 沿革、
+  competitive-analysis 边缘推理行同步。
+
+---
+
 ## [Unreleased] — deploy 三路径收口：helm 资源名 release 化 / 内置 PG / NetworkPolicy 断链修复（2026-10-05）
 
 ### 1. helm 资源名 release 化（同命名空间可并存多 release）

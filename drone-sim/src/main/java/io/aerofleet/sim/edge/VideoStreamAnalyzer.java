@@ -25,7 +25,9 @@ import java.util.Queue;
  * {@code io.aerofleet.sim.EdgeInferenceRunner}：2Hz 用
  * {@code ShotImageWriter.renderGray} 把 {@code CameraModel} 合成快照渲染成
  * 160×90 灰度帧喂入 {@code analyzeFrame(byte[])}，检测结果经
- * EDGE_TASK_STATUS(30053) 上报。
+ * EDGE_TASK_STATUS(30053) 上报；2026-10-05 起 {@code analyzeFrameDetailed}
+ * 额外产出逐目标记录（u/v 像素坐标 + 类别 + 置信度 + 跟踪 ID），由
+ * EdgeInferenceRunner 以 VISION_DETECTION(30014) 逐目标上报。
  * 这些是<b>经典 CV 算法，不是机器学习模型</b>——全仓 pom 无任何 ML 依赖。
  * 「边缘 AI 推理」在产品文档里的确切含义以此为准：本地确定性图像处理，
  * 不是神经网络推理。真正的模型接缝在云端
@@ -98,23 +100,45 @@ public class VideoStreamAnalyzer {
      * 检测对象列表为当前帧检测到的目标标签，置信度为当前帧检测的平均置信度。
      */
     public AnalysisResult analyzeFrame(byte[] frame) {
+        DetailedResult detailed = analyzeFrameDetailed(frame);
+        List<String> labels = new ArrayList<>(detailed.records.size());
+        double confSum = 0.0;
+        for (DetectionRecord r : detailed.records) {
+            labels.add(r.label);
+            confSum += r.confidence;
+        }
+        double confidence = detailed.records.isEmpty() ? 0.0 : confSum / detailed.records.size();
+
+        return new AnalysisResult("frame-" + totalFrames, labels, confidence, detailed.processingTimeMs);
+    }
+
+    /**
+     * 分析单帧并返回逐目标记录（2026-10-05 新增，VISION_DETECTION 30014 的数据源）。
+     * <p>
+     * 与 {@link #analyzeFrame(byte[])} 共享同一条「帧差 → 连通域 → 质心跟踪」管线，
+     * 区别是保留逐目标的完整记录：边界框中心 (u,v) 像素坐标 + 类别标签 +
+     * 单目标置信度 + 本帧质心跟踪关联 ID（匹配既有目标或新建目标）。
+     * unknown 亮区同样保留在记录中，是否上报由调用方（协议 kind 枚举）决定。
+     */
+    public DetailedResult analyzeFrameDetailed(byte[] frame) {
         totalFrames++;
         long start = System.currentTimeMillis();
 
         List<DetectedObject> detections = detectMotion(frame);
-        updateTracking(detections);
+        int[] trackIds = new int[detections.size()];
+        updateTracking(detections, trackIds);
 
-        long elapsed = System.currentTimeMillis() - start;
-
-        List<String> labels = new ArrayList<>(detections.size());
-        double confSum = 0.0;
-        for (DetectedObject d : detections) {
-            labels.add(d.label);
-            confSum += d.confidence;
+        List<DetectionRecord> records = new ArrayList<>(detections.size());
+        for (int i = 0; i < detections.size(); i++) {
+            DetectedObject d = detections.get(i);
+            records.add(new DetectionRecord(
+                    d.x + d.width / 2.0,
+                    d.y + d.height / 2.0,
+                    d.label,
+                    d.confidence,
+                    trackIds[i]));
         }
-        double confidence = detections.isEmpty() ? 0.0 : confSum / detections.size();
-
-        return new AnalysisResult("frame-" + totalFrames, labels, confidence, elapsed);
+        return new DetailedResult(records, System.currentTimeMillis() - start);
     }
 
     // ===== 运动检测（帧差法） =====
@@ -251,6 +275,18 @@ public class VideoStreamAnalyzer {
      * 5. 返回当前活跃跟踪目标列表（{@link TrackedObject#lastSeen} 为连续未匹配帧数）。
      */
     public List<TrackedObject> updateTracking(List<DetectedObject> detections) {
+        return updateTracking(detections, null);
+    }
+
+    /**
+     * 质心跟踪更新（带逐检测跟踪 ID 输出的重载）。
+     *
+     * @param detections  当前帧检测列表（可为 null，按空处理）
+     * @param trackIdsOut 可为 null；非 null 时长度须 ≥ detections.size()，
+     *                    第 i 位填入第 i 个检测的最终跟踪 ID——匹配到既有目标时
+     *                    为该目标 ID，未匹配时为本次新建目标的 ID
+     */
+    public List<TrackedObject> updateTracking(List<DetectedObject> detections, int[] trackIdsOut) {
         if (detections == null) {
             detections = Collections.emptyList();
         }
@@ -293,6 +329,9 @@ public class VideoStreamAnalyzer {
                 t.label = det.label;
                 trackedMatched[bestIdx] = true;
                 detMatched[i] = true;
+                if (trackIdsOut != null) {
+                    trackIdsOut[i] = t.id;
+                }
             }
         }
 
@@ -315,6 +354,9 @@ public class VideoStreamAnalyzer {
             trackedObjects.add(t);
             uniqueObjectsTracked++;
             classCounts.merge(det.label, 1L, Long::sum);
+            if (trackIdsOut != null) {
+                trackIdsOut[i] = t.id;
+            }
         }
 
         // 未匹配跟踪目标 → missedFrames++
@@ -483,6 +525,47 @@ public class VideoStreamAnalyzer {
         public String toString() {
             return "TrackedObject{id=" + id + ", cx=" + centroidX + ", cy=" + centroidY
                     + ", lastSeen=" + lastSeen + "}";
+        }
+    }
+
+    /** 单目标检测记录（{@link #analyzeFrameDetailed} 的产出，30014 数据源）。 */
+    public static final class DetectionRecord {
+        /** 边界框中心 u 坐标（像素，0-based，坐标系为输入帧分辨率）。 */
+        public final double u;
+        /** 边界框中心 v 坐标（像素，0-based）。 */
+        public final double v;
+        /** 类别标签（vehicle / person / unknown）。 */
+        public final String label;
+        /** 该目标的置信度（帧差启发式：min(1, 0.5 + 面积/1000)）。 */
+        public final double confidence;
+        /** 本帧质心跟踪关联 ID（匹配既有目标或新建目标，分析器内单调递增）。 */
+        public final int trackId;
+
+        public DetectionRecord(double u, double v, String label, double confidence, int trackId) {
+            this.u = u;
+            this.v = v;
+            this.label = label;
+            this.confidence = confidence;
+            this.trackId = trackId;
+        }
+
+        @Override
+        public String toString() {
+            return "DetectionRecord{u=" + u + ", v=" + v + ", label=" + label
+                    + ", conf=" + confidence + ", trackId=" + trackId + "}";
+        }
+    }
+
+    /** {@link #analyzeFrameDetailed} 的结果：逐目标记录 + 本帧处理耗时。 */
+    public static final class DetailedResult {
+        /** 本帧逐目标记录（无运动/首帧缓存时为空列表）。 */
+        public final List<DetectionRecord> records;
+        /** 帧差 + 连通域 + 质心跟踪 + 记录构建的总耗时（ms）。 */
+        public final long processingTimeMs;
+
+        public DetailedResult(List<DetectionRecord> records, long processingTimeMs) {
+            this.records = records;
+            this.processingTimeMs = processingTimeMs;
         }
     }
 

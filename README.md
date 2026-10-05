@@ -651,12 +651,12 @@ NexusSky/
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 457 |
-| `drone-sim` | 1382 |
+| `drone-sim` | 1389 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2198 |
+| `cloud-backend` | 2200 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4185** |
+| **总计** | **4194** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -813,9 +813,12 @@ NexusSky/
   `SensorFusionEngine` 9 维 EKF 521 行、`VideoStreamAnalyzer`
   帧差 + 连通域 + 质心跟踪 506 行）经 `EdgeInferenceRunner` 接入同一遥测主循环：
   2Hz 喂 GPS（`reportedLat/Lon`，3m 噪声）/ IMU 速度 / LiDAR(注入式在环时) 观测，
-  1Hz 下发 `SENSOR_FUSION_DATA(30054)`；2Hz 拍帧经 `ShotImageWriter.renderGray`
-  （160×90 原始灰度，噪声 σ=6——JPEG 路径的 σ=12 帧差会点亮 ~8% 假运动）喂
-  视频分析，检出即发 `EDGE_TASK_STATUS(30053)`（视频 / 融合各一路任务 id）；
+   1Hz 下发 `SENSOR_FUSION_DATA(30054)`；2Hz 拍帧经 `ShotImageWriter.renderGray`
+   （160×90 原始灰度，噪声 σ=6——JPEG 路径的 σ=12 帧差会点亮 ~8% 假运动）喂
+   视频分析，检出即发 `EDGE_TASK_STATUS(30053)`（视频 / 融合各一路任务 id），
+   已分类目标（vehicle/person）逐个补发 `VISION_DETECTION(30014)`（u/v 为
+   160×90 渲染帧像素坐标 + kind + 置信度 + 质心跟踪 ID；unknown 亮区无形状
+   归类依据，不占协议 kind 枚举，跳过——2026-10-05 起该消息有生产者）；
   `EdgeNode` 为机载侧任务登记簿。**被动观测、默认常开、无开关**：融合结果不回写
   `DronePhysics`（飞控仍用真值）、不驱动执行机构——与 M11 执行级的「默认关闭」
   刻意不对称（观测无风险，抢杆才有）。两处「自主」的准确含义是<b>规则 +
@@ -839,17 +842,38 @@ NexusSky/
   vitest 钉扎）。**GPI 兜底**（2026-10-05）：无新鲜融合态的设备（从未收到
   30054 或距上次超过 3s——即未运行机载边缘栈 EdgeInferenceRunner，或边缘栈
   停发）由 `GLOBAL_POSITION_INT(33)` 原始 GPS 兜底喂孪生（alt 同为 AMSL、
-  速度取 vx/vy/vz 合矢量、hdg=65535 未知回退 0 北向），融合态新鲜时 GPI 不
-  竞争；此前「未运行边缘栈的设备不进孪生」的边界自此消除。**仍存的语义边界**：
-  `driftMeters` 是相邻两次同步的位移，非与独立实测的偏差（孪生与物理态云内同源）。
-- **自定义 MAV_CMD 已整带搬入私有区 30080-30099**（2026-10-04；原 310-312/
-  320-322/420/421 位于官方/方言分配带，其中 420/421 与 ArduPilot 方言实锤冲突。
-  常量收口 `MavEnums.MAV_CMD_NEXUS_*`，双测试钉扎：私有区守卫 + 真实 UDP
-  派发往返）。其中环境配置 3 条（30080-30082）与载荷查询（30085）在仓库内
-  无生产者，属**设计边界而非缺口**：环境命令是 M0b 的机载本地控制面（M0b
-  立项范围是模型+告警+消息，云端环境控制 API 从未立项）；载荷查询是 1Hz 周期
-  PAYLOAD_STATUS 遥测之外的按需冗余触发。协议面保留给 SITL/外部工具与后续
-  GCS 功能。
+   速度取 vx/vy/vz 合矢量、hdg=65535 未知回退 0 北向），融合态新鲜时 GPI 不
+   竞争；此前「未运行边缘栈的设备不进孪生」的边界自此消除。**预测结果帧已产出**
+   （2026-10-05）：/api/v1/twin/predict 在孪生有状态时把预测发布为
+   `PREDICTION_RESULT(30056)`（此前全仓零生产者；时域末端点 + 轨迹点数 +
+   置信度）以 "prediction-result" WS 帧广播；空轨迹不发布，compare 端点的
+   内部 1 秒近似预测属虚实对比用途不发布。**仍存的语义边界**：
+   `driftMeters` 是相邻两次同步的位移，非与独立实测的偏差（孪生与物理态云内同源）。
+ - **自定义 MAV_CMD 已整带搬入私有区 30080-30099**（2026-10-04；原 310-312/
+   320-322/420/421 位于官方/方言分配带，其中 420/421 与 ArduPilot 方言实锤冲突。
+   常量收口 `MavEnums.MAV_CMD_NEXUS_*`，双测试钉扎：私有区守卫 + 真实 UDP
+   派发往返）。其中环境配置 3 条（30080-30082）与载荷查询（30085）在仓库内
+   无生产者，属**设计边界而非缺口**：环境命令是 M0b 的机载本地控制面（M0b
+   立项范围是模型+告警+消息，云端环境控制 API 从未立项）；载荷查询是 1Hz 周期
+   PAYLOAD_STATUS 遥测之外的按需冗余触发。协议面保留给 SITL/外部工具与后续
+   GCS 功能。
+ - **WS_TYPE_MAP 13 帧生产者收口**（2026-10-05）：/ws/telemetry 的 13 类转发
+   帧现全部逐一核实，7 类有真实生产者（decision-event/adaptive-path/
+   edge-task-status/sensor-fusion 出自 drone-sim，twin-state-sync 出自
+   TwinSyncListener，vision-detection/prediction-result 为本日新增——见上两条）。
+   其余 6 类维持「协议预留」**边界而非缺口**，各自有具体依据：task-assignment
+   (30048)——`TaskRequest.taskId` 是字符串，消息字段 u32 无法无损承载（哈希
+   映射无法与 REST 面 taskId 关联，属协议改造决策）；conflict-alert(30049)——
+   `/scheduling/conflicts/check` 的输入是两机位置/速度（无 sysid 对），
+   `ConflictResult` 亦无 severity 概念，产出该帧需先扩 API 语义；task-status
+   (30050)——M10 调度任务无执行进度跟踪（无任何链路更新 progressPercent，
+   机载任务执行走 MISSION 协议而非 M10 任务）；alarm-trigger(30057)/
+   alarm-ack(30058)——消息语义是「安防设备→无人机通知 + 机载确认」的 MAVLink
+   下行闭环，机载无 30057 接收/应答处理，报警联动实际走 AlarmLinkageEngine→
+   AutoDispatchService 云内调用（REST 面的运维确认与机载 ack 不同物）；
+   surveillance-status(30059)——`SurveillanceDevice` 模型无摄像头数量/运行
+   时长字段（消息要求 onlineCameras/totalCameras/uptimeSec），产出需先扩
+   设备模型。协议面全部保留，外部工具/后续 GCS 功能可随时接入。
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。

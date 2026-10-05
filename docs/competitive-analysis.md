@@ -157,7 +157,8 @@
 >   SENSOR_FUSION_DATA(30054)；**观测级**：融合结果不回写 `DronePhysics`，
 >   飞行位姿仍由真值直接积分。
 > - **边缘 AI 推理**（`VideoStreamAnalyzer`）：已接线——2Hz 拍帧（`renderGray`
->   160×90 原始灰度）做帧差 + 连通域 + 质心跟踪，检出即发 EDGE_TASK_STATUS(30053)。
+>   160×90 原始灰度）做帧差 + 连通域 + 质心跟踪，检出即发 EDGE_TASK_STATUS(30053)，
+>   已分类目标逐个补发 VISION_DETECTION(30014)（2026-10-05）。
 >   该行 ⚠️ 指向本质：是**经典 CV 算法而非机器学习模型**；全仓 pom 无
 >   onnxruntime/tensorflow/ONNX 任何 ML 依赖。
 >

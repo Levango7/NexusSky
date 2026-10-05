@@ -476,4 +476,75 @@ class VideoStreamAnalyzerTest {
         // 引用 id 避免未使用警告
         assertThat(id).isPositive();
     }
+
+    // ===== analyzeFrameDetailed 逐目标记录（30014 数据源） =====
+
+    @Nested
+    @DisplayName("analyzeFrameDetailed 逐目标记录")
+    class DetailedRecords {
+
+        @Test
+        @DisplayName("单目标：u/v 为边界框中心、置信度来自检测、跟踪 ID 新建")
+        void singleRecordCarriesCenterConfidenceAndTrackId() {
+            analyzer.analyzeFrameDetailed(blankFrame());   // 首帧仅缓存
+            VideoStreamAnalyzer.DetailedResult r =
+                    analyzer.analyzeFrameDetailed(frameWithBlock(10, 10, 3, 3, 255));
+            assertThat(r.records).hasSize(1);
+            VideoStreamAnalyzer.DetectionRecord rec = r.records.get(0);
+            // 3×3 亮块：area=9、aspect=1.0 → person（area≥4 且 aspect≤2.0）
+            assertThat(rec.label).isEqualTo("person");
+            assertThat(rec.u).isEqualTo(11.5);   // 10 + 3/2
+            assertThat(rec.v).isEqualTo(11.5);
+            assertThat(rec.confidence).isEqualTo(0.509, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat(rec.trackId).isEqualTo(1);   // 首个跟踪目标
+            assertThat(r.processingTimeMs).isGreaterThanOrEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("目标移动：帧差点亮新旧两处，旧位置保持原跟踪 ID、新位置新建 ID")
+        void movedTargetKeepsOldTrackAndSpawnsNew() {
+            analyzer.analyzeFrameDetailed(blankFrame());
+            analyzer.analyzeFrameDetailed(frameWithBlock(10, 10, 3, 3, 255));
+            VideoStreamAnalyzer.DetailedResult r =
+                    analyzer.analyzeFrameDetailed(frameWithBlock(14, 10, 3, 3, 255));
+            assertThat(r.records).hasSize(2);
+            // 贪心匹配按扫描序：左侧旧位置先匹配既有轨迹 1，右侧新位置新建轨迹 2
+            assertThat(r.records.get(0).trackId).isEqualTo(1);
+            assertThat(r.records.get(0).u).isEqualTo(11.5);
+            assertThat(r.records.get(1).trackId).isEqualTo(2);
+            assertThat(r.records.get(1).u).isEqualTo(15.5);
+        }
+
+        @Test
+        @DisplayName("悬停（帧不变）→ 无记录；unknown 亮区保留在记录中由调用方过滤")
+        void hoverYieldsNoRecordsAndUnknownKeptInRecords() {
+            analyzer.analyzeFrameDetailed(blankFrame());
+            // 10×1 条带：area=10 ≥ minContourArea=4，但 aspect=10.0 既非 vehicle
+            // （area<50）也非 person（aspect>2.0）→ unknown；记录保留，是否上报
+            // 由生产者按协议 kind 枚举决定
+            VideoStreamAnalyzer.DetailedResult r =
+                    analyzer.analyzeFrameDetailed(frameWithBlock(10, 10, 10, 1, 255));
+            assertThat(r.records).hasSize(1);
+            assertThat(r.records.get(0).label).isEqualTo("unknown");
+            // 同一帧再分析 → 帧差为零，无记录
+            VideoStreamAnalyzer.DetailedResult still =
+                    analyzer.analyzeFrameDetailed(frameWithBlock(10, 10, 10, 1, 255));
+            assertThat(still.records).isEmpty();
+        }
+
+        @Test
+        @DisplayName("analyzeFrame 向后兼容：标签/平均置信度与 DetailedResult 一致")
+        void analyzeFrameMatchesDetailedResult() {
+            VideoStreamAnalyzer legacyAnalyzer = new VideoStreamAnalyzer(W, H);
+            VideoStreamAnalyzer detailedAnalyzer = new VideoStreamAnalyzer(W, H);
+            legacyAnalyzer.analyzeFrame(blankFrame());
+            AnalysisResult legacy = legacyAnalyzer.analyzeFrame(frameWithBlock(10, 10, 3, 3, 255));
+            detailedAnalyzer.analyzeFrameDetailed(blankFrame());
+            VideoStreamAnalyzer.DetailedResult detailed =
+                    detailedAnalyzer.analyzeFrameDetailed(frameWithBlock(10, 10, 3, 3, 255));
+            assertThat(legacy.detectedObjects).containsExactly("person");
+            assertThat(legacy.confidence)
+                    .isEqualTo(detailed.records.get(0).confidence, org.assertj.core.data.Offset.offset(1e-9));
+        }
+    }
 }
