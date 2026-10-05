@@ -116,7 +116,7 @@ NexusSky（天枢）是一套面向无人机集群的**协同指挥调度云平�
 | API 文档 | OpenAPI 3.0 + Swagger UI |
 | 容器化部署 | Docker + docker-compose + K8s + Helm |
 | CI/CD | GitHub Actions + 集成测试自动化 |
-| 测试覆盖 | 4234 单元测试，0 失败 |
+| 测试覆盖 | 4239 单元测试，0 失败 |
 | 代码审查 | 6 轮代码审查，累计修复 52 个问题（4 Critical + 12 Major + 5 Minor + 11 P1 + 20 新增） |
 
 ---

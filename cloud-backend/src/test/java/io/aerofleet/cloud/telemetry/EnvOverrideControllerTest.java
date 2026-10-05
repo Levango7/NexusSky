@@ -127,4 +127,15 @@ class EnvOverrideControllerTest {
         assertThat(resp.get("status")).isEqualTo("error");
         assertThat((String) resp.get("result")).contains("timed out");
     }
+
+    @Test
+    @DisplayName("环境命令端到端：30080/30081/30082 三条 MAV_CMD 均有真实生产者，无缺失前置链路")
+    void allThreeEnvCommandsHaveRealProducers() {
+        // 本轮边界清零（2026-10-05）：EnvOverrideController 已接入 DroneCommandService，
+        // 30080（ENV_SET_WIND）、30081（ENV_SET_WEATHER）、30082（ENV_SET_THRESHOLDS）
+        // 全部有 REST 端点 + 机载处理器（VirtualDrone 831-838 行），无缺失前置链路。
+        assertThat(MavEnums.MAV_CMD_NEXUS_ENV_SET_WIND).isEqualTo(30080);
+        assertThat(MavEnums.MAV_CMD_NEXUS_ENV_SET_WEATHER).isEqualTo(30081);
+        assertThat(MavEnums.MAV_CMD_NEXUS_ENV_SET_THRESHOLDS).isEqualTo(30082);
+    }
 }

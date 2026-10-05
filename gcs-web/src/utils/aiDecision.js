@@ -146,3 +146,114 @@ export function normalizeEdgeTaskStatus(raw, receivedAt) {
     receivedAt,
   }
 }
+
+/** VISION_DETECTION(30014) kind 码 → 标签（VisionDetectionMsg javadoc：0=vehicle,1=person,2=animal）。 */
+export const VISION_KIND_META = {
+  0: '车辆',
+  1: '人员',
+  2: '动物',
+}
+
+/** SENSOR_FUSION_DATA(30054) sensorMask 位 → 标签（javadoc：GPS=1, IMU=2, VISION=4, LIDAR=8）。 */
+export const SENSOR_SOURCE_META = [
+  { bit: 1, label: 'GPS' },
+  { bit: 2, label: 'IMU' },
+  { bit: 4, label: '视觉' },
+  { bit: 8, label: '激光' },
+]
+
+/** VISION_DETECTION(30014) trackId 未关联占位值（与 Java 侧 TRACK_ID_NONE=0xFF 一致）。 */
+export const TRACK_ID_NONE = 0xff
+
+/**
+ * 归一化一条视觉检测帧的 data 为展示用字段。
+ * u/v 保持像素原值（不做缩放——渲染侧才知道画布尺寸）；trackId=0xFF 表示未关联目标。
+ *
+ * @param {Object|null|undefined} raw 帧 data（VisionDetectionMsg 序列化）
+ * @param {number} receivedAt 前端收到该帧的本地时间戳（ms）
+ * @returns {Object|null} { sysid, kind, kindLabel, u, v, confidence, confidencePct,
+ *                          trackId, sourceTimestamp, receivedAt }
+ */
+export function normalizeVisionDetection(raw, receivedAt) {
+  if (!raw || typeof raw !== 'object') return null
+  const kind = num(raw.kind)
+  const trackId = num(raw.trackId)
+  const confidence = num(raw.confidence)
+  const sysid = num(raw.sysid) != null ? num(raw.sysid) : num(raw.sysId)
+  return {
+    sysid,
+    kind,
+    kindLabel: kind != null ? (VISION_KIND_META[kind] ?? `码 ${kind}`) : null,
+    u: num(raw.u),
+    v: num(raw.v),
+    confidence,
+    confidencePct: confidence != null ? Math.round(confidence * 100) : null,
+    trackId: trackId != null && trackId !== TRACK_ID_NONE ? trackId : null,
+    trackAssociated: trackId != null && trackId !== TRACK_ID_NONE,
+    sourceTimestamp: num(raw.timestamp),
+    receivedAt,
+  }
+}
+
+/**
+ * 归一化一条传感器融合帧的 data 为展示用字段。
+ * 单位换算：fusedLat/fusedLon 1E7 → 度；fusedAlt mm → m；fusedHeading cdeg → 度（0-360 归一）。
+ * sensorMask 按位展开为数据源中文标签列表。
+ *
+ * @param {Object|null|undefined} raw 帧 data（SensorFusionDataMsg 序列化）
+ * @param {number} receivedAt 前端收到该帧的本地时间戳（ms）
+ * @returns {Object|null} { sysid, lat, lon, altM, velocityMps, accuracyM, headingDeg,
+ *                          sensorMask, sources, receivedAt }
+ */
+export function normalizeSensorFusion(raw, receivedAt) {
+  if (!raw || typeof raw !== 'object') return null
+  const latRaw = num(raw.fusedLat)
+  const lonRaw = num(raw.fusedLon)
+  const altRaw = num(raw.fusedAlt)
+  const headingCdeg = num(raw.fusedHeading)
+  const mask = num(raw.sensorMask)
+  const sysid = num(raw.sysId) != null ? num(raw.sysId) : num(raw.sysid)
+  return {
+    sysid,
+    lat: latRaw != null ? latRaw / 1e7 : null,
+    lon: lonRaw != null ? lonRaw / 1e7 : null,
+    altM: altRaw != null ? altRaw / 1000 : null,
+    velocityMps: num(raw.fusedVelocity),
+    accuracyM: num(raw.accuracy),
+    headingDeg: headingCdeg != null ? ((headingCdeg / 100) % 360 + 360) % 360 : null,
+    sensorMask: mask,
+    sources: mask != null
+      ? SENSOR_SOURCE_META.filter((s) => (mask & s.bit) !== 0).map((s) => s.label)
+      : null,
+    receivedAt,
+  }
+}
+
+/**
+ * 归一化一条轨迹预测帧的 data 为展示用字段。
+ * 单位换算：predictedLat/predictedLon 1E7 → 度；predictedAlt mm → m。
+ *
+ * @param {Object|null|undefined} raw 帧 data（PredictionResultMsg 序列化）
+ * @param {number} receivedAt 前端收到该帧的本地时间戳（ms）
+ * @returns {Object|null} { sysid, lat, lon, altM, confidence, confidencePct,
+ *                          horizonSec, trajectoryPoints, receivedAt }
+ */
+export function normalizePredictionResult(raw, receivedAt) {
+  if (!raw || typeof raw !== 'object') return null
+  const latRaw = num(raw.predictedLat)
+  const lonRaw = num(raw.predictedLon)
+  const altRaw = num(raw.predictedAlt)
+  const confidence = num(raw.confidence)
+  const sysid = num(raw.sysId) != null ? num(raw.sysId) : num(raw.sysid)
+  return {
+    sysid,
+    lat: latRaw != null ? latRaw / 1e7 : null,
+    lon: lonRaw != null ? lonRaw / 1e7 : null,
+    altM: altRaw != null ? altRaw / 1000 : null,
+    confidence,
+    confidencePct: confidence != null ? Math.round(confidence * 100) : null,
+    horizonSec: num(raw.predictionHorizonSec),
+    trajectoryPoints: num(raw.trajectoryPoints),
+    receivedAt,
+  }
+}

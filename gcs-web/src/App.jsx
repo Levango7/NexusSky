@@ -130,6 +130,9 @@ export default function App() {
     decisionEvents,
     adaptivePaths,
     edgeTasks,
+    visionDetections,
+    sensorFusions,
+    predictions,
   } = useWebSocket(selectedSysidRef, setTelemetry)
 
   // UI 状态（视图、时钟、移动端侧栏、丐版模式）
@@ -395,6 +398,9 @@ export default function App() {
             decisionEvents={decisionEvents}
             adaptivePaths={adaptivePaths}
             edgeTasks={edgeTasks}
+            visionDetections={visionDetections}
+            sensorFusions={sensorFusions}
+            predictions={predictions}
           />
         </PanelWrapper>
       ) : view === 'scenariolib' ? (

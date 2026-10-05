@@ -4,6 +4,56 @@
 
 ---
 
+## [Unreleased] — 清单收口：环境/载荷查询真链路 E2E + GCS 感知三帧消费（2026-10-05）
+
+本轮处理 `.coord/GAPS.md` §二「可立即解决」清单（第 1 行经复核已由上轮 e21a066 完成）。
+
+### 1. 30080-30082 环境覆写：真链路端到端测试（§二 第 4 行）
+
+- 新增 `EnvOverrideE2ETest`（cloud-backend）：REST(EnvOverrideController) →
+  DroneCommandService → UdpGateway（真 socket，255/GCS 源）→ 真实 UDP →
+  VirtualDrone 机载校验 → COMMAND_ACK 回程 → TelemetryIngestService 解码 →
+  MavlinkMessageEvent → PendingAcks → REST ok；
+- 并以机载 1Hz 周期下传的 `ENVIRONMENT_STATUS`(30002) 断言**机载状态真变了**
+  （场景基线风向 0° → 覆写后 270°±5°），而非只证「命令发出去了」；
+- 装配口径：事件总线用 lambda 替身（仅复刻 `@EventListener` 的派发规则：CommandAck
+  转投 PendingAcks、其余落进断言列表），命令通道/UDP/解码全为生产代码；
+- 三条用例：风场（含状态断言）/ 天气 / 阈值。后两者以 ACK=ACCEPTED 证机载校验通过——
+  天气取值按 `EnvScenario.weatherStability` 逐 tick 概率转移，断言其稳态值是 flaky 的，
+  故不断言（javadoc 已写明口径）。
+
+### 2. 30085 载荷查询：真链路端到端测试（§二 第 3 行）
+
+- 新增 `DeliveryPayloadQueryE2ETest`：REST → 真 UDP → 机载 `handlePayloadQuery`
+  （`--actuators` 装配 gripper 才回 ACCEPTED，否则 UNSUPPORTED）→ 立即回传
+  `PayloadStatus`(30006) → ACK 回程 → REST ok；
+- 不比较「查询前后 30006 帧数」：actuatorsEnabled 下机载每 1Hz 也周期上报，帧数比较会与
+  周期上报混淆、成为脆弱断言；判定证据取「REST ok（=机载 ACCEPTED）+ 回程观测到 30006」。
+
+### 3. GCS 前端补齐感知侧三帧消费（§二 第 2 行）
+
+- 缺口：后端 `WS_TYPE_MAP` 已下发 13 类帧，前端 `useWebSocket` 只消费其中 6 类，
+  `vision-detection`(30014) / `sensor-fusion`(30054) / `prediction-result`(30056)
+  到达前端即被静默丢弃（`AiDecisionPanel` 只覆盖 30051-30053）；
+- 补齐：三条事件流（视觉/预测为离散事件 → 数组头插留 50 条；融合为周期态 →
+  按 sysid 只留最新）、`utils/aiDecision.js` 三个归一化纯函数 + 码表、
+  `AiDecisionPanel` 三张卡片、`App.jsx` 透传；
+- 测试：`aiDecision.test.js` 12 → 22 例（含 hook 层三流断言），`npm run check` 177/177 通过。
+
+### 4. 计数口径同步
+
+- 全仓单测 4234 → **4239**（cloud-backend 2238 → 2243）；README / ROADMAP / whitepaper /
+  sales-pitch-deck / pricing-strategy / demo-scenarios / customer-onboarding-guide /
+  low-altitude-economy-demand-research 共 8 份文档同步；
+  `python scripts/check-test-count-docs.py` 全绿。
+
+> 排查备注（供后来者避坑）：`mvn -pl cloud-backend` **不带 `-am`** 时会解析本地 Maven
+> 仓库里的 `aerofleet-drone-sim` 过期 jar——旧版 `SimConfig` 解析器会吞掉裸布尔开关，
+> 使 `--env`/`--actuators` 静默失效、机载命令一律回 UNSUPPORTED。跑跨模块 E2E 必须带
+> `-am`（或先 `mvn -pl drone-sim install`），本次曾因此在错误方向上排查两轮。
+
+---
+
 ## [Unreleased] — ADAPT_PATH 复合任务尾 + ai 包未接线守卫完备性（2026-10-05）
 
 ### 1. ADAPT_PATH 复合任务尾：一条拍照指令不再废掉全部适配

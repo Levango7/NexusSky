@@ -42,6 +42,14 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
   const [adaptivePaths, setAdaptivePaths] = useState([])
   const [edgeTasks, setEdgeTasks] = useState([])
 
+  // 感知侧三帧（"vision-detection" 30014 / "sensor-fusion" 30054 / "prediction-result" 30056）：
+  // 此前后端已由 WS_TYPE_MAP 下发，但前端无消费分支，帧到即被丢弃（AiDecisionPanel 只覆盖 30051-30053）。
+  // 保留策略按帧的语义分两类：视觉检测/轨迹预测是离散事件 -> 数组头插留 50 条；
+  // 传感器融合是周期状态（2Hz 级）-> 按 sysid 只留最新，避免刷屏且天然覆盖旧值。
+  const [visionDetections, setVisionDetections] = useState([])
+  const [sensorFusions, setSensorFusions] = useState({})
+  const [predictions, setPredictions] = useState([])
+
   const wsRef = useRef(null)
 
   // WebSocket 实时遥测（断线 3s 自动重连）
@@ -147,6 +155,15 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
         } else if (msg.type === 'edge-task-status') {
           // M12 边缘任务状态（EDGE_TASK_STATUS 30053，机载边缘栈逐任务上报）
           setEdgeTasks((prev) => [{ ...(msg.data || {}), sysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'vision-detection') {
+          // 视觉检测（VISION_DETECTION 30014，机载视觉源逐目标上报）：离散事件，新帧头插留 50 条
+          setVisionDetections((prev) => [{ ...(msg.data || {}), sysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'sensor-fusion') {
+          // 传感器融合态（SENSOR_FUSION_DATA 30054，周期上报）：可覆盖状态，按 sysid 只留最新
+          setSensorFusions((prev) => ({ ...prev, [msg.sysid]: { ...(msg.data || {}), receivedAt: Date.now() } }))
+        } else if (msg.type === 'prediction-result') {
+          // 轨迹预测（PREDICTION_RESULT 30056）：离散预测事件，新帧头插留 50 条
+          setPredictions((prev) => [{ ...(msg.data || {}), sysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
         }
       }
     }
@@ -172,5 +189,8 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
     decisionEvents,
     adaptivePaths,
     edgeTasks,
+    visionDetections,
+    sensorFusions,
+    predictions,
   }
 }

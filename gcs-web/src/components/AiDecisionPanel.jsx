@@ -4,6 +4,9 @@ import {
   normalizeDecisionEvent,
   normalizeAdaptivePath,
   normalizeEdgeTaskStatus,
+  normalizeVisionDetection,
+  normalizeSensorFusion,
+  normalizePredictionResult,
 } from '../utils/aiDecision.js'
 
 // M11 AI 自主决策面板：消费 useWebSocket 注入的三条 WS 事件流。
@@ -36,7 +39,14 @@ function EmptyHint({ main, sub }) {
   )
 }
 
-export default function AiDecisionPanel({ decisionEvents, adaptivePaths, edgeTasks }) {
+export default function AiDecisionPanel({
+  decisionEvents,
+  adaptivePaths,
+  edgeTasks,
+  visionDetections = [],
+  sensorFusions = {},
+  predictions = [],
+}) {
   // 归一化 + 过滤完全空壳帧（data 缺失时归一化全 null 的行不展示，与事件流语义不符）
   const decisionRows = (decisionEvents || [])
     .map((raw) => normalizeDecisionEvent(raw, raw.receivedAt))
@@ -47,6 +57,16 @@ export default function AiDecisionPanel({ decisionEvents, adaptivePaths, edgeTas
   const edgeRows = (edgeTasks || [])
     .map((raw) => normalizeEdgeTaskStatus(raw, raw.receivedAt))
     .filter((t) => t && (t.taskId != null || t.taskType != null || t.status != null))
+  // 感知侧三流（30014 / 30054 / 30056）：此前帧到达前端但无消费分支，本次补齐
+  const visionRows = (visionDetections || [])
+    .map((raw) => normalizeVisionDetection(raw, raw.receivedAt))
+    .filter((d) => d && (d.kind != null || d.confidence != null || d.u != null || d.v != null))
+  const fusionRows = Object.entries(sensorFusions || {})
+    .map(([, raw]) => normalizeSensorFusion(raw, raw && raw.receivedAt))
+    .filter((f) => f && (f.lat != null || f.sensorMask != null || f.altM != null))
+  const predictionRows = (predictions || [])
+    .map((raw) => normalizePredictionResult(raw, raw.receivedAt))
+    .filter((p) => p && (p.lat != null || p.confidence != null || p.horizonSec != null))
 
   return (
     <div style={{ padding: 16, color: 'var(--text)' }}>
@@ -123,6 +143,84 @@ export default function AiDecisionPanel({ decisionEvents, adaptivePaths, edgeTas
                   <span>耗时 <b style={{ color: 'var(--text)' }}>{t.processingMs != null ? `${t.processingMs.toFixed(0)} ms` : '--'}</b></span>
                   <span>结果 <b style={{ color: 'var(--text)' }}>{t.resultSize != null ? `${t.resultSize} B` : '--'}</b></span>
                   <span>{fmtTime(t.receivedAt)}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </EventListCard>
+
+        {/* 视觉检测（30014） */}
+        <EventListCard title="视觉检测" tag="VISION_DETECTION 30014" count={visionRows.length}>
+          {visionRows.length === 0 ? (
+            <EmptyHint main="暂无视觉检测" sub="由机载视觉源（SimulatedVisionSource）逐目标上报；未开启视觉的设备无帧" />
+          ) : (
+            visionRows.map((d, i) => (
+              <div key={`${d.receivedAt}-${i}`} style={{ padding: '5px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: '3px solid var(--cyan)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 10, color: 'var(--cyan)', fontWeight: 'bold' }}>
+                    #{d.sysid != null ? d.sysid : '?'} [{d.kindLabel ?? '--'}]
+                  </span>
+                  <span style={{ fontSize: 9, color: 'var(--dim-2)', fontFamily: 'var(--mono)' }}>
+                    {d.u != null && d.v != null ? `u ${d.u.toFixed(0)}, v ${d.v.toFixed(0)}` : '--'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <span>置信度 <b style={{ color: 'var(--text)' }}>{d.confidencePct != null ? `${d.confidencePct}%` : '--'}</b></span>
+                  <span>跟踪 <b style={{ color: 'var(--text)' }}>{d.trackAssociated ? `#${d.trackId}` : '未关联'}</b></span>
+                  <span>{fmtTime(d.sourceTimestamp ?? d.receivedAt)}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </EventListCard>
+
+        {/* 传感器融合态（30054，按 sysid 只留最新） */}
+        <EventListCard title="传感器融合" tag="SENSOR_FUSION_DATA 30054" count={fusionRows.length}>
+          {fusionRows.length === 0 ? (
+            <EmptyHint main="暂无融合态" sub="机载融合器周期上报（含 GPS/IMU/视觉/激光 来源位掩码）；未开启融合的设备无帧" />
+          ) : (
+            fusionRows.map((f, i) => (
+              <div key={`${f.receivedAt}-${i}`} style={{ padding: '5px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: '3px solid var(--ok)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 10, color: 'var(--cyan)', fontWeight: 'bold' }}>
+                    #{f.sysid != null ? f.sysid : '?'}
+                  </span>
+                  <span style={{ fontSize: 9, color: 'var(--dim-2)' }}>
+                    来源 [{(f.sources || []).join('+') || '--'}]
+                  </span>
+                </div>
+                <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <span>{f.lat != null && f.lon != null ? `${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}` : '--'}</span>
+                  <span>高度 <b style={{ color: 'var(--text)' }}>{f.altM != null ? `${f.altM.toFixed(1)} m` : '--'}</b></span>
+                  <span>地速 <b style={{ color: 'var(--text)' }}>{f.velocityMps != null ? `${f.velocityMps.toFixed(1)} m/s` : '--'}</b></span>
+                  <span>精度 <b style={{ color: 'var(--text)' }}>{f.accuracyM != null ? `${f.accuracyM.toFixed(1)} m` : '--'}</b></span>
+                  <span>航向 <b style={{ color: 'var(--text)' }}>{f.headingDeg != null ? `${f.headingDeg.toFixed(0)}°` : '--'}</b></span>
+                </div>
+              </div>
+            ))
+          )}
+        </EventListCard>
+
+        {/* 轨迹预测（30056） */}
+        <EventListCard title="轨迹预测" tag="PREDICTION_RESULT 30056" count={predictionRows.length}>
+          {predictionRows.length === 0 ? (
+            <EmptyHint main="暂无轨迹预测" sub="由机载预测引擎（AiPlaneEngine）在预测变化沿下发" />
+          ) : (
+            predictionRows.map((p, i) => (
+              <div key={`${p.receivedAt}-${i}`} style={{ padding: '5px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: '3px solid var(--warn)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 10, color: 'var(--cyan)', fontWeight: 'bold' }}>
+                    #{p.sysid != null ? p.sysid : '?'} 预测点
+                  </span>
+                  <span style={{ fontSize: 9, color: 'var(--dim-2)', fontFamily: 'var(--mono)' }}>
+                    {p.lat != null && p.lon != null ? `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` : '--'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <span>置信度 <b style={{ color: 'var(--text)' }}>{p.confidencePct != null ? `${p.confidencePct}%` : '--'}</b></span>
+                  <span>预测时长 <b style={{ color: 'var(--text)' }}>{p.horizonSec != null ? `${p.horizonSec} s` : '--'}</b></span>
+                  <span>轨迹点 <b style={{ color: 'var(--text)' }}>{p.trajectoryPoints != null ? p.trajectoryPoints : '--'}</b></span>
+                  <span>{fmtTime(p.receivedAt)}</span>
                 </div>
               </div>
             ))
