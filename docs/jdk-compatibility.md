@@ -248,6 +248,41 @@ Jacoco 0.8.12）在 JDK 26 上**可编译**。
 字节码增强类工具（JaCoCo agent、Mockito inline mock）在 JDK 26 上可能失败。
 故 §4.3 的 26 腿**只跑 compile，不跑 test**，这是刻意的最小验证集。
 
+### 5.3 向下的边界：JDK 8【实测，2026-10-06】
+
+**"产物兼容 N" 与 "构建需要 N" 是两件事**，必须分开声明。
+
+在 git HEAD 的干净克隆上用 **JDK 8**（Corretto 1.8.0_503）构建 `sdk-java`：
+
+```
+$ JAVA_HOME=/e/dev-tools/jdk8-64-oracle mvn -B -pl sdk-java clean compile
+[INFO] Compiling 6 source files with javac [debug parameters release 11] to target\classes
+[ERROR] Failed to execute goal ...maven-compiler-plugin:3.13.0:compile ...:
+        Fatal error compiling: 无效的目标发行版: 11
+```
+
+**结论**：
+
+| 场景 | 最低 JDK | 依据 |
+|---|---|---|
+| 使用 `sdk-java`（加依赖） | **11** | 产物字节码 major=55 |
+| 构建 `sdk-java` | **11** | `--release 11` 要求编译 JDK ≥ 目标版本；JDK 8 的 javac 不认该参数 |
+
+这是 **javac 能力限制，不是代码缺陷**。若未来真需支持 JDK 8 客户，须把 release 降到 8，
+但**不能只改配置**——`sdk-java` 的 Java 11 下限有真实的 API 依据：
+
+| 依据 | 位置 | 说明 |
+|---|---|---|
+| `java.net.http.HttpClient` / `HttpRequest` / `HttpResponse` | `NexusSkyClient.java:11-13` | `java.net.http` 包在 **Java 9 孵化、Java 11 转正**。这是 **11 的硬下限** |
+
+> **复核修正（2026-10-06）**：本节初稿曾写"SDK 源码已用 `record` 与 `switch` 箭头表达式"——
+> **该断言错误**，`grep` 在 `sdk-java/src/main` 下对二者**均为零命中**。
+> 那是我从其他模块（cloud-backend/drone-sim）的特征误推的。真实依据是上面的 `java.net.http`，
+> 已据实改正。**降级到 8 需把 HTTP 客户端换成 `HttpURLConnection` 或引入 Apache HttpClient**，
+> 属真实改写，不是配置项调整。
+
+> 该约束已写入 `sdk-java/README.md`「环境要求」，避免客户误以为能在 JDK 8 上构建。
+
 ---
 
 ## 6. 本机多 JDK 使用方式

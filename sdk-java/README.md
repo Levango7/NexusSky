@@ -62,20 +62,31 @@ implementation 'com.github.Levango7.NexusSky:nexussky-sdk-java:v1.0.3'
   故写作 `com.github.Levango7.NexusSky:nexussky-sdk-java`。
 - jitpack.io 为按需联网构建（tag `v1.0.2`/`v1.0.3` 已包含根目录 `jitpack.yml`，指定 JDK 17），
   但其线上构建结果无法在本仓库内验证。
-- **已知问题（未修复，需重新打 tag 才能生效）**：`v1.0.2`/`v1.0.3` 这两个 tag 的
-  `sdk-java/pom.xml` 使用 `maven.compiler.source/target=11`，但根 pom 的
-  `maven.compiler.release=17` 会**压制** source/target，导致这两个 tag 构建出的 jar
-  字节码是 **Java 17**（major 61），与本 README 声明的"Java 11+"**不符**。
-  使用 JDK 11 的客户拉取 v1.0.2/v1.0.3 会遇 `UnsupportedClassVersionError`。
-  修复已提交至主干（改用显式 `<release>11</release>`），**下一个 tag 起生效**。
-  在此之前，JDK 11 客户请用源码集成。
+- **版本兼容性说明**：
+  - **`v1.0.4` 及以后**：产物字节码为 **Java 11**（major 55），与下方"环境要求"一致。
+  - **`v1.0.2` / `v1.0.3`（已发布，有缺陷）**：这两个 tag 的 `sdk-java/pom.xml` 用
+    `maven.compiler.source/target=11`，但根 pom 的 `maven.compiler.release=17` 会
+    **压制** source/target，导致产物字节码实为 **Java 17**（major 61），与本 README
+    声明的"Java 11+"**不符**。JDK 11 客户拉取这两个版本会遇 `UnsupportedClassVersionError`。
+    **请改用 `v1.0.4`**，或走下方源码集成。
 - 源码集成：仓库根目录执行 `mvn -pl sdk-java -am install`，
   然后依赖 `io.aerofleet:nexussky-sdk-java:0.1.0-SNAPSHOT`。
 
 ### 环境要求
 
-- Java 11 或更高版本
+**运行/集成**与**参与构建本 SDK**是两回事，要求不同：
+
+| 场景 | JDK 要求 | 原因 |
+|---|---|---|
+| **使用本 SDK**（加依赖） | **Java 11+** | 产物字节码 major=55 |
+| **构建本 SDK**（`mvn install`） | **Java 11+** | `release 11` 要求编译用 JDK ≥ 目标版本。实测：JDK 8 下报 `无效的目标发行版: 11` |
+
 - 依赖：Jackson Databind 2.21.7（自动引入）
+
+> **注**：JDK 8 无法构建本 SDK，因为 JDK 8 的 javac 不支持 `--release 11`。
+> 这是编译器能力限制，非代码问题。若确有 JDK 8 客户，**不能只改 release 配置**——
+> 本 SDK 使用 `java.net.http.HttpClient`（Java 11 转正的标准 API，
+> 见 `NexusSkyClient.java:11`），降级需改写为 `HttpURLConnection` 等替代方案。
 
 ## 快速开始
 
