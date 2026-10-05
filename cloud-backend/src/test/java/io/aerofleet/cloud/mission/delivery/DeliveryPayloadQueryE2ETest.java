@@ -98,12 +98,17 @@ class DeliveryPayloadQueryE2ETest {
 
     @AfterEach
     void tearDown() {
-        if (drone != null) {
-            drone.close();
+        try {
+            if (drone != null) {
+                drone.close();
+            }
+        } finally {
+            // 同 EnvOverrideE2ETest：drone.close() 抛异常不能阻断网关端口（24850）释放，
+            // 否则下一个用例 setUp 构造网关时 BindException。
             drone = null;
-        }
-        if (gateway != null) {
-            gateway.shutdown();
+            if (gateway != null) {
+                gateway.shutdown();
+            }
             gateway = null;
         }
     }

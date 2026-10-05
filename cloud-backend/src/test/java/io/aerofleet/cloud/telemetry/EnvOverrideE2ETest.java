@@ -113,12 +113,17 @@ class EnvOverrideE2ETest {
 
     @AfterEach
     void tearDown() {
-        if (drone != null) {
-            drone.close();
+        try {
+            if (drone != null) {
+                drone.close();
+            }
+        } finally {
+            // 网关端口（24840）释放必须无条件执行：drone.close() 抛异常也不能
+            // 跳过 shutdown()，否则下一个用例的 setUp 会在构造网关时 BindException。
             drone = null;
-        }
-        if (gateway != null) {
-            gateway.shutdown();
+            if (gateway != null) {
+                gateway.shutdown();
+            }
             gateway = null;
         }
     }

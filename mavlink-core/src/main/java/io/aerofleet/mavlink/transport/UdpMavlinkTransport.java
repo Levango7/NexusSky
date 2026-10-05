@@ -33,6 +33,8 @@ public class UdpMavlinkTransport implements AutoCloseable {
     private static final long PEER_TIMEOUT_MS = 120_000L;
     /** peer 清理周期（ms）。 */
     private static final long PEER_CLEANUP_INTERVAL_MS = 30_000L;
+    /** close() 等待收包线程退出的上限（ms）：线程退出后端口释放必然完成。 */
+    private static final long RECEIVE_JOIN_TIMEOUT_MS = 5_000L;
 
     private final DatagramSocket socket;
     private final MavlinkParser parser = new MavlinkParser();
@@ -262,6 +264,20 @@ public class UdpMavlinkTransport implements AutoCloseable {
         // P2: 中断 discovery 线程，避免线程泄漏
         for (Thread t : discoveryThreads) {
             t.interrupt();
+        }
+        // 端口释放同步化：JDK 阻塞模式下 socket.close() 是延迟关闭——收包线程
+        // 阻塞于 receive 时 close() 只做 preClose 即返回，真正 fd 关闭由收包线程
+        // 退出路径完成（DatagramChannelImpl.endRead -> tryFinishClose）；不 join 则
+        // close() 返回后端口可能仍被占，紧随的下一绑定会 BindException（CI 两个
+        // E2E 间歇红取证与此吻合）。join 有界，正常路径瞬时返回。
+        try {
+            receiveThread.join(RECEIVE_JOIN_TIMEOUT_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (receiveThread.isAlive()) {
+            log.log(Level.WARNING, receiveThread.getName() + " still alive after close ("
+                    + RECEIVE_JOIN_TIMEOUT_MS + "ms join timeout); UDP port release may lag");
         }
     }
 }

@@ -4,6 +4,38 @@
 
 ---
 
+## [Unreleased] — 修复两个 E2E 固定端口 flake：端口释放同步化 + close 链 try/finally（2026-10-06）
+
+- **现象**：master CI 连红的第二个原因——两个 E2E 用例间歇 `BindException: Address already in use`
+  （构造期失败，0.003 s，约四分之三的 run 通过）：cloud-backend `EnvOverrideE2ETest.setUp:90`
+  （网关端口 24840）、drone-sim `AdaptivePathExecutionTest:63`（机载端口 24780）；
+- **取证**（两 run CI 日志）：失败都是**类内最后一个方法**，前一个方法完整通过——
+  cloud-backend 类总 2.020 s＝前一方法约 2.0 s＋失败 0.003 s；drone-sim 类总 0.016 s＝
+  前一方法 0.013 s＋失败 0.003 s，两方法相隔毫秒级。本机修复前连跑 13 轮 0 复现；
+  排除项：无并行测试配置、端口段全仓唯一、close 链均为同步显式 close；
+- **机理（JDK 源码级确证）**：阻塞模式下 `DatagramChannel.close()` 是**延迟关闭**——
+  `DatagramChannelImpl.implCloseBlockingMode()` javadoc："the final close is deferred until
+  all I/O operations complete"；`tryClose()` 仅当 `readerThread==0 && writerThread==0` 才真正
+  关 fd；收包线程在 `beginRead()` 登记自身，退出路径 `endRead()` 里清零并 `tryFinishClose()`。
+  ⇒ 收包线程阻塞在 `socket.receive()` 期间调用 `close()`，**close() 只做 preClose 即返回，
+  fd 未关、端口未释放**，真正释放发生在收包线程被唤醒之后。下一个测试方法毫秒级紧接
+  bind 同端口时撞上该窗口即 BindException。本机（Windows）全绿＝同代码下调度窗口未撞上；
+- **修复（两层，各覆盖一类失效面）**：
+  1. `UdpMavlinkTransport.close()` 尾部 `receiveThread.join(5 s)`（超时打 WARN）——
+     join 返回 ⇒ 收包线程已退出 ⇒ `endRead → tryFinishClose` 已执行 ⇒ fd 已真正关闭、
+     端口已释放，把延迟关闭窗口从根上收拢；
+  2. `VirtualDrone.close()` 与两个 E2E 的 `tearDown` 改 try/finally——防 close 链中任一
+     子系统异常把端口关闭整个跳过（另一类失效面）；
+- **验证（本机）**：变异探针（两类临时探针用例，验后删除、不计入用例数）：A 修复前形态+
+  注入子系统异常 → 红、B try/finally+注入 → 绿、C 最终态 → 绿；J 临时移除 join → 红
+  （"close() 在收包线程存活时提前返回"）、K 恢复 → 绿。回归：mavlink-core+drone-sim 全量
+  BUILD SUCCESS（drone-sim 汇总 1391/0/0）；AdaptivePathExecutionTest 连跑 3 轮全绿；
+  cloud-backend 两个 E2E 连跑 3 轮全绿（每轮 4 用例）；cloud-backend 全量 2295/0/0；
+- **边界说明**：原 flake 在本机（Windows）不可复现，上述验证证明的是"修复形态正确 +
+  非回归"；"是否根除"的最终确认在 CI（Linux）复跑。
+
+---
+
 ## [Unreleased] — 覆盖率棘轮上调：cloud-backend 0.60 → 0.65（2026-10-06）
 
 - **现象**：master 近期红 run 里确定性的一条是 `Coverage threshold consistency`

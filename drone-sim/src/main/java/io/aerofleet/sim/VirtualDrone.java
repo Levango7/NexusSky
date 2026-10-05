@@ -564,24 +564,29 @@ public final class VirtualDrone implements AutoCloseable {
 
     @Override
     public void close() {
-        // M5 mesh 路由引擎关闭（FR-22a 主动退出：发 RERR + 停 HELLO）
-        if (meshEnabled) {
-            meshRouter.close();
+        try {
+            // M5 mesh 路由引擎关闭（FR-22a 主动退出：发 RERR + 停 HELLO）
+            if (meshEnabled) {
+                meshRouter.close();
+            }
+            // M7 sat-relay 引擎关闭
+            if (satRelayEnabled) {
+                satRelayEngine.close();
+            }
+            // C2 RID 广播器关闭（FR-RID）
+            if (ridBroadcaster != null) {
+                ridBroadcaster.close();
+            }
+            scheduler.shutdownNow();
+            // P0: 关闭 ground-truth HTTP sidecar，避免端口和线程泄漏
+            if (truthServer != null) {
+                truthServer.stop();
+            }
+        } finally {
+            // 端口释放必须无条件执行：任一子系统关闭抛异常都不能阻断 transport.close()，
+            // 否则同 JVM 中下一个绑定同端口的测试会在构造期 BindException（CI flake）。
+            transport.close();
         }
-        // M7 sat-relay 引擎关闭
-        if (satRelayEnabled) {
-            satRelayEngine.close();
-        }
-        // C2 RID 广播器关闭（FR-RID）
-        if (ridBroadcaster != null) {
-            ridBroadcaster.close();
-        }
-        scheduler.shutdownNow();
-        // P0: 关闭 ground-truth HTTP sidecar，避免端口和线程泄漏
-        if (truthServer != null) {
-            truthServer.stop();
-        }
-        transport.close();
     }
 
     // ------------------------------------------------------------------
