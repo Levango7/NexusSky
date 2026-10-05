@@ -20,6 +20,75 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  dep-gate:
+    name: Dependency Version Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install xml parser deps
+        # 仅用标准库，无需额外依赖；此步留作未来扩展（如 lxml）的挂载点
+        run: python -c "import xml.etree.ElementTree as ET; print('stdlib ok')"
+      - name: Dependency version gate
+        # 三查：① 硬编码版本（应走 ${xxx.version}）② 同一 artifactId 版本分裂
+        # ③ docs/dependency-management.md 台账与 pom 实际值同步。
+        # 为什么单列一个 job：纯静态检查、秒级完成，不必等 java 编译，早失败早反馈。
+        run: python3 scripts/check-dependency-versions.py
+      - name: Maven incantation gate
+        # 检查文档/脚本里的 `mvn -pl` 是否漏 `-am`——漏了会静默使用 m2 陈旧制品，
+        # 让开发者看到与改动无关的假失败（本仓曾因此误判两轮）。
+        run: python3 scripts/check-maven-incantations.py
+      - name: Java level declaration gate
+        # 只查「声明层」一致性：各模块 pom 的有效编译级别是否自洽
+        # （release/source 混用、继承覆盖等），不需要已编译产物。
+        # 产物字节码核对在 java-level 作业里做（那里才有 target/classes）。
+        run: python3 scripts/check-java-level.py --list
+
+  java-upward-compat:
+    name: Java 26 Upward Compatibility (compile only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '26'
+      - name: Compile with JDK 26
+        # 只跑 compile，不跑 test：JDK 26 是非 LTS（2027-03 EOL），不作为生产基线。
+        # 它的价值是「预警器」——提前发现未来 JDK 会破坏构建的用法。
+        # 不跑 test 是刻意的：字节码增强类工具（JaCoCo agent / Mockito inline mock）
+        # 在新 JDK 上可能失败，那是工具问题而非本仓代码问题，会制造噪声失败。
+        run: mvn -B clean compile -DskipTests
+
+  java-level:
+    name: Java Level Gate (bytecode vs declaration)
+    needs: [maven-warm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+      - name: Compile all modules
+        run: mvn -B clean compile -DskipTests
+      - name: Java level gate (bytecode must match declaration)
+        # 读各模块 target/classes 首个 class 的 major version，与 pom 声明的有效级别比对，
+        # 并检查产物新鲜度（class 不得早于 pom.xml）。
+        # 为什么必须有这个作业：sdk-java 曾声明 Java 11、实际产出 Java 17，
+        # 构建全绿、测试全绿、文档也"写对了"，只有客户在 JDK 11 上才炸。
+        run: python3 scripts/check-java-level.py
+
   maven-warm:
     name: Warm Maven Cache
     runs-on: ubuntu-latest
@@ -142,7 +211,6 @@ jobs:
         # README/ROADMAP/whitepaper 等口径文档声称的单测数与 surefire 实测必须一致，
         # 数字漂移即红——权威来源是 XML，不是文档。
         run: python3 scripts/check-test-count-docs.py --reports-root surefire-reports
-
   frontend:
     name: GCS Web
     runs-on: ubuntu-latest

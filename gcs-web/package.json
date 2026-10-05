@@ -1,6 +1,7 @@
 {
   "name": "nexussky-gcs-web",
   "private": true,
+  "license": "SEE LICENSE IN ../LICENSE",
   "version": "0.1.0",
   "type": "module",
   "description": "AeroFleet Web GCS - drone ground control station",

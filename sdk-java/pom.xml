@@ -20,9 +20,10 @@
 
     <licenses>
         <license>
-            <name>Apache License, Version 2.0</name>
-            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
-            <distribution>repo</distribution>
+            <name>NexusSky Proprietary License</name>
+            <url>https://github.com/Levango7/NexusSky/blob/main/LICENSE</url>
+            <distribution>manual</distribution>
+            <comments>Proprietary. Commercial license required for any use. All rights reserved.</comments>
         </license>
     </licenses>
 
@@ -42,6 +43,29 @@
     </scm>
 
     <properties>
+        <!-- SDK 的 Java 兼容级别：11（其余模块为 17）。
+             为什么用 release 而不是 source/target：
+             source/target 只保证字节码版本号，不校验 API 可用性。用它们时，
+             代码里可以调 JDK 17 才有的 API 而编译照过，但客户在 JDK 11 上
+             一跑就 NoSuchMethodError（实测：Stream.toList() 在 release 11 下
+             报"找不到符号"，在 source/target=11 下却能编译通过）。
+             release 会同时约束语言级别与可用 API 集合（ct.sym），
+             是唯一能真正保证向下兼容的机制。
+
+             为什么必须显式写在这里（不能只靠继承）：
+             父 pom 声明了 maven.compiler.release=17，本模块若不声明 release，
+             生效的就是继承来的 17。判定优先级为：
+               <release>（插件配置 / maven.compiler.release 属性，含继承值）
+                 > <source>/<target>
+             ——即 release 只要存在就压制 source/target，来源不影响此规则。
+             2026-10-06 实测：改前 sdk-java 产物字节码 major=61(Java 17)，
+             而文档声称兼容 Java 11，客户按文档集成会在编译期炸
+             （UnsupportedClassVersionError）。本处显式覆写为 11 修正之。
+
+             下面两行 source/target 是"兜底提示"：它们对 javac 无实际作用
+             （已被上面的 release 压制），保留仅为让 IDE / 旧插件能识别本模块
+             的目标级别。删掉它们也不影响产物；但**不能只留它们**。 -->
+        <maven.compiler.release>11</maven.compiler.release>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <!-- 2.16.1 含 CVE-2026-54512/54513/68497，2.21.7 为已修复版本 -->
@@ -58,7 +82,7 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.10.2</version>
+            <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -104,16 +128,18 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
+                <version>${compiler-plugin.version}</version>
                 <configuration>
-                    <source>11</source>
-                    <target>11</target>
+                    <!-- 用 release（非 source/target）：release 会同时校验 API 可用性，
+                         确保代码真的能在 Java 11 上编译运行，而非仅字节码版本号对。
+                         版本由根 pom 的 compiler-plugin.version 统一管理。 -->
+                    <release>${maven.compiler.release}</release>
                 </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.2.5</version>
+                <version>${surefire.version}</version>
                 <configuration>
                     <includes>
                         <include>**/*Test.java</include>
@@ -123,7 +149,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-source-plugin</artifactId>
-                <version>3.3.0</version>
+                <version>${source-plugin.version}</version>
                 <executions>
                     <execution>
                         <id>attach-sources</id>

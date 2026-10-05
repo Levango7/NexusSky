@@ -457,4 +457,69 @@ public class LicenseService {
             return null;
         }
     }
+
+    /**
+     * 按**商业档位**签发 license key（推荐入口，2026-10-05 新增）。
+     * <p>
+     * <b>为什么不直接用上面那个传 {@code Set<String> modules} 的重载</b>：
+     * 手传模块集合时，"卖了哪一档"与"客户能开哪些模块"是两件事，可能漂移——
+     * 签发脚本手滑多传一个 {@code emergency}，基础版客户就以基础版价格拿到
+     * 应急模块。本方法把档位翻译成模块集合（{@link LicenseTier#modulesOf}），
+     * 签发后再用 {@link LicenseTier#mismatchOf} 自检，确保签出的授权
+     * **恰好等于**该档位应有的模块，多一个少一个都会拒签。
+     * <p>
+     * 产品名也会带上档位中文名（如 {@code "NexusSky 基础版"}），便于运维从
+     * license 串直接看出客户买的是哪一档。若需自定义产品名，用
+     * {@link #generateLicenseKeyByTier(String, String, String, int, Instant, String, int, int)}。
+     *
+     * @param tier 档位：{@link LicenseTier#BASIC} / {@link LicenseTier#EMERGENCY}
+     *             / {@link LicenseTier#FULL}
+     * @return 签名版 license key；档位未知、档位与模块不符、或无私钥时返回 null
+     */
+    public String generateLicenseKeyByTier(String tenantId, String tier, int maxDevices,
+                                           Instant expiryDate, String issuedTo,
+                                           int maxApiCallsPerDay, int maxConcurrentDrones) {
+        return generateLicenseKeyByTier(tenantId, null, tier, maxDevices, expiryDate,
+                issuedTo, maxApiCallsPerDay, maxConcurrentDrones);
+    }
+
+    /**
+     * 按商业档位签发 license key（可自定义产品名）。
+     *
+     * @param productNameOverride 自定义产品名；传 null 则用「NexusSky &lt;档位中文名&gt;」
+     * @see #generateLicenseKeyByTier(String, String, int, Instant, String, int, int)
+     */
+    public String generateLicenseKeyByTier(String tenantId, String productNameOverride, String tier,
+                                           int maxDevices, Instant expiryDate, String issuedTo,
+                                           int maxApiCallsPerDay, int maxConcurrentDrones) {
+        if (!LicenseTier.isKnownTier(tier)) {
+            log.error("拒绝签发：未知档位 {}（合法档位：{}）", tier, LicenseTier.allTiers());
+            return null;
+        }
+        Set<String> modules = LicenseTier.modulesOf(tier);
+        // 自检：档位 → 模块的映射不得漂移（例如有人改了 T，用错常量）
+        String mismatch = LicenseTier.mismatchOf(tier, modules);
+        if (mismatch != null) {
+            log.error("拒绝签发：档位映射自检失败 —— {}", mismatch);
+            return null;
+        }
+        // 反向自检：档位模块必须全部在 ALL_MODULES 内（防止档位引用了已废弃模块名）
+        for (String m : modules) {
+            if (!ALL_MODULES.contains(m)) {
+                log.error("拒绝签发：档位 {} 引用了未定义模块 '{}'（合法模块：{}）",
+                        tier, m, ALL_MODULES);
+                return null;
+            }
+        }
+        String productName = productNameOverride != null
+                ? productNameOverride
+                : "NexusSky " + LicenseTier.displayName(tier);
+        String key = generateLicenseKey(tenantId, productName, maxDevices, expiryDate,
+                issuedTo, modules, maxApiCallsPerDay, maxConcurrentDrones);
+        if (key != null) {
+            log.info("已按档位签发 license：tier={}({}) tenant={} modules={}",
+                    tier, LicenseTier.displayName(tier), tenantId, modules);
+        }
+        return key;
+    }
 }

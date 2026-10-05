@@ -10,7 +10,16 @@
   <packaging>pom</packaging>
 
   <name>AeroFleet</name>
-  <description>无人机智能控制系统骨架：开源 MAVLink 协议栈 + 虚拟无人机模拟器 + 云端管理平台 + Web 地面站</description>
+  <description>NexusSky 无人机智能控制系统：MAVLink 协议栈 + 虚拟无人机模拟器 + 云端管理平台 + Web 地面站（专有软件，商业授权）</description>
+
+  <licenses>
+    <license>
+      <name>NexusSky Proprietary License</name>
+      <url>https://github.com/Levango7/NexusSky/blob/main/LICENSE</url>
+      <distribution>manual</distribution>
+      <comments>Proprietary. Commercial license required for any use. All rights reserved. Third-party components remain under their own licenses.</comments>
+    </license>
+  </licenses>
 
   <modules>
     <module>mavlink-core</module>
@@ -27,6 +36,41 @@
     <spring-boot.version>3.5.16</spring-boot.version>
     <junit.version>5.11.4</junit.version>
     <slf4j.version>2.0.16</slf4j.version>
+
+    <!-- ================================================================
+         依赖版本集中管理（2026-10-05 建立）
+         规则：所有第三方依赖版本必须在此声明，下游模块只引用 ${xxx.version}，
+         不得在各自 pom 里硬编码字面量。理由见 docs/dependency-management.md：
+         版本散落在 7 个 pom 时，升级要改 33 处、漏一处就版本分裂（同一 jar 两个
+         版本进 classpath，症状是运行期 NoSuchMethodError 而非编译失败）。
+         门禁：scripts/check-dependency-versions.py（CI 中执行）
+
+         注意：下方 dependencyManagement 里的安全覆写条目**故意保留字面量**
+         而非引用本处属性。原因见该处注释（import BOM 场景下 property 覆写
+         实测无效，必须写直接条目）。本属性块的作用是「版本台账 + 非 BOM 依赖
+         的单一真相源」，不是用来替换那些直接条目的。
+         ================================================================ -->
+
+    <!-- 安全覆写：Trivy/Semgrep 门禁红因，详见下方 dependencyManagement 注释 -->
+    <tomcat.version>10.1.59</tomcat.version>
+    <netty.version>4.1.138.Final</netty.version>
+    <postgresql.version>42.7.13</postgresql.version>
+    <jackson.version>2.21.7</jackson.version>
+    <log4j.version>2.25.5</log4j.version>
+    <commons-lang3.version>3.18.0</commons-lang3.version>
+
+    <!-- 业务依赖（原散落在各子模块 pom，2026-10-05 收敛至此） -->
+    <springdoc.version>2.8.6</springdoc.version>
+    <jacoco.version>0.8.12</jacoco.version>
+    <surefire.version>3.5.2</surefire.version>
+    <compiler-plugin.version>3.13.0</compiler-plugin.version>
+    <mavlink.version>3.6.0</mavlink.version>
+    <okhttp.version>5.10.2</okhttp.version>
+    <junit-platform.version>3.11.0</junit-platform.version>
+    <assertj.version>3.2.5</assertj.version>
+    <mockito.version>3.3.0</mockito.version>
+    <wiremock.version>3.6.3</wiremock.version>
+    <source-plugin.version>3.3.0</source-plugin.version>
   </properties>
 
   <dependencyManagement>

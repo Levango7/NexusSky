@@ -17,7 +17,7 @@ setup(
     url="https://github.com/Levango7/NexusSky",
     author="NexusSky Team",
     author_email="support@nexussky.io",
-    license="Apache License 2.0",
+    license="Proprietary",
     packages=find_packages(),
     python_requires=">=3.8",
     install_requires=[
@@ -26,7 +26,7 @@ setup(
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: Apache Software License",
+        "License :: Other/Proprietary License",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",

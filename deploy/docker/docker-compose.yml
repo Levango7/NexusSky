@@ -89,6 +89,12 @@ services:
       # 相当于让 Hibernate 隐式建表，迁移脚本从未在生产通路被验证过）。
       - SPRING_FLYWAY_ENABLED=true
       - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
+      # MAVLink UDP 网关绑定地址：此处**有意不注入**，保持 prod 默认 0.0.0.0。
+      # 容器内必须监听所有接口才能被上方 `ports:` 映射（绑 127.0.0.1 会让映射失效）。
+      # 真正的入站收口由网络层完成（K8s 见 deploy/k8s/networkpolicy.yaml 的 14550/UDP 规则）。
+      # 仅当"裸机/VM 直跑 jar + 多网卡需限定内网口"时才设：
+      #   - AEROFLEET_UDP_BIND_ADDRESS=10.0.1.5
+      # 详见 docs/security-design.md §6.4「为什么生产默认仍是 0.0.0.0」
     depends_on:
       redis:
         condition: service_started

@@ -4,6 +4,88 @@
 
 ---
 
+## [Unreleased] — Java 兼容性修复：sdk-java release 缺陷 + 多 JDK 策略与门禁（2026-10-06）
+
+### 1. 修复 sdk-java 的「静默兼容性欺诈」【P0，对外交付缺陷】
+
+- **症状**：`sdk-java/pom.xml` 声明 `maven.compiler.source/target=11`，
+  `sdk-java/README.md` 声明"Java 11 或更高版本"，但**实测产物字节码是 major 61（Java 17）**；
+- **根因**（用 git HEAD 原始 pom 复现确认）：Maven Compiler Plugin 的判定优先级为
+  `<release>`（插件配置 / `maven.compiler.release` 属性）**高于** `<source>/<target>`。
+  根 pom 的 `maven.compiler.release=17` 被插件当作 `<release>` 读取，**压制**了
+  sdk-java 的 source/target=11。构建日志只打印 `release 17`，**不提示** source/target 被忽略；
+  `help:effective-pom` 里 source/target 仍显示 11，**看起来是对的**；
+- **影响面（已发布版本）**：`git show v1.0.3:sdk-java/pom.xml` 确认 tag 版本同为缺陷态，
+  根 pom 亦有 `release=17` → **v1.0.2 / v1.0.3 构建出的 SDK 字节码为 Java 17**，
+  JDK 11 客户拉取即 `UnsupportedClassVersionError`。
+  修复已入主干，**下个 tag 起生效**（README 已如实标注）；
+- **修复**：`sdk-java/pom.xml` 改用显式 `<release>${maven.compiler.release}</release>`
+  并把该属性设为 11，盖过继承值。实测产物 `major version: 55`，构建日志 `release 11`。
+
+### 2. 新增门禁 `scripts/check-java-level.py`（四查）
+
+1. **字节码 vs 声明一致性**：`javap` 读各模块 `target/classes` 首 class 的 `major version`，
+   与 pom 声明的**有效级别**（release 优先）比对；
+2. **产物新鲜度**：class 早于 `pom.xml` 即报错——否则一致性结论建立在陈旧产物上（假绿）；
+3. **release/source 混用告警**：标出被静默忽略的死配置；
+4. **级别清单打印**：标注每项来源（本模块显式 / 继承根 pom）。
+
+- **阴性对照（5 组）**：修复态通过；git HEAD 原始 pom → 精确报"并存死配置"并退出 1；
+  陈旧产物 → 报新鲜度失败；另有 2 组用于**推翻我最初的错误归因**（详见
+  `docs/jdk-compatibility.md` §4.2.1）；
+- **阳性对照**：向 SDK 注入 `Stream.toList()`（Java 16+），`release 11` 下
+  报"找不到符号 → toList()"编译失败 → 证明 `release` 真能约束 API 可用性，
+  而非仅字节码版本号（详见同文档 §2.3.1）。
+
+### 3. 多 JDK 策略（`docs/jdk-compatibility.md` 新增）
+
+- 基线保持 **JDK 17（LTS）**；实测 `mvn clean compile` 在 **JDK 26** 下 **7 模块全部 SUCCESS**；
+- **不把 26 设为基线**：非 LTS（2027-03 EOL），仅作"未来兼容预警器"；
+- 升级路径固化：改基线的 JDK 只需改根 pom 一个属性，门禁自动核对字节码是否真的变了；
+- **诚实标注未验证项**：JDK 26 下**运行**（测试/启动）未验证——编译通过 ≠ 运行通过，
+  JaCoCo agent / Mockito inline mock 在新 JDK 可能失败，故 CI 的 26 腿只跑 compile。
+
+### 4. CI 新增 3 个 job
+
+- `java-level`：编译后跑字节码核对门禁（这是 §1 那个缺陷的检测器）；
+- `java-upward-compat`：JDK 26 上仅 `clean compile`（向上兼容预警）；
+- `dep-gate` 内增 `check-java-level.py --list`（声明层静态检查，不需编译）。
+
+### 5. 修复 jitpack 坐标错误【对外交付缺陷】
+
+- `sdk-java/README.md` 原写 `com.github.Levango7:nexussky-sdk-java` 是**单模块**格式；
+  本仓是多模块工程，依 JitPack 官方文档应为 `com.github.Levango7.NexusSky:nexussky-sdk-java`
+  （三段点号 + 模块 artifactId）。照原样抄写会解析失败；
+- 原文另一处错误：称"`NexusSky` 是根聚合模块"，实际根 pom artifactId 为 `aerofleet-parent`；
+- `jitpack.yml` 补 `install` 指令：原先只指定 JDK，JitPack 会构建全部模块
+  （含依赖 Spring Boot 的 cloud-backend），容易失败。现改为只构建 `sdk-java`
+  （该模块无内部依赖，`-pl` 单独即可，无需 `-am`——已实测 `install` 成功且产出
+  jar/sources/javadoc 三种制品）。文件无 BOM、LF 行尾（规避历史 `1e6095c` 的 BOM 坑）。
+
+### 6. License 档位绑定（授权可机器校验）
+
+- 新增 `LicenseTier`（`basic ⊂ emergency ⊂ full` 累进档位）+
+  `LicenseService.generateLicenseKeyByTier()` 重载；
+- 新增 `LicenseTierTest` **20 例**（累进结构、全覆盖、无越界、档位推断、
+  签发自检 `mismatchOf`、不可变性等），全部通过；
+- 至此「授权档位 → 模块集合」的绑定可被机器测试，而非仅文档声明。
+
+### 7. 计数口径同步
+
+- 全仓单测 4271 → **4291**（cloud-backend 2275 → 2295，新增 `LicenseTierTest` 20 例）；
+- README / ROADMAP / whitepaper / sales-pitch-deck / pricing-strategy / demo-scenarios /
+  customer-onboarding-guide / competitive-analysis / low-altitude-economy-demand-research /
+  product-brief 共 10 份文档同步（`docs/product-brief.md` 为千分位格式 `4,271`→`4,291`）；
+  `python scripts/check-test-count-docs.py` 全绿（实测 4291 / 0 失败 / 463 测试类）。
+
+### 8. 全量验证
+
+- `mvn -B clean test` → **BUILD SUCCESS，4291 用例 0 失败 0 错误 0 跳过**；
+- `mvn -B -pl cloud-backend -am test -Dtest='LicenseTierTest,LicenseModuleCoverageTest'`
+  → 52 用例 0 失败（LicenseTier 20 + LicenseModuleCoverage 32）。
+
+---
+
 ## [Unreleased] — 清单收口：环境/载荷查询真链路 E2E + GCS 感知三帧消费（2026-10-05）
 
 本轮处理 `.coord/GAPS.md` §二「可立即解决」清单（第 1 行经复核已由上轮 e21a066 完成）。

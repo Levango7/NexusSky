@@ -58,6 +58,9 @@ CURRENT_DOCS = [
     'docs/commercialization-plan.md',
     'docs/competitive-analysis.md',
     'docs/low-altitude-economy-demand-research.md',
+    # 2026-10-05 补入：一页纸产品介绍是对外第一手材料，此前游离在门禁之外，
+    # 其中的「4,239 个后端单测」既不被核对、也无信号会因测试增长而变红。
+    'docs/product-brief.md',
 ]
 
 # 参与统计的模块。与根 pom 的 <modules> 一致；漏一个会让总数偏小，
@@ -71,18 +74,53 @@ EXPECTED_MODULES = [
     'regulator-sim',
 ]
 
-# 形如 "3230 单测" / "3869 个测试" / "共 3988 例" 的数字声称
+# 形如 "3230 单测" / "3869 个测试" / "共 3988 例" 的数字声称。
+# 数字部分统一用 ``_NUM`` 片段容忍千分位逗号：``4,239`` 与 ``4239`` 必须等价，
+# 否则 \d{3,5} 只会截到 ``239`` 并当成合法声称值，产生**误报**（2026-10-05 修）。
+_NUM = r'(\d{1,3}(?:[,\uFF0C]\d{3})+|\d{3,5})'
+# 「数量词 + 可选限定词 + 单测」：容忍 "4,239 个后端单测" / "4239 个单测" 两种写法。
+# 早先写成 ``_NUM\s*(?:条|个)?\s*单测``，要求「个」与「单测」相邻，于是
+# product-brief.md 的「4,239 个后端单测」整句逃检（2026-10-05 修）。
 CLAIM_PATTERNS = [
-    re.compile(r'(\d{3,5})\s*(?:条|个)?\s*单测'),
-    re.compile(r'(\d{3,5})\s*(?:条|个)?\s*(?:单元测试|测试用例)'),
-    re.compile(r'(?:测试|单测)(?:用例)?\s*(?:共|计|总计)?\s*[:：]?\s*(\d{3,5})'),
+    re.compile(_NUM + r'\s*(?:条|个)?\s*(?:[\u4e00-\u9fa5]{0,6})?单测'),
+    re.compile(_NUM + r'\s*(?:条|个)?\s*(?:单元测试|测试用例)'),
+    re.compile(r'(?:测试|单测)(?:用例)?\s*(?:共|计|总计)?\s*[:：]?\s*' + _NUM),
+    # 英文口径，形如 "4234 tests" / "4239 unit tests"。
+    # 必要：demo-scenarios.md 与 sales-pitch-deck.md 曾用英文写总测数，
+    # 因不含「单测/测试用例」中文关键词而被整段漏检（2026-10-05 修复）。
+    re.compile(_NUM + r'\s*(?:unit\s+)?tests?\b', re.IGNORECASE),
 ]
+
+
+def _parse_count(text):
+    """把 ``4,239`` / ``4239`` / ``4，239`` 统一解析成整数。"""
+    return int(re.sub(r'[,\uFF0C]', '', text))
 
 # 表格行里表示"全仓合计"的首列写法
 TOTAL_LABELS = {'总计', '合计', '共计', '总数'}
 
+# 章节级豁免：这些章节标题下的全部内容视为**历史台账**，与 CHANGELOG 同性质，
+# 其中的测数是"当时那一刻"的快照，不参与当前口径校验。
+#
+# 为什么需要它：commercialization-plan.md 的「六、代码审查修复记录」逐 commit 记录
+# 每一轮修复后的测数（1692 → 1934 → 3266），这些值在当时都是真的。若强行改成今天
+# 的数字，那张「更新前 → 更新后」的对比表就变成了假话。逐行追述标记覆盖不到这种
+# 形态（"测试验证"行本身不含 commit 字样，commit 在上一行），故按章节整体豁免。
+RETROSPECTIVE_SECTIONS = {
+    'docs/commercialization-plan.md': ('六、代码审查修复记录',),
+}
+
+# Markdown 章节标题（## / ### ...），用于划定章节级豁免范围
+_HEADING = re.compile(r'^#{2,6}\s+(.*\S)\s*$')
+
 # 追述标记：命中即认为该行在引述一个已被取代的历史值，不参与校验。
-RETROSPECTIVE = ('此前', '原先', '曾经', '曾写', '已过期', '旧值', '改前', '修正前')
+RETROSPECTIVE = ('此前', '原先', '曾经', '曾写', '已过期', '旧值', '改前', '修正前',
+                 # 「更新前 / 更新后」对比表列头：整表记的是历史演进，不是当前口径。
+                 '更新前', '更新后',
+                 # 「测试验证：... (commit abc1234)」型历史记录。
+                 # commercialization-plan.md 的章节按 commit 记录每一轮修复后的测数，
+                 # 那些数字**在当时是对的**，改成今天的值是篡改历史（2026-10-05 修）。
+                 'commit ')
 
 # 表格单元格里剥掉 Markdown 强调/代码标记
 _CELL_NOISE = re.compile(r'[*`\s]')
@@ -159,6 +197,32 @@ def _is_retrospective(line):
     return any(marker in line for marker in RETROSPECTIVE)
 
 
+def retrospective_section_lines(lines, rel):
+    """返回属于「历史台账章节」的行号集合（1 基），见 RETROSPECTIVE_SECTIONS。
+
+    规则：命中标题前缀后，直到**同级或更高级**的标题为止，整段豁免。
+    例：豁免「## 六、...」后，其下所有 ### / #### 子节一并豁免，
+    直到下一个「## 」为止。
+    """
+    prefixes = RETROSPECTIVE_SECTIONS.get(rel)
+    if not prefixes:
+        return set()
+    exempt = set()
+    active_level = None
+    for lineno, line in enumerate(lines, 1):
+        m = _HEADING.match(line)
+        if m:
+            level = len(line) - len(line.lstrip('#'))
+            title = m.group(1)
+            if active_level is not None and level <= active_level:
+                active_level = None          # 同级或更高级标题 → 豁免段结束
+            if any(title.startswith(p) or p in title for p in prefixes):
+                active_level = level
+        if active_level is not None:
+            exempt.add(lineno)
+    return exempt
+
+
 def test_table_rows(lines):
     """找出所有「测试数」表的**数据行**行号集合。
 
@@ -201,9 +265,13 @@ def row_claim(line, per_module):
     - ``| `mavlink-core` | 449 |``      首列是已知模块名 → 该模块
     - ``| **总计** | **3994** |``         首列是合计字样 → 全仓
 
-    第二列必须整体是整数或 ``~`` 前缀的整数，否则不是测试数。
+    第二列必须**以整数开头**（允许后跟「全绿/PASS/个/例」等说明文字），否则不是测试数。
     以 README 第 27 行为例，第二列是「纯 Java 17」而非数字，会被正确忽略——
     那一行的数字由 CLAIM_PATTERNS 文本路径负责。
+
+    历史坑（2026-10-05 修）：早先要求第二列 ``strip`` 后**完全是数字**，于是
+    ``| **单元测试** | 4234 全绿 |`` 这类「数字 + 说明」的写法整行逃检，
+    销售材料里的 4234 因此长期未被门禁抓到。现改为「正则抓取前导整数」。
 
     ``~1823`` 这类近似值返回 exact=False：门禁无法核对它，也无法让它随测试增长
     自动过期，所以调用方应当判红并要求写准数，而不是默默放过。
@@ -216,15 +284,23 @@ def row_claim(line, per_module):
         return None
     name = _CELL_NOISE.sub('', cells[1])
     raw = _CELL_NOISE.sub('', cells[2])
+    if not name:
+        return None
     exact = True
     if raw.startswith('~'):
         exact, raw = False, raw[1:]
-    if not raw.isdigit():
+    # 抓取前导整数（容忍千分位逗号与其后紧跟的说明文字「全绿」「PASS」「个」等）
+    m = re.match(r'(\d{1,3}(?:[,\uFF0C]\d{3})+|\d+)', raw)
+    if not m:
+        return None
+    value = _parse_count(m.group(1))
+    # 常识过滤：单测数不会小到 2 位数；防把「第 3 阶段」之类误当测试数
+    if value < 100:
         return None
     if name in per_module:
-        return name, int(raw), exact
+        return name, value, exact
     if name in TOTAL_LABELS:
-        return '__total__', int(raw), exact
+        return '__total__', value, exact
     return None
 
 
@@ -289,11 +365,12 @@ def main():
         with open(path, encoding='utf-8') as fh:
             lines = fh.readlines()
         table_rows = test_table_rows(lines)
+        exempt_rows = retrospective_section_lines(lines, rel)
         hits = []
         approx = []
         skipped_retro = 0
         for lineno, line in enumerate(lines, 1):
-            if _is_retrospective(line):
+            if lineno in exempt_rows or _is_retrospective(line):
                 skipped_retro += 1
                 continue
             # 表格型模块/合计行：不要求本行出现"单测"字样（README 的测试规模表
@@ -309,13 +386,18 @@ def main():
                     else:
                         approx.append((lineno, scope, line.strip()))
                     continue
-            if '单测' not in line and '测试用例' not in line and '单元测试' not in line:
+            # 散文化声称（非表格行）：需含「单测 / 测试用例 / 单元测试」或英文 tests。
+            # 英文关键词是 2026-10-05 补的：demo-scenarios.md 曾写
+            # "4234 tests，0 failures"，不含任何中文关键词，整行静默逃检。
+            _low = line.lower()
+            if ('单测' not in line and '测试用例' not in line
+                    and '单元测试' not in line and 'tests' not in _low):
                 continue
             scope = scope_of(line, per_module)
             expected = per_module[scope] if scope else actual
             for pat in CLAIM_PATTERNS:
                 for m in pat.finditer(line):
-                    claimed = int(m.group(1))
+                    claimed = _parse_count(m.group(1))
                     if 100 <= claimed <= 200_000:      # 过滤明显不是测试数的巧合数字
                         hits.append((lineno, claimed, expected, scope, line.strip()))
 

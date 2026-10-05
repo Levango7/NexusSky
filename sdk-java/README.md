@@ -21,11 +21,18 @@ NexusSky Java SDK 是 NexusSky 无人机智能飞控中间件的 Java 客户端 
 
 ```xml
 <dependency>
-    <groupId>com.github.Levango7</groupId>
+    <groupId>com.github.Levango7.NexusSky</groupId>
     <artifactId>nexussky-sdk-java</artifactId>
     <version>v1.0.3</version>
 </dependency>
 ```
+
+> **groupId 是 `com.github.Levango7.NexusSky`（三段点号），不是 `com.github.Levango7`。**
+> 本仓是多模块工程，JitPack 对多模块仓库的坐标规则为
+> `com.github.<用户>.<仓库>:<模块 artifactId>:<tag>`（依据 JitPack 官方文档
+> "For a multi module project, the artifacts are published under
+> `com.github.USER.REPO:MODULE:VERSION`"）。
+> 写成两段（`com.github.Levango7:nexussky-sdk-java`）会解析失败。
 
 ### Gradle
 
@@ -43,13 +50,27 @@ dependencyResolutionManagement {
 然后添加依赖：
 
 ```groovy
-implementation 'com.github.Levango7:nexussky-sdk-java:v1.0.3'
+implementation 'com.github.Levango7.NexusSky:nexussky-sdk-java:v1.0.3'
 ```
 
 ### 关于坐标与线上构建状态
 
-- `NexusSky` 是本仓库的根聚合模块（`packaging=pom`，不产出 jar），本 SDK 的实际模块为 `nexussky-sdk-java`；JitPack 对多模块仓库按 `com.github.用户名:模块 artifactId:tag` 坐标提供各模块依赖，故上面写 `nexussky-sdk-java` 而不是 `NexusSky`。
-- jitpack.io 为按需联网构建（tag `v1.0.2`/`v1.0.3` 已包含根目录 `jitpack.yml`，指定 JDK 17），但其线上构建结果无法在本仓库内验证。若拉取失败，可改为源码集成：仓库根目录执行 `mvn -pl sdk-java -am install`，然后依赖 `io.aerofleet:nexussky-sdk-java:0.1.0-SNAPSHOT`。
+- 本仓是多模块工程，根聚合模块 artifactId 为 `aerofleet-parent`（`packaging=pom`，不产出 jar），
+  本 SDK 的实际模块 artifactId 为 `nexussky-sdk-java`（目录名 `sdk-java` —— **目录名与
+  artifactId 不同**，JitPack 用的是 artifactId）。
+- JitPack 对多模块仓库的坐标为 `com.github.<用户>.<仓库>:<模块 artifactId>:<tag>`，
+  故写作 `com.github.Levango7.NexusSky:nexussky-sdk-java`。
+- jitpack.io 为按需联网构建（tag `v1.0.2`/`v1.0.3` 已包含根目录 `jitpack.yml`，指定 JDK 17），
+  但其线上构建结果无法在本仓库内验证。
+- **已知问题（未修复，需重新打 tag 才能生效）**：`v1.0.2`/`v1.0.3` 这两个 tag 的
+  `sdk-java/pom.xml` 使用 `maven.compiler.source/target=11`，但根 pom 的
+  `maven.compiler.release=17` 会**压制** source/target，导致这两个 tag 构建出的 jar
+  字节码是 **Java 17**（major 61），与本 README 声明的"Java 11+"**不符**。
+  使用 JDK 11 的客户拉取 v1.0.2/v1.0.3 会遇 `UnsupportedClassVersionError`。
+  修复已提交至主干（改用显式 `<release>11</release>`），**下一个 tag 起生效**。
+  在此之前，JDK 11 客户请用源码集成。
+- 源码集成：仓库根目录执行 `mvn -pl sdk-java -am install`，
+  然后依赖 `io.aerofleet:nexussky-sdk-java:0.1.0-SNAPSHOT`。
 
 ### 环境要求
 

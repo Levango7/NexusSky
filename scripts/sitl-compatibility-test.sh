@@ -138,7 +138,8 @@ fi
 
 if [ "$cloud_running" = false ]; then
   echo "   ❌ cloud-backend 不可用，跳过端到端验证"
-  echo "   💡 提示：先运行 'mvn -pl cloud-backend -DskipTests package' 并启动 JAR"
+  # -am 必带：不带会用 m2 里的陈旧 mavlink-core/drone-sim，导致后续 e2e 假失败
+  echo "   💡 提示：先运行 'mvn -pl cloud-backend -am -DskipTests package' 并启动 JAR"
   # 离线自检已跑完，按结果退出
   if [ "$FAIL" = '0' ]; then echo "✅ 离线自检通过（端到端验证已跳过）"; exit 0; else exit 1; fi
 fi

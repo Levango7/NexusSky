@@ -24,3 +24,12 @@ data:
   MANAGEMENT_ENDPOINT_HEALTH_GROUP_LIVENESS_INCLUDE: "livenessState"
   # 飞行日志目录：必须与 Deployment 的 flight-logs 卷 mountPath 一致（/app/logs）
   AEROFLEET_FLIGHTLOG_DIR: "/app/logs"
+  # MAVLink UDP 网关绑定地址：**有意不设置**，保持 prod 默认 0.0.0.0。
+  # Pod IP 每次重建都会变，绑具体 IP 会导致 UDP 网关起不来；
+  # 入站收口由 networkpolicy.yaml 完成（仅放行同命名空间 → 14550/UDP）。
+  # 详见 docs/security-design.md §6.4「为什么生产默认仍是 0.0.0.0」
+  #
+  # 注：UDP 端口（14550）此处也不设置——`UdpGateway` 的
+  # `@Value("${aerofleet.udp-port:14550}")` 已内置同值默认，
+  # networkpolicy.yaml 亦按 14550 硬编码。三处一致，无需 ConfigMap 再声明一份
+  # （多一处声明就多一处可能漂移的副本）。

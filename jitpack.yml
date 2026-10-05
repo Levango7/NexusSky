@@ -1,2 +1,10 @@
 jdk:
   - openjdk17
+
+# 只构建 sdk-java，不构建其余模块。
+# 不加 install 指令时，JitPack 会构建根 pom 声明的全部模块（cloud-backend 等），
+# 其中 cloud-backend 依赖 Spring Boot 运行期环境与大量插件，在 JitPack 默认沙箱里
+# 容易失败或耗时过长。sdk-java 的依赖只有 Jackson 与 JUnit（无内部模块依赖），
+# 可独立构建，故直接 -pl sdk-java 即可，无需 -am。
+install:
+  - mvn -B -pl sdk-java install -DskipTests

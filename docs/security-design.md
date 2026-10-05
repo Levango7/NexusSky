@@ -408,26 +408,64 @@ SSE 的 `Authorization` 头问题（`EventSource` 带不了自定义头，故 pr
 2. 使用相同密钥和 IV 解密
 3. 解密失败时返回原值（兼容旧明文数据）
 
-### 5.2 AES-ECB 加密（安防设备密码）
+### 5.2 AES-GCM 加密（安防设备密码）
 
 `PasswordConverter`（`cloud-backend/src/main/java/io/aerofleet/cloud/surveillance/PasswordConverter.java`）是 JPA `AttributeConverter`，对 `SurveillanceDeviceEntity` 的 password 字段进行 AES 加密：
 
 **加密配置**：
-- 算法：`AES/ECB/PKCS5Padding`
+- 算法：`AES/GCM/NoPadding`
+- GCM Tag 长度：128 位
+- IV 长度：12 字节（每行随机生成，`SecureRandom`）
 - 密钥派生：SHA-256(配置密钥) 取前 16 字节（AES-128）
-- 密钥来源：`aerofleet.encryption.key`（默认 `aerofleet-dev-encryption-key`）
-- 存储格式：Base64(ciphertext)
+- 密钥来源：`aerofleet.encryption.key`（prod/staging 为 `${AEROFLEET_ENCRYPTION_KEY}`，**无默认值**）
+- 存储格式：Base64(IV + ciphertext + GCM tag)
 
-**注意**：ECB 模式不推荐用于新开发（相同明文产生相同密文），但已用于安防设备密码的兼容性考虑。Webhook secret 使用更安全的 GCM 模式。
+**加密流程**（`convertToDatabaseColumn`）：
+1. 随机生成 12 字节 IV
+2. 用派生密钥和 GCM 参数初始化 Cipher
+3. 加密明文密码
+4. 将 IV 与密文拼接后 Base64 编码存库
+
+**解密流程**（`convertToEntityAttribute`）：
+1. Base64 解码，分离 IV（前 12 字节）与密文
+2. 用相同密钥与 IV 解密
+3. **解密失败时返回原值**（兼容历史明文行）——见下方"遗留兼容"
+
+**遗留兼容（重要）**：`convertToEntityAttribute` 在解密失败时**静默返回原值**并记 WARN。
+这是为兼容历史明文数据而设，但也意味着**密钥配错不会报错，而是把密文当明文返回**
+（下游拿到的是 Base64 串而非真实密码）。判断：这是**有意的降级**，因为安防设备密码
+仅在对接厂商平台时使用，配错密钥的表现是"对接失败"而非"数据损坏"；
+但运维排查时容易误判为"厂商平台故障"。故排障清单中应包含"确认 `AEROFLEET_ENCRYPTION_KEY` 与落库时一致"。
+
+**历史迁移（2026-10-01，commit `d292314`）**：
+
+| 项 | 迁移前 | 迁移后 |
+|---|---|---|
+| 算法 | `AES/ECB/PKCS5Padding` | `AES/GCM/NoPadding` |
+| IV | 无（ECB 不需要） | 12 字节随机，随密文存储 |
+| 完整性 | 无 | 128 位 GCM tag（AEAD） |
+| 密钥默认值 | 硬编码 `aerofleet-dev-encryption-key` | 已移除，prod/staging 无默认值 |
+
+> **ECB 的问题**：相同明文产生相同密文，可被频率分析识别出"哪些设备用了同一密码"。
+> 迁移后每行密文因随机 IV 而不同，且 GCM 提供篡改检测。
+
+> **文档同步说明**：本节曾长期描述为 `AES-ECB/PKCS5Padding`（含"兼容性考虑"的解释），
+> 而代码在 `d292314` 已改为 GCM——属于**文档落后于代码**的漂移。2026-10-06 已据实修正。
 
 ### 5.3 密钥配置
 
 | 配置项 | 默认值 | 生产环境要求 |
 |---|---|---|
-| `aerofleet.encryption.key` | `aerofleet-dev-encryption-key` | 必须通过环境变量覆盖 |
+| `aerofleet.encryption.key` | **base 无默认值**（dev/test 各有独立开发密钥；prod/staging 为 `${AEROFLEET_ENCRYPTION_KEY}` 且无默认值） | 必须通过环境变量设置，未设即启动失败 |
 | `aerofleet.security.jwt-secret` | 空 | HS256 模式下必须配置（≥32 字节） |
 | `jwt.private-key` / `jwt.public-key` | 空 | RS256 生产模式必须配置 |
 | `AEROFLEET_JWT_SECRET` | — | 生产环境环境变量 |
+
+> **2026-10-01 起 fail-fast**（`application.properties:171-179`）：base properties
+> **不再提供明文默认密钥**。此前 base 硬编码 `aerofleet-dev-encryption-key`，
+> 而 prod/staging 都没覆盖它 → 生产用一把**写在公开仓库里**的密钥加密安防设备口令与
+> webhook 密钥；且 `PasswordConverter#deriveKey` 的「空值则抛异常」检查因拿到的不是空值而**从未触发**。
+> 现在：dev/test 各用自己的密钥，prod/staging 无默认值——**未设环境变量即启动失败**。
 
 ## 6. 安全加固清单
 
@@ -465,10 +503,36 @@ WebSocket CORS 通过 `WebSocketConfig.registerWebSocketHandlers()` 的 `setAllo
 
 | 配置 | 开发环境 | 生产环境 | 说明 |
 |---|---|---|---|
-| `aerofleet.udp.bind-address` | `0.0.0.0` | 内网网卡 IP | 网卡绑定地址 |
+| `aerofleet.udp.bind-address` | `0.0.0.0` | `${AEROFLEET_UDP_BIND_ADDRESS:0.0.0.0}`（**默认仍为 0.0.0.0**） | 网卡绑定地址；见下方"为什么生产默认仍是 0.0.0.0" |
 | `aerofleet.udp.device-whitelist-enabled` | `false` | `true` | 只接受已注册 sysid 的帧 |
 | `aerofleet.device-registry.persist` | `false` | `true` | **必须与上一行成对**：白名单只认注册表里的 sysid，而陌生 sysid 的帧在进注册表之前就被丢弃。若注册表只在内存里，重启后 ADMIN 登记过的条目随之消失，白名单会重新变成"首台设备永远进不来"的死锁 |
 | `aerofleet.udp.max-frame-rate-per-sysid` | `100` | `100` | 单 sysid 每秒最大帧数 |
+
+**为什么生产默认仍是 `0.0.0.0`（2026-10-06 复核修正）**
+
+本节曾表述为"生产应绑定内网网卡 IP"。复核后确认：**在容器化部署下保持 `0.0.0.0` 才是正确的**，理由是
+绑定具体 IP 会失效或带来更大风险：
+
+| 部署形态 | 绑定具体 IP 的问题 |
+|---|---|
+| K8s（`deploy/k8s`、`deploy/helm`） | Pod IP **每次重建都会变**，写死 IP → 绑定失败或绑定到不存在的接口，UDP 网关直接起不来 |
+| docker-compose（`deploy/docker`） | 容器内需监听所有接口才能被 `ports:` 映射，绑 `127.0.0.1` 则映射失效 |
+
+正确的隔离手段**不是**绑 IP，而是**网络层收口**（本项目已实施）：
+
+- `deploy/helm/nexussky/templates/networkpolicy.yaml` 与 `deploy/k8s/networkpolicy.yaml`
+  已把 cloud-backend 的入站精确限制为 `8080/TCP`（同命名空间 + ingress-nginx）与
+  `14550/UDP`（仅同命名空间）——**UDP 网关只对本命名空间的 Pod 可达**。
+- 注意：`cloud-backend` 的 Service **不暴露 UDP 端口**（只有 `http/TCP`）。因为
+  sim 经 REST 注册上报地址后，backend 按源地址**直连 Pod IP**，不经 Service。
+
+**何时才需要设置 `AEROFLEET_UDP_BIND_ADDRESS`**：裸机/VM 直接跑 jar（非容器），
+且主机有多个网卡、需限定只在内网网卡上收 MAVLink 帧时。此时按需设为其内网 IP。
+
+> **注**：该环境变量在 `application-prod.properties:89` 已预留覆盖入口，
+> 但 `deploy/` 下的 K8s 与 docker-compose 模板**均未注入**——这是**有意不注入**，
+> 因为上述两种形态下绑具体 IP 都会有害。若未来出现"裸机多网卡"的交付形态，
+> 需在对应部署文档中补上该变量的设置指引。
 
 设备登记入口：`POST /api/v1/devices/{sysid}`（ADMIN，可选 `{"tenantId":N}`）——这是白名单唯一的注册腿。
 撤销用 `DELETE /api/v1/devices/{sysid}`（ADMIN）：内存条目与 `devices` 行一起清掉，撤销后该 sysid

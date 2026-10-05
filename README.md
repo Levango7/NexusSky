@@ -646,17 +646,17 @@ NexusSky/
 
 ## 测试规模
 
-实测于 2026-10-04，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
+实测于 2026-10-05，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
 
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 457 |
 | `drone-sim` | 1391 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2243 |
+| `cloud-backend` | 2295 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4239** |
+| **总计** | **4291** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -917,8 +917,7 @@ NexusSky/
   **凭据加密密钥不再有 base 明文默认值**（2026-10-02）：此前 `aerofleet.encryption.key` 在
   base 里硬编码 `aerofleet-dev-encryption-key` 且 prod/staging 都未覆盖，等于用一把公开密钥
   加密安防设备口令与 webhook secret。现在 dev/test 各自声明，prod/staging 走
-  `${AEROFLEET_ENCRYPTION_KEY}` 且无缺省（与 jwt-secret 同一套 fail-fast）。
-  License 在缺 key 或验签失败时降级为无限期 dev license（商用门禁当前不成立）
+  `${AEROFLEET_ENCRYPTION_KEY}` 且无缺省  （与 jwt-secret 同一套 fail-fast）。
   设备/边缘上报四条腿（`edge/results`、`loRa/alarm`、`offline-alarm/batch-upload|flush`、
   `alarms/events`）要求 OPERATOR 档凭据，凭据有两条路（2026-10-03 收口"整部署一把共享
   key"项）：**运营态**是 per-device key——登记设备（`POST /api/v1/devices/{sysid}`）→
@@ -963,3 +962,38 @@ NexusSky/
    `DroneCommandService.uploadMission`）。
 4. **Windows 编码**：PowerShell `Set-Content` 会写 UTF-8 BOM，JDK 17 把 BOM 当非法字符；
    CMD 嵌套执行带中文注释的批处理会乱码——所以 Java 源码全 ASCII、脚本优先 ps1。
+
+## 许可与商业授权（License）
+
+**本项目为专有软件（Proprietary Software），不是开源项目。** 全部源代码、二进制、
+文档与设计文件的著作权归 NexusSky Team 所有，保留所有权利。完整条款见根目录
+[`LICENSE`](./LICENSE)。
+
+- **使用前提**：任何形式的使用（包括内部部署、二次开发、集成到贵方产品）
+  均需获得书面商业授权。
+- **授权粒度**：以功能模块为最小单位，与 `docs/PRODUCT-POSITIONING.md` §5 的三档
+  定价方案对应：
+
+  | 档位 | 授权模块 | 说明 |
+  |---|---|---|
+  | 基础版 | `core` | 设备接入、遥测、任务、航迹、围栏、RID、监管、租户、审计 |
+  | 应急版 | `core` + `emergency` | 增应急指挥闭环、安防联动、视频 / 视觉 |
+  | 完整版 | 全部 5 模块 | 增 `fleet`（编队作业）、`network`（mesh / 基站 / 卫星）、`advanced`（孪生 / AI） |
+
+  > 模块归属的机器可校验真相源为
+  > `cloud-backend/.../license/LicenseModuleMap.java`，
+  > 由 `LicenseModuleCoverageTest` 守卫。**授权档位到模块集合的强制绑定尚未落地**
+  > （见 `docs/product-brief.md` §5），接入生产前须补齐。
+
+- **未授权行为**：复制、分发、转售、反向工程、移除授权校验逻辑、超授权范围
+  使用等，均属违约，许可方保留追究法律责任的权利。
+- **第三方组件**：本软件包含或依赖的开源组件（如前端 `gcs-web/public/vendor/`
+  下的 hls.js 等）继续受其原始许可约束，本许可不改变该等许可，亦不授予
+  对本软件自身的额外权利。
+- **商业授权咨询**：support@nexussky.io
+
+### CI / 发布注意事项
+
+`scripts/publish-pypi.*` 与 `scripts/publish-maven.*` 具备一键发布到公共仓库的能力。
+发布后制品**不可撤回**，执行前务必确认 `sdk-python/setup.py` 与 `sdk-java/pom.xml`
+的许可字段已是"Proprietary"（2026-10-05 已从误标的 Apache 2.0 修正）。

@@ -214,7 +214,8 @@ if (-not $cloudRunning) {
         }
     } else {
         Write-Host "   未找到 cloud-backend JAR: $jarPath" -ForegroundColor Yellow
-        Write-Host '   请先执行: mvn -pl cloud-backend -DskipTests package' -ForegroundColor Yellow
+        # -am 必带：不带会用 m2 里的陈旧 mavlink-core/drone-sim，导致后续 e2e 假失败
+        Write-Host '   请先执行: mvn -pl cloud-backend -am -DskipTests package' -ForegroundColor Yellow
     }
 }
 

@@ -48,9 +48,16 @@ mvn test
 mvn -pl mavlink-core test
 
 :: 生成测试覆盖率报告（JaCoCo）
-mvn -pl cloud-backend verify
+mvn -pl cloud-backend -am verify
 :: 报告位于 cloud-backend/target/site/jacoco/index.html
 ```
+
+> **为什么必须带 `-am`**（maven-incantations:ok 本行是解释而非可执行命令）：本仓是多模块 reactor。`mvn -pl cloud-backend` 不带
+> `-am` 时，Maven 不会在 reactor 内重建 `mavlink-core`/`drone-sim`，而是去本地
+> 仓库（`~/.m2/repository`）找。若那里的 SNAPSHOT jar 是旧的，**测试会拿旧字节码
+> 跑并假失败**——你看到的失败不在你的改动里。本仓曾因此误判两轮（详见
+> `CHANGELOG.md` 排查备注）。一律用 `-am`，或先跑 `mvn install -DskipTests`。
+> 门禁 `scripts/check-maven-incantations.py` 会检查文档/脚本里的裸 `-pl`。
 
 覆盖率要求：`cloud-backend` 行覆盖率最低 50%（`jacoco-maven-plugin` 配置）。
 
@@ -117,6 +124,32 @@ bash scripts/e2e-smoke.sh
 ```
 
 注意：docker-compose 仅在 Linux 上可运行（MAVLink UDP 需要 host 网络模式）。
+
+### 2.6 行尾（CRLF/LF）与本仓的现状
+
+**结论：CI 不受影响，本地看到 CRLF 属正常。**
+
+本仓**没有** `.gitattributes`，而多数 Windows 开发机的 `core.autocrlf=true`。其行为是：
+
+| 阶段 | 效果 |
+|---|---|
+| 提交时 | CRLF → LF（**归一化进 git 索引**） |
+| 检出时 | LF → CRLF（仅本地工作区） |
+
+实测确认：`git show :scripts/ci-integration-test.sh` 等文件的**索引内容均为 LF**，
+所以 Linux CI 检出后执行不会遇到 `bad interpreter: /bin/bash^M`。
+本地 `ls` 看到 CRLF 只是检出形态。
+
+> **为什么不在本仓加 `.gitattributes`**：那会一次性改写全仓 1,281 个文件的
+> 行尾归一化行为，需要独立验证（尤其 `jitpack.yml` 历史上踩过 BOM+行尾坑，
+> 见 commit `1e6095c`），不宜混在功能提交里做。若后续要做，应单独开一轮。
+
+**注意事项**：
+- 新增 `.sh` / `.py` 脚本时，**保持 LF**（编辑器设为 LF，不要 CRLF）。
+  Python 对 CRLF 容忍度较高，但 shell 脚本在容器/Linux 里执行时 `\r` 会导致
+  参数解析异常（如变量值末尾多一个 `\r`）。
+- 若本机脚本莫名报 `$'\r': command not found`，用
+  `git config --local core.autocrlf false` 后重新检出该文件，而不是手改行尾。
 
 ## 3. 代码提交规范
 
