@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** M10 集群调度 REST API */
@@ -20,11 +21,14 @@ public class SchedulingController {
 
     private final TaskAssignmentService assignmentService;
     private final ConflictAvoidanceService conflictService;
+    private final ConflictScanService conflictScanService;
 
     public SchedulingController(TaskAssignmentService assignmentService,
-                                ConflictAvoidanceService conflictService) {
+                                ConflictAvoidanceService conflictService,
+                                ConflictScanService conflictScanService) {
         this.assignmentService = assignmentService;
         this.conflictService = conflictService;
+        this.conflictScanService = conflictScanService;
     }
 
     @PostMapping("/tasks")
@@ -49,6 +53,32 @@ public class SchedulingController {
         return resp;
     }
 
+    /**
+     * 显式启动任务（生命周期沿）：标记执行中并发布 TaskStatus(30050) IN_PROGRESS 帧。
+     */
+    @PostMapping("/tasks/{id}/start")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> startTask(@PathVariable String id) {
+        boolean ok = assignmentService.startTask(id);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("taskId", id);
+        resp.put("started", ok);
+        return resp;
+    }
+
+    /**
+     * 标记任务完成：解除无人机负载映射并发布 TaskStatus(30050) COMPLETED 帧。
+     */
+    @PostMapping("/tasks/{id}/complete")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> completeTask(@PathVariable String id) {
+        boolean ok = assignmentService.completeTask(id);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("taskId", id);
+        resp.put("completed", ok);
+        return resp;
+    }
+
     @PostMapping("/conflicts/check")
     @RequireRole(Role.OPERATOR)
     public ConflictAvoidanceService.ConflictResult checkConflict(@RequestBody Map<String, Number> body) {
@@ -64,6 +94,30 @@ public class SchedulingController {
                 body.get("alt1").doubleValue(), body.get("v1").doubleValue(), body.get("h1").doubleValue(),
                 body.get("lat2").doubleValue(), body.get("lon2").doubleValue(),
                 body.get("alt2").doubleValue(), body.get("v2").doubleValue(), body.get("h2").doubleValue());
+    }
+
+    /**
+     * 机队冲突扫描（边界清零新增）：对在线无人机构建 4D 预测航迹两两检测，
+     * 每个冲突对发布 ConflictAlertMsg(30049) WS 帧。
+     */
+    @PostMapping("/conflicts/scan")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> scanConflicts() {
+        List<ConflictAvoidanceService.ConflictPair> pairs = conflictScanService.scanOnce();
+        List<Map<String, Object>> views = new java.util.ArrayList<>();
+        for (ConflictAvoidanceService.ConflictPair p : pairs) {
+            Map<String, Object> v = new LinkedHashMap<>();
+            v.put("sysid1", p.sysid1);
+            v.put("sysid2", p.sysid2);
+            v.put("minDistanceM", p.result.horizontalDistance);
+            v.put("timeToConflictSec", p.result.timeToConflict);
+            v.put("type", p.result.type);
+            views.add(v);
+        }
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("conflictCount", pairs.size());
+        resp.put("conflicts", views);
+        return resp;
     }
 
     @GetMapping("/status")

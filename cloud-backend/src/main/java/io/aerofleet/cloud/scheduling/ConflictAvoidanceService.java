@@ -196,6 +196,24 @@ public class ConflictAvoidanceService {
      */
     public List<ConflictResult> checkAllConflicts(List<DroneTrajectory> trajectories) {
         List<ConflictResult> conflicts = new ArrayList<>();
+        for (ConflictPair pair : scanAllConflicts(trajectories)) {
+            conflicts.add(pair.result);
+        }
+        return conflicts;
+    }
+
+    /**
+     * 批量 4D 冲突检测（带 sysid 对，2026-10-05 边界清零新增）：
+     * 对一组无人机航迹两两检查，返回所有冲突对。
+     * <p>
+     * 与 {@link #checkAllConflicts} 的区别：结果携带冲突双方 sysid，
+     * 供 ConflictAlertMsg(30049) 发布与调度决策使用。
+     *
+     * @param trajectories 无人机航迹列表
+     * @return 所有冲突对列表（无冲突时为空）
+     */
+    public List<ConflictPair> scanAllConflicts(List<DroneTrajectory> trajectories) {
+        List<ConflictPair> conflicts = new ArrayList<>();
         if (trajectories == null || trajectories.size() < 2) {
             return conflicts;
         }
@@ -205,7 +223,7 @@ public class ConflictAvoidanceService {
                 DroneTrajectory b = trajectories.get(j);
                 ConflictResult r = checkConflict4D(a.points, b.points);
                 if (r.conflict) {
-                    conflicts.add(r);
+                    conflicts.add(new ConflictPair(a.sysid, b.sysid, r));
                 }
             }
         }
@@ -540,6 +558,25 @@ public class ConflictAvoidanceService {
             this.verticalDistance = vDist;
             this.timeToConflict = time;
             this.type = type;
+        }
+    }
+
+    /**
+     * 冲突对（2026-10-05 边界清零新增）：携带冲突双方 sysid 的检测结果，
+     * 供 ConflictAlertMsg(30049) 发布使用（协议帧需要 sysId/conflictingSysId）。
+     */
+    public static class ConflictPair {
+        /** 第一架无人机 sysid。 */
+        public final int sysid1;
+        /** 第二架无人机 sysid。 */
+        public final int sysid2;
+        /** 冲突检测结果。 */
+        public final ConflictResult result;
+
+        public ConflictPair(int sysid1, int sysid2, ConflictResult result) {
+            this.sysid1 = sysid1;
+            this.sysid2 = sysid2;
+            this.result = result;
         }
     }
 

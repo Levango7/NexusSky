@@ -5,6 +5,8 @@ import io.aerofleet.cloud.gateway.DroneSnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -14,6 +16,11 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /**
  * TaskAssignmentService 任务分配服务单测（M10 集群智能调度）。
@@ -25,11 +32,12 @@ class TaskAssignmentServiceTest {
 
     private StubRegistry registry;
     private TaskAssignmentService service;
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
 
     @BeforeEach
     void setUp() {
         registry = new StubRegistry();
-        service = new TaskAssignmentService(registry);
+        service = new TaskAssignmentService(registry, eventPublisher);
     }
 
     @Test

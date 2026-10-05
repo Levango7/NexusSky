@@ -104,6 +104,40 @@
 - 文档：README（M12/M13 条目 + 新增 13 帧收口边界条目）、ROADMAP M13 沿革、
   competitive-analysis 边缘推理行同步。
 
+### 6. 剩余边界全部清零（2026-10-05 补记）——6 帧 + 4 条 MAV_CMD 全接上真实生产者
+
+- 30048/30050（M10 调度）：`TaskAssignmentService` 新增生命周期四态发布
+  （ASSIGNED/IN_PROGRESS/COMPLETED/ABORTED，progress 0→100），REST 新增
+  POST `/tasks/{id}/start`、`/tasks/{id}/complete`；reassignAll 对在线无人机重分配；
+- 30049（冲突避免）：新增 `ConflictScanService`（5s 周期 + REST `/conflicts/scan`）；
+  对在线且有导航数据的无人机做 4D 轨迹预测（60s 视界）两两扫描，逐对发布
+  30049（type HEAD-ON→COLLISION(2)、CROSSING/OVERTAKE→PATH(1)；severity 按倒计时
+  <10→4/<30→3/<60→2/else 1）；AIRSPACE(0) 不可达（机对几何扫描范畴）；
+- 30057/30058（4a 安防报警）：`AlarmLinkageEngine` 构造器新增
+  `ApplicationEventPublisher` 参数；processEvent 落库后发布 30057（deviceId u16
+  哈希）；executeAutoDispatch 派遣成功后逐受派无人机发布 30058（承载真实 sysid +
+  etaSec）；设备源帧租户路由经 `MavlinkMessageEvent` 显式租户字段（null+explicit=未归属→全局域），无人机源帧沿用 registry.tenantOf(sysid)；
+- 30059（监控状态）：新增 `SurveillanceStatusPusher`（1s 周期，无 WS 客户端跳过）；
+  `SurveillanceDevice.firstSeenMs` 新增；诚实口径——单通道模型（totalCameras 恒为 1，
+  无多通道设备）、status 仅 ONLINE/OFFLINE（FAULT/MAINTENANCE 不可达）、uptimeSec
+  为进程内计数（重启清零，firstSeenMs 不持久化）；
+- 30080-30082（环境命令）：新增 `telemetry/EnvOverrideController`（@RestController，
+  @RequireRole(OPERATOR)），POST `/api/v1/env/{sysid}/wind|weather|thresholds`，
+  参数校验与 drone-sim 机载校验同构（风速 0-50、风向 [0,360)、weatherCode 0-4、雨量 0-255、
+  阈值 windWarnMps≥0 且 < windCritMps）；
+- 30085（载荷查询）：`DeliveryController` 构造器新增 `DroneCommandService`，新增
+  POST `/{id}/payload/query`（按 delivery.sequence 取 targetSysid，机载立即回传
+  PAYLOAD_STATUS 30006）；
+- 计数：新增 38 测（TaskAssignmentFrameTest 10、ConflictScanServiceTest 7、
+  AlarmLinkageEngineFrameTest 6、SurveillanceStatusPusherTest 5、
+  EnvOverrideControllerTest 7、DeliveryPayloadQueryTest 3）；cloud-backend 2238、
+  全仓 4234（+38）；api-reference.md 端点 353（190 GET / 136 POST / 13 PUT / 14 DELETE）、
+  @RestController 66、控制器源文件 69；
+- 文档：README 两条边界条目（M10 + 6 帧收口）翻转写明真实生产者与诚实不可达值
+  （FAILED(3)、AIRSPACE(0)、FAULT(2)/MAINTENANCE(3)、totalCameras 固定 1、uptimeSec
+  非持久、30048/30050 taskId 字符串→u32 哈希非可逆映射）；ROADMAP M10 补记 + 顶部
+  生产者清零记录；CHANGELOG 本条。
+
 ---
 
 ## [Unreleased] — deploy 三路径收口：helm 资源名 release 化 / 内置 PG / NetworkPolicy 断链修复（2026-10-05）

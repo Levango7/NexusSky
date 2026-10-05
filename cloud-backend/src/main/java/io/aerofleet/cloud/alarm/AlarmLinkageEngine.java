@@ -3,9 +3,13 @@ package io.aerofleet.cloud.alarm;
 import io.aerofleet.cloud.autodispatch.AutoDispatchService;
 import io.aerofleet.cloud.autodispatch.DispatchResult;
 import io.aerofleet.cloud.autodispatch.VoiceIntercomService;
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
+import io.aerofleet.mavlink.messages.AlarmAckMsg;
+import io.aerofleet.mavlink.messages.AlarmTriggerMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
@@ -30,6 +34,11 @@ import java.util.concurrent.ConcurrentLinkedDeque;
  *   <li>匹配规则委托 {@link AlarmToOrchBridge} 执行联动动作</li>
  *   <li>记录处理日志与执行结果</li>
  * </ol>
+ * <p>
+ * WS 帧生产（2026-10-05 边界清零）：事件摄取发布 AlarmTriggerMsg(30057)
+ * （显式租户 = 事件所属租户，帧 sysid = 设备 ID 哈希）；AUTO_DISPATCH 联动
+ * 派遣成功后逐机发布 AlarmAckMsg(30058, ackResult=1 已开始响应，含真实 ETA）。
+ * DEPLOY_DRONE 走云内编排无确定机载 sysid，不发 ack——见 README 边界口径。
  *
  * @see AlarmLinkageRule
  * @see AlarmToOrchBridge
@@ -50,6 +59,8 @@ public class AlarmLinkageEngine {
     private final Optional<AutoDispatchService> autoDispatchService;
     /** 语音对讲服务（@Lazy 避免循环依赖，可能未注入）。 */
     private final Optional<VoiceIntercomService> voiceIntercomService;
+    /** WS 帧发布器（旧构造器/测试场景为 null，发布跳过）。 */
+    private final ApplicationEventPublisher eventPublisher;
     /** 联动执行日志（最近 N 条，线程安全的有界队列）。 */
     private final ConcurrentLinkedDeque<LinkageLog> linkageLogs = new ConcurrentLinkedDeque<>();
     /** 联动日志容量上限。 */
@@ -58,21 +69,25 @@ public class AlarmLinkageEngine {
     @Autowired
     public AlarmLinkageEngine(AlarmEventStore eventStore, AlarmToOrchBridge bridge,
                               @Lazy AutoDispatchService autoDispatchService,
-                              @Lazy VoiceIntercomService voiceIntercomService) {
+                              @Lazy VoiceIntercomService voiceIntercomService,
+                              ApplicationEventPublisher eventPublisher) {
         this.eventStore = eventStore;
         this.bridge = bridge;
         this.autoDispatchService = Optional.ofNullable(autoDispatchService);
         this.voiceIntercomService = Optional.ofNullable(voiceIntercomService);
+        this.eventPublisher = eventPublisher;
     }
 
     /**
-     * 兼容旧构造器：不注入自动出警/语音对讲服务（用于测试与向后兼容）。
+     * 兼容旧构造器：不注入自动出警/语音对讲服务与帧发布器（用于测试与向后兼容，
+     * WS 帧发布跳过）。
      */
     public AlarmLinkageEngine(AlarmEventStore eventStore, AlarmToOrchBridge bridge) {
         this.eventStore = eventStore;
         this.bridge = bridge;
         this.autoDispatchService = Optional.empty();
         this.voiceIntercomService = Optional.empty();
+        this.eventPublisher = null;
     }
 
     /**
@@ -149,6 +164,7 @@ public class AlarmLinkageEngine {
         log.info("alarm event received: id={} type={} severity={} device={}",
                 event.getId(), event.getEventType(), event.getSeverity(),
                 event.getSourceDeviceId());
+        publishAlarmTrigger(event);
 
         // 2. 遍历启用规则，匹配并执行动作
         List<ActionExecution> executions = new ArrayList<>();
@@ -278,6 +294,12 @@ public class AlarmLinkageEngine {
         log.info("auto dispatch action: eventId={} ruleId={} status={} dispatched={}",
                 event.getId(), rule.getId(), result.getStatus(),
                 result.getDispatchedDrones().size());
+        // 派遣成功（已分配任务）= 无人机开始响应：逐机发布机载确认帧（30058）
+        for (DispatchResult.DispatchedDrone drone : result.getDispatchedDrones()) {
+            if (drone.isTaskAssigned()) {
+                publishAlarmAck(event, drone);
+            }
+        }
 
         Map<String, Object> template = new java.util.LinkedHashMap<>();
         template.put("dispatchId", result.getDispatchId());
@@ -352,6 +374,92 @@ public class AlarmLinkageEngine {
     /** 当前联动日志总数。 */
     public int linkageLogCount() {
         return linkageLogs.size();
+    }
+
+    // =====================================================================
+    // WS 帧发布（30057 AlarmTrigger / 30058 AlarmAck）
+    // =====================================================================
+
+    /** 机载确认结果常量：1 = 已开始响应（联动派遣成功语义）。 */
+    private static final int ACK_RESULT_RESPONDING = 1;
+
+    /**
+     * 字符串 ID → u32 稳定哈希（事件 ID / 设备 ID 的协议承载方式）。
+     * REST 面 ID 为字符串，u32 字段以 {@code String.hashCode()} 无符号化映射。
+     */
+    static long idToU32(String id) {
+        return id == null ? 0L : id.hashCode() & 0xFFFFFFFFL;
+    }
+
+    /** 设备 ID → u16 稳定哈希（sourceDeviceId 协议字段，碰撞可能，REST 面以字符串为准）。 */
+    static int deviceIdToU16(String deviceId) {
+        return deviceId == null ? 0 : deviceId.hashCode() & 0xFFFF;
+    }
+
+    /** 报警海拔（m）→ i16 毫米钳位（协议 i16 范围 ±32.767m，超出截断）。 */
+    private static int altMmClampI16(double altM) {
+        long mm = Math.round(altM * 1000.0);
+        if (mm > Short.MAX_VALUE) {
+            return Short.MAX_VALUE;
+        }
+        if (mm < Short.MIN_VALUE) {
+            return Short.MIN_VALUE;
+        }
+        return (int) mm;
+    }
+
+    /**
+     * 发布 AlarmTriggerMsg(30057)：报警事件摄取即通知（安防设备→无人机通知语义，
+     * 云端代发）。显式租户 = 事件所属租户；帧 sysid = 设备 ID 哈希（非无人机 sysid）。
+     * 发布失败仅记日志，不影响事件处理主流程。
+     */
+    private void publishAlarmTrigger(AlarmEvent event) {
+        if (eventPublisher == null) {
+            return;
+        }
+        try {
+            AlarmTriggerMsg msg = new AlarmTriggerMsg(
+                    event.getTimestampMs(),
+                    (int) Math.round(event.getLat() * 1e7),
+                    (int) Math.round(event.getLon() * 1e7),
+                    deviceIdToU16(event.getSourceDeviceId()),
+                    altMmClampI16(event.getAlt()),
+                    event.getEventType().ordinal(),
+                    event.getSeverity().level(),
+                    event.getDescription() == null ? "" : event.getDescription());
+            eventPublisher.publishEvent(new MavlinkMessageEvent(
+                    this, deviceIdToU16(event.getSourceDeviceId()),
+                    AlarmTriggerMsg.ID, msg, event.getTimestampMs(),
+                    event.getTenantId()));
+        } catch (Exception e) {
+            log.warn("alarm trigger frame publish failed: eventId={}: {}", event.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 发布 AlarmAckMsg(30058)：AUTO_DISPATCH 派遣成功（无人机已分配任务）视为
+     * 机载开始响应，承载真实无人机 sysid 与预计到达时间。显式租户 = 事件所属租户；
+     * 事件 sysid = 被派遣无人机（真实机载 sysid）。
+     */
+    private void publishAlarmAck(AlarmEvent event, DispatchResult.DispatchedDrone drone) {
+        if (eventPublisher == null) {
+            return;
+        }
+        try {
+            long now = System.currentTimeMillis();
+            AlarmAckMsg msg = new AlarmAckMsg(
+                    idToU32(event.getId()),
+                    now,
+                    drone.getEstimatedArrivalSec(),
+                    drone.getSysid(),
+                    ACK_RESULT_RESPONDING);
+            eventPublisher.publishEvent(new MavlinkMessageEvent(
+                    this, drone.getSysid(), AlarmAckMsg.ID, msg, now,
+                    event.getTenantId()));
+        } catch (Exception e) {
+            log.warn("alarm ack frame publish failed: eventId={} sysid={}: {}",
+                    event.getId(), drone.getSysid(), e.getMessage());
+        }
     }
 
     // =====================================================================

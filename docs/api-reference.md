@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 更新至 2026-10-03，共 65 个 `@RestController`、3 个 `@Service` 辅助类、346 个 REST API 端点
+> 更新至 2026-10-05，共 66 个 `@RestController`、3 个 `@Service` 辅助类、353 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -2456,6 +2456,6 @@ es.onerror = (e) => {
 | 限飞区 | RestrictionController | /api/v1/geofence | 4 |
 | 设备归属 | DeviceProvisioningController | /api/v1/devices | 4 |
 | 视觉感知 | CvEvalController | /api/v1/cv-eval | 2 |
-| **合计** | **65 个 @RestController** | | **345** |
+| **合计** | **66 个 @RestController** | | **353** |
 
-> **注**: 项目共 68 个 Controller 源文件（67 个 `*Controller.java` + `delivery2/DeliveryController2.java`），其中 65 个为 `@RestController`。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。65 个 `@RestController` 共 345 个端点。
+> **注**: 项目共 69 个 Controller 源文件（68 个 `*Controller.java`，含新增 `telemetry/EnvOverrideController` + `delivery2/DeliveryController2.java`），其中 66 个为 `@RestController`（新增 3 个环境控制端点 + 2 个任务生命周期端点 + 1 个冲突扫描端点 + 1 个载荷查询端点）。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。66 个 `@RestController` 共 353 个端点（190 GET / 136 POST / 13 PUT / 14 DELETE）。

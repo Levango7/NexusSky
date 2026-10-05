@@ -2,9 +2,15 @@ package io.aerofleet.cloud.scheduling;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.security.TenantContext;
+import io.aerofleet.mavlink.enums.TaskStatusEnum;
+import io.aerofleet.mavlink.enums.TaskType;
+import io.aerofleet.mavlink.messages.TaskAssignmentMsg;
+import io.aerofleet.mavlink.messages.TaskStatusMsg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -15,12 +21,18 @@ import java.util.concurrent.PriorityBlockingQueue;
  * M10 集群智能调度：多机任务分配 + 冲突避免 + 任务队列管理。
  *
  * 分配算法：综合评分 = 能力匹配(40%) + 电量因子(30%) + 距离因子(20%) + 优先级(10%)
+ *
+ * WS 帧生产（2026-10-05 边界清零）：分配成功发布 TaskAssignmentMsg(30048) +
+ * TaskStatusMsg(30050, ASSIGNED)；startTask/pollNextTask 发布 IN_PROGRESS；
+ * completeTask 发布 COMPLETED；cancelTask 发布 ABORTED。FAILED 无生命周期路径
+ * （模型无失败态转换），协议值不可达——见 README 边界口径。
  */
 @Service
 public class TaskAssignmentService {
     private static final Logger log = LoggerFactory.getLogger(TaskAssignmentService.class);
 
     private final DeviceRegistry registry;
+    private final ApplicationEventPublisher eventPublisher;
     private final PriorityBlockingQueue<TaskRequest> taskQueue = new PriorityBlockingQueue<>(100,
             Comparator.comparingInt(TaskRequest::getPriority).reversed());
     private final Map<String, AssignmentResult> assignments = new ConcurrentHashMap<>();
@@ -57,8 +69,9 @@ public class TaskAssignmentService {
     /** 地球半径（m），用于 haversine 距离计算 */
     private static final double EARTH_RADIUS_M = 6371000.0;
 
-    public TaskAssignmentService(DeviceRegistry registry) {
+    public TaskAssignmentService(DeviceRegistry registry, ApplicationEventPublisher eventPublisher) {
         this.registry = registry;
+        this.eventPublisher = eventPublisher;
     }
 
     /** 分配任务到最优无人机 */
@@ -108,6 +121,7 @@ public class TaskAssignmentService {
         }
         taskQueue.offer(req);
         log.info("Task {} assigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
+        publishAssignmentFrames(req, best.sysid);
         return result;
     }
 
@@ -155,6 +169,7 @@ public class TaskAssignmentService {
                 taskTenantMap.put(requests.get(i).getTaskId(), tenantId);
             }
             taskQueue.offer(requests.get(i));
+            publishAssignmentFrames(requests.get(i), d.sysid);
             results.add(r);
         }
         log.info("assignTasks: {} tasks to {} drones via {}", nTasks, nDrones, algo);
@@ -439,6 +454,7 @@ public class TaskAssignmentService {
             }
             // 同步从任务队列移除，避免队列只增不减
             taskQueue.removeIf(req -> req.getTaskId().equals(taskId));
+            publishTaskStatus(taskId, removed.getAssignedSysid(), TaskStatusEnum.ABORTED.ordinal(), 0);
         }
         return removed != null;
     }
@@ -452,13 +468,36 @@ public class TaskAssignmentService {
             if (assignment != null && assignment.isSuccess()) {
                 droneToTaskIds.computeIfAbsent(assignment.getAssignedSysid(), k -> ConcurrentHashMap.newKeySet())
                         .add(task.getTaskId());
+                publishTaskStatus(task.getTaskId(), assignment.getAssignedSysid(),
+                        TaskStatusEnum.IN_PROGRESS.ordinal(), 0);
             }
         }
         return task;
     }
 
-    /** 标记任务完成，从无人机负载映射中移除。 */
-    public synchronized void completeTask(String taskId) {
+    /**
+     * 显式启动指定任务（REST 生命周期沿）：标记为正在执行并发布 IN_PROGRESS 帧。
+     *
+     * @return true 若任务存在且分配成功
+     */
+    public synchronized boolean startTask(String taskId) {
+        AssignmentResult assignment = assignments.get(taskId);
+        if (assignment == null || !assignment.isSuccess()) {
+            return false;
+        }
+        droneToTaskIds.computeIfAbsent(assignment.getAssignedSysid(), k -> ConcurrentHashMap.newKeySet())
+                .add(taskId);
+        taskQueue.removeIf(req -> req.getTaskId().equals(taskId));
+        publishTaskStatus(taskId, assignment.getAssignedSysid(), TaskStatusEnum.IN_PROGRESS.ordinal(), 0);
+        return true;
+    }
+
+    /**
+     * 标记任务完成，从无人机负载映射中移除，并发布 COMPLETED 帧。
+     *
+     * @return true 若任务存在且分配成功
+     */
+    public synchronized boolean completeTask(String taskId) {
         AssignmentResult assignment = assignments.get(taskId);
         if (assignment != null && assignment.isSuccess()) {
             Set<String> activeTasks = droneToTaskIds.get(assignment.getAssignedSysid());
@@ -468,9 +507,13 @@ public class TaskAssignmentService {
                     droneToTaskIds.remove(assignment.getAssignedSysid());
                 }
             }
+            publishTaskStatus(taskId, assignment.getAssignedSysid(),
+                    TaskStatusEnum.COMPLETED.ordinal(), 100);
             log.info("Task {} completed, removed from drone {} load tracking",
                     taskId, assignment.getAssignedSysid());
+            return true;
         }
+        return false;
     }
 
     /**
@@ -525,11 +568,103 @@ public class TaskAssignmentService {
                 assignments.put(req.getTaskId(), result); // 覆盖旧分配记录
                 taskQueue.offer(req);
                 log.info("Task {} reassigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
+                publishAssignmentFrames(req, best.sysid);
             } else {
                 // 无在线无人机时将任务放回队列，等待下次有无人机上线时再分配。
                 taskQueue.offer(req);
                 log.warn("Task {} cannot be reassigned: no online drone available, re-queued", req.getTaskId());
             }
+        }
+    }
+
+    // ==================== WS 帧发布（30048 TaskAssignment / 30050 TaskStatus） ====================
+
+    /** 云端调度器作为帧发送方的系统 ID（与 UdpGateway.GCS_SYSID 同源）。 */
+    private static final int SENDER_SYSID = 255;
+
+    /**
+     * taskId 字符串 → u32 稳定哈希。
+     * <p>
+     * REST 面 taskId 为 1-64 字符字符串，协议字段 u32 无法无损承载；
+     * 以 {@code String.hashCode()} 无符号化映射，同一 taskId 稳定映射同一 u32
+     * （理论碰撞存在，REST 面以字符串 taskId 为准）。
+     */
+    static long taskIdToU32(String taskId) {
+        return taskId.hashCode() & 0xFFFFFFFFL;
+    }
+
+    /**
+     * REST 优先级 0-10 → 协议优先级 1-4（等宽分档）。
+     * <p>
+     * [0,2]→1（低），[3,5]→2（中），[6,8]→3（高），[9,10]→4（紧急）。
+     */
+    static int priorityToProtocol(int priority) {
+        if (priority <= 2) {
+            return 1;
+        }
+        if (priority <= 5) {
+            return 2;
+        }
+        if (priority <= 8) {
+            return 3;
+        }
+        return 4;
+    }
+
+    /** i16 高度钳位（协议 targetAlt i16，米）。 */
+    private static int clampAltI16(double altM) {
+        long v = Math.round(altM);
+        if (v > Short.MAX_VALUE) {
+            return Short.MAX_VALUE;
+        }
+        if (v < Short.MIN_VALUE) {
+            return Short.MIN_VALUE;
+        }
+        return (int) v;
+    }
+
+    /**
+     * 分配成功后发布 30048（任务分配）+ 30050（ASSIGNED, progress 0）。
+     * <p>
+     * 发布失败仅记日志，不影响分配主流程（WS 转发是旁路关注点）。
+     */
+    private void publishAssignmentFrames(TaskRequest req, int assignedSysid) {
+        try {
+            long now = System.currentTimeMillis();
+            TaskAssignmentMsg assignmentMsg = new TaskAssignmentMsg(
+                    taskIdToU32(req.getTaskId()),
+                    (int) Math.round(req.getTargetLat() * 1e7),
+                    (int) Math.round(req.getTargetLon() * 1e7),
+                    clampAltI16(req.getTargetAlt()),
+                    SENDER_SYSID,
+                    TaskType.valueOf(req.getTaskType()).ordinal(),
+                    priorityToProtocol(req.getPriority()),
+                    assignedSysid);
+            eventPublisher.publishEvent(
+                    new MavlinkMessageEvent(this, assignedSysid, TaskAssignmentMsg.ID, assignmentMsg, now));
+            publishTaskStatus(req.getTaskId(), assignedSysid, TaskStatusEnum.ASSIGNED.ordinal(), 0);
+        } catch (Exception e) {
+            log.warn("task assignment frame publish failed: taskId={}: {}", req.getTaskId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 发布 30050（任务状态）。事件 sysid 用任务所属无人机（租户路由按其归属推导）；
+     * 帧内 sysId 字段为任务所属机（云端代报生命周期沿，非机载自报）。
+     */
+    private void publishTaskStatus(String taskId, int assignedSysid, int statusOrdinal, int progressPercent) {
+        try {
+            TaskStatusMsg msg = new TaskStatusMsg(
+                    taskIdToU32(taskId),
+                    System.currentTimeMillis(),
+                    assignedSysid,
+                    statusOrdinal,
+                    progressPercent);
+            eventPublisher.publishEvent(
+                    new MavlinkMessageEvent(this, assignedSysid, TaskStatusMsg.ID, msg, msg.timestamp));
+        } catch (Exception e) {
+            log.warn("task status frame publish failed: taskId={} status={}: {}",
+                    taskId, statusOrdinal, e.getMessage());
         }
     }
 }

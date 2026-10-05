@@ -56,6 +56,13 @@ public class SurveillanceDevice {
     public volatile String rtspUrl;
     /** 最近一次心跳时间戳（System.currentTimeMillis()）。 */
     public volatile long lastHeartbeatMs;
+    /**
+     * 首次注册/进程内首次加载时间戳（System.currentTimeMillis()）。
+     * <p>
+     * 运行时长（uptime）推导基准：{@code now - firstSeenMs}。JPA 实体不持久化
+     * 该字段，进程重启后从加载时刻重新计数（设备模型无出厂/激活时间字段）。
+     */
+    public volatile long firstSeenMs;
     /** 租户 ID（用于租户隔离，null 表示全局管理员或未设置）。 */
     public volatile Integer tenantId;
 
@@ -85,6 +92,7 @@ public class SurveillanceDevice {
         this.password = password;
         this.status = Status.ONLINE;
         this.lastHeartbeatMs = System.currentTimeMillis();
+        this.firstSeenMs = this.lastHeartbeatMs;
     }
 
     /** 获取设备能力集合（不可变视图）。 */

@@ -366,6 +366,10 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
      * 从 TelemetryIngestService.forwardToWs 迁移。帧格式：
      * {"type":"<type>","sysid":N,"data":<msg>,"timestamp":T}
      * <p>
+     * 租户路由：设备源帧（安防报警/监控设备）经 {@link MavlinkMessageEvent#isTenantExplicit()}
+     * 携带显式租户，优先采用（其 sysid 是设备 ID 哈希，不可反查）；无人机源帧沿用
+     * {@code DeviceRegistry.tenantOf(sysid)} 推导。显式 null = 设备未归属 → 全局域。
+     * <p>
      * 无 WS 连接时降级为日志输出，不阻塞事件处理。
      */
     @EventListener
@@ -384,7 +388,10 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
             frame.put("sysid", event.getSysid());
             frame.put("data", event.getMessage());
             frame.put("timestamp", event.getMsgTimestamp());
-            broadcastToTenant(registry.tenantOf(event.getSysid()),
+            Integer tenant = event.isTenantExplicit()
+                    ? event.getOwnerTenantId()
+                    : registry.tenantOf(event.getSysid());
+            broadcastToTenant(tenant,
                     objectMapper.writeValueAsString(frame));
         } catch (Exception e) {
             log.warn("WS forward failed: sysid={} type={}: {}", event.getSysid(), type, e.getMessage());

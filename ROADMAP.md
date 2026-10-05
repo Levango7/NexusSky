@@ -22,13 +22,17 @@
 - **真实卫星接入预留**：天通/铱星/星链三种卫星通信系统占位实现类，统一 SatelliteLink
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
-   4196 单测全绿（Java surefire 实测；前端已有 168 例 vitest——api.js 会话/预算
+   4234 单测全绿（Java surefire 实测；前端已有 168 例 vitest——api.js 会话/预算
     档位/WS URL、组件逻辑、孪生同步换算与分桶、M11 决策三帧归一化；Playwright
     真浏览器 E2E 4 例已于 2026-10-04 补齐，见 docs/devops-enhancement-plan.md CI7）
   > 第六轮（2026-10-02）明细见 CHANGELOG「Unreleased — 第六轮审查」。此前此处写
   > 「6 轮 / 32 问题 / 3230 单测」，其中 3230 已过期两年多、且第 6 轮在 CHANGELOG
   > 无记录——第六轮补齐了这条记录，单测数则由新增的 CI 门禁持续保证不会再次过期。
 - **新功能扩展方案全部完成**：P0–P3 + Wave 1-2（M0a–M13、4a、P2、P3）+ 代码审查全部收尾
+- **消息/命令生产者清零（2026-10-05）**：51 条自定义消息与 8 条自定义 MAV_CMD 在
+  仓库内全部有真实生产者——最后一轮补齐 6 类 WS 帧（M10 的 30048-30050、4a 的
+  30057-30059）与 4 条 MAV_CMD（30080-30082 环境配置 REST、30085 载荷查询），
+  详见 CHANGELOG「Unreleased — 边界清零」与 README 边界条目（M10 补记在案）。
 - **低空经济需求调研 v2**：67 个来源、逐条核验，形成合规/付费场景/出海三优先级建设基线
 
 ## 二、分阶段里程碑
@@ -138,13 +142,23 @@
 
 依赖：M5 + M6 + M7 + M8（全部完成后才能编排）。
 
-### M10 集群智能调度（多机任务分配 + 冲突避免） ✅ 已完成
+### M10 集群智能调度（多机任务分配 + 冲突避免） ✅ 已完成（WS 帧生产者补齐 2026-10-05）
 | 交付物 | 说明 |
 |---|---|
 | 任务分配引擎 | 综合评分算法：能力匹配(40%) + 电量因子(30%) + 距离因子(20%) + 优先级(10%) |
 | 冲突避免 | 航迹交叉检测 + 时空预留 + 安全距离约束 |
 | 任务队列管理 | 优先级队列 + 全量重分配（无人机损毁后触发） |
 | MAVLink 新消息 | TaskAssignmentMsg(30048) / ConflictAlertMsg(30049) / TaskStatusMsg(30050) |
+
+> **2026-10-05 补记**：30048/30049/30050 三帧接上云端生产者，不再是"仅协议
+> 定义"——`TaskAssignmentService` 在 assign/reassign/poll 及新增 REST
+> `/tasks/{id}/start|complete` 生命周期端点上发布任务帧与状态帧
+> （ASSIGNED/IN_PROGRESS/COMPLETED/ABORTED 四态）；新增 `ConflictScanService`
+> 5s 周期 + POST `/scheduling/conflicts/scan` 对在线无人机 4D 轨迹预测两两
+> 扫描发布 30049（type 映射 HEAD-ON→COLLISION、CROSSING/OVERTAKE→PATH，
+> severity 按冲突倒计时分档）。诚实边界：TaskStatus FAILED(3) 无生命周期
+> 路径；ConflictType AIRSPACE(0) 不属机对扫描；taskId 为字符串哈希 u32
+> 非可逆映射。
 
 依赖：Baseline（DeviceRegistry 多机状态）。
 
@@ -397,6 +411,6 @@ M7 ──► E4(5G-A通感)
 1. 每个里程碑走完整 SDD；单个里程碑内尽量原子化（2–4h/任务）。
 2. 代码严格落在已有模块边界内：`cloud-backend`(调度/API)、`drone-sim`(载荷/执行)、
    `mavlink-core`(新消息)、`link-sim`(中继/链路)、`gcs-web`(观察)。
-3. 每个里程碑必须有回归基线：现有 4196 单测（Java） + e2e 脚本不回归。
+3. 每个里程碑必须有回归基线：现有 4234 单测（Java） + e2e 脚本不回归。
 4. 边界诚实声明：工作量 = 协议抽象 + 假数据源，非真硬件实现。
 5. **MAVLink msgId 全局唯一且避开官方分配带**：2026-10 治理搬迁后自定义消息统一使用私有方言段 **30000-30099**（common.xml 官方拥有 msgId 300-10000 分配带，旧 420-483 段位于其中，420/437/440 已与官方 RADIO_RC_CHANNELS / AVAILABLE_MODES_MONITOR / ILLUMINATOR_STATUS 实锤冲突，全部 51 条已等差平移 +29580）。已分配：30000-30021(M0a-M4)、30030-30047(M5-M9)、30048-30056(M10-M13)、30057-30059(4a 安防报警)、30060-30063(P2 灾害应急通讯组网扩展)；新增从 **30064+** 起分配，30064-30099 为增长预留。**自定义 MAV_CMD 同步治理（2026-10）**：8 条自定义命令（原 310-312/320-322/420/421）已搬入私有区命令子段 **30080-30087**（命令与消息分属不同命名空间，数值不冲突；分段纯为日志可读性，常量收口 `MavEnums.MAV_CMD_NEXUS_*`，守卫测试防回退）。冲突防护：`scripts/mavlink-compatibility-check.py --self-test` 内嵌 392 个官方已分配 msgId 快照逐条核对。Phase 2 预估 msgId 区间：C2(RID) 使用 `OPEN_DRONE_ID_*` 官方消息族（msgId 12900-12999，MAVLink 官方分配），C5(signing) 使用 MAVLink v2 签名帧（不占新 msgId），其余 C/F/E 系列按需从 30064+ 分配。

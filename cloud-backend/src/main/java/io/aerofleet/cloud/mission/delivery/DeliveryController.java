@@ -2,11 +2,15 @@ package io.aerofleet.cloud.mission.delivery;
 
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.cloud.mission.formation.FormationController;
 import io.aerofleet.cloud.mission.spray.SprayTaskService;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import io.aerofleet.mavlink.enums.MavEnums;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -29,21 +33,25 @@ import java.util.Map;
  * <p>
  * 端点清单：
  * <pre>
- *   POST   /api/v1/delivery              创建配送任务（FR-23）
- *   GET    /api/v1/delivery/{id}         查询配送任务状态（FR-25）
- *   POST   /api/v1/delivery/{id}/control 控制配送任务（推进/跳过站点）
- *   GET    /api/v1/delivery/{id}/payload 查询当前负载清单（FR-34）
+ *   POST   /api/v1/delivery                    创建配送任务（FR-23）
+ *   GET    /api/v1/delivery/{id}               查询配送任务状态（FR-25）
+ *   POST   /api/v1/delivery/{id}/control       控制配送任务（推进/跳过站点）
+ *   GET    /api/v1/delivery/{id}/payload       查询当前负载清单（FR-34）
+ *   POST   /api/v1/delivery/{id}/payload/query 按需触发机载负载上报（MAV_CMD 30085）
  * </pre>
  */
 @RestController
 @RequestMapping("/api/v1/delivery")
 @RequireRole(Role.OBSERVER)
 public class DeliveryController {
+    private static final Logger log = LoggerFactory.getLogger(DeliveryController.class);
 
     private final DeliveryService deliveryService;
+    private final DroneCommandService commands;
 
-    public DeliveryController(DeliveryService deliveryService) {
+    public DeliveryController(DeliveryService deliveryService, DroneCommandService commands) {
         this.deliveryService = deliveryService;
+        this.commands = commands;
     }
 
     /** 创建配送任务（FR-23）。 */
@@ -138,6 +146,37 @@ public class DeliveryController {
         out.put("totalVolume", totalVolume);
         // TODO: combinedCenterOfGravity 需要 payload 在机舱中的位置数据才能计算加权重心
         out.put("combinedCenterOfGravity", 0);
+        return out;
+    }
+
+    /**
+     * 按需触发机载负载上报（MAV_CMD 30085 生产者，边界清零 2026-10-05）。
+     * <p>
+     * 向配送任务的目标机下发 MAV_CMD_NEXUS_PAYLOAD_QUERY(30085)；机载
+     * （drone-sim {@code handlePayloadQuery}）立即回传一帧 PAYLOAD_STATUS(30006)，
+     * 作为 1Hz 周期遥测之外的按需冗余触发。云端命令结果同步返回。
+     */
+    @PostMapping("/{id}/payload/query")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> queryPayload(@PathVariable("id") int id) {
+        DeliverySequence seq = deliveryService.sequence(id);
+        if (seq == null) {
+            throw new NotFoundException("delivery " + id + " not found");
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("deliveryId", id);
+        out.put("sysid", seq.targetSysid());
+        try {
+            int result = commands.command(seq.targetSysid(),
+                    MavEnums.MAV_CMD_NEXUS_PAYLOAD_QUERY, 0, 0, 0, 0, 0, 0, 0);
+            out.put("status", "ok");
+            out.put("result", result);
+        } catch (DroneCommandService.CommandException e) {
+            log.warn("payload query failed for delivery={} sysid={}: {}",
+                    id, seq.targetSysid(), e.getMessage());
+            out.put("status", "error");
+            out.put("result", e.getMessage());
+        }
         return out;
     }
 

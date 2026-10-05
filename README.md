@@ -26,7 +26,7 @@
 |---|---|---|---|
 | `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**457 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
-| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（346 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
+| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（353 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 38 个功能面板 | 不需要换 |
 
 > **M0a–M4 能力扩展**：组网/环境/编队/喷洒/成像/硬件抽象均在上述四模块内叠加，
@@ -583,7 +583,7 @@ DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理�
 - `GET /v1/disaster/status` 灾害模式状态 · `POST /v1/disaster/budget` Budget 模式切换
 - `POST /v1/buzzer/control` 蜂鸣器控制 · `GET /v1/thermal/search` 热源搜救
 
-> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 65 个 @RestController、346 REST 端点。
+> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 68 个 @RestController、353 REST 端点。
 
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
@@ -653,10 +653,10 @@ NexusSky/
 | `mavlink-core` | 457 |
 | `drone-sim` | 1391 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2200 |
+| `cloud-backend` | 2238 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4196** |
+| **总计** | **4234** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -855,36 +855,49 @@ NexusSky/
    置信度）以 "prediction-result" WS 帧广播；空轨迹不发布，compare 端点的
    内部 1 秒近似预测属虚实对比用途不发布。**仍存的语义边界**：
    `driftMeters` 是相邻两次同步的位移，非与独立实测的偏差（孪生与物理态云内同源）。
- - **自定义 MAV_CMD 已整带搬入私有区 30080-30099**（2026-10-04；原 310-312/
-   320-322/420/421 位于官方/方言分配带，其中 420/421 与 ArduPilot 方言实锤冲突。
-   常量收口 `MavEnums.MAV_CMD_NEXUS_*`，双测试钉扎：私有区守卫 + 真实 UDP
-   派发往返）。其中环境配置 3 条（30080-30082）与载荷查询（30085）在仓库内
-   无生产者，属**设计边界而非缺口**：环境命令是 M0b 的机载本地控制面（M0b
-   立项范围是模型+告警+消息，云端环境控制 API 从未立项）；载荷查询是 1Hz 周期
-   PAYLOAD_STATUS 遥测之外的按需冗余触发。协议面保留给 SITL/外部工具与后续
-   GCS 功能。
- - **WS_TYPE_MAP 13 帧生产者收口**（2026-10-05）：/ws/telemetry 的 13 类转发
-   帧现全部逐一核实，7 类有真实生产者（decision-event/adaptive-path/
-   edge-task-status/sensor-fusion 出自 drone-sim，twin-state-sync 出自
-   TwinSyncListener，vision-detection/prediction-result 为本日新增——见上两条）。
-   其余 6 类维持「协议预留」**边界而非缺口**，各自有具体依据：task-assignment
-   (30048)——`TaskRequest.taskId` 是字符串，消息字段 u32 无法无损承载（哈希
-   映射无法与 REST 面 taskId 关联，属协议改造决策）；conflict-alert(30049)——
-   `/scheduling/conflicts/check` 的输入是两机位置/速度（无 sysid 对），
-   `ConflictResult` 亦无 severity 概念，产出该帧需先扩 API 语义；task-status
-   (30050)——M10 调度任务无执行进度跟踪（无任何链路更新 progressPercent，
-   机载任务执行走 MISSION 协议而非 M10 任务）；alarm-trigger(30057)/
-   alarm-ack(30058)——消息语义是「安防设备→无人机通知 + 机载确认」的 MAVLink
-   下行闭环，机载无 30057 接收/应答处理，报警联动实际走 AlarmLinkageEngine→
-   AutoDispatchService 云内调用（REST 面的运维确认与机载 ack 不同物）；
-   surveillance-status(30059)——`SurveillanceDevice` 模型无摄像头数量/运行
-   时长字段（消息要求 onlineCameras/totalCameras/uptimeSec），产出需先扩
-   设备模型。协议面全部保留，外部工具/后续 GCS 功能可随时接入。
+  - **自定义 MAV_CMD 已整带搬入私有区 30080-30099**（2026-10-04；原 310-312/
+    320-322/420/421 位于官方/方言分配带，其中 420/421 与 ArduPilot 方言实锤冲突。
+    常量收口 `MavEnums.MAV_CMD_NEXUS_*`，双测试钉扎：私有区守卫 + 真实 UDP
+    派发往返）。**全部 4 条云端生产者已接通（2026-10-05）**：环境配置 3 条
+    （30080-30082）由 `telemetry/EnvOverrideController` 发出——POST
+    `/api/v1/env/{sysid}/wind|weather|thresholds`（OPERATOR），参数校验与
+    drone-sim 机载校验同构（风速 0-50 m/s、风向 [0,360)、weatherCode 0-4、
+    雨量 0-255、阈值 windWarnMps≥0 且 < windCritMps）；载荷查询（30085）由
+    `mission/delivery/DeliveryController` 的 POST `/{id}/payload/query` 发出
+    （按 delivery.sequence 取 targetSysid，机载立即回传 PAYLOAD_STATUS 30006）。
+    原边界描述（环境命令仅机载本地控制面、载荷查询仅协议预留）就此作废。
+  - **WS_TYPE_MAP 13 帧生产者收口**（2026-10-05）：/ws/telemetry 的 13 类转发
+    帧现全部逐一核实有真实生产者——7 类出自 drone-sim/TwinSyncListener/视觉
+    链路（decision-event/adaptive-path/edge-task-status/sensor-fusion/
+    twin-state-sync/vision-detection/prediction-result），其余 6 类已于
+    2026-10-05 全部接上云端生产者，**零协议预留**：
+    task-assignment(30048)——`TaskAssignmentService` 在
+    assign/assignTasks/reassignAll/pollNextTask 成功路径发布（REST
+    `/scheduling/requests/{id}/assign` 等 + 新增 POST `/tasks/{id}/start`、
+    `/tasks/{id}/complete`）；conflict-alert(30049)——新增
+    `ConflictScanService`（5s 周期 + POST `/scheduling/conflicts/scan` 按需），
+    对在线且有导航数据的无人机做 4D 轨迹预测两两扫描，逐冲突对发布；
+    task-status(30050)——任务生命周期四态可达（ASSIGNED/IN_PROGRESS/
+    COMPLETED/ABORTED，progress 0→100）；alarm-trigger(30057)——
+    `AlarmLinkageEngine.processEvent` 落库后发布（deviceId u16 哈希承载源设备）；
+    alarm-ack(30058)——AUTO_DISPATCH 派遣成功后逐受派无人机发布（承载
+    DispatchedDrone 真实 sysid + etaSec）；surveillance-status(30059)——新增
+    `SurveillanceStatusPusher`（1s 周期，无 WS 客户端跳过）逐设备发布。
+    设备源帧（30057/30059）的租户路由经 `MavlinkMessageEvent` 显式租户字段
+    （null+explicit=未归属→全局域），无人机源帧沿用 registry.tenantOf(sysid)。
+    **诚实声明的不可达协议值与映射边界**：30048/30050 的 taskId 为字符串哈希
+    映射至 u32（`taskIdToU32`，非可逆——消费方无法从帧反解 REST 面 taskId，
+    需自持映射表，属既有协议改造决策）；TaskStatus FAILED(3) 无生命周期路径（调度
+    模型无执行失败态）；ConflictType AIRSPACE(0) 不可达（机对几何扫描产出
+    PATH/COLLISION，空域预约冲突不属机对扫描范畴）；SurveillanceStatus
+    FAULT(2)/MAINTENANCE(3) 不可达（设备模型仅 ONLINE/OFFLINE）；
+    surveillance-status 的 totalCameras 恒为 1（单 RTSP 通道模型，无多通道
+    设备）、uptimeSec 为进程内计数（重启清零，firstSeenMs 不持久化）。
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
-  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：346 个端点
-  （190 GET/127 POST/13 PUT/14 DELETE）全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
+  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：353 个端点
+  （190 GET/136 POST/13 PUT/14 DELETE）全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
   写=`OPERATOR`、配置/用户/密钥/租户/围栏/license 面=`ADMIN`，匿名入口只有登录与刷新两处
   `@PermitAll`；漏写注解由 `RbacEndpointCoverageTest` 反射逐个校验并判红，不靠文本扫描
   （awk 版会把签名里的 `@RequestBody` 当注解行，把 272 个未声明少报成 99）。
