@@ -47,6 +47,21 @@
   low-altitude-economy-demand-research 共 8 份文档同步；
   `python scripts/check-test-count-docs.py` 全绿。
 
+### 5. docker-compose 完整实测（§二 第 5 行，2026-10-06 补跑）
+
+- 干净环境 `docker compose -f deploy/docker/docker-compose.yml up -d` 一次通过：
+  5 容器全起（cloud-backend **Healthy** / gcs-web Healthy / drone-sim / redis / postgres）；
+  实测 `GET :28080/actuator/health` = `{"status":"UP"}`(200)、`GET :23000/` = 200（SPA）、
+  `GET :23000/actuator/health` = 200（gcs-web → 后端反代链路通）；收尾已 `down` 拆净；
+- **首次 up 曾失败**，根因值得记录：
+  `ERROR: null value in column "created_at" of relation "tenant" violates not-null constraint`
+  —— 不是 compose 配置缺陷，而是**复用了脏库**：同一 postgres 容器此前被以 ddl-auto 建过表，
+  Flyway 只记到 V5；V6 的 `CREATE TABLE IF NOT EXISTS tenant` 跳过了已存在的表，随后那条
+  不带 `created_at` 的 INSERT 便撞上 NOT NULL。清库重建（postgres 未声明 volume，`down` 即
+  销毁数据）后一次通过。**验证 compose 路径必须先清库**；V6 在干净库上无问题（k8s 路径同验）。
+- 8080 冲突只存在于**仓库根** dev compose（host 网络）；deploy/docker 用
+  28080/23000/25432/26379，不冲突。
+
 > 排查备注（供后来者避坑）：`mvn -pl cloud-backend` **不带 `-am`** 时会解析本地 Maven
 > 仓库里的 `aerofleet-drone-sim` 过期 jar——旧版 `SimConfig` 解析器会吞掉裸布尔开关，
 > 使 `--env`/`--actuators` 静默失效、机载命令一律回 UNSUPPORTED。跑跨模块 E2E 必须带
