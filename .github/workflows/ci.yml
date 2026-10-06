@@ -496,6 +496,7 @@ jobs:
         continue-on-error: true
         run: mvn -B -q dependency:go-offline
       - name: Trivy filesystem scan
+        id: trivy
         # 固定到发布 tag v0.36.0，不再用 @master。理由（供应链）：
         #   @master 是浮动 ref——同一份 workflow 在不同日期会执行不同的 action 代码，
         #   上游合入任何改动（默认 scanners、退出码语义、内置 trivy 版本）都会在没有
@@ -529,7 +530,14 @@ jobs:
       - name: Upload Trivy results to GitHub Security
         # always()：扫描步骤现在会因 CRITICAL/HIGH 直接判红，
         # 若不加这一条，SARIF 上传会被跳过，安全面板反而在最需要报告的运行里失去数据。
-        if: always()
+        # 但单有 always() 是错的：本 job 在它之前的 npm audit 步骤失败时，Trivy 步骤
+        # **从未执行过**，输出文件根本不存在，于是上传步自己再红一次——
+        # run 37407124936 实测：真红因只有一条（source-map-js high），日志里却是
+        # 两条 X，第二条是 `Path does not exist: trivy-results.sarif`。
+        # 次生红会把唯一有用的信号埋进噪声里，所以这里加两道：
+        #   steps.trivy.conclusion != 'skipped' → 扫描没跑就不上传；
+        #   hashFiles(...) != ''                → 跑了但没落盘（中途崩溃）也不上传。
+        if: always() && steps.trivy.conclusion != 'skipped' && hashFiles('trivy-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
