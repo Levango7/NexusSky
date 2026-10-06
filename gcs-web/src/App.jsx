@@ -32,6 +32,7 @@ import MappingPanel from './components/MappingPanel.jsx'
 import VoiceCmdPanel from './components/VoiceCmdPanel.jsx'
 import CityTwinPanel from './components/CityTwinPanel.jsx'
 import AiDecisionPanel from './components/AiDecisionPanel.jsx'
+import FleetOpsPanel from './components/FleetOpsPanel.jsx'
 import DeliveryPanel from './components/DeliveryPanel.jsx'
 import ShowPanel from './components/ShowPanel.jsx'
 import DisasterCommPanel from './components/DisasterCommPanel.jsx'
@@ -133,6 +134,12 @@ export default function App() {
     visionDetections,
     sensorFusions,
     predictions,
+    taskAssignments,
+    conflictAlerts,
+    taskStatuses,
+    alarmTriggers,
+    alarmAcks,
+    surveillanceStatuses,
   } = useWebSocket(selectedSysidRef, setTelemetry)
 
   // UI 状态（视图、时钟、移动端侧栏、丐版模式）
@@ -211,6 +218,7 @@ export default function App() {
               { key: 'dronelock', label: '锁机' },
               { key: 'autodispatch', label: '自动出警' },
               { key: 'aidecision', label: 'AI 决策' },
+              { key: 'fleetops', label: '机队协同' },
               { key: 'scenariolib', label: '场景库' },
               { key: 'inspection', label: '智能巡检' },
               { key: 'health', label: '健康管理' },
@@ -401,6 +409,17 @@ export default function App() {
             visionDetections={visionDetections}
             sensorFusions={sensorFusions}
             predictions={predictions}
+          />
+        </PanelWrapper>
+      ) : view === 'fleetops' ? (
+        <PanelWrapper>
+          <FleetOpsPanel
+            taskAssignments={taskAssignments}
+            conflictAlerts={conflictAlerts}
+            taskStatuses={taskStatuses}
+            alarmTriggers={alarmTriggers}
+            alarmAcks={alarmAcks}
+            surveillanceStatuses={surveillanceStatuses}
           />
         </PanelWrapper>
       ) : view === 'scenariolib' ? (
