@@ -240,7 +240,7 @@ jobs:
         run: >-
           python3 scripts/check-test-count-docs.py
           --reports-root surefire-reports
-          --frontend-json gcs-web/.vitest-report.json
+          --frontend-json gcs-web/vitest-report.json
   frontend:
     name: GCS Web
     runs-on: ubuntu-latest
@@ -271,7 +271,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vitest-report
-          path: gcs-web/.vitest-report.json
+          # 文件名**刻意不以点开头**：upload-artifact@v4 默认 include-hidden-files: false，
+          # 点开头的文件会被静默排除，本步随即 if-no-files-found: error 判红
+          # （实测 run 37535480620：报告已写到 gcs-web/.vitest-report.json，上传仍报
+          # "No files were found with the provided path"，并把 needs 它的
+          # Docs test-count gate / Security Scan 一起拖成 skipped）。
+          # 要改名请保持无前导点，或显式传 include-hidden-files: true。
+          path: gcs-web/vitest-report.json
           if-no-files-found: error
           retention-days: 7
       - run: npm run build

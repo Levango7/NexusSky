@@ -52,7 +52,7 @@ CHANGELOG 是**历史记录**，记的是"当时是什么状态"。改写历史�
     python scripts/check-test-count-docs.py --root F:/repo     # 指定仓库根
     python scripts/check-test-count-docs.py --print-actual     # 只打印实测数，不校验
     python scripts/check-test-count-docs.py --reports-root D   # 从 D/<module>/TEST-*.xml 汇总
-    python scripts/check-test-count-docs.py --frontend-json gcs-web/.vitest-report.json
+    python scripts/check-test-count-docs.py --frontend-json gcs-web/vitest-report.json
 
 ``--reports-root`` 供 CI 使用：各模块 job 把 surefire 报告按模块名上传为 artifact，
 汇总 job 下载后用本模式统计，从而**复用 java job 已经跑过的那次测试**，不必为门禁
@@ -428,7 +428,7 @@ def main():
                     help='从该目录下的 <module>/TEST-*.xml 汇总（CI 聚合模式）')
     ap.add_argument('--print-actual', action='store_true', help='只打印实测数')
     ap.add_argument('--frontend-json', default=None,
-                    help='vitest json 报告路径（gcs-web/.vitest-report.json）。'
+                    help='vitest json 报告路径（gcs-web/vitest-report.json）。'
                          '给了才校验前端用例数；不给则只校验 Java 侧')
     args = ap.parse_args()
 

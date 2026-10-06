@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:ci": "vitest run --reporter=json --outputFile=.vitest-report.json",
+    "test:ci": "vitest run --reporter=json --outputFile=vitest-report.json",
     "test:e2e": "playwright test",
     "test:e2e:backend": "node e2e/start-backend.mjs",
     "check": "node scripts/check-frontend.cjs && vitest run"
