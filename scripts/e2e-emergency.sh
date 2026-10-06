@@ -14,7 +14,10 @@
 #
 # 退出码：0 全流程通过；1 任一步失败。
 set -uo pipefail
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+# 后端基址。默认 8080；CI/本机并行调试时用 AF_BACKEND_BASE 覆盖
+# （COORDINATION.md 记的本机 8080 被常驻容器 opsmesh-controlplane 占用）。
+# AF_BACKEND_BASE 与 e2e-spray.sh / e2e-hardware.sh 同名变量，语义一致。
+BASE_URL="${AF_BACKEND_BASE:-http://localhost:8080}"
 FAIL=0
 
 # 演示场景常量

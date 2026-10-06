@@ -4,7 +4,7 @@
 # 断言链：雷达配置 -> 雷达状态 -> 雷达目标 -> 旋翼遥测 -> LiDAR -> IMU -> 物理模型切换(aero/kinematics)
 # 便携性：JSON 解析用 python3（CI 自带），不依赖 jq；字符串校验用 grep。
 set -euo pipefail
-BASE='http://localhost:8080/api/v1'
+BASE="${AF_BACKEND_BASE:-http://localhost:8080}/api/v1"
 FAIL=0
 SYSID=1
 

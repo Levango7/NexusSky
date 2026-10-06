@@ -1,0 +1,34 @@
+# 显式声明行尾，不再依赖开发者本机的 git 配置
+#
+# 为什么需要（本条是 2026-10-06 实测踩出来的）：
+# 本仓工作区曾在 core.autocrlf=true 的机器上被转成 CRLF，导致在 WSL2/真 Linux 下
+# 直接执行 `scripts/*.sh` 全部失败——bash 读到 `set -euo pipefail\r` 报
+# `invalid option name`，每个脚本逐行报 `$'\r': command not found`。
+# 当时仓库 blob 本身是 LF（git cat-file 实测 0 个 CR 行），所以 Linux CI 不受影响，
+# **失败只发生在"从 Windows 工作区直接跑"的场景**——恰恰是本地调试最常用的路径。
+#
+# 只靠 blob 正确是不够的：任何人把 core.autocrlf 改成 false/input 后提交 .sh，
+# CRLF 就会进 blob，Linux CI 会在 `set -euo pipefail` 上整体失败，且红因离改动点很远
+# （报在脚本第一行，git blame 指向的行是无关的行）。显式声明把这个坑变成不可达。
+*.sh text eol=lf
+
+# Windows 批处理与 PS1 脚本必须是 CRLF，否则 cmd.exe 解析失败
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 二进制/生成物不做行尾转换
+*.jar binary
+*.png binary
+*.jpg binary
+*.gz binary
+
+# 源码与配置统一 LF（避免跨平台 diff 噪声）；*.sh 的 eol=lf 规则已单独声明
+*.java text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.py text eol=lf
+*.properties text eol=lf
+*.sql text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf

@@ -88,6 +88,7 @@ class AuditPersistenceTest {
 
         AuditService.ChainVerification v = auditService.verifyChain();
         assertThat(v.ok()).isTrue();
+        assertThat(v.reason()).isNull();
         assertThat(v.checked()).isEqualTo(3);
         assertThat(v.brokenAtId()).isNull();
     }
@@ -161,7 +162,19 @@ class AuditPersistenceTest {
         List<AuditLogEntity> rows = auditLogRepository.findAllByOrderByIdAsc();
         assertThat(rows).hasSize(3);
         assertThat(rows.get(2).getPrevHash()).isEqualTo(lastHashBefore);
-        assertThat(auditService.verifyChain().ok()).isTrue();
+
+        // 断言完整判决而非只看 ok()：verifyChain() 对「记录真被篡改」与「库查询抛异常」
+        // 返回同一个 ok=false。只断 ok() 时两者不可区分，一次基础设施抖动会以
+        // "Expecting value to be true but was false" 的形态出现，既看不出是不是
+        // 安全事件，也没有异常内容可查（本条 2026-10-06 实测复现过一次，
+        // 单独跑该类 9/9 绿 → 属全量同 JVM 下的间歇失效）。
+        // checked() 是判别位：真断链返回首个断链行的 checked 前缀，
+        // 而查询异常分支恒返回 checked=0，故 checked()==3 证明循环跑完、不是异常路径。
+        AuditService.ChainVerification v = auditService.verifyChain();
+        assertThat(v.checked()).isEqualTo(3);
+        assertThat(v.ok()).isTrue();
+        assertThat(v.reason()).isNull();
+        assertThat(v.brokenAtId()).isNull();
     }
 
     // ===== 内存回退 =====
@@ -194,6 +207,26 @@ class AuditPersistenceTest {
         assertThat(auditService.size()).isEqualTo(1);
         assertThat(auditService.findAll()).hasSize(1);
         assertThat(auditLogRepository.count()).isZero();
+    }
+
+    @Test
+    @DisplayName("库查询抛异常时 verifyChain 的结论可与「真被篡改」区分（基础设施故障不得冒充安全事件）")
+    void queryExceptionVerdictIsDistinguishableFromTamper() throws Exception {
+        AuditLogRepository broken = org.mockito.Mockito.mock(AuditLogRepository.class);
+        org.mockito.Mockito.when(broken.findAllByOrderByIdAsc())
+                .thenThrow(new IllegalStateException("simulated datasource outage"));
+        setRepository(broken);
+
+        AuditService.ChainVerification v = auditService.verifyChain();
+
+        assertThat(v.ok()).isFalse();
+        // 判别位：查询异常路径恒 checked=0 / brokenAtId=null；真断链必带具体行 id 与断链原因。
+        // 缺了这条，一次库抖动会以「哈希链被篡改」的形态出现在 /api/v1/audit/verify 上。
+        assertThat(v.checked()).isZero();
+        assertThat(v.brokenAtId()).isNull();
+        assertThat(v.reason()).contains("校验失败（查询异常）").contains("simulated datasource outage");
+        // 篡改路径的措辞不得出现在基础设施故障的结论里
+        assertThat(v.reason()).doesNotContain("entry_hash 与记录内容不符", "prev_hash 与前一条");
     }
 
     @Test

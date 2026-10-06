@@ -22,7 +22,7 @@
 - **真实卫星接入预留**：天通/铱星/星链三种卫星通信系统占位实现类，统一 SatelliteLink
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
-   4301 单测全绿（Java surefire 实测；前端已有 168 例 vitest——api.js 会话/预算
+   4326 单测全绿（Java surefire 实测；前端已有 218 例 vitest——api.js 会话/预算
     档位/WS URL、组件逻辑、孪生同步换算与分桶、M11 决策三帧归一化；Playwright
     真浏览器 E2E 4 例已于 2026-10-04 补齐，见 docs/devops-enhancement-plan.md CI7）
   > 第六轮（2026-10-02）明细见 CHANGELOG「Unreleased — 第六轮审查」。此前此处写
@@ -301,18 +301,34 @@
 > 核心判断：合规是 2026-11-01 后的入场券；付费场景核心在"识别率/误检比/处理时间"指标层 + 机巢管控；
 > 破局点在"跨品牌中立 + 数据闭环 + 合规自动化"而非功能堆砌。
 
-### C 系列 — 合规入场券（P0，2026-11-01 过渡期硬 deadline）
+### C 系列 — 合规入场券（P0，2026-11-01 过渡期硬 deadline）✅ 五项均已落地（2026-10-06 状态翻正）
 
-| 编号 | 方向 | 交付物 | 依赖 |
+> **状态翻正说明（2026-10-06）**：本节此前把 C1–C5 全部列为「待做」，而逐条核对代码
+> 后确认**五项均已实现**。这是一次文档滞后于代码的净损失——C 系列带 2026-11-01 硬
+> deadline，却被写成未来工作，任何读路线图做入场合规判断的人都会得出相反结论。
+> 下表的「现状」列与代码路径是本轮核对结果，不是推断。
+
+| 编号 | 方向 | 现状 | 代码实证 |
 |---|---|---|---|
-| C1 | **UOM 数据对接层** | `RegulatorReportSink` 抽象（cloud-backend 新包 `regulator`）；MH/T 3030 三项交互（实名状态验证/激活上报/注销）+ 遥测上报通道；模拟监管平台（link-sim 模式）+ e2e | 无 |
-| C2 | **运行识别（RID）广播** | GB 46750 字段映射 + MAVLink `OPEN_DRONE_ID_*` 消息族（对齐官方 c_library_v2）；drone-sim 广播模拟 + GCS 观察面板 | C1 |
-| C3 | **电子围栏硬拦截** | 现有 `/geofence` 升级为起飞前命令拦截链；限飞区数据源接口 + 本地缓存；GB 42590 围栏语义 | 无 |
-| C4 | **PostgreSQL 持久化** | 主数据内存态 → 库（drone/mission/flightlog 三域先行）；Repository 已有接口不变，切换实现 | 无 |
-| C5 | **MAVLink v2 signing** | GB 42590 数据链路安全项；link-sim 加"篡改/未签名"损伤画像验证；签名密钥管理 | 无 |
+| C1 | **UOM 数据对接层** | ✅ 已完成 | `cloud/regulator/` 23 文件；`RegulatorReportSink` 接口 + `UomReportSink`/`SimReportSink`/`NoopReportSink`；独立 `regulator-sim` 模块模拟 5 个 UOM 端点（`/api/verify\|activate\|cancel\|telemetry\|records`）+ `--delay-ms`/`--error-rate` 故障注入；`scripts/e2e-regulator.ps1`（25 KB）端到端 |
+| C2 | **运行识别（RID）广播** | ✅ 已完成 | `cloud/rid/` 14 文件 + drone-sim `rid/RidBroadcaster`；`OPEN_DRONE_ID_*` 官方 msgId **12900–12915**（6 条，取官方值而非自造）；`scripts/e2e-rid.ps1`（18 KB）覆盖 BROADCASTING/BasicId/Location/System + 停止后转 BROADCASTING_ERROR |
+| C3 | **电子围栏硬拦截** | ✅ 已完成 | `geofence/GeofenceInterceptService` + `InterceptChain` + `InterceptVerdict` + `InterceptLogStore`；ARM/TAKEOFF 前拦截，**异常时 fail-safe DENY**（`InterceptChain` javadoc 明载）；限飞区数据源 `RestrictionDataSource` + `LocalFileRestrictionSource` + `MockRestrictionSource` |
+| C4 | **PostgreSQL 持久化** | ✅ 已完成（主数据域） | Flyway **21 个迁移**（`db/migration/V1…V22`，无 V7）；prod `ddl-auto=validate`；CI `integration` job 在真 PostgreSQL 15 上跑 Pass C（Flyway + validate + 设备登记落行） |
+| C5 | **MAVLink v2 signing** | ✅ 已完成 | `MavlinkSignerFactory` **按 sysid 取签名器**（多机密钥）+ `MavlinkSigningConfiguration` 条件装配（此前四个注入点全是 `@Autowired(required=false)` 而裸 `@SpringBootApplication` 不扫 `io.aerofleet.mavlink.*`，开关打开也不签名）；`link-sim` 两个安全画像 `tamper`/`unsigned`；`scripts/e2e-signing.ps1`（37 KB，6 场景） |
 
 - C1/C3/C4/C5 互相独立，可并行；C2 依赖 C1（RID 上报复用 RegulatorReportSink 通道）。
 - **2026-11-01 是硬 deadline**：GB 46750 过渡期截止，不具备运行识别功能不应运行。
+  → C2 已就绪，**该 deadline 的技术前置已满足**。
+- **C 系列剩余缺口（不是"未实现"，是"未闭合"）**：
+  ① **C4 的"主数据"只在 provisioning 层面落库，遥测热态仍是内存**：
+     `DeviceRegistry` 有 `aerofleet.device-registry.persist`（base 默认 false、
+     prod 显式 true），但落库的只是 `devices` 表的**登记/在线/租户**三列
+     （`DeviceEntity` 的 online/lastSeen/tenantId）；`DroneSnapshot` 的
+     电量/经纬/姿态/模式等 volatile 字段不落库——它们本就属高频瞬时态，
+     落库也无查询价值，但意味着**重启后历史位置轨迹只能从 `flight_log` 重建**，
+     不能从注册表恢复；② **C5 签名出厂仍明文**——`mavlink.signing.enabled` 默认 false 且
+     无 profile 配置，密钥/口令无轮换端点，`MavlinkParser` 层仍只切帧不验签；
+  ③ **C1/C2 的对端都是模拟器**（`regulator-sim` / drone-sim），未与真实 UOM 平台联调。
 
 ### F 系列 — 付费场景核心（P1）
 
@@ -411,6 +427,6 @@ M7 ──► E4(5G-A通感)
 1. 每个里程碑走完整 SDD；单个里程碑内尽量原子化（2–4h/任务）。
 2. 代码严格落在已有模块边界内：`cloud-backend`(调度/API)、`drone-sim`(载荷/执行)、
    `mavlink-core`(新消息)、`link-sim`(中继/链路)、`gcs-web`(观察)。
-3. 每个里程碑必须有回归基线：现有 4301 单测（Java） + e2e 脚本不回归。
+3. 每个里程碑必须有回归基线：现有 4326 单测（Java） + e2e 脚本不回归。
 4. 边界诚实声明：工作量 = 协议抽象 + 假数据源，非真硬件实现。
 5. **MAVLink msgId 全局唯一且避开官方分配带**：2026-10 治理搬迁后自定义消息统一使用私有方言段 **30000-30099**（common.xml 官方拥有 msgId 300-10000 分配带，旧 420-483 段位于其中，420/437/440 已与官方 RADIO_RC_CHANNELS / AVAILABLE_MODES_MONITOR / ILLUMINATOR_STATUS 实锤冲突，全部 51 条已等差平移 +29580）。已分配：30000-30021(M0a-M4)、30030-30047(M5-M9)、30048-30056(M10-M13)、30057-30059(4a 安防报警)、30060-30063(P2 灾害应急通讯组网扩展)；新增从 **30064+** 起分配，30064-30099 为增长预留。**自定义 MAV_CMD 同步治理（2026-10）**：8 条自定义命令（原 310-312/320-322/420/421）已搬入私有区命令子段 **30080-30087**（命令与消息分属不同命名空间，数值不冲突；分段纯为日志可读性，常量收口 `MavEnums.MAV_CMD_NEXUS_*`，守卫测试防回退）。冲突防护：`scripts/mavlink-compatibility-check.py --self-test` 内嵌 392 个官方已分配 msgId 快照逐条核对。Phase 2 预估 msgId 区间：C2(RID) 使用 `OPEN_DRONE_ID_*` 官方消息族（msgId 12900-12999，MAVLink 官方分配），C5(signing) 使用 MAVLink v2 签名帧（不占新 msgId），其余 C/F/E 系列按需从 30064+ 分配。

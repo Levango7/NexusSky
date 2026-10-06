@@ -4,7 +4,7 @@
 # 断言链：创建喷洒任务 -> 查询喷洒状态 -> 控制夹爪 -> 查询物流配送序列 -> 清理取消任务
 # 便携性：JSON 解析用 python3（CI 自带），不依赖 jq；字符串校验用 grep。
 set -euo pipefail
-BASE='http://localhost:8080/api/v1'
+BASE="${AF_BACKEND_BASE:-http://localhost:8080}/api/v1"
 FAIL=0
 SYSID=1
 

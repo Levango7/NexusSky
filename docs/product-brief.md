@@ -25,18 +25,44 @@
 4. **自主决策是规则与搜索，不是学习。** 集群调度用的是真遗传算法（PMX 交叉 + 锦标赛
    选择 + 精英保留），冲突避免是 4D 常速外推，轨迹预测是卡尔曼滤波——都是扎实的
    经典算法，但没有任何学习成分。
-5. **License 门禁的模块覆盖已完成收口，但档位绑定尚未落地。** 2026-10-02 起
+5. **License 门禁的档位绑定已在验证期落地（2026-10-06 收口）。** 2026-10-02 起
    验签失败**拒绝启动**（fail-closed，见 `LicenseService.loadLicense()`）；2026-10-05 起
-   模块映射由 `LicenseModuleMap` 全量登记（覆盖 49 个 API 前缀 → 5 个模块），
+   模块映射由 `LicenseModuleMap` 全量登记（覆盖 50 个 API 前缀 → 5 个模块），
    未登记前缀按 `MODULE_UNCLASSIFIED` 哨兵**默认拒绝**，由
    `LicenseModuleCoverageTest` 反射扫描 `*Controller.java` 守卫。
-   **剩余缺口**：授权档位（基础版/应急版/完整版）到模块集合的映射尚未与
-   `docs/PRODUCT-POSITIONING.md` §5 的定价方案做机器可校验绑定——即"某档客户
-   实际能启用哪些模块"目前靠配置约定而非代码强制。接入生产前必须补齐。
+   **2026-10-06 补上此前缺失的一环**：`validateLicense` 原先只判 `active` + `expiry`，
+   完全不看模块集合——签发侧虽有 `LicenseTier.mismatchOf` 自检，但三条绕过路径
+   （原始 `generateLicenseKey` 直传 modules / `LicenseTier` 引入前的旧授权 /
+   持有签发密钥的一方构造任意集合）畅通，"某档客户实际能启用哪些模块"仍是约定而非强制。
+   现要求模块集合**恰好等于**某档（`LicenseService.tierBindingViolation`，
+   由 `aerofleet.license.enforce-tier-binding` 默认 true 控制），守卫为
+   `LicenseTierBindingEnforcementTest`（16 例，含超集必须判红、逃生阀必须可用、
+   `displayName(null)` 不得 NPE）。**至此三档定价在代码层可执行。**
+   **剩余边界**：① ⚠️ **`LicenseTier` 与 `PRODUCT-POSITIONING.md` §5 对"每档含哪些能力"
+   的定义不一致，且这是本轮强制绑定让它变成一个真实故障面**——详见下方第 6 条；
+   ② 价格表不入代码，仍需人工与 §5 同步；
+   ③ 逃生阀 `enforce-tier-binding=false` 若被打开，定价即退回约定，启动会打 WARN。
+6. **⚠️ 定价文档与强制档位互相矛盾（需定价负责人裁决，不要由开发端自行"修好"）**
+   - 代码（`LicenseTier`，现已被 `validateLicense` 强制）：基础版 = `core`+`fleet`；
+     应急版 = +`emergency`；完整版 = 全 5 模块。
+   - 文档（`PRODUCT-POSITIONING.md` §5.1，第 342–344 行）：基础版 = **M5 mesh** +
+     **M9 编排** + GCS OEM；应急版 = 基础版 + 4a + ONVIF；完整版 = 全模块。
+   - 冲突点（按 `LicenseModuleMap` 的实际归属核对）：
+     | 能力 | 模块 | PRODUCT-POSITIONING 说在 | `LicenseTier` 实际在 |
+     |---|---|---|---|
+     | mesh 组网 | `network` | **基础版** | **完整版** |
+     | 应急编排 M9 | `emergency` | **基础版** | 应急版 |
+     | 移动基站 / 卫星中继 | `network` | 完整版 | 完整版 ✓ |
+   - **为什么必须显式登记**：档位绑定在验证期强制之后，"客户买了哪档"不再只是合同文字，
+     而是**运行时真的会被 403**。若继续按 §5 卖基础版，客户付费购买的 mesh 会打不开
+     `/api/v1/mesh/*`。这在强制之前不可见、强制之后立即变成交付事故。
+   - **本轮未擅自改任何一侧**：`LicenseTier` 是已强制执行的一侧，改它等于单方面改定价；
+     改 §5 是定价文档，同样不是开发决策。`LicenseTierTest`（20 例）已把当前代码定义
+     钉死，任何改动都会显式变红，强制走评审。
 
 哪些是**已经扎实**的：MAVLink v1/v2 协议栈（v2 签名有真实 pymavlink 参考实现生成的
 已知答案向量逐字节把关）、链路损伤仿真（Gilbert-Elliot + 令牌桶）、机载 failsafe 语义、
-RBAC 默认拒绝、审计哈希链，以及 **4,301 个后端单测**与 CI 覆盖率门禁。
+RBAC 默认拒绝、审计哈希链，以及 **4326 个后端单测**与 CI 覆盖率门禁。
 
 ---
 
