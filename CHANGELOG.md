@@ -33,6 +33,13 @@
   cloud-backend 两个 E2E 连跑 3 轮全绿（每轮 4 用例）；cloud-backend 全量 2295/0/0；
 - **边界说明**：原 flake 在本机（Windows）不可复现，上述验证证明的是"修复形态正确 +
   非回归"；"是否根除"的最终确认在 CI（Linux）复跑。
+- **CI 复跑确认（2026-10-06）**：push 后 run 37387694246 completed / success
+  （attempt 1，head=37608e3）——22 job success + 1 skipped（PR Title Check，push 事件不跑）。
+  两宿主类在 Linux CI 上实测通过：drone-sim 腿 `AdaptivePathExecutionTest` 2/0/0（0.520 s）、
+  模块汇总 1391/0/0；cloud-backend 腿 `EnvOverrideE2ETest` 3/0/0（2.225 s）、
+  `DeliveryPayloadQueryE2ETest` 1/0/0、模块汇总 2295/0/0；三模块 jacoco check 与
+  `--strict cloud-backend` 覆盖率一致性步骤均过。此为首次复跑，间歇性（约 1/4）的统计学
+  闭环由后续 run 持续验证。
 
 ---
 
