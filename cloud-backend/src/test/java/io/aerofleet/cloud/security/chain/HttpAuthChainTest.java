@@ -80,6 +80,9 @@ class HttpAuthChainTest {
     private AlarmEventStore alarmStore;
 
     @Autowired
+    private io.aerofleet.cloud.alarm.AlarmEventRepository alarmEventRepository;
+
+    @Autowired
     private FlightLogRepository flightLogRepository;
 
     @Autowired
@@ -97,6 +100,9 @@ class HttpAuthChainTest {
 
     @BeforeEach
     void setUp() {
+        // 报警事件是 JPA 存储、跨用例累积：本类的计数断言（total==1/0）必须从空表开始。
+        // 不删的话，任何新增用例写入的事件都会污染既有断言——这次就是我加 ACK 用例才暴露。
+        alarmEventRepository.deleteAll();
         flightLogRepository.deleteAll();
         planRepository.deleteAll();
         deliveryRepository.deleteAll();
@@ -331,5 +337,123 @@ class HttpAuthChainTest {
         mvc.perform(get("/api/v1/orch/plans/" + plan.getPlanId())
                         .header("Authorization", bearerA))
                 .andExpect(status().isOk());
+    }
+
+    // ==================== 4. 跨租户「动作」必须被拒（写路径 IDOR） ====================
+    // 读侧过滤完好并不代表写侧安全：alarm ack / orch 生命周期 / delivery2 动作端点
+    // 曾各自直接 findById，于是「看不见」的资源仍可被改写。每条都配一个本租户的
+    // 正向断言——否则「一律 404」的坏门禁同样能通过负向断言。
+
+    @Test
+    @DisplayName("他租户不能确认（ACK）我的报警，且报警保持未确认")
+    void alarmAckAcrossTenantIsRejected() throws Exception {
+        AlarmEvent event = new AlarmEvent();
+        event.setId("chain-ack-A");
+        event.setSourceDeviceId("chain-dev-ack");
+        event.setEventType(AlarmEvent.EventType.INTRUSION);
+        event.setSeverity(AlarmEvent.Severity.CRITICAL);
+        event.setDescription("chain-test ack target");
+        event.setTimestampMs(System.currentTimeMillis());
+        event.setTenantId(TENANT_A);
+        alarmStore.store(event);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/v1/alarms/events/chain-ack-A/ack")
+                        .header("Authorization", bearerB))
+                .andExpect(status().isNotFound());
+
+        // 关键断言：不是「返回了 404」就算过，要确证资源没被改写
+        org.junit.jupiter.api.Assertions.assertFalse(
+                alarmStore.getById("chain-ack-A").isAcknowledged(),
+                "他租户 ACK 被拒后事件仍应为未确认");
+
+        // 正向对照：归属租户自己 ACK 必须成功（防止把门禁写成恒 404）
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/v1/alarms/events/chain-ack-A/ack")
+                        .header("Authorization", bearerA))
+                .andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                alarmStore.getById("chain-ack-A").isAcknowledged());
+    }
+
+    @Test
+    @DisplayName("他租户不能中止我的编排计划、不能读我的步骤进度")
+    void orchActionsAcrossTenantAreRejected() throws Exception {
+        OrchestrationPlanEntity plan = new OrchestrationPlanEntity();
+        plan.setName("chain-plan-action");
+        plan.setStatus(PlanStatus.DRAFT);
+        plan.setResourcePool("[]");
+        plan.setTenantId(TENANT_A);
+        planRepository.save(plan);
+        Long planId = plan.getPlanId();
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/v1/orch/plans/" + planId + "/abort")
+                        .header("Authorization", bearerB))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/orch/plans/" + planId + "/progress")
+                        .header("Authorization", bearerB))
+                .andExpect(status().isNotFound());
+        org.junit.jupiter.api.Assertions.assertEquals(PlanStatus.DRAFT,
+                planRepository.findById(planId).orElseThrow().getStatus(),
+                "他租户中止被拒后计划状态不应改变");
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/v1/orch/plans/" + planId + "/abort")
+                        .header("Authorization", bearerA))
+                .andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertEquals(PlanStatus.ABORTED,
+                planRepository.findById(planId).orElseThrow().getStatus());
+    }
+
+    @Test
+    @DisplayName("他租户不能启动我的配送任务、不能取我的路线")
+    void deliveryActionsAcrossTenantAreRejected() throws Exception {
+        DeliveryTask2 task = new DeliveryTask2();
+        task.setId("chain-delivery-action");
+        task.setStatus(DeliveryTask2.Status.PENDING);
+        task.setTenantId(TENANT_A);
+        deliveryRepository.save(task);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/v1/delivery2/tasks/chain-delivery-action/start")
+                        .header("Authorization", bearerB))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/delivery2/tasks/chain-delivery-action/route")
+                        .header("Authorization", bearerB))
+                .andExpect(status().isNotFound());
+        org.junit.jupiter.api.Assertions.assertEquals(DeliveryTask2.Status.PENDING,
+                deliveryRepository.findById("chain-delivery-action").orElseThrow().getStatus(),
+                "他租户 start 被拒后任务状态不应改变");
+
+        // 正向对照：归属租户中止（不依赖 statusTracker/降落点的最简动作）必须成功
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/v1/delivery2/tasks/chain-delivery-action/abort")
+                        .header("Authorization", bearerA))
+                .andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertEquals(DeliveryTask2.Status.ABORTED,
+                deliveryRepository.findById("chain-delivery-action").orElseThrow().getStatus());
+    }
+
+    @Test
+    @DisplayName("无归属报警对具体租户不可见，也不能被其确认")
+    void unassignedAlarmIsUnackable() throws Exception {
+        AlarmEvent orphan = new AlarmEvent();
+        orphan.setId("chain-ack-orphan");
+        orphan.setSourceDeviceId("chain-dev-orphan");
+        orphan.setEventType(AlarmEvent.EventType.INTRUSION);
+        orphan.setSeverity(AlarmEvent.Severity.WARN);
+        orphan.setDescription("chain-test unassigned alarm");
+        orphan.setTimestampMs(System.currentTimeMillis());
+        alarmStore.store(orphan);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/v1/alarms/events/chain-ack-orphan/ack")
+                        .header("Authorization", bearerA))
+                .andExpect(status().isNotFound());
+        AlarmEvent reloaded = alarmStore.getById("chain-ack-orphan");
+        org.junit.jupiter.api.Assertions.assertNotNull(reloaded, "全局视角应能看到该事件");
+        org.junit.jupiter.api.Assertions.assertFalse(reloaded.isAcknowledged(),
+                "未归属事件不得被任何具体租户确认");
     }
 }

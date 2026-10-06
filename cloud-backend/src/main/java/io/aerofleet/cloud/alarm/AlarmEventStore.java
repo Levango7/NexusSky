@@ -126,17 +126,20 @@ public class AlarmEventStore {
 
     /**
      * 确认报警事件。
+     * <p>
+     * 租户隔离：走 {@link #getById(String)} 的可见性判定，他租户事件按「不存在」返回
+     * false（控制器转 404）。此前这里是裸 {@code repository.findById}，于是读侧过滤
+     * 完好、确认侧跨租户必成功——ACK 是改写别人未处理的告警队列，属于必须拦的一类。
      *
      * @param id 事件 ID
-     * @return true 若事件存在并已确认
+     * @return true 若事件存在、属于当前租户域并已确认
      */
     @Transactional
     public boolean acknowledge(String id) {
-        Optional<AlarmEvent> opt = repository.findById(id);
-        if (opt.isEmpty()) {
+        AlarmEvent event = getById(id);
+        if (event == null) {
             return false;
         }
-        AlarmEvent event = opt.get();
         event.acknowledge();
         repository.save(event);
         log.info("alarm event acknowledged: id={}", id);

@@ -742,6 +742,9 @@ class OrchestrationPlanServiceTest {
     void getProgressReturnsSteps() {
         // Arrange
         TaskStepEntity step = buildStep("step-1", null, "[]", null);
+        // getProgress 现在先过租户可见性（进度含机号/航点），故必须让计划本身可解析
+        when(planRepository.findById(1L)).thenReturn(
+                Optional.of(buildPlan(1L, PlanStatus.RUNNING, "[]")));
         when(stepRepository.findByPlanId(1L)).thenReturn(Collections.singletonList(step));
 
         // Act

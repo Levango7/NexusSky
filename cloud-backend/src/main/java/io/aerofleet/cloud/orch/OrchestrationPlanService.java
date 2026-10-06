@@ -14,6 +14,7 @@ import io.aerofleet.cloud.orch.repository.ConditionTriggerRepository;
 import io.aerofleet.cloud.orch.repository.OrchestrationPlanRepository;
 import io.aerofleet.cloud.orch.repository.TaskStepRepository;
 import io.aerofleet.cloud.security.TenantContext;
+import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -184,6 +185,33 @@ public class OrchestrationPlanService {
     }
 
     /**
+     * 生命周期动作（start/pause/resume/abort）与进度查询的取物入口。
+     * <p>
+     * 与 {@link #getPlan(Long)} 同一份可见性规则，但语义按「不存在」抛错：
+     * <ul>
+     *   <li>计划真的不存在 → {@link IllegalArgumentException}（沿用这些方法既有契约）；</li>
+     *   <li>存在但属于其他租户 → {@link NotFoundException}，转 404，口径与读侧
+     *       「他租户按不存在处理」一致，不用 403 暴露「这个 ID 属于别人」。</li>
+     * </ul>
+     * 后台线程（事件监听、定时推进）没有请求上下文，有效租户为 null → 直接放行，
+     * 因此本方法只约束 HTTP 入口。
+     *
+     * @param planId 计划 ID
+     * @return 当前租户域可见的计划
+     */
+    private OrchestrationPlanEntity requireVisiblePlan(Long planId) {
+        OrchestrationPlanEntity plan = planRepository.findById(planId).orElse(null);
+        if (plan == null) {
+            throw new IllegalArgumentException("计划不存在：" + planId);
+        }
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        if (tenantId != null && !tenantId.equals(plan.getTenantId())) {
+            throw new NotFoundException("计划不存在：" + planId);
+        }
+        return plan;
+    }
+
+    /**
      * 查询计划列表。
      * <p>
      * 租户隔离：有租户上下文时只返回本租户计划；有效租户为 null
@@ -213,8 +241,7 @@ public class OrchestrationPlanService {
      */
     @Transactional
     public void startPlan(Long planId) {
-        OrchestrationPlanEntity plan = planRepository.findById(planId)
-                .orElseThrow(() -> new IllegalArgumentException("计划不存在：" + planId));
+        OrchestrationPlanEntity plan = requireVisiblePlan(planId);
 
         if (plan.getStatus() != PlanStatus.DRAFT) {
             throw new IllegalStateException("计划状态不为 DRAFT，无法启动：" + plan.getStatus());
@@ -247,8 +274,7 @@ public class OrchestrationPlanService {
      */
     @Transactional
     public void pausePlan(Long planId) {
-        OrchestrationPlanEntity plan = planRepository.findById(planId)
-                .orElseThrow(() -> new IllegalArgumentException("计划不存在：" + planId));
+        OrchestrationPlanEntity plan = requireVisiblePlan(planId);
 
         if (plan.getStatus() != PlanStatus.RUNNING) {
             throw new IllegalStateException("计划状态不为 RUNNING，无法暂停：" + plan.getStatus());
@@ -272,8 +298,7 @@ public class OrchestrationPlanService {
      */
     @Transactional
     public void resumePlan(Long planId) {
-        OrchestrationPlanEntity plan = planRepository.findById(planId)
-                .orElseThrow(() -> new IllegalArgumentException("计划不存在：" + planId));
+        OrchestrationPlanEntity plan = requireVisiblePlan(planId);
 
         if (plan.getStatus() != PlanStatus.PAUSED) {
             throw new IllegalStateException("计划状态不为 PAUSED，无法恢复：" + plan.getStatus());
@@ -298,8 +323,7 @@ public class OrchestrationPlanService {
      */
     @Transactional
     public void abortPlan(Long planId) {
-        OrchestrationPlanEntity plan = planRepository.findById(planId)
-                .orElseThrow(() -> new IllegalArgumentException("计划不存在：" + planId));
+        OrchestrationPlanEntity plan = requireVisiblePlan(planId);
 
         if (plan.getStatus() == PlanStatus.COMPLETED || plan.getStatus() == PlanStatus.ABORTED) {
             throw new IllegalStateException("计划已结束，无法中止：" + plan.getStatus());
@@ -328,12 +352,16 @@ public class OrchestrationPlanService {
 
     /**
      * 查询指定计划的步骤进度。
+     * <p>
+     * 租户隔离：进度里带机号、航点与资源池，属于归属信息，因此与生命周期动作同口径
+     * 先过 {@link #requireVisiblePlan(Long)}——他租户计划按不存在处理（404）。
      *
      * @param planId 计划 ID
      * @return 步骤列表
      */
     @Transactional(readOnly = true)
     public List<TaskStepEntity> getProgress(Long planId) {
+        requireVisiblePlan(planId);
         return stepRepository.findByPlanId(planId);
     }
 
