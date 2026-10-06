@@ -2,7 +2,7 @@
 
 > **文档版本**：v1.0 | **日期**：2026-09-24 | **定位**：内部商务参考，不对外发布
 >
-> **项目阶段**：PoC（4291 单测全绿，模拟器验证通过，未在真机集群上完成验证）
+> **项目阶段**：PoC（4301 单测全绿，模拟器验证通过，未在真机集群上完成验证）
 >
 > **关联文档**：[产品定位](PRODUCT-POSITIONING.md)、[定价策略](pricing-strategy.md)、[部署指南](deployment-guide.md)、[集成手册](integration-guide.md)、[演示场景](demo-scenarios.md)
 
@@ -472,15 +472,21 @@ curl http://localhost:8080/actuator/health
 kubectl version       # 1.28+
 helm version          # 3.12+
 
-# 2. 配置 values.yaml
-# 编辑 deploy/helm/nexussky/values.yaml：
-#   cloudBackend.replicas: 2
-#   ingress.enabled: true
-#   ingress.host: nexussky.customer.com
+# 2. 准备私有凭据 values（不要改仓库里的 values.yaml）
+# values.yaml 里的 security.jwtSecret / security.encryptionKey / database.password
+# 是 REPLACE_WITH_* 占位串，chart 从本版本起直接拒绝安装
+# （原因与写法见 docs/deployment-guide.md §2.2）
+cat > my-values.yaml <<'YAML'
+security:
+  jwtSecret: "<≥32 字符随机串>"
+  encryptionKey: "<≥32 字符随机串>"
+database:
+  password: "<真实库口令>"
+YAML
 
 # 3. 部署
 cd deploy/helm/nexussky
-helm install nexussky . -f values.yaml
+helm install nexussky . -f my-values.yaml
 
 # 4. 验证
 kubectl get pods
@@ -744,7 +750,7 @@ kubectl get svc
 | 风险 | 概率 | 影响 | 应对策略 |
 |---|---|---|---|
 | **PoC 阶段真机未验证** | 高 | 高 | 所有商务沟通中如实告知 PoC 状态；不夸大能力；合同中约定真机验证里程碑 |
-| **4291 单测覆盖但不等于生产验证** | 中 | 中 | 强调单测 + 模拟器 e2e 双重验证；POC 阶段在客户环境中补充验证 |
+| **4301 单测覆盖但不等于生产验证** | 中 | 中 | 强调单测 + 模拟器 e2e 双重验证；POC 阶段在客户环境中补充验证 |
 | **功能迭代节奏与客户期望不匹配** | 中 | 中 | 合同中明确版本升级政策；SDK 授权版季度更新；私有部署版按合同约定 |
 
 ---

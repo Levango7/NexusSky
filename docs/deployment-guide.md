@@ -42,9 +42,35 @@ docker-compose down
 
 ### 2.2 部署
 
+> **凭据必须先替换，否则装不上。** `values.yaml` 里的 `security.jwtSecret`、
+> `security.encryptionKey`、`database.password` 是 `REPLACE_WITH_*` 占位串，仓库里公开可见。
+> 它们长度达标，会原样通过后端既有的「JWT secret ≥32 字节」强度校验——所以从本版本起
+> chart 在 `helm install/template` 阶段直接 `fail`，后端 `DeploymentSecretsGuard` 启动时
+> 也会拒绝，两级都不给「安静地用公开字符串当密钥」留机会。
+
 ```bash
 cd deploy/helm/nexussky
-helm install nexussky . -f values.yaml
+
+# 用一份不进版本库的私有 values 覆盖占位值
+helm install nexussky . -f my-values.yaml
+# my-values.yaml 至少包含：
+#   security:
+#     jwtSecret: "<≥32 字符随机串>"
+#     encryptionKey: "<≥32 字符随机串>"
+#   database:
+#     password: "<真实库口令>"
+
+# 或临时用 --set（会留在 shell history 里，仅适合本地验证）
+helm install nexussky . \
+  --set security.jwtSecret="$JWT_SECRET" \
+  --set security.encryptionKey="$ENC_KEY" \
+  --set database.password="$DB_PASSWORD"
+```
+
+自查（本机或 CI 同一条脚本）：
+
+```bash
+bash scripts/check-deploy-secrets.sh
 ```
 
 ### 2.3 配置项（values.yaml）
@@ -74,7 +100,7 @@ ingress:
 ### 2.4 升级
 
 ```bash
-helm upgrade nexussky . -f values.yaml
+helm upgrade nexussky . -f my-values.yaml
 ```
 
 ### 2.5 卸载

@@ -621,3 +621,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+  deploy-secrets:
+    name: Deploy Secret Gate
+    runs-on: ubuntu-latest
+    # 独立 job：不依赖构建产物，判定的对象是仓库里的部署清单本身。
+    # 存在的理由：values.yaml / deploy/k8s/secret.yaml 里的 REPLACE_WITH_* 占位串
+    # 长度达标，能原样通过后端既有的「jwt secret ≥32 字节」强度校验——忘替换的那次
+    # 部署不是报错，而是安静地把仓库里公开的字符串当 HMAC-SHA256 密钥上岗，
+    # 任何读过本仓库的人都能自造任意租户/ADMIN 的 JWT。
+    # 脚本三个方向都断言（默认值必须被拒 / 真实值必须渲染成功 / 结果无残留），
+    # 且 helm 不存在时直接 exit 1——跳过不等于通过。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4.3.1
+        # 固定到发布 tag v4.3.1（commit 1a275c3b69536ee54be43f208112b4e1c0d1b3c5）；
+        # 与 trivy-action 同口径：不用浮动 major ref，避免上游改动悄悄改变本门禁行为。
+        with:
+          version: v3.14.4
+      - name: 占位凭据门禁校验
+        run: bash scripts/check-deploy-secrets.sh

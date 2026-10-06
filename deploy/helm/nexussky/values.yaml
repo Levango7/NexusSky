@@ -100,7 +100,12 @@ gcsWeb:
 # ---- 安全配置 ----
 security:
   devMode: "false"
-  # JWT 密钥：生产必须覆盖（至少 32 字符）
+  # JWT 密钥：生产必须覆盖（至少 32 字符）。
+  # 这三个 REPLACE_WITH_* 占位串已构成一道门禁：chart 在 install/template 阶段
+  # 直接 fail（templates/secret.yaml 顶部），后端 DeploymentSecretsGuard 启动时同样拒绝。
+  # 理由不是「格式不好看」：占位串长度达标，会骗过既有的 ≥32 字节强度校验，
+  # 忘替换的那次部署等于把仓库里公开的字符串当 HMAC 密钥上岗（可伪造 ADMIN token）。
+  # 覆盖方式见 docs/deployment-guide.md §2.2；自查：bash scripts/check-deploy-secrets.sh
   jwtSecret: "REPLACE_WITH_STRONG_JWT_SECRET_AT_LEAST_32_CHARS"
   # 凭据加密密钥（AES-GCM）：prod 无缺省 fail-fast，缺失则后端拒绝启动——必填
   encryptionKey: "REPLACE_WITH_STRONG_ENCRYPTION_KEY_AT_LEAST_32_CHARS"
