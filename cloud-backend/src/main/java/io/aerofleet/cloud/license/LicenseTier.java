@@ -100,12 +100,29 @@ public final class LicenseTier {
      * @return 该档模块集合；未知档位返回 {@code null}（由调用方决定如何拒绝）
      */
     public static Set<String> modulesOf(String tier) {
+        // null 必须挡在 map 查询之前：TIER_TO_MODULES 是 Map.of(...)，其 get(null)
+        // 走 MapN.probe(pk) → pk.hashCode() → NPE。javadoc 承诺"未知档位返回 null"，
+        // 而 null 恰恰是最常见的"未知档位"形态（反查失败时）。
+        if (tier == null) {
+            return null;
+        }
         Set<String> got = TIER_TO_MODULES.get(tier);
         return got == null ? null : Set.copyOf(got);
     }
 
-    /** 档位中文名；未知档位原样返回。 */
+    /**
+     * 档位中文名；未知档位（含 {@code null}）原样返回。
+     *
+     * <p><b>null 必须显式挡掉</b>：{@code TIER_DISPLAY_NAME} 是 {@code Map.of(...)}，
+     * 其 {@code getOrDefault} 走 {@code MapN.probe(pk)}，对 null key 直接
+     * {@code pk.hashCode()} → NPE。于是"档位反查不到"这个完全正常的路径
+     * （非档位组合）反而会把调用方炸掉。2026-10-06 加档位绑定校验时由
+     * {@code LicenseControllerTest} 暴露。
+     */
     public static String displayName(String tier) {
+        if (tier == null) {
+            return null;
+        }
         return TIER_DISPLAY_NAME.getOrDefault(tier, tier);
     }
 

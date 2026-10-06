@@ -70,16 +70,50 @@ public class LicenseService {
     private final LicenseSigner licenseSigner;
     private final LicenseInfo currentLicense;
 
+    /**
+     * 是否强制「License 模块集合必须恰好等于某个可售档位」。
+     *
+     * <p>默认 **true**（fail-closed）。关掉它等于恢复 2026-10-06 之前的行为：
+     * 签名里的模块集合是什么就放行什么，于是"某档客户实际能启用哪些模块"退回为
+     * 签发脚本的约定而非代码强制。
+     *
+     * <p><b>为什么默认 true 而不是 false</b>：本产品处于 PoC / 私有化交付准备阶段
+     * （见 {@code docs/product-brief.md}），现场没有任何已签发的旧授权，因此不存在
+     * "老授权会被新规则拒掉"的兼容问题；而留着一条默认关闭的口子，等于把刚建立的
+     * 不变式交给部署方去记。确有非档位组合的商务需求时再显式关闭。
+     */
+    private final boolean enforceTierBinding;
+
+    /**
+     * 兼容构造器：等价于「强制档位绑定」。
+     *
+     * <p>保留它是为了不打断既有直接构造点（本仓测试有 6 处、外部集成代码也可能直接
+     * {@code new}）。<b>但它不构成后门</b>：默认开启而非关闭，想关掉必须显式走
+     * 6 参构造并传 {@code false}。
+     */
+    public LicenseService(String licenseKeyConfig, String hmacSecret, boolean devMode,
+                          String publicKeyConfig, ObjectMapper objectMapper) {
+        this(licenseKeyConfig, hmacSecret, devMode, publicKeyConfig, true, objectMapper);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public LicenseService(
             @Value("${aerofleet.license.key:}") String licenseKeyConfig,
             @Value("${aerofleet.security.jwt-secret:" + DEV_HMAC_SECRET_FALLBACK + "}") String hmacSecret,
             @Value("${aerofleet.security.dev-mode:false}") boolean devMode,
             @Value("${aerofleet.license.public-key:}") String publicKeyConfig,
+            @Value("${aerofleet.license.enforce-tier-binding:true}") boolean enforceTierBinding,
             ObjectMapper objectMapper) {
         this.licenseKeyConfig = licenseKeyConfig;
         this.hmacSecret = hmacSecret;
         this.devMode = devMode;
+        this.enforceTierBinding = enforceTierBinding;
         this.objectMapper = objectMapper;
+        if (!enforceTierBinding) {
+            log.warn("aerofleet.license.enforce-tier-binding=false：档位→模块绑定不再强制，"
+                    + "License 里签了什么模块就放行什么模块 —— 三档定价退回为签发脚本的约定，"
+                    + "非代码强制。仅在确有非档位商务组合时使用。");
+        }
         // fail-closed：jwt-secret 同时用于 JWT HS256 回退与 license 激活码 HMAC（generateActivationCode）。
         // 非 dev 模式下留空/未配置（等于内置默认值）一律拒绝启动，避免激活码静默不可用或弱密钥上岗；
         // dev 模式下仅告警（保持本地/CI 可启动，激活码功能明确不可用）。
@@ -204,9 +238,22 @@ public class LicenseService {
     }
 
     /**
-     * 校验 License 有效性：已激活、未过期。
+     * 校验 License 有效性：已激活、未过期、模块集合绑定到可售档位。
      * <p>
      * 设备数量校验请使用 {@link LicenseInfo#canActivate(int)}。
+     *
+     * <h2>档位绑定为什么必须在**验证期**做</h2>
+     * 签发侧（{@link #generateLicenseKeyByTier}）已有 {@link LicenseTier#mismatchOf} 自检，
+     * 但那只保护"走档位入口签发"的路径。三处绕过它：
+     * <ul>
+     *   <li>走原始 {@link #generateLicenseKey} 直接传 {@code modules}；</li>
+     *   <li>{@link LicenseTier} 引入之前签出的授权，其模块集合是当时的自由文本；</li>
+     *   <li>拿到签发密钥的任何一方都能构造任意模块集合。</li>
+     * </ul>
+     * 只在签发侧校验 ⇒ <b>加载时那一步没有任何检查</b>，一份"基础版 + emergency"的授权
+     * 照样全程有效，定价仍不可执行。故此处按 fail-closed 补上不变式：
+     * 模块集合必须<b>恰好等于</b>某档（不多、不少）。{@code null}/空集同样判失败——
+     * 那等价于"什么模块都没有"，与已签发授权的语义矛盾。
      *
      * @param info 待校验的 License 信息
      * @return 有效返回 true，否则 false
@@ -223,7 +270,58 @@ public class LicenseService {
             log.debug("License 校验失败: 已过期, tenant={}, expiry={}", info.getTenantId(), info.getExpiryDate());
             return false;
         }
+        if (enforceTierBinding) {
+            String violation = tierBindingViolation(info.getModules());
+            if (violation != null) {
+                log.error("License 档位绑定校验失败，拒绝请求: tenant={}, modules={} —— {}",
+                        info.getTenantId(), info.getModules(), violation);
+                return false;
+            }
+        }
         return true;
+    }
+
+    /** 档位绑定是否处于强制状态（供 /api/v1/license/info 自报，便于运维核对部署口径）。 */
+    public boolean isTierBindingEnforced() {
+        return enforceTierBinding;
+    }
+
+    /**
+     * 校验一组模块是否**恰好等于**某个可售档位的模块集合。
+     *
+     * <p>刻意不用 {@link LicenseTier#inferTier} 做判定：它是"包含某档全部模块"的
+     * 子集语义，对超集会误判为高档（{@code FULL + 一个未知模块} 会被认成 FULL）——
+     * 即"多签一个未知模块反而更宽松"。这里逐档做 {@link LicenseTier#mismatchOf}
+     * 精确比对：超集、多一个未知模块、少一个模块，三种都判红。
+     * （已由 {@code LicenseTierBindingEnforcementTest.supersetIsRejected} 变异验证：
+     * 换成 inferTier 语义该用例立刻红。）
+     *
+     * @param modules License 签名负载里的模块集合
+     * @return 相符返回 {@code null}；不符返回人类可读原因（供日志与测试断言）
+     */
+    public String tierBindingViolation(Set<String> modules) {
+        if (modules == null || modules.isEmpty()) {
+            return "模块集合为空（合法组合：" + tierSummary() + "）";
+        }
+        for (String tier : LicenseTier.allTiers()) {
+            if (LicenseTier.mismatchOf(tier, modules) == null) {
+                return null;
+            }
+        }
+        return "模块集合不对应任何可售档位：" + modules
+                + "（合法组合：" + tierSummary() + "）";
+    }
+
+    /** 合法档位摘要（仅日志与错误消息用，避免把 LicenseTier 的表结构复制到别处）。 */
+    private static String tierSummary() {
+        StringBuilder sb = new StringBuilder();
+        for (String t : LicenseTier.allTiers().stream().sorted().toList()) {
+            if (sb.length() > 0) {
+                sb.append("；");
+            }
+            sb.append(LicenseTier.displayName(t)).append('=').append(LicenseTier.modulesOf(t));
+        }
+        return sb.toString();
     }
 
     /**
@@ -369,6 +467,23 @@ public class LicenseService {
             throw new IllegalStateException(
                     "License key 解析结果为空，已拒绝以开发版继续运行（fail-closed）。"
                             + "若本部署本就不需要授权校验，请清空 aerofleet.license.key。");
+        }
+
+        // 档位绑定在启动期也要判一次，与上面两条「验签失败/解析为空即拒启」同一风格。
+        // 只判在 validateLicense（每请求）会得到一个更难排查的失效形态：装了一份模块集合
+        // 不对应任何可售档位的授权，进程**启动成功**，然后每个请求 403 —— 运维会先去查
+        // 认证/网关，而不是去查授权本身。启动期拒绝把「定价是否可执行」变成部署时问题。
+        if (enforceTierBinding) {
+            String violation = tierBindingViolation(parsed.getModules());
+            if (violation != null) {
+                log.error("License 档位绑定校验失败，拒绝启动: tenant={}, modules={} —— {}",
+                        parsed.getTenantId(), parsed.getModules(), violation);
+                throw new IllegalStateException(
+                        "License 已配置但模块集合不对应任何可售档位，拒绝启动（fail-closed）："
+                                + violation
+                                + " 若本部署确实使用非档位商务组合，请显式设置 "
+                                + "aerofleet.license.enforce-tier-binding=false（会打 WARN）。");
+            }
         }
 
         log.info("License 加载成功: tenant={}, product={}, maxDevices={}, modules={}, expiry={}",
