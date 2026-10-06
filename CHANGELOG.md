@@ -4,6 +4,72 @@
 
 ---
 
+## [Unreleased] — 第七轮：HEAD 变红收口 + 三域写路径 IDOR + 占位凭据两级门禁（2026-10-06）
+
+背景：第六轮复核（HEAD `a6e1118`）确认 4291 单测全绿但 **CI 是红的**，红因两条；
+同时清单外残留的跨租户缺陷被重新定位为「读已过滤、**写**没过滤」。本轮收这三件事，
+外加收口过程中新暴露的一个计数口径缺陷。
+
+1. **`Security Scan` 判红的两条独立原因**（run 37407124936 取证）：
+   - 真漏洞：`npm audit --audit-level=high` 报 `source-map-js 1.0.0–1.2.1`
+     （GHSA-68fv-2mgg-jv7q，事件循环 DoS）。修复版本经 `gh api /advisories/...` 官方确认为
+     **1.2.2**（范围 `>= 1.0.0, < 1.2.2`），lockfile 锁到 1.2.2；`postcss`/`magicast` 的
+     `^1.2.1` 本就覆盖它，因此 **只改 lockfile、不动 package.json**，`npm ci --dry-run` 退出码 0。
+     本机无法复现该审计结论——registry 是 npmmirror，`/-/npm/v1/security/*` 返回 NOT_IMPLEMENTED，
+     所以这条只能在 CI 验；
+   - **我上一轮引入的缺陷**：SARIF 上传步 `if: always()` 没有文件存在守卫。npm audit 先红
+     → Trivy 从未执行 → 上传步自己再红一次（`Path does not exist: trivy-results.sarif`）。
+     一次真红被放大成两条噪声。现改为
+     `always() && steps.trivy.conclusion != 'skipped' && hashFiles('trivy-results.sarif') != ''`
+     （`actionlint` 退出码 0）。
+2. **三域写路径 IDOR 闭合**（alarm / orch / delivery2）：此前这三个域的**读**端点已过租户
+   可见性，**动作**端点各自直接 `findById`，于是「看不见」的资源仍可被改写——他租户可
+   ACK 我的告警、中止我的编排计划、启动/投放/签收我的配送任务，且全部返回 200。
+   - `AlarmEventStore.acknowledge()` 改走既有 `getById()`（即 `isVisibleTo`），批量 ACK 同规则；
+     全仓两个调用点都在请求线程（已核，无后台线程回归面）；
+   - `OrchestrationPlanService.requireVisiblePlan()` 新增，start/pause/resume/abort/getProgress
+     五个动作端点全部走它；计划真不存在仍抛 `IllegalArgumentException`（沿用既有契约），
+     他租户抛 `NotFoundException`→404（与读侧「按不存在处理」同口径，不用 403 暴露归属）；
+   - `DeliveryController2.visibleTask()` 成为该控制器**唯一** ID 取物入口，`getTask` 也改为
+     调它——两份判定并存就会各自漂移，这正是本次失效的形态；
+   - 测试：`HttpAuthChainTest` 新增 4 条**动作**断言（跨租户 ACK/中止/启动/进度 + 未归属事件
+     不可 ACK）。每条同时断言「资源未被改写」并配本租户正向对照——只断 404 的话，
+     「恒 404」的坏门禁同样能过；
+   - **变异验证**：逐个摘掉三处守卫 → 4/4 红，红因均为 `expected:<404> but was:<200>`
+     （即修复前的真实行为）；恢复后 15/15 绿。
+3. **占位凭据两级门禁**（P0-5 的最后一块）：`deploy/k8s/secret.yaml` 与 helm `values.yaml` 里的
+   `REPLACE_WITH_*` 占位串**长度达标**，会原样通过后端既有的「jwt secret ≥32 字节」校验，
+   所以忘替换的那次部署不是报错，而是安静地把仓库里公开的字符串当 HMAC-SHA256 密钥上岗——
+   任何读过本仓库的人都能自造任意租户/ADMIN 的 JWT。
+   - 后端：`PlaceholderSecrets` + `DeploymentSecretsGuard`（`@PostConstruct`，覆盖 `jwt.secret`、
+     `aerofleet.security.jwt-secret`、`aerofleet.encryption.key`、`spring.datasource.password`）。
+     刻意**不**挂在 `dev-mode` 下：dev/test 用自有字面量零影响，而「prod 才检查」等于把判定
+     挂在可能被忘设的 profile 上——正是这轮反复遇到的失效类型；
+   - helm：`templates/secret.yaml` 顶部 `fail`，默认 values 在 `install/template` 阶段即被拒并
+     点名属性；真实 `--set` 渲染 13 个对象、无占位残留；
+   - `scripts/check-deploy-secrets.sh`：A 拒默认 / B 收真实 / C 无残留 / 附示例清单不得混入
+     真凭据，**helm 缺失直接 exit 1**（跳过不等于通过）。该脚本当场抓出我一个真 bug：helm 的
+     报错文本里没有 `REPLACE_WITH` 字面量导致 A 断言锚不到（已修消息文本）；另在临时副本上
+     摘掉守卫做变异，确认 A 会判红；
+   - CI 新增独立 job `deploy-secrets`（`azure/setup-helm@v4.3.1`，按 tag 固定并注释记 SHA）；
+   - 文档同步：`docs/deployment-guide.md` §2.2 与 `docs/customer-onboarding-guide.md` 里
+     `helm install nexussky . -f values.yaml` 这条命令现在**必然失败**，已改为私有 values 写法。
+4. **计数口径缺陷（本轮新暴露）**：`check-test-count-docs.py` 从 `target/surefire-reports/`
+   汇总，而该目录**不会自清**——`mvn test`（不带 clean）只覆盖本轮跑过的类，已删除的测试类
+   留下的旧 XML 仍被计入。实测：某会话的临时探针类 `PortReleaseProbeTest` 验后删除、XML 仍在，
+   本地量到 drone-sim=1392 而 CI 是 1391。门禁不会因此变红，反而是「把带病的数字写进对外
+   文档」这条路径被打开了。现在脚本剔除「类已不在 `src/test`」的报告并**打印剔除清单**
+   （静默剔除等于换个方式的错数），并注入幻影报告（7 用例）验证剔除生效且总数不变。
+   文档 22 处 + `docs/product-brief.md` 的「4,291」同步到实测 **4301**（cloud-backend 2305），
+   `python scripts/check-test-count-docs.py` 退出码 0。
+
+**本机验证**：`mvn -B -o clean test` 全 reactor **4301 用例 / 0 失败 / 0 错误 / 0 跳过**；
+新增 `DeploymentSecretsGuardTest` 6 例；摘 `@PostConstruct` 变异 → 3 条接线断言立刻红
+（验的是「函数正确≠被调用」）。CI 腿（npm audit 真值、SARIF 上传、helm job）只能在推送后验，
+验证对象是要推的 HEAD。
+
+---
+
 ## [Unreleased] — 修复两个 E2E 固定端口 flake：端口释放同步化 + close 链 try/finally（2026-10-06）
 
 - **现象**：master CI 连红的第二个原因——两个 E2E 用例间歇 `BindException: Address already in use`

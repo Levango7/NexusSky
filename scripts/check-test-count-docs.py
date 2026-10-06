@@ -144,22 +144,66 @@ def _read_suite(path):
             int(suite.get('skipped', 0)))
 
 
+def _suite_class(fn):
+    """从 ``TEST-<fqcn>.xml`` 取测试类全名；``$Nested`` 归到宿主类（surefire 为每个
+    嵌套类各写一份报告，但源文件只有宿主类那一份）。"""
+    name = fn[len('TEST-'):-len('.xml')]
+    return name.split('$')[0]
+
+
+def _class_has_source(root, module, fqcn):
+    """该测试类在本模块 ``src/test`` 下是否还有源文件。
+
+    为什么必须查：**surefire 报告目录不会被清理**。`mvn test`（不带 clean）只覆盖
+    本轮跑过的类，早已改名/删除的类留下的旧 XML 会一直被算进总数。实测踩坑：
+    2026-10-06 某轮临时探针用例 `io.aerofleet.sim.PortReleaseProbeTest` 验后删除，
+    类不在了、XML 还在，本地量到 drone-sim=1392 而 CI（干净 checkout）是 1391——
+    门禁本身不会因此变红，反而是"把带病的数字写进对外文档"这条路径被打开了。
+    """
+    rel = fqcn.replace('.', os.sep) + '.java'
+    expected = os.path.join(root, module, 'src', 'test', 'java', rel)
+    if os.path.isfile(expected):
+        return True
+    # 兜底：类可能写在同名之外的文件里（Java 允许包级私有类文件名不同）
+    probe = fqcn.split('.')[-1]
+    test_dir = os.path.join(root, module, 'src', 'test', 'java')
+    if not os.path.isdir(test_dir):
+        return True  # 拿不到源码树时不判陈旧——宁可少报，不可误杀
+    for dirpath, _dirnames, filenames in os.walk(test_dir):
+        for f in filenames:
+            if f.endswith('.java'):
+                try:
+                    with open(os.path.join(dirpath, f), 'r', encoding='utf-8',
+                              errors='ignore') as fh:
+                        if probe in fh.read():
+                            return True
+                except OSError:
+                    continue
+    return False
+
+
 def measure_actual(root, reports_root=None):
     """汇总 surefire 报告。
 
-    返回 (总数, 失败, 错误, 跳过, 文件数, 每模块计数, 缺失模块)。
+    返回 (总数, 失败, 错误, 跳过, 文件数, 每模块计数, 缺失模块, 陈旧报告列表)。
 
     - 默认模式：递归扫 ``*/target/surefire-reports/TEST-*.xml``，模块名由相对路径推出。
     - ``reports_root`` 模式：只扫 ``<reports_root>/<module>/TEST-*.xml``，模块名取目录名。
       这是 CI 汇总模式，artifact 下载到哪个模块目录就算哪个模块。
+    - 两种模式都剔除「类已不存在于 src/test」的陈旧报告（见 ``_class_has_source``），
+      并把剔除项回传给调用方打印——剔除必须可见，静默剔除等于换了个方式的错数。
     """
     total = 0
     failures = errors = skipped = 0
     files = 0
     per_module = {}
+    stale = []
 
     def absorb(module, path):
         nonlocal total, failures, errors, skipped, files
+        if not _class_has_source(root, module, _suite_class(os.path.basename(path))):
+            stale.append('%s: %s' % (module, os.path.basename(path)))
+            return
         got = _read_suite(path)
         if got is None:
             return
@@ -190,7 +234,7 @@ def measure_actual(root, reports_root=None):
                     absorb(module, os.path.join(dirpath, fn))
 
     missing = [m for m in EXPECTED_MODULES if m not in per_module]
-    return total, failures, errors, skipped, files, per_module, missing
+    return total, failures, errors, skipped, files, per_module, missing, stale
 
 
 def _is_retrospective(line):
@@ -328,7 +372,7 @@ def main():
     args = ap.parse_args()
 
     (actual, failures, errors, skipped, files,
-     per_module, missing) = measure_actual(args.root, args.reports_root)
+     per_module, missing, stale) = measure_actual(args.root, args.reports_root)
 
     if files == 0:
         if args.reports_root:
@@ -341,6 +385,14 @@ def main():
     print('实测：%d 用例 / %d 失败 / %d 错误 / %d 跳过（来自 %d 个测试类）'
           % (actual, failures, errors, skipped, files))
     print('  分模块：' + '，'.join('%s=%d' % kv for kv in sorted(per_module.items())))
+
+    if stale:
+        # 剔除必须说出来：静默剔除只是把「虚高的数」换成「看不见的剔除」。
+        print('  剔除 %d 份陈旧报告（对应测试类已不在 src/test，surefire 目录不会自清）：'
+              % len(stale))
+        for s in stale[:10]:
+            print('    - %s' % s)
+        print('  （要彻底干净请跑 `mvn clean test`）')
 
     if missing:
         # 缺模块意味着 total 偏小，此时任何校验结论都不可信，先红。

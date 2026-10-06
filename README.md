@@ -646,17 +646,22 @@ NexusSky/
 
 ## 测试规模
 
-实测于 2026-10-05，`mvn -B -o test`（全 reactor，0 failures / 0 errors / 0 skipped）：
+实测于 2026-10-06，`mvn -B -o clean test`（全 reactor，0 failures / 0 errors / 0 skipped）：
+
+> **必须带 `clean`**：`target/surefire-reports/` 不会自清，`mvn test` 只覆盖本轮跑过的类，
+> 于是已改名/删除的测试类留下的旧 XML 仍被计入——实测踩到过 drone-sim 虚高 1（本地 1392
+> vs CI 1391）。脚本现在会剔除这类陈旧报告并**打印剔除清单**（静默剔除等于换个方式的错数），
+> 但正确的取数姿势仍是 `clean test`。
 
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 457 |
 | `drone-sim` | 1391 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2295 |
+| `cloud-backend` | 2305 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4291** |
+| **总计** | **4301** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
