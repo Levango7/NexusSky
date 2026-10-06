@@ -117,6 +117,21 @@ CodeQL、Playwright、helm 渲染。改动对象是要推的 HEAD。
      "surefire 偶发漏跑" / "某个 `@SpringBootTest` 上下文初始化竞争导致类被丢弃" /
      "构建产物写入竞争"。跟进方向：连续 N 次 `clean test` 记录逐类用例数并做差集，
      定位是哪些类/用例在漂；确认为漏跑后在门禁侧加"逐类基线比对"而非仅比总数。
+   - **更正（2026-10-07，Qoder 会话；上面的归因方向被证伪）**：这段"run-to-run 不可复现"
+     被归到了 surefire/装配竞争，**真实原因是跨 agent 干扰**——同一时刻有第二个会话（Qoder）
+     在改测试树、并在同一棵树里跑 `mvn clean`。三条证据：
+     ① 漂移的步长与方向逐一对得上测试树的增删：Qoder 会话在 00:27 摘除了 4 个临时探针用例
+     （`XsltViewReachabilityTest` 3 例 + `TrivyIgnoreHygieneTest` 1 例），恰是 2334→2330 那一步；
+     其后又分两批新增 6 例，2330→2336→2340；
+     ② 同批运行里的 `Failed to clean project: Failed to delete …/target` 与 drone-sim 的
+     `ClassNotFoundException` 风暴，是"两个 `mvn clean` 同时持有一棵树"的签名，与测试套件无关；
+     ③ 树静止后（对方停写、Qoder 迁到独立 worktree）计数确定，且**两个会话独立测得同一值**：
+     **4336（cloud-backend 2340）**——Qoder 在 `F:/Nexus/nexussky-land` 排除被占端口的
+     `OrbitJobManagerTest` 后得 4332/2336、加回该类 4 例即 4336/2340；OpenCode 会话清空全部
+     target 并确认无残留进程后同样读到 4336/2340。
+     故本条由"未收口"改为**已收口（归因＝跨 agent 并发干扰）**，文档当前值 4336。
+     教训：`target/` 是共享资源，同一仓库同一时间只应有一个构建方；看到
+     "clean 删不掉 target + CNFE 风暴"应先怀疑并发，而不是 surefire。
 
 ---
 
@@ -172,6 +187,12 @@ CodeQL、Playwright、helm 渲染。改动对象是要推的 HEAD。
      不得出现在异常结论里。
    - **诚实声明**：原始机理**未确证**（无法在本机复现到那一帧）。本轮做的是让它下次
      复发时可诊断，而不是宣称已根除。CI 侧若复现，按上面的判别位读红因即可。
+   - **更正（2026-10-07，Qoder 会话）**：那次"2 跑 1 红"的最可能原因同样是**跨 agent 构建干扰**
+     （同一棵树上第二个会话正在跑 `mvn clean`、且它在改测试源），而非审计链本身不可复现。
+     定性从"未经登记的真实间歇失效"下调为"观测到一次，后证实为跨 agent 构建干扰"。
+     两处加固（catch 分支补 `log.warn`、用 `checked()/reason()/brokenAtId()` 当判别位）
+     **保留**——下次若真复发，它们仍是把"基础设施故障"与"篡改"分开的唯一信号。
+     树静止后，该类在两侧独立全量中均为绿。
 4. **视频融合后端补齐**（`VideoFusionPanel` 此前必然 404）：
    - 该面板从建仓起就调用 `/api/v1/video-fusion/{surveillance/streams, drone/feeds,
      recording/{id}/start|stop}`，**后端从无对应 Controller**；而 `videofusion` 早已在
