@@ -21,11 +21,15 @@ import java.util.Set;
  * 本类把"档位 → 模块集合"固化成常量表，并提供签发侧的档位化入口，
  * 使"卖了哪一档"与"客户能开哪些模块"在代码层强一致。
  * <p>
- * <b>与定价文档的对应关系</b>（{@code docs/PRODUCT-POSITIONING.md} §5.1）：
+ * <b>与定价文档的对应关系</b>（{@code docs/PRODUCT-POSITIONING.md} §5.1，
+ * 2026-10-07 裁决后）：
  * <pre>
- *   基础版 (BASIC)     20–50  万/年  → core + fleet
- *   应急版 (EMERGENCY) 50–100 万/年  → core + fleet + emergency
- *   完整版 (FULL)      100–200 万/年 → core + fleet + emergency + network + advanced
+ *   基础版 (BASIC)     20–50  万/年  → M5 mesh + M9 编排 + GCS OEM
+ *                                   = core + fleet + mesh + orch
+ *   应急版 (EMERGENCY) 50–100 万/年  → 基础版 + 4a 空地一体化 + ONVIF
+ *                                   = 基础版 + emergency
+ *   完整版 (FULL)      100–200 万/年 → 全模块
+ *                                   = 应急版 + network + advanced
  * </pre>
  * <p>
  * <b>维护契约</b>：新增模块（{@link LicenseService#ALL_MODULES} 扩容）时，
@@ -41,10 +45,10 @@ import java.util.Set;
  */
 public final class LicenseTier {
 
-    /** 基础版：飞起来所需的核心能力 + 机队作业。 */
+    /** 基础版：GCS OEM + 机队作业 + M5 mesh 自愈组网 + M9 应急编排。 */
     public static final String BASIC = "basic";
 
-    /** 应急版：基础版 + 应急指挥闭环 + 安防联动。 */
+    /** 应急版：基础版 + 4a 空地一体化指挥 + 告警联动 + ONVIF 安防 / 视频视觉。 */
     public static final String EMERGENCY = "emergency";
 
     /** 完整版：全部模块。 */
@@ -69,8 +73,25 @@ public final class LicenseTier {
     private LicenseTier() {
     }
 
+    /**
+     * 档位 → 模块集合（累进）。
+     * <p>
+     * <b>2026-10-07 定价裁决</b>：用户裁定"基础版需要扎实"，即基础版必须真的能撑起
+     * 一次交付。原先基础版 = {@code core}+{@code fleet}（只有接入与作业），
+     * 与定价文档 §5.1 承诺的「M5 mesh + M9 编排 + GCS OEM」不符——按 §5 卖基础版，
+     * 客户付费的 mesh 与 M9 编排会被 403。
+     * <p>
+     * 为让基础版"扎实"而不把重资产链路（5G 基站 / 卫星中继）与 ONVIF 安防一起白送，
+     * {@link LicenseService#ALL_MODULES} 由 5 扩为 7：{@code network} 拆出 {@code mesh}，
+     * {@code emergency} 拆出 {@code orch}。三档边界与定价文档逐字对齐：
+     * <pre>
+     *   基础版 = M5 mesh + M9 编排 + GCS OEM    (core + fleet + mesh + orch)
+     *   应急版 = 基础版 + 4a 空地一体化 + ONVIF  (基础版 + emergency)
+     *   完整版 = 全模块                          (应急版 + network + advanced)
+     * </pre>
+     */
     private static Map<String, Set<String>> build() {
-        Set<String> basic = new LinkedHashSet<>(List.of("core", "fleet"));
+        Set<String> basic = new LinkedHashSet<>(List.of("core", "fleet", "mesh", "orch"));
         Set<String> emergency = new LinkedHashSet<>(basic);
         emergency.add("emergency");
         Set<String> full = new LinkedHashSet<>(emergency);

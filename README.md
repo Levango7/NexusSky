@@ -622,22 +622,34 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 
 ## 能力腿 e2e 的实测状态（2026-10-06 实测，非推断）
 
-`scripts/` 下 28 个 `e2e-*` 脚本中，**只有 4 个进 CI 门禁**（`e2e-smoke` /
-`e2e-fault-linux` / `e2e-failsafe-linux` / `e2e-vision-linux`）。2026-10-06 新增
-`e2e-capability` job 接入三个已有 Linux 版的脚本，并在真 Linux（WSL2）内核下
-对着当时的 `master` 后端**逐条实测**。结论：
+`scripts/` 下 28 个 `e2e-*` 脚本中，**7 个进 CI 门禁**（`e2e-smoke` /
+`e2e-fault-linux` / `e2e-failsafe-linux` / `e2e-vision-linux`，以及 2026-10-07
+转正的 `e2e-capability` 三条腿）。
 
-| 脚本 | Linux 可执行 | 对当前后端的实测结果 |
+**2026-10-06 首轮实测**（真 Linux / WSL2 内核，对着当时的 `master` 后端）发现
+两条腿存在 API 漂移、一条腿语义误解：
+
+| 脚本 | 首轮实测 | 红因 |
 |---|---|---|
-| `e2e-emergency.sh` | ✅ | **7/9 阶段通过**。前 7 步全绿（布控球 3 台注册 → 报警事件 → 联动规则匹配 → 应急命令 → 状态转移 3 步 → 历史留档）；**末尾 2 条断言失败且属时序**：脚本等编排计划走到 `CLOSED/SUMMARY` 且 ≥4 次状态转移，实际停在 `EXECUTING` / 3 步 |
-| `e2e-spray.sh` | ✅ | **0/7 全红**。**API 漂移**：`POST ... not supported`、`no such endpoint`——脚本打的是旧版喷洒/物流路径与请求方法 |
-| `e2e-hardware.sh` | ✅ | **4/9**。**API 漂移**：`missing numeric field 'azimCenter'`（雷达配置载荷字段改名）、模型切换 `no such endpoint`；LiDAR/IMU 返回 `sysid 1 no LiDAR/IMU data`（需模拟器开启对应载荷开关） |
+| `e2e-emergency.sh` | 7/9 | 末尾 2 条断言**属脚本语义误解**：把"一键应急"当成走完全流程，而 `oneClick` 的契约只到 `EXECUTING`（评估与总结是独立端点 `/evaluate`、`/close`） |
+| `e2e-spray.sh` | 0/7 | **API 漂移**：端点前缀、请求体字段、状态枚举全部对不上；另有 `/spray/gripper` 指向不存在的端点 |
+| `e2e-hardware.sh` | 4/9 | **API 漂移**：雷达载荷字段改名；模型切换端点 `/hardware/physics-model` 全仓不存在；IMU 是扁平字段而非嵌套对象 |
 
-**因此**：这三个脚本以 **`continue-on-error: true` 观察模式**接入 CI，不作硬门禁。
-理由不是"它们会挂"，而是上面两栏——**spray 与 hardware 腿对着当前 API 已经是坏的**，
-此时设成硬门禁只会让 CI 常红并掩盖真实原因。收紧条件：① spray/hardware 腿按当前
-API 重写并本地全绿；② emergency 腿的 2 条时序断言在 CI 机器上稳定通过。
-去掉 `continue-on-error` 只需删一行，不涉及脚本改动。
+**2026-10-07 已按当前 API 重写并转硬门禁**（去掉 `continue-on-error`）。三条腿
+在真 Linux 下连续两次全绿：**emergency 31 项 / spray 20 项 / hardware 16 项，共
+67 项断言 0 失败**；CI run `37624477248` 上 25/25 job 全绿。
+
+重写中删掉了**指向不存在端点的凭空断言**，并把"无数据"按契约处理而非假装通过：
+
+- `/hardware/physics-model` 与 `/spray/gripper` 在仓内均不存在（原脚本凭空断言），
+  动力侧改用真实存在的 `/rotor/config` + `/rotor/telemetry`，夹爪由 drone-sim 单测覆盖。
+- LiDAR/IMU 返回 404 是**符合契约**的：drone-sim 默认不注入 `LiDARSource`/`ImuSource`。
+  此时断言"404 契约正确"并跳过字段断言，真实载荷断言需显式装配 Source 或真机。
+- 机载拒收（`MAV_RESULT=3`，drone-sim 未实现该自定义 MAV_CMD）只告警不判失败——
+  REST 侧契约是"命令已下发并拿到回执"，机载语义需机载实现后另测。
+
+> 附带修掉一个真实后端缺陷：`POST /api/v1/spray` 此前**恒返回 500**
+> （`WaypointListConverter` 反序列化切串越界 → 事务 rollback-only）。详见 CHANGELOG。
 
 > **方法学备注**：本次验证在 WSL2 真 Linux 内核下进行，因为本仓工作区被
 > `core.autocrlf=true` 转成 CRLF，bash 会因 `set -euo pipefail\r` 报
@@ -704,10 +716,10 @@ NexusSky/
 | `mavlink-core` | 457 |
 | `drone-sim` | 1391 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2347 |
+| `cloud-backend` | 2363 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4343** |
+| **总计** | **4359** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -1046,12 +1058,12 @@ NexusSky/
 
   | 档位 | 授权模块（累进） | 说明 |
   |---|---|---|
-  | 基础版 | `core` + `fleet` | 设备接入、遥测、任务、航迹、围栏、RID、监管、租户、审计 + 机队作业（编队、喷洒、物流、集群调度） |
-  | 应急版 | 基础版 + `emergency` | 增应急指挥闭环、安防联动、视频 / 视觉 |
-  | 完整版 | 基础版 + `emergency` + `network` + `advanced` | 增 mesh / 移动基站 / 卫星中继（network）与数字孪生 / AI 决策（advanced） |
+  | 基础版 | `core` + `fleet` + `mesh` + `orch` | 设备接入、遥测、任务、航迹、围栏、RID、监管、租户、审计 + 机队作业（编队、喷洒、物流、集群调度）+ **M5 mesh 自愈组网** + **M9 应急编排** |
+  | 应急版 | 基础版 + `emergency` | 增 4a 空地一体化指挥、告警联动、ONVIF 安防接入、视频融合 / 视觉 |
+  | 完整版 | 应急版 + `network` + `advanced` | 增 5G 移动基站 / 卫星中继 / 链路适配（network）与数字孪生 / AI 决策（advanced） |
 
   > **档位是累进的**（应急版 ⊇ 基础版，完整版 ⊇ 应急版），与定价文档"应急版 = 基础版 + ..."的
-  > 语义一致；本表此前列为基础版/应急版时漏了 `fleet`，已按代码更正。
+  > 语义一致。
   >
   > 两处机器可校验真相源：
   > ① **前缀 → 模块**：`cloud-backend/.../license/LicenseModuleMap.java`，
@@ -1060,17 +1072,20 @@ NexusSky/
   > ② **档位 → 模块集合**：`LicenseTier.java`，且**在验证期强制**
   >    （`LicenseService.validateLicense` → `tierBindingViolation`：模块集合必须
   >    **恰好等于**某档，超集/缺项/未知模块一律判红），由
-  >    `LicenseTierBindingEnforcementTest`（16 例）守卫；
+  >    `LicenseTierBindingEnforcementTest`（19 例）守卫；
   >    开关 `aerofleet.license.enforce-tier-binding` 默认 true。
 >    **至此"某档客户实际能启用哪些模块"是代码保证，不再是配置约定。**
 >    唯一仍需人工同步的是**价格表**（不入代码）：本表模块与
 >    `docs/PRODUCT-POSITIONING.md` §5 的档位价格需同时改。
->    ⚠️ **已知矛盾（2026-10-06 登记，未擅自修改任何一侧）**：§5.1 第 342–344 行把
->    **mesh 组网（M5）** 写在**基础版**，而 `LicenseTier` 把 `network`（含 mesh/基站/卫星）
->    放在**完整版**；§5 还把**应急编排（M9）** 写在基础版，而代码里 `orch` 属
->    `emergency`（应急版起）。档位绑定在验证期强制之后，按 §5 卖基础版会导致客户
->    付费的 mesh 被 403。**需定价负责人裁决后再改一侧**，见
->    `docs/product-brief.md` §⚠6。
+>
+> **✅ 定价档位已裁决（2026-10-07，"基础版需要扎实"）**：此前 §5.1 把 mesh 与 M9 编排
+>    承诺给基础版，而代码把 mesh 放完整版、M9 放应急版 ⇒ 按 §5 卖基础版会让客户付费的
+>    `/api/v1/mesh/*` 与 M9 编排被 403。现已把 `network` 拆出 `mesh`、`emergency` 拆出
+>    `orch`（`ALL_MODULES` 5 → 7），三档边界与 §5 逐字对齐；拆分**不是**把两个大模块
+>    整块下移——那会让基础版连基站 / 卫星 / ONVIF 一起白送、档位梯子塌掉。
+>    边界由 `LicenseModuleSplitMigrationTest`（7 例）钉死。
+>    ⚠️ **升级需重签发**：模块名进签名载荷，拆分前签发的 license 不再对应任何档位。
+>    详见 `docs/PRODUCT-POSITIONING.md` §5.1.1（唯一对照入口）。
 
 - **未授权行为**：复制、分发、转售、反向工程、移除授权校验逻辑、超授权范围
   使用等，均属违约，许可方保留追究法律责任的权利。

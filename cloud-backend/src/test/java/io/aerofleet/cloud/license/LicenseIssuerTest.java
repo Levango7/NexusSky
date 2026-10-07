@@ -76,13 +76,15 @@ class LicenseIssuerTest {
         keyPair = LicenseKeyGenerator.generateKeyPair();
     }
 
-    /** 一份标准的待签发授权：acme 租户、50 设备、core+fleet 模块、一年有效期 */
+    /** 一份标准的待签发授权：acme 租户、50 设备、**基础版**模块、一年有效期 */
     private LicenseInfo sampleInfo() {
         LicenseInfo info = new LicenseInfo();
         info.setTenantId("acme");
         info.setProductName("AeroFleet Cloud Standard");
         info.setMaxDevices(50);
-        info.setModules(new HashSet<>(Set.of("core", "fleet")));
+        // 用基础版的精确集合（2026-10-07 拆分后 = core+fleet+mesh+orch），
+        // 否则部署端档位绑定会 fail-closed 拒启，签发-部署往返用例无法成立。
+        info.setModules(new HashSet<>(LicenseTier.modulesOf(LicenseTier.BASIC)));
         info.setActive(true);
         info.setIssuedAt(Instant.now());
         info.setExpiryDate(Instant.now().plus(Duration.ofDays(365)));

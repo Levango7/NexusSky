@@ -79,9 +79,14 @@ class LicenseTierBindingEnforcementTest {
     private LicenseService serviceWith(LicenseInfo license, boolean enforceTierBinding) throws Exception {
         java.lang.reflect.Field f = LicenseService.class.getDeclaredField("currentLicense");
         f.setAccessible(true);
-        // 先造一个合法实例以走过构造期的 key 校验，再用反射换成目标 license
+        // 先造一个合法实例以走过构造期的 key 校验，再用反射换成目标 license。
+        // seed 必须用**完整版**（含全部 7 个模块）：无论本用例传进来的目标 license
+        // 是合法档位还是刻意构造的非档位组合，seed 都得先通过构造期的启动期校验。
+        // （曾用 core+fleet 作 seed，2026-10-07 拆分后那已不是任何档位的精确集合，
+        //   构造器会 fail-closed 抛 IllegalStateException，于是所有走 serviceWith 的用例
+        //   在抵达断言前就炸掉 —— 报红原因指向档位而非被测行为。）
         LicenseSigner issuer = new LicenseSigner(mapper);
-        LicenseInfo seed = licenseWithModules(modules("core", "fleet"));
+        LicenseInfo seed = licenseWithModules(LicenseTier.modulesOf(LicenseTier.FULL));
         String key = Base64.getEncoder().encodeToString(mapper.writeValueAsString(seed).getBytes(StandardCharsets.UTF_8))
                 + "." + issuer.sign(seed);
         LicenseService svc = new LicenseService(key, HMAC_SECRET, false,
@@ -114,9 +119,10 @@ class LicenseTierBindingEnforcementTest {
          */
         static Stream<Arguments> tierModuleCombinations() {
             return Stream.of(
-                    Arguments.of("basic", Set.of("core", "fleet")),
-                    Arguments.of("emergency", Set.of("core", "fleet", "emergency")),
-                    Arguments.of("full", Set.of("core", "fleet", "emergency", "network", "advanced"))
+                    Arguments.of("basic", Set.of("core", "fleet", "mesh", "orch")),
+                    Arguments.of("emergency", Set.of("core", "fleet", "mesh", "orch", "emergency")),
+                    Arguments.of("full", Set.of("core", "fleet", "mesh", "orch",
+                            "emergency", "network", "advanced"))
             );
         }
 
@@ -134,7 +140,7 @@ class LicenseTierBindingEnforcementTest {
         @Test
         @DisplayName("esforce 关闭时，非档位组合被放行（逃生阀本身要可用且可自报）")
         void escapeHatchAllowsNonTierSets() throws Exception {
-            Set<String> odd = modules("core", "fleet", "network");   // 跳过 emergency 的怪组合
+            Set<String> odd = modules("core", "fleet", "mesh", "orch", "network"); // 跳过 emergency 的怪组合
             LicenseService svc = serviceWith(licenseWithModules(odd), false);
             assertThat(svc.isTierBindingEnforced()).isFalse();
             assertThat(svc.validateLicense(licenseWithModules(odd)))
@@ -150,13 +156,30 @@ class LicenseTierBindingEnforcementTest {
     class NonTierSetsRejected {
 
         @Test
-        @DisplayName("基础版 + network / advanced：定价越权必须判红")
+        @DisplayName("基础版 + network / advanced：定价越权必须判红（emergency 除外，见下一条）")
         void basicTierWithExtraModuleRejected() {
             LicenseService svc = new LicenseService("", HMAC_SECRET, true, "", mapper);
+            // 注意不含 emergency：基础版 + emergency 恰好等于**应急版**的精确集合，
+            // 是合法升档而非越权，由 basicPlusEmergencyIsTheEmergencyTierNotAnEscalation 覆盖。
             for (String extra : new String[] { "network", "advanced" }) {
-                Set<String> mods = modules("core", "fleet", extra);
+                Set<String> mods = modules("core", "fleet", "mesh", "orch", extra);
                 assertThat(svc.tierBindingViolation(mods))
-                        .as("基础版 core+fleet 多出 %s 必须判红", extra)
+                        .as("基础版 core+fleet+mesh+orch 多出 %s 必须判红", extra)
+                        .isNotNull();
+                assertThat(svc.validateLicense(licenseWithModules(mods)))
+                        .as("越权授权必须使 validateLicense 返回 false")
+                        .isFalse();
+            }
+        }
+
+        @Test
+        @DisplayName("应急版 + network / advanced：越过完整版付费点必须判红")
+        void emergencyTierWithFullOnlyModuleRejected() {
+            LicenseService svc = new LicenseService("", HMAC_SECRET, true, "", mapper);
+            for (String extra : new String[] { "network", "advanced" }) {
+                Set<String> mods = modules("core", "fleet", "mesh", "orch", "emergency", extra);
+                assertThat(svc.tierBindingViolation(mods))
+                        .as("应急版多出完整版付费点 %s 必须判红", extra)
                         .isNotNull();
                 assertThat(svc.validateLicense(licenseWithModules(mods)))
                         .as("越权授权必须使 validateLicense 返回 false")
@@ -167,12 +190,12 @@ class LicenseTierBindingEnforcementTest {
         @Test
         @DisplayName("⚠️ 「基础版 + emergency」不是越权——它恰好等于应急版，应被接受并归类为应急版")
         void basicPlusEmergencyIsTheEmergencyTierNotAnEscalation() {
-            // 刻意把这条单列：写"多塞一个模块必红"会误把 core+fleet+emergency 判红，
-            // 而它正是应急版的合法集合。这里的正确期望是"接受 + 归类为 emergency"。
-            Set<String> mods = modules("core", "fleet", "emergency");
+            // 刻意把这条单列：写"多塞一个模块必红"会误把应急版的精确集合判红。
+            // 这里的正确期望是"接受 + 归类为 emergency"。
+            Set<String> mods = modules("core", "fleet", "mesh", "orch", "emergency");
             LicenseService svc = new LicenseService("", HMAC_SECRET, true, "", mapper);
             assertThat(svc.validateLicense(licenseWithModules(mods)))
-                    .as("core+fleet+emergency 是应急版的精确集合，必须放行")
+                    .as("基础版模块集 + emergency 是应急版的精确集合，必须放行")
                     .isTrue();
             assertThat(LicenseTier.inferTier(mods)).isEqualTo(LicenseTier.EMERGENCY);
         }
@@ -180,7 +203,7 @@ class LicenseTierBindingEnforcementTest {
         @Test
         @DisplayName("缺模块（应急版少 emergency）：也不该放行 —— 少给是配置错误，不是宽容的理由")
         void missingModuleRejected() {
-            Set<String> mods = modules("core", "fleet", "network");
+            Set<String> mods = modules("core", "fleet", "mesh", "orch", "network");
             LicenseService svc = new LicenseService("", HMAC_SECRET, true, "", mapper);
             assertThat(svc.validateLicense(licenseWithModules(mods))).isFalse();
         }
@@ -188,7 +211,8 @@ class LicenseTierBindingEnforcementTest {
         @Test
         @DisplayName("⚠️ 超集必须被拒：FULL + 一个未知模块不得被 inferTier 误判为 FULL")
         void supersetIsRejected() {
-            Set<String> mods = modules("core", "fleet", "emergency", "network", "advanced", "godmode");
+            Set<String> mods = modules("core", "fleet", "mesh", "orch",
+                    "emergency", "network", "advanced", "godmode");
             LicenseService svc = new LicenseService("", HMAC_SECRET, true, "", mapper);
             // 前置：若用 inferTier（子集语义）判定，这里会被误判为 FULL 而放行
             assertThat(LicenseTier.inferTier(mods))
@@ -299,7 +323,8 @@ class LicenseTierBindingEnforcementTest {
         @DisplayName("非档位模块集合：构造函数抛 IllegalStateException，消息点名逃生阀")
         void nonTierLicenseFailsStartup() throws Exception {
             LicenseSigner signer = new LicenseSigner(mapper);
-            String key = signWith(signer, modules("core", "fleet", "network")); // 基础版 + 超集
+            // 基础版 + network：跳过了 emergency 的怪组合（既非任一档位的精确集合）
+            String key = signWith(signer, modules("core", "fleet", "mesh", "orch", "network"));
             IllegalStateException e = org.junit.jupiter.api.Assertions.assertThrows(
                     IllegalStateException.class,
                     () -> new LicenseService(key, HMAC_SECRET, false, signer.getPublicKeyBase64(), true, mapper));
@@ -323,7 +348,7 @@ class LicenseTierBindingEnforcementTest {
         @DisplayName("逃生阀：enforce=false 时非档位授权可启动，但违规原因仍可自报")
         void escapeHatchAllowsNonTierLicense() throws Exception {
             LicenseSigner signer = new LicenseSigner(mapper);
-            String key = signWith(signer, modules("core", "fleet", "network"));
+            String key = signWith(signer, modules("core", "fleet", "mesh", "orch", "network"));
             LicenseService svc = new LicenseService(key, HMAC_SECRET, false,
                     signer.getPublicKeyBase64(), false, mapper);
             assertThat(svc.isTierBindingEnforced()).isFalse();

@@ -57,7 +57,11 @@ class LicenseServiceFailClosedTest {
         info.setTenantId("acme");
         info.setProductName("AeroFleet Cloud Standard");
         info.setMaxDevices(50);
-        info.setModules(new HashSet<>(Set.of("core", "fleet")));
+        // 用**基础版的精确集合**（2026-10-07 拆分后 = core+fleet+mesh+orch）。
+        // 本测试要验的是"签名有效即放行"，不是"模块集合随便填"——
+        // 非档位集合会在构造器被档位绑定 fail-closed 拒启，那条由
+        // LicenseTierBindingEnforcementTest 覆盖。
+        info.setModules(new HashSet<>(LicenseTier.modulesOf(LicenseTier.BASIC)));
         info.setActive(true);
         info.setIssuedAt(Instant.parse("2026-01-01T00:00:00Z"));
         info.setExpiryDate(Instant.parse("2030-01-01T00:00:00Z"));

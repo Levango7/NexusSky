@@ -53,8 +53,27 @@ public class LicenseService {
     public static final String DEV_ISSUED_TO = "AeroFleet Developer";
     /** jwt-secret 未配置时的内置开发默认值（非 dev 模式下等于该值会拒绝启动，见构造器 fail-closed 守卫）。 */
     public static final String DEV_HMAC_SECRET_FALLBACK = "aerofleet-dev-secret-change-in-production-at-least-32-chars";
-    /** 全部模块集合 */
-    public static final Set<String> ALL_MODULES = Set.of("core", "fleet", "emergency", "network", "advanced");
+    /**
+     * 全部模块集合（7 个，2026-10-07 由 5 扩为 7）。
+     * <p>
+     * <b>为什么拆分</b>：原 5 模块下，"基础版要含 M5 mesh + M9 编排"（定价文档 §5.1 的
+     * 销售承诺）与"mesh 属完整版、M9 属应急版"（{@code LicenseTier} 的原定义）直接矛盾。
+     * 两条路都走不通：把 {@code network}/{@code emergency} 整块下移到基础版，会让基础版
+     * 连 5G 基站、卫星中继、ONVIF 安防联动一起白送，应急版与基础版同集合 ⇒ 档位梯子塌掉、
+     * 无法定价（{@code LicenseTierTest} 的"档位必须互异"会红）。
+     * <p>
+     * 故按交付形态把两个大模块各拆一半，边界与定价文档逐字对齐：
+     * <ul>
+     *   <li>{@code network} → {@code mesh}（M5 AODV-lite 自愈组网，基础版）
+     *       + {@code network}（5G 基站 / 卫星中继 / 链路适配 / LoRa / 边缘，完整版）；</li>
+     *   <li>{@code emergency} → {@code orch}（M9 应急任务编排 + 编排计划，基础版）
+     *       + {@code emergency}（4a 空地一体化指挥 / 告警 / ONVIF 安防 / 视频视觉，应急版）。</li>
+     * </ul>
+     * <b>兼容性</b>：模块名进签名载荷（{@link LicenseIssuer}），改名即换授权语义。
+     * 见 {@code LicenseModuleSplitMigrationTest} 对旧授权集合的处置断言。
+     */
+    public static final Set<String> ALL_MODULES =
+            Set.of("core", "fleet", "mesh", "orch", "emergency", "network", "advanced");
 
     /**
      * License Key 中 payload 和 signature 的分隔符。

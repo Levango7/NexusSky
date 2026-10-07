@@ -461,35 +461,33 @@ jobs:
             sleep 2
           done
           echo "::warning::drone-sim did not register within 60s; capability legs may self-skip"
-      # ↓↓↓ 观察模式：待连续全绿后逐个删掉 continue-on-error ↓↓↓
-      # 步骤名必须加引号：未加引号的标量里出现「冒号+空格」会被 YAML 解析成映射而报错。
+      # 硬门禁：三条腿任一失败即 job 变红（2026-10-07 由观察模式转正）。
+      # 转正依据：三腿在 WSL2 真 Linux 本地连续两次全绿（emergency 31 / spray 20 /
+      # hardware 16，67 项断言 0 失败），且 CI run 37624477248 上 25/25 全绿。
       #
-      # 每条腿 tee 到 /tmp 后再跑，退出码落盘 —— 因为 continue-on-error 会把
-      # 失败步骤在 UI 上也显示成绿勾，只看 job 状态无法判断真实通过情况。
+      # 步骤名必须加引号：未加引号的标量里出现「冒号+空格」会被 YAML 解析成映射而报错。
+      # 每条腿仍 tee 到 /tmp 并落盘退出码 —— 汇总步骤用它出表，
+      # 这样即使将来某条腿失败，也能一眼看出是哪条、失败在哪一步。
       - name: "Air-ground emergency workflow (deploy -> alarm -> linkage -> dispatch)"
-        continue-on-error: true
         run: |
           set -o pipefail
           bash scripts/e2e-emergency.sh 2>&1 | tee /tmp/leg-emergency.log
           echo "${PIPESTATUS[0]}" > /tmp/rc-emergency
       - name: "Spray + logistics chain (task -> status -> control -> delivery)"
-        continue-on-error: true
         run: |
           set -o pipefail
           bash scripts/e2e-spray.sh 2>&1 | tee /tmp/leg-spray.log
           echo "${PIPESTATUS[0]}" > /tmp/rc-spray
       - name: "Hardware abstraction (radar -> rotor -> lidar -> imu)"
-        continue-on-error: true
         run: |
           set -o pipefail
           bash scripts/e2e-hardware.sh 2>&1 | tee /tmp/leg-hardware.log
           echo "${PIPESTATUS[0]}" > /tmp/rc-hardware
-      # 汇总：把观察模式下被 continue-on-error 吞掉的失败显式写进 job summary，
-      # 并在有腿失败时把 job 标红（而不是靠"步骤是否红"这种已被掩盖的信号）。
-      - name: Capability legs summary (observe mode)
+      - name: Capability legs summary
+        if: always()
         run: |
           {
-            echo "## 能力腿观察模式汇总"
+            echo "## 能力腿汇总"
             echo
             echo "| 腿 | 结果 |"
             echo "|---|---|"
@@ -504,11 +502,11 @@ jobs:
               fi
             done
             echo
-            echo "> 这些腿处于 \`continue-on-error\` 观察模式：上方步骤在 UI 上显示为绿勾不代表通过，"
-            echo "> 以本表为准。全绿后才逐个摘掉 continue-on-error 并转硬门禁。"
+            echo "> 三条腿为**硬门禁**：任一失败即本 job 变红（2026-10-07 由观察模式转正）。"
+            echo "> 完整日志见上方各步骤输出。"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$overall" != "0" ]; then
-            echo "::error::能力腿存在失败（观察模式），详见 job summary"
+            echo "::error::能力腿存在失败，详见 job summary"
             exit 1
           fi
 

@@ -4,6 +4,74 @@
 
 ---
 
+## [Unreleased] — 定价档位裁决落地：基础版扎实（模块 5→7 拆分）+ 三腿 e2e 转硬门禁（2026-10-07）
+
+用户裁定「**基础版需要扎实**」，即基础版必须真能撑起一次交付。本轮落地该裁决，
+并把三条能力腿从观察模式转为硬门禁。
+
+1. **定价档位裁决：`ALL_MODULES` 由 5 扩为 7，三档与定价文档 §5 逐字对齐**
+   - **原矛盾**：§5.1 承诺基础版含 **M5 mesh + M9 编排 + GCS OEM**，而 `LicenseTier`
+     把 mesh 放完整版、M9 放应急版 ⇒ 按 §5 卖基础版，客户付费的 `/api/v1/mesh/*`
+     与 M9 编排会被 403（档位绑定已在验证期与启动期双重强制，这是交付事故）。
+   - **为什么不整块下移**：把 `network`/`emergency` 整块放进基础版，会让基础版连
+     5G 基站、卫星中继、ONVIF 安防联动一起白送 ⇒ 应急版与基础版同集合、
+     **档位梯子塌掉、无法定价**（`LicenseTierTest` 的"档位必须互异"会红）。
+   - **改为按交付形态各拆一半**：
+     | 模块 | 覆盖 | 档位 |
+     |---|---|---|
+     | `mesh`（新，从 `network` 拆） | M5 AODV-lite 自愈组网 | 基础版 |
+     | `orch`（新，从 `emergency` 拆） | M9 应急任务编排 + 编排计划 | 基础版 |
+     | `emergency` | 4a 空地一体化指挥 / 告警 / ONVIF / 视频视觉 | 应急版 |
+     | `network` | 5G 基站 / 卫星中继 / 链路适配 / LoRa / 边缘 | 完整版 |
+     | `advanced` | 数字孪生 / 城市孪生 / AI 决策 / 语音 / 多光谱 | 完整版 |
+   - 拆分后：基础版 = `core`+`fleet`+`mesh`+`orch`；应急版 = 基础版 + `emergency`；
+     完整版 = 应急版 + `network`+`advanced`。
+   - **新增 `LicenseModuleSplitMigrationTest`（7 例）** 钉死边界：模块集合恰为 7 且
+     原有 5 名不被改名、mesh/orch 必归基础版、基站卫星与 ONVIF 必留在上档、
+     每个模块必须有前缀、三档必须互异。
+   - **变异验证**：把 `/api/v1/mesh` 改回 `NETWORK`（即撤销拆分）后 3 例立即转红
+     ——这正是"拆分做一半"的失效形态：客户付了钱、license 也认了、请求却 403。
+   - **⚠️ 已知且故意的不兼容**：模块名进 license 签名载荷，拆分**前**签发的授权
+     （含 `network`/`emergency`、无 `mesh`/`orch`）不再对应任何档位，**必须重新签发**。
+     刻意不给旧集合加兼容映射——旧集合里 `network` 含 mesh、`emergency` 含 M9 编排，
+     与新边界不再等价，兼容等于把定价边界改回错的那一侧。该不兼容已由测试钉死
+     （`legacyModuleSetMatchesNoTier`），若有人"贴心地"加兼容映射会红并被追问。
+   - **顺带修掉三处测试自身的隐雷**（拆分后暴露，非本轮引入）：
+     ① `LicenseTierBindingEnforcementTest.serviceWith` 的 seed 用 `core+fleet`，
+        拆分后那已不是任何档位的精确集合 ⇒ 构造器 fail-closed 先炸，
+        所有走该 helper 的用例在抵达断言前就挂，报红原因指向档位而非被测行为。
+        改用 `LicenseTier.modulesOf(FULL)` 作 seed。
+     ② `LicenseServiceFailClosedTest` / `LicenseIssuerTest` 的样本 license 同样
+        硬编码 `core+fleet`，改用基础版的精确集合。
+     ③ `basicTierWithExtraModuleRejected` 原先把 `emergency` 与 `network`/`advanced`
+        一起当"越权"，但基础版 + `emergency` 恰好等于**应急版**的精确集合（合法升档）。
+        已把 `emergency` 移出该循环，并新增 `emergencyTierWithFullOnlyModuleRejected`
+        覆盖"应急版 + network/advanced"这一真正的越权面。
+
+2. **三条能力腿从 `continue-on-error` 观察模式转为硬门禁**
+   - 转正依据：真 Linux（WSL2）下连续两次全绿 —— emergency **31** 项 / spray **20** 项 /
+     hardware **16** 项，共 **67 项断言 0 失败**；且 CI run `37624477248` 上 25/25 job 全绿。
+   - 删掉三条腿的 `continue-on-error`；汇总步骤加 `if: always()`，
+     任一腿失败即 `exit 1` 让 job 变红（此前汇总步骤虽已存在，但若前序步骤失败会被跳过）。
+   - 保留 `tee /tmp/leg-*.log` + 落盘退出码：失败时能一眼看出是哪条腿、失败在哪一步。
+
+3. **文档口径同步**
+   - `PRODUCT-POSITIONING.md` §5.1.1 由"两个待裁决方案"改为**已裁决**，
+     给出 7 模块逐项对照表（含前缀示例）与拆分后三档定义，并显著标注重签发要求。
+   - `README.md` 许可章节档位表按拆分后重写；能力腿章节由"首轮实测 7/9、0/7、4/9"
+     改为"已按当前 API 重写并转硬门禁"，并列出被删除的**指向不存在端点的凭空断言**。
+   - `docs/demo-scenarios.md` 场景 C/D 的操作步骤按 `SprayController`/
+     `DeliveryController`/`EmergencyCommandController` 的真实契约更正
+     （原文写的 `/spray/task`、`/spray/gripper`、`/delivery/sequence/{id}`、
+     `/spray/cancel`、`/hardware/physics-model` 在仓内均不存在）；
+     补 LiDAR/IMU 404 的边界说明。
+
+4. **计数基线 4343 → 4359（cloud-backend 2347 → 2363）**
+   - 新增 `LicenseModuleSplitMigrationTest` 7 例 + `emergencyTierWithFullOnlyModuleRejected` 1 例；
+     `check-test-count-docs.py` 全绿，22 处文档声称同步。
+
+---
+
 ## [Unreleased] — 能力腿 e2e 对齐当前 API + 修喷洒任务落库真缺陷（2026-10-07）
 
 承接上一轮"两腿 API 漂移"的实测结论，本轮把 `e2e-spray` / `e2e-hardware` 真正跑到绿，
@@ -141,6 +209,8 @@
 9. **计数基线 4336 → 4343（cloud-backend 2340 → 2347）**
    - 新增 `SprayTaskPersistenceTest` 3 例（+3）、并入 CVE 自证 4 例（+4）；门禁全绿，
      22 处文档声称同步。
+   - 后续 `LicenseModuleSplitMigrationTest` 7 例 + 越权面 1 例落地后推进到
+     **4359（cloud-backend 2363）**，见上一条。
 
 ---
 
