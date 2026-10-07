@@ -45,6 +45,12 @@ public class VoiceCommandController {
 
     private static final Logger log = LoggerFactory.getLogger(VoiceCommandController.class);
 
+    /**
+     * 语音文本上限（字符数）。解析器靠正则匹配，长度无上限时最坏情况的可得 CPU
+     * 成本随输入增长（入口在此，边界处收口；一条真实语音指令远短于此）。
+     */
+    static final int MAX_TEXT_CHARS = 500;
+
     private final VoiceCommandParser parser;
     private final VoiceCommandExecutor executor;
     private final VoiceBroadcaster broadcaster;
@@ -82,6 +88,10 @@ public class VoiceCommandController {
         if (text == null || text.isBlank()) {
             throw new io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException(
                     "body must contain a non-empty 'text' field");
+        }
+        if (text.length() > MAX_TEXT_CHARS) {
+            throw new io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException(
+                    "'text' must not exceed " + MAX_TEXT_CHARS + " characters");
         }
         log.info("Parsing voice text: '{}'", text);
         return parser.parse(text);

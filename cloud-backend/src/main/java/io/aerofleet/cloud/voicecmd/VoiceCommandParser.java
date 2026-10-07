@@ -56,10 +56,19 @@ public class VoiceCommandParser {
             Pattern.compile("速度(\\d+(?:\\.\\d+)?)");
     private static final Pattern SPEED_EN_PATTERN =
             Pattern.compile("speed\\s+(\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
+    // 目标名不用 `(.+?)(?:sep|$)`：惰性 `.` 的类与分隔符**相交**（点号能吃掉逗号），这正是
+    // CodeQL java/polynomial-redos #4 的判定条件；换成排除式字符类后类与终止符不相交，
+    // 匹配不再有歧义路径。诚实标注：jshell 实测 20k 字符下新旧耗时相当（148ms vs 135ms），
+    // 我没能构造出可演示的平方级输入 —— 真正的成本上限由 VoiceCommandController 的
+    // MAX_TEXT_CHARS=500 入口边界保证，不靠这次改写。
+    // 边界实测（新旧双跑）："前往东门"、"前往东门，高度50米"、"前往A\nB"（不跨换行，两边都
+    // 不匹配）、"前往"（要求 ≥1 字符，两边都不匹配）四种一致；唯一有意差异是紧邻分隔符的
+    // "前往，东门"：旧写法取到垃圾组 "，东门"，新写法判为无目标（见 parse_target_boundaries）。
+    // 勿"顺手简化"回 .+?。
     private static final Pattern TARGET_CN_PATTERN =
-            Pattern.compile("前往(.+?)(?:[,，。;；]|$)");
+            Pattern.compile("前往([^\\n,，。;；]+)(?:[,，。;；]|$)");
     private static final Pattern TARGET_EN_PATTERN =
-            Pattern.compile("go\\s+to\\s+(.+?)(?:[,，。;；]|$)", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("go\\s+to\\s+([^\\n,，。;；]+)(?:[,，。;；]|$)", Pattern.CASE_INSENSITIVE);
 
     // --- 设备与优先级模式 ---
     private static final Pattern SYSID_CN_PATTERN =

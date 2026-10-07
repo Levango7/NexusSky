@@ -187,6 +187,18 @@ class VoiceCommandParserTest {
         assertThat(cmd.getAction()).isEqualTo(ParsedCommand.Action.FLY_TO);
     }
 
+    @Test
+    @DisplayName("目标名边界：止于首个分隔符、不跨换行、目标须含 ≥1 个非分隔符字符")
+    void parse_target_boundaries() {
+        // 这四条与改写前的 `(.+?)(?:sep|$)` 逐条实测对齐（jshell 双跑，见 TARGET_CN_PATTERN 注释）
+        assertThat(parser.parse("前往东门，高度50米").getTargetName()).isEqualTo("东门");
+        assertThat(parser.parse("前往东门;返航").getTargetName()).isEqualTo("东门");
+        assertThat(parser.parse("前往A\nB").getTargetName()).isNull();
+        assertThat(parser.parse("前往").getTargetName()).isNull();
+        // 唯一有意差异：紧邻分隔符旧写法会取到垃圾组 "，东门"，现在判为无目标
+        assertThat(parser.parse("前往，东门").getTargetName()).isNull();
+    }
+
     // --- 设备编号解析 ---
 
     @Test
