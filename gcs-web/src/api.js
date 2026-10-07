@@ -65,7 +65,27 @@ export class TimeoutError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 15000
 
-async function jsonFetch(url, options = {}) {
+// jsonFetch 会自动附带 Authorization: Bearer，所以 url 一旦被外部值带出本前端，
+// 等于把令牌送到别的宿主（CodeQL js/request-forgery #1）。只放行同源 /api/v1/ 路径。
+const API_PREFIX = '/api/v1/'
+const ORIGIN_PROBE = 'http://nexussky.invalid'
+
+export function resolveApiUrl(url) {
+  if (typeof url !== 'string' || !url) throw new Error(`非法请求 URL：${String(url)}`)
+  let parsed
+  try {
+    parsed = new URL(url, ORIGIN_PROBE)
+  } catch {
+    throw new Error(`非法请求 URL：${url}`)
+  }
+  // origin 不变 ⇒ 既不是绝对 URL / 协议相对 URL（//host），也没有靠 .. 段爬出本站
+  if (parsed.origin !== ORIGIN_PROBE) throw new Error(`拒绝跨源请求：${url}`)
+  if (!parsed.pathname.startsWith(API_PREFIX)) throw new Error(`拒绝非 API 路径：${parsed.pathname}`)
+  return parsed.pathname + parsed.search
+}
+
+async function jsonFetch(rawUrl, options = {}) {
+  const url = resolveApiUrl(rawUrl)
   const { timeout = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options
 
   if (authToken) {
