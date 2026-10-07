@@ -466,6 +466,39 @@ BUILD SUCCESS；前端 `npm run test` **218/218**（新增 41 例）、`npm run 
 **未在本轮验证（只能在 CI 验）**：CI 实际执行结果、npm audit 真值、Trivy、CodeQL、
 Playwright、helm 渲染。改动对象是要推的 HEAD。
 
+---
+
+## [Unreleased] — CVE-2026-47884（spring-webmvc 6.2.19，CRITICAL）有依据的忽略 + 可达性自证（2026-10-06）
+
+第七轮推送后 CI 唯一残留红。**先定性**：不是本轮回归——绿 run `37387694246`（sha `37608e3`，
+9 小时前）的 `pom.xml:36` 同样是 `spring-boot 3.5.16`，`Security Scan` 结论是 success；
+`git diff --name-only a6e1118..HEAD` 里没有 `pom.xml`/`package.json`。**变的是 Trivy 公告库**。
+- **上游无补丁可换**：`gh api advisories/GHSA-pc63-qcmh-9cmg` 给出所有 6.x 区间
+  （含 `>= 6.2.0, <= 6.2.19`）的 `first_patched_version` 均为 **null**，唯一 fixed 是 7.0.9
+  ——即唯一真修复路径是 Boot 3.5→4.x / Framework 6.2→7.0 大版本迁移。因此本次处置是
+  **风险登记 + 有界忽略**，不是"已修复"；升级是否立项留给产品/架构决策。
+- **可达性证据（本机实测）**：advisory 触发前提是"存在导向视图渲染的 `/**` 映射、视图名未转义、
+  且使用 XsltView"。本仓 cloud-backend 为纯 REST：ViewResolver bean 4 个
+  （BeanName / ViewResolverComposite / InternalResource / ContentNegotiating，**全非 Xslt**）、
+  360 个 handler method 中 `/**` 模式 **0** 个；`src/main` 内 `XsltView`/`XsltViewResolver`/任何
+  `ViewResolver` 配置 0 处。注意：**不能**用"classpath 没有 XSLT 引擎"作论据——JDK 自带
+  `TransformerFactory`，站得住的只有"本仓没有任何视图渲染路径"。
+- **`.trivyignore.yaml`（新增）**：只登记这一条，且强制三件套——`paths` 限定到
+  `pom.xml`/`cloud-backend/pom.xml`（不写 paths 会对全仓生效）、`expired_at: 2027-01-31`
+  （到期后 Trivy 主动剔除条目、发现回来判红：v0.70.0 `pkg/result/ignore.go:131-141` 的 `Prune`）、
+  `statement` 写证据与撤销条件。字段名与过期语义**以固定版本 v0.70.0 的源码为准**，不照抄网页说明。
+- **CI 接线**：Trivy 步骤加 `trivyignores: .trivyignore.yaml`（显式传入，不依赖隐式查找；
+  trivy-action v0.36.0 的 entrypoint 对不存在的清单文件直接 `exit 1`，因此这条接线不可能静默失效）。
+- **两条自证测试（"有依据"的关键，否则忽略只是静态承诺）**：
+  - `XsltViewReachabilityTest`：断言上下文内无 XSLT 形态 ViewResolver、无 `/**` 映射；
+    另加基线自证（映射数 >100、ViewResolver 数 ==4）防止装配面变化后变成空断言。
+    **变异验证**：临时插入一个 `@RequestMapping("/**")` 控制器 → 立即红，报错点名"必须撤销忽略并复核视图名转义"；删除后 3/3 绿。
+  - `TrivyIgnoreHygieneTest`：忽略清单每条必须带 paths/expired_at/长 statement/id，
+    防止清单退化成静默白名单。**变异验证**：删掉该条的 `paths` 与 `expired_at` → 立即红
+    （"缺 paths —— 不限定路径的忽略会对全仓所有文件生效"）；恢复后绿（sha256 回证一致）。
+
+---
+
 ## [Unreleased] — 第七轮：HEAD 变红收口 + 三域写路径 IDOR + 占位凭据两级门禁（2026-10-06）
 
 背景：第六轮复核（HEAD `a6e1118`）确认 4291 单测全绿但 **CI 是红的**，红因两条；
