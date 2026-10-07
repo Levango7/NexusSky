@@ -4,6 +4,32 @@
 
 ---
 
+## [Unreleased] — CI：maven 缓存键只掺 pom 不掺工具链，master 与全部 PR 被冻红数小时（2026-10-08）
+
+- **现象**：`Warm Maven Cache` 自 2026-10-07 15:53Z 起**确定性**判红 —— master run `37647669688`
+  （head `74af653`）、PR #6 run `37647663158`、PR #7 run `37655262825` 三处红在同一行
+  `Cannot access central ... in offline mode`，缺的都是 `maven-resources-plugin:3.5.0`；
+  下游 10 个 job（含 `CodeQL Analysis`、`Security Scan`）全被 skipped；
+- **归因**（两条互斥证据夹出来）：同一个键 `mvn-Linux-6b5e33ff…-v1` 存在多个条目版本——12:55Z
+  success 的 run `37624477248` 恢复的是 **139,866,841 B** 那版且离线自检通过；15:53Z 起恢复
+  **139,868,081 B** 那版就挂。⇒ 变的不是 pom（键就是 pom 哈希，未变），而是 **runner 自带 Maven
+  的默认插件版本集合**（本仓从不显式钉 `maven-resources-plugin` 这类）；又因 `actions/cache`
+  对已存在的同键「首写者胜出、此后只读不覆盖」，没有任何一次运行能自愈 —— 只能抬代次或删条目；
+- **修（三件）**：
+  1. 键代次 v1 → **v2**，`ci.yml` **9 处一起抬**（maven-warm / java / gcs-e2e / e2e-smoke /
+     e2e-capability / integration / sdk-integration / security-scan / codeql）；
+  2. 离线自检失败不再打死整条腿：打 `::warning::` 后**在线补齐**，当次运行继续走完 —— 症状从
+     「全仓冻红」降级为「一次警告 + 慢几分钟」；
+  3. 新增 `scripts/ci-maven-cache-key.sh` 守卫并接为 maven-warm 第一步：所有键必须与规范值同源，
+     **扫不到任何键也判红**（防门禁自己失明）；
+- **验证**：`bash -n` 通过；正向 `sites=9 mismatch=0` exit 0；负向（临时副本只抬一处）exit 1 并
+  指名 `ci.yml:129 实得 …-v3`；负向（空目录）exit 1 报「没找到任何 maven 缓存键」。全部负向测试
+  在 /tmp 副本里做，真实文件核验保持 9×v2；`yaml.safe_load` 解析通过（17 个 job）；
+- **遗留**：键里仍不含 Maven 版本（workflow 表达式拿不到，需每个 job 先导出再引用，9 处都要改）。
+  下次 runner 工具链再动，按提示抬 v3 即可，守卫会替你盯住"漏抬一处"。
+
+---
+
 ## [Unreleased] — 定价档位裁决落地：基础版扎实（模块 5→7 拆分）+ 三腿 e2e 转硬门禁（2026-10-07）
 
 用户裁定「**基础版需要扎实**」，即基础版必须真能撑起一次交付。本轮落地该裁决，
