@@ -515,6 +515,12 @@ jobs:
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           trivy-config: trivy.yaml
+          # 显式传入忽略清单，而不是依赖 .trivyignore 的隐式查找：
+          # trivy-action v0.36.0 的 entrypoint.sh 对不存在的清单文件直接 `exit 1`
+          # （ERROR: cannot find ignorefile），所以这条接线不可能静默失效。
+          # 清单本身要求每条带 paths 限定 + expired_at 到期 + statement 证据，
+          # 且前提由 cloud-backend 的 XsltViewReachabilityTest 机器复核。
+          trivyignores: .trivyignore.yaml
           # 0 → 只产 SARIF 不阻断（原状态：名义门禁）
           # 1 → 有发现直接让 job 变红；SARIF 仍然上传，用于看红因。
           # v0.36.0 实测语义修正（run 36647831204 红因 + action 源码
