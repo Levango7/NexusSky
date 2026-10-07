@@ -246,15 +246,23 @@ class WaypointListConverter implements AttributeConverter<List<double[]>, String
             return new ArrayList<>();
         }
         List<double[]> result = new ArrayList<>();
-        // 手动解析 [[lat,lon],[lat,lon],...] 格式
+        // 手动解析 [[lat,lon],[lat,lon],...] 格式。
+        // 注意：最外层 '[' 是数组开括号，其后的第一个 '[' 才是坐标对的开括号；
+        // 若从最外层 '[' 直接取 substring(openBracket+1, comma) 会把内层 '['
+        // 一起切进数字串，导致 Double.parseDouble("[22.5907") 抛 NumberFormatException
+        // （Hibernate 包装为 "Error attempting to apply AttributeConverter"）。
         int i = 0;
         while (i < json.length()) {
-            int openBracket = json.indexOf('[', i);
-            if (openBracket == -1) {
+            int outerOrPair = json.indexOf('[', i);
+            if (outerOrPair == -1) {
                 break;
             }
-            // 找到匹配的逗号（lat 和 lon 之间）
-            int comma = json.indexOf(',', openBracket + 1);
+            // 跳过最外层数组开括号：其后若紧跟 '['，说明还没进到坐标对
+            if (outerOrPair + 1 < json.length() && json.charAt(outerOrPair + 1) == '[') {
+                i = outerOrPair + 1;
+                continue;
+            }
+            int comma = json.indexOf(',', outerOrPair + 1);
             if (comma == -1) {
                 break;
             }
@@ -262,7 +270,7 @@ class WaypointListConverter implements AttributeConverter<List<double[]>, String
             if (closeBracket == -1) {
                 break;
             }
-            double lat = Double.parseDouble(json.substring(openBracket + 1, comma).trim());
+            double lat = Double.parseDouble(json.substring(outerOrPair + 1, comma).trim());
             double lon = Double.parseDouble(json.substring(comma + 1, closeBracket).trim());
             result.add(new double[]{lat, lon});
             i = closeBracket + 1;

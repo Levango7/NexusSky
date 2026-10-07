@@ -4,6 +4,118 @@
 
 ---
 
+## [Unreleased] — 能力腿 e2e 对齐当前 API + 修喷洒任务落库真缺陷（2026-10-07）
+
+承接上一轮"两腿 API 漂移"的实测结论，本轮把 `e2e-spray` / `e2e-hardware` 真正跑到绿，
+并在过程中挖出一个**此前单测全绿也掩盖不了的真实后端缺陷**。
+
+1. **🔴 喷洒任务创建实际 100% 失败：`WaypointListConverter` 反序列化切串越界**
+   - **现象**：`POST /api/v1/spray` 返回 500 `Transaction silently rolled back …`。
+   - **根因链（三跳，每跳都有日志证据）**：
+     ① `WaypointListConverter.convertToEntityAttribute` 从**最外层** `'['` 直接
+     `substring(openBracket+1, comma)`，把内层 `'['` 一起切进数字串 ⇒
+     `Double.parseDouble("[22.5907")` 抛 `NumberFormatException`
+     ——Hibernate 包装为 `Error attempting to apply AttributeConverter`；
+     ② `SprayTaskService.create` 的 `catch` 只 `log.warn` 就继续，但事务已被标记
+     rollback-only，于是方法正常返回后在提交阶段炸 `UnexpectedRollbackException`；
+     ③ 该异常逃到 `ApiExceptionHandler#internal` ⇒ HTTP 500。
+     实测 inner cause：`NumberFormatException: For input string: "[22.5907"`。
+   - **为什么此前没被发现**：仓内**没有任何** `SprayController` / `SprayTaskService` 的
+     持久化测试，只有纯值对象 `SprayTaskTest`。⇒ 单测 100% 绿、`POST /api/v1/spray`
+     却在真实链路上不可用。这是本仓反复在修的失效类型（"没有任何信号会变红"）
+     的又一实例：**catch-and-warn 把持久化失败降级成了日志行，但事务仍回滚**。
+   - **修**：converter 在遇到"最外层数组开括号"时跳过一层再取坐标对；
+     新增 `SprayTaskPersistenceTest`（3 例：落库不抛异常 / waypoints 往返无损 / 单航点容错）。
+   - **变异验证**：把"跳过最外层 `'['`"改成 `if (false)` 后，
+     `createPersistsWithoutConverterFailure` 与 `waypointsRoundTripThroughDatabase` 转红，
+     报错仍是 `NumberFormatException: For input string: "[22.5907"` ⇒ 断言真的咬住了缺陷。
+   - **未一并修的相邻风险**：`catch-and-warn` + `@Transactional` 这个组合本身仍有问题
+     ——持久化失败后事务已 poisoned，"降级继续"的意图无法实现。正确的 fail-soft 需要
+     `noRollbackFor` 或独立事务传播，本次只修转换器、未改事务语义，留待单独一轮。
+
+2. **`e2e-spray.sh` 对齐当前 API（此前 0/7 全红）**
+   - 端点前缀纠正：`/spray/task` → `/spray`，`/spray/status/{sysid}` → `/spray/{id}`，
+     `/spray/gripper` **不存在**（`PayloadPlugin` 是 SPI 内部接口，夹爪能力由 drone-sim 单测覆盖），
+     `/delivery/sequence/{sysid}` → `/delivery` + `/delivery/{id}`。
+   - 请求体对齐 `SprayTaskRequest` / `DeliveryRequest`：`targetSysid` + `waypoints:[[lat,lon],…]`
+     + `targetRate`/`capacityMl`/`sprayWidth`（三者须 > 0）；`sites` 为对象数组。
+   - 断言口径纠正：初始态是 `PENDING`（`SprayTask.State` 无 `CREATED`）；
+     `sites` 在查询响应里是**对象数组**（创建响应里才是站点数）；
+     状态字段无 `pump`，改用 `state`/`coverageRate`/`remainingChemical`。
+   - 新增覆盖：`/delivery/{id}/payload`、`/delivery/{id}/payload/query`（MAV_CMD 30085）。
+   - **机载拒收不判失败**：`result:-1`（`MAV_RESULT=3`）表示 drone-sim 未实现该自定义
+     MAV_CMD，REST 侧契约是"命令已下发并拿到回执"，故只告警。真实载荷语义需机载实现后另测。
+   - 实测：`✅ M2 喷洒物流 e2e 全部通过`（WSL2 真 Linux + 真实后端/模拟器）。
+
+3. **`e2e-hardware.sh` 对齐当前 API（此前 4/9）**
+   - 雷达配置字段名纠正：`azimCenterDeg`/`azimWidthDeg` → `azimCenter`/`azimWidth`，
+     并补齐 `elevCenter`/`beamWidth`/`range`/`scanPeriodMs`（`HardwareDataController`
+     用 `num()` 逐个读，缺一即 400 `missing numeric field`）。
+   - **删除指向不存在端点的断言**：全量检索确认仓内**没有** `POST /hardware/physics-model`，
+     原脚本的 aero/kinematics 两步是凭空断言。改用真实存在的 `/rotor/config` +
+     `/rotor/telemetry` 覆盖动力侧。
+   - IMU 字段纠正：响应是**扁平** `accelX`/`gyroY`/`tempC`，原脚本误读嵌套 `accel`/`gyro` 对象。
+   - LiDAR/IMU 的 404 按契约处理：`drone-sim` 默认不注入 `LiDARSource`/`ImuSource`
+     （`VirtualDrone` 字段初值 null，`DroneSimMain` 未装配）⇒ 端点返回 404
+     `no LiDAR data`。此时断言"404 契约正确"并 ⚠️ 跳过字段断言，**不把 404 当失败**，
+     也不假装有数据。真实载荷断言需显式装配 Source 或真机。
+   - 实测：`✅ M4 硬件抽象 e2e 全部通过`。
+
+4. **`e2e-emergency.sh`：纠正"一键应急"的语义误解（此前 7/9 → 现 31/31 全绿）**
+   - **根因**：脚本在 `POST /{id}/one-click` 之后直接断言"最终阶段 CLOSED、
+     转移 ≥4 步"。但 `EmergencyCommandController#oneClick` 的契约是
+     **"自动走完 接报→研判→部署→执行"四阶段**（`@Operation` 描述与 `api-reference.md` 一致），
+     返回时 `currentPhase=EXECUTING`、`phaseHistorySize=3`。
+     **评估与总结是独立端点** `/evaluate`、`/close`，本就不该由 one-click 完成。
+     ⇒ 这是脚本把"一键"误解为"走完全流程"，不是后端缺陷。
+   - **修**：拆成 8/9a（one-click）+ 8/9b（`/evaluate`）+ 8/9c（`/close`）三步，
+     并补断言：部署计划 `planName` 非空、研判结论非空、评估结论落库、总结非空。
+   - **顺带纠正阶段名**：指挥域枚举是 `EVALUATED`（不是 `EVALUATING`）；
+     全流程 **6 阶段 = 5 次转移**（`RECEIVED→ASSESSED→DEPLOYED→EXECUTING→EVALUATED→CLOSED`），
+     原脚本的"≥4"与"7 阶段"表述都对不上 `EmergencyCommandPhase`。
+
+5. **CI `e2e-capability`：消除 `continue-on-error` 造成的"假绿"**
+   - **问题**：三条腿带 `continue-on-error: true` 时，GitHub 把**失败步骤也显示成 ✓**。
+     PR #6 上该 job 全绿，但日志里 emergency 2 条 ❌、spray 6 条 ❌、hardware 6 条 ❌
+     ——只看 job/步骤状态会得出完全错误的结论。
+   - **修**：每条腿 `tee` 到 `/tmp/leg-*.log` 并把退出码落盘 `/tmp/rc-*`（`PIPESTATUS[0]`），
+     新增 `Capability legs summary` 步骤把三腿结果写进 `$GITHUB_STEP_SUMMARY`，
+     **有腿失败则该步骤 `exit 1`**，让 job 真正变红。观察模式本身保留。
+   - 同时修正本会话早前引入的**跨 step 进程生命周期隐患**：原写法把
+     "启动 backend + drone-sim" 与"跑脚本"分在不同 step，后台进程可能随 step 结束被回收。
+   - **三腿已连续两次全绿**（WSL2 真 Linux + 真实后端/模拟器）：
+     emergency 31 ✅ / spray 20 ✅ / hardware 16 ✅，共 67 项断言 0 失败。
+     ⇒ 下一步可摘掉三条腿的 `continue-on-error` 转硬门禁。本轮**故意未摘**：
+     本地全绿不等于 CI 全绿（CI 是干净 Linux 容器 + redis service），
+     应在 PR 上连续全绿后再摘，避免一次 CI 红就回退。
+
+6. **定价档位矛盾：改为"单一对照入口"，不擅自改任一侧**
+   - `PRODUCT-POSITIONING.md` §5.1 说基础版含 **M5 mesh** + **M9 编排**；
+     `LicenseTier`（已被 `validateLicense` 强制）把 `network`（含 mesh）放完整版、
+     `emergency`（含 M9）放应急版。档位强制后，**按 §5 卖基础版会让客户付费的 mesh 与
+     M9 编排被 403** ——这是交付事故，不再是话术问题。
+   - **本轮不选边**（改代码 = 单方面改定价；改文档 = 定价决策）。
+     做法：新增 **§5.1.1** 作为唯一对照入口——逐项列出「代码模块 ↔ 覆盖能力 ↔
+     `LicenseTier` 实际档位 ↔ §5 销售口径 ↔ 是否一致」，并给出两个待裁决方案
+     （A 改 `LicenseTier` 下移 `network`/`emergency`；B 改 §5 把 mesh/M9 移出基础版），
+     各自写明影响面。`product-brief.md` §⚠6 与 §交付方式 改为**指向 §5.1.1**，
+     不再各自复述档位口径 ⇒ 消除"两处各说一套"，裁决只需落地一处。
+
+7. **`OrbitJobManagerTest` 硬编码端口 18099 → 内核分配（消除一类随机红）**
+   - 该测试的 fake truth sidecar 硬编码 `HttpServer.create(new InetSocketAddress(18099), 0)`，
+     并把 `http://127.0.0.1:18099` 写死进 `OrbitService`。18099 恰是本机跑 e2e 后端常用的端口，
+     端口被占时该类直接 `BindException` 报 3 个 error —— Qoder 上一轮为对齐计数
+     也曾手工"排除被占端口的 `OrbitJobManagerTest`"。
+   - **修**：`InetSocketAddress("127.0.0.1", 0)` 让内核分配空闲端口，
+     `startTruth` 记录 `truth.getAddress().getPort()` 到 `truthBase`，两处 `OrbitService` 构造改用它。
+   - 改版连跑 5 次 4/4 全绿；原版在端口被占时必红。
+
+8. **计数基线 4336 → 4339（cloud-backend 2340 → 2343）**
+   - 新增 `SprayTaskPersistenceTest` 3 例；`check-test-count-docs.py` 全绿，
+     22 处文档声称同步。
+
+---
+
 ## [Unreleased] — 档位绑定验证期强制 + 能力腿 e2e 实测（发现 2 腿 API 漂移）（2026-10-06）
 
 承接同日"文档口径第三次收口"一轮，处理「商业化硬前置」与「验证面覆盖」两项。
@@ -129,9 +241,10 @@ CodeQL、Playwright、helm 渲染。改动对象是要推的 HEAD。
      **4336（cloud-backend 2340）**——Qoder 在 `F:/Nexus/nexussky-land` 排除被占端口的
      `OrbitJobManagerTest` 后得 4332/2336、加回该类 4 例即 4336/2340；OpenCode 会话清空全部
      target 并确认无残留进程后同样读到 4336/2340。
-     故本条由"未收口"改为**已收口（归因＝跨 agent 并发干扰）**，文档当前值 4336。
-     教训：`target/` 是共享资源，同一仓库同一时间只应有一个构建方；看到
-     "clean 删不掉 target + CNFE 风暴"应先怀疑并发，而不是 surefire。
+      故本条由"未收口"改为**已收口（归因＝跨 agent 并发干扰）**。
+      教训：`target/` 是共享资源，同一仓库同一时间只应有一个构建方；看到
+      "clean 删不掉 target + CNFE 风暴"应先怀疑并发，而不是 surefire。
+      后续本会话新增 `SprayTaskPersistenceTest` 3 例，基线推进到 **4339（cloud-backend 2343）**。
 
 ---
 
