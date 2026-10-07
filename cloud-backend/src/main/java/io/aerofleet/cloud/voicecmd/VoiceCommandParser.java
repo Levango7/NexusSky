@@ -56,19 +56,9 @@ public class VoiceCommandParser {
             Pattern.compile("速度(\\d+(?:\\.\\d+)?)");
     private static final Pattern SPEED_EN_PATTERN =
             Pattern.compile("speed\\s+(\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
-    // 目标名不用 `(.+?)(?:sep|$)`：惰性 `.` 的类与分隔符**相交**（点号能吃掉逗号），这正是
-    // CodeQL java/polynomial-redos #4 的判定条件；换成排除式字符类后类与终止符不相交，
-    // 匹配不再有歧义路径。诚实标注：jshell 实测 20k 字符下新旧耗时相当（148ms vs 135ms），
-    // 我没能构造出可演示的平方级输入 —— 真正的成本上限由 VoiceCommandController 的
-    // MAX_TEXT_CHARS=500 入口边界保证，不靠这次改写。
-    // 边界实测（新旧双跑）："前往东门"、"前往东门，高度50米"、"前往A\nB"（不跨换行，两边都
-    // 不匹配）、"前往"（要求 ≥1 字符，两边都不匹配）四种一致；唯一有意差异是紧邻分隔符的
-    // "前往，东门"：旧写法取到垃圾组 "，东门"，新写法判为无目标（见 parse_target_boundaries）。
-    // 勿"顺手简化"回 .+?。
-    private static final Pattern TARGET_CN_PATTERN =
-            Pattern.compile("前往([^\\n,，。;；]+)(?:[,，。;；]|$)");
-    private static final Pattern TARGET_EN_PATTERN =
-            Pattern.compile("go\\s+to\\s+([^\\n,，。;；]+)(?:[,，。;；]|$)", Pattern.CASE_INSENSITIVE);
+    // 目标名不走正则——理由与语义对齐说明见 extractTarget()。终止符集合与原字符类一致。
+    private static final String TARGET_MARKER_CN = "前往";
+    private static final String TARGET_TERMINATORS = ",，。;；";
 
     // --- 设备与优先级模式 ---
     private static final Pattern SYSID_CN_PATTERN =
@@ -145,10 +135,7 @@ public class VoiceCommandParser {
         }
 
         // --- 解析目标位置 ---
-        String target = extractString(normalized, TARGET_CN_PATTERN);
-        if (target == null) {
-            target = extractString(normalized, TARGET_EN_PATTERN);
-        }
+        String target = extractTarget(normalized);
         if (target != null && !target.isBlank()) {
             cmd.setTargetName(target.trim());
             matchedRules++;
@@ -215,11 +202,76 @@ public class VoiceCommandParser {
         return null;
     }
 
-    private String extractString(String text, Pattern pattern) {
-        Matcher m = pattern.matcher(text);
-        if (m.find()) {
-            return m.group(1);
+    /**
+     * 提取「前往 / go to」之后的目标名。**刻意不走正则**：即便把字符类与终止符做成不相交
+     * （{@code [^\n,，。;；]+(?:[,，。;；]|$)}），CodeQL 的 java/polynomial-redos 仍判它可回退
+     * ——本批改写正则后 CI 依旧报 new alert（见 PR #7）。这里每步只前进一个字符、无回溯，
+     * 线性由构造保证；成本上限另有 {@code VoiceCommandController.MAX_TEXT_CHARS=500} 兜着。
+     * <p>语义与原正则逐条对齐：目标须 ≥1 字符、止于首个终止符或输入末尾、遇换行则该起点不算
+     * 匹配（换行既不是终止符也不是行尾）、某起点失败后从下一个字符继续找。
+     */
+    static String extractTarget(String text) {
+        String hit = targetAfterMarker(text);
+        return hit != null ? hit : targetAfterGoTo(text);
+    }
+
+    private static String targetAfterMarker(String text) {
+        for (int i = text.indexOf(TARGET_MARKER_CN); i >= 0; i = text.indexOf(TARGET_MARKER_CN, i + 1)) {
+            String run = readTargetRun(text, i + TARGET_MARKER_CN.length());
+            if (run != null) {
+                return run;
+            }
         }
         return null;
+    }
+
+    /** 大小写无关地定位 {@code go\s+to\s+}，再取其后的目标串（捕获组保持原大小写）。 */
+    private static String targetAfterGoTo(String text) {
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        for (int i = lower.indexOf("go"); i >= 0; i = lower.indexOf("go", i + 1)) {
+            int p = skipRegexSpaces(lower, i + 2);
+            if (p < 0 || !lower.startsWith("to", p)) {
+                continue;
+            }
+            int q = skipRegexSpaces(lower, p + 2);
+            if (q < 0) {
+                continue;
+            }
+            String run = readTargetRun(text, q);
+            if (run != null) {
+                return run;
+            }
+        }
+        return null;
+    }
+
+    /** 从 from 起读目标串；长度为 0 或止于换行时返回 null（同原正则的失败分支）。 */
+    private static String readTargetRun(String text, int from) {
+        int end = from;
+        while (end < text.length() && text.charAt(end) != '\n'
+                && TARGET_TERMINATORS.indexOf(text.charAt(end)) < 0) {
+            end++;
+        }
+        if (end == from) {
+            return null;
+        }
+        if (end < text.length() && text.charAt(end) == '\n') {
+            return null;
+        }
+        return text.substring(from, end);
+    }
+
+    /** 跳过 Java 正则 {@code \s} 等价的一个或多个空白；一个都没有时返回 -1。 */
+    private static int skipRegexSpaces(String s, int from) {
+        int i = from;
+        while (i < s.length() && isRegexSpace(s.charAt(i))) {
+            i++;
+        }
+        return i == from ? -1 : i;
+    }
+
+    /** {@code \s} = {@code [ \t\n\x0B\f\r]}；{@code Character.isWhitespace} 更宽，故不采用。 */
+    private static boolean isRegexSpace(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == 0x0B;
     }
 }
