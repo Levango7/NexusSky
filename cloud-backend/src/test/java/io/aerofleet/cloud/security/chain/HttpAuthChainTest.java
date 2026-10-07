@@ -28,7 +28,9 @@ import java.util.List;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -136,6 +138,25 @@ class HttpAuthChainTest {
         for (String endpoint : endpoints) {
             mvc.perform(get(endpoint))
                     .andExpect(status().isUnauthorized());
+        }
+    }
+
+    @Test
+    @DisplayName("CSRF 前提复核：Cookie 不携带凭据——伪造 JSESSIONID 的写请求仍 401，且响应不下发 Set-Cookie")
+    void csrfPremise_noAmbientCookieCredential() throws Exception {
+        // SecurityConfig 两处 csrf.disable() 的唯一正当理由是「浏览器不会自动附带凭据」：
+        // 凭据只来自 Authorization / X-API-Key 头，会话策略 STATELESS。这条把它钉成机器断言——
+        // 将来任何人改成 cookie/会话型凭据（httpBasic / formLogin / rememberMe / 把 JWT 放 cookie），
+        // 下面两个断言会先红，届时 csrf.disable() 必须撤掉，而不是让告警静默着。
+        List<String> writeEndpoints = List.of(
+                "/api/v1/alarms/events",
+                "/api/v1/orch/plans",
+                "/api/v1/delivery2/tasks");
+
+        for (String endpoint : writeEndpoints) {
+            mvc.perform(post(endpoint).header("Cookie", "JSESSIONID=csrf-probe-0001"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(header().doesNotExist("Set-Cookie"));
         }
     }
 
