@@ -132,7 +132,7 @@ public final class MavlinkMessageInfo {
         EXTENDED_INFOS.put(30060, new Info(12, 121));   // QOS_ROUTE_DECISION
         EXTENDED_INFOS.put(30061, new Info(18, 241));   // CLUSTER_FORMATION
         EXTENDED_INFOS.put(30062, new Info(8, 137));    // DISASTER_MODE_STATUS
-        // ---- NexusSky 自定义扩展消息（P3 灾害应急搜救信号，msgId=30063）----
+        // ---- NexusSky 自定义扩展消息（P2 灾害应急通讯组网扩展，msgId=30063）----
         EXTENDED_INFOS.put(30063, new Info(7, 94));    // BUZZER_CONTROL
         // ---- C2 开放无人机标识（OPEN_DRONE_ID_*，msgId=12900-12915）----
         // OPEN_DRONE_ID 与上方 30000-30099 私有区同属 EXTENDED_INFOS 扩展区

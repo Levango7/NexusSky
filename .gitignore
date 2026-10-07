@@ -26,6 +26,10 @@ gcs-web/.e2e-logs/
 gcs-web/test-results/
 gcs-web/playwright-report/
 gcs-web/blob-report/
+# vitest 产物：JSON 报告供 scripts/check-test-count-docs.py 取前端实测用例数，
+# 覆盖率报告供人工查看。两者都是跑一次就重写的中间产物。
+gcs-web/vitest-report.json
+gcs-web/coverage/
 .playwright/
 # E2E 编排脚本的工作目录在 gcs-web 下，dev profile 的 H2 文件库会落在这里
 gcs-web/data/

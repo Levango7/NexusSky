@@ -25,9 +25,9 @@
 | `e2e-smoke.ps1` / `.sh` | 基础 | 设备发现→任务上传→ARM→任务推进→RTL→轨迹→飞行日志→手动控制 | ★★★★★ | ★★★★★ | **核心演示脚本**，覆盖单机操控全链路，PS1/SH 双版本，前置依赖清晰 |
 | `e2e-formation.ps1` | M1 T16 | 3机编队→起飞→队形变换(LINE→CIRCLE)→灯光同步→解散 | ★★★★★ | ★★★★☆ | **编队演示核心**，完整状态机验证，可选 `-IncludeRelay` 中继复用；需构建多个 jar |
 | `e2e-mesh.ps1` | M0a Phase G | 中继转发→命令到达→遥测反向→透明性→异构链路→对端唯一性 | ★★★★★ | ★★★★☆ | **组网演示核心**，支持 auto/simplified/full 三模式，简化版零外部依赖；完整版需多 jar |
-| `e2e-emergency.sh` | 4a + M9 | 布控球发现→报警事件→联动规则→应急指挥工作流(一键响应) | ★★★★★ | ★★★★★ | **应急演示核心**，9步完整流程，自带演示总结输出，最贴近客户场景 |
-| `e2e-spray.sh` | M2 | 创建喷洒任务→查询状态→控制夹爪→查询物流配送→取消任务 | ★★★☆☆ | ★★★☆☆ | **喷洒演示基础**，依赖外部后端运行，无自启动逻辑，需配合其他脚本启动环境 |
-| `e2e-hardware.sh` | M4 | 雷达配置→雷达状态→雷达目标→旋翼遥测→LiDAR→IMU→物理模型切换 | ★★★☆☆ | ★★★☆☆ | **硬件演示基础**，依赖外部后端运行，覆盖传感器查询但缺少操控闭环 |
+| `e2e-emergency.sh` | 4a + M9 | 布控球发现→报警事件→联动规则→应急指挥(一键响应+评估+总结) | ★★★★★ | ★★★★★ | **应急演示核心**，11 步完整流程（31 项断言），自带演示总结输出，2026-10-07 已转 CI 硬门禁 |
+| `e2e-spray.sh` | M2 | 创建喷洒任务→查询状态→控制(START/STOP)→创建配送任务→查询站点→负载清单→按需负载上报 | ★★★☆☆ | ★★★☆☆ | **喷洒演示基础**，依赖外部后端运行，无自启动逻辑；2026-10-07 已对齐当前 API（20 项断言），CI 硬门禁 |
+| `e2e-hardware.sh` | M4 | 雷达配置→配置回读→雷达状态→雷达目标→旋翼配置→旋翼遥测→LiDAR→IMU | ★★★☆☆ | ★★★☆☆ | **硬件演示基础**，依赖外部后端运行；2026-10-07 已对齐当前 API（16 项断言），CI 硬门禁 |
 | `e2e-failsafe.ps1` | P0 | 断链→自动RTL→链路恢复→自主落地 | ★★★★★ | ★★★★☆ | **安全演示核心**，验证 PX4 兼容自主保护，220s 观察窗，全程零人工命令 |
 | `e2e-vision.ps1` | A5 | 相机会话→单拍定位→环绕orbit→航迹查询 | ★★★★★ | ★★★★☆ | **视觉演示核心**，异步 job 轮询，4站环绕拍照，定位误差<3m |
 | `e2e-vision-pixels.ps1` | E2 | pixels模式单拍→blob检测→地理解算→JPEG字节验证 | ★★★★☆ | ★★★☆☆ | **像素域验证**，需后端以 `AEROFLEET_VISION_SOURCE=pixels` 启动，配置门槛较高 |
@@ -41,7 +41,7 @@
 **已具备完整演示能力的场景**：
 - ✅ 单机操控（e2e-smoke）—— 起飞→航点→返航全链路
 - ✅ 多机编队（e2e-formation）—— 3机编队完整闭环
-- ✅ 应急指挥（e2e-emergency）—— 空地一体化9步流程
+- ✅ 应急指挥（e2e-emergency）—— 空地一体化 11 步流程
 - ✅ 安全保障（e2e-failsafe + e2e-fault）—— 故障检测与自主保护
 - ✅ 网络韧性（e2e-network）—— 多链路画像下的任务韧性
 
@@ -49,6 +49,8 @@
 - ⚠️ 喷洒物流演示 —— e2e-spray.sh 缺少环境自启动，需配合 start-all + drone-sim 才能运行
 - ⚠️ 安防监控演示 —— e2e-emergency.sh 覆盖了安防联动，但缺少独立的"监控→告警→追踪→处置"闭环演示
 - ⚠️ 硬件抽象演示 —— e2e-hardware.sh 仅查询传感器数据，缺少操控闭环（如雷达扫描控制→目标追踪）
+- ⚠️ LiDAR / IMU 数据 —— drone-sim 默认**不注入** `LiDARSource`/`ImuSource`，
+  故两个端点返回 404（符合契约）。要演示真实载荷数据需显式装配 Source 或接真机。
 - ❌ 应急编排完整演示 —— M9 应急编排（灾区测绘→覆盖规划→组网部署→自愈重构）无独立 e2e 脚本
 - ❌ 多机协同调度演示 —— M10 集群调度无 e2e 脚本
 - ❌ 星地中继演示 —— M7 层级路由无独立 e2e 脚本
@@ -74,14 +76,14 @@
 
 ### 1.4 测试基线
 
-当前项目测试基线：**4305 tests，0 failures**（全部通过）。
+当前项目测试基线：**4359 tests，0 failures**（全部通过）。
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
 | mavlink-core | 457 | MAVLink 协议编解码、CRC 一致性 |
 | drone-sim | 1391 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
-| cloud-backend | 2309 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **4305** | **全部通过，0 failures** |
+| cloud-backend | 2363 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **4359** | **全部通过，0 failures** |
 
 > 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
 
@@ -219,21 +221,30 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 | 5 | 查看报警列表 | `GET /api/v1/alarms/events` | 事件总数 ≥1 |
 | 6 | 确认报警 | `POST /api/v1/alarms/events/{id}/ack` | acknowledged=true |
 | 7 | 创建应急指挥 | `POST /api/v1/emergency-command` (incidentType=火灾) | commandId + currentPhase |
-| 8 | 一键应急响应 | `POST /api/v1/emergency-command/{id}/one-click` | 阶段流转：接报→研判→部署→执行→评估→总结 |
+| 8a | 一键应急响应 | `POST /api/v1/emergency-command/{id}/one-click` | 自动走完 **接报→研判→部署→执行** 四阶段：currentPhase=EXECUTING、phaseHistorySize=3，并已生成部署计划与研判结论 |
+| 8b | 应急评估 | `POST /api/v1/emergency-command/{id}/evaluate` | currentPhase=EVALUATED，评估结论落库 |
+| 8c | 总结关闭 | `POST /api/v1/emergency-command/{id}/close` | currentPhase=CLOSED、总结非空、phaseHistorySize=5 |
 | 9 | 查看指挥历史 | `GET /api/v1/emergency-command` | 历史命令数 ≥1 |
+
+> **口径修正（2026-10-07）**：`one-click` 的契约是"自动走完 接报→研判→部署→执行"
+> 四阶段（`EmergencyCommandController#oneClick` 的 `@Operation` 描述与 api-reference 一致），
+> **评估与总结是独立端点**，本就不由 one-click 完成。此前本节写"一键走完 6 阶段、
+> 最终 CLOSED/SUMMARY、转移 ≥4 步"，是把"一键"误解为"走完全流程"——
+> 脚本因此稳定红 2 条断言。阶段枚举是 `EVALUATED`（不是 EVALUATING），
+> 全流程 **6 阶段 = 5 次转移**。
 
 #### 预期结果
 
 - 布控球自动发现并一键注册，识别厂商品牌
 - 报警事件触发联动规则，自动匹配 DEPLOY_DRONE 动作
-- 应急指挥一键响应，6 阶段自动流转（接报→研判→部署→执行→评估→总结）
-- 最终阶段为 CLOSED/SUMMARY，阶段转移历史 ≥4 步
+- 应急指挥一键响应：自动完成 接报→研判→部署→执行 四阶段并启动编排计划
+- 评估与总结经 `/evaluate`、`/close` 两步完成后停在 `CLOSED`，阶段转移历史 5 步
 
 #### 关键卖点
 
 1. **空地一体化**：布控球（地面安防）→ 报警联动 → 无人机侦察 → 应急指挥闭环
 2. **ONVIF 多厂商兼容**：海康/大华/宇视三大安防硬件供应商协议兼容
-3. **一键应急响应**：6 阶段工作流自动走完，从报警到总结零人工干预
+3. **一键应急响应**：自动完成研判、部署、执行并启动编排计划，从报警到执行零人工干预
 4. **报警联动编排**：规则引擎自动匹配事件类型+严重程度→触发无人机部署
 
 ---
@@ -257,25 +268,33 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 | 步骤 | 操作 | API/命令 | 预期结果 |
 |---|---|---|---|
 | 1 | 确认后端 + 飞机在线 | `GET /api/v1/drones` | sysid=1 online=true |
-| 2 | 创建喷洒任务 | `POST /api/v1/spray/task` (rateLpm=2.5, totalLiters=50, 2段航线) | taskId 非空 |
-| 3 | 查询喷洒状态 | `GET /api/v1/spray/status/1` | pump 字段有值 |
-| 4 | 打开夹爪 | `POST /api/v1/spray/gripper` (open=true) | 返回成功 |
-| 5 | 关闭夹爪 | `POST /api/v1/spray/gripper` (open=false) | 返回成功 |
-| 6 | 查询物流配送序列 | `GET /api/v1/delivery/sequence/1` | 站点列表非空 |
-| 7 | 取消喷洒任务 | `POST /api/v1/spray/cancel` (taskId) | 返回成功 |
+| 2 | 创建喷洒任务 | `POST /api/v1/spray`（`targetSysid` + `waypoints:[[lat,lon],…]` + `targetRate`/`capacityMl`/`sprayWidth`，均须 >0） | taskId 非空、segments=航点数-1、state=PENDING、totalArea>0 |
+| 3 | 查询喷洒任务 | `GET /api/v1/spray/{id}` | state 非空、remainingChemical>0（初始=药箱容量） |
+| 4 | 控制喷洒任务 | `POST /api/v1/spray/{id}/control`（`action=START`） | 返回 results 结构（机载回执） |
+| 5 | 停止喷洒任务 | `POST /api/v1/spray/{id}/control`（`action=STOP`） | 返回 results 结构 |
+| 6 | 创建配送任务 | `POST /api/v1/delivery`（`sites` 为对象数组，含坐标/负载/投放精度） | deliveryId 非空、sites=站点数 |
+| 7 | 查询配送序列 | `GET /api/v1/delivery/{id}` | 站点数组长度正确、首站 payloadId 正确、progress 存在 |
+| 8 | 查询负载清单 | `GET /api/v1/delivery/{id}/payload` | 含 payloads 数组与 totalWeight |
+| 9 | 按需负载上报 | `POST /api/v1/delivery/{id}/payload/query` | sysid 正确；status=ok 或机载拒收告警 |
+| 10 | 控制配送任务 | `POST /api/v1/delivery/{id}/control`（`action=START`） | 返回 results 结构 |
+
+> **口径修正（2026-10-07）**：本节此前写的 `POST /api/v1/spray/task`、
+> `GET /api/v1/spray/status/{id}`、`POST /api/v1/spray/gripper`、
+> `GET /api/v1/delivery/sequence/{id}`、`POST /api/v1/spray/cancel`
+> **在仓内均不存在**（`PayloadPlugin` 是 SPI 内部接口，夹爪无 REST 端点），
+> 已按 `SprayController` / `DeliveryController` 的实际契约更正。
 
 #### 预期结果
 
-- 喷洒任务创建返回 taskId
-- 喷洒状态包含 pump 运行状态
-- 夹爪开/关控制成功
-- 物流配送序列包含站点列表
-- 任务取消成功
+- 喷洒任务创建返回 taskId、分段数与总面积
+- 喷洒任务可查、可控制（START/STOP）
+- 配送任务可创建、可查站点与负载清单
+- 按需负载上报可触发（MAV_CMD 30085）
 
 #### 关键卖点
 
 1. **精准农业**：喷洒速率+总量控制，分段航线规划
-2. **物流配送**：夹爪控制 + 配送序列查询
+2. **物流配送**：站点序列 + 负载清单 + 按需机载负载上报
 3. **任务生命周期**：创建→执行→查询→取消完整管理
 4. **模块化可选**：喷洒/物流作为可选模块，按需启用
 

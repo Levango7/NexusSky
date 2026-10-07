@@ -42,6 +42,15 @@ public class LicenseController {
         result.put("active", info.isActive());
         result.put("expired", info.isExpired());
         result.put("devEdition", licenseService.isDevLicense());
+        // 档位与模块：运维问「这台部署卖的是哪一档、实际能开哪些模块」时的唯一入口。
+        // tier 由模块集合反查（LicenseTier.inferTier），为 null 表示该组合不对应任何
+        // 可售档位——配合 validateLicense 的档位绑定校验，这种情况在 prod 下应当起不来。
+        String tier = LicenseTier.inferTier(info.getModules());
+        result.put("tier", tier);
+        result.put("tierDisplayName", LicenseTier.displayName(tier));
+        result.put("modules", info.getModules());
+        result.put("tierBindingEnforced", licenseService.isTierBindingEnforced());
+        result.put("tierBindingViolation", licenseService.tierBindingViolation(info.getModules()));
         return result;
     }
 
@@ -76,6 +85,9 @@ public class LicenseController {
         result.put("expired", info.isExpired());
         result.put("active", info.isActive());
         result.put("devEdition", licenseService.isDevLicense());
+        // valid=false 时把档位违规原因一并返回：运维不必再去翻日志就能看出
+        // 是「过期」还是「模块集合不对应任何可售档位」。
+        result.put("tierBindingViolation", licenseService.tierBindingViolation(info.getModules()));
         return result;
     }
 }

@@ -85,18 +85,27 @@ class LicenseTierTest {
 
     @ParameterizedTest(name = "{0} → {1}")
     @CsvSource({
+            // 基础版 = GCS OEM + 机队作业 + M5 mesh + M9 编排（§5.1 承诺项）
             "basic,     core",
             "basic,     fleet",
+            "basic,     mesh",
+            "basic,     orch",
+            // 应急版 = 基础版 + 4a 空地一体化 + ONVIF 安防
             "emergency, core",
             "emergency, fleet",
+            "emergency, mesh",
+            "emergency, orch",
             "emergency, emergency",
+            // 完整版 = 全模块
             "full,      core",
             "full,      fleet",
+            "full,      mesh",
+            "full,      orch",
             "full,      emergency",
             "full,      network",
             "full,      advanced",
     })
-    @DisplayName("档位内容抽样：与定价文档的档位描述一致")
+    @DisplayName("档位内容抽样：与定价文档 §5.1 的档位描述逐字对齐")
     void tierContentFollowsPricingDoc(String tier, String module) {
         assertThat(LicenseTier.modulesOf(tier))
                 .as("档位 %s 应包含模块 %s（依据 PRODUCT-POSITIONING §5.1）", tier, module)
@@ -104,14 +113,21 @@ class LicenseTierTest {
     }
 
     @Test
-    @DisplayName("档位差异：基础版不含 network/advanced，应急版不含 advanced")
+    @DisplayName("档位差异：基础版含 mesh/orch 但不含 emergency/network/advanced；应急版不含 network/advanced")
     void tiersAreMutuallyDistinguishable() {
         assertThat(LicenseTier.modulesOf(LicenseTier.BASIC))
-                .as("基础版（20-50 万）不应包含完整版付费点 network/advanced")
-                .doesNotContain("network", "advanced");
+                .as("基础版（20-50 万）必须含 §5.1 承诺的 M5 mesh 与 M9 编排")
+                .contains("mesh", "orch");
+        assertThat(LicenseTier.modulesOf(LicenseTier.BASIC))
+                .as("基础版不应包含应急版付费点（4a 空地一体化 / ONVIF 安防）"
+                        + "与完整版付费点（基站卫星 / 孪生 AI）")
+                .doesNotContain("emergency", "network", "advanced");
         assertThat(LicenseTier.modulesOf(LicenseTier.EMERGENCY))
-                .as("应急版（50-100 万）不应包含完整版付费点 advanced")
-                .doesNotContain("advanced");
+                .as("应急版（50-100 万）应含 4a 空地一体化与 ONVIF 安防")
+                .contains("emergency");
+        assertThat(LicenseTier.modulesOf(LicenseTier.EMERGENCY))
+                .as("应急版不应包含完整版付费点 network/advanced")
+                .doesNotContain("network", "advanced");
     }
 
     @Test

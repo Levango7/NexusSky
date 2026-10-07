@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [ main, master ]
 
+# 2026-10-06 补。此前同分支连续推送会各自起一整套 16 job 的 run，互不取消：
+# 一次 push 之后紧跟 amend 是常见节奏，于是后一次 run 在前一次还占着 runner 时
+# 又起 16 个 job——排队时间比构建时间还长，且旧 run 的结论毫无价值。
+# cancel-in-progress 只取消**同 ref 未完成**的 run：master 上 push 会取消前一个
+# 未完成的 master run（其结论已过期），而 PR 上的 run 不受其他 ref 影响。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write
@@ -14,6 +23,7 @@ jobs:
   pr-lint:
     name: PR Title Check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: github.event_name == 'pull_request'
     steps:
       - uses: amannn/action-semantic-pull-request@v5
@@ -23,6 +33,7 @@ jobs:
   dep-gate:
     name: Dependency Version Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -49,6 +60,7 @@ jobs:
   java-upward-compat:
     name: Java 26 Upward Compatibility (compile only)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -66,6 +78,7 @@ jobs:
     name: Java Level Gate (bytecode vs declaration)
     needs: [maven-warm]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -92,6 +105,7 @@ jobs:
   maven-warm:
     name: Warm Maven Cache
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -123,6 +137,7 @@ jobs:
   java:
     name: Java ${{ matrix.module }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: [ maven-warm ]
     strategy:
       fail-fast: false
@@ -189,7 +204,8 @@ jobs:
   docs-test-count:
     name: Docs test-count gate
     runs-on: ubuntu-latest
-    needs: [ java ]
+    timeout-minutes: 15
+    needs: [ java, frontend ]
     steps:
       - uses: actions/checkout@v4
       - name: Download surefire reports
@@ -207,13 +223,28 @@ jobs:
             mv "$d" "${d#surefire-}"
           done
           ls .
+      - name: Download vitest json report
+        # 2026-10-06 补：门禁此前只读 surefire XML，即只管 Java。前端用例数没有任何
+        # 约束力——README 的「168 例」已过期到 177 例却长期无人发现，与 Java 侧
+        # 「3230 过期两年多」是同一个根因：加测试不会让文档过期这件事变红。
+        # 这里下载 frontend job 那次 vitest 的 JSON 报告，不为门禁重跑一遍前端测试。
+        uses: actions/download-artifact@v4
+        with:
+          name: vitest-report
+          path: gcs-web
       - name: Docs test-count gate
         # README/ROADMAP/whitepaper 等口径文档声称的单测数与 surefire 实测必须一致，
         # 数字漂移即红——权威来源是 XML，不是文档。
-        run: python3 scripts/check-test-count-docs.py --reports-root surefire-reports
+        # --frontend-json 追加前端一侧，用 vitest 自己的 numTotalTests 作权威值
+        # （刻意不用静态数 `it(`：循环生成的用例数不等于文本出现次数）。
+        run: >-
+          python3 scripts/check-test-count-docs.py
+          --reports-root surefire-reports
+          --frontend-json gcs-web/vitest-report.json
   frontend:
     name: GCS Web
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: gcs-web
@@ -233,7 +264,22 @@ jobs:
       # 2026-10-04 合并第二批（72 例组件逻辑测试）后仍为同一道门禁。
       # 放在 lint 之后、build 之前：测试失败比构建失败更早暴露逻辑问题。
       - name: Unit tests (vitest)
-        run: npm run test
+        # test:ci = test + JSON 报告。JSON 供 docs-test-count job 核对文档里的
+        # 前端用例数声称——与 surefire XML 对 Java 侧是同一个角色。
+        run: npm run test:ci
+      - name: Upload vitest json report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-report
+          # 文件名**刻意不以点开头**：upload-artifact@v4 默认 include-hidden-files: false，
+          # 点开头的文件会被静默排除，本步随即 if-no-files-found: error 判红
+          # （实测 run 37535480620：报告已写到 gcs-web/.vitest-report.json，上传仍报
+          # "No files were found with the provided path"，并把 needs 它的
+          # Docs test-count gate / Security Scan 一起拖成 skipped）。
+          # 要改名请保持无前导点，或显式传 include-hidden-files: true。
+          path: gcs-web/vitest-report.json
+          if-no-files-found: error
+          retention-days: 7
       - run: npm run build
 
   # CI7 后半边：Playwright 真浏览器 E2E。
@@ -242,6 +288,7 @@ jobs:
   gcs-e2e:
     name: GCS Web E2E (Playwright)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: gcs-web
@@ -298,6 +345,7 @@ jobs:
   e2e-smoke:
     name: E2E smoke + fault + failsafe + vision
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: [ java, frontend ]
     services:
       redis:
@@ -349,9 +397,123 @@ jobs:
       - name: Vision regression (camera session -> capture -> orbit -> tracks)
         run: bash scripts/e2e-vision-linux.sh
 
+# CI 能力腿（2026-10-06 新增）：把已有 Linux 版脚本接进门禁。
+  #
+  # 为什么单独一个 job 而不加进 e2e-smoke：两者故障语义不同——
+  #   e2e-smoke 是**安全回归**（故障注入 / failsafe / 感知），红了必须立刻阻塞；
+  #   本 job 是**能力演示**（空地应急 / 喷洒物流 / 硬件抽象），红的原因往往是编排脆弱
+  #   而非能力缺失。混在一起会连带把更有价值的安全回归一起拖红。
+  #
+  # 为什么带 continue-on-error：这些脚本此前只在本机手工跑过，**从未在 Linux CI 上
+  # 连续复跑**，稳定性未知。先以观察模式接入收集 flaky 数据（步骤会显示为
+  # "failed but continued"，日志可见），待若干次 run 全绿后再去掉该标记转为硬门禁。
+  # 去掉标记 = 把"跑过"升级为"必须通过"，只需删一行，不涉及任何脚本改动。
+  e2e-capability:
+    name: E2E capability (emergency / spray / hardware)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: [ java ]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      - name: Build backend + sim
+        run: mvn -B -DskipTests package -pl cloud-backend,drone-sim -am
+      - name: Start backend + drone-sim
+        run: |
+          java -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+            --spring.profiles.active=dev &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/actuator/health 2>/dev/null | grep -q '"status":"UP"'; then
+              echo "backend ready (${i} probes)"; break
+            fi
+            if [ "$i" = "60" ]; then
+              echo "::error::backend failed to become ready within 120s"
+              exit 1
+            fi
+            sleep 2
+          done
+          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar &
+          # 等 sim 注册上来：后三个脚本都以 sysid=1 在线为前置
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/api/v1/drones 2>/dev/null | grep -q '"sysid":1'; then
+              echo "drone registered (${i} probes)"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::warning::drone-sim did not register within 60s; capability legs may self-skip"
+      # 硬门禁：三条腿任一失败即 job 变红（2026-10-07 由观察模式转正）。
+      # 转正依据：三腿在 WSL2 真 Linux 本地连续两次全绿（emergency 31 / spray 20 /
+      # hardware 16，67 项断言 0 失败），且 CI run 37624477248 上 25/25 全绿。
+      #
+      # 步骤名必须加引号：未加引号的标量里出现「冒号+空格」会被 YAML 解析成映射而报错。
+      # 每条腿仍 tee 到 /tmp 并落盘退出码 —— 汇总步骤用它出表，
+      # 这样即使将来某条腿失败，也能一眼看出是哪条、失败在哪一步。
+      - name: "Air-ground emergency workflow (deploy -> alarm -> linkage -> dispatch)"
+        run: |
+          set -o pipefail
+          bash scripts/e2e-emergency.sh 2>&1 | tee /tmp/leg-emergency.log
+          echo "${PIPESTATUS[0]}" > /tmp/rc-emergency
+      - name: "Spray + logistics chain (task -> status -> control -> delivery)"
+        run: |
+          set -o pipefail
+          bash scripts/e2e-spray.sh 2>&1 | tee /tmp/leg-spray.log
+          echo "${PIPESTATUS[0]}" > /tmp/rc-spray
+      - name: "Hardware abstraction (radar -> rotor -> lidar -> imu)"
+        run: |
+          set -o pipefail
+          bash scripts/e2e-hardware.sh 2>&1 | tee /tmp/leg-hardware.log
+          echo "${PIPESTATUS[0]}" > /tmp/rc-hardware
+      - name: Capability legs summary
+        if: always()
+        run: |
+          {
+            echo "## 能力腿汇总"
+            echo
+            echo "| 腿 | 结果 |"
+            echo "|---|---|"
+            overall=0
+            for leg in emergency spray hardware; do
+              rc="$(cat /tmp/rc-$leg 2>/dev/null || echo 999)"
+              if [ "$rc" = "0" ]; then
+                echo "| $leg | ✅ 通过 |"
+              else
+                echo "| $leg | ❌ 失败 (exit $rc) |"
+                overall=1
+              fi
+            done
+            echo
+            echo "> 三条腿为**硬门禁**：任一失败即本 job 变红（2026-10-07 由观察模式转正）。"
+            echo "> 完整日志见上方各步骤输出。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$overall" != "0" ]; then
+            echo "::error::能力腿存在失败，详见 job summary"
+            exit 1
+          fi
+
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     needs: [java]
     services:
       redis:
@@ -402,6 +564,7 @@ jobs:
   sdk-integration:
     name: SDK Integration E2E
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     needs: [ java ]
     services:
       redis:
@@ -462,6 +625,7 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [ java, frontend ]
     permissions:
       contents: read
@@ -551,6 +715,7 @@ jobs:
   codeql:
     name: CodeQL Analysis (${{ matrix.language }})
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [ maven-warm ]
     permissions:
       contents: read
@@ -579,6 +744,7 @@ jobs:
   docker-build:
     name: Docker Build & Push
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [java, frontend]
     permissions:
       contents: read
@@ -630,6 +796,7 @@ jobs:
   deploy-secrets:
     name: Deploy Secret Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # 独立 job：不依赖构建产物，判定的对象是仓库里的部署清单本身。
     # 存在的理由：values.yaml / deploy/k8s/secret.yaml 里的 REPLACE_WITH_* 占位串
     # 长度达标，能原样通过后端既有的「jwt secret ≥32 字节」强度校验——忘替换的那次

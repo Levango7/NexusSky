@@ -28,6 +28,7 @@ class OrbitJobManagerTest {
 
     private HttpServer truth;
     private OrbitJobManager manager;
+    private String truthBase;
 
     @AfterEach
     void tearDown() {
@@ -41,7 +42,9 @@ class OrbitJobManagerTest {
 
     /** Boot a truth sidecar that always reports the given shots JSON. */
     private void startTruth(String shotsJson) throws Exception {
-        truth = HttpServer.create(new InetSocketAddress(18099), 0);
+        // 端口 0 = 让内核分配空闲端口。此前硬编码 18099，与本机真实后端 / 并行测试
+        // 抢同一个端口，撞上即 BindException —— 该类曾因端口被占而"随机"红。
+        truth = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         truth.createContext("/camera/shots", ex -> {
             byte[] body = shotsJson.getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");
@@ -56,13 +59,23 @@ class OrbitJobManagerTest {
             ex.close();
         });
         truth.start();
+        // 记录内核实际分配的端口，供 OrbitService 拼 base URL
+        truthBase = "http://127.0.0.1:" + truth.getAddress().getPort();
     }
 
     private OrbitJobManager managerWithRealOrbit() {
         // Real OrbitService against the fake truth base; commands is not
         // exercised by these tests (submit() validation + job map semantics
         // do not need a flight).
-        OrbitService svc = new OrbitService(null, null, null, new ObjectMapper(), "http://127.0.0.1:18099");
+        //
+        // truthBase 可能为 null：invalidParams / duplicate-inflight / progress-shape
+        // 三个用例不调用 startTruth（它们只验 submit 的校验与 job map 语义，
+        // 不需要 truth 通道）。此时必须给一个**语法合法**的 base URL，
+        // 否则 OrbitService 拿到 null 会让 submit 的在飞判定提前失效
+        // （duplicate-inflight 用例曾因此报 "Expected IllegalStateException
+        // to be thrown, but nothing was thrown"）。
+        String base = truthBase != null ? truthBase : "http://127.0.0.1:1";
+        OrbitService svc = new OrbitService(null, null, null, new ObjectMapper(), base);
         manager = new OrbitJobManager(svc, 2);
         return manager;
     }
@@ -127,7 +140,7 @@ class OrbitJobManagerTest {
         // the state machine directly: submit, then mark terminal via run()
         // failure - uploadMission with null commands throws instantly.
         startTruth("[]");
-        OrbitService svc = new OrbitService(null, null, null, new ObjectMapper(), "http://127.0.0.1:18099");
+        OrbitService svc = new OrbitService(null, null, null, new ObjectMapper(), truthBase);
         manager = new OrbitJobManager(svc, 1);
         OrbitJobManager.OrbitJob j = manager.submit(12, 22.59, 113.93, 25, 60, 2);
         // null DroneCommandService -> uploadMission NPEs -> job FAILED fast

@@ -14,7 +14,10 @@
 #
 # 退出码：0 全流程通过；1 任一步失败。
 set -uo pipefail
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+# 后端基址。默认 8080；CI/本机并行调试时用 AF_BACKEND_BASE 覆盖
+# （COORDINATION.md 记的本机 8080 被常驻容器 opsmesh-controlplane 占用）。
+# AF_BACKEND_BASE 与 e2e-spray.sh / e2e-hardware.sh 同名变量，语义一致。
+BASE_URL="${AF_BACKEND_BASE:-http://localhost:8080}"
 FAIL=0
 
 # 演示场景常量
@@ -206,18 +209,54 @@ echo "   命令 ID: $COMMAND_ID  当前阶段: $CMD_PHASE"
 # =====================================================================
 # 8. 一键应急响应（自动走完 接报→研判→部署→执行→评估→总结）
 # =====================================================================
-step "8/9 一键应急响应（POST /api/v1/emergency-command/{id}/one-click）"
+# 注意：one-click 的契约是「自动走完 接报→研判→部署→执行」四阶段
+#       （EmergencyCommandController#oneClick 的 @Operation 描述与 api-reference.md 一致），
+#       返回时 currentPhase=EXECUTING、phaseHistorySize=3（4 个阶段 = 3 次转移）。
+#       评估与总结是**独立端点**，需再调 /evaluate 与 /close 才能到 CLOSED。
+#       原脚本在此处直接断言 CLOSED 且 ≥4 步转移，是把"一键"误解为"走完全流程"。
+step "8/9a 一键应急响应（POST /api/v1/emergency-command/{id}/one-click）"
 echo "   命令 ID: $COMMAND_ID"
-echo "   预期阶段流转: 接报 → 研判 → 部署 → 执行 → 评估 → 总结"
+echo "   预期阶段流转: 接报 → 研判 → 部署 → 执行（4 阶段 / 3 次转移）"
 api_call POST "/api/v1/emergency-command/$COMMAND_ID/one-click" '{}'
 check_http "一键应急响应" || exit 1
 echo "   响应:"
 print_resp
-FINAL_PHASE=$(jget "$RESP" 'd.get("currentPhase","")')
+PHASE=$(jget "$RESP" 'd.get("currentPhase","")')
 PHASE_HIST_SIZE=$(jget "$RESP" 'd.get("phaseHistorySize",0)')
-check "最终阶段为 CLOSED/SUMMARY" "echo '$FINAL_PHASE' | grep -qiE 'CLOSED|SUMMARY|总结'"
-check "阶段转移历史 >= 4 步" "[ '${PHASE_HIST_SIZE:-0}' -ge 4 ] 2>/dev/null"
-echo "   最终阶段: $FINAL_PHASE  转移步数: $PHASE_HIST_SIZE"
+check "one-click 后阶段为 EXECUTING" "[ '$PHASE' = 'EXECUTING' ]"
+check "阶段转移历史 = 3（4 阶段 - 1）" "[ '${PHASE_HIST_SIZE:-0}' -eq 3 ] 2>/dev/null"
+PLAN=$(jget "$RESP" 'd.get("deploymentPlan",{}).get("planName","")')
+check "已生成部署计划" "[ -n '$PLAN' ] && [ '$PLAN' != 'None' ]"
+ASSESS=$(jget "$RESP" 'd.get("assessmentResult","")')
+check "已产出研判结论" "[ -n '$ASSESS' ] && [ '$ASSESS' != 'None' ]"
+echo "   当前阶段: $PHASE  转移步数: $PHASE_HIST_SIZE  部署计划: $PLAN"
+
+step "8/9b 评估（POST /api/v1/emergency-command/{id}/evaluate）"
+api_call POST "/api/v1/emergency-command/$COMMAND_ID/evaluate" \
+  '{"evaluationResult":"6 架无人机完成火场侦察与建链，处置半径 2000m，无人机返航正常","operator":"e2e-demo"}'
+check_http "应急评估" || exit 1
+# 注意：阶段枚举是 EVALUATED（不是 EVALUATING）；应急编排域的 EXECUTING
+#       与指挥域的 EVALUATED/CLOSED 是两套枚举，api-reference.md 的阶段名沿用指挥域。
+EVAL_PHASE=$(jget "$RESP" 'd.get("currentPhase","")')
+check "评估后阶段为 EVALUATED" "[ '$EVAL_PHASE' = 'EVALUATED' ]"
+EVAL_TEXT=$(jget "$RESP" 'd.get("evaluationResult","")')
+check "评估结论已落库" "[ -n '$EVAL_TEXT' ] && [ '$EVAL_TEXT' != 'None' ]"
+echo "   评估后阶段: $EVAL_PHASE"
+
+step "8/9c 总结关闭（POST /api/v1/emergency-command/{id}/close）"
+api_call POST "/api/v1/emergency-command/$COMMAND_ID/close" \
+  '{"summary":"火情侦察与建链完成，处置半径 2000m，无人员伤亡","operator":"e2e-demo"}'
+check_http "总结关闭" || exit 1
+echo "   响应:"
+print_resp
+FINAL_PHASE=$(jget "$RESP" 'd.get("currentPhase","")')
+FINAL_HIST=$(jget "$RESP" 'd.get("phaseHistorySize",0)')
+check "最终阶段为 CLOSED" "[ '$FINAL_PHASE' = 'CLOSED' ]"
+# 6 个阶段（RECEIVED/ASSESSED/DEPLOYED/EXECUTING/EVALUATED/CLOSED）= 5 次转移
+check "阶段转移历史 = 5（全流程 6 阶段）" "[ '${FINAL_HIST:-0}' -eq 5 ] 2>/dev/null"
+SUMMARY=$(jget "$RESP" 'd.get("summary","")')
+check "总结字段非空" "[ -n '$SUMMARY' ] && [ '$SUMMARY' != 'None' ]"
+echo "   最终阶段: $FINAL_PHASE  转移步数: $FINAL_HIST"
 
 # =====================================================================
 # 9. 查看应急指挥历史

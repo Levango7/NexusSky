@@ -26,20 +26,44 @@ CHANGELOG 是**历史记录**，记的是"当时是什么状态"。改写历史�
 追述标记），那行仍会被当当前口径校验。本仓当前 12 行命中已逐条人工核对，确认均为
 真正的历史叙述；新增文档请把「追述 + 数字」写在同一行。
 
+**前端用例数（2026-10-06 补）**
+--------------------------
+此前本脚本只读 surefire XML，即**只管 Java**。前端从 2026-10-01 起有 vitest 用例后，
+它的用例数完全没有约束力——实测 README 的「168 例」已过期到 177 例，长期无人发现，
+原因与上面 Java 侧同一个：加前端测试不会让文档过期这件事变红。
+
+故新增 ``--frontend-json``：读 vitest 的 JSON 报告（``numTotalTests``），
+核对文档里的前端用例数声称。与 Java 侧共用 ``CURRENT_DOCS`` 与"追述旧值"豁免，
+但用**独立的、更窄的**匹配文法（``FRONTEND_CLAIM_PATTERNS``）——不能复用 Java 侧的
+宽泛正则：README「与后端 3869 例形成断层」这一行同时含「前端」与「例」，会被宽泛文法
+当成前端声称而误报。前端文法要求限定词紧贴数字（`前端测试覆盖 177 例` /
+`前端已有 168 例 vitest` / `177 例 vitest`），宁可漏检也不误报。
+
+**为什么不用静态数 ``it(``**
+---------------------------
+静态计数给出 156（实测 177）：``test/flightCommands.test.jsx`` 与
+``test/singleSourceOfTruth.test.js`` 里有用例在循环里生成（5 / 12 / 7 三处），
+静态文本数与运行时数天然不等。用 156 当基准会把**正确的**文档判成错——
+比漏检更糟，所以取 vitest 自己的报告。
+
 **用法**
 ------
     python scripts/check-test-count-docs.py                    # 用本地已跑出的 surefire 产物
     python scripts/check-test-count-docs.py --root F:/repo     # 指定仓库根
     python scripts/check-test-count-docs.py --print-actual     # 只打印实测数，不校验
     python scripts/check-test-count-docs.py --reports-root D   # 从 D/<module>/TEST-*.xml 汇总
+    python scripts/check-test-count-docs.py --frontend-json gcs-web/vitest-report.json
 
 ``--reports-root`` 供 CI 使用：各模块 job 把 surefire 报告按模块名上传为 artifact，
 汇总 job 下载后用本模式统计，从而**复用 java job 已经跑过的那次测试**，不必为门禁
 再跑一遍全 reactor（否则同一批用例在 CI 里要跑两遍）。
 
+``--frontend-json`` 同理复用 frontend job 已经跑过的那次 vitest（``npm run test:ci``）。
+
 退出码：0=一致，1=存在不一致或找不到产物。
 """
 import argparse
+import json
 import os
 import re
 import sys
@@ -89,6 +113,21 @@ CLAIM_PATTERNS = [
     # 必要：demo-scenarios.md 与 sales-pitch-deck.md 曾用英文写总测数，
     # 因不含「单测/测试用例」中文关键词而被整段漏检（2026-10-05 修复）。
     re.compile(_NUM + r'\s*(?:unit\s+)?tests?\b', re.IGNORECASE),
+]
+
+# 前端用例数声称（2026-10-06）。**刻意比 Java 侧窄得多**。
+#
+# 为什么不复用 CLAIM_PATTERNS：README「与后端 3869 例形成断层」这一行同时含
+# 「前端」与「例」，按 Java 侧的宽泛文法会被当成前端声称，而实测是 177 →
+# 把一句正确的表述判成错。误报比漏检更贵（门禁一旦有噪声就会被整体忽略）。
+#
+# 因此要求限定词与数字**相邻**：
+#   前端测试覆盖 177 例 / 前端已有 168 例 vitest / 177 例 vitest
+# 宁可漏检（新增文档请照此写法），不可误报。
+FRONTEND_CLAIM_PATTERNS = [
+    re.compile(r'前端\s*(?:测试)?\s*(?:覆盖|已有|共|计|共计)?\s*[:：]?\s*' + _NUM + r'\s*例'),
+    re.compile(_NUM + r'\s*例\s*(?:的\s*)?vitest', re.IGNORECASE),
+    re.compile(_NUM + r'\s*front-?end\s+tests?', re.IGNORECASE),
 ]
 
 
@@ -362,6 +401,25 @@ def scope_of(line, per_module):
     return None
 
 
+def measure_frontend(report_path):
+    """从 vitest JSON 报告取实测前端用例数。
+
+    返回 ``(总数, 通过数, 失败数)``；报告不存在或字段缺失时抛 ``FileNotFoundError``
+    / ``ValueError``，由调用方决定是红还是跳过。
+
+    刻意**不**接受"没给 --frontend-json 就当 0"：那等于把「没跑前端测试」与
+    「前端零用例」混为一谈，而后者不可能（test/ 与 src/ 下都有测试文件）。
+    """
+    if not os.path.exists(report_path):
+        raise FileNotFoundError(report_path)
+    with open(report_path, encoding='utf-8') as fh:
+        data = json.load(fh)
+    for key in ('numTotalTests', 'numPassedTests', 'numFailedTests'):
+        if key not in data:
+            raise ValueError('vitest 报告缺少字段 %s（不是 vitest json reporter 的产物？）' % key)
+    return data['numTotalTests'], data['numPassedTests'], data['numFailedTests']
+
+
 def main():
     ap = argparse.ArgumentParser(description='校验文档声称的单测数与 surefire 实测一致')
     ap.add_argument('--root', default=os.path.abspath(os.path.join(os.path.dirname(__file__), '..')),
@@ -369,6 +427,9 @@ def main():
     ap.add_argument('--reports-root', default=None,
                     help='从该目录下的 <module>/TEST-*.xml 汇总（CI 聚合模式）')
     ap.add_argument('--print-actual', action='store_true', help='只打印实测数')
+    ap.add_argument('--frontend-json', default=None,
+                    help='vitest json 报告路径（gcs-web/vitest-report.json）。'
+                         '给了才校验前端用例数；不给则只校验 Java 侧')
     args = ap.parse_args()
 
     (actual, failures, errors, skipped, files,
@@ -407,6 +468,25 @@ def main():
         print('有测试未通过，先修测试再谈文档口径', file=sys.stderr)
         return 1
 
+    # 前端实测值（--frontend-json 才启用）。取不到就红：静默跳过等于把
+    # "没跑前端测试"当成"前端用例数无需核对"，那正是本门禁要消灭的失效面。
+    fe_total = fe_passed = fe_failed = None
+    if args.frontend_json:
+        try:
+            fe_total, fe_passed, fe_failed = measure_frontend(args.frontend_json)
+        except FileNotFoundError:
+            print('找不到 vitest json 报告：%s（先跑 `npm run test:ci`）'
+                  % args.frontend_json, file=sys.stderr)
+            return 1
+        except ValueError as e:
+            print('vitest 报告无法解析：%s' % e, file=sys.stderr)
+            return 1
+        print('实测（前端）：%d 用例 / %d 通过 / %d 失败（来自 %s）'
+              % (fe_total, fe_passed, fe_failed, args.frontend_json))
+        if fe_failed:
+            print('前端有用例未通过，先修测试再谈文档口径', file=sys.stderr)
+            return 1
+
     print('\n校验当前口径文档：')
     bad = 0
     for rel in CURRENT_DOCS:
@@ -420,11 +500,25 @@ def main():
         exempt_rows = retrospective_section_lines(lines, rel)
         hits = []
         approx = []
+        fe_hits = []
         skipped_retro = 0
         for lineno, line in enumerate(lines, 1):
             if lineno in exempt_rows or _is_retrospective(line):
                 skipped_retro += 1
                 continue
+            # 前端声称（--frontend-json 启用时）。**在 Java 侧之前判、且 continue**：
+            # 同一行若同时含前后端两个数，Java 的宽泛文法会把前端的数也抓走，
+            # 拿 177 去比 4301，判红理由还是错的。
+            if fe_total is not None:
+                fe_matched = False
+                for pat in FRONTEND_CLAIM_PATTERNS:
+                    for m in pat.finditer(line):
+                        claimed = _parse_count(m.group(1))
+                        if 1 <= claimed <= 200_000:
+                            fe_hits.append((lineno, claimed, line.strip()))
+                            fe_matched = True
+                if fe_matched:
+                    continue
             # 表格型模块/合计行：不要求本行出现"单测"字样（README 的测试规模表
             # 数据行是 "| `mavlink-core` | 449 |"，不带关键词——早先按关键词过滤
             # 会把整张表漏检，那正是最该被核对的地方）。
@@ -454,9 +548,14 @@ def main():
                         hits.append((lineno, claimed, expected, scope, line.strip()))
 
         note = '，跳过 %d 行追述旧值' % skipped_retro if skipped_retro else ''
-        if not hits and not approx:
+        if not hits and not approx and not fe_hits:
             print('  ok %s（无单测数声称%s）' % (rel, note))
             continue
+        fe_wrong = [h for h in fe_hits if h[1] != fe_total]
+        bad += len(fe_wrong)
+        for lineno, claimed, text in fe_wrong:
+            print('  ✗ %s:%d [前端] 声称 %d，实测 %d' % (rel, lineno, claimed, fe_total))
+            print('      %s' % (text[:120] + ('…' if len(text) > 120 else '')))
         bad += len(approx)
         for lineno, scope, text in approx:
             what = '全仓' if scope == '__total__' else '模块 %s' % scope
@@ -469,9 +568,14 @@ def main():
             what = '全仓' if scope in (None, '__total__') else '模块 %s' % scope
             print('  ✗ %s:%d [%s] 声称 %d，实测 %d' % (rel, lineno, what, claimed, expected))
             print('      %s' % (text[:120] + ('…' if len(text) > 120 else '')))
-        if not wrong and not approx:
-            scope_desc = '/'.join(sorted({h[3] for h in hits if h[3] and h[3] != '__total__'})) or '全仓'
-            print('  ok %s（%d 处，%s%s）' % (rel, len(hits), scope_desc, note))
+        if not wrong and not approx and not fe_wrong:
+            bits = []
+            if hits:
+                scope_desc = '/'.join(sorted({h[3] for h in hits if h[3] and h[3] != '__total__'})) or '全仓'
+                bits.append('%d 处，%s' % (len(hits), scope_desc))
+            if fe_hits:
+                bits.append('前端 %d 处' % len(fe_hits))
+            print('  ok %s（%s%s）' % (rel, '，'.join(bits), note))
 
     print()
     if bad:

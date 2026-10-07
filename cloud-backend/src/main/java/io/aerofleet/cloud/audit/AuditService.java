@@ -223,6 +223,12 @@ public class AuditService {
                 }
                 return new ChainVerification(true, checked, null, null, truncated);
             } catch (Exception e) {
+                // 本分支与类内其余异常处理（findAll/findRecent/size/record）一致地告警。
+                // 此前它不打日志，于是「库查询异常」与「记录真被篡改」对调用方是同一个
+                // ok=false 判决：/api/v1/audit/verify 的运维读数会把一次基础设施抖动
+                // 误读成安全事件，排查方向直接跑偏。日志是二者唯一的可区分信号，
+                // 所以这里必须留，且带完整堆栈（debug 级）。
+                log.warn("审计哈希链校验因查询异常中断，本轮结论无效（非篡改结论）: {}", e.toString(), e);
                 return new ChainVerification(false, 0, null, "校验失败（查询异常）: " + e.getMessage(), false);
             }
         }

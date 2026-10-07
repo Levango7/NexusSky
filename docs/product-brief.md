@@ -25,18 +25,48 @@
 4. **自主决策是规则与搜索，不是学习。** 集群调度用的是真遗传算法（PMX 交叉 + 锦标赛
    选择 + 精英保留），冲突避免是 4D 常速外推，轨迹预测是卡尔曼滤波——都是扎实的
    经典算法，但没有任何学习成分。
-5. **License 门禁的模块覆盖已完成收口，但档位绑定尚未落地。** 2026-10-02 起
+5. **License 门禁的档位绑定已在验证期落地（2026-10-06 收口）。** 2026-10-02 起
    验签失败**拒绝启动**（fail-closed，见 `LicenseService.loadLicense()`）；2026-10-05 起
-   模块映射由 `LicenseModuleMap` 全量登记（覆盖 49 个 API 前缀 → 5 个模块），
+   模块映射由 `LicenseModuleMap` 全量登记（覆盖 50 个 API 前缀 → 5 个模块），
    未登记前缀按 `MODULE_UNCLASSIFIED` 哨兵**默认拒绝**，由
    `LicenseModuleCoverageTest` 反射扫描 `*Controller.java` 守卫。
-   **剩余缺口**：授权档位（基础版/应急版/完整版）到模块集合的映射尚未与
-   `docs/PRODUCT-POSITIONING.md` §5 的定价方案做机器可校验绑定——即"某档客户
-   实际能启用哪些模块"目前靠配置约定而非代码强制。接入生产前必须补齐。
+   **2026-10-06 补上此前缺失的一环**：`validateLicense` 原先只判 `active` + `expiry`，
+   完全不看模块集合——签发侧虽有 `LicenseTier.mismatchOf` 自检，但三条绕过路径
+   （原始 `generateLicenseKey` 直传 modules / `LicenseTier` 引入前的旧授权 /
+   持有签发密钥的一方构造任意集合）畅通，"某档客户实际能启用哪些模块"仍是约定而非强制。
+   现要求模块集合**恰好等于**某档（`LicenseService.tierBindingViolation`，
+   由 `aerofleet.license.enforce-tier-binding` 默认 true 控制），守卫为
+   `LicenseTierBindingEnforcementTest`（16 例，含超集必须判红、逃生阀必须可用、
+   `displayName(null)` 不得 NPE）。**至此三档定价在代码层可执行。**
+   **剩余边界**：① ⚠️ **`LicenseTier` 与 `PRODUCT-POSITIONING.md` §5 对"每档含哪些能力"
+   的定义不一致，且这是本轮强制绑定让它变成一个真实故障面**——详见下方第 6 条；
+   ② 价格表不入代码，仍需人工与 §5 同步；
+   ③ 逃生阀 `enforce-tier-binding=false` 若被打开，定价即退回约定，启动会打 WARN。
+6. **✅ 定价档位已裁决并落地（2026-10-07，"基础版需要扎实"）**
+   - **原矛盾**：`PRODUCT-POSITIONING.md` §5.1 承诺基础版含 **M5 mesh + M9 编排**，
+     而 `LicenseTier` 把 mesh 放完整版、M9 放应急版 ⇒ 按 §5 卖基础版，客户付费的
+     `/api/v1/mesh/*` 与 M9 编排会被 403（档位绑定在验证期强制后，这是交付事故）。
+   - **裁决与落地**：采纳方案 A，但**不是**把 `network`/`emergency` 整块下移
+     （那会让基础版连 5G 基站、卫星中继、ONVIF 安防一起白送，应急版与基础版同集合、
+     档位梯子塌掉、无法定价）。改为**把两个大模块各拆一半**，
+     `ALL_MODULES` 由 5 扩为 7：
+     | 档位 | 模块 | 客户拿到什么 |
+     |---|---|---|
+     | 基础版 | `core`+`fleet`+**`mesh`**+**`orch`** | GCS OEM + 机队作业 + M5 mesh + M9 编排 |
+     | 应急版 | 基础版 + `emergency` | + 4a 空地一体化指挥 + ONVIF 安防联动 |
+     | 完整版 | 应急版 + `network`+`advanced` | + 基站/卫星中继 + 数字孪生/AI |
+   - **守卫**：新增 `LicenseModuleSplitMigrationTest`（7 例）钉死边界 ——
+     mesh/orch 必须归基础版、基站卫星与 ONVIF 必须留在上档、三档必须互异、
+     每个模块必须有前缀。变异验证：把 `/api/v1/mesh` 改回 `NETWORK` 后 3 例立即转红
+     （"拆分做一半"会导致付了钱、license 也认了、请求却 403）。
+   - **已知且故意的不兼容**：模块名进签名载荷，拆分**前**签发的授权不再对应任何档位，
+     **必须重新签发**。刻意不给旧集合加兼容映射——旧集合里 `network` 含 mesh、
+     `emergency` 含 M9 编排，与新边界不再等价，兼容等于把定价边界改回错的那一侧。
+   - 逐项对照表与拆分后三档定义见 `PRODUCT-POSITIONING.md` **§5.1.1**（唯一对照入口）。
 
 哪些是**已经扎实**的：MAVLink v1/v2 协议栈（v2 签名有真实 pymavlink 参考实现生成的
 已知答案向量逐字节把关）、链路损伤仿真（Gilbert-Elliot + 令牌桶）、机载 failsafe 语义、
-RBAC 默认拒绝、审计哈希链，以及 **4,305 个后端单测**与 CI 覆盖率门禁。
+RBAC 默认拒绝、审计哈希链，以及 **4359 个后端单测**与 CI 覆盖率门禁。
 
 ---
 
@@ -64,8 +94,10 @@ Java 17 + Spring Boot 3.5 + React 18 + MapLibre + MAVLink v1/v2 + PostgreSQL + R
 
 ## 交付方式
 
-> ⚠️ **定价口径待统一**：本页与 `docs/PRODUCT-POSITIONING.md` §5 的中间件授权档位
-> （20-50 / 50-100 / 100-200 万/年）目前不一致，以 PRODUCT-POSITIONING 为准并待统一。
+> ✅ **定价口径已统一（2026-10-07 裁决）**：本页与 `docs/PRODUCT-POSITIONING.md` §5
+> 的中间件授权档位（20-50 / 50-100 / 100-200 万/年）现已对齐代码强制行为。
+> **唯一对照入口是 `PRODUCT-POSITIONING.md` §5.1.1**（档位 ↔ 代码模块逐项对应）。
+> 报价前请核对该节，并注意拆分前签发的旧 license 需重新签发。
 
 - **SDK 授权**：协议栈 + 技术支持（档位见 PRODUCT-POSITIONING §5）
 - **私有部署**：全模块 + 部署 + 培训

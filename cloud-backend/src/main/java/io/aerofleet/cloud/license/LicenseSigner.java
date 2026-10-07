@@ -248,6 +248,24 @@ public class LicenseSigner {
         map.remove("signature");
         map.remove("signerCert");
         map.remove("licenseKey");
+        // modules 是 LicenseInfo 里唯一的集合型字段，必须按字典序固定下来：
+        // 集合的迭代顺序既不携带语义，又在两端不可复现——签发端的集合实现由调用方决定
+        // （LicenseTier.modulesOf 返回 Set.copyOf，其顺序依赖 JVM 级 SALT），解析端则由
+        // Jackson 建成 HashSet（顺序由哈希与容量决定）。不排序就会出现「同一份 License、
+        // 同一把密钥，签发端验得过、部署端验不过」的随机失败，后果是 fail-closed 拒绝启动，
+        // 而现场很难把"起不来"与"集合迭代顺序"联系起来。
+        // 实测复现：同集合、仅迭代顺序不同 → verify=false（见
+        // LicenseSigningOrderInsensitivityTest；该用例修复前红）。
+        // 本方法承诺「给定同一份 License，两端算出字节级相同的 JSON」，排序是这个承诺的一部分。
+        Object modules = map.get("modules");
+        if (modules instanceof java.util.List<?> rawList) {
+            java.util.List<String> sorted = new java.util.ArrayList<>(rawList.size());
+            for (Object m : rawList) {
+                sorted.add(String.valueOf(m));
+            }
+            java.util.Collections.sort(sorted);
+            map.put("modules", sorted);
+        }
         return CANONICAL_MAPPER.writeValueAsString(map);
     }
 

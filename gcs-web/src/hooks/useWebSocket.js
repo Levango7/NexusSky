@@ -50,6 +50,21 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
   const [sensorFusions, setSensorFusions] = useState({})
   const [predictions, setPredictions] = useState([])
 
+  // M10 集群调度三帧 + 4a 空地联动三帧（2026-10-06 补消费）。
+  // 这六帧后端自 2026-10-05 起就已有真实生产者（TaskAssignmentService / ConflictScanService /
+  // AlarmLinkageEngine / SurveillanceStatusPusher），但前端此前**无匹配分支**——
+  // 帧到达 onmessage 末尾即被静默丢弃。后果：M10 全部对外价值对操作员不可见
+  // （谁被派了任务、两机何时会撞、进度到哪一步只存在于云端日志）。
+  // 保留策略按语义分两类，与上方感知三帧同一判据：
+  //   离散事件（分配/冲突/状态迁移/报警触发/报警确认）-> 数组头插留 50 条；
+  //   周期状态（安防设备 1Hz 推送）-> 按 deviceId 只留最新。
+  const [taskAssignments, setTaskAssignments] = useState([])
+  const [conflictAlerts, setConflictAlerts] = useState([])
+  const [taskStatuses, setTaskStatuses] = useState([])
+  const [alarmTriggers, setAlarmTriggers] = useState([])
+  const [alarmAcks, setAlarmAcks] = useState([])
+  const [surveillanceStatuses, setSurveillanceStatuses] = useState({})
+
   const wsRef = useRef(null)
 
   // WebSocket 实时遥测（断线 3s 自动重连）
@@ -164,6 +179,31 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
         } else if (msg.type === 'prediction-result') {
           // 轨迹预测（PREDICTION_RESULT 30056）：离散预测事件，新帧头插留 50 条
           setPredictions((prev) => [{ ...(msg.data || {}), sysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'task-assignment') {
+          // M10 任务分配（TASK_ASSIGNMENT 30048，TaskAssignmentService 发布）
+          setTaskAssignments((prev) => [{ ...(msg.data || {}), frameSysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'conflict-alert') {
+          // M10 冲突告警（CONFLICT_ALERT 30049，ConflictScanService 5s 周期两两扫描）
+          setConflictAlerts((prev) => [{ ...(msg.data || {}), frameSysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'task-status') {
+          // M10 任务状态（TASK_STATUS 30050，ASSIGNED→IN_PROGRESS→COMPLETED/ABORTED）
+          setTaskStatuses((prev) => [{ ...(msg.data || {}), frameSysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'alarm-trigger') {
+          // 4a 报警触发（ALARM_TRIGGER 30057，AlarmLinkageEngine 落库后发布）
+          setAlarmTriggers((prev) => [{ ...(msg.data || {}), frameSysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'alarm-ack') {
+          // 4a 报警确认（ALARM_ACK 30058，AUTO_DISPATCH 派遣成功后逐机发布）
+          setAlarmAcks((prev) => [{ ...(msg.data || {}), frameSysid: msg.sysid, receivedAt: Date.now() }, ...prev.slice(0, 49)])
+        } else if (msg.type === 'surveillance-status') {
+          // 4a 安防设备状态（SURVEILLANCE_STATUS 30059，SurveillanceStatusPusher 1Hz 周期）：
+          // 周期状态可覆盖，按 deviceId 只留最新。注意分桶键取 data.deviceId 而非帧级
+          // sysid —— 这是设备源帧，帧级 sysid 无意义（用 0 分桶会把所有设备塞进同一桶）。
+          const deviceId = msg.data?.deviceId
+          setSurveillanceStatuses((prev) => (
+            deviceId == null
+              ? prev
+              : { ...prev, [deviceId]: { ...(msg.data || {}), receivedAt: Date.now() } }
+          ))
         }
       }
     }
@@ -192,5 +232,11 @@ export default function useWebSocket(selectedSysidRef, setTelemetry) {
     visionDetections,
     sensorFusions,
     predictions,
+    taskAssignments,
+    conflictAlerts,
+    taskStatuses,
+    alarmTriggers,
+    alarmAcks,
+    surveillanceStatuses,
   }
 }

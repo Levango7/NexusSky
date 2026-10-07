@@ -217,21 +217,24 @@ class LicenseModuleCoverageTest {
     }
 
     @ParameterizedTest(name = "{0} → {1}")
-    @DisplayName("商业分档抽样：收费模块归属正确")
+    @DisplayName("商业分档抽样：收费模块归属正确（2026-10-07 拆分后：mesh/orch 归基础版）")
     @CsvSource({
             // 基础版能力（core / fleet）
             "/api/v1/drones,           core",
             "/api/v1/flightlog,        core",
             "/api/v1/scheduling,       fleet",
             "/api/v1/spray,            fleet",
-            // 应急版核心付费点（emergency）
-            "/api/v1/emergency,        emergency",
+            // 基础版能力（mesh = M5 自愈组网、orch = M9 应急编排；定价文档 §5.1 承诺项）
+            "/api/v1/mesh,             mesh",
+            "/api/v1/emergency,        orch",
+            "/api/v1/orch,             orch",
+            // 应急版核心付费点（emergency = 4a 空地一体化 + 安防联动）
             "/api/v1/emergency-command,emergency",
+            "/api/v1/air-ground,       emergency",
             "/api/v1/surveillance,     emergency",
             "/api/v1/alarms,           emergency",
             "/api/v1/vision,           emergency",
-            // 完整版付费点（network / advanced）
-            "/api/v1/mesh,             network",
+            // 完整版付费点（network = 基站/卫星/链路，advanced = 孪生/AI）
             "/api/v1/sat-link,         network",
             "/api/v1/celltowers,       network",
             "/api/v1/twin,             advanced",

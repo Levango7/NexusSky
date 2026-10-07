@@ -9,7 +9,10 @@ import java.util.Map;
  * <p>
  * <b>为什么单独成类</b>：2026-10-05 核查发现 {@link LicenseInterceptor} 内联的映射表
  * 只覆盖 5 个路径前缀（drones/scheduling/emergency/mesh/twin），而实际存在
- * <b>66 个 @RequestMapping 前缀</b>。实测门禁只约束 <b>35/343 = 10.2%</b> 的端点，
+ * <b>66 个 @RequestMapping 前缀</b>。2026-10-05 当时的实测：门禁只约束
+ * <b>35/343 = 10.2%</b> 的端点
+ * （端点总数此后已增至 353，此处保留当时的测量值不改数——改数等于篡改记录；分母的
+ * 当前值以 {@code api-reference.md} 为准），
  * 其余 89.8% 只校验「License 是否过期」而不校验「该模块是否已授权」——
  * 结果是买了基础版（M5 mesh + M9 编排）的客户可访问全部应急指挥、安防联动、
  * 卫星中继、5G 基站等未付费模块。<b>三档定价在技术上不可执行。</b>
@@ -35,6 +38,10 @@ final class LicenseModuleMap {
     /** 模块名常量：与 {@link LicenseService#ALL_MODULES} 保持同集合。 */
     static final String CORE = "core";
     static final String FLEET = "fleet";
+    /** M5 AODV-lite mesh 自愈组网（2026-10-07 从 {@link #NETWORK} 拆出，基础版）。 */
+    static final String MESH = "mesh";
+    /** M9 应急任务编排 + 编排计划（2026-10-07 从 {@link #EMERGENCY} 拆出，基础版）。 */
+    static final String ORCH = "orch";
     static final String EMERGENCY = "emergency";
     static final String NETWORK = "network";
     static final String ADVANCED = "advanced";
@@ -116,14 +123,24 @@ final class LicenseModuleMap {
         m.put("/api/v1/inspection", FLEET);
         m.put("/api/v1/drone-lock", FLEET);
 
-        // ============ emergency：应急指挥闭环 + 安防联动（应急版核心付费点） ============
-        m.put("/api/v1/emergency", EMERGENCY);
+        // ============ orch：M9 应急任务编排 + 编排计划（基础版；2026-07 从 emergency 拆出）============
+        // 定价文档 §5.1 把「M9 编排」列为**基础版**卖点，故与 4a 空地一体化指挥分开。
+        // EmergencyOrchController（M9 应急任务编排 FR-30）与 OrchestrationController（编排计划）
+        // 属编排域，进基础版。
+        m.put("/api/v1/emergency", ORCH);
+        m.put("/api/v1/orch", ORCH);
+
+        // ============ emergency：4a 空地一体化指挥 + 告警 + 安防联动（应急版核心付费点）============
         m.put("/api/v1/emergency-command", EMERGENCY);
-        m.put("/api/v1/orch", EMERGENCY);
         m.put("/api/v1/air-ground", EMERGENCY);
         m.put("/api/v1/alarms", EMERGENCY);
         m.put("/api/v1/offline-alarm", EMERGENCY);
         m.put("/api/v1/surveillance", EMERGENCY);
+        // 视频融合聚合视图（GCS VideoFusionPanel 的 4 个端点）。商业分档上「视频/视觉」
+        // 属应急版，与 surveillance / vision / alarms 同档。
+        // 2026-10-06 补：此前该前缀无后端控制器，面板运行期必然 404，故从未登记；
+        // 控制器补齐后必须登记，否则面板在 prod（license.enabled=true）会被 403。
+        m.put("/api/v1/video-fusion", EMERGENCY);
         m.put("/api/v1/video-stream", EMERGENCY);
         m.put("/api/v1/scenarios", EMERGENCY);
         m.put("/api/v1/disaster", EMERGENCY);
@@ -131,8 +148,12 @@ final class LicenseModuleMap {
         m.put("/api/v1/vision", EMERGENCY);
         m.put("/api/v1/cv-eval", EMERGENCY);
 
-        // ============ network：mesh / 基站 / 卫星 / 链路适配（完整版付费点） ============
-        m.put("/api/v1/mesh", NETWORK);
+        // ============ mesh：M5 AODV-lite 自愈组网（基础版；2026-10-07 从 network 拆出）============
+        // 定价文档 §5.1 把「M5 mesh」列为**基础版**卖点。mesh 是单机多机的组网自愈，
+        // 与 5G 基站 / 卫星中继这类重资产链路不是同一交付形态，故独立成模块。
+        m.put("/api/v1/mesh", MESH);
+
+        // ============ network：基站 / 卫星 / 链路适配（完整版付费点）============
         m.put("/api/v1/celltowers", NETWORK);
         m.put("/api/v1/sat-link", NETWORK);
         m.put("/api/v1/comm-adapt", NETWORK);

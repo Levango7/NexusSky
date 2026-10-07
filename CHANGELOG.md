@@ -4,6 +4,470 @@
 
 ---
 
+## [Unreleased] — 定价档位裁决落地：基础版扎实（模块 5→7 拆分）+ 三腿 e2e 转硬门禁（2026-10-07）
+
+用户裁定「**基础版需要扎实**」，即基础版必须真能撑起一次交付。本轮落地该裁决，
+并把三条能力腿从观察模式转为硬门禁。
+
+1. **定价档位裁决：`ALL_MODULES` 由 5 扩为 7，三档与定价文档 §5 逐字对齐**
+   - **原矛盾**：§5.1 承诺基础版含 **M5 mesh + M9 编排 + GCS OEM**，而 `LicenseTier`
+     把 mesh 放完整版、M9 放应急版 ⇒ 按 §5 卖基础版，客户付费的 `/api/v1/mesh/*`
+     与 M9 编排会被 403（档位绑定已在验证期与启动期双重强制，这是交付事故）。
+   - **为什么不整块下移**：把 `network`/`emergency` 整块放进基础版，会让基础版连
+     5G 基站、卫星中继、ONVIF 安防联动一起白送 ⇒ 应急版与基础版同集合、
+     **档位梯子塌掉、无法定价**（`LicenseTierTest` 的"档位必须互异"会红）。
+   - **改为按交付形态各拆一半**：
+     | 模块 | 覆盖 | 档位 |
+     |---|---|---|
+     | `mesh`（新，从 `network` 拆） | M5 AODV-lite 自愈组网 | 基础版 |
+     | `orch`（新，从 `emergency` 拆） | M9 应急任务编排 + 编排计划 | 基础版 |
+     | `emergency` | 4a 空地一体化指挥 / 告警 / ONVIF / 视频视觉 | 应急版 |
+     | `network` | 5G 基站 / 卫星中继 / 链路适配 / LoRa / 边缘 | 完整版 |
+     | `advanced` | 数字孪生 / 城市孪生 / AI 决策 / 语音 / 多光谱 | 完整版 |
+   - 拆分后：基础版 = `core`+`fleet`+`mesh`+`orch`；应急版 = 基础版 + `emergency`；
+     完整版 = 应急版 + `network`+`advanced`。
+   - **新增 `LicenseModuleSplitMigrationTest`（7 例）** 钉死边界：模块集合恰为 7 且
+     原有 5 名不被改名、mesh/orch 必归基础版、基站卫星与 ONVIF 必留在上档、
+     每个模块必须有前缀、三档必须互异。
+   - **变异验证**：把 `/api/v1/mesh` 改回 `NETWORK`（即撤销拆分）后 3 例立即转红
+     ——这正是"拆分做一半"的失效形态：客户付了钱、license 也认了、请求却 403。
+   - **⚠️ 已知且故意的不兼容**：模块名进 license 签名载荷，拆分**前**签发的授权
+     （含 `network`/`emergency`、无 `mesh`/`orch`）不再对应任何档位，**必须重新签发**。
+     刻意不给旧集合加兼容映射——旧集合里 `network` 含 mesh、`emergency` 含 M9 编排，
+     与新边界不再等价，兼容等于把定价边界改回错的那一侧。该不兼容已由测试钉死
+     （`legacyModuleSetMatchesNoTier`），若有人"贴心地"加兼容映射会红并被追问。
+   - **顺带修掉三处测试自身的隐雷**（拆分后暴露，非本轮引入）：
+     ① `LicenseTierBindingEnforcementTest.serviceWith` 的 seed 用 `core+fleet`，
+        拆分后那已不是任何档位的精确集合 ⇒ 构造器 fail-closed 先炸，
+        所有走该 helper 的用例在抵达断言前就挂，报红原因指向档位而非被测行为。
+        改用 `LicenseTier.modulesOf(FULL)` 作 seed。
+     ② `LicenseServiceFailClosedTest` / `LicenseIssuerTest` 的样本 license 同样
+        硬编码 `core+fleet`，改用基础版的精确集合。
+     ③ `basicTierWithExtraModuleRejected` 原先把 `emergency` 与 `network`/`advanced`
+        一起当"越权"，但基础版 + `emergency` 恰好等于**应急版**的精确集合（合法升档）。
+        已把 `emergency` 移出该循环，并新增 `emergencyTierWithFullOnlyModuleRejected`
+        覆盖"应急版 + network/advanced"这一真正的越权面。
+
+2. **三条能力腿从 `continue-on-error` 观察模式转为硬门禁**
+   - 转正依据：真 Linux（WSL2）下连续两次全绿 —— emergency **31** 项 / spray **20** 项 /
+     hardware **16** 项，共 **67 项断言 0 失败**；且 CI run `37624477248` 上 25/25 job 全绿。
+   - 删掉三条腿的 `continue-on-error`；汇总步骤加 `if: always()`，
+     任一腿失败即 `exit 1` 让 job 变红（此前汇总步骤虽已存在，但若前序步骤失败会被跳过）。
+   - 保留 `tee /tmp/leg-*.log` + 落盘退出码：失败时能一眼看出是哪条腿、失败在哪一步。
+
+3. **文档口径同步**
+   - `PRODUCT-POSITIONING.md` §5.1.1 由"两个待裁决方案"改为**已裁决**，
+     给出 7 模块逐项对照表（含前缀示例）与拆分后三档定义，并显著标注重签发要求。
+   - `README.md` 许可章节档位表按拆分后重写；能力腿章节由"首轮实测 7/9、0/7、4/9"
+     改为"已按当前 API 重写并转硬门禁"，并列出被删除的**指向不存在端点的凭空断言**。
+   - `docs/demo-scenarios.md` 场景 C/D 的操作步骤按 `SprayController`/
+     `DeliveryController`/`EmergencyCommandController` 的真实契约更正
+     （原文写的 `/spray/task`、`/spray/gripper`、`/delivery/sequence/{id}`、
+     `/spray/cancel`、`/hardware/physics-model` 在仓内均不存在）；
+     补 LiDAR/IMU 404 的边界说明。
+
+4. **计数基线 4343 → 4359（cloud-backend 2347 → 2363）**
+   - 新增 `LicenseModuleSplitMigrationTest` 7 例 + `emergencyTierWithFullOnlyModuleRejected` 1 例；
+     `check-test-count-docs.py` 全绿，22 处文档声称同步。
+
+---
+
+## [Unreleased] — 能力腿 e2e 对齐当前 API + 修喷洒任务落库真缺陷（2026-10-07）
+
+承接上一轮"两腿 API 漂移"的实测结论，本轮把 `e2e-spray` / `e2e-hardware` 真正跑到绿，
+并在过程中挖出一个**此前单测全绿也掩盖不了的真实后端缺陷**。
+
+1. **🔴 喷洒任务创建实际 100% 失败：`WaypointListConverter` 反序列化切串越界**
+   - **现象**：`POST /api/v1/spray` 返回 500 `Transaction silently rolled back …`。
+   - **根因链（三跳，每跳都有日志证据）**：
+     ① `WaypointListConverter.convertToEntityAttribute` 从**最外层** `'['` 直接
+     `substring(openBracket+1, comma)`，把内层 `'['` 一起切进数字串 ⇒
+     `Double.parseDouble("[22.5907")` 抛 `NumberFormatException`
+     ——Hibernate 包装为 `Error attempting to apply AttributeConverter`；
+     ② `SprayTaskService.create` 的 `catch` 只 `log.warn` 就继续，但事务已被标记
+     rollback-only，于是方法正常返回后在提交阶段炸 `UnexpectedRollbackException`；
+     ③ 该异常逃到 `ApiExceptionHandler#internal` ⇒ HTTP 500。
+     实测 inner cause：`NumberFormatException: For input string: "[22.5907"`。
+   - **为什么此前没被发现**：仓内**没有任何** `SprayController` / `SprayTaskService` 的
+     持久化测试，只有纯值对象 `SprayTaskTest`。⇒ 单测 100% 绿、`POST /api/v1/spray`
+     却在真实链路上不可用。这是本仓反复在修的失效类型（"没有任何信号会变红"）
+     的又一实例：**catch-and-warn 把持久化失败降级成了日志行，但事务仍回滚**。
+   - **修**：converter 在遇到"最外层数组开括号"时跳过一层再取坐标对；
+     新增 `SprayTaskPersistenceTest`（3 例：落库不抛异常 / waypoints 往返无损 / 单航点容错）。
+   - **变异验证**：把"跳过最外层 `'['`"改成 `if (false)` 后，
+     `createPersistsWithoutConverterFailure` 与 `waypointsRoundTripThroughDatabase` 转红，
+     报错仍是 `NumberFormatException: For input string: "[22.5907"` ⇒ 断言真的咬住了缺陷。
+   - **未一并修的相邻风险**：`catch-and-warn` + `@Transactional` 这个组合本身仍有问题
+     ——持久化失败后事务已 poisoned，"降级继续"的意图无法实现。正确的 fail-soft 需要
+     `noRollbackFor` 或独立事务传播，本次只修转换器、未改事务语义，留待单独一轮。
+
+2. **`e2e-spray.sh` 对齐当前 API（此前 0/7 全红）**
+   - 端点前缀纠正：`/spray/task` → `/spray`，`/spray/status/{sysid}` → `/spray/{id}`，
+     `/spray/gripper` **不存在**（`PayloadPlugin` 是 SPI 内部接口，夹爪能力由 drone-sim 单测覆盖），
+     `/delivery/sequence/{sysid}` → `/delivery` + `/delivery/{id}`。
+   - 请求体对齐 `SprayTaskRequest` / `DeliveryRequest`：`targetSysid` + `waypoints:[[lat,lon],…]`
+     + `targetRate`/`capacityMl`/`sprayWidth`（三者须 > 0）；`sites` 为对象数组。
+   - 断言口径纠正：初始态是 `PENDING`（`SprayTask.State` 无 `CREATED`）；
+     `sites` 在查询响应里是**对象数组**（创建响应里才是站点数）；
+     状态字段无 `pump`，改用 `state`/`coverageRate`/`remainingChemical`。
+   - 新增覆盖：`/delivery/{id}/payload`、`/delivery/{id}/payload/query`（MAV_CMD 30085）。
+   - **机载拒收不判失败**：`result:-1`（`MAV_RESULT=3`）表示 drone-sim 未实现该自定义
+     MAV_CMD，REST 侧契约是"命令已下发并拿到回执"，故只告警。真实载荷语义需机载实现后另测。
+   - 实测：`✅ M2 喷洒物流 e2e 全部通过`（WSL2 真 Linux + 真实后端/模拟器）。
+
+3. **`e2e-hardware.sh` 对齐当前 API（此前 4/9）**
+   - 雷达配置字段名纠正：`azimCenterDeg`/`azimWidthDeg` → `azimCenter`/`azimWidth`，
+     并补齐 `elevCenter`/`beamWidth`/`range`/`scanPeriodMs`（`HardwareDataController`
+     用 `num()` 逐个读，缺一即 400 `missing numeric field`）。
+   - **删除指向不存在端点的断言**：全量检索确认仓内**没有** `POST /hardware/physics-model`，
+     原脚本的 aero/kinematics 两步是凭空断言。改用真实存在的 `/rotor/config` +
+     `/rotor/telemetry` 覆盖动力侧。
+   - IMU 字段纠正：响应是**扁平** `accelX`/`gyroY`/`tempC`，原脚本误读嵌套 `accel`/`gyro` 对象。
+   - LiDAR/IMU 的 404 按契约处理：`drone-sim` 默认不注入 `LiDARSource`/`ImuSource`
+     （`VirtualDrone` 字段初值 null，`DroneSimMain` 未装配）⇒ 端点返回 404
+     `no LiDAR data`。此时断言"404 契约正确"并 ⚠️ 跳过字段断言，**不把 404 当失败**，
+     也不假装有数据。真实载荷断言需显式装配 Source 或真机。
+   - 实测：`✅ M4 硬件抽象 e2e 全部通过`。
+
+4. **`e2e-emergency.sh`：纠正"一键应急"的语义误解（此前 7/9 → 现 31/31 全绿）**
+   - **根因**：脚本在 `POST /{id}/one-click` 之后直接断言"最终阶段 CLOSED、
+     转移 ≥4 步"。但 `EmergencyCommandController#oneClick` 的契约是
+     **"自动走完 接报→研判→部署→执行"四阶段**（`@Operation` 描述与 `api-reference.md` 一致），
+     返回时 `currentPhase=EXECUTING`、`phaseHistorySize=3`。
+     **评估与总结是独立端点** `/evaluate`、`/close`，本就不该由 one-click 完成。
+     ⇒ 这是脚本把"一键"误解为"走完全流程"，不是后端缺陷。
+   - **修**：拆成 8/9a（one-click）+ 8/9b（`/evaluate`）+ 8/9c（`/close`）三步，
+     并补断言：部署计划 `planName` 非空、研判结论非空、评估结论落库、总结非空。
+   - **顺带纠正阶段名**：指挥域枚举是 `EVALUATED`（不是 `EVALUATING`）；
+     全流程 **6 阶段 = 5 次转移**（`RECEIVED→ASSESSED→DEPLOYED→EXECUTING→EVALUATED→CLOSED`），
+     原脚本的"≥4"与"7 阶段"表述都对不上 `EmergencyCommandPhase`。
+
+5. **CI `e2e-capability`：消除 `continue-on-error` 造成的"假绿"**
+   - **问题**：三条腿带 `continue-on-error: true` 时，GitHub 把**失败步骤也显示成 ✓**。
+     PR #6 上该 job 全绿，但日志里 emergency 2 条 ❌、spray 6 条 ❌、hardware 6 条 ❌
+     ——只看 job/步骤状态会得出完全错误的结论。
+   - **修**：每条腿 `tee` 到 `/tmp/leg-*.log` 并把退出码落盘 `/tmp/rc-*`（`PIPESTATUS[0]`），
+     新增 `Capability legs summary` 步骤把三腿结果写进 `$GITHUB_STEP_SUMMARY`，
+     **有腿失败则该步骤 `exit 1`**，让 job 真正变红。观察模式本身保留。
+   - 同时修正本会话早前引入的**跨 step 进程生命周期隐患**：原写法把
+     "启动 backend + drone-sim" 与"跑脚本"分在不同 step，后台进程可能随 step 结束被回收。
+   - **三腿已连续两次全绿**（WSL2 真 Linux + 真实后端/模拟器）：
+     emergency 31 ✅ / spray 20 ✅ / hardware 16 ✅，共 67 项断言 0 失败。
+     ⇒ 下一步可摘掉三条腿的 `continue-on-error` 转硬门禁。本轮**故意未摘**：
+     本地全绿不等于 CI 全绿（CI 是干净 Linux 容器 + redis service），
+     应在 PR 上连续全绿后再摘，避免一次 CI 红就回退。
+
+6. **定价档位矛盾：改为"单一对照入口"，不擅自改任一侧**
+   - `PRODUCT-POSITIONING.md` §5.1 说基础版含 **M5 mesh** + **M9 编排**；
+     `LicenseTier`（已被 `validateLicense` 强制）把 `network`（含 mesh）放完整版、
+     `emergency`（含 M9）放应急版。档位强制后，**按 §5 卖基础版会让客户付费的 mesh 与
+     M9 编排被 403** ——这是交付事故，不再是话术问题。
+   - **本轮不选边**（改代码 = 单方面改定价；改文档 = 定价决策）。
+     做法：新增 **§5.1.1** 作为唯一对照入口——逐项列出「代码模块 ↔ 覆盖能力 ↔
+     `LicenseTier` 实际档位 ↔ §5 销售口径 ↔ 是否一致」，并给出两个待裁决方案
+     （A 改 `LicenseTier` 下移 `network`/`emergency`；B 改 §5 把 mesh/M9 移出基础版），
+     各自写明影响面。`product-brief.md` §⚠6 与 §交付方式 改为**指向 §5.1.1**，
+     不再各自复述档位口径 ⇒ 消除"两处各说一套"，裁决只需落地一处。
+
+7. **`OrbitJobManagerTest` 硬编码端口 18099 → 内核分配（消除一类随机红）**
+   - 该测试的 fake truth sidecar 硬编码 `HttpServer.create(new InetSocketAddress(18099), 0)`，
+     并把 `http://127.0.0.1:18099` 写死进 `OrbitService`。18099 恰是本机跑 e2e 后端常用的端口，
+     端口被占时该类直接 `BindException` 报 3 个 error —— Qoder 上一轮为对齐计数
+     也曾手工"排除被占端口的 `OrbitJobManagerTest`"。
+    - **修**：`InetSocketAddress("127.0.0.1", 0)` 让内核分配空闲端口，
+      `startTruth` 记录 `truth.getAddress().getPort()` 到 `truthBase`，两处 `OrbitService` 构造改用它。
+    - **⚠️ 该改动自身引入过一次回归，已修（诚实记录）**：`invalidParamsRejected` /
+      `submitReturnsHandleAndRejectsDuplicateInFlight` / `jobViewExposesProgressShape`
+      三个用例**不调用** `startTruth`（只验 submit 校验与 job map 语义，不需要 truth 通道），
+      于是 `truthBase` 为 null 被直接传给 `OrbitService` ⇒ 在飞判定提前失效，
+      duplicate-inflight 用例报 `Expected IllegalStateException to be thrown, but nothing
+      was thrown`。**本地 5 次全绿没抓到，CI run 37604120294 抓到了** ——
+      这正是"本地绿 ≠ CI 绿"的实例。修法：null 时回退到 `http://127.0.0.1:1`
+      （语法合法、必然连不通），修后连跑 6 次 4/4 全绿。
+
+8. **并入 CVE-2026-47884 的有界忽略（自 `fix/cve-2026-47884-ignore` 摘取，PR #6 的 Security Scan 唯一红）**
+   - **不是回归**：绿 run 37387694246 的 `pom.xml:36` 同为 spring-boot 3.5.16 且 Security Scan 通过，
+     `a6e1118..HEAD` 未碰 pom/package.json；变的是 Trivy 公告库。
+   - **上游无可换的修复版**：`gh api advisories/GHSA-pc63-qcmh-9cmg` 显示 6.x 全部区间
+     （含 `>= 6.2.0, <= 6.2.19`）`first_patched_version` 均为 null，唯一 fixed 是 7.0.9
+     —— 真修复路径是 Boot 3.5→4.x 大版本迁移。故本次是**风险登记 + 有界忽略**，
+     不是"已修复"。
+   - 可达性证据（本机实测，见 `XsltViewReachabilityTest`）：advisory 前提是"存在导向视图渲染的
+     `/**` 映射 + 视图名未转义 + 使用 `XsltView`"；本仓纯 REST，4 个 ViewResolver 全非 Xslt，
+     handler 映射中 `/**` 为 0。诚实边界：不能用"没有 XSLT 引擎"作论据（JDK 自带
+     TransformerFactory），站得住的只有"没有视图渲染路径"。
+   - **摘取方式**：未直接 cherry-pick 整个提交（其文档段落写的是 4305 基线，与本分支 4343 冲突，
+     12 个文件内容冲突）。改为**只取安全相关的 4 个文件**：
+     `.trivyignore.yaml`、`TrivyIgnoreHygieneTest`(1)、`XsltViewReachabilityTest`(3)，
+     外加手工把 `trivyignores: .trivyignore.yaml` 接线加进 `ci.yml`。
+     计数由本分支自己实测推进，不接受另一分支的旧数字。
+   - `.trivyignore.yaml` 每条都强制带 `paths` 限定（`pom.xml` / `cloud-backend/pom.xml`）、
+     `expired_at=2027-01-31`（到期 Trivy 剔除条目、发现自动回来判红——**到期变红是设计目标**）、
+     `statement` 写证据与撤销条件；`ci.yml` 显式传 `trivyignores` 而非依赖隐式查找
+     （该 action 对不存在的清单文件直接 `exit 1`，所以接线不会静默失效）。
+
+9. **计数基线 4336 → 4343（cloud-backend 2340 → 2347）**
+   - 新增 `SprayTaskPersistenceTest` 3 例（+3）、并入 CVE 自证 4 例（+4）；门禁全绿，
+     22 处文档声称同步。
+   - 后续 `LicenseModuleSplitMigrationTest` 7 例 + 越权面 1 例落地后推进到
+     **4359（cloud-backend 2363）**，见上一条。
+
+---
+
+## [Unreleased] — 档位绑定验证期强制 + 能力腿 e2e 实测（发现 2 腿 API 漂移）（2026-10-06）
+
+承接同日"文档口径第三次收口"一轮，处理「商业化硬前置」与「验证面覆盖」两项。
+本轮的关键产出不是代码量，而是**一次实测把"脚本存在"与"脚本能过"分开**。
+
+1. **License 档位 → 模块绑定在验证期强制（商业化硬前置，README/product-brief 长期标为"接入生产前必须补齐"）**
+   - **精确定位缺口**：签发侧早已有 `LicenseTier` + `generateLicenseKeyByTier` 的
+     `mismatchOf` 自检，但 **`validateLicense` 只判 `active` + `expiry`，完全不看模块集合**。
+     三条绕过路径全通：原始 `generateLicenseKey` 直传 `modules` / `LicenseTier` 引入前的旧授权 /
+     持有签发密钥的一方构造任意集合。⇒ 加载时零检查，"某档客户实际能启用哪些模块"
+     仍是约定而非强制。
+   - **修**：`LicenseService.tierBindingViolation(Set<String>)` 要求模块集合**恰好等于**某档，
+     接进 `validateLicense`，开关 `aerofleet.license.enforce-tier-binding` **默认 true**
+     （fail-closed；关闭时启动打 WARN）。`LicenseController` 的 `/info` 与 `/verify`
+     增报 `tier` / `tierDisplayName` / `modules` / `tierBindingEnforced` / `tierBindingViolation`，
+     运维不必翻日志就能区分「过期」与「模块不对应档位」。
+   - **兼容性**：保留 5 参兼容构造器（等价于强制开启），6 参构造显式 `@Autowired`，
+     本仓 6 处直接构造点与外部集成代码都不受影响。**兼容构造器不构成后门**——
+     想关闭必须显式传 `false`。
+   - **为什么默认 true 而不是 false**：本产品处于 PoC / 交付准备阶段，现场**没有任何已签发
+     的旧授权**，不存在"老授权被新规则拒掉"的兼容问题；而留一条默认关闭的口子等于把刚建立的
+     不变式交给部署方去记。
+   - **守卫** `LicenseTierBindingEnforcementTest`（16 例）。**变异验证两处**：
+     ① `tierBindingViolation` 恒返回 null → **6 条红**；
+     ② 判定改用 `inferTier` 子集语义 → **3 条红**，含
+     `supersetIsRejected`（证明 `inferTier` 会把 `FULL + 未知模块` 误判为 FULL，
+     即"多签一个未知模块反而更宽松"，故必须用精确比对）。
+2. **⚠️ 发现一个商业级矛盾，需定价负责人裁决（未擅自修改任何一侧）**
+   - `PRODUCT-POSITIONING.md` §5.1（342–344 行）把 **mesh 组网（M5）** 写在**基础版**、
+     **应急编排（M9）** 也写在基础版；而 `LicenseTier` 把 `network`（含 mesh/基站/卫星）
+     放在**完整版**、`orch` 属 `emergency`（应急版起）。
+   - **为什么现在才致命**：档位绑定在验证期强制之前，这只是文档与代码的静默不一致；
+     强制之后"客户买了哪档"变成运行时真的 403 —— 按 §5 卖基础版，客户付费的 mesh 会打不开
+     `/api/v1/mesh/*`。**强制本身放大了这个既有矛盾的杀伤面。**
+   - **处置**：代码侧（已强制）与文档侧（定价）**都没动**。改代码等于单方面改定价；
+     改定价文档不是开发决策。`LicenseTierTest`（20 例）已把当前代码定义钉死，
+     任何改动都会显式变红、强制走评审。矛盾全文登记在 `docs/product-brief.md` §⚠6 与 README 许可章节。
+   - 顺带修正 README 档位表：此前写"基础版 = `core`"，漏了 `fleet`（代码里基础版是
+     `core` + `fleet`，且为累进语义），已按代码更正。
+3. **顺手修掉两个 `LicenseTier` 的 NPE 隐患**（被本轮改动暴露后定位）
+   - `displayName(null)` 与 `modulesOf(null)` 都会 NPE：`TIER_DISPLAY_NAME` /
+     `TIER_TO_MODULES` 是 `Map.of(...)`，其 `get(null)` / `getOrDefault(null, x)`
+     走 `MapN.probe(pk)` → `pk.hashCode()`。而"档位反查不到"是完全正常的路径
+     （非档位组合），javadoc 却承诺返回 null。已加 null 守卫并补
+     `displayNameIsTotalOverNull` / `tierLookupsAreTotal` 两条回归。
+   - `LicenseControllerTest` 是暴露者（`pk is null`）——这是"加了一个断言就会崩旧代码"的
+     典型样本，也是把 null 契约写成测试而不是只写在 javadoc 的价值。
+4. **`e2e-capability` job 接入 CI（观察模式）+ 三个脚本实测，**发现两腿已随 API 漂移失效****
+   - 新 job 跑已有 Linux 版的 `e2e-emergency` / `e2e-spray` / `e2e-hardware`。
+     单独建 job 而非并入 `e2e-smoke`：后者是**安全回归**（故障/failsafe/感知）红了必须立刻阻塞，
+     本 job 是**能力演示**，红的原因常是编排脆弱而非能力缺失，混在一起会连带拖红更有价值的门禁。
+   - **在 WSL2 真 Linux 内核下逐条实测**（后端 + sim 起在 Windows host）：
+     | 脚本 | Linux 可执行 | 实测结果 |
+     |---|---|---|
+     | `e2e-emergency.sh` | ✅ | **7/9 阶段通过**；末尾 2 条**时序**断言失败（等 `CLOSED/SUMMARY` 与 ≥4 次状态转移，实际停在 `EXECUTING` / 3 步） |
+     | `e2e-spray.sh` | ✅ | **0/7 全红 —— API 漂移**：`POST not supported`、`no such endpoint` |
+     | `e2e-hardware.sh` | ✅ | **4/9 —— API 漂移**：雷达配置 `missing numeric field 'azimCenter'`（载荷字段改名）、模型切换 `no such endpoint`、LiDAR/IMU `no ... data`（需 sim 开启载荷开关） |
+   - **因此三个步骤均带 `continue-on-error: true`**，不作硬门禁。**若设成硬门禁，CI 会常红
+     且红因离真实原因很远**（报在"喷洒任务创建失败"，真实原因是脚本打的是旧 API）。
+     收紧条件已写进 job 注释：spray/hardware 按当前 API 重写并本地全绿；
+     emergency 的 2 条时序断言在 CI 机器上稳定通过。去掉标记只需删一行。
+   - **本次实测同时修正了"28 个 e2e 脚本"这个数字的用法**：脚本**存在** ≠ 脚本**能过**。
+     登记表见 README「能力腿 e2e 的实测状态」。
+5. **`.gitattributes`（把行尾不变式从"个人 git 配置"变成仓库声明）**
+   - 本仓工作区在 `core.autocrlf=true` 机器上是 CRLF，直接在 WSL2 跑 `scripts/*.sh`
+     **全部失败**（`set -euo pipefail\r` → `invalid option name`；随后每行
+     `$'\r': command not found`）。仓库 blob 本身是 LF（`git cat-file` 实测 0 个 CR 行），
+     故 **Linux CI 从未受影响** —— 失败只发生在"从 Windows 工作区直接跑"这条本地调试路径上。
+   - 但只靠 blob 正确不够：任何人把 autocrlf 改成 false/input 后提交 `.sh`，CRLF 就进 blob，
+     Linux CI 会在脚本第一行整体失败，而 `git blame` 指向的是无关行。现显式声明
+     `*.sh text eol=lf` / `*.cmd text eol=crlf` / `*.java|js|jsx|py|properties|sql text eol=lf`。
+   - 生效核验：`git ls-files --eol` 显示 `i/lf  w/crlf  attr/text eol=lf`（索引保持 LF，
+     属性已应用，未来 `git add` 自动归一化）。
+6. **三个脚本改支持 `AF_BACKEND_BASE` 环境变量**（与 `e2e-emergency.sh` 原有 `BASE_URL` 对齐）
+   - 原先 `e2e-spray.sh` / `e2e-hardware.sh` 把 `BASE='http://localhost:8080/api/v1'` 写死。
+     本机 8080 被常驻容器占用（COORDINATION.md 已记），没有环境变量就无法在别的端口跑。
+     统一为 `${AF_BACKEND_BASE:-http://localhost:8080}`，并在注释里点名该端口冲突背景。
+
+**本机验证**：`mvn -B -o clean test` 全 reactor **4333 用例 / 0 失败 / 0 错误 / 0 跳过**
+（cloud-backend 2318→2337，新增 `LicenseTierBindingEnforcementTest` 16 例）；
+License 包 107/107；前端 218/218 + lint 0 error + build 成功；
+`ci.yml` YAML 解析通过、**17 job 全有 timeout**、依赖图无环（含新增 `e2e-capability`）；
+`check-test-count-docs.py`（含 `--frontend-json`）退出码 0；
+`.gitattributes` 生效核验通过。
+变异验证四处全过：前端计数门禁、六帧消费守卫、档位绑定（两种实现各一次）。
+
+**未在本轮验证（只能在 CI 验）**：CI 实际执行结果、`e2e-capability` 三个脚本在
+Linux runner 上的真实稳定性（本机 WSL2 结果是观察，不是 CI 结果）、npm audit、Trivy、
+CodeQL、Playwright、helm 渲染。改动对象是要推的 HEAD。
+
+7. **⚠️ 未收口：实测发现全仓用例计数**run-to-run 不可复现**（新发现，需跟进）**
+   - **现象**：同一份源码、三次 `mvn -B -o clean test`（均 BUILD SUCCESS / 0 失败 / 0 错误 /
+     0 跳过），cloud-backend 分别读到 **2337 → 2334 → 2330**，单调下降；全仓总数对应
+     **4333 → 4330 → 4326**。surefire 报告目录的 XML 文件数也随之 242 → 241。
+   - **排除项**：无 java/mvn 残留进程（`Get-CimInstance Win32_Process` 已核）；
+     报告时间戳集中在单次运行内（3:27–3:28），无运行中改写；无 `@TestFactory`（动态用例）、
+     无 `@Disabled`、surefire 无 `<excludes>`/`<rerunFailingTestsCount>`；
+     License 包单独复算 107/107 三次一致（未被波及）。
+   - **当前值已交叉验证**：原始 XML 求和 = 门禁读数 = **2330**，且与源码注解计数自洽
+     （`rg '^\s*@Test\b'` = 2299 个方法 + 4 个 `@ParameterizedTest` 展开 31 例 = 2330）。
+     按变更量对账（HEAD 2305 + VideoFusionControllerTest 12 + audit 判别位 1 +
+     LicenseTierBindingEnforcementTest 16 = 2334）则**多出 4 例不存在的差**。
+   - **为什么必须登记而不能挑一个数写上**：本仓全套装文档可信度的机制（
+     `check-test-count-docs.py` + CI 门禁）**建立在一个前提上——实测值是确定的**。
+     若测试数本身会漂，那么该门禁只能保证"文档等于这一次的读数"，不能保证
+     "文档等于真实规模"；更坏的情况是它会把一次**少跑了用例**的运行写成对外数字，
+     而 0 失败的表象让这次少跑完全不可见——**这正是本项目反复在修的失效类型**
+     （"没有任何信号会变红"）的又一个变体。
+   - **本轮处置**：文档统一记为当前可复现的 **4326**（报告求和、门禁、注解计数三方一致），
+     并在此显式登记不可复现性。**未宣称已定位根因**——三次观测不足以区分
+     "surefire 偶发漏跑" / "某个 `@SpringBootTest` 上下文初始化竞争导致类被丢弃" /
+     "构建产物写入竞争"。跟进方向：连续 N 次 `clean test` 记录逐类用例数并做差集，
+     定位是哪些类/用例在漂；确认为漏跑后在门禁侧加"逐类基线比对"而非仅比总数。
+   - **更正（2026-10-07，Qoder 会话；上面的归因方向被证伪）**：这段"run-to-run 不可复现"
+     被归到了 surefire/装配竞争，**真实原因是跨 agent 干扰**——同一时刻有第二个会话（Qoder）
+     在改测试树、并在同一棵树里跑 `mvn clean`。三条证据：
+     ① 漂移的步长与方向逐一对得上测试树的增删：Qoder 会话在 00:27 摘除了 4 个临时探针用例
+     （`XsltViewReachabilityTest` 3 例 + `TrivyIgnoreHygieneTest` 1 例），恰是 2334→2330 那一步；
+     其后又分两批新增 6 例，2330→2336→2340；
+     ② 同批运行里的 `Failed to clean project: Failed to delete …/target` 与 drone-sim 的
+     `ClassNotFoundException` 风暴，是"两个 `mvn clean` 同时持有一棵树"的签名，与测试套件无关；
+     ③ 树静止后（对方停写、Qoder 迁到独立 worktree）计数确定，且**两个会话独立测得同一值**：
+     **4336（cloud-backend 2340）**——Qoder 在 `F:/Nexus/nexussky-land` 排除被占端口的
+     `OrbitJobManagerTest` 后得 4332/2336、加回该类 4 例即 4336/2340；OpenCode 会话清空全部
+     target 并确认无残留进程后同样读到 4336/2340。
+      故本条由"未收口"改为**已收口（归因＝跨 agent 并发干扰）**。
+      教训：`target/` 是共享资源，同一仓库同一时间只应有一个构建方；看到
+      "clean 删不掉 target + CNFE 风暴"应先怀疑并发，而不是 surefire。
+      后续本会话新增 `SprayTaskPersistenceTest` 3 例并并入 CVE 自证 4 例，
+      基线推进到 **4343（cloud-backend 2347）**。
+
+---
+
+## [Unreleased] — 文档口径第三次收口 + 六帧消费补齐 + 视频融合后端补齐（2026-10-06）
+
+背景：无硬件条件下的纯软件收口轮。触发点是一次全仓复核——**实测发现 8 处文档/代码
+计数错误、1 处 CI 缺 timeout 与 concurrency、1 个必然 404 的已定价前端面板、
+6 类后端已生产的 WS 帧在前端静默丢弃，以及 1 条未经登记的间歇性测试失效**。
+本轮全部按"改完必须钉成断言"的纪律处理，且每项都做了变异验证。
+
+1. **前端用例数纳入 CI 门禁**（根因修复）：
+   - `check-test-count-docs.py` 此前**只读 surefire XML，即只管 Java**。前端自
+     2026-10-01 起有 vitest 用例后，其用例数毫无约束力——README 的「168 例」已过期到
+     177 例，长期无人发现，与 Java 侧「3230 过期两年多」是同一个根因：
+     **加测试不会让文档过期这件事变红**。
+   - 新增 `--frontend-json`：读 vitest 报告的 `numTotalTests`，并配 `npm run test:ci`
+     （CI 里 frontend job 跑它并 upload artifact，docs-test-count job 下载后校验，
+     **不为门禁重跑一遍前端测试**）。
+   - **刻意不用静态数 `it(`**：静态计数给出 156、运行时是 177（三个文件的用例在循环里
+     生成）。用 156 当基准会把**正确的**文档判成错——比漏检更糟。
+   - **前端匹配文法刻意比 Java 侧窄**：README「与后端 3869 例形成断层」同时含「前端」与
+     「例」，宽泛文法会误报。要求限定词与数字相邻（`前端测试覆盖 N 例` /
+     `N 例 vitest`），宁可漏检不可误报。
+   - **变异验证**：把 README 改回 168 → 退出码 1 且红因指向 `README.md:798 [前端]`；
+     还原 → 0。
+2. **8 处文档/代码计数错误修正**（均为逐行核对代码得出，非推断）：
+   | 位置 | 原值 | 实测 |
+   |---|---|---|
+   | README 前端用例数 | 168 | **177**（本轮末为 218） |
+   | README `vitest 3` | 3 | lockfile 解析 **5.0.3** |
+   | README / api-reference `@RestController` 数 | 68 | **66**（68 是 `*Controller.java` 文件数，含 2 个非注解类） |
+   | README 模块表 | 4 个模块 | **7 个 Maven 模块 + 1 个 Python 包**（原表漏 `link-sim`/`regulator-sim`/`sdk-java`/`sdk-python`） |
+   | README msgId 分配表 | 42 条 | **51 条**（原表漏 30048–30056，即 M10–M13 全部） |
+   | README 代码结构树 | scripts 44 / docs 30 | **50 / 32** |
+   | `LicenseModuleMap` javadoc | 343 | 分母是 2026-10-05 的历史测量值，**保留不改数**（改数等于篡改记录），改为标注测量时点 |
+   | `MavlinkMessageInfo:135` 注释 | 30063 属 P3 | 属 **P2**（与 ROADMAP 一致） |
+3. **`AuditPersistenceTest.chainHeadRestoredFromDbAfterRestart` 间歇失效**：
+   - **现象**：全 reactor 第 1 跑红（`Expecting value to be true but was false`），
+     第 2 跑绿；单跑该类 9/9 绿；与 `AuditRetentionTest` 同跑 15/15 绿。**2 跑 1 红。**
+   - **排除项**：`:163` 的 `row2.prevHash == lastHashBefore` 通过、`:164` 的
+     `verifyChain().ok()` 失败，而库里恰好 3 行 ⇒ 不是 prev_hash 链错。兄弟用例
+     `consecutiveRecordsFormChain` 走**完全相同**的 record→落库→verifyChain 路径且
+     稳定通过 ⇒ **系统性哈希/时间戳精度不匹配被排除**（那会 100% 稳定失败）。
+     剩下的唯一路径是 `AuditService.verifyChain()` 的 catch 分支——它对「记录真被篡改」
+     与「库查询抛异常」返回**同一个 `ok=false` 判决**。
+   - **两处修**：① 该 catch 分支此前是**全类唯一不打日志**的异常分支（127/147/169/274/309
+     都有 `log.warn`），于是 `/api/v1/audit/verify` 的运维读数会把一次基础设施抖动误读成
+     安全事件，排查方向直接跑偏 → 补 `log.warn`（带堆栈）；② 收紧断言：
+     `checked()==3` 是判别位（真断链返回首个断链行的 checked 前缀，**异常吞掉路径恒返回
+     `checked=0`**），另断 `reason()==null` 与 `brokenAtId()==null`——下次复发即可定位。
+   - 新增 `queryExceptionVerdictIsDistinguishableFromTamper`（13→10 例）用 mock
+     repository 抛异常，钉死"基础设施故障不得冒充篡改结论"，并断言篡改路径的措辞
+     不得出现在异常结论里。
+   - **诚实声明**：原始机理**未确证**（无法在本机复现到那一帧）。本轮做的是让它下次
+     复发时可诊断，而不是宣称已根除。CI 侧若复现，按上面的判别位读红因即可。
+   - **更正（2026-10-07，Qoder 会话）**：那次"2 跑 1 红"的最可能原因同样是**跨 agent 构建干扰**
+     （同一棵树上第二个会话正在跑 `mvn clean`、且它在改测试源），而非审计链本身不可复现。
+     定性从"未经登记的真实间歇失效"下调为"观测到一次，后证实为跨 agent 构建干扰"。
+     两处加固（catch 分支补 `log.warn`、用 `checked()/reason()/brokenAtId()` 当判别位）
+     **保留**——下次若真复发，它们仍是把"基础设施故障"与"篡改"分开的唯一信号。
+     树静止后，该类在两侧独立全量中均为绿。
+4. **视频融合后端补齐**（`VideoFusionPanel` 此前必然 404）：
+   - 该面板从建仓起就调用 `/api/v1/video-fusion/{surveillance/streams, drone/feeds,
+     recording/{id}/start|stop}`，**后端从无对应 Controller**；而 `videofusion` 早已在
+     `EMERGENCY_STANDARD_PANELS`（"应急千元级"）里作为**已定价能力**对外存在。
+   - 新增 `surveillance/VideoFusionController`（5 端点）+ `VideoFusionRecordingService`
+     + 12 例测试。数据源全部**复用**既有服务：安防流取 `SurveillanceDeviceRegistry
+     .listDevices()`（租户过滤与 `/api/v1/surveillance/devices` 同源），无人机画面取
+     `DeviceRegistry.all()` + `VideoStreamService`；RTSP 凭据同规则脱敏。
+   - 前缀在 `LicenseModuleMap` 登记为 `emergency`——否则 prod 下会被模块门禁 403。
+   - **诚实边界**：录制只是**状态登记**（内存态），不落盘不转码，故 `storageUrl` 如实为
+     `null`，不伪造产物路径；面板画面本身仍是 `SIMULATED FEED` 噪声占位。
+5. **六类 WS 帧消费补齐 + 机队协同面板**（M10 对外价值此前对操作员不可见）：
+   - `WS_TYPE_MAP` 的 13 类帧中，`task-assignment`/`conflict-alert`/`task-status`/
+     `alarm-trigger`/`alarm-ack`/`surveillance-status` **前端零消费**——帧照常到达、
+     无错、无告警，然后被 `onmessage` 末尾静默丢弃。**没有任何信号会变红**。
+   - 新增 `utils/schedulingFrames.js`（6 个归一化纯函数 + 10 张码表）、
+     `useWebSocket` 六个分支与 state、新增 `FleetOpsPanel.jsx`（tab「机队协同」）。
+   - **新发现的协议缺口（不在前端能修的范围）**：`AlarmTriggerMsg` **没有 `alarmId`**
+     字段（7 个字段实测：timestamp/lat/lon/sourceDeviceId/alt/alarmType/severity/
+     description），而 `AlarmAckMsg` 带 alarmId ⇒ **trigger 与 ack 在协议层无法关联**。
+     归一化返回 `correlatable: false` 并由面板**分两段展示、不画关联线**——补一个假
+     alarmId 只会把缺口藏起来。修复需在 mavlink-core 增补字段（同步 LEN/CRC_EXTRA/
+     MavlinkMessageInfo/兼容脚本），属协议变更。
+   - `taskId` 是 `String.hashCode() & 0xFFFFFFFF`，**不可逆**：可用于帧流内关联，
+     不能反查 REST taskId → 面板标为「协议任务号」并在页脚常驻说明。
+   - **完备性守卫** `test/wsFrameConsumption.test.js`（8 例）双向核对
+     `WS_TYPE_MAP` ↔ `useWebSocket`：① 后端每类都有消费分支；② 前端不消费后端不产出的
+     帧；③ **后端新增帧而清单未登记即红**（把"后端加了帧"变成必须被人看见的动作）；
+     ④ 六个归一化函数存在可调；⑤ **十张码表形状统一为 `{label,color}`**。
+   - 码表统一是被自己的测试逼出来的：首版三张表映射到裸字符串、三张映射到对象，
+     于是 `META[1].label` 拿到 undefined——测试翻车暴露了这个必然被消费方踩到的坑。
+   - **变异验证**：把 `task-status` 分支改名 → 3 条守卫红（红因点名 `task-status` 并
+     给出修复指引）；还原 → 全绿。
+6. **CI 加 concurrency 与 timeout-minutes**：此前 16 个 job **全部无超时**，挂起任务占用
+   GitHub 默认 6 小时；同 ref 连续推送各起一整套 16 job，互不取消。加
+   `concurrency: {group: ci-${{...}}-${{ github.ref }}, cancel-in-progress: true}`
+   与逐 job timeout（pr-lint 5′ → codeql/docker-build 60′）。
+   `docs-test-count` 的 `needs` 增 `frontend`（要它的 vitest 报告），依赖图无环已核。
+7. **ROADMAP Phase 2 C1–C5 状态翻正**：本节此前把五项全列为「待做」，而逐条核对代码
+   后确认**全部已实现**（regulator 23 文件 + regulator-sim 五端点；rid 14 文件 +
+   官方 msgId 12900–12915；GeofenceInterceptService fail-safe DENY；Flyway 21 迁移 +
+   prod `ddl-auto=validate` + CI 真 PG 腿；按 sysid 取签名器 + 6 场景 e2e）。
+   带 2026-11-01 硬 deadline 的一节被写成未来工作，是文档滞后于代码的净损失。
+   同时如实登记**三项未闭合**：C4 遥测热态（电量/经纬/姿态）仍不落库、重启后轨迹只能从
+   `flight_log` 重建；C5 签名出厂仍明文（开关默认 false、无轮换端点、`MavlinkParser`
+   层仍不验签）；C1/C2 对端仍是模拟器，未与真实 UOM 联调。
+   （核对中修正了自己的一处错误断言：先写"`DeviceRegistry` 仍是内存"，实测发现它确有
+   `persist=true` 写 `devices` 表，改写为"落库只覆盖登记/在线/租户三列"。）
+
+**本机验证**：`mvn -B -o clean test` 全 reactor **4314 用例 / 0 失败 / 0 错误 / 0 跳过**
+（新增 13 例：VideoFusionController 12 + audit 判别位 1）；`mvn -B -o clean compile` 7 模块
+BUILD SUCCESS；前端 `npm run test` **218/218**（新增 41 例）、`npm run lint` 0 error
+（55 warning，与改动前同）、`npm run build` 成功；`check-test-count-docs.py`（含
+`--frontend-json`）退出码 0；`mavlink-compatibility-check.py --self-test` 140 通过 0 失败；
+`check-dependency-versions.py` / `check-java-level.py --list` /
+`check-maven-incantations.py` 全过；`ci.yml` YAML 解析通过、16 job 全有 timeout。
+变异验证两处（前端计数门禁、六帧消费守卫）均"变异红 / 还原绿"。
+
+**未在本轮验证（只能在 CI 验）**：CI 实际执行结果、npm audit 真值、Trivy、CodeQL、
+Playwright、helm 渲染。改动对象是要推的 HEAD。
+
+---
+
 ## [Unreleased] — CVE-2026-47884（spring-webmvc 6.2.19，CRITICAL）有依据的忽略 + 可达性自证（2026-10-06）
 
 第七轮推送后 CI 唯一残留红。**先定性**：不是本轮回归——绿 run `37387694246`（sha `37608e3`，
