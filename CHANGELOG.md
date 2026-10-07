@@ -106,12 +106,40 @@
      并把 `http://127.0.0.1:18099` 写死进 `OrbitService`。18099 恰是本机跑 e2e 后端常用的端口，
      端口被占时该类直接 `BindException` 报 3 个 error —— Qoder 上一轮为对齐计数
      也曾手工"排除被占端口的 `OrbitJobManagerTest`"。
-   - **修**：`InetSocketAddress("127.0.0.1", 0)` 让内核分配空闲端口，
-     `startTruth` 记录 `truth.getAddress().getPort()` 到 `truthBase`，两处 `OrbitService` 构造改用它。
-   - 改版连跑 5 次 4/4 全绿；原版在端口被占时必红。
+    - **修**：`InetSocketAddress("127.0.0.1", 0)` 让内核分配空闲端口，
+      `startTruth` 记录 `truth.getAddress().getPort()` 到 `truthBase`，两处 `OrbitService` 构造改用它。
+    - **⚠️ 该改动自身引入过一次回归，已修（诚实记录）**：`invalidParamsRejected` /
+      `submitReturnsHandleAndRejectsDuplicateInFlight` / `jobViewExposesProgressShape`
+      三个用例**不调用** `startTruth`（只验 submit 校验与 job map 语义，不需要 truth 通道），
+      于是 `truthBase` 为 null 被直接传给 `OrbitService` ⇒ 在飞判定提前失效，
+      duplicate-inflight 用例报 `Expected IllegalStateException to be thrown, but nothing
+      was thrown`。**本地 5 次全绿没抓到，CI run 37604120294 抓到了** ——
+      这正是"本地绿 ≠ CI 绿"的实例。修法：null 时回退到 `http://127.0.0.1:1`
+      （语法合法、必然连不通），修后连跑 6 次 4/4 全绿。
 
-8. **计数基线 4336 → 4339（cloud-backend 2340 → 2343）**
-   - 新增 `SprayTaskPersistenceTest` 3 例；`check-test-count-docs.py` 全绿，
+8. **并入 CVE-2026-47884 的有界忽略（自 `fix/cve-2026-47884-ignore` 摘取，PR #6 的 Security Scan 唯一红）**
+   - **不是回归**：绿 run 37387694246 的 `pom.xml:36` 同为 spring-boot 3.5.16 且 Security Scan 通过，
+     `a6e1118..HEAD` 未碰 pom/package.json；变的是 Trivy 公告库。
+   - **上游无可换的修复版**：`gh api advisories/GHSA-pc63-qcmh-9cmg` 显示 6.x 全部区间
+     （含 `>= 6.2.0, <= 6.2.19`）`first_patched_version` 均为 null，唯一 fixed 是 7.0.9
+     —— 真修复路径是 Boot 3.5→4.x 大版本迁移。故本次是**风险登记 + 有界忽略**，
+     不是"已修复"。
+   - 可达性证据（本机实测，见 `XsltViewReachabilityTest`）：advisory 前提是"存在导向视图渲染的
+     `/**` 映射 + 视图名未转义 + 使用 `XsltView`"；本仓纯 REST，4 个 ViewResolver 全非 Xslt，
+     handler 映射中 `/**` 为 0。诚实边界：不能用"没有 XSLT 引擎"作论据（JDK 自带
+     TransformerFactory），站得住的只有"没有视图渲染路径"。
+   - **摘取方式**：未直接 cherry-pick 整个提交（其文档段落写的是 4305 基线，与本分支 4343 冲突，
+     12 个文件内容冲突）。改为**只取安全相关的 4 个文件**：
+     `.trivyignore.yaml`、`TrivyIgnoreHygieneTest`(1)、`XsltViewReachabilityTest`(3)，
+     外加手工把 `trivyignores: .trivyignore.yaml` 接线加进 `ci.yml`。
+     计数由本分支自己实测推进，不接受另一分支的旧数字。
+   - `.trivyignore.yaml` 每条都强制带 `paths` 限定（`pom.xml` / `cloud-backend/pom.xml`）、
+     `expired_at=2027-01-31`（到期 Trivy 剔除条目、发现自动回来判红——**到期变红是设计目标**）、
+     `statement` 写证据与撤销条件；`ci.yml` 显式传 `trivyignores` 而非依赖隐式查找
+     （该 action 对不存在的清单文件直接 `exit 1`，所以接线不会静默失效）。
+
+9. **计数基线 4336 → 4343（cloud-backend 2340 → 2347）**
+   - 新增 `SprayTaskPersistenceTest` 3 例（+3）、并入 CVE 自证 4 例（+4）；门禁全绿，
      22 处文档声称同步。
 
 ---
@@ -244,7 +272,8 @@ CodeQL、Playwright、helm 渲染。改动对象是要推的 HEAD。
       故本条由"未收口"改为**已收口（归因＝跨 agent 并发干扰）**。
       教训：`target/` 是共享资源，同一仓库同一时间只应有一个构建方；看到
       "clean 删不掉 target + CNFE 风暴"应先怀疑并发，而不是 surefire。
-      后续本会话新增 `SprayTaskPersistenceTest` 3 例，基线推进到 **4339（cloud-backend 2343）**。
+      后续本会话新增 `SprayTaskPersistenceTest` 3 例并并入 CVE 自证 4 例，
+      基线推进到 **4343（cloud-backend 2347）**。
 
 ---
 

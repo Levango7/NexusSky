@@ -67,7 +67,15 @@ class OrbitJobManagerTest {
         // Real OrbitService against the fake truth base; commands is not
         // exercised by these tests (submit() validation + job map semantics
         // do not need a flight).
-        OrbitService svc = new OrbitService(null, null, null, new ObjectMapper(), truthBase);
+        //
+        // truthBase 可能为 null：invalidParams / duplicate-inflight / progress-shape
+        // 三个用例不调用 startTruth（它们只验 submit 的校验与 job map 语义，
+        // 不需要 truth 通道）。此时必须给一个**语法合法**的 base URL，
+        // 否则 OrbitService 拿到 null 会让 submit 的在飞判定提前失效
+        // （duplicate-inflight 用例曾因此报 "Expected IllegalStateException
+        // to be thrown, but nothing was thrown"）。
+        String base = truthBase != null ? truthBase : "http://127.0.0.1:1";
+        OrbitService svc = new OrbitService(null, null, null, new ObjectMapper(), base);
         manager = new OrbitJobManager(svc, 2);
         return manager;
     }
