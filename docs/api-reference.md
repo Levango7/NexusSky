@@ -2328,6 +2328,22 @@ curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/cv-eval/me
 
 ---
 
+## 行业航线模板
+
+### 基础路径 `/api/v1/route-templates`
+
+**Controller**: `route/RouteTemplateController` | 四类行业航线模板生成（F3）——输出可直接下发到 `POST /api/v1/drones/{sysid}/mission`
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| POST | `/generate` | `{type: tower|solar|pipeline|shoreline, ...参数}` → 航点任务 | OPERATOR |
+
+**类型参数**：tower（towers 坐标序列/orbitRadiusM/orbitPoints/hoverSec）；solar（polygon/lineSpacingM/directionDeg）；
+pipeline（line/stepM）；shoreline（polygon/stepM/offsetM）。响应含 waypoints + legs（tower 按塔分段）+ estKm。
+参数非法返回 400+字段名；航点上限 990。
+
+---
+
 ## 缺陷报告与工单闭环
 
 ### 基础路径 `/api/v1/defects`
