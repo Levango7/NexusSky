@@ -714,18 +714,18 @@ NexusSky/
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 462 |
-| `drone-sim` | 1405 |
+| `drone-sim` | 1408 |
 | `link-sim` | 117 |
 <<<<<<< HEAD
 | `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4485** |
+| **总计** | **4492** |
 =======
 | `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4485** |
+| **总计** | **4492** |
 >>>>>>> origin/master
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
@@ -821,6 +821,8 @@ NexusSky/
 - **行业航线模板（F3）的几何口径**：局部平面近似（<10km 区域误差厘米级）；弓字形无
   最小转弯优化；岸线偏移是顶点法向近似；杆塔号→坐标由请求方传入（真实台账/GIS 接入
   属生产阶段）。
+- **RTK（F6）是 fix_type 上报语义**：协议层（GPS_FIX_TYPE 5/6）+ 展示链路就绪，
+  坐标噪声模型未区分 RTK/单点——真实差分改正数接入属生产阶段（需 RTK 基站/网络 RTK）。
 - **缺陷闭环（F4）的复检与去重口径**：复检=真拍一张（复用 F1 captureAndLocate）+ 逐缺陷
   10m 同 kind 比对——**要求托管机已飞临缺陷点**（派飞属运维职责，工单不驱动飞控）；
   去重与复检是同一空间近似口径。报告导出 json/csv/md，PDF 属渲染层不在本轮。
