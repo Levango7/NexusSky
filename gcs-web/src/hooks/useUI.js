@@ -23,6 +23,7 @@ export const VIEW_PANEL_MAP = {
   cveval: 'mission',       // CV 智能识别评测归入任务范畴（千元级可用）
   defect: 'mission',       // 缺陷报告与工单闭环归入任务范畴（千元级可用，F4）
   routetpl: 'mission',     // 行业航线模板归入任务范畴（千元级可用，F3）
+  opsreport: 'mission',    // 运营报表归入任务范畴（千元级可用，E6；fleet 键不在档位清单会致丐版误隐藏）
   dock: 'dock',            // 机巢管控独立面板（千元级可用，无人值守）
   dronelock: 'status',     // 远程锁机归入状态管理（百元级可用）
   autodispatch: 'emergency', // 自动出警归入应急范畴（千元级可用）

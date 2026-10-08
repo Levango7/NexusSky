@@ -4,6 +4,28 @@
 
 ---
 
+## [Unreleased] — E6 运营报表与单位经济：架次/时长/里程/能耗/成本核算（2026-10-08）
+
+> 依据 ROADMAP E6（依赖 C4 持久化✅）。物流与植保结算刚需——数据源是 flight_log
+> 的 telemetry 帧（armed 连续段 = 架次），**e2e 首次端到端启用了 C4 的
+> `persist-to-db` 批量写库路径**（该开关默认 false/JSONL，此前从未在 e2e 中验证过）。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| E6.1 | **架次分割** | armed 连续帧段 = 架次；断档 >30s 切分（防数据粘连）；充电段能耗 clamp 0 |
+| E6.2 | **架次指标** | 时长/里程（帧间 haversine 累加）/能耗（段首末电量差）/主 mode 众数 |
+| E6.3 | **三维聚合** | groupBy=day/drone/tenant：架次数/总时长/总里程/总能耗/成本 |
+| E6.4 | **成本口径** | `成本 = 时长(h) × aerofleet.report.cost-per-hour`（默认 0）——**参数化模型，本仓不编造电价/折旧，部署方按其单位经济填** |
+| E6.5 | **REST** | GET /operations/report?from=&to=&groupBy=（窗口上限 31 天防全表扫描，OBSERVER） |
+| E6.6 | **GCS 面板** | OpsReportPanel：三维切换/指标卡片/分组表/单架次明细（费率如实展示） |
+| E6.7 | **e2e** | `e2e-operations.ps1`：真飞 ARM→起飞→驻空→disarm → 报表 9 断言（含成本精确对账 0.35 元）ALL PASS |
+
+**诚实边界**：里程是 1Hz 采样累加近似；能耗按电量百分比差不换算 mAh/电费
+（电池容量因机型而异，属部署方配置）；成本单一费率不分机型/任务类型；
+tenant 维度依赖帧上租户标记（未归属计入 unassigned，精确归属属设备归属功能范畴）。
+
+---
+
 ## [Unreleased] — F5 多品牌双栈网关：DeviceGateway SPI + 协议标记 + 命令路由（2026-10-08）
 
 > 依据 ROADMAP F5（依赖 C1 协议抽象✅）。反锁定生态位：注册/遥测/命令面只依赖
@@ -256,7 +278,7 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
    - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
      （模拟"裸写开关被吞 token"）。
 
-4. **计数基线 4380 → 4497（drone-sim 1397 → 1405）**
+4. **计数基线 4380 → 4504（drone-sim 1397 → 1405）**
    - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
 
 ---

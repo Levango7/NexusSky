@@ -24,6 +24,7 @@ import RidPanel from './components/RidPanel.jsx'
 import CvEvalPanel from './components/CvEvalPanel.jsx'
 import DefectPanel from './components/DefectPanel.jsx'
 import RouteTemplatePanel from './components/RouteTemplatePanel.jsx'
+import OpsReportPanel from './components/OpsReportPanel.jsx'
 import DockPanel from './components/DockPanel.jsx'
 import DroneLockPanel from './components/DroneLockPanel.jsx'
 import AutoDispatchPanel from './components/AutoDispatchPanel.jsx'
@@ -220,6 +221,7 @@ export default function App() {
               { key: 'cveval', label: 'CV评测' },
               { key: 'defect', label: '缺陷工单' },
               { key: 'routetpl', label: '航线模板' },
+              { key: 'opsreport', label: '运营报表' },
               { key: 'dock', label: '机巢' },
               { key: 'dronelock', label: '锁机' },
               { key: 'autodispatch', label: '自动出警' },
@@ -405,6 +407,10 @@ export default function App() {
       ) : view === 'routetpl' ? (
         <PanelWrapper>
           <RouteTemplatePanel drone={selected} />
+        </PanelWrapper>
+      ) : view === 'opsreport' ? (
+        <PanelWrapper>
+          <OpsReportPanel />
         </PanelWrapper>
       ) : view === 'dock' ? (
         <PanelWrapper>

@@ -2344,6 +2344,21 @@ pipeline（line/stepM）；shoreline（polygon/stepM/offsetM）。响应含 wayp
 
 ---
 
+## 运营报表
+
+### 基础路径 `/api/v1/operations`
+
+**Controller**: `report/OperationsReportController` | 架次/时长/里程/能耗/成本核算（E6）
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/report?from=&to=&groupBy=day\|drone\|tenant` | 运营报表聚合（窗口上限 31 天） | OBSERVER |
+
+**架次口径**：telemetry 帧 armed 连续段 = 架次（断档 30s 切分）；成本 = 时长(h) ×
+`aerofleet.report.cost-per-hour`（默认 0，参数化口径）。响应含 summary/groups/topSorties。
+
+---
+
 ## 缺陷报告与工单闭环
 
 ### 基础路径 `/api/v1/defects`
