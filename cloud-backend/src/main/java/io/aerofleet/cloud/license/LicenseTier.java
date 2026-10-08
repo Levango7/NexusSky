@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.license;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -97,10 +98,11 @@ public final class LicenseTier {
         Set<String> full = new LinkedHashSet<>(emergency);
         full.add("network");
         full.add("advanced");
+        // 存 LinkedHashSet 的不可变视图而非 Set.copyOf：保留声明顺序，理由见 modulesOf
         return Map.of(
-                BASIC, Set.copyOf(basic),
-                EMERGENCY, Set.copyOf(emergency),
-                FULL, Set.copyOf(full)
+                BASIC, Collections.unmodifiableSet(basic),
+                EMERGENCY, Collections.unmodifiableSet(emergency),
+                FULL, Collections.unmodifiableSet(full)
         );
     }
 
@@ -115,7 +117,7 @@ public final class LicenseTier {
     }
 
     /**
-     * 取某档位包含的模块集合（不可变副本）。
+     * 取某档位包含的模块集合（不可变副本，**迭代顺序 = 档位定义的声明顺序**）。
      *
      * @param tier 档位名（{@link #BASIC} / {@link #EMERGENCY} / {@link #FULL}）
      * @return 该档模块集合；未知档位返回 {@code null}（由调用方决定如何拒绝）
@@ -128,7 +130,17 @@ public final class LicenseTier {
             return null;
         }
         Set<String> got = TIER_TO_MODULES.get(tier);
-        return got == null ? null : Set.copyOf(got);
+        if (got == null) {
+            return null;
+        }
+        // 必须用 unmodifiableSet(LinkedHashSet) 而非 Set.copyOf：
+        // Set.copyOf 返回的是**无序**不可变集（元素按 hash 分布），迭代顺序每次 JVM
+        // 启动都可能不同。这会让面向运维的输出不稳定 —— 例如迁移预检 CLI 打印的
+        // `--modules core,fleet,mesh,orch`，同一份档位两次运行可能给出两种顺序，
+        // 运维无从判断是否抄错、日志 diff 也失去意义。
+        // 类注释里"用 LinkedHashSet 保证迭代顺序稳定（便于日志与测试断言可读）"
+        // 正是在说这件事；此前 build() 里 Set.copyOf 把这个意图丢掉了。
+        return Collections.unmodifiableSet(new LinkedHashSet<>(got));
     }
 
     /**

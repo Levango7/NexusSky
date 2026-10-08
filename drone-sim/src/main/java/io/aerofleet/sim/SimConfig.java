@@ -25,7 +25,7 @@ public final class SimConfig {
      * 不吞下一 token、不要求后随参数。
      */
     private static final Set<String> BOOLEAN_FLAGS = Set.of(
-            "env", "actuators", "mesh", "sat-relay", "terrain-adapt",
+            "env", "actuators", "lidar", "imu", "mesh", "sat-relay", "terrain-adapt",
             "celltower", "rid", "reject-unsigned", "autonomy-exec");
 
     public final int port;
@@ -62,6 +62,10 @@ public final class SimConfig {
     // ---- M2 执行机构参数（FR-01，DFX 4.4 配置可追溯）----
     /** 执行机构启用开关（--actuators）。false 时 VirtualDrone.sprayPump/gripper=null，既有行为不变（DFX 4.5）。 */
     public final boolean actuatorsEnabled;
+    /** M4 传感器装配（FR-21 LiDAR / FR-22 IMU）：true = 注入模拟源，REST 端点将不再 404。 */
+    public final boolean lidarEnabled;
+    public final boolean imuEnabled;
+    public final long imuSeed;
     /** 药箱容量 L（--spray-capacity，默认 20）。 */
     public final double sprayCapacity;
     /** 最大流量 mL/s（--spray-rate-max，默认 2000）。 */
@@ -134,6 +138,7 @@ public final class SimConfig {
                       boolean actuatorsEnabled, double sprayCapacity,
                       double sprayRateMax, double gripperPayloadMax,
                       double sprayCrosswindMax,
+                      boolean lidarEnabled, boolean imuEnabled, long imuSeed,
                        boolean meshEnabled, MeshRouterConfig meshRouterConfig,
                         boolean satRelayEnabled, SatRelayConfig satRelayConfig,
                          boolean terrainAdaptEnabled, double terrainGridResolution,
@@ -166,6 +171,9 @@ public final class SimConfig {
         this.envWindMax = envWindMax;
         this.envTempRange = envTempRange;
         this.actuatorsEnabled = actuatorsEnabled;
+        this.lidarEnabled = lidarEnabled;
+        this.imuEnabled = imuEnabled;
+        this.imuSeed = imuSeed;
         this.sprayCapacity = sprayCapacity;
         this.sprayRateMax = sprayRateMax;
         this.gripperPayloadMax = gripperPayloadMax;
@@ -202,6 +210,7 @@ public final class SimConfig {
                 "none", "0.0.0.0", true, "flat", "off", "none", 0,
                 false, "calm", 0, 50, new double[]{-40, 55},
                 false, 20.0, 2000.0, 10.0, 6.0,
+                false, false, 42L,
                 false, MeshRouterConfig.defaults(),
                 false, SatRelayConfig.defaults(),
                 false, 100.0,
@@ -243,6 +252,11 @@ public final class SimConfig {
         double sprayRateMax = 2000.0;
         double gripperPayloadMax = 10.0;
         double sprayCrosswindMax = 6.0;
+        // M4 传感器载荷默认值（FR-21/FR-22）：与 actuators 同为"显式装配"语义，
+        // 缺省不注入 ⇒ /api/v1/lidar/data、/api/v1/imu/data 恒 404。
+        boolean lidarEnabled = false;
+        boolean imuEnabled = false;
+        long imuSeed = 42L;
         // M5 mesh 路由参数默认值（FR-01）
         boolean meshEnabled = false;
         // mesh 子参数先收集，构造期统一解析
@@ -354,6 +368,11 @@ public final class SimConfig {
                     }
                     // M2 执行机构参数（FR-01，DFX 4.4 配置可追溯）
                     case "actuators" -> actuatorsEnabled = true;
+                    // M4 传感器装配（FR-21 LiDAR / FR-22 IMU）：
+                    // 与 --actuators 同为显式开关，缺省不注入。
+                    case "lidar" -> lidarEnabled = true;
+                    case "imu" -> imuEnabled = true;
+                    case "imu-seed" -> imuSeed = Long.parseLong(value);
                     case "spray-capacity" -> sprayCapacity = Double.parseDouble(value);
                     case "spray-rate-max" -> sprayRateMax = Double.parseDouble(value);
                     case "gripper-payload-max" -> gripperPayloadMax = Double.parseDouble(value);
@@ -448,6 +467,7 @@ public final class SimConfig {
                 envEnabled, envScenario, envSeed, envWindMax, envTempRange,
                 actuatorsEnabled, sprayCapacity, sprayRateMax, gripperPayloadMax,
                 sprayCrosswindMax,
+                lidarEnabled, imuEnabled, imuSeed,
                 meshEnabled, meshRouterConfig,
                 satRelayEnabled, satRelayConfig,
                 terrainAdaptEnabled, terrainGridResolution,
@@ -496,6 +516,9 @@ public final class SimConfig {
         log.info("[sim]   --spray-rate-max       max spray rate mL/s (default 2000)");
         log.info("[sim]   --gripper-payload-max  max gripper payload kg (default 10)");
         log.info("[sim]   --spray-crosswind-max  crosswind no-spray threshold m/s (default 6)");
+        log.info("[sim]   --lidar                inject SimulatedLiDARSource -> LIDAR_DATA 1Hz (default off)");
+        log.info("[sim]   --imu                  inject SimulatedImuSource -> IMU_DATA 10Hz (default off)");
+        log.info("[sim]   --imu-seed N           IMU noise seed (default 42)");
         log.info("[sim]   --mesh                  enable mesh routing engine (default off)");
         log.info("[sim]   --mesh-hello-ms         HELLO broadcast interval ms (default 1000)");
         log.info("[sim]   --mesh-neighbor-timeout-ms  neighbor timeout ms (default 5000)");

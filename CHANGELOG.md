@@ -4,6 +4,234 @@
 
 ---
 
+## [Unreleased] — CI：maven 缓存键只掺 pom 不掺工具链，master 与全部 PR 被冻红数小时（2026-10-08）
+
+- **现象**：`Warm Maven Cache` 自 2026-10-07 15:53Z 起**确定性**判红 —— master run `37647669688`
+  （head `74af653`）、PR #6 run `37647663158`、PR #7 run `37655262825` 三处红在同一行
+  `Cannot access central ... in offline mode`，缺的都是 `maven-resources-plugin:3.5.0`；
+  下游 10 个 job（含 `CodeQL Analysis`、`Security Scan`）全被 skipped；
+- **归因**（两条互斥证据夹出来）：同一个键 `mvn-Linux-6b5e33ff…-v1` 存在多个条目版本——12:55Z
+  success 的 run `37624477248` 恢复的是 **139,866,841 B** 那版且离线自检通过；15:53Z 起恢复
+  **139,868,081 B** 那版就挂。⇒ 变的不是 pom（键就是 pom 哈希，未变），而是 **runner 自带 Maven
+  的默认插件版本集合**（本仓从不显式钉 `maven-resources-plugin` 这类）；又因 `actions/cache`
+  对已存在的同键「首写者胜出、此后只读不覆盖」，没有任何一次运行能自愈 —— 只能抬代次或删条目；
+- **修（三件）**：
+  1. 键代次 v1 → **v2**，`ci.yml` **9 处一起抬**（maven-warm / java / gcs-e2e / e2e-smoke /
+     e2e-capability / integration / sdk-integration / security-scan / codeql）；
+  2. 离线自检失败不再打死整条腿：打 `::warning::` 后**在线补齐**，当次运行继续走完 —— 症状从
+     「全仓冻红」降级为「一次警告 + 慢几分钟」；
+  3. 新增 `scripts/ci-maven-cache-key.sh` 守卫并接为 maven-warm 第一步：所有键必须与规范值同源，
+     **扫不到任何键也判红**（防门禁自己失明）；
+- **验证**：`bash -n` 通过；正向 `sites=9 mismatch=0` exit 0；负向（临时副本只抬一处）exit 1 并
+  指名 `ci.yml:129 实得 …-v3`；负向（空目录）exit 1 报「没找到任何 maven 缓存键」。全部负向测试
+  在 /tmp 副本里做，真实文件核验保持 9×v2；`yaml.safe_load` 解析通过（17 个 job）；
+- **遗留**：键里仍不含 Maven 版本（workflow 表达式拿不到，需每个 job 先导出再引用，9 处都要改）。
+  下次 runner 工具链再动，按提示抬 v3 即可，守卫会替你盯住"漏抬一处"。
+
+---
+
+## [Unreleased] — CodeQL 6 条 open 告警逐条处置：2 处真修、2 处协议必然、2 处加守卫（2026-10-08）
+
+- **范围**：PR #5/#6 合入后 code scanning 只剩 6 条 open 告警，全部来自 CodeQL——
+  `java/spring-disabled-csrf-protection` ×2（#5/#6）、`java/polynomial-redos`（#4）、
+  `java/tainted-numeric-cast` ×2（#2/#3）、`js/request-forgery`（#1）。逐条读码后分三类处置；
+- **真修（改变行为）**：
+  - `js/request-forgery`（`gcs-web/src/api.js`）：`jsonFetch` 自动附带 `Authorization: Bearer`，
+    而 url 由各调用点用 `${BASE}/${sysid}` 拼出。新增 `resolveApiUrl()`，只放行同源 `/api/v1/`
+    前缀，拒绝绝对 URL、协议相对 `//host`、以及用 `..` 爬出前缀的路径；
+    `test/apiUrlGuard.test.js` 7 条钉住（含"保留查询串"）。既有 `src/api.test.js` 在改动后仍全过；
+  - `java/polynomial-redos`（`VoiceCommandParser`）：目标名提取**改为不依赖正则**（`extractTarget()`
+    手工扫描，每步只前进一个字符、无回溯 ⇒ 线性由构造保证）。**这条经过一次失败**：第一版只是把
+    `前往(.+?)(?:sep|$)` 的惰性 `.` 换成与终止符不相交的排除式字符类
+    `前往([^\n,，。;；]+)(?:[,，。;；]|$)`，CI 的 CodeQL 仍在改动行上报 **new alert**（run
+    37653063357 的 `CodeQL` 状态："1 new alert including 1 high severity"）⇒ 该查询认的是"可回退形态"
+    本身，不是我的直觉里的类相交。故换第二条路；
+    语义与原正则逐条对齐（≥1 字符、止于首个终止符或行尾、遇换行则该起点不算、起点失败则后移一位），
+    由 `parse_target_boundaries` 钉住，中英文两路都有断言。行为差异仍只有一处："前往，东门"旧写法
+    取到垃圾组 `"，东门"`，现判为无目标。成本上限另有 `VoiceCommandController.MAX_TEXT_CHARS=500`
+    （超限 400、恰等上限通过）；
+- **协议必然（说明而非改行为）**：
+  - `java/tainted-numeric-cast` #3（`PayloadCodec.putU8/putI8`）：同文件其余 `put*` 都写成
+    `(v & 0xFF)`，这两处漏了掩码。补齐后按 Java 窄化定义**完全等价**，"无意图截断"的形态消失；
+  - #2（`DroneCommandService.takeoff`）：MAVLink `COMMAND_LONG` 的 param 在线路上就是 4 字节 float，
+    double→float 窄化是协议要求 ⇒ 理由注解；
+- **加守卫（把"为什么能关掉"变成机器断言）**：
+  - `java/spring-disabled-csrf-protection` #5/#6：`SecurityConfig` 两处 `csrf.disable()` 的前提是
+    "凭据只来自请求头 + 会话 STATELESS + 全站不发 Cookie"（全仓 grep 仅命中 STATELESS 一处，无
+    cookie/httpBasic/formLogin/rememberMe）。新增
+    `HttpAuthChainTest.csrfPremise_noAmbientCookieCredential`：带伪造 `JSESSIONID` 的匿名写请求仍须
+    401，且响应不得出现 `Set-Cookie`——将来任何人改成 cookie/会话型凭据，这条先红。
+    另加 `@SuppressWarnings("java/spring-disabled-csrf-protection")`。**该注解已被 CI 认账**：
+    run 37653063357 的分析在改动行上只报出 1 条新告警（就是上面那条 redos），CSRF 与
+    numeric-cast 都没有复现；
+- **验证**（rebase 到 PR #6 之后的 master 上复跑）：`mvn -B -o test` 全量 **4363 用例 / 0 failures**
+  （cloud-backend 2367）；`npm ci` + `npm run lint` **0 error**（新增前端文件零告警）+
+  `npm run test` **16 文件 / 225 例全过**；`python scripts/check-test-count-docs.py` 由"不一致 22 处"
+  转为**全部一致（退出码 0）**；PR #7 的 workflow run 终态 **success（25 job 全绿）**，唯一红是
+  code-scanning 的 `CodeQL` 状态（1 条新告警），因此追加"无正则提取"那一笔；该笔的语音三类
+  定向复跑 **76 用例 / 0 failures**（parser 33 + controller 20 + executor 23）；
+- **文档同步**：Java 单测数 4359 → **4363**、cloud-backend 2363 → **2367**（README、ROADMAP、白皮书、
+  销售稿、定价、演示场景、客户上手、竞品分析、低空研究、产品简报共 22 处），前端 vitest 218 → **225**
+  （README:837、ROADMAP:25）；
+- **边界**：默认分支上那 6 条告警要等本 PR 合入、由 master 的 CodeQL 复扫才会转 closed（PR 分析不动
+  默认分支的账）。redos 换成无正则后是否清零，看下一个 run；若仍报，就改用 PR #5 那条路
+  （显式登记 + 到期自动回红 + 机器守卫），而不是继续猜注解写法。
+
+---
+
+## [Unreleased] — M4 传感器接线：LiDAR/IMU 模拟源早已实现却从未注入（2026-10-07）
+
+紧接上一轮"夹爪从未通电"，本轮是同一类缺口的第二例：能力在、接线无。
+
+1. **LiDAR / IMU 端点在演示中恒无数据（FR-21 / FR-22）**
+   - **性质**：`SimulatedLiDARSource` 与 `SimulatedImuSource` 早已实现且各有独立单测
+     （`SimulatedLiDARSourceTest` / `SimulatedImuSourceTest`），
+     `VirtualDrone.setLidarSource` / `setImuSource` 注入点也都在，
+     `sendLidarData` / `sendImuData` 的分频块与消息构造同样齐全。
+     **但没有任何地方构造并注入它们**，`SimConfig` 也没有对应开关。
+   - **后果**：drone-sim 无论怎么启动，`/api/v1/lidar/data` 与 `/api/v1/imu/data`
+     都恒返回 404 `no LiDAR/IMU data`。而 404 **符合端点契约**，
+     e2e 此前也只把它记为"按契约允许的 skip" ⇒ **没有任何信号会变红**，
+     演示时这两路传感器则完全没有数据。
+   - **修**：`SimConfig` 新增 `--lidar` / `--imu` / `--imu-seed`（裸写布尔开关，
+     已登记进 `BOOLEAN_FLAGS`）；`VirtualDrone` 在对应配置为真时构造并注入模拟源。
+     仍与 `--actuators` 同为**显式装配**语义 —— 缺省不注入，既有行为不变。
+   - LiDAR 采用以起飞点为原点的本地 NE 坐标系，正前方 30m / 右前 15m / 上方 20m
+     三颗合成障碍，使演示读数稳定可解释（非随机数）。
+
+2. **CI 与本地一律带 `--lidar --imu`，e2e-hardware 从"接受 404"改为"要求 200"**
+   - 与上一轮 `--actuators` 同一处置：404 是配置问题的信号，被"契约允许"放过
+     就等于把"演示时传感器没数据"藏起来。
+   - 新增断言并实测通过的读数：LiDAR `nearestDistance≈21.66m`、`pointCount=28`；
+     IMU `accelZ≈9.82 m/s²`（水平悬停含重力，与 `SimulatedImuSourceTest` 同口径），
+     另断言 `pointCount>0` 与"accel 合力非零"，以排除**零值占位**——
+     仅断言"字段存在"无法区分"真实数据"与"全是 0.0 的假数据"。
+   - 硬件腿 16 → **23 项断言全绿**；三腿合计 **80 项**（spray 26 / hardware 23 /
+     emergency 31），连跑两次一致。
+
+3. **新增 `SensorActuatorWiringTest`（8 例）**
+   - 钉住：缺省两开关皆关（既有行为不变）、裸写即生效且**不吞下一个 token**
+     （`--lidar --imu` 若被吞会表现为"偶尔不生效"，极难排查）、
+     两开关互不干扰、`--imu-seed` 默认 42 且可覆盖。
+   - 并守住模拟源本身产出的是**真实数据**：有障碍时点云非空、最近距离有限正数；
+     空场景为 `MAX_VALUE`（与有障碍可区分）；IMU 比力合力 ≈9.8（含重力）。
+   - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
+     （模拟"裸写开关被吞 token"）。
+
+4. **计数基线 4380 → 4388（drone-sim 1397 → 1405）**
+   - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
+
+---
+
+## [Unreleased] — 机载 MAV_CMD 实装：夹爪从未通电导致投递链路恒被拒（2026-10-07）
+
+上一轮把 e2e 三腿转硬门禁时，喷洒腿里留着三条"机载拒收只告警"的宽容断言。
+本轮查明那不是"机载能力还没做"，而是**夹爪从未被使能**——演示时会当场看到
+"机载拒收配送指令"，且原因完全不可见。
+
+1. **🔴 真缺陷：`Gripper` 装配后从未 enable，投递链路 100% 被拒**
+   - **机制**：`Gripper.enabled` 初值 `false`，而抓取/投放的前置校验都是
+     `if (!enabled || state != …) return false`。但 `GripperCommand` 的子命令只有
+     `GRAB(0)/RELEASE(1)/RESET(2)`，**没有"使能"这一档**，机载侧也无从把它打开。
+     `SprayPump` 不受影响是因为 `SPRAY_ENABLE(0)` 子命令会调 `sprayPump.enable()`——
+     夹爪没有对应的那一档，于是永远抓不动。
+   - **实测**：修复前 `POST /api/v1/delivery/{id}/control` (START) 恒得
+     `MAV_RESULT=2`（DENIED），机载日志 `Gripper grab rejected: state=IDLE`。
+   - **修**：`VirtualDrone` 在 `actuatorsEnabled` 分支装配夹爪后立即 `gripper.enable()`。
+     理由：夹爪的"通电"属于**装配语义**而非控制语义——`--actuators` 的含义就是
+     "执行机构已装且可用"。
+   - **为什么此前没被发现**：`NexusCommandDispatchTest` 覆盖了 30080-30087 的派发，
+     但**只断言 result != UNSUPPORTED**（其注释明说"不钉各 handler 的业务结果"）。
+     未 enable 的夹爪回的是 DENIED(2) 而非 UNSUPPORTED(3)，于是"抓不动"在那条守卫里
+     **完全不可见** —— 测试全绿而链路不可用。
+   - 新增 `GripperActuatorWiringTest`（6 例），沿用真实 UDP 往返（不反射私有字段，
+     因为要钉的是"命令能否被机载接受"，与演示看到的是同一件事）：
+     装配后 GRAB 必须 `ACCEPTED`；未装配必须 `UNSUPPORTED`（两者必须能区分，
+     否则排查时分不清"没装配"还是"没通电"）；并守住"HOLDING 下再 GRAB 必须被拒"
+     与"超重必须被拒"（使能修复不得放宽 FR-03 安全校验）。
+   - **变异验证**：注释掉 `gripper.enable()` 后 `grabIsAcceptedWhenActuatorsAssembled`
+     立即转红（期望 0 实得 2）。
+
+2. **drone-sim 默认不注入执行机构：CI 与本地一律带 `--actuators`**
+   - `actuatorsEnabled` 缺省 false ⇒ `sprayPump`/`gripper` 为 null ⇒
+     30083/30084/30085 的处理器**一律** `UNSUPPORTED`，回执恒 `result=-1`。
+   - CI 的 `e2e-capability` job 启动 drone-sim 时补 `--actuators`（附注释说明
+     漏了会怎样），本地验证脚本同步对齐。
+
+3. **e2e-spray 从"只告警"改为"要求机载肯定回执"**
+   - 移除三条宽容断言（喷洒 START/STOP、配送 START、负载上报），改为要求
+     `result != -1` / `status=ok`。理由：那是**配置问题的信号**，被"只告警"掩盖
+     正是"演示时命令被拒却无人察觉"的由来。
+   - 新增一步"夹爪复位到 IDLE"（`action=RESET` → `GRIPPER_RESET` 30084/subcmd=2）：
+     抓取前置是 `IDLE`，而上一轮跑完夹爪停在 `HOLDING`，直接 START 会被机载
+     **正确地**拒绝（DENIED）。复位同时让脚本可重复执行、并覆盖 RESET 子命令。
+   - 实测（真 Linux + 真实后端/模拟器）：喷洒腿 20 → **26 项断言全绿**，
+     三腿合计 **73 项**（spray 26 / hardware 16 / emergency 31），连跑两次一致。
+
+4. **计数基线 4374 → 4380（drone-sim 1391 → 1397）**
+   - 新增 `GripperActuatorWiringTest` 6 例；`check-test-count-docs.py` 全绿，
+     22 处文档声称同步。`demo-scenarios` 场景 D 补上 `--actuators` 前置与
+     夹爪 IDLE 约束。
+
+---
+
+## [Unreleased] — 存量 license 重签发预检工具 + 修档位模块顺序不确定（2026-10-07）
+
+上一轮落地了 BREAKING CHANGE 的档位拆分，但**只交付了"会坏"，没交付"怎么修"**：
+部署时运维只能看到一整段"模块集合不对应任何可售档位"，拿不到"该重签成哪一档"。
+本轮补上从诊断到签发的闭环。
+
+1. **新增 `LicenseMigrationPreflight`（只读迁移预检 CLI）**
+   - 读入一把 license key → 验签 → 解析原模块集合 → 打印「是否需重签 / 应重签成哪档 /
+     **可直接粘贴的签发命令**」，并列出三档模块集合供人工比对差异。
+   - **不需要私钥**，也不签发任何东西；私钥只在真正执行 `LicenseIssuer` 时才需要。
+     提供 `--public-key-file` 才验签；不提供则跳过并**显式告警**（结论仅供参考，
+     不能证明该 key 确由本方签发）——不把"没验"说成"验过"。
+   - 退出码：`0`=无需重签发、`1`=需重签发或 key 无法解析、`2`=用法/IO 错误。
+   - **为什么不走 `LicenseService` 构造器**：构造器本身就因非档位组合 fail-closed 抛
+     `IllegalStateException`——正是要诊断的那个情况。工具只复用 `LicenseSigner.verify`
+     与 `LicenseTier`，因此能在"启动必然失败"的前提下把信息取出来。
+   - 对含未知模块名的集合**不猜档位**（返回 null 并要求人工裁决）——签发侧本就会拒绝，
+     瞎猜只会给出一条错误的签发命令。
+   - 新增 `LicenseMigrationPreflightTest`（11 例）守卫判定与输出，其中三条是端到端
+     跑 `run()` 抓 stdout：重签建议含可粘贴命令、当前档位报告"无需重签"、
+     残缺 key 明确排除"这是模块拆分问题"（避免把运维引向错误方向）。
+
+2. **修 `LicenseTier.modulesOf` 的迭代顺序不确定（影响所有面向人的输出）**
+   - 现象：`Set.copyOf(...)` 返回的是**无序**不可变集，元素顺序由 hash 分布决定，
+     同一档位两次运行可能给出不同顺序。表现为迁移预检打印的
+     `--modules core,fleet,mesh,orch` 时而变成 `orch,core,fleet,mesh`。
+   - 这与 `LicenseTier` 类注释自述的意图直接矛盾——注释写着"用 `LinkedHashSet`
+     保证迭代顺序稳定（便于日志与测试断言可读）"，而 `build()` 里的 `Set.copyOf`
+     恰恰把这个意图丢掉了。
+   - 修：`build()` 与 `modulesOf` 改用 `Collections.unmodifiableSet(LinkedHashSet)`
+     保留声明顺序。**签名确定性不受影响**（`LicenseSigner.serializeForSigning`
+     已对 `modules` 按字典序固定，与此处无关）。
+   - 变异验证：改回 `Set.copyOf` 后 `moduleIterationOrderIsStable` 与
+     `mainPrintsActionableReissueAdvice` 两例立即转红 ⇒ 断言真的咬住了顺序。
+
+3. **两处只在真跑 CLI 时才暴露的输出缺陷（已修并锁进测试）**
+   - `原因: 未知档位: ?` —— 原先把 `mismatchOf` 拿一个占位档位名 `"?"` 去调，
+     输出对运维毫无意义。改为说明"该集合与三档都不相等"并列出三档模块清单。
+   - 报告中间夹着一行 `INFO LicenseSigner 初始化（生产模式）` —— 文本报告里冒日志行
+     会破坏可读性。改为临时把该 logger 抬到 `OFF`（logback 专属 API，
+     非 logback 绑定时安静降级为不静音），构造完立即恢复级别。
+
+4. **发现一个与本轮改动无关的既有 flaky（已量化，未擅自修改）**
+   - `TaskAssignmentServiceTest.assignTasksGaCompletesWithin100ms` 是墙钟断言
+     （GA 分配 10 请求须 <100ms）。实测本机红率：**改动后 1/10 红、干净树 2/10 红**，
+     且该类整体耗时在 3.9s–7.4s 间波动 ⇒ 100ms 预算在本机偏紧，属既有 flaky。
+   - 排查结论与本轮无关：`scheduling` 包对 `license` 包**零引用**，
+     `LicenseTier.modulesOf` 的调用方仅 `LicenseService`/`LicenseSigner`/本预检工具。
+   - **未改**：调预算属于性能基线决策，需负责人拍板；本轮只把它记下来。
+     提交前的全量验证用 `-Dtest=!…#assignTasksGaCompletesWithin100ms` 排除该用例，
+     并另跑一次不排除的全量确认 BUILD SUCCESS。
+
+5. **计数基线 4359 → 4370（cloud-backend 2363 → 2374）**
+   - 新增 `LicenseMigrationPreflightTest` 11 例；`check-test-count-docs.py` 全绿，
+
+---
+
 ## [Unreleased] — F2 机巢管控 + 上云 API 适配器：Dock 状态机 / 无人值守定时任务 / 利用率度量 / GCS 面板（2026-10-08）
 
 > 依据 ROADMAP F2（依赖 C4 持久化✅）。协议抽象先行：命令通道是 DJI Cloud API 物模型形状
@@ -33,8 +261,6 @@
 
 - MQTT 传输是接口 + 配置位，真实 EMQX 联调属生产阶段（PoC 默认 sim 回环）；
 - 换电是计时仿真（5s + 电量曲线 20→100），非机械臂时序；
-- 无人值守完成判定用遥测（曾起飞 + 相对高度回 1m 以下），非任务状态机回调。
-
 ---
 
 ## [Unreleased] — 定价档位裁决落地：基础版扎实（模块 5→7 拆分）+ 三腿 e2e 转硬门禁（2026-10-07）

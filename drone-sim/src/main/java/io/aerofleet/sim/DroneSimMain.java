@@ -48,6 +48,9 @@ public final class DroneSimMain {
         } else {
             log.info("[sim] signing: disabled (no --signing-key or --signing-key-store)");
         }
+        log.info("[sim] sensors: lidar={} imu={} (未装配 ⇒ /api/v1/lidar/data、/api/v1/imu/data 恒 404)",
+                config.lidarEnabled ? "on" : "off",
+                config.imuEnabled ? "on" : "off");
 
         try (VirtualDrone drone = new VirtualDrone(config)) {
             drone.start();

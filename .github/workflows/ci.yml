@@ -119,20 +119,38 @@ jobs:
       # Downloading from central），在共享 runner IP 上触发 Maven Central 429。
       # 本作业先于全部 maven job 运行：冷缓存时成为唯一保存者（完整 m2）；
       # 命中时以离线构建校验缓存完整性（-o 下任何缺失立刻失败而非静默回源）。
+      - name: Check cache key sites are consistent
+        run: bash scripts/ci-maven-cache-key.sh
       - name: Restore Maven local repository
         id: mvn-cache
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Populate local repository (cold cache)
         if: steps.mvn-cache.outputs.cache-hit != 'true'
         run: mvn -B -DskipTests verify
+      # 命中缓存时的完整性自检。原形态「-o 一缺就判红」的代价：runner 自带的 Maven 一换默认
+      # 插件版本集合（本仓从不显式钉 maven-resources-plugin 这类），缓存里就没有那一版，离线
+      # 自检必挂；而 actions/cache 对已存在的同键不再保存 ⇒ master 与所有 PR 一起冻在红上。
+      # 实证（2026-10-07）：键 …-v1 从 15:53Z 起在 master run 37647669688、PR #6 run
+      # 37647663158、PR #7 run 37655262825 三处红在同一行 Cannot access central ... in
+      # offline mode；而同一键 139,866,841 B 那版当天 12:55Z（run 37624477248）离线自检通过
+      # ⇒ 变的是工具链不是 pom（键里没掺 Maven 版本，所以键不动、缓存也不覆盖）。
+      # 现在：自检失败 ⇒ 打警告并在线补齐，当次运行继续走完；真正换代由键尾 v 号显式抬升，
+      # 上面那步守卫保证所有站点同源（防"只改一处"）。
       - name: Verify cached repository is complete (offline build)
         if: steps.mvn-cache.outputs.cache-hit == 'true'
-        run: mvn -B -o -DskipTests verify
+        run: |
+          echo "toolchain: $(mvn -version | head -1)"
+          if mvn -B -o -DskipTests verify; then
+            echo "m2 缓存对当前工具链完整"
+          else
+            echo "::warning::离线自检失败（多为 runner 的 Maven 代次换了默认插件版本）⇒ 本次在线补齐；请抬 ci.yml 键尾 v 号重开一代缓存"
+            mvn -B -DskipTests verify
+          fi
 
   java:
     name: Java ${{ matrix.module }}
@@ -153,7 +171,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build & test
@@ -306,7 +324,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: mvn-${{ runner.os }}-
       - name: Build backend + drone-sim jars
         # 覆盖 job 级 defaults.run.working-directory（gcs-web）：本步必须在仓库根跑 Maven，
@@ -367,7 +385,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -433,7 +451,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build backend + sim
@@ -452,7 +470,15 @@ jobs:
             fi
             sleep 2
           done
-          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar &
+          # --actuators 必须带：SprayPump / Gripper 默认不注入
+          # （VirtualDrone 构造器 actuatorsEnabled=false ⇒ 两者为 null），
+          # 于是 MAV_CMD 30083/30084/30085 的处理器一律返回 MAV_RESULT_UNSUPPORTED，
+          # e2e-spray 的机载回执恒为 result=-1 —— 演示时看到的是"命令被拒"。
+          # 该 flag 是 M2 执行机构（FR-01）的显式开关，见 SimConfig#parse 的 "actuators" 分支。
+          # --lidar / --imu 同理：注入 SimulatedLiDARSource / SimulatedImuSource，
+          # 否则 /api/v1/lidar/data、/api/v1/imu/data 恒 404（FR-21 / FR-22）。
+          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar \
+            --actuators --lidar --imu &
           # 等 sim 注册上来：后三个脚本都以 sysid=1 在线为前置
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/api/v1/drones 2>/dev/null | grep -q '"sysid":1'; then
@@ -553,7 +579,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Run integration tests
@@ -586,7 +612,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -653,7 +679,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Pre-populate local Maven repository (Trivy offline dependency resolution)
@@ -730,7 +756,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v1
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: |
             mvn-${{ runner.os }}-
       - uses: github/codeql-action/init@v3

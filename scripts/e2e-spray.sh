@@ -13,7 +13,14 @@
 #   POST   /api/v1/delivery/{id}/payload/query  按需触发 MAV_CMD 30085 负载上报
 #
 # 注意：夹爪（gripper）在本仓没有 REST 端点，PayloadPlugin 是 SPI 内部接口，
-#   故原脚本的 /spray/gripper 断言已移除；夹爪能力改由 drone-sim 单测覆盖。
+#   故原脚本的 /spray/gripper 断言已移除；夹爪的**机载**能力由本脚本的
+#   配送 START（MAV_CMD 30084 GRIPPER_CONTROL）覆盖。
+#
+# ⚠️ drone-sim 必须带 --actuators：SprayPump / Gripper 默认不注入
+#   （VirtualDrone 构造器 actuatorsEnabled=false ⇒ 两者为 null），
+#   于是 30083/30084/30085 的处理器一律返回 MAV_RESULT_UNSUPPORTED、回执 result=-1。
+#   本脚本**要求**拿到肯定回执，把"漏了 --actuators"变成响亮的失败而不是一条告警 ——
+#   那正是演示时"命令被拒"却无人察觉的由来。
 #
 # 便携性：JSON 解析用 python3（CI 自带），不依赖 jq。
 set -euo pipefail
@@ -81,19 +88,16 @@ step '控制喷洒任务 START'
 START_R=$(curl -s --max-time 10 -X POST -H 'Content-Type: application/json' -d '{"action":"START"}' "$BASE/spray/$SPRAY_ID/control" 2>/dev/null || echo '{}')
 echo "   响应: $START_R"
 check "START 返回 results 结构" "echo '$START_R' | grep -q 'results'"
-# 机载回执：result=-1 表示 MAVLink 命令被拒（drone-sim 未实现该 MAV_CMD 时恒为此值）。
-# REST 侧契约是"命令已下发并拿到机载回执"，故以 results 存在且带 result 键为通过；
-# 机载是否接受属于 FR-14 的机载实现范畴，sim 未实现时只告警不判失败。
-if echo "$START_R" | grep -q '"result":-1'; then
-  echo "   ⚠️  机载拒收 START（MAV_RESULT!=ACCEPTED，drone-sim 未实现该 MAV_CMD），不判失败"
-else
-  check "START 拿到机载肯定回执" "echo '$START_R' | grep -vq '\"result\":-1'"
-fi
+# 机载回执必须为肯定。drone-sim 带 --actuators 时 SprayPump 已注入，
+# handleSprayControl 才返回 MAV_RESULT_ACCEPTED；result=-1 说明执行机构没装配
+# （CI 与本地脚本均已确保 --actuators），这是必须暴露的配置问题而非可容忍的噪声。
+check "START 拿到机载肯定回执（需 drone-sim 带 --actuators）" "echo '$START_R' | grep -vq '\"result\":-1'"
 
 step '控制喷洒任务 STOP'
 STOP_R=$(curl -s --max-time 10 -X POST -H 'Content-Type: application/json' -d '{"action":"STOP"}' "$BASE/spray/$SPRAY_ID/control" 2>/dev/null || echo '{}')
 echo "   响应: $STOP_R"
 check "STOP 返回 results 结构" "echo '$STOP_R' | grep -q 'results'"
+check "STOP 拿到机载肯定回执（需 drone-sim 带 --actuators）" "echo '$STOP_R' | grep -vq '\"result\":-1'"
 
 # ---- 4. 创建配送任务 ----
 step '创建配送任务 (2 站点，各带 1 件负载)'
@@ -132,21 +136,25 @@ echo "   响应: $PQ"
 PQ_SYSID=$(jqget "$PQ" 'd.get("sysid")')
 check "负载上报目标 sysid=1" "[ '$PQ_SYSID' = '1' ]"
 PQ_ST=$(jqget "$PQ" 'd.get("status")')
-# drone-sim 在线时应为 ok；离线时后端返回 status=error（不判失败，只记录）
-if [ "$PQ_ST" = 'ok' ]; then
-  echo "   ✅ 负载上报已被机载接受 (status=ok)"
-else
-  echo "   ⚠️  负载上报 status=$PQ_ST（机载未确认，非断言失败）"
-fi
+# 同上：payload query 的处理器 handlePayloadQuery 也要求 gripper 已注入，
+# 否则恒回 error。status=ok 才算机载真的回了 PAYLOAD_STATUS(30006)。
+check "机载接受负载上报并回执（需 drone-sim 带 --actuators）" "[ '$PQ_ST' = 'ok' ]"
 
 # ---- 8. 控制配送任务 ----
+step '夹爪复位到 IDLE（GRIPPER_RESET 30084/subcmd=2）'
+# 抓取的前置条件是 state==IDLE；上一轮跑完本脚本后夹爪停在 HOLDING，
+# 直接 START 会被机载正确拒绝（MAV_RESULT_DENIED）。先复位让断言可重复执行，
+# 顺带覆盖 RESET 子命令。
+GRESET=$(curl -s --max-time 10 -X POST -H 'Content-Type: application/json' -d '{"action":"RESET"}' "$BASE/delivery/$DEL_ID/control" 2>/dev/null || echo '{}')
+echo "   响应: $GRESET"
+check "夹爪复位返回 results 结构" "echo '$GRESET' | grep -q 'results'"
+check "夹爪复位拿到机载肯定回执（需 drone-sim 带 --actuators）" "echo '$GRESET' | grep -vq '\"result\":-1'"
+
 step '控制配送任务 START'
 DSTART=$(curl -s --max-time 10 -X POST -H 'Content-Type: application/json' -d '{"action":"START"}' "$BASE/delivery/$DEL_ID/control" 2>/dev/null || echo '{}')
 echo "   响应: $DSTART"
 check "配送 START 返回 results 结构" "echo '$DSTART' | grep -q 'results'"
-if echo "$DSTART" | grep -q '"result":-1'; then
-  echo "   ⚠️  机载拒收配送 START（MAV_RESULT!=ACCEPTED，drone-sim 未实现该 MAV_CMD），不判失败"
-fi
+check "配送 START 拿到机载肯定回执（需 drone-sim 带 --actuators）" "echo '$DSTART' | grep -vq '\"result\":-1'"
 
 # ---- 收尾 ----
 if [ "$FAIL" = '0' ]; then
