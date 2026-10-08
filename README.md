@@ -720,12 +720,12 @@ NexusSky/
 | `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4492** |
+| **总计** | **4497** |
 =======
 | `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4492** |
+| **总计** | **4497** |
 >>>>>>> origin/master
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
@@ -821,6 +821,9 @@ NexusSky/
 - **行业航线模板（F3）的几何口径**：局部平面近似（<10km 区域误差厘米级）；弓字形无
   最小转弯优化；岸线偏移是顶点法向近似；杆塔号→坐标由请求方传入（真实台账/GIS 接入
   属生产阶段）。
+- **双栈网关（F5）的 DJI 侧是标记+路由骨架**：DeviceGateway SPI 与协议标记就位，
+  dji-cloud 设备的命令被**明确拒绝**（不静默丢、不假成功）；真实 DJI Cloud API
+  对端（MQTT/HTTPS/WS）接入属生产阶段——与 F2 机巢 mqtt seam 同一诚实口径。
 - **RTK（F6）是 fix_type 上报语义**：协议层（GPS_FIX_TYPE 5/6）+ 展示链路就绪，
   坐标噪声模型未区分 RTK/单点——真实差分改正数接入属生产阶段（需 RTK 基站/网络 RTK）。
 - **缺陷闭环（F4）的复检与去重口径**：复检=真拍一张（复用 F1 captureAndLocate）+ 逐缺陷

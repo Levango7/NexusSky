@@ -32,6 +32,7 @@ public final class DroneViews {
         m.put("relativeAlt", clean(s.relativeAlt));
         m.put("lastHeartbeat", s.lastHeartbeatMs);
         m.put("rtkStatus", s.rtkStatus());   // F6：列表即带 RTK 状态（GCS 徽标数据源）
+        m.put("protocol", s.protocol);        // F5 双栈：设备接入协议（mavlink/dji-cloud）
         return m;
     }
 

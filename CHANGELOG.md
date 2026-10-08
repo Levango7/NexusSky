@@ -4,6 +4,24 @@
 
 ---
 
+## [Unreleased] — F5 多品牌双栈网关：DeviceGateway SPI + 协议标记 + 命令路由（2026-10-08）
+
+> 依据 ROADMAP F5（依赖 C1 协议抽象✅）。反锁定生态位：注册/遥测/命令面只依赖
+> SPI 与快照，新品牌栈实现接口即可接入机队管理。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| F5.1 | **DeviceGateway SPI** | 协议标识 + `send()`——文档化扩展点（单点裁决原则：拦截链在 MAVLink 栈内，路由层不复制校验） |
+| F5.2 | **MAVLink 栈适配** | `MavlinkDeviceGateway` 薄适配 `DroneCommandService`（拦截链/重试/ACK 全量复用，既有调用方零改道） |
+| F5.3 | **协议标记** | `DroneSnapshot.protocol`（缺省 mavlink，既有注册路径零变化）+ summary 视图暴露 |
+| F5.4 | **CommandRouter** | 按设备协议路由，三态语义全如实：有栈委托 / 无栈拒绝（WARN）/ 未知拒绝——**dji-cloud 标记就位但栈未接入，命令明确拒绝不静默丢**（与 F2 transport=mqtt seam 同一诚实口径） |
+| F5.5 | **测试** | CommandRouterTest 5 例，含协议中立断言：**dji-cloud 设备的命令不许从 MAVLink 栈漏出** |
+
+**诚实边界**：DJI Cloud API 栈的真实对端（MQTT 物模型/HTTPS/WebSocket）属生产阶段；
+本轮交付的是 SPI + 路由骨架 + 协议标记（含 dji 设备命令的明确拒绝语义），非假接线。
+
+---
+
 ## [Unreleased] — F6 RTK 高精度链路：精度等级字段 + 固定/浮点解状态上报（2026-10-08）
 
 > 依据 ROADMAP F6（依赖 Baseline 遥测✅）。口径：MAVLink GPS_FIX_TYPE
@@ -238,7 +256,7 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
    - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
      （模拟"裸写开关被吞 token"）。
 
-4. **计数基线 4380 → 4492（drone-sim 1397 → 1405）**
+4. **计数基线 4380 → 4497（drone-sim 1397 → 1405）**
    - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
 
 ---

@@ -17,6 +17,8 @@ public final class DroneSnapshot {
     // --- heartbeat / liveness ---
     public volatile long lastHeartbeatMs;      // epoch ms of last HEARTBEAT
     public volatile boolean online;
+    /** 设备接入协议（F5 双栈）：mavlink（缺省，既有注册路径）/ dji-cloud（Cloud API 栈标记）。 */
+    public volatile String protocol = "mavlink";
     public volatile int customMode;             // HEARTBEAT custom_mode (PX4 nav state)
     public volatile int baseMode;              // MAV_MODE_FLAG bits
     public volatile int systemStatus;          // MAV_STATE
