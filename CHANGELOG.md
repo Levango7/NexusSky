@@ -4,6 +4,24 @@
 
 ---
 
+## [Unreleased] — F6 RTK 高精度链路：精度等级字段 + 固定/浮点解状态上报（2026-10-08）
+
+> 依据 ROADMAP F6（依赖 Baseline 遥测✅）。口径：MAVLink GPS_FIX_TYPE
+> （3=3D_FIX 单点 / 5=RTK_FLOAT 浮点解 / 6=RTK_FIXED 固定解，PX4 同口径）。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| F6.1 | drone-sim | `--rtk none|fixed|float`（缺省 none 保持既有 3D_FIX 不变；非法值 WARN+降级 none）；GPS_RAW_INT.fix_type 按模式发 3/5/6（GPS 丢失场景照旧置 0） |
+| F6.2 | cloud-backend | `DroneSnapshot.rtkStatus()` 派生标签（RTK_FIXED/RTK_FLOAT/STANDALONE/NONE）；summary 与 status 视图均暴露（列表与 WS 帧同源） |
+| F6.3 | GCS | DroneList RTK 徽标（固定解绿 RTK·F / 浮点解黄 RTK·f，title 注精度量级） |
+| F6.4 | e2e | `scripts/e2e-rtk.ps1`：三机并行（fixed/float/缺省）→ rtkStatus 三态断言——ALL PASS |
+
+**测试**：DroneSnapshotRtkTest(4) + SimConfigRtkTest(3)；e2e 三机三态。
+**诚实边界**：RTK 是 **fix_type 上报语义**（协议层就绪），坐标噪声模型未区分 RTK/单点
+（真实差分改正数接入属生产阶段——需要 RTK 基站/网络 RTK 数据源）。
+
+---
+
 ## [Unreleased] — F3 行业航线库：四类模板生成器 + GCS 模板面板（2026-10-08）
 
 > 依据 ROADMAP F3（依赖 Baseline 航线规划✅）。模板 = 纯函数几何生成器
@@ -220,7 +238,7 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
    - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
      （模拟"裸写开关被吞 token"）。
 
-4. **计数基线 4380 → 4485（drone-sim 1397 → 1405）**
+4. **计数基线 4380 → 4492（drone-sim 1397 → 1405）**
    - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
 
 ---

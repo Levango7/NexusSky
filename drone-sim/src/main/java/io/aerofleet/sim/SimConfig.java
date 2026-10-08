@@ -48,6 +48,8 @@ public final class SimConfig {
     public final String targets;
     /** Ground-truth HTTP port (0 = disabled). */
     public final int httpPort;
+    /** RTK 模式（F6）：none=单点(3D_FIX) / fixed=RTK 固定解 / float=RTK 浮点解。 */
+    public final String rtkMode;
     // ---- M0b 环境气象参数（FR-01/03/05）----
     /** 环境模型启用开关（--env）。false 时 VirtualDrone.envModel=null，既有行为不变（DFX 4.5）。 */
     public final boolean envEnabled;
@@ -133,6 +135,7 @@ public final class SimConfig {
     private SimConfig(int port, int sysid, double lat, double lon, double speed,
                       String name, String scenario, String bindIp, boolean failsafe,
                       String terrain, String fence, String targets, int httpPort,
+                      String rtkMode,
                       boolean envEnabled, String envScenario, long envSeed,
                       double envWindMax, double[] envTempRange,
                       boolean actuatorsEnabled, double sprayCapacity,
@@ -165,6 +168,7 @@ public final class SimConfig {
         this.fence = fence;
         this.targets = targets;
         this.httpPort = httpPort;
+        this.rtkMode = rtkMode;
         this.envEnabled = envEnabled;
         this.envScenario = envScenario;
         this.envSeed = envSeed;
@@ -207,7 +211,7 @@ public final class SimConfig {
     /** Defaults: Shenzhen University Town area, 8 m/s cruise, port 14540, sysid 1. */
     public static SimConfig defaults() {
         return new SimConfig(14540, 1, 22.5907, 113.9345, 8.0, "AF-SIM-01",
-                "none", "0.0.0.0", true, "flat", "off", "none", 0,
+                "none", "0.0.0.0", true, "flat", "off", "none", 0, "none",
                 false, "calm", 0, 50, new double[]{-40, 55},
                 false, 20.0, 2000.0, 10.0, 6.0,
                 false, false, 42L,
@@ -240,6 +244,7 @@ public final class SimConfig {
         String fence = "off";
         String targets = "none";
         int httpPort = 0;
+        String rtkMode = "none";
         // M0b 环境气象参数默认值（FR-01/03/05）
         boolean envEnabled = false;
         String envScenario = "calm";
@@ -343,6 +348,13 @@ public final class SimConfig {
                     case "fence" -> fence = value;
                     case "targets" -> targets = value;
                     case "http-port" -> httpPort = Integer.parseInt(value);
+                    case "rtk" -> {
+                        if (!value.equals("none") && !value.equals("fixed") && !value.equals("float")) {
+                            // 非法值按格式错误路径处理（WARN + 保留默认），与数值参数同纪律
+                            throw new NumberFormatException();
+                        }
+                        rtkMode = value;
+                    }
                     // M0b 环境气象参数（FR-01/03/05）
                     case "env" -> envEnabled = true;
                     case "env-scenario" -> envScenario = value;  // EnvScenario.of 校验在 VirtualDrone 构造期
@@ -464,6 +476,7 @@ public final class SimConfig {
         }
         return new SimConfig(port, sysid, lat, lon, speed, name, scenario, bindIp,
                 failsafe, terrain, fence, targets, httpPort,
+                rtkMode,
                 envEnabled, envScenario, envSeed, envWindMax, envTempRange,
                 actuatorsEnabled, sprayCapacity, sprayRateMax, gripperPayloadMax,
                 sprayCrosswindMax,

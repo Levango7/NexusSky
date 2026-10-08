@@ -1774,8 +1774,20 @@ public final class VirtualDrone implements AutoCloseable {
                 lost ? (short) 9999 : 80,
                 (int) Math.round(physics.groundSpeed() * 100),
                 (int) Math.round(Math.toDegrees(DronePhysics.normalizeAngle(physics.yawRad())) * 100),
-                lost ? 0 : 3,
+                lost ? 0 : rtkFixType(),
                 lost ? 0 : 12, 0));
+    }
+
+    /**
+     * F6 RTK：GPS_FIX_TYPE 口径——3=3D_FIX(单点) / 5=RTK_FLOAT / 6=RTK_FIXED
+     *（MAVLink common.xml；PX4 同口径）。--rtk none 时保持既有 3D_FIX 不变。
+     */
+    private int rtkFixType() {
+        return switch (config.rtkMode) {
+            case "fixed" -> 6;
+            case "float" -> 5;
+            default -> 3;
+        };
     }
 
     private void sendSystemTime() throws IOException {

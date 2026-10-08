@@ -117,9 +117,9 @@ NexusSky（天枢）是一套面向无人机集群的**协同指挥调度云平�
 | 容器化部署 | Docker + docker-compose + K8s + Helm |
 | CI/CD | GitHub Actions + 集成测试自动化 |
 <<<<<<< HEAD
-| 测试覆盖 | 4485 单元测试，0 失败 |
+| 测试覆盖 | 4492 单元测试，0 失败 |
 =======
-| 测试覆盖 | 4485 单元测试，0 失败 |
+| 测试覆盖 | 4492 单元测试，0 失败 |
 >>>>>>> origin/master
 | 代码审查 | 6 轮代码审查，累计修复 52 个问题（4 Critical + 12 Major + 5 Minor + 11 P1 + 20 新增） |
 
@@ -227,9 +227,9 @@ NexusSky（天枢）是一套面向无人机集群的**协同指挥调度云平�
 |---|---|
 | MAVLink 消息支持 | 31 标准 + 51 扩展 = 82 条 |
 <<<<<<< HEAD
-| 单元测试覆盖 | 4485 tests, 0 failures |
+| 单元测试覆盖 | 4492 tests, 0 failures |
 =======
-| 单元测试覆盖 | 4485 tests, 0 failures |
+| 单元测试覆盖 | 4492 tests, 0 failures |
 >>>>>>> origin/master
 | 模块数 | 5 个 Maven 模块 |
 | 里程碑 | 13 个（M0a-M13；M11 未接线、M12/M13 部分接线，见 ROADMAP） |

@@ -31,6 +31,7 @@ public final class DroneViews {
         m.put("lon", clean(s.lon));
         m.put("relativeAlt", clean(s.relativeAlt));
         m.put("lastHeartbeat", s.lastHeartbeatMs);
+        m.put("rtkStatus", s.rtkStatus());   // F6：列表即带 RTK 状态（GCS 徽标数据源）
         return m;
     }
 
@@ -91,6 +92,7 @@ public final class DroneViews {
         m.put("battery", s.battery);
         m.put("online", s.online);
         m.put("rssiDbm", clean(s.rssiDbm));
+        m.put("rtkStatus", s.rtkStatus());   // F6：NONE/STANDALONE/RTK_FLOAT/RTK_FIXED
         return m;
     }
 
