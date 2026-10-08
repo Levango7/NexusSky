@@ -128,6 +128,9 @@ final class LicenseModuleMap {
         // 行业航线库（F3）：杆塔/光伏/管线/河湖四类模板，与 inspection/mapping 同属
         // 任务作业范畴——归 fleet 档。
         m.put("/api/v1/route-templates", FLEET);
+        // 运营报表与单位经济（E6）：架次/时长/里程/能耗/成本核算——机队运营管理域，
+        // 归 fleet 档（物流/植保结算是 fleet 场景的账面延伸）。
+        m.put("/api/v1/operations", FLEET);
         // 机巢管控（F2）：无人值守定时作业是调度作业域的延伸（定时巡检 = scheduling
         // 的无人化），机巢是作业基础设施而非应急/重资产链路——归 fleet 档。
         // 定价文档未单列机巢，此为按语义的首个归类，档位调整属产品决策。
