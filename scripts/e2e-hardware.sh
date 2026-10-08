@@ -18,9 +18,10 @@
 #   原脚本的 aero/kinematics 断言指向不存在的端点，已移除。动力侧改用真实存在的
 #   /rotor/config + /rotor/telemetry 覆盖。
 #
-# 关于 LiDAR/IMU：drone-sim 默认不注入 LiDARSource/ImuSource（VirtualDrone 字段初值为 null，
-#   DroneSimMain 未装配），因此这两个端点在 CI 默认返回 404。此时只断言"端点契约正确"，
-#   不把 404 判为失败——真实载荷数据需硬件或显式装配 Source 后才可断言。
+# 关于 LiDAR/IMU：drone-sim 需带 --lidar / --imu 才会注入 Simulated*Source。
+#   不注入时端点返回 404 no LiDAR/IMU data —— 符合契约，但演示时这两路传感器没有数据。
+#   本脚本**要求** 200 并校验字段：CI 与本地验证均已带这两个 flag，
+#   404 应被视为配置问题的信号，而不是"按契约允许"地放过。
 #
 # 便携性：JSON 解析用 python3（CI 自带），不依赖 jq。
 set -euo pipefail
@@ -110,41 +111,45 @@ TT=$(jqget "$RT" 'd.get("thrust")')
 check "遥测包含 thrust 字段" "[ -n '$TT' ] && [ '$TT' != 'None' ]"
 
 # ---- 6. LiDAR 数据 ----
-# drone-sim 默认不注入 LiDARSource → 404。按契约区分：有数据则校验字段，无数据则记 skip。
-step '查询 LiDAR 数据'
+# drone-sim 带 --lidar 时 SimulatedLiDARSource 已注入 ⇒ 端点返回 200 + 字段；
+# 未带则 404（符合契约，但演示时这路传感器没有数据）。本脚本**要求** 200：
+# CI 与本地验证均已带 --lidar，404 属配置问题的信号，不该被当成"契约允许"放过。
+step '查询 LiDAR 数据（需 drone-sim 带 --lidar）'
 LD_CODE=$(httpcode "$BASE/lidar/data/$SYSID")
 LD=$(curl -s --max-time 10 "$BASE/lidar/data/$SYSID" 2>/dev/null || echo '{}')
 echo "   HTTP $LD_CODE 响应: $LD"
+check "LiDAR 端点返回 200（未装配时为 404，需 drone-sim 带 --lidar）" "[ '$LD_CODE' = '200' ]"
 if [ "$LD_CODE" = '200' ]; then
   ND=$(jqget "$LD" 'd.get("nearestDistance")')
   check "LiDAR 包含 nearestDistance 字段" "[ -n '$ND' ] && [ '$ND' != 'None' ]"
   PC=$(jqget "$LD" 'd.get("pointCount")')
   check "LiDAR 包含 pointCount 字段" "[ -n '$PC' ] && [ '$PC' != 'None' ]"
-elif [ "$LD_CODE" = '404' ]; then
-  check "无数据时返回 404" "echo '$LD' | grep -qi 'no LiDAR data'"
-  skip "LiDAR 无载荷数据（drone-sim 未注入 LiDARSource），字段断言跳过"
+  check "pointCount > 0（合成障碍场非空，非零值占位）" "[ '${PC:-0}' -gt 0 ] 2>/dev/null"
 else
-  check "LiDAR 端点可达（期望 200 或 404，实得 $LD_CODE）" "false"
+  check "未装配时的 404 契约正确" "echo '$LD' | grep -qi 'no LiDAR data'"
 fi
 
 # ---- 7. IMU 数据 ----
 # 字段是 accelX/accelY/accelZ/gyroX/... 的扁平结构（原脚本误读了嵌套 accel/gyro 对象）
-step '查询 IMU 数据'
+step '查询 IMU 数据（需 drone-sim 带 --imu）'
 IM_CODE=$(httpcode "$BASE/imu/data/$SYSID")
 IM=$(curl -s --max-time 10 "$BASE/imu/data/$SYSID" 2>/dev/null || echo '{}')
 echo "   HTTP $IM_CODE 响应: $IM"
+check "IMU 端点返回 200（未装配时为 404，需 drone-sim 带 --imu）" "[ '$IM_CODE' = '200' ]"
 if [ "$IM_CODE" = '200' ]; then
   AX=$(jqget "$IM" 'd.get("accelX")')
+  AY=$(jqget "$IM" 'd.get("accelY")')
+  AZ=$(jqget "$IM" 'd.get("accelZ")')
   check "IMU 包含 accelX 字段" "[ -n '$AX' ] && [ '$AX' != 'None' ]"
   GX=$(jqget "$IM" 'd.get("gyroX")')
   check "IMU 包含 gyroX 字段" "[ -n '$GX' ] && [ '$GX' != 'None' ]"
   TC2=$(jqget "$IM" 'd.get("tempC")')
   check "IMU 包含 tempC 字段" "[ -n '$TC2' ] && [ '$TC2' != 'None' ]"
-elif [ "$IM_CODE" = '404' ]; then
-  check "无数据时返回 404" "echo '$IM' | grep -qi 'no IMU data'"
-  skip "IMU 无载荷数据（drone-sim 未注入 ImuSource），字段断言跳过"
+  # 加速度合力应≈重力（SimulatedImuSource 从姿态推导比力、含重力）。
+  # 只断言"合力非零"即可排除零值占位，同时不把姿态相关的精确值写死。
+  check "accel 合力非零（含重力，排除零值占位）" "python3 -c \"import math,sys; sys.exit(0 if abs(math.sqrt(float('$AX')**2+float('$AY')**2+float('$AZ')**2))>1e-6 else 1)\" 2>/dev/null"
 else
-  check "IMU 端点可达（期望 200 或 404，实得 $IM_CODE）" "false"
+  check "未装配时的 404 契约正确" "echo '$IM' | grep -qi 'no IMU data'"
 fi
 
 # ---- 收尾 ----

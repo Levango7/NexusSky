@@ -373,6 +373,34 @@ public final class VirtualDrone implements AutoCloseable {
             this.gripper = null;
             this.actuatorsEnabled = false;
         }
+        // M4 传感器装配（FR-21 LiDAR / FR-22 IMU）：与 actuators 同为显式开关。
+        // 不注入时 sendLidarData/sendImuData 的分频块整块跳过 ⇒
+        // cloud-backend 的 /api/v1/lidar/data、/api/v1/imu/data 恒返回 404
+        // "no LiDAR/IMU data" —— 符合端点契约，但演示时这两路传感器没有任何数据。
+        // 2026-10-07 接上：SimulatedLiDARSource / SimulatedImuSource 早已实现且有单测，
+        // 只是从未被构造注入（与夹爪未 enable 同一类"能力在、接线无"缺口）。
+        if (config.lidarEnabled) {
+            // 演示用合成障碍场：正前方 30m / 右前方 15m / 正上方 20m，
+            // 让 LiDAR 点云与最近距离在演示中有可解释的稳定读数。
+            List<SyntheticObstacle> obstacles = List.of(
+                    new SyntheticObstacle(30, 0, 2.0),
+                    new SyntheticObstacle(15, 12, 1.5),
+                    new SyntheticObstacle(20, -8, 1.0));
+            // 障碍物定义在以起飞点为原点的本地 NE 坐标系里，故无人机取原点，
+            // 高度取典型悬停 10m（与 SimulatedLiDARSourceTest 的构造一致）。
+            this.lidarSource = new SimulatedLiDARSource(
+                    obstacles, TerrainModel.flat(), 0.0, 0.0, 10.0);
+            SimLog.info("lidar enabled: synthetic obstacles=" + obstacles.size()
+                    + " (frame origin = takeoff point, alt=10m)");
+        } else {
+            this.lidarSource = null;
+        }
+        if (config.imuEnabled) {
+            this.imuSource = new SimulatedImuSource(physics, config.imuSeed);
+            SimLog.info("imu enabled: seed=" + config.imuSeed);
+        } else {
+            this.imuSource = null;
+        }
         // M5 mesh 路由引擎创建（FR-01）：config.meshEnabled 时创建，否则 null（DFX 4.5 既有行为不变）
         if (config.meshEnabled) {
             this.meshRouter = new MeshRouter(config.sysid, config.meshRouterConfig, transport);

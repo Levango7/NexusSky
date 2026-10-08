@@ -79,6 +79,50 @@
 
 ---
 
+## [Unreleased] — M4 传感器接线：LiDAR/IMU 模拟源早已实现却从未注入（2026-10-07）
+
+紧接上一轮"夹爪从未通电"，本轮是同一类缺口的第二例：能力在、接线无。
+
+1. **LiDAR / IMU 端点在演示中恒无数据（FR-21 / FR-22）**
+   - **性质**：`SimulatedLiDARSource` 与 `SimulatedImuSource` 早已实现且各有独立单测
+     （`SimulatedLiDARSourceTest` / `SimulatedImuSourceTest`），
+     `VirtualDrone.setLidarSource` / `setImuSource` 注入点也都在，
+     `sendLidarData` / `sendImuData` 的分频块与消息构造同样齐全。
+     **但没有任何地方构造并注入它们**，`SimConfig` 也没有对应开关。
+   - **后果**：drone-sim 无论怎么启动，`/api/v1/lidar/data` 与 `/api/v1/imu/data`
+     都恒返回 404 `no LiDAR/IMU data`。而 404 **符合端点契约**，
+     e2e 此前也只把它记为"按契约允许的 skip" ⇒ **没有任何信号会变红**，
+     演示时这两路传感器则完全没有数据。
+   - **修**：`SimConfig` 新增 `--lidar` / `--imu` / `--imu-seed`（裸写布尔开关，
+     已登记进 `BOOLEAN_FLAGS`）；`VirtualDrone` 在对应配置为真时构造并注入模拟源。
+     仍与 `--actuators` 同为**显式装配**语义 —— 缺省不注入，既有行为不变。
+   - LiDAR 采用以起飞点为原点的本地 NE 坐标系，正前方 30m / 右前 15m / 上方 20m
+     三颗合成障碍，使演示读数稳定可解释（非随机数）。
+
+2. **CI 与本地一律带 `--lidar --imu`，e2e-hardware 从"接受 404"改为"要求 200"**
+   - 与上一轮 `--actuators` 同一处置：404 是配置问题的信号，被"契约允许"放过
+     就等于把"演示时传感器没数据"藏起来。
+   - 新增断言并实测通过的读数：LiDAR `nearestDistance≈21.66m`、`pointCount=28`；
+     IMU `accelZ≈9.82 m/s²`（水平悬停含重力，与 `SimulatedImuSourceTest` 同口径），
+     另断言 `pointCount>0` 与"accel 合力非零"，以排除**零值占位**——
+     仅断言"字段存在"无法区分"真实数据"与"全是 0.0 的假数据"。
+   - 硬件腿 16 → **23 项断言全绿**；三腿合计 **80 项**（spray 26 / hardware 23 /
+     emergency 31），连跑两次一致。
+
+3. **新增 `SensorActuatorWiringTest`（8 例）**
+   - 钉住：缺省两开关皆关（既有行为不变）、裸写即生效且**不吞下一个 token**
+     （`--lidar --imu` 若被吞会表现为"偶尔不生效"，极难排查）、
+     两开关互不干扰、`--imu-seed` 默认 42 且可覆盖。
+   - 并守住模拟源本身产出的是**真实数据**：有障碍时点云非空、最近距离有限正数；
+     空场景为 `MAX_VALUE`（与有障碍可区分）；IMU 比力合力 ≈9.8（含重力）。
+   - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
+     （模拟"裸写开关被吞 token"）。
+
+4. **计数基线 4380 → 4388（drone-sim 1397 → 1405）**
+   - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
+
+---
+
 ## [Unreleased] — 机载 MAV_CMD 实装：夹爪从未通电导致投递链路恒被拒（2026-10-07）
 
 上一轮把 e2e 三腿转硬门禁时，喷洒腿里留着三条"机载拒收只告警"的宽容断言。
