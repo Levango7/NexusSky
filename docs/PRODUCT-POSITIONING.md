@@ -381,6 +381,17 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
 存量客户升级需走一次重签发流程，不要试图给旧集合加兼容映射——旧集合里
 `network` 含 mesh、`emergency` 含 M9 编排，与新边界不再等价。
 
+重签发前先用只读预检工具确认目标档位（不需要私钥）：
+
+```bash
+java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+     io.aerofleet.cloud.license.LicenseMigrationPreflight \
+     --license-key-file 老license.key --public-key-file 公钥.key
+```
+
+它会输出"是否需重签 + 应重签成哪一档 + 可直接粘贴的签发命令"，
+退出码 `0`=无需重签、`1`=需重签、`2`=用法错误。详见 README「许可与商业授权」章。
+
 ### 5.2 定制开发
 
 | 类型 | 计价方式 | 单价区间 |

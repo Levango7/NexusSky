@@ -30,6 +30,64 @@
 
 ---
 
+## [Unreleased] — 存量 license 重签发预检工具 + 修档位模块顺序不确定（2026-10-07）
+
+上一轮落地了 BREAKING CHANGE 的档位拆分，但**只交付了"会坏"，没交付"怎么修"**：
+部署时运维只能看到一整段"模块集合不对应任何可售档位"，拿不到"该重签成哪一档"。
+本轮补上从诊断到签发的闭环。
+
+1. **新增 `LicenseMigrationPreflight`（只读迁移预检 CLI）**
+   - 读入一把 license key → 验签 → 解析原模块集合 → 打印「是否需重签 / 应重签成哪档 /
+     **可直接粘贴的签发命令**」，并列出三档模块集合供人工比对差异。
+   - **不需要私钥**，也不签发任何东西；私钥只在真正执行 `LicenseIssuer` 时才需要。
+     提供 `--public-key-file` 才验签；不提供则跳过并**显式告警**（结论仅供参考，
+     不能证明该 key 确由本方签发）——不把"没验"说成"验过"。
+   - 退出码：`0`=无需重签发、`1`=需重签发或 key 无法解析、`2`=用法/IO 错误。
+   - **为什么不走 `LicenseService` 构造器**：构造器本身就因非档位组合 fail-closed 抛
+     `IllegalStateException`——正是要诊断的那个情况。工具只复用 `LicenseSigner.verify`
+     与 `LicenseTier`，因此能在"启动必然失败"的前提下把信息取出来。
+   - 对含未知模块名的集合**不猜档位**（返回 null 并要求人工裁决）——签发侧本就会拒绝，
+     瞎猜只会给出一条错误的签发命令。
+   - 新增 `LicenseMigrationPreflightTest`（11 例）守卫判定与输出，其中三条是端到端
+     跑 `run()` 抓 stdout：重签建议含可粘贴命令、当前档位报告"无需重签"、
+     残缺 key 明确排除"这是模块拆分问题"（避免把运维引向错误方向）。
+
+2. **修 `LicenseTier.modulesOf` 的迭代顺序不确定（影响所有面向人的输出）**
+   - 现象：`Set.copyOf(...)` 返回的是**无序**不可变集，元素顺序由 hash 分布决定，
+     同一档位两次运行可能给出不同顺序。表现为迁移预检打印的
+     `--modules core,fleet,mesh,orch` 时而变成 `orch,core,fleet,mesh`。
+   - 这与 `LicenseTier` 类注释自述的意图直接矛盾——注释写着"用 `LinkedHashSet`
+     保证迭代顺序稳定（便于日志与测试断言可读）"，而 `build()` 里的 `Set.copyOf`
+     恰恰把这个意图丢掉了。
+   - 修：`build()` 与 `modulesOf` 改用 `Collections.unmodifiableSet(LinkedHashSet)`
+     保留声明顺序。**签名确定性不受影响**（`LicenseSigner.serializeForSigning`
+     已对 `modules` 按字典序固定，与此处无关）。
+   - 变异验证：改回 `Set.copyOf` 后 `moduleIterationOrderIsStable` 与
+     `mainPrintsActionableReissueAdvice` 两例立即转红 ⇒ 断言真的咬住了顺序。
+
+3. **两处只在真跑 CLI 时才暴露的输出缺陷（已修并锁进测试）**
+   - `原因: 未知档位: ?` —— 原先把 `mismatchOf` 拿一个占位档位名 `"?"` 去调，
+     输出对运维毫无意义。改为说明"该集合与三档都不相等"并列出三档模块清单。
+   - 报告中间夹着一行 `INFO LicenseSigner 初始化（生产模式）` —— 文本报告里冒日志行
+     会破坏可读性。改为临时把该 logger 抬到 `OFF`（logback 专属 API，
+     非 logback 绑定时安静降级为不静音），构造完立即恢复级别。
+
+4. **发现一个与本轮改动无关的既有 flaky（已量化，未擅自修改）**
+   - `TaskAssignmentServiceTest.assignTasksGaCompletesWithin100ms` 是墙钟断言
+     （GA 分配 10 请求须 <100ms）。实测本机红率：**改动后 1/10 红、干净树 2/10 红**，
+     且该类整体耗时在 3.9s–7.4s 间波动 ⇒ 100ms 预算在本机偏紧，属既有 flaky。
+   - 排查结论与本轮无关：`scheduling` 包对 `license` 包**零引用**，
+     `LicenseTier.modulesOf` 的调用方仅 `LicenseService`/`LicenseSigner`/本预检工具。
+   - **未改**：调预算属于性能基线决策，需负责人拍板；本轮只把它记下来。
+     提交前的全量验证用 `-Dtest=!…#assignTasksGaCompletesWithin100ms` 排除该用例，
+     并另跑一次不排除的全量确认 BUILD SUCCESS。
+
+5. **计数基线 4359 → 4370（cloud-backend 2363 → 2374）**
+   - 新增 `LicenseMigrationPreflightTest` 11 例；`check-test-count-docs.py` 全绿，
+     22 处文档声称同步。
+
+---
+
 ## [Unreleased] — 定价档位裁决落地：基础版扎实（模块 5→7 拆分）+ 三腿 e2e 转硬门禁（2026-10-07）
 
 用户裁定「**基础版需要扎实**」，即基础版必须真能撑起一次交付。本轮落地该裁决，

@@ -716,10 +716,10 @@ NexusSky/
 | `mavlink-core` | 457 |
 | `drone-sim` | 1391 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2363 |
+| `cloud-backend` | 2374 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4359** |
+| **总计** | **4370** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -1086,6 +1086,52 @@ NexusSky/
 >    边界由 `LicenseModuleSplitMigrationTest`（7 例）钉死。
 >    ⚠️ **升级需重签发**：模块名进签名载荷，拆分前签发的 license 不再对应任何档位。
 >    详见 `docs/PRODUCT-POSITIONING.md` §5.1.1（唯一对照入口）。
+
+### 存量 license 迁移：重签发前先跑预检
+
+模块拆分是 BREAKING CHANGE。部署时只会看到一整段"模块集合不对应任何可售档位"的
+报错，**它不告诉你该重签成哪一档**。`LicenseMigrationPreflight` 就是补这个缺口的
+只读诊断工具——不需要私钥，也不签发任何东西：
+
+```bash
+java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+     io.aerofleet.cloud.license.LicenseMigrationPreflight \
+     --license-key-file 老license.key \
+     --public-key-file 公钥.key
+```
+
+输出示例：
+
+```
+原模块集合      : core, fleet
+验签            : ✅ 通过
+
+❌ 结论：不对应任何可售档位 —— 这份 license 必须重签发
+
+   原因: 该模块集合与三个可售档位都不相等
+         基础版 = core,fleet,mesh,orch
+         应急版 = core,fleet,mesh,orch,emergency
+         完整版 = core,fleet,mesh,orch,emergency,network,advanced
+
+   建议重签档位: 基础版 (basic)
+   签发命令（需私钥；请按实际租户与有效期替换）:
+     java -cp cloud-backend.jar io.aerofleet.cloud.license.LicenseIssuer \
+        --private-key-file <私钥文件> --tenant-id acme --issued-to "Acme Drone Co" \
+        --max-devices 50 --expiry 2027-01-01T00:00:00Z \
+        --modules core,fleet,mesh,orch
+```
+
+要点：
+
+- **不需要私钥**（私钥只在真正执行 `LicenseIssuer` 时才需要）。提供 `--public-key-file`
+  才会验签；不提供则跳过并**显式告警**，此时结论仅供参考。
+- 退出码：`0` = 无需重签发；`1` = 需重签发或 key 无法解析；`2` = 用法/IO 错误。
+- 三档的模块集合会一并列出，便于人工核对差异。
+- 报告里那句"不要给旧集合加兼容映射"是认真的：旧集合里 `network` 含 mesh、
+  `emergency` 含 M9 编排，与新边界不再等价。
+
+`LicenseMigrationPreflightTest`（11 例）守卫其判定与输出，含"三档顺序稳定"与
+"输出不得混入 SLF4J 日志行"两条。
 
 - **未授权行为**：复制、分发、转售、反向工程、移除授权校验逻辑、超授权范围
   使用等，均属违约，许可方保留追究法律责任的权利。
