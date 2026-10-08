@@ -4,6 +4,38 @@
 
 ---
 
+## [Unreleased] — F4 缺陷报告与工单闭环：领域模型/工单状态机/复检闭环/报告导出（2026-10-08）
+
+> 依据 ROADMAP F4（依赖 F1✅）。对表三峡"统一管控、统筹调度、智能诊断、闭环消缺"——
+> 复检（智能诊断）用 F1 既有拍照链路真拍一张 + 逐缺陷 10m 比对，不造假结果。
+
+### 交付清单
+
+| # | 交付 | 内容 |
+|---|---|---|
+| F4.1 | **持久化** | V24 迁移 3 表：defects / work_orders / work_order_defects（BIGINT 主外键，对齐实体 Long——F2 的 V23 在 Pass C 已踩过 INTEGER↔Long 的 validate 坑） |
+| F4.2 | **缺陷领域** | 从拍照结果自动晋升（conf≥0.6 可配，纯旁路吞异常）或人工立案（note 必填）；**10m 同 kind 去重锚点**（复现只更新 lastSeen/confidence 不重复立案）；severity 按 confidence 分档（0.9→P1/0.75→P2/其余 P3） |
+| F4.3 | **工单状态机** | OPEN→DISPATCHED→IN_PROGRESS→RESOLVED→VERIFIED；复检命中→REOPENED 回流程；任意未终态可 CANCEL（记原因）；RESOLVED 也可取消（测试抓出状态机漏配后修正）；终态封死 |
+| F4.4 | **复检闭环** | POST /work-orders/{id}/verify {sysid} → 真拍一张（复用 captureAndLocate）→ 逐缺陷比对 → 全未命中 VERIFIED/有命中 REOPENED；拍照腿失败如实 502 |
+| F4.5 | **报告导出** | GET /defects/report?format=json|csv|md——缺陷清单 + 工单闭环统计 + 复检通过率（分母零 null，F1 口径）；PDF 属渲染层不在本轮 |
+| F4.6 | **GCS 面板** | DefectPanel（tab 缺陷工单）：缺陷列表（严重度色标/勾选建单）+ 工单流转按钮 + 复检验证 + 报告下载 |
+| F4.7 | **e2e** | `scripts/e2e-defect.ps1`：真飞拍照→自动晋升（2 条 P1）→去重→建单→流转→非法转移 409→复检 REOPENED→报告三格式，全链 ALL PASS |
+
+### 顺带修复（F1 遗留真缺陷）
+
+**truth 分支 detection 缺 confidence 键**：CaptureService 的 truth（默认检测源）分支直接构造
+detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision-source/external
+分支经 locateAndScore 有补）——F1 的 capture 响应在默认源下一直没有 confidence 字段，F4 的
+自动晋升依赖它才暴露。修为 confidence=1.0（投影真值语义，与 ProjectionVisionSource.detect 一致）。
+
+### 已知边界
+
+- 复检要求托管机已飞临缺陷点（派飞属运维职责，工单不驱动飞控）；
+- 工单"处置"是流程态，不含飞控指令；
+- 10m 去重与复检比对是同一口径的空间近似。
+
+---
+
 ## [Unreleased] — CI：maven 缓存键只掺 pom 不掺工具链，master 与全部 PR 被冻红数小时（2026-10-08）
 
 - **现象**：`Warm Maven Cache` 自 2026-10-07 15:53Z 起**确定性**判红 —— master run `37647669688`
@@ -164,7 +196,7 @@
    - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
      （模拟"裸写开关被吞 token"）。
 
-4. **计数基线 4380 → 4388（drone-sim 1397 → 1405）**
+4. **计数基线 4380 → 4473（drone-sim 1397 → 1405）**
    - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
 
 ---

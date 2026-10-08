@@ -59,6 +59,7 @@ public class CaptureService {
             .connectTimeout(Duration.ofSeconds(2)).build();
     /** CV 评测指标层（F1）：拍摄主路径的纯旁路（spec N3）。 */
     private final CvEvalService eval;
+    private final io.aerofleet.cloud.defect.DefectService defectService;
 
     /** Ground-truth HTTP base of the drone-sim instance (properties-configurable). */
     private final String simTruthBase;
@@ -76,6 +77,7 @@ public class CaptureService {
                           GeolocationSolver solver,
                           ObjectMapper objectMapper,
                           CvEvalService eval,
+                          io.aerofleet.cloud.defect.DefectService defectService,
                           org.springframework.beans.factory.ObjectProvider<ExternalVisionSource> externalSourceProvider,
                           @Value("${aerofleet.sim-truth-base:http://127.0.0.1:18080}") String simTruthBase,
                           @Value("${aerofleet.vision.source:truth}") String source) {
@@ -84,6 +86,7 @@ public class CaptureService {
         this.solver = solver;
         this.mapper = objectMapper;
         this.eval = eval;
+        this.defectService = defectService;
         this.simTruthBase = simTruthBase;
         this.externalSource = externalSourceProvider.getIfAvailable();
         // source=external 但条件 Bean 缺失（endpoint 未配置）→ 启动时 WARN 回退 truth（spec N2）
@@ -168,6 +171,7 @@ public class CaptureService {
                         camNe, alt, roll, pitch, yaw, gpitch, gyaw);
                 // truth mode knows the target id directly
                 double errM = truthErrorM(t.path("id").asInt(), (double) d.get("lat"), (double) d.get("lon"));
+                d.put("confidence", 1.0);  // 投影真值置信度恒 1.0（与 ProjectionVisionSource.detect 同语义）
                 d.put("id", t.path("id").asInt());
                 d.put("truthErrorM", Math.round(errM * 10) / 10.0);
                 detections.add(d);
@@ -190,6 +194,14 @@ public class CaptureService {
         log.info("captureAndLocate sysid={} frame={} source={} -> {} detection(s) in {} ms",
                 sysid, shot.path("frameSeq").asLong(), batch.source(),
                 detections.size(), Math.round(latencyMs));
+        // F4 自动晋升（纯旁路，spec §2）：立案失败不影响拍照主路径——
+        // onCapture 自吞异常；此前用 ObjectProvider 延迟解析，e2e 实测 getIfAvailable()
+        // 静默返回 null 导致晋升从未执行，改为构造直注入（依赖无环，人工立案已证 Bean 可用）。
+        try {
+            defectService.onCapture(shot.path("frameSeq").asLong(), sysid, detections, null);
+        } catch (Exception e) {
+            log.warn("defect auto-promote bypass failed (ignored): {}", e.getMessage());
+        }
         return out;
     }
 
