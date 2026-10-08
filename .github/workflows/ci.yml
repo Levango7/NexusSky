@@ -226,6 +226,13 @@ jobs:
     needs: [ java, frontend ]
     steps:
       - uses: actions/checkout@v4
+      - name: Self-test the gate itself
+        # 门禁自己也得被证明有效。2026-10-08 master 上 8 份文档带着误提交的
+        # merge 冲突标记，冲突块正好吞掉计数表，于是逐格核对被静默跳过、
+        # 门禁输出"全部一致"。此后 check-test-count-docs.py 增加冲突标记检出，
+        # 这里用离线夹具证明它**真的会红**，防止这道防线自己退化成装饰。
+        # 无需 surefire 产物，放在下载之前跑，坏了能最快暴露。
+        run: python3 scripts/check-test-count-docs.py --self-test
       - name: Download surefire reports
         uses: actions/download-artifact@v4
         with:

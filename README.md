@@ -716,17 +716,10 @@ NexusSky/
 | `mavlink-core` | 462 |
 | `drone-sim` | 1408 |
 | `link-sim` | 117 |
-<<<<<<< HEAD
-| `cloud-backend` | 2470 |
+| `cloud-backend` | 2512 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4526** |
-=======
-| `cloud-backend` | 2470 |
-| `sdk-java` | 12 |
-| `regulator-sim` | 19 |
-| **总计** | **4526** |
->>>>>>> origin/master
+| **总计** | **4530** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -817,7 +810,6 @@ NexusSky/
 
 ## 已知边界（骨架的诚实声明）
 
-<<<<<<< HEAD
 - **行业航线模板（F3）的几何口径**：局部平面近似（<10km 区域误差厘米级）；弓字形无
   最小转弯优化；岸线偏移是顶点法向近似；杆塔号→坐标由请求方传入（真实台账/GIS 接入
   属生产阶段）。
@@ -836,14 +828,13 @@ NexusSky/
 - **缺陷闭环（F4）的复检与去重口径**：复检=真拍一张（复用 F1 captureAndLocate）+ 逐缺陷
   10m 同 kind 比对——**要求托管机已飞临缺陷点**（派飞属运维职责，工单不驱动飞控）；
   去重与复检是同一空间近似口径。报告导出 json/csv/md，PDF 属渲染层不在本轮。
-=======
+
 - **机巢管控（F2）的传输与执行边界**：命令通道交付的是 DJI Cloud API **物模型形状**
   （`{tid,bid,timestamp,method,data}` services 语义）+ 可插拔 `DockGateway`；默认
   `transport=sim`（HTTP 回环到 drone-sim 的 `dock` 子命令），`transport=mqtt` 是生产
   seam（需 EMQX Broker，接口/配置已就位但未联调——与 C1/C2 "对端是模拟器"同一诚实口径）。
   换电是计时仿真（5s + 电量曲线），非机械臂时序；无人值守完成判定用遥测
   （曾起飞 + 相对高度回地），非任务状态机回调。
->>>>>>> origin/master
 - 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
 - 微服务/K8s 暂不引入：模块化单体已够当前规模，拆分时机见设计文档讨论
 - MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（30000–30063）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
