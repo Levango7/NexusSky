@@ -26,7 +26,7 @@
 | `e2e-formation.ps1` | M1 T16 | 3机编队→起飞→队形变换(LINE→CIRCLE)→灯光同步→解散 | ★★★★★ | ★★★★☆ | **编队演示核心**，完整状态机验证，可选 `-IncludeRelay` 中继复用；需构建多个 jar |
 | `e2e-mesh.ps1` | M0a Phase G | 中继转发→命令到达→遥测反向→透明性→异构链路→对端唯一性 | ★★★★★ | ★★★★☆ | **组网演示核心**，支持 auto/simplified/full 三模式，简化版零外部依赖；完整版需多 jar |
 | `e2e-emergency.sh` | 4a + M9 | 布控球发现→报警事件→联动规则→应急指挥(一键响应+评估+总结) | ★★★★★ | ★★★★★ | **应急演示核心**，11 步完整流程（31 项断言），自带演示总结输出，2026-10-07 已转 CI 硬门禁 |
-| `e2e-spray.sh` | M2 | 创建喷洒任务→查询状态→控制(START/STOP)→创建配送任务→查询站点→负载清单→按需负载上报 | ★★★☆☆ | ★★★☆☆ | **喷洒演示基础**，依赖外部后端运行，无自启动逻辑；2026-10-07 已对齐当前 API（20 项断言），CI 硬门禁 |
+| `e2e-spray.sh` | M2 | 创建喷洒任务→查询状态→控制(START/STOP)→创建配送任务→查询站点→负载清单→按需负载上报→夹爪复位→配送 START | ★★★☆☆ | ★★★☆☆ | **喷洒演示基础**，依赖外部后端运行，无自启动逻辑；2026-10-07 已对齐当前 API 并要求机载肯定回执（26 项断言），CI 硬门禁。**需 drone-sim 带 `--actuators`** |
 | `e2e-hardware.sh` | M4 | 雷达配置→配置回读→雷达状态→雷达目标→旋翼配置→旋翼遥测→LiDAR→IMU | ★★★☆☆ | ★★★☆☆ | **硬件演示基础**，依赖外部后端运行；2026-10-07 已对齐当前 API（16 项断言），CI 硬门禁 |
 | `e2e-failsafe.ps1` | P0 | 断链→自动RTL→链路恢复→自主落地 | ★★★★★ | ★★★★☆ | **安全演示核心**，验证 PX4 兼容自主保护，220s 观察窗，全程零人工命令 |
 | `e2e-vision.ps1` | A5 | 相机会话→单拍定位→环绕orbit→航迹查询 | ★★★★★ | ★★★★☆ | **视觉演示核心**，异步 job 轮询，4站环绕拍照，定位误差<3m |
@@ -76,14 +76,14 @@
 
 ### 1.4 测试基线
 
-当前项目测试基线：**4374 tests，0 failures**（全部通过）。
+当前项目测试基线：**4380 tests，0 failures**（全部通过）。
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
 | mavlink-core | 457 | MAVLink 协议编解码、CRC 一致性 |
-| drone-sim | 1391 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
+| drone-sim | 1397 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
 | cloud-backend | 2378 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **4374** | **全部通过，0 failures** |
+| **总计** | **4380** | **全部通过，0 failures** |
 
 > 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
 
@@ -275,8 +275,16 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 | 6 | 创建配送任务 | `POST /api/v1/delivery`（`sites` 为对象数组，含坐标/负载/投放精度） | deliveryId 非空、sites=站点数 |
 | 7 | 查询配送序列 | `GET /api/v1/delivery/{id}` | 站点数组长度正确、首站 payloadId 正确、progress 存在 |
 | 8 | 查询负载清单 | `GET /api/v1/delivery/{id}/payload` | 含 payloads 数组与 totalWeight |
-| 9 | 按需负载上报 | `POST /api/v1/delivery/{id}/payload/query` | sysid 正确；status=ok 或机载拒收告警 |
-| 10 | 控制配送任务 | `POST /api/v1/delivery/{id}/control`（`action=START`） | 返回 results 结构 |
+| 9 | 按需负载上报 | `POST /api/v1/delivery/{id}/payload/query` | sysid=1、status=ok（机载回执） |
+| 10 | 夹爪复位到 IDLE | `POST /api/v1/delivery/{id}/control` (action=RESET) | results 含肯定回执（GRIPPER_RESET 30084/subcmd=2） |
+| 11 | 控制配送任务 | `POST /api/v1/delivery/{id}/control` (action=START) | results 含肯定回执（GRIPPER_GRAB 30084/subcmd=0） |
+
+> **⚠️ 演示前置：drone-sim 必须带 `--actuators`**
+> `SprayPump` / `Gripper` 默认不注入（`actuatorsEnabled=false` ⇒ 两者为 null），
+> 于是 30083/30084/30085 的处理器一律回 `MAV_RESULT_UNSUPPORTED`、REST 侧看到
+> `result=-1`——表现为"机载拒收"。CI 的 `e2e-capability` job 与本地验证均已带该 flag。
+> 另注：抓取的前置是夹爪处于 `IDLE`，故第 10 步先复位；上一轮跑完夹爪停在 `HOLDING`，
+> 直接 START 会被机载正确拒绝（`MAV_RESULT_DENIED`）。
 
 > **口径修正（2026-10-07）**：本节此前写的 `POST /api/v1/spray/task`、
 > `GET /api/v1/spray/status/{id}`、`POST /api/v1/spray/gripper`、

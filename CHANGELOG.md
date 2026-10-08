@@ -79,6 +79,58 @@
 
 ---
 
+## [Unreleased] — 机载 MAV_CMD 实装：夹爪从未通电导致投递链路恒被拒（2026-10-07）
+
+上一轮把 e2e 三腿转硬门禁时，喷洒腿里留着三条"机载拒收只告警"的宽容断言。
+本轮查明那不是"机载能力还没做"，而是**夹爪从未被使能**——演示时会当场看到
+"机载拒收配送指令"，且原因完全不可见。
+
+1. **🔴 真缺陷：`Gripper` 装配后从未 enable，投递链路 100% 被拒**
+   - **机制**：`Gripper.enabled` 初值 `false`，而抓取/投放的前置校验都是
+     `if (!enabled || state != …) return false`。但 `GripperCommand` 的子命令只有
+     `GRAB(0)/RELEASE(1)/RESET(2)`，**没有"使能"这一档**，机载侧也无从把它打开。
+     `SprayPump` 不受影响是因为 `SPRAY_ENABLE(0)` 子命令会调 `sprayPump.enable()`——
+     夹爪没有对应的那一档，于是永远抓不动。
+   - **实测**：修复前 `POST /api/v1/delivery/{id}/control` (START) 恒得
+     `MAV_RESULT=2`（DENIED），机载日志 `Gripper grab rejected: state=IDLE`。
+   - **修**：`VirtualDrone` 在 `actuatorsEnabled` 分支装配夹爪后立即 `gripper.enable()`。
+     理由：夹爪的"通电"属于**装配语义**而非控制语义——`--actuators` 的含义就是
+     "执行机构已装且可用"。
+   - **为什么此前没被发现**：`NexusCommandDispatchTest` 覆盖了 30080-30087 的派发，
+     但**只断言 result != UNSUPPORTED**（其注释明说"不钉各 handler 的业务结果"）。
+     未 enable 的夹爪回的是 DENIED(2) 而非 UNSUPPORTED(3)，于是"抓不动"在那条守卫里
+     **完全不可见** —— 测试全绿而链路不可用。
+   - 新增 `GripperActuatorWiringTest`（6 例），沿用真实 UDP 往返（不反射私有字段，
+     因为要钉的是"命令能否被机载接受"，与演示看到的是同一件事）：
+     装配后 GRAB 必须 `ACCEPTED`；未装配必须 `UNSUPPORTED`（两者必须能区分，
+     否则排查时分不清"没装配"还是"没通电"）；并守住"HOLDING 下再 GRAB 必须被拒"
+     与"超重必须被拒"（使能修复不得放宽 FR-03 安全校验）。
+   - **变异验证**：注释掉 `gripper.enable()` 后 `grabIsAcceptedWhenActuatorsAssembled`
+     立即转红（期望 0 实得 2）。
+
+2. **drone-sim 默认不注入执行机构：CI 与本地一律带 `--actuators`**
+   - `actuatorsEnabled` 缺省 false ⇒ `sprayPump`/`gripper` 为 null ⇒
+     30083/30084/30085 的处理器**一律** `UNSUPPORTED`，回执恒 `result=-1`。
+   - CI 的 `e2e-capability` job 启动 drone-sim 时补 `--actuators`（附注释说明
+     漏了会怎样），本地验证脚本同步对齐。
+
+3. **e2e-spray 从"只告警"改为"要求机载肯定回执"**
+   - 移除三条宽容断言（喷洒 START/STOP、配送 START、负载上报），改为要求
+     `result != -1` / `status=ok`。理由：那是**配置问题的信号**，被"只告警"掩盖
+     正是"演示时命令被拒却无人察觉"的由来。
+   - 新增一步"夹爪复位到 IDLE"（`action=RESET` → `GRIPPER_RESET` 30084/subcmd=2）：
+     抓取前置是 `IDLE`，而上一轮跑完夹爪停在 `HOLDING`，直接 START 会被机载
+     **正确地**拒绝（DENIED）。复位同时让脚本可重复执行、并覆盖 RESET 子命令。
+   - 实测（真 Linux + 真实后端/模拟器）：喷洒腿 20 → **26 项断言全绿**，
+     三腿合计 **73 项**（spray 26 / hardware 16 / emergency 31），连跑两次一致。
+
+4. **计数基线 4374 → 4380（drone-sim 1391 → 1397）**
+   - 新增 `GripperActuatorWiringTest` 6 例；`check-test-count-docs.py` 全绿，
+     22 处文档声称同步。`demo-scenarios` 场景 D 补上 `--actuators` 前置与
+     夹爪 IDLE 约束。
+
+---
+
 ## [Unreleased] — 存量 license 重签发预检工具 + 修档位模块顺序不确定（2026-10-07）
 
 上一轮落地了 BREAKING CHANGE 的档位拆分，但**只交付了"会坏"，没交付"怎么修"**：
