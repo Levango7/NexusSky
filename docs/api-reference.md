@@ -2328,6 +2328,42 @@ curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/cv-eval/me
 
 ---
 
+## 机巢管控
+
+### 基础路径 `/api/v1/docks`
+
+**Controller**: `dock/DockController` | 机巢（无人值守机场）注册/查询/动作命令/OSD 摄取/度量聚合/定时任务管理（F2，机巢管控 + 上云 API 适配器）
+
+| 方法 | 路径 | 说明 | 请求体 | 响应 |
+|------|------|------|--------|------|
+| POST | `/` | 注册机巢（需 ADMIN） | {name, sn, model?, lat?, lon?, droneSysid?} | 201 机巢视图 / 409 重复 SN |
+| GET | `/` | 机巢列表（需 OBSERVER） | - | 200 [机巢视图] |
+| GET | `/{id}` | 详情 + 最近 20 条状态迁移（需 OBSERVER） | - | 200 详情 / 404 |
+| POST | `/{id}/commands` | 动作命令（需 OPERATOR） | {method} | 200 受理 / 409 非法状态 / 404 / 504 通道故障 |
+| POST | `/osd` | OSD 心跳摄取（机巢 → 云，需 OPERATOR） | {sn, state?, temperature?, batteryPct?, droneSysid?} | 200 机巢视图 / 404 |
+| GET | `/{id}/metrics` | 利用率与运维健康度聚合（需 OBSERVER） | ?days=N（默认 7，上限 90） | 200 度量 / 404 |
+| POST | `/{id}/schedules` | 创建无人值守定时任务（需 OPERATOR） | {name, cron, waypoints?, enabled?} | 201 / 400 非法 cron / 404 |
+| GET | `/{id}/schedules` | 定时任务列表（需 OBSERVER） | - | 200 / 404 |
+| POST | `/{id}/schedules/{sid}/enable` | 启用/停用（需 ADMIN） | {enabled} | 200 / 404 |
+| DELETE | `/{id}/schedules/{sid}` | 删除定时任务（需 ADMIN） | - | 200 / 404 |
+
+#### 命令 method 取值
+
+`door_open`（开门，仅 IDLE/CHARGING）、`door_close`（关门，仅 OPEN）、`battery_swap`（换电，仅 IDLE/CHARGING 门关）、`reboot`（重启，FAULT/MAINTENANCE/各稳态）。非法迁移返回 **409** + 当前状态名；命令经物模型形状（`{tid,bid,timestamp,method,data}`）下发，通道超时/机巢拒绝返回 **504**，状态机回滚不留中间态。
+
+#### 度量口径
+
+`sorties`（无人值守任务 OK 架次）、`flightMinutes`（任务飞行分钟）、`doorCycles`（开门次数，机械寿命口径）、`availabilityPct`（在线时长/窗口时长）、`utilizationPct`（flightMinutes/(480×天数)）、`avgChargeTimeMin`（充电段均值，无充电起始返回 `null`）；数据源 `dock_state_log` + `dock_run_log`，查询时按需重算当天（幂等），小时级定时重算历史。
+
+**curl 示例**:
+```bash
+# 开门（409 时响应点名当前状态）
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"method":"door_open"}' "http://localhost:8080/api/v1/docks/1/commands"
+```
+
+---
+
 ## 附录
 
 ### 错误响应格式

@@ -21,6 +21,7 @@ export const VIEW_PANEL_MAP = {
   geofence: 'mission',     // 电子围栏归入任务范畴（千元级可用）
   rid: 'mission',          // RID 运行识别归入任务范畴（千元级可用，合规）
   cveval: 'mission',       // CV 智能识别评测归入任务范畴（千元级可用）
+  dock: 'dock',            // 机巢管控独立面板（千元级可用，无人值守）
   dronelock: 'status',     // 远程锁机归入状态管理（百元级可用）
   autodispatch: 'emergency', // 自动出警归入应急范畴（千元级可用）
   scenariolib: 'emergency', // 场景库归入应急范畴（千元级可用）
