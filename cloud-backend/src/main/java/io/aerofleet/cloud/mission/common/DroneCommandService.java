@@ -154,6 +154,9 @@ public class DroneCommandService {
         return command(sysid, MavEnums.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0, 0, 0, 0, 0);
     }
 
+    // double→float 不是疏漏：MAVLink COMMAND_LONG 的 param 在线路上就是 4 字节 float，
+    // 窄化是协议要求的（CodeQL java/tainted-numeric-cast #2 在此是必然而非缺陷）。
+    @SuppressWarnings("java/tainted-numeric-cast")
     public int takeoff(int sysid, double alt) {
         // NAV_TAKEOFF: param7 = altitude (m), param4 = yaw (0 = unchanged)
         return command(sysid, MavEnums.MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, (float) alt);

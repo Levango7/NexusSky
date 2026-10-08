@@ -51,11 +51,11 @@ public final class PayloadCodec {
     }
 
     public static void putU8(byte[] buf, int offset, int v) {
-        buf[offset] = (byte) v;
+        buf[offset] = (byte) (v & 0xFF);
     }
 
     public static void putI8(byte[] buf, int offset, int v) {
-        buf[offset] = (byte) v;
+        buf[offset] = (byte) (v & 0xFF);
     }
 
     public static void putU16(byte[] buf, int offset, int v) {

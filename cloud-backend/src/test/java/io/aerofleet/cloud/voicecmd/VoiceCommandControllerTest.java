@@ -110,6 +110,28 @@ class VoiceCommandControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    @DisplayName("POST /parse 拒绝超长文本：解析成本在入口就有界")
+    void parse_oversizedText_badRequest() throws Exception {
+        String oversized = "前往前往".repeat(VoiceCommandController.MAX_TEXT_CHARS / 2 + 1);
+
+        mockMvc.perform(post("/api/v1/voice-cmd/parse")
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("text", oversized))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /parse 恰好等于上限仍接受（闭区间，别把边界写成开区间）")
+    void parse_textAtLimit_accepted() throws Exception {
+        String atLimit = "a".repeat(VoiceCommandController.MAX_TEXT_CHARS);
+
+        mockMvc.perform(post("/api/v1/voice-cmd/parse")
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(Map.of("text", atLimit))))
+                .andExpect(status().isOk());
+    }
+
     // --- POST /execute ---
 
     @Test

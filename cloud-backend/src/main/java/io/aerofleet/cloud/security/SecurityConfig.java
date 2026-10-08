@@ -55,6 +55,11 @@ public class SecurityConfig {
     }
 
     @Bean
+    // CSRF 关闭的前提：认证凭据只来自 Authorization / X-API-Key 请求头，会话策略
+    // STATELESS，全站不下发也不读取 Cookie —— 浏览器不会自动附带凭据，跨站请求
+    // 因此拿不到身份。该前提由 HttpAuthChainTest.csrfPremise_noAmbientCookieCredential
+    // 机器复核：将来任何一处改成 cookie/会话型凭据，那条测试先红，这里就必须改回开启。
+    @SuppressWarnings("java/spring-disabled-csrf-protection")
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         if (devMode) {
             // 开发模式：允许所有请求，不破坏现有测试和本地开发

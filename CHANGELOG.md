@@ -30,6 +30,55 @@
 
 ---
 
+## [Unreleased] — CodeQL 6 条 open 告警逐条处置：2 处真修、2 处协议必然、2 处加守卫（2026-10-08）
+
+- **范围**：PR #5/#6 合入后 code scanning 只剩 6 条 open 告警，全部来自 CodeQL——
+  `java/spring-disabled-csrf-protection` ×2（#5/#6）、`java/polynomial-redos`（#4）、
+  `java/tainted-numeric-cast` ×2（#2/#3）、`js/request-forgery`（#1）。逐条读码后分三类处置；
+- **真修（改变行为）**：
+  - `js/request-forgery`（`gcs-web/src/api.js`）：`jsonFetch` 自动附带 `Authorization: Bearer`，
+    而 url 由各调用点用 `${BASE}/${sysid}` 拼出。新增 `resolveApiUrl()`，只放行同源 `/api/v1/`
+    前缀，拒绝绝对 URL、协议相对 `//host`、以及用 `..` 爬出前缀的路径；
+    `test/apiUrlGuard.test.js` 7 条钉住（含"保留查询串"）。既有 `src/api.test.js` 在改动后仍全过；
+  - `java/polynomial-redos`（`VoiceCommandParser`）：目标名提取**改为不依赖正则**（`extractTarget()`
+    手工扫描，每步只前进一个字符、无回溯 ⇒ 线性由构造保证）。**这条经过一次失败**：第一版只是把
+    `前往(.+?)(?:sep|$)` 的惰性 `.` 换成与终止符不相交的排除式字符类
+    `前往([^\n,，。;；]+)(?:[,，。;；]|$)`，CI 的 CodeQL 仍在改动行上报 **new alert**（run
+    37653063357 的 `CodeQL` 状态："1 new alert including 1 high severity"）⇒ 该查询认的是"可回退形态"
+    本身，不是我的直觉里的类相交。故换第二条路；
+    语义与原正则逐条对齐（≥1 字符、止于首个终止符或行尾、遇换行则该起点不算、起点失败则后移一位），
+    由 `parse_target_boundaries` 钉住，中英文两路都有断言。行为差异仍只有一处："前往，东门"旧写法
+    取到垃圾组 `"，东门"`，现判为无目标。成本上限另有 `VoiceCommandController.MAX_TEXT_CHARS=500`
+    （超限 400、恰等上限通过）；
+- **协议必然（说明而非改行为）**：
+  - `java/tainted-numeric-cast` #3（`PayloadCodec.putU8/putI8`）：同文件其余 `put*` 都写成
+    `(v & 0xFF)`，这两处漏了掩码。补齐后按 Java 窄化定义**完全等价**，"无意图截断"的形态消失；
+  - #2（`DroneCommandService.takeoff`）：MAVLink `COMMAND_LONG` 的 param 在线路上就是 4 字节 float，
+    double→float 窄化是协议要求 ⇒ 理由注解；
+- **加守卫（把"为什么能关掉"变成机器断言）**：
+  - `java/spring-disabled-csrf-protection` #5/#6：`SecurityConfig` 两处 `csrf.disable()` 的前提是
+    "凭据只来自请求头 + 会话 STATELESS + 全站不发 Cookie"（全仓 grep 仅命中 STATELESS 一处，无
+    cookie/httpBasic/formLogin/rememberMe）。新增
+    `HttpAuthChainTest.csrfPremise_noAmbientCookieCredential`：带伪造 `JSESSIONID` 的匿名写请求仍须
+    401，且响应不得出现 `Set-Cookie`——将来任何人改成 cookie/会话型凭据，这条先红。
+    另加 `@SuppressWarnings("java/spring-disabled-csrf-protection")`。**该注解已被 CI 认账**：
+    run 37653063357 的分析在改动行上只报出 1 条新告警（就是上面那条 redos），CSRF 与
+    numeric-cast 都没有复现；
+- **验证**（rebase 到 PR #6 之后的 master 上复跑）：`mvn -B -o test` 全量 **4363 用例 / 0 failures**
+  （cloud-backend 2367）；`npm ci` + `npm run lint` **0 error**（新增前端文件零告警）+
+  `npm run test` **16 文件 / 225 例全过**；`python scripts/check-test-count-docs.py` 由"不一致 22 处"
+  转为**全部一致（退出码 0）**；PR #7 的 workflow run 终态 **success（25 job 全绿）**，唯一红是
+  code-scanning 的 `CodeQL` 状态（1 条新告警），因此追加"无正则提取"那一笔；该笔的语音三类
+  定向复跑 **76 用例 / 0 failures**（parser 33 + controller 20 + executor 23）；
+- **文档同步**：Java 单测数 4359 → **4363**、cloud-backend 2363 → **2367**（README、ROADMAP、白皮书、
+  销售稿、定价、演示场景、客户上手、竞品分析、低空研究、产品简报共 22 处），前端 vitest 218 → **225**
+  （README:837、ROADMAP:25）；
+- **边界**：默认分支上那 6 条告警要等本 PR 合入、由 master 的 CodeQL 复扫才会转 closed（PR 分析不动
+  默认分支的账）。redos 换成无正则后是否清零，看下一个 run；若仍报，就改用 PR #5 那条路
+  （显式登记 + 到期自动回红 + 机器守卫），而不是继续猜注解写法。
+
+---
+
 ## [Unreleased] — 存量 license 重签发预检工具 + 修档位模块顺序不确定（2026-10-07）
 
 上一轮落地了 BREAKING CHANGE 的档位拆分，但**只交付了"会坏"，没交付"怎么修"**：
