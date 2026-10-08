@@ -2328,6 +2328,39 @@ curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/cv-eval/me
 
 ---
 
+## 缺陷报告与工单闭环
+
+### 基础路径 `/api/v1/defects`
+
+**Controller**: `defect/DefectController` | 缺陷立案/去重、工单状态机、复检闭环、报告导出（F4）
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| POST | `/` | 人工立案（note 必填） | OPERATOR |
+| GET | `/?status=` | 缺陷列表（可按状态过滤） | OBSERVER |
+| GET | `/{id}` | 缺陷详情 | OBSERVER |
+| POST | `/{id}/status` | 状态裁决（OPEN/CONFIRMED/DISMISSED） | OPERATOR |
+| POST | `/work-orders` | 从缺陷列表创建工单（defectIds ≥1） | OPERATOR |
+| GET | `/work-orders` | 工单列表 | OBSERVER |
+| POST | `/work-orders/{id}/transition` | 流转（action: dispatch/start/resolve/cancel） | OPERATOR |
+| POST | `/work-orders/{id}/verify` | 复检（真拍一张 + 逐缺陷 10m 比对） | OPERATOR |
+| GET | `/report?from=&to=&format=` | 报告导出（json/csv/md） | OBSERVER |
+
+**工单状态机**：OPEN→DISPATCHED→IN_PROGRESS→RESOLVED→VERIFIED；RESOLVED 复检命中→REOPENED（回流程）；
+任意未终态可 CANCEL（记原因）；VERIFIED/CANCELLED 终态。非法转移 409。
+
+**自动晋升**：拍照响应 detection 的 confidence ≥ 0.6（`aerofleet.defect.auto-promote-confidence` 可配）
+自动立案；同 kind 且 ≤10m 复现只更新不重复立案。
+
+**curl 示例**:
+```bash
+# 建工单
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"defectIds":[1,2],"title":"A区巡检缺陷"}' "http://localhost:8080/api/v1/defects/work-orders"
+```
+
+---
+
 ## 附录
 
 ### 错误响应格式

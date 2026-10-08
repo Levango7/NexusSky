@@ -122,6 +122,9 @@ final class LicenseModuleMap {
         m.put("/api/v1/mapping", FLEET);
         m.put("/api/v1/inspection", FLEET);
         m.put("/api/v1/drone-lock", FLEET);
+        // 缺陷报告与工单闭环（F4）：巡检发现缺陷→工单→复检闭环，与 inspection
+        // 同属作业质量域——归 fleet 档（档位调整属产品决策）。
+        m.put("/api/v1/defects", FLEET);
 
         // ============ orch：M9 应急任务编排 + 编排计划（基础版；2026-07 从 emergency 拆出）============
         // 定价文档 §5.1 把「M9 编排」列为**基础版**卖点，故与 4a 空地一体化指挥分开。
