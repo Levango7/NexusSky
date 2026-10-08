@@ -26,7 +26,8 @@ import {
  * 背景：这六个 WS 帧后端早已有生产者，前端直到 2026-10-06 才补上消费分支。
  * 本组用例的价值不在"函数能跑"，而在把两处**协议实况**钉成断言：
  *   ① 帧里的 taskId 是不可逆哈希（TASK_ID_IS_HASH），不是 REST taskId；
- *   ② ALARM_TRIGGER 没有 alarmId，故 trigger 与 ack 无法关联（correlatable=false）。
+ *   ② ALARM_TRIGGER 的 alarmId（2026-10-07 协议追加）**缺失或为 0 时**不可关联，
+ *      两条路都必须仍报 correlatable=false（旧帧兼容）。
  * 这两条一旦被"顺手修好"，本组即红——那正是要人工确认协议变更的时机。
  *
  * 字段名与单位取自 mavlink-core 的消息类（TaskAssignmentMsg / ConflictAlertMsg /
@@ -189,6 +190,7 @@ describe('调度/联动帧归一化', () => {
       alarmType: 2,
       severity: 2,
       description: '仓库烟感触发',
+      alarmId: 88231,    // 2026-10-07 协议追加（尾部偏移 68）
     }
 
     it('经纬度 1E7→度、高度 mm→m', () => {
@@ -206,11 +208,31 @@ describe('调度/联动帧归一化', () => {
       expect(n.severityColor).toBe(ALARM_SEVERITY_META[2].color)
     })
 
-    it('⚠️ 协议实况：该消息无 alarmId，故 correlatable 必须为 false', () => {
+    it('✅ 2026-10-07 起带 alarmId，可与 ack 关联', () => {
       const n = normalizeAlarmTrigger(raw, NOW)
+      expect(n.alarmId).toBe(88231)
+      expect(n.correlatable).toBe(true)
+    })
+
+    it('alarmId 缺失（字段未携带）⇒ alarmId=null 且 correlatable=false', () => {
+      const n = normalizeAlarmTrigger({ ...raw, alarmId: undefined }, NOW)
+      expect(n.alarmId).toBeNull()
+      // 缺失即不可关联，消费侧不应拿它去 join ack
       expect(n.correlatable).toBe(false)
-      // 不得凭空造一个 alarmId 出来
-      expect(n.alarmId).toBeUndefined()
+    })
+
+    it('alarmId=0 ⇒ 未携带语义，不可关联', () => {
+      const n = normalizeAlarmTrigger({ ...raw, alarmId: 0 }, NOW)
+      expect(n.alarmId).toBe(0)
+      // 0 是"未携带"哨兵，不是一个合法事件 ID
+      expect(n.correlatable).toBe(false)
+    })
+
+    it('两端 alarmId 相同 ⇒ 可 join（这是本轮协议变更的目的）', () => {
+      const trigger = normalizeAlarmTrigger(raw, NOW)
+      const ack = normalizeAlarmAck({ alarmId: 88231, droneSysid: 3 }, NOW)
+      expect(trigger.correlatable && ack.correlatable).toBe(true)
+      expect(trigger.alarmId).toBe(ack.alarmId)
     })
 
     it('⚠️ 设备源帧无 sysId 时为 null（不按机分组）', () => {
@@ -259,8 +281,13 @@ describe('调度/联动帧归一化', () => {
       expect(n.estimatedArrivalSec).toBeNull()
     })
 
-    it('⚠️ trigger 无 alarmId ⇒ ack 侧也显式标记不可关联', () => {
-      expect(normalizeAlarmAck(raw, NOW).correlatable).toBe(false)
+    it('✅ alarmId 非 0 ⇒ correlatable=true（可与 trigger join）', () => {
+      expect(normalizeAlarmAck(raw, NOW).correlatable).toBe(true)
+    })
+
+    it('⚠️ alarmId 缺失或为 0 ⇒ 仍显式标记不可关联（旧帧兼容）', () => {
+      expect(normalizeAlarmAck({ ...raw, alarmId: undefined }, NOW).correlatable).toBe(false)
+      expect(normalizeAlarmAck({ ...raw, alarmId: 0 }, NOW).correlatable).toBe(false)
     })
   })
 

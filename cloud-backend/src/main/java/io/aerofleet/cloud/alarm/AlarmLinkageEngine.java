@@ -426,7 +426,10 @@ public class AlarmLinkageEngine {
                     altMmClampI16(event.getAlt()),
                     event.getEventType().ordinal(),
                     event.getSeverity().level(),
-                    event.getDescription() == null ? "" : event.getDescription());
+                    event.getDescription() == null ? "" : event.getDescription(),
+                    // 与 publishAlarmAck 的 alarmId 同一个来源（idToU32(event.getId())），
+                    // 否则 trigger 帧与 ack 帧对不上号，消费侧无法关联。
+                    idToU32(event.getId()));
             eventPublisher.publishEvent(new MavlinkMessageEvent(
                     this, deviceIdToU16(event.getSourceDeviceId()),
                     AlarmTriggerMsg.ID, msg, event.getTimestampMs(),

@@ -24,7 +24,7 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**457 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**462 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（358 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 38 个功能面板 | 不需要换 |
@@ -438,7 +438,12 @@ REST `/api/v1/emergency/*`，前端 `EmergencyOrchPanel.jsx` 可视化编排进�
 `AlarmPanel`（SSE 实时报警/联动规则管理/一键应急响应）。
 
 **MAVLink 报警消息**：`AlarmTriggerMsg`(30057)/`AlarmAckMsg`(30058)/
-`SurveillanceStatusMsg`(30059)。
+`SurveillanceStatusMsg`(30059)。**2026-10-07 起 `AlarmTriggerMsg` 尾部追加 `alarmId`
+（u32，LEN 68→72）**，与 `AlarmAckMsg.alarmId` 同为 `idToU32(eventId)`，
+两端终于可关联——此前 trigger 与 ack 在协议层对不上号，操作员无法确认
+"Drone-3 已在响应"是不是这条报警的响应。字段追加在尾部而非插入头部，
+以保持既有偏移不动并做到新旧双向兼容；`alarmId=0` 表示未携带（旧帧），
+消费侧据此置 `correlatable=false`。
 
 **应急指挥工作流**：六阶段（接报 → 研判 → 部署 → 执行 → 评估 → 总结），
 一键应急响应自动走完全流程。
@@ -713,13 +718,13 @@ NexusSky/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 457 |
+| `mavlink-core` | 462 |
 | `drone-sim` | 1405 |
 | `link-sim` | 117 |
 | `cloud-backend` | 2378 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4388** |
+| **总计** | **4393** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -834,7 +839,7 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 225 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 229 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）；
   `npm run test` 实测
