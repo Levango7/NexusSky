@@ -52,6 +52,15 @@ public final class DroneSnapshot {
 
     // --- gps ---
     public volatile int fixType;               // GPS_RAW_INT fix_type
+
+    /** F6 RTK 状态标签（MAVLink GPS_FIX_TYPE 口径：5=RTK_FLOAT/6=RTK_FIXED/3=3D_FIX）。 */
+    public String rtkStatus() {
+        return switch (fixType) {
+            case 6 -> "RTK_FIXED";
+            case 5 -> "RTK_FLOAT";
+            default -> fixType >= 3 ? "STANDALONE" : "NONE";
+        };
+    }
     public volatile int satellites = -1;
     public volatile int eph = -1;               // HDOP*100
     /** Derived: 3D fix with enough satellites; false during gps-loss scenarios. */

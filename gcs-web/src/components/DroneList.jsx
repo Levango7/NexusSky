@@ -52,6 +52,21 @@ export default function DroneList({ drones, selectedSysid, onSelect }) {
               </span>
               <span className="sub">
                 <span>{MODE_LABEL[d.mode] || d.mode || '待命'}</span>
+              {(d.rtkStatus === 'RTK_FIXED' || d.rtkStatus === 'RTK_FLOAT') && (
+                <span
+                  title={`RTK ${d.rtkStatus === 'RTK_FIXED' ? '固定解 (cm 级)' : '浮点解 (dm 级)'}`}
+                  style={{
+                    marginLeft: 4,
+                    fontSize: 10,
+                    padding: '0 4px',
+                    borderRadius: 3,
+                    color: d.rtkStatus === 'RTK_FIXED' ? '#22c55e' : '#eab308',
+                    border: `1px solid ${d.rtkStatus === 'RTK_FIXED' ? '#22c55e' : '#eab308'}`,
+                  }}
+                >
+                  {d.rtkStatus === 'RTK_FIXED' ? 'RTK·F' : 'RTK·f'}
+                </span>
+              )}
                 <span>{d.armed ? '🔓 已解锁' : '🔒 上锁'}</span>
                 <span>{d.online ? '● 在线' : '○ 离线'}</span>
               </span>
