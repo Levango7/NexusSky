@@ -24,7 +24,7 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**457 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**462 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（358 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 38 个功能面板 | 不需要换 |
@@ -713,13 +713,20 @@ NexusSky/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 457 |
+| `mavlink-core` | 462 |
 | `drone-sim` | 1405 |
 | `link-sim` | 117 |
+<<<<<<< HEAD
 | `cloud-backend` | 2401 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
 | **总计** | **4411** |
+=======
+| `cloud-backend` | 2435 |
+| `sdk-java` | 12 |
+| `regulator-sim` | 19 |
+| **总计** | **4450** |
+>>>>>>> origin/master
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -810,9 +817,18 @@ NexusSky/
 
 ## 已知边界（骨架的诚实声明）
 
+<<<<<<< HEAD
 - **缺陷闭环（F4）的复检与去重口径**：复检=真拍一张（复用 F1 captureAndLocate）+ 逐缺陷
   10m 同 kind 比对——**要求托管机已飞临缺陷点**（派飞属运维职责，工单不驱动飞控）；
   去重与复检是同一空间近似口径。报告导出 json/csv/md，PDF 属渲染层不在本轮。
+=======
+- **机巢管控（F2）的传输与执行边界**：命令通道交付的是 DJI Cloud API **物模型形状**
+  （`{tid,bid,timestamp,method,data}` services 语义）+ 可插拔 `DockGateway`；默认
+  `transport=sim`（HTTP 回环到 drone-sim 的 `dock` 子命令），`transport=mqtt` 是生产
+  seam（需 EMQX Broker，接口/配置已就位但未联调——与 C1/C2 "对端是模拟器"同一诚实口径）。
+  换电是计时仿真（5s + 电量曲线），非机械臂时序；无人值守完成判定用遥测
+  （曾起飞 + 相对高度回地），非任务状态机回调。
+>>>>>>> origin/master
 - 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
 - 微服务/K8s 暂不引入：模块化单体已够当前规模，拆分时机见设计文档讨论
 - MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（30000–30063）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
@@ -837,11 +853,11 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 225 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 233 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）；
   `npm run test` 实测
-  218/218，15 个测试文件，分布在 `gcs-web/test/`（13）与 `gcs-web/src/`（2）两处）：
+  233/233，17 个测试文件，分布在 `gcs-web/test/`（13）与 `gcs-web/src/`（2）两处）：
   `npm run test` 已在 CI 的 GCS Web job 门禁。
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
@@ -1089,52 +1105,6 @@ NexusSky/
 >    边界由 `LicenseModuleSplitMigrationTest`（7 例）钉死。
 >    ⚠️ **升级需重签发**：模块名进签名载荷，拆分前签发的 license 不再对应任何档位。
 >    详见 `docs/PRODUCT-POSITIONING.md` §5.1.1（唯一对照入口）。
-
-### 存量 license 迁移：重签发前先跑预检
-
-模块拆分是 BREAKING CHANGE。部署时只会看到一整段"模块集合不对应任何可售档位"的
-报错，**它不告诉你该重签成哪一档**。`LicenseMigrationPreflight` 就是补这个缺口的
-只读诊断工具——不需要私钥，也不签发任何东西：
-
-```bash
-java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
-     io.aerofleet.cloud.license.LicenseMigrationPreflight \
-     --license-key-file 老license.key \
-     --public-key-file 公钥.key
-```
-
-输出示例：
-
-```
-原模块集合      : core, fleet
-验签            : ✅ 通过
-
-❌ 结论：不对应任何可售档位 —— 这份 license 必须重签发
-
-   原因: 该模块集合与三个可售档位都不相等
-         基础版 = core,fleet,mesh,orch
-         应急版 = core,fleet,mesh,orch,emergency
-         完整版 = core,fleet,mesh,orch,emergency,network,advanced
-
-   建议重签档位: 基础版 (basic)
-   签发命令（需私钥；请按实际租户与有效期替换）:
-     java -cp cloud-backend.jar io.aerofleet.cloud.license.LicenseIssuer \
-        --private-key-file <私钥文件> --tenant-id acme --issued-to "Acme Drone Co" \
-        --max-devices 50 --expiry 2027-01-01T00:00:00Z \
-        --modules core,fleet,mesh,orch
-```
-
-要点：
-
-- **不需要私钥**（私钥只在真正执行 `LicenseIssuer` 时才需要）。提供 `--public-key-file`
-  才会验签；不提供则跳过并**显式告警**，此时结论仅供参考。
-- 退出码：`0` = 无需重签发；`1` = 需重签发或 key 无法解析；`2` = 用法/IO 错误。
-- 三档的模块集合会一并列出，便于人工核对差异。
-- 报告里那句"不要给旧集合加兼容映射"是认真的：旧集合里 `network` 含 mesh、
-  `emergency` 含 M9 编排，与新边界不再等价。
-
-`LicenseMigrationPreflightTest`（11 例）守卫其判定与输出，含"三档顺序稳定"与
-"输出不得混入 SLF4J 日志行"两条。
 
 - **未授权行为**：复制、分发、转售、反向工程、移除授权校验逻辑、超授权范围
   使用等，均属违约，许可方保留追究法律责任的权利。

@@ -19,7 +19,16 @@ public final class DroneSimMain {
     private DroneSimMain() {
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
+        // F2：`dock` 子命令启动机巢模拟器（与无人机模拟器同 jar，可同机并存）。
+        // 必须在最前面分派：dock 的参数面与无人机完全不同，不做混解析。
+        if (args.length > 0 && "dock".equals(args[0])) {
+            String[] rest = new String[args.length - 1];
+            System.arraycopy(args, 1, rest, 0, rest.length);
+            DockSimMain.main(rest);
+            return;
+        }
+
         SimConfig config = SimConfig.parse(args);
 
         log.info("[sim] AeroFleet virtual drone simulator starting");

@@ -125,7 +125,7 @@ public final class MavlinkMessageInfo {
         EXTENDED_INFOS.put(30055, new Info(28, 208));   // TWIN_STATE_SYNC
         EXTENDED_INFOS.put(30056, new Info(20, 139));   // PREDICTION_RESULT
         // ---- NexusSky 自定义扩展消息（M14 安防报警，msgId 30057-30059）----
-        EXTENDED_INFOS.put(30057, new Info(68, 64));   // ALARM_TRIGGER
+        EXTENDED_INFOS.put(30057, new Info(72, 64));   // ALARM_TRIGGER（2026-10-07 尾部追加 alarmId）
         EXTENDED_INFOS.put(30058, new Info(12, 200));   // ALARM_ACK
         EXTENDED_INFOS.put(30059, new Info(14, 184));   // SURVEILLANCE_STATUS
         // ---- NexusSky 自定义扩展消息（P2 灾害应急通讯组网，msgId 30060-30062）----

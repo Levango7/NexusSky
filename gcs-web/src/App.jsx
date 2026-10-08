@@ -23,6 +23,7 @@ import GeofencePanel from './components/GeofencePanel.jsx'
 import RidPanel from './components/RidPanel.jsx'
 import CvEvalPanel from './components/CvEvalPanel.jsx'
 import DefectPanel from './components/DefectPanel.jsx'
+import DockPanel from './components/DockPanel.jsx'
 import DroneLockPanel from './components/DroneLockPanel.jsx'
 import AutoDispatchPanel from './components/AutoDispatchPanel.jsx'
 import ScenarioLibraryPanel from './components/ScenarioLibraryPanel.jsx'
@@ -217,6 +218,7 @@ export default function App() {
               { key: 'rid', label: 'RID' },
               { key: 'cveval', label: 'CV评测' },
               { key: 'defect', label: '缺陷工单' },
+              { key: 'dock', label: '机巢' },
               { key: 'dronelock', label: '锁机' },
               { key: 'autodispatch', label: '自动出警' },
               { key: 'aidecision', label: 'AI 决策' },
@@ -397,6 +399,9 @@ export default function App() {
       ) : view === 'defect' ? (
         <PanelWrapper>
           <DefectPanel />
+      ) : view === 'dock' ? (
+        <PanelWrapper>
+          <DockPanel />
         </PanelWrapper>
       ) : view === 'dronelock' ? (
         <PanelWrapper>

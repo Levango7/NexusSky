@@ -111,6 +111,52 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
 
 ---
 
+## [Unreleased] — 协议补齐：AlarmTrigger 增补 alarmId，报警与派遣首次可关联（2026-10-07）
+
+1. **🔴 协议缺口：`ALARM_TRIGGER`(30057) 不带 `alarmId`，而 `ALARM_ACK`(30058) 带**
+   - **实况**：`AlarmLinkageEngine.publishAlarmAck` 用 `idToU32(event.getId())` 填
+     `alarmId`，而 `publishAlarmTrigger` **完全不携带事件 ID** ⇒ 两帧在协议层无共同键。
+     操作员看到"某处发生火灾"与"Drone-3 已在响应"，无法确认后者是不是这条报警的响应。
+     前端 `normalizeAlarmTrigger` 早已把该缺口写进注释并硬编码 `correlatable: false`，
+     `normalizeAlarmAck` 同样如此。
+   - **布局取舍（协议变更，三选一）**：原 LEN=68 被前 7 字段填满（18 + 50），无空位。
+     - **追加尾部（本方案）**：LEN 68→72，既有偏移一字不动，**双向兼容**——
+       新解码器读 68 字节旧帧 ⇒ `len > 71` 不成立 ⇒ `alarmId=0`；
+       旧解码器读 72 字节新帧 ⇒ 各字段仍在原偏移、尾部 4 字节被忽略
+       （`decode` 每个字段都有 `len > N` 守卫，帧解码不校验 payload 长度）。代价 4 字节/帧。
+     - 插入头部 + description 50→46：LEN 仍 68，但 description 偏移 18→22，
+       **旧帧的 description 会被错读成 alarmId**——省 0 字节却换来静默数据损坏。
+     - 不改协议、靠 `(sourceDeviceId, timestamp)` 关联：告警突发时时间戳必然撞车，
+       且前端补一个假 alarmId 只会把缺口藏起来。
+   - **改动**：`AlarmTriggerMsg` 增 `alarmId`（u32，偏移 68）+ `hasAlarmId()`；
+     保留旧 8 参构造器（等价 `alarmId=0`）以保源码兼容；
+     `MavlinkMessageInfo` 30057 同步为 `Info(72, 64)`（**CRC_EXTRA 不变**——
+     它只由 msgId 与字段名决定，不含字段长度/顺序）；
+     `AlarmLinkageEngine` 与 ack 用**同一** `idToU32(event.getId())` 填 trigger。
+   - **`alarmId=0` 的语义**：未携带（旧帧 / 事件 ID 为空）。前端据此置
+     `correlatable=false`，不得拿它去 join。
+
+2. **前端：两帧的 `correlatable` 由硬编码 false 改为按 `alarmId` 判定**
+   - `normalizeAlarmTrigger` 带出 `alarmId`；`normalizeAlarmAck` 同步。
+   - 两侧统一 `correlatable = alarmId != null && alarmId !== 0`，
+     故**旧帧仍正确地报不可关联**，不会因为协议升级就把旧数据当成可关联。
+   - 用例从"断言无 alarmId"改为覆盖三条路：非 0 ⇒ 可 join、字段缺失 ⇒ 不可关联、
+     `=0` ⇒ 不可关联，并新增"两端 alarmId 相同 ⇒ 可 join"（本轮变更的目的本身）。
+
+3. **测试**
+   - `AlarmTriggerMsgTest` 9 → 14 例：新增 alarmId 往返无损、**alarmId 位于偏移 68
+     且不挤占 description**、新解码器读旧帧（68B ⇒ alarmId=0 且其余字段无损）、
+     旧解码器读新帧（既有偏移仍可正确取值）、`MavlinkMessageInfo` 与常量一致、
+     旧构造器等价于 0。
+   - 前端 225 → 229 例。
+   - **诚实记录一处自身失误**：初版用例误用 Jest 的 `.as()` 链式写法
+     （`expect(x).toBe(false).as(...)`）在 Chai 下报 `Invalid Chai property: as`，
+     首次运行 2 红；改为注释 + 独立断言后 229/229 全绿。
+
+4. **计数基线 4388 → 4393（mavlink-core 457 → 462），前端 225 → 229；门禁全绿。**
+
+---
+
 ## [Unreleased] — M4 传感器接线：LiDAR/IMU 模拟源早已实现却从未注入（2026-10-07）
 
 紧接上一轮"夹爪从未通电"，本轮是同一类缺口的第二例：能力在、接线无。
@@ -261,8 +307,38 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
 
 5. **计数基线 4359 → 4370（cloud-backend 2363 → 2374）**
    - 新增 `LicenseMigrationPreflightTest` 11 例；`check-test-count-docs.py` 全绿，
-     22 处文档声称同步。
 
+---
+
+## [Unreleased] — F2 机巢管控 + 上云 API 适配器：Dock 状态机 / 无人值守定时任务 / 利用率度量 / GCS 面板（2026-10-08）
+
+> 依据 ROADMAP F2（依赖 C4 持久化✅）。协议抽象先行：命令通道是 DJI Cloud API 物模型形状
+> （services 通道 `{tid,bid,timestamp,method,data}`），传输默认 sim（HTTP 回环到机巢模拟器），
+> `aerofleet.dock.transport=mqtt` 为生产 seam（需 EMQX Broker，见 README 边界）。
+
+### 交付清单
+
+| # | 交付 | 内容 |
+|---|---|---|
+| F2.1 | **持久化** | V23 迁移 5 表：docks / dock_state_log / dock_schedules / dock_run_log / dock_metrics_daily（day 列因 H2 保留字用 day_date） |
+| F2.2 | **状态机** | 9 态（OFFLINE/IDLE/OPENING/OPEN/CLOSING/CHARGING/EXCHANGING/FAULT/MAINTENANCE）；迁移表唯一裁决点 `DockStateMachine`，非法迁移 409+状态名；OSD 只按自然后继推进过渡态，FAULT 不被自报覆盖（防自动痊愈） |
+| F2.3 | **命令通道** | `DockGateway` 接口 + `SimLoopbackGateway`（默认装配）；通道失败回滚过渡态不留卡死的 OPENING；REBOOT 经网关转发 + 8s 定时器回 IDLE |
+| F2.4 | **无人值守** | cron 定时任务（Spring CronExpression）；四道门控（机巢在线/状态 IDLE·CHARGING/托管机**在线**/无并发 RUNNING）——托管机在线性是 e2e 实测撞出的真缺陷（修前会白开门白等到超时）；全链路复用 DroneCommandService（arm→uploadMission→startMission→监测落地→关门） |
+| F2.5 | **度量** | 日结幂等重算（小时级定时 + 查询时按需重算当天）：架次/飞行分钟/开关门/可用率/利用率(8h 基准)/充电时长/换电次数/温度告警；分母零返回 null（F1 口径） |
+| F2.6 | **模拟器** | drone-sim 增 `dock` 子命令（DockSimMain）：物模型行为（开门 3s/关门 3s/换电 5s/重启 8s）+ OSD 推送 + /services /osd /health |
+| F2.7 | **GCS 面板** | DockPanel（tab 机巢）：状态色标列表/动作按钮（非法态置灰+后端裁决）/度量卡片/定时任务管理/迁移时间线 |
+| F2.8 | **e2e** | `scripts/e2e-dock.ps1`：注册幂等(201/409)→OSD 上线→开门时序跟随→409 非法态→400 未知命令→关门→cron 400→SKIPPED 门控→度量聚合——真后端 + 真模拟器全链路 |
+
+### 测试
+
+- 后端 57 例：DockStateMachineTest(26 全表) / DockServiceTest(14) / DockMetricsServiceTest(4) / DockGatewayLoopbackTest(5 真 HTTP 往返) / UnattendedGateTest(8 门控)
+- 前端 8 例：dockPanel.test.js（状态表完整性 + 动作许可表与后端状态机一致性）
+- e2e-dock ALL PASS（真后端 + DockSim 全链路 26 断言）
+
+### 已知边界
+
+- MQTT 传输是接口 + 配置位，真实 EMQX 联调属生产阶段（PoC 默认 sim 回环）；
+- 换电是计时仿真（5s + 电量曲线 20→100），非机械臂时序；
 ---
 
 ## [Unreleased] — 定价档位裁决落地：基础版扎实（模块 5→7 拆分）+ 三腿 e2e 转硬门禁（2026-10-07）
@@ -327,7 +403,7 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
      `/spray/cancel`、`/hardware/physics-model` 在仓内均不存在）；
      补 LiDAR/IMU 404 的边界说明。
 
-4. **计数基线 4343 → 4359（cloud-backend 2347 → 2363）**
+4. **计数基线 4343 → 4450（cloud-backend 2347 → 2435）**
    - 新增 `LicenseModuleSplitMigrationTest` 7 例 + `emergencyTierWithFullOnlyModuleRejected` 1 例；
      `check-test-count-docs.py` 全绿，22 处文档声称同步。
 
@@ -471,7 +547,7 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
    - 新增 `SprayTaskPersistenceTest` 3 例（+3）、并入 CVE 自证 4 例（+4）；门禁全绿，
      22 处文档声称同步。
    - 后续 `LicenseModuleSplitMigrationTest` 7 例 + 越权面 1 例落地后推进到
-     **4359（cloud-backend 2363）**，见上一条。
+     **4450（cloud-backend 2435）**，见上一条。
 
 ---
 
