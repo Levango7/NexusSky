@@ -354,6 +354,15 @@ public final class VirtualDrone implements AutoCloseable {
                     physics,
                     envModel);
             this.gripper = new Gripper(config.gripperPayloadMax);
+            // Gripper 默认 enabled=false，而抓取/投放的前置校验都是
+            // `if (!enabled || state != …) return false` —— 也就是说**不enable
+            // 就永远抓不动**。可 GripperCommand 的子命令只有
+            // GRAB(0)/RELEASE(1)/RESET(2)，没有"使能"这一档，机载侧也无从把它打开。
+            // SprayPump 不受影响是因为 SPRAY_ENABLE(0) 子命令会调 sprayPump.enable()。
+            // 结论：夹爪的"通电"属于装配语义而非控制语义，装配时即应可用。
+            // 修前：DeliveryService 的 START(GRAB) 恒得 MAV_RESULT_DENIED，
+            //       演示时表现为"机载拒收配送指令"，且原因完全不可见。
+            this.gripper.enable();
             this.actuatorsEnabled = true;
             SimLog.info("actuators enabled: spray-capacity=" + config.sprayCapacity
                     + "L spray-rate-max=" + config.sprayRateMax + "mL/s"

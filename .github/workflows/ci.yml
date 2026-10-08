@@ -470,7 +470,12 @@ jobs:
             fi
             sleep 2
           done
-          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar &
+          # --actuators 必须带：SprayPump / Gripper 默认不注入
+          # （VirtualDrone 构造器 actuatorsEnabled=false ⇒ 两者为 null），
+          # 于是 MAV_CMD 30083/30084/30085 的处理器一律返回 MAV_RESULT_UNSUPPORTED，
+          # e2e-spray 的机载回执恒为 result=-1 —— 演示时看到的是"命令被拒"。
+          # 该 flag 是 M2 执行机构（FR-01）的显式开关，见 SimConfig#parse 的 "actuators" 分支。
+          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar --actuators &
           # 等 sim 注册上来：后三个脚本都以 sysid=1 在线为前置
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/api/v1/drones 2>/dev/null | grep -q '"sysid":1'; then
