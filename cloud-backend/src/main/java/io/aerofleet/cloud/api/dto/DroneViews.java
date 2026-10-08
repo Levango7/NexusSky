@@ -31,6 +31,7 @@ public final class DroneViews {
         m.put("lon", clean(s.lon));
         m.put("relativeAlt", clean(s.relativeAlt));
         m.put("lastHeartbeat", s.lastHeartbeatMs);
+        m.put("protocol", s.protocol);        // F5 双栈：设备接入协议（mavlink/dji-cloud）
         return m;
     }
 
