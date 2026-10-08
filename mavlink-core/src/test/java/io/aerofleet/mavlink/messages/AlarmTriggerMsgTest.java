@@ -1,8 +1,12 @@
 package io.aerofleet.mavlink.messages;
 
 import io.aerofleet.mavlink.MavlinkFrame;
+import io.aerofleet.mavlink.MavlinkMessageInfo;
+import io.aerofleet.mavlink.PayloadCodec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.nio.ByteBuffer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,19 +22,23 @@ class AlarmTriggerMsgTest {
     }
 
     @Test
-    @DisplayName("消息 ID=30057、LEN=68、CRC_EXTRA=64")
+    @DisplayName("消息 ID=30057、LEN=72、CRC_EXTRA=64（LEN 因尾部追加 alarmId 由 68→72）")
     void messageIdAndConstants() {
         assertThat(AlarmTriggerMsg.ID).isEqualTo(30057);
-        assertThat(AlarmTriggerMsg.LEN).isEqualTo(68);
+        assertThat(AlarmTriggerMsg.LEN).isEqualTo(72);
+        // CRC_EXTRA 不随尾部追加而变：它只由 msgId 与字段名决定，不含字段顺序/长度
         assertThat(AlarmTriggerMsg.CRC_EXTRA).isEqualTo(64);
+        assertThat(MavlinkMessageInfo.lengthOf(AlarmTriggerMsg.ID))
+                .as("MavlinkMessageInfo 必须同步，否则帧长与常量表不一致")
+                .isEqualTo(72);
     }
 
     @Test
-    @DisplayName("全字段 encode→decode 往返一致")
+    @DisplayName("全字段 encode→decode 往返一致（含 alarmId）")
     void encodeDecodeRoundtrip() {
         AlarmTriggerMsg orig = new AlarmTriggerMsg(
                 1700000000L, 477123456, 1214736928, 1001,
-                5000, 1, 2, "Intrusion at gate A");
+                5000, 1, 2, "Intrusion at gate A", 0xDEADBEEFL);
         AlarmTriggerMsg back = roundtrip(orig);
 
         assertThat(back.timestamp).isEqualTo(1700000000L);
@@ -41,14 +49,102 @@ class AlarmTriggerMsgTest {
         assertThat(back.alarmType).isEqualTo(1);
         assertThat(back.severity).isEqualTo(2);
         assertThat(back.description).isEqualTo("Intrusion at gate A");
+        assertThat(back.alarmId)
+                .as("alarmId 必须往返无损 —— 它是与 AlarmAckMsg 关联的唯一键")
+                .isEqualTo(0xDEADBEEFL);
+        assertThat(back.hasAlarmId()).isTrue();
     }
 
     @Test
-    @DisplayName("encode 产出 68 字节 payload")
+    @DisplayName("alarmId 位于 payload 尾部偏移 68，不挤占 description")
+    void alarmIdSitsAfterDescription() {
+        // 追加式布局的关键不变量：description 仍在偏移 18、长度仍为 50，
+        // alarmId 在 68。若有人日后把它插进头部，本测试会红。
+        String desc = "0123456789";
+        AlarmTriggerMsg msg = new AlarmTriggerMsg(
+                0, 0, 0, 0, 0, 0, 0, desc, 0x11223344L);
+        byte[] buf = msg.encode();
+
+        assertThat(buf).hasSize(72);
+        // description 仍在原偏移：偏移 18 起应能读回原串
+        assertThat(PayloadCodec.chars(
+                PayloadCodec.littleEndian(buf), 18, 50)).isEqualTo(desc);
+        // alarmId 在 68
+        assertThat(PayloadCodec.u32(PayloadCodec.littleEndian(buf), 68))
+                .isEqualTo(0x11223344L);
+    }
+
+    @Test
+    @DisplayName("向后兼容：新解码器读 68 字节旧帧 ⇒ alarmId=0 且其余字段无损")
+    void decodeLegacyFrameWithoutAlarmId() {
+        // 构造一个"旧格式"帧：前 68 字节按旧布局，尾部不存在
+        byte[] legacy = PayloadCodec.alloc(68);
+        PayloadCodec.putU32(legacy, 0, 1700000000L);
+        PayloadCodec.putI32(legacy, 4, 477123456);
+        PayloadCodec.putI32(legacy, 8, 1214736928);
+        PayloadCodec.putU16(legacy, 12, 1001);
+        PayloadCodec.putI16(legacy, 14, 5000);
+        PayloadCodec.putU8(legacy, 16, 1);
+        PayloadCodec.putU8(legacy, 17, 2);
+        PayloadCodec.putChars(legacy, 18, "legacy frame", 50);
+
+        MavlinkFrame frame = new MavlinkFrame(68, 0, 0, 0, 1, 1, AlarmTriggerMsg.ID, legacy, 0);
+        AlarmTriggerMsg msg = AlarmTriggerMsg.decode(frame);
+
+        assertThat(msg.alarmId)
+                .as("旧帧无该字段 ⇒ 必须为 0（= 未携带），不得抛异常或读垃圾")
+                .isZero();
+        assertThat(msg.hasAlarmId()).isFalse();
+        assertThat(msg.timestamp).isEqualTo(1700000000L);
+        assertThat(msg.lat).isEqualTo(477123456);
+        assertThat(msg.description).isEqualTo("legacy frame");
+    }
+
+    @Test
+    @DisplayName("向前兼容：旧解码器读到 72 字节新帧时忽略尾部 4 字节")
+    void oldDecoderIgnoresTrailingBytes() {
+        // 用旧布局的读取方式（只读到 offset 67）解析新帧，验证既有字段仍可正确取出：
+        // 这等价于"未升级的解码器"的行为，因为旧代码本就只按原偏移取值。
+        AlarmTriggerMsg msg = new AlarmTriggerMsg(
+                1700000000L, 477123456, 1214736928, 1001,
+                5000, 1, 2, "new frame", 0xCAFEBABEL);
+        byte[] buf = msg.encode();
+
+        ByteBuffer b = PayloadCodec.littleEndian(buf);
+        assertThat(PayloadCodec.u32(b, 0)).isEqualTo(1700000000L);
+        assertThat(PayloadCodec.i32(b, 4)).isEqualTo(477123456);
+        assertThat(PayloadCodec.u16(b, 12)).isEqualTo(1001);
+        assertThat(PayloadCodec.u8(b, 16)).isEqualTo(1);
+        assertThat(PayloadCodec.chars(b, 18, 50)).isEqualTo("new frame");
+        // 旧解码器根本不会碰 offset 68 ⇒ 不受影响
+    }
+
+    @Test
+    @DisplayName("alarmId=0 与 AlarmAckMsg 的 alarmId 一样表示'不可关联'")
+    void zeroAlarmIdMeansNotCarried() {
+        AlarmTriggerMsg noId = new AlarmTriggerMsg(
+                1L, 0, 0, 0, 0, 0, 0, "");
+        assertThat(noId.alarmId).isZero();
+        assertThat(noId.hasAlarmId())
+                .as("消费侧据此判断能否与 ack 关联")
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("旧构造器（无 alarmId）等价于 alarmId=0，保持源码兼容")
+    void legacyConstructorDelegatesToZero() {
+        AlarmTriggerMsg legacy = new AlarmTriggerMsg(
+                1L, 2, 3, 4, 5, 0, 0, "x");
+        assertThat(legacy.alarmId).isZero();
+        assertThat(legacy.hasAlarmId()).isFalse();
+    }
+
+    @Test
+    @DisplayName("encode 产出 72 字节 payload")
     void encodeLength() {
         AlarmTriggerMsg msg = new AlarmTriggerMsg(
                 0, 0, 0, 0, 0, 0, 0, "");
-        assertThat(msg.encode()).hasSize(68);
+        assertThat(msg.encode()).hasSize(72);
         assertThat(msg.messageId()).isEqualTo(30057);
     }
 

@@ -79,6 +79,52 @@
 
 ---
 
+## [Unreleased] — 协议补齐：AlarmTrigger 增补 alarmId，报警与派遣首次可关联（2026-10-07）
+
+1. **🔴 协议缺口：`ALARM_TRIGGER`(30057) 不带 `alarmId`，而 `ALARM_ACK`(30058) 带**
+   - **实况**：`AlarmLinkageEngine.publishAlarmAck` 用 `idToU32(event.getId())` 填
+     `alarmId`，而 `publishAlarmTrigger` **完全不携带事件 ID** ⇒ 两帧在协议层无共同键。
+     操作员看到"某处发生火灾"与"Drone-3 已在响应"，无法确认后者是不是这条报警的响应。
+     前端 `normalizeAlarmTrigger` 早已把该缺口写进注释并硬编码 `correlatable: false`，
+     `normalizeAlarmAck` 同样如此。
+   - **布局取舍（协议变更，三选一）**：原 LEN=68 被前 7 字段填满（18 + 50），无空位。
+     - **追加尾部（本方案）**：LEN 68→72，既有偏移一字不动，**双向兼容**——
+       新解码器读 68 字节旧帧 ⇒ `len > 71` 不成立 ⇒ `alarmId=0`；
+       旧解码器读 72 字节新帧 ⇒ 各字段仍在原偏移、尾部 4 字节被忽略
+       （`decode` 每个字段都有 `len > N` 守卫，帧解码不校验 payload 长度）。代价 4 字节/帧。
+     - 插入头部 + description 50→46：LEN 仍 68，但 description 偏移 18→22，
+       **旧帧的 description 会被错读成 alarmId**——省 0 字节却换来静默数据损坏。
+     - 不改协议、靠 `(sourceDeviceId, timestamp)` 关联：告警突发时时间戳必然撞车，
+       且前端补一个假 alarmId 只会把缺口藏起来。
+   - **改动**：`AlarmTriggerMsg` 增 `alarmId`（u32，偏移 68）+ `hasAlarmId()`；
+     保留旧 8 参构造器（等价 `alarmId=0`）以保源码兼容；
+     `MavlinkMessageInfo` 30057 同步为 `Info(72, 64)`（**CRC_EXTRA 不变**——
+     它只由 msgId 与字段名决定，不含字段长度/顺序）；
+     `AlarmLinkageEngine` 与 ack 用**同一** `idToU32(event.getId())` 填 trigger。
+   - **`alarmId=0` 的语义**：未携带（旧帧 / 事件 ID 为空）。前端据此置
+     `correlatable=false`，不得拿它去 join。
+
+2. **前端：两帧的 `correlatable` 由硬编码 false 改为按 `alarmId` 判定**
+   - `normalizeAlarmTrigger` 带出 `alarmId`；`normalizeAlarmAck` 同步。
+   - 两侧统一 `correlatable = alarmId != null && alarmId !== 0`，
+     故**旧帧仍正确地报不可关联**，不会因为协议升级就把旧数据当成可关联。
+   - 用例从"断言无 alarmId"改为覆盖三条路：非 0 ⇒ 可 join、字段缺失 ⇒ 不可关联、
+     `=0` ⇒ 不可关联，并新增"两端 alarmId 相同 ⇒ 可 join"（本轮变更的目的本身）。
+
+3. **测试**
+   - `AlarmTriggerMsgTest` 9 → 14 例：新增 alarmId 往返无损、**alarmId 位于偏移 68
+     且不挤占 description**、新解码器读旧帧（68B ⇒ alarmId=0 且其余字段无损）、
+     旧解码器读新帧（既有偏移仍可正确取值）、`MavlinkMessageInfo` 与常量一致、
+     旧构造器等价于 0。
+   - 前端 225 → 229 例。
+   - **诚实记录一处自身失误**：初版用例误用 Jest 的 `.as()` 链式写法
+     （`expect(x).toBe(false).as(...)`）在 Chai 下报 `Invalid Chai property: as`，
+     首次运行 2 红；改为注释 + 独立断言后 229/229 全绿。
+
+4. **计数基线 4388 → 4393（mavlink-core 457 → 462），前端 225 → 229；门禁全绿。**
+
+---
+
 ## [Unreleased] — M4 传感器接线：LiDAR/IMU 模拟源早已实现却从未注入（2026-10-07）
 
 紧接上一轮"夹爪从未通电"，本轮是同一类缺口的第二例：能力在、接线无。

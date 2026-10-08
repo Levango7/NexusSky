@@ -258,14 +258,13 @@ export function normalizeTaskStatus(raw, receivedAt) {
  * 归一化一条报警触发帧的 data（ALARM_TRIGGER 30057）。
  * 单位换算：lat/lon 1E7 → 度；alt mm → m。
  *
- * ⚠️ **该消息没有 alarmId 字段**（协议实况，见 AlarmTriggerMsg 的 7 个字段：
- * timestamp/lat/lon/sourceDeviceId/alt/alarmType/severity/description）。
- * 而 ALARM_ACK(30058) 带 alarmId —— 于是 **trigger 帧与 ack 帧在协议层无法关联**：
- * 操作员看到"某处发生火灾"和"Drone-3 已在响应"，却无法确认后者是不是这条报警的响应。
- * 这是协议设计缺口，不是前端归一化能补的（补一个假 alarmId 只会把缺口藏起来）。
- * 当前唯一可用的关联键是 `sourceDeviceId` 哈希 + `timestamp` 邻近。
- * 修复路径：在 AlarmTriggerMsg 增补 alarmId（需同步 mavlink-core LEN/CRC_EXTRA、
- * MavlinkMessageInfo、兼容脚本），属协议变更，不在本前端任务范围内。
+ * ✅ 2026-10-07 起本消息**带 alarmId**（u32，追加在 payload 尾部偏移 68，LEN 68→72），
+ *    与 ALARM_ACK(30058) 的 alarmId 同为 `idToU32(eventId)`，二者终于可以对上号。
+ *    协议变更的取舍见 `AlarmTriggerMsg` 的类注释（追加尾部而非插入头部，
+ *    以保持既有字段偏移不动并做到双向兼容）。
+ *
+ * ⚠️ `alarmId === 0` 表示**未携带**（旧帧，或事件 ID 为空）——此时不可关联，
+ *    `correlatable` 为 false，消费侧不应拿它去 join ack。
  *
  * ⚠️ 该消息也没有 sysId：报警是**设备源**帧，帧级 sysid 来自
  * `MavlinkMessageEvent.getSysId()`，对设备源帧无意义。sysid 因此为 null，
@@ -275,13 +274,14 @@ export function normalizeTaskStatus(raw, receivedAt) {
  * @param {number} receivedAt
  * @returns {Object|null} { sysid, lat, lon, altM, alarmType, alarmTypeLabel,
  *                          severity, severityLabel, severityColor, sourceDeviceIdHash,
- *                          description, sourceTimestamp, correlatable, receivedAt }
+ *                          description, alarmId, sourceTimestamp, correlatable, receivedAt }
  */
 export function normalizeAlarmTrigger(raw, receivedAt) {
   if (!isRecord(raw)) return null
   const alarmType = num(raw.alarmType)
   const severity = num(raw.severity)
   const severityMeta = lookupMeta(ALARM_SEVERITY_META, severity)
+  const alarmId = num(raw.alarmId)
   return {
     sysid: num(raw.sysId) != null ? num(raw.sysId) : num(raw.sysid),
     lat: num(raw.lat) != null ? raw.lat / 1e7 : null,
@@ -294,9 +294,11 @@ export function normalizeAlarmTrigger(raw, receivedAt) {
     severityColor: severityMeta ? severityMeta.color : 'var(--dim)',
     sourceDeviceIdHash: num(raw.sourceDeviceId),
     description: str(raw.description),
+    alarmId,
     sourceTimestamp: num(raw.timestamp),
-    // 显式告知消费侧"本帧无法与 ack 关联"，让面板据此决定是否显示关联列
-    correlatable: false,
+    // 2026-10-07 起可与 ack 关联：alarmId 非 0 即带键。
+    // 0 = 未携带（旧帧 / 事件 ID 为空），此时仍不可 join。
+    correlatable: alarmId != null && alarmId !== 0,
     receivedAt,
   }
 }
@@ -305,8 +307,8 @@ export function normalizeAlarmTrigger(raw, receivedAt) {
  * 归一化一条报警确认帧的 data（ALARM_ACK 30058）。
  * 这是「报警 → 自动派遣」闭环的关键一帧：操作员需要看到哪台机接了单、还要多久到。
  *
- * ⚠️ 帧里的 alarmId 无法与 ALARM_TRIGGER(30057) 对上——后者没有该字段。
- * 详见 {@link normalizeAlarmTrigger} 的说明。故 alarmId 只作展示，不作关联键。
+ * ✅ 2026-10-07 起 alarmId 可与 ALARM_TRIGGER(30057) 对上号（同一 `idToU32(eventId)`）。
+ *    两端任一为 0（旧帧 / 事件 ID 为空）即不可关联。
  *
  * @param {Object|null|undefined} raw 帧 data（AlarmAckMsg 序列化）
  * @param {number} receivedAt
@@ -319,9 +321,10 @@ export function normalizeAlarmAck(raw, receivedAt) {
   const ackResult = num(raw.ackResult)
   const ackMeta = lookupMeta(ALARM_ACK_META, ackResult)
   const eta = num(raw.estimatedArrivalSec)
+  const alarmId = num(raw.alarmId)
   return {
     sysid: num(raw.sysId) != null ? num(raw.sysId) : num(raw.sysid),
-    alarmId: num(raw.alarmId),
+    alarmId,
     droneSysid: num(raw.droneSysid),
     estimatedArrivalSec: eta,
     // ETA 直接给字符串，面板不重复做单位换算/哨兵值判断
@@ -330,7 +333,7 @@ export function normalizeAlarmAck(raw, receivedAt) {
     ackResultLabel: ackMeta ? ackMeta.label : null,
     ackResultColor: ackMeta ? ackMeta.color : 'var(--dim)',
     sourceTimestamp: num(raw.timestamp),
-    correlatable: false,
+    correlatable: alarmId != null && alarmId !== 0,
     receivedAt,
   }
 }
