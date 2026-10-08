@@ -371,7 +371,7 @@
      `/spray/cancel`、`/hardware/physics-model` 在仓内均不存在）；
      补 LiDAR/IMU 404 的边界说明。
 
-4. **计数基线 4343 → 4445（cloud-backend 2347 → 2435）**
+4. **计数基线 4343 → 4450（cloud-backend 2347 → 2435）**
    - 新增 `LicenseModuleSplitMigrationTest` 7 例 + `emergencyTierWithFullOnlyModuleRejected` 1 例；
      `check-test-count-docs.py` 全绿，22 处文档声称同步。
 
@@ -515,7 +515,7 @@
    - 新增 `SprayTaskPersistenceTest` 3 例（+3）、并入 CVE 自证 4 例（+4）；门禁全绿，
      22 处文档声称同步。
    - 后续 `LicenseModuleSplitMigrationTest` 7 例 + 越权面 1 例落地后推进到
-     **4445（cloud-backend 2435）**，见上一条。
+     **4450（cloud-backend 2435）**，见上一条。
 
 ---
 
