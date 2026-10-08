@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS docks (
     temp_warn_c DOUBLE PRECISION NOT NULL DEFAULT 55,
     temp_crit_c DOUBLE PRECISION NOT NULL DEFAULT 70,
     reboot_until_ms BIGINT NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at_ms BIGINT NOT NULL DEFAULT 0,
+    updated_at_ms BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS dock_state_log (
@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS dock_state_log (
     from_state VARCHAR(20),
     to_state VARCHAR(20) NOT NULL,
     reason VARCHAR(200),
-    ts BIGINT NOT NULL
+    ts BIGINT NOT NULL,
+    created_at_ms BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_dock_state_log_dock_ts ON dock_state_log (dock_id, ts);
 
@@ -41,7 +42,7 @@ CREATE TABLE IF NOT EXISTS dock_schedules (
     last_run_at BIGINT,
     last_result VARCHAR(30),
     next_due_ms BIGINT,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at_ms BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_dock_schedules_dock ON dock_schedules (dock_id);
 
@@ -53,7 +54,8 @@ CREATE TABLE IF NOT EXISTS dock_run_log (
     finished_at BIGINT,
     result VARCHAR(20) NOT NULL,
     reason VARCHAR(200),
-    flight_minutes DOUBLE PRECISION
+    flight_minutes DOUBLE PRECISION,
+    created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dock_run_log_dock_ts ON dock_run_log (dock_id, started_at);
 

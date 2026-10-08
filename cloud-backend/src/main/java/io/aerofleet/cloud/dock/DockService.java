@@ -140,7 +140,7 @@ public class DockService {
             transition(d, reported, "osd state follow");
         }
 
-        d.updatedAt = java.time.Instant.now();
+        d.updatedAtMs = System.currentTimeMillis();
         return docks.save(d);
     }
 
@@ -172,7 +172,7 @@ public class DockService {
                             "dock rejected command: result=" + reply.result() + " " +
                                     (reply.message() == null ? "" : reply.message()));
                 }
-                d.updatedAt = java.time.Instant.now();
+                d.updatedAtMs = System.currentTimeMillis();
                 docks.save(d);
                 return Map.of("dockId", d.id, "sn", d.sn, "method", command.method(),
                         "state", d.state.name(), "transport", gateway.transportName(),
@@ -180,7 +180,7 @@ public class DockService {
             } catch (DockGateway.DockGatewayException e) {
                 // 通道不可达：回滚过渡态，如实向上抛（不留下卡死的 OPENING）
                 transition(d, before, "command " + command.method() + " transport failed: " + e.getMessage());
-                d.updatedAt = java.time.Instant.now();
+                d.updatedAtMs = System.currentTimeMillis();
                 docks.save(d);
                 throw e;
             }
@@ -189,7 +189,7 @@ public class DockService {
         // 转发失败如实抛（504），不假装已重启。
         gateway.sendCommand(d.sn, command, Map.of());
         scheduleReboot(d);
-        d.updatedAt = java.time.Instant.now();
+        d.updatedAtMs = System.currentTimeMillis();
         docks.save(d);
         return Map.of("dockId", d.id, "sn", d.sn, "method", command.method(),
                 "state", d.state.name(), "rebootUntilMs", d.rebootUntilMs);
@@ -210,7 +210,7 @@ public class DockService {
                     fresh.state = DockState.IDLE;
                     stateLog.save(logEntry(fresh, before, DockState.IDLE, "reboot completed"));
                 }
-                fresh.updatedAt = java.time.Instant.now();
+                fresh.updatedAtMs = System.currentTimeMillis();
                 docks.save(fresh);
                 log.info("dock {} reboot completed, state={}", fresh.sn, fresh.state);
             } catch (Exception e) {
@@ -280,7 +280,7 @@ public class DockService {
             if (d.state != DockState.OFFLINE && d.lastHeartbeatMs > 0 && d.lastHeartbeatMs < cutoff) {
                 transition(d, DockState.OFFLINE,
                         "heartbeat timeout (" + props.getOfflineAfterPeriods() + " periods)");
-                d.updatedAt = java.time.Instant.now();
+                d.updatedAtMs = System.currentTimeMillis();
                 docks.save(d);
             }
         }
@@ -295,7 +295,7 @@ public class DockService {
         }
         DockState from = d.state;
         d.state = to;
-        d.updatedAt = java.time.Instant.now();
+        d.updatedAtMs = System.currentTimeMillis();
         stateLog.save(logEntry(d, from, to, reason));
         log.info("dock {} state {} -> {} ({})", d.sn, from, to, reason);
     }

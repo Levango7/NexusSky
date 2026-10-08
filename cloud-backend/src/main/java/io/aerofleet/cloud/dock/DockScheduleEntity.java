@@ -1,7 +1,6 @@
 package io.aerofleet.cloud.dock;
 
 import jakarta.persistence.*;
-import java.time.Instant;
 
 /** 无人值守定时任务（spec R4）。cron 用 Spring {@link org.springframework.scheduling.support.CronExpression} 口径。 */
 @Entity
@@ -37,6 +36,6 @@ public class DockScheduleEntity {
     @Column(name = "next_due_ms")
     public Long nextDueMs;
 
-    @Column(name = "created_at", nullable = false)
-    public Instant createdAt = Instant.now();
+    @Column(name = "created_at_ms", nullable = false)
+    public long createdAtMs = System.currentTimeMillis();
 }

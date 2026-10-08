@@ -1,7 +1,6 @@
 package io.aerofleet.cloud.dock;
 
 import jakarta.persistence.*;
-import java.time.Instant;
 
 /** 状态迁移日志（spec R1：所有迁移必写，供审计与度量）。 */
 @Entity
@@ -14,9 +13,11 @@ public class DockStateLogEntity {
     @Column(name = "dock_id", nullable = false)
     public Long dockId;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "from_state", length = 20)
     public DockState fromState;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "to_state", nullable = false, length = 20)
     public DockState toState;
 
@@ -25,6 +26,6 @@ public class DockStateLogEntity {
     @Column(nullable = false)
     public long ts = System.currentTimeMillis();
 
-    @Column(name = "created_at", nullable = false)
-    public Instant createdAt = Instant.now();
+    @Column(name = "created_at_ms", nullable = false)
+    public long createdAtMs = System.currentTimeMillis();
 }

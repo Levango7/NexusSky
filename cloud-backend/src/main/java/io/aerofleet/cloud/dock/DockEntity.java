@@ -1,7 +1,6 @@
 package io.aerofleet.cloud.dock;
 
 import jakarta.persistence.*;
-import java.time.Instant;
 
 /** 机巢（F2，spec R1）。主数据落 PG（C4 口径），状态机真值在 state 字段。 */
 @Entity
@@ -52,9 +51,9 @@ public class DockEntity {
     @Column(name = "reboot_until_ms", nullable = false)
     public long rebootUntilMs;
 
-    @Column(name = "created_at", nullable = false)
-    public Instant createdAt = Instant.now();
+    @Column(name = "created_at_ms", nullable = false)
+    public long createdAtMs = System.currentTimeMillis();
 
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt = Instant.now();
+    @Column(name = "updated_at_ms", nullable = false)
+    public long updatedAtMs = System.currentTimeMillis();
 }

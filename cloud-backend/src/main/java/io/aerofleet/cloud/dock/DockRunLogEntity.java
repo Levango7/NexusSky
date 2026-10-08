@@ -1,7 +1,6 @@
 package io.aerofleet.cloud.dock;
 
 import jakarta.persistence.*;
-import java.time.Instant;
 
 /** 无人值守任务运行记录（spec R5：架次与飞行分钟的数据源）。 */
 @Entity
@@ -33,5 +32,5 @@ public class DockRunLogEntity {
     public Double flightMinutes;
 
     @Column(name = "created_at", nullable = false)
-    public Instant createdAt = Instant.now();
+    public long createdAt = System.currentTimeMillis();
 }
