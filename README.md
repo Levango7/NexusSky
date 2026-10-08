@@ -716,10 +716,10 @@ NexusSky/
 | `mavlink-core` | 457 |
 | `drone-sim` | 1391 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2363 |
+| `cloud-backend` | 2420 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4359** |
+| **总计** | **4416** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -810,6 +810,12 @@ NexusSky/
 
 ## 已知边界（骨架的诚实声明）
 
+- **机巢管控（F2）的传输与执行边界**：命令通道交付的是 DJI Cloud API **物模型形状**
+  （`{tid,bid,timestamp,method,data}` services 语义）+ 可插拔 `DockGateway`；默认
+  `transport=sim`（HTTP 回环到 drone-sim 的 `dock` 子命令），`transport=mqtt` 是生产
+  seam（需 EMQX Broker，接口/配置已就位但未联调——与 C1/C2 "对端是模拟器"同一诚实口径）。
+  换电是计时仿真（5s + 电量曲线），非机械臂时序；无人值守完成判定用遥测
+  （曾起飞 + 相对高度回地），非任务状态机回调。
 - 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
 - 微服务/K8s 暂不引入：模块化单体已够当前规模，拆分时机见设计文档讨论
 - MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（30000–30063）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展

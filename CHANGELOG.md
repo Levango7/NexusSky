@@ -4,6 +4,39 @@
 
 ---
 
+## [Unreleased] — F2 机巢管控 + 上云 API 适配器：Dock 状态机 / 无人值守定时任务 / 利用率度量 / GCS 面板（2026-10-08）
+
+> 依据 ROADMAP F2（依赖 C4 持久化✅）。协议抽象先行：命令通道是 DJI Cloud API 物模型形状
+> （services 通道 `{tid,bid,timestamp,method,data}`），传输默认 sim（HTTP 回环到机巢模拟器），
+> `aerofleet.dock.transport=mqtt` 为生产 seam（需 EMQX Broker，见 README 边界）。
+
+### 交付清单
+
+| # | 交付 | 内容 |
+|---|---|---|
+| F2.1 | **持久化** | V23 迁移 5 表：docks / dock_state_log / dock_schedules / dock_run_log / dock_metrics_daily（day 列因 H2 保留字用 day_date） |
+| F2.2 | **状态机** | 9 态（OFFLINE/IDLE/OPENING/OPEN/CLOSING/CHARGING/EXCHANGING/FAULT/MAINTENANCE）；迁移表唯一裁决点 `DockStateMachine`，非法迁移 409+状态名；OSD 只按自然后继推进过渡态，FAULT 不被自报覆盖（防自动痊愈） |
+| F2.3 | **命令通道** | `DockGateway` 接口 + `SimLoopbackGateway`（默认装配）；通道失败回滚过渡态不留卡死的 OPENING；REBOOT 经网关转发 + 8s 定时器回 IDLE |
+| F2.4 | **无人值守** | cron 定时任务（Spring CronExpression）；四道门控（机巢在线/状态 IDLE·CHARGING/托管机**在线**/无并发 RUNNING）——托管机在线性是 e2e 实测撞出的真缺陷（修前会白开门白等到超时）；全链路复用 DroneCommandService（arm→uploadMission→startMission→监测落地→关门） |
+| F2.5 | **度量** | 日结幂等重算（小时级定时 + 查询时按需重算当天）：架次/飞行分钟/开关门/可用率/利用率(8h 基准)/充电时长/换电次数/温度告警；分母零返回 null（F1 口径） |
+| F2.6 | **模拟器** | drone-sim 增 `dock` 子命令（DockSimMain）：物模型行为（开门 3s/关门 3s/换电 5s/重启 8s）+ OSD 推送 + /services /osd /health |
+| F2.7 | **GCS 面板** | DockPanel（tab 机巢）：状态色标列表/动作按钮（非法态置灰+后端裁决）/度量卡片/定时任务管理/迁移时间线 |
+| F2.8 | **e2e** | `scripts/e2e-dock.ps1`：注册幂等(201/409)→OSD 上线→开门时序跟随→409 非法态→400 未知命令→关门→cron 400→SKIPPED 门控→度量聚合——真后端 + 真模拟器全链路 |
+
+### 测试
+
+- 后端 57 例：DockStateMachineTest(26 全表) / DockServiceTest(14) / DockMetricsServiceTest(4) / DockGatewayLoopbackTest(5 真 HTTP 往返) / UnattendedGateTest(8 门控)
+- 前端 8 例：dockPanel.test.js（状态表完整性 + 动作许可表与后端状态机一致性）
+- e2e-dock ALL PASS（真后端 + DockSim 全链路 26 断言）
+
+### 已知边界
+
+- MQTT 传输是接口 + 配置位，真实 EMQX 联调属生产阶段（PoC 默认 sim 回环）；
+- 换电是计时仿真（5s + 电量曲线 20→100），非机械臂时序；
+- 无人值守完成判定用遥测（曾起飞 + 相对高度回 1m 以下），非任务状态机回调。
+
+---
+
 ## [Unreleased] — 定价档位裁决落地：基础版扎实（模块 5→7 拆分）+ 三腿 e2e 转硬门禁（2026-10-07）
 
 用户裁定「**基础版需要扎实**」，即基础版必须真能撑起一次交付。本轮落地该裁决，
@@ -66,7 +99,7 @@
      `/spray/cancel`、`/hardware/physics-model` 在仓内均不存在）；
      补 LiDAR/IMU 404 的边界说明。
 
-4. **计数基线 4343 → 4359（cloud-backend 2347 → 2363）**
+4. **计数基线 4343 → 4416（cloud-backend 2347 → 2420）**
    - 新增 `LicenseModuleSplitMigrationTest` 7 例 + `emergencyTierWithFullOnlyModuleRejected` 1 例；
      `check-test-count-docs.py` 全绿，22 处文档声称同步。
 
@@ -210,7 +243,7 @@
    - 新增 `SprayTaskPersistenceTest` 3 例（+3）、并入 CVE 自证 4 例（+4）；门禁全绿，
      22 处文档声称同步。
    - 后续 `LicenseModuleSplitMigrationTest` 7 例 + 越权面 1 例落地后推进到
-     **4359（cloud-backend 2363）**，见上一条。
+     **4416（cloud-backend 2420）**，见上一条。
 
 ---
 
