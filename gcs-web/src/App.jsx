@@ -399,6 +399,7 @@ export default function App() {
       ) : view === 'defect' ? (
         <PanelWrapper>
           <DefectPanel />
+        </PanelWrapper>
       ) : view === 'dock' ? (
         <PanelWrapper>
           <DockPanel />

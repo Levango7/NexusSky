@@ -196,7 +196,7 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
    - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
      （模拟"裸写开关被吞 token"）。
 
-4. **计数基线 4380 → 4411（drone-sim 1397 → 1405）**
+4. **计数基线 4380 → 4473（drone-sim 1397 → 1405）**
    - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
 
 ---

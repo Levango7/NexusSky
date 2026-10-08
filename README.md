@@ -717,15 +717,15 @@ NexusSky/
 | `drone-sim` | 1405 |
 | `link-sim` | 117 |
 <<<<<<< HEAD
-| `cloud-backend` | 2401 |
+| `cloud-backend` | 2458 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4411** |
+| **总计** | **4473** |
 =======
-| `cloud-backend` | 2435 |
+| `cloud-backend` | 2458 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4450** |
+| **总计** | **4473** |
 >>>>>>> origin/master
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
