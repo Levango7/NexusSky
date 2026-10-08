@@ -717,15 +717,15 @@ NexusSky/
 | `drone-sim` | 1405 |
 | `link-sim` | 117 |
 <<<<<<< HEAD
-| `cloud-backend` | 2458 |
+| `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4473** |
+| **总计** | **4485** |
 =======
-| `cloud-backend` | 2458 |
+| `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4473** |
+| **总计** | **4485** |
 >>>>>>> origin/master
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
@@ -818,6 +818,9 @@ NexusSky/
 ## 已知边界（骨架的诚实声明）
 
 <<<<<<< HEAD
+- **行业航线模板（F3）的几何口径**：局部平面近似（<10km 区域误差厘米级）；弓字形无
+  最小转弯优化；岸线偏移是顶点法向近似；杆塔号→坐标由请求方传入（真实台账/GIS 接入
+  属生产阶段）。
 - **缺陷闭环（F4）的复检与去重口径**：复检=真拍一张（复用 F1 captureAndLocate）+ 逐缺陷
   10m 同 kind 比对——**要求托管机已飞临缺陷点**（派飞属运维职责，工单不驱动飞控）；
   去重与复检是同一空间近似口径。报告导出 json/csv/md，PDF 属渲染层不在本轮。
