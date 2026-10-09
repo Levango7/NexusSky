@@ -21,7 +21,6 @@ export default function DroneList({ drones, selectedSysid, onSelect }) {
       <div className="panel-body">
         {drones.length === 0 && (
           <div className="empty-hint">
-            <span className="big">🛰</span>
             暂无设备上线
             <br />
             启动 drone-sim 后约 2 秒内出现
@@ -67,7 +66,7 @@ export default function DroneList({ drones, selectedSysid, onSelect }) {
                   {d.rtkStatus === 'RTK_FIXED' ? 'RTK·F' : 'RTK·f'}
                 </span>
               )}
-                <span>{d.armed ? '🔓 已解锁' : '🔒 上锁'}</span>
+                <span>{d.armed ? '已解锁' : '已锁'}</span>
                 <span>{d.online ? '● 在线' : '○ 离线'}</span>
               </span>
             </li>

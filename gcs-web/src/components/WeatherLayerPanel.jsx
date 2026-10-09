@@ -3,14 +3,14 @@ import { api } from '../api.js'
 
 const POLL_MS = 5000
 
-const WEATHER_ICONS = {
-  sunny: '☀',
-  cloudy: '☁',
-  rainy: '🌧',
-  storm: '⛈',
-  fog: '🌫',
-  snowy: '❄',
-  windy: '💨',
+const WEATHER_MARKS = {
+  sunny: '晴',
+  cloudy: '云',
+  rainy: '雨',
+  storm: '雷',
+  fog: '雾',
+  snowy: '雪',
+  windy: '风',
 }
 
 const WIND_DIR_LABELS = ['北', '东北', '东', '东南', '南', '西南', '西', '西北']
@@ -122,10 +122,10 @@ export default function WeatherLayerPanel() {
       }
 
       if (st.weather) {
-        const icon = WEATHER_ICONS[st.weather] || '•'
-        ctx.font = '14px sans-serif'
+        const mark = WEATHER_MARKS[st.weather] || '•'
+        ctx.font = '12px sans-serif'
         ctx.fillStyle = '#ffc857'
-        ctx.fillText(icon, cx - 7, cy + 4)
+        ctx.fillText(mark, cx - 6, cy + 4)
       }
 
       if (showTurbulence && st.turbulence) {
@@ -158,9 +158,9 @@ export default function WeatherLayerPanel() {
   }, [envStatus, showWind, showTemp, showTurbulence])
 
   return (
-    <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
+    <div className="page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18, color: 'var(--cyan)' }}>气象图层面板</h2>
+        <h2 className="page-title">气象图层面板</h2>
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             className={`btn ${showWind ? 'primary' : ''}`}
@@ -222,7 +222,7 @@ export default function WeatherLayerPanel() {
           <div style={{ padding: 8, borderRadius: 6, background: 'var(--card)', border: '1px solid var(--border)' }}>
             <div style={{ fontSize: 10, color: 'var(--dim)' }}>天气状态</div>
             <div style={{ fontSize: 16, fontWeight: 600 }}>
-              {envStatus.weather ? `${WEATHER_ICONS[envStatus.weather] || ''} ${envStatus.weather}` : '--'}
+              {envStatus.weather ? `${WEATHER_MARKS[envStatus.weather] || ''} ${envStatus.weather}` : '--'}
             </div>
           </div>
         </div>

@@ -52,15 +52,16 @@ import TelemetryCharts from './components/TelemetryCharts.jsx'
 import DashboardPanel from './components/DashboardPanel.jsx'
 import Scene3D from './components/Scene3D.jsx'
 import Trajectory3D from './components/Trajectory3D.jsx'
-import { api, isPanelAvailable, BUDGET_MODES, getCurrentUser } from './api.js'
+import { api, BUDGET_MODES, getCurrentUser } from './api.js'
 import BudgetBadge from './components/BudgetBadge.jsx'
 import LoginPanel from './components/LoginPanel.jsx'
 import TenantPanel from './components/TenantPanel.jsx'
 import UserPanel from './components/UserPanel.jsx'
+import NavGroups from './components/NavGroups.jsx'
 import useAuth from './hooks/useAuth.js'
 import useDrones from './hooks/useDrones.js'
 import useWebSocket from './hooks/useWebSocket.js'
-import useUI, { VIEW_PANEL_MAP } from './hooks/useUI.js'
+import useUI from './hooks/useUI.js'
 import useMission from './hooks/useMission.js'
 import useReplay from './hooks/useReplay.js'
 
@@ -202,68 +203,7 @@ export default function App() {
         </div>
 
         <div className="topbar-center">
-          <div className="view-tabs" style={{ display: 'inline-flex', gap: 4, marginRight: 6 }}>
-            {[
-              { key: 'dashboard', label: '仪表盘' },
-              { key: 'scene3d', label: '3D 视图' },
-              { key: 'control', label: '操控' },
-              { key: 'formation', label: '编队' },
-              { key: 'spray', label: '喷洒' },
-              { key: 'hardware', label: '硬件' },
-              { key: 'mesh', label: 'Mesh' },
-              { key: 'celltower', label: '基站' },
-              { key: 'satlink', label: '星地中继' },
-              { key: 'terrain', label: '地形' },
-              { key: 'emergency', label: '应急编排' },
-              { key: 'surveillance', label: '安防监控' },
-              { key: 'alarm', label: '报警联动' },
-              { key: 'tracking', label: '追踪' },
-              { key: 'geofence', label: '围栏' },
-              { key: 'rid', label: 'RID' },
-              { key: 'cveval', label: 'CV评测' },
-              { key: 'defect', label: '缺陷工单' },
-              { key: 'routetpl', label: '航线模板' },
-              { key: 'opsreport', label: '运营报表' },
-              { key: 'roc', label: 'ROC席位' },
-              { key: 'sensing', label: '侦测态势' },
-              { key: 'dock', label: '机巢' },
-              { key: 'dronelock', label: '锁机' },
-              { key: 'autodispatch', label: '自动出警' },
-              { key: 'aidecision', label: 'AI 决策' },
-              { key: 'fleetops', label: '机队协同' },
-              { key: 'scenariolib', label: '场景库' },
-              { key: 'inspection', label: '智能巡检' },
-              { key: 'health', label: '健康管理' },
-              { key: 'commadapt', label: '通信自适应' },
-              { key: 'mapping', label: '航拍测绘' },
-              { key: 'voicecmd', label: '语音指挥' },
-              { key: 'citytwin', label: '数字孪生' },
-              { key: 'delivery', label: '物流配送' },
-              { key: 'show', label: '编队表演' },
-              { key: 'disastercomm', label: '灾害通信' },
-              { key: 'unifiedcmd', label: '空地指挥' },
-              { key: 'videofusion', label: '视频融合' },
-              { key: 'thermal', label: '热成像' },
-              { key: 'weather', label: '气象' },
-              { key: 'linkquality', label: '链路质量' },
-              { key: 'trajectory3d', label: '3D轨迹' },
-              ...(isAdmin ? [
-                { key: 'tenants', label: '租户管理' },
-                { key: 'users', label: '用户管理' },
-              ] : []),
-            ]
-              .filter((tab) => isPanelAvailable(VIEW_PANEL_MAP[tab.key], budgetMode))
-              .map((tab) => (
-                <button
-                  key={tab.key}
-                  className={`btn ${view === tab.key ? 'primary' : ''}`}
-                  style={{ padding: '4px 12px', fontSize: 11 }}
-                  onClick={() => setView(tab.key)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-          </div>
+          <NavGroups view={view} onSelect={setView} budgetMode={budgetMode} isAdmin={isAdmin} />
           <span className="chip mono">{new Date(now).toLocaleTimeString('zh-CN', { hour12: false })}</span>
           <span className="chip">
             机队 <b className="mono">{onlineCount}</b>
@@ -313,9 +253,9 @@ export default function App() {
           >
             <span className="icon">⚙</span>
           </button>
-          {/* 当前用户信息 */}
+          {/* 当前用户信息（移动端由 CSS 隐藏，用户名仍在 title 里） */}
           {currentUser && (
-            <span className="chip" title={currentUser.username}>
+            <span className="chip user-chip" title={currentUser.username}>
               <span style={{ fontSize: 11, color: 'var(--cyan)' }}>
                 {currentUser.role === 'ADMIN' ? '管理员' : currentUser.role === 'OPERATOR' ? '操作员' : '观察者'}
               </span>
@@ -631,7 +571,6 @@ export default function App() {
           )}
           {telemetry && telemetry.online === false && (
             <div className="fault-banner warn">
-              <span className="fault-icon">📡</span>
               <div>
                 <b>链路丢失</b>
                 <span className="fault-sub">心跳超时 —— 设备已标记离线</span>

@@ -185,7 +185,7 @@ export default function DockPanel() {
   const st = detail ? detail.state : null
 
   return (
-    <div style={{ display: 'flex', gap: 12, padding: 12, height: '100%', boxSizing: 'border-box' }}>
+    <div className="page page-split">
       {/* 左：机巢列表 */}
       <div style={{ width: 260, flexShrink: 0, overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -235,20 +235,27 @@ export default function DockPanel() {
             </div>
           </div>
         ))}
-        {docks.length === 0 && <div style={{ color: '#94a3b8', fontSize: 13 }}>暂无机巢，点右上「注册」新增</div>}
+        {docks.length === 0 && (
+          <div className="empty-state" style={{ padding: '28px 8px' }}>
+            <span className="es-title">暂无机巢</span>
+            <span className="es-hint">点右上「注册」新增</span>
+          </div>
+        )}
       </div>
 
       {/* 右：详情 */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {error && (
-          <div style={{ background: '#7f1d1d', borderRadius: 6, padding: '6px 10px', marginBottom: 8 }}>
-            {error}
+          <div className="notice crit">{error}</div>
+        )}
+        {!detail && (
+          <div className="empty-state">
+            <span className="es-hint">选择左侧机巢查看详情</span>
           </div>
         )}
-        {!detail && <div style={{ color: '#94a3b8' }}>选择左侧机巢查看详情</div>}
         {detail && (
           <>
-            <h3 style={{ margin: '0 0 8px' }}>
+            <h3 className="page-title">
               {detail.name}
               <span style={{ marginLeft: 8, color: STATE_COLORS[st] || '#6b7280' }}>
                 ● {STATE_LABELS[st] || st}

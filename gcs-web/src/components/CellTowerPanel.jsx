@@ -146,8 +146,8 @@ export default function CellTowerPanel({ cellTowerData }) {
     : {}
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         移动基站载荷
       </h2>
 

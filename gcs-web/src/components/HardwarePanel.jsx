@@ -310,7 +310,6 @@ export default function HardwarePanel({ drones = [] }) {
       <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
         {sysid == null ? (
           <div className="empty-hint" style={{ textAlign: 'center', paddingTop: 60 }}>
-            <span className="big">📡</span>
             从左侧选择一架无人机
           </div>
         ) : (

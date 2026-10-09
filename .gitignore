@@ -36,3 +36,7 @@ gcs-web/data/
 # 多 agent 协作的共享文件（见 COORDINATION.md）：各 agent 之间的留言与状态板，
 # 属本地协调信息而非仓库资产，不入库
 .coord/
+
+# UI 验收临时产物（无头截图与调试脚本的本地工作目录），不入库
+gcs-web/shots/
+.ui-logs/

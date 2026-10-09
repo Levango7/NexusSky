@@ -262,8 +262,8 @@ export default function AutoDispatchPanel() {
   }, [])
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         自动出警
         <span style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 8 }}>
           进行中 {activeDispatches.length} · 历史 {history.length}
@@ -271,7 +271,7 @@ export default function AutoDispatchPanel() {
       </h2>
 
       {error && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {error}
         </div>
       )}
@@ -418,7 +418,7 @@ export default function AutoDispatchPanel() {
                   opacity: triggering ? 0.5 : 1,
                 }}
               >
-                {triggering ? '触发中…' : '🚨 触发出警'}
+                {triggering ? '触发中…' : '触发出警'}
               </button>
             </form>
             {triggerResult && (
@@ -576,7 +576,7 @@ export default function AutoDispatchPanel() {
                 disabled={voiceBusy != null}
                 style={{ ...miniBtnStyle, color: 'var(--warn)', borderColor: 'var(--warn)', padding: '4px 10px', opacity: voiceBusy ? 0.5 : 1, cursor: voiceBusy ? 'not-allowed' : 'pointer' }}
               >
-                {voiceBusy === 'broadcast' ? '广播中…' : '📢 广播'}
+                {voiceBusy === 'broadcast' ? '广播中…' : '广播'}
               </button>
             </div>
           </div>

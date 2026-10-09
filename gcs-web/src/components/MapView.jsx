@@ -929,7 +929,6 @@ export default function MapView({
     return (
       <div className="map-view map-error" ref={mapRef}>
         <div className="map-error-body">
-          <div style={{ fontSize: 28, opacity: .4, marginBottom: 8 }}>🗺️</div>
           <b style={{ color: 'var(--crit)', display: 'block', marginBottom: 6 }}>地图加载失败</b>
           <div style={{ fontSize: 11, color: 'var(--dim-2)', marginBottom: 14, wordBreak: 'break-word' }}>
             {mapError}

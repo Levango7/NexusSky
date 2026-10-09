@@ -93,8 +93,8 @@ export default function RocPanel() {
   const batteryColor = (b) => (b == null ? '#6b7280' : b >= 50 ? '#22c55e' : b >= 25 ? '#eab308' : '#ef4444')
 
   return (
-    <div style={{ padding: 12, height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
-      <h3 style={{ margin: '0 0 8px' }}>ROC 一控多机席位</h3>
+    <div className="page">
+      <h3 className="page-title">ROC 一控多机席位</h3>
 
       {/* 席位管理 */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>

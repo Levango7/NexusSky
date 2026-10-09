@@ -142,22 +142,22 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
 
         <div className="cmd-grid">
           <button className="btn arm" disabled={busy || !drone} onClick={() => cmd('arm')}>
-            <span className="icon">🔓</span>解锁
+            解锁
           </button>
           <button className="btn disarm" disabled={busy || !drone} onClick={() => cmd('disarm')}>
-            <span className="icon">🔒</span>上锁
+            上锁
           </button>
           <button className="btn takeoff" disabled={busy || !drone} onClick={() => cmd('takeoff', 30)}>
-            <span className="icon">🛫</span>起飞
+            起飞
           </button>
           <button className="btn start tall" style={{ gridColumn: '1 / 3' }} disabled={busy || !drone} onClick={() => cmd('start_mission')}>
-            <span className="icon">▶</span>开始任务
+            开始任务
           </button>
           <button className="btn rtl" disabled={busy || !drone} onClick={() => cmd('rtl')}>
-            <span className="icon">⟲</span>返航
+            返航
           </button>
           <button className="btn kill" disabled={busy || !drone} onClick={() => cmd('kill')} title="紧急终止">
-            <span className="icon">✋</span>急停
+            急停
           </button>
         </div>
 

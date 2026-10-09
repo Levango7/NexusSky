@@ -32,10 +32,10 @@ const POLL_MS = 3000
 
 // 场景预设类型
 const SCENARIO_TYPES = [
-  { type: 'earthquake', label: '地震', icon: '🌐' },
-  { type: 'mudslide', label: '泥石流', icon: '⛰' },
-  { type: 'fire', label: '火灾', icon: '🔥' },
-  { type: 'custom', label: '自定义', icon: '⚙' },
+  { type: 'earthquake', label: '地震' },
+  { type: 'mudslide', label: '泥石流' },
+  { type: 'fire', label: '火灾' },
+  { type: 'custom', label: '自定义' },
 ]
 
 // 编排阶段（六阶段流程）
@@ -667,10 +667,10 @@ export default function UnifiedCommandPanel() {
   const onlineDroneCount = useMemo(() => drones.filter((d) => d.online).length, [drones])
 
   return (
-    <div style={{ padding: 12, color: 'var(--text)', display: 'flex', flexDirection: 'column', gap: 8, height: '100%', overflow: 'auto' }}>
+    <div className="page" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {/* 标题栏 + 全局状态指示 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <h2 style={{ fontSize: 16, margin: 0, color: 'var(--text)' }}>
+        <h2 className="page-title">
           空地一体化应急指挥面板
         </h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1086,7 +1086,6 @@ export default function UnifiedCommandPanel() {
                 color: selectedScenarioType === s.type ? 'var(--cyan)' : 'var(--dim)',
               }}
             >
-              <span style={{ marginRight: 3 }}>{s.icon}</span>
               {s.label}
             </button>
           ))}

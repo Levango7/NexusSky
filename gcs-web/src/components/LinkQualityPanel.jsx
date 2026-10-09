@@ -152,9 +152,9 @@ export default function LinkQualityPanel() {
   const linkColor = getLinkColor(currentScore)
 
   return (
-    <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
+    <div className="page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18, color: 'var(--cyan)' }}>链路质量面板</h2>
+        <h2 className="page-title">链路质量面板</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className="chip mono" style={{ fontSize: 10 }}>
             评分

@@ -234,13 +234,13 @@ export default function CommAdaptPanel() {
   }, [])
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         多模态通信自适应
       </h2>
 
       {(linksError || failoverError) && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {linksError ? `链路数据刷新失败：${linksError}` : `故障切换失败：${failoverError}`}
         </div>
       )}

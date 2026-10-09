@@ -13,10 +13,10 @@ const POLL_MS = 2000
 
 // 场景预设类型（与后端 scenario type 对应）
 const SCENARIO_TYPES = [
-  { type: 'earthquake', label: '地震', icon: '🌐' },
-  { type: 'mudslide', label: '泥石流', icon: '⛰' },
-  { type: 'fire', label: '火灾', icon: '🔥' },
-  { type: 'custom', label: '自定义', icon: '⚙' },
+  { type: 'earthquake', label: '地震' },
+  { type: 'mudslide', label: '泥石流' },
+  { type: 'fire', label: '火灾' },
+  { type: 'custom', label: '自定义' },
 ]
 
 // 编排 5 阶段（测绘→规划→部署→服务→自愈）
@@ -291,13 +291,13 @@ export default function EmergencyOrchPanel() {
   }, [queueTasks])
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         应急任务编排
       </h2>
 
       {error && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {error}
         </div>
       )}
@@ -326,7 +326,6 @@ export default function EmergencyOrchPanel() {
                 transition: 'all 0.15s',
               }}
             >
-              <span style={{ marginRight: 4 }}>{s.icon}</span>
               {s.label}
             </button>
           ))}

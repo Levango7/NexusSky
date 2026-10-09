@@ -223,8 +223,8 @@ export default function VoiceCmdPanel() {
   }, [statusSysid])
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>语音指挥</h2>
+    <div className="page">
+      <h2 className="page-title">语音指挥</h2>
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         {/* 左列：指令输入 + 解析结果 + 执行 */}

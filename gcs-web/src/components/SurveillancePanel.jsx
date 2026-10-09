@@ -452,13 +452,13 @@ export default function SurveillancePanel() {
   }, [tileAssign, selectedDeviceId])
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         安防视频监控
       </h2>
 
       {error && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {error}
         </div>
       )}
@@ -514,7 +514,7 @@ export default function SurveillancePanel() {
             onClick={() => setShowDiscover(true)}
             style={{ ...miniBtnStyle, width: '100%', marginTop: 6, padding: '3px 0' }}
           >
-            🔍 子网发现
+            子网发现
           </button>
         </div>
 
@@ -538,7 +538,7 @@ export default function SurveillancePanel() {
               </button>
             ))}
             <button onClick={autoAssign} style={{ ...miniBtnStyle, marginLeft: 'auto' }}>
-              ⚡ 自动排布
+              自动排布
             </button>
             <button onClick={() => setTileAssign({})} style={miniBtnStyle}>
               清空

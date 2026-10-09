@@ -24,7 +24,7 @@ const PATTERN_ICON = {
   BLINK: '◉',
   BREATHE: '◐',
   CHASE: '▹',
-  RAINBOW: '🌈',
+  RAINBOW: '◍',
 }
 
 export default function FormationPanel({ formations = [], drones = [] }) {
@@ -179,7 +179,6 @@ export default function FormationPanel({ formations = [], drones = [] }) {
             )}
             {formations.length === 0 && !showCreate && (
               <div className="empty-hint">
-                <span className="big">🛩</span>
                 暂无活跃编队
                 <br />
                 点击「＋ 新建」创建
@@ -427,10 +426,10 @@ function FormationDetail({
         <div className="panel-body">
           <div className="cmd-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
             <button className="btn takeoff" disabled={busy} onClick={() => onCommand('TAKEOFF', 30)}>
-              <span className="icon">🛫</span>起飞
+              起飞
             </button>
             <button className="btn rtl" disabled={busy} onClick={() => onCommand('RTL')}>
-              <span className="icon">⟲</span>返航
+              返航
             </button>
             <button
               className="btn kill"
@@ -438,7 +437,7 @@ function FormationDetail({
               onClick={onDissolve}
               title="解散编队（在飞成员 RTL 后置 DISSOLVED）"
             >
-              <span className="icon">✋</span>解散
+              解散
             </button>
           </div>
 

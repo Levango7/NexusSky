@@ -296,13 +296,13 @@ export default function AlarmPanel() {
   }, [])
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         报警联动
       </h2>
 
       {error && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {error}
         </div>
       )}
@@ -401,7 +401,7 @@ export default function AlarmPanel() {
                               fontWeight: 'bold', opacity: responding ? 0.6 : 1,
                             }}
                           >
-                            {responding ? '响应中…' : '🚁 一键应急响应'}
+                            {responding ? '响应中…' : '一键应急响应'}
                           </button>
                         </div>
                       )}

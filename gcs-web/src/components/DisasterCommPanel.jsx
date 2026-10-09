@@ -18,10 +18,10 @@ const QOS_PRIORITIES = [
 
 // 异构链路类型定义
 const LINK_TYPES = {
-  WiFi: { label: 'WiFi', color: '#3498DB', icon: '📶' },
-  LTE: { label: 'LTE', color: '#2ECC71', icon: '📡' },
+  WiFi: { label: 'WiFi', color: '#3498DB' },
+  LTE: { label: 'LTE', color: '#2ECC71' },
   LoRa: { label: 'LoRa', color: '#F39C12', icon: '〰' },
-  Sat: { label: '卫星', color: '#9B59B6', icon: '🛰' },
+  Sat: { label: '卫星', color: '#9B59B6' },
 }
 
 // 链路质量颜色
@@ -327,8 +327,8 @@ export default function DisasterCommPanel() {
   }, [linkList])
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         灾害应急通信综合态势
       </h2>
 
@@ -532,7 +532,7 @@ export default function DisasterCommPanel() {
                   return (
                     <tr key={`link-${i}`}>
                       <td style={tdStyle}>
-                        <span style={{ color: meta.color }}>{meta.icon}</span>{' '}
+                        <i className="dotp" style={{ color: meta.color }} />{' '}
                         <span style={{ fontSize: 10 }}>{meta.label}</span>
                       </td>
                       <td style={tdStyle}>{link.bridgeNode || link.node || '--'}</td>
@@ -560,7 +560,7 @@ export default function DisasterCommPanel() {
           }}>
             {Object.entries(LINK_TYPES).map(([key, meta]) => (
               <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ color: meta.color }}>{meta.icon}</span>
+                <i className="dotp" style={{ color: meta.color }} />
                 <span style={{ color: 'var(--dim-2)' }}>{meta.label}</span>
               </span>
             ))}

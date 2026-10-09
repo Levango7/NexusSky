@@ -285,11 +285,11 @@ export default function CityTwinPanel({ twinStates }) {
   } : { drones: 0, vehicles: 0, persons: 0, alerts: 0 }
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>数字孪生城市</h2>
+    <div className="page">
+      <h2 className="page-title">数字孪生城市</h2>
 
       {modelsError && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {modelsError}
         </div>
       )}

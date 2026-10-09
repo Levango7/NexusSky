@@ -99,8 +99,8 @@ export default function SatLinkPanel({ satLinkData }) {
   const currentStrategy = strategy?.strategy || 'NEAR_FIRST'
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         星-空-地多层级中继
       </h2>
 

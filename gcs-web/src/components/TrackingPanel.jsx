@@ -332,13 +332,13 @@ export default function TrackingPanel({ onTrackLoaded }) {
   }, [onTrackLoaded])
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         无人机追踪 / 遗失辅助查找
       </h2>
 
       {(lostError || scanError) && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {lostError ? `失联列表刷新失败：${lostError}` : `扫描失败：${scanError}`}
         </div>
       )}
