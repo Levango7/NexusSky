@@ -4,6 +4,68 @@
 
 ---
 
+## [Unreleased] — C5 MAVLink 签名：补接收验签测试 + 密钥轮换端点 + 配置显式化（2026-10-09）
+
+### 一、把「写了却没人验证」的验签路径纳入 CI
+
+C5 的签名能力原本已有两侧覆盖：mavlink-core 的 MavlinkSignerTest /
+MavlinkSigningVectorTest / SigningKeyManagerTest 管密码学，
+MavlinkSigningConfigurationTest 管 bean 装配，scripts/e2e-signing.ps1
+管全链路（884 行 / 6 场景）。
+
+但 **e2e-signing.ps1 从未被任何 workflow 调用**（CI 只跑 9 个 e2e，签名不在其中），
+而 UdpGateway 那段 fail-closed 验签决策——拒绝未签名、按来源 sysid 取密钥、
+取不到密钥就拒、timestamp 防重放——**零测试覆盖**。结果是：一段安全语义全靠人眼保证，
+CI 全绿也证明不了它还在工作。
+
+新增 UdpGatewaySigningTest（8 例），打真实 UDP 字节走生产同一条路
+（DatagramSocket → UdpMavlinkTransport → MavlinkParser → onFrame → verifyFrame），
+顺带覆盖「签名块是否正确从线上字节切出来」——全链路最容易错的一环。
+
+**做过变异测试**：把 verifyFrame 改成无条件放行后，5 个「应拒绝」场景
+（篡改 / 未签名 / 错密钥 / 未知 sysid / 重放）全部转红，两个「应放行」场景
+（正常签名、签名未启用）仍然通过——证明断言真的在咬，不是假绿。
+
+### 二、密钥轮换端点（此前只能手工改文件）
+
+新增 SigningKeyStoreWriter（原子落盘）+ MavlinkSigningKeyController：
+
+- GET  /api/v1/mavlink/signing/keys              指纹与 linkId，**不含密钥**
+- POST /api/v1/mavlink/signing/keys/{sysid}/rotate  轮换单机密钥
+
+**协议层诚实边界**：MAVLink v2 签名的 13 字节数据块是
+linkId(1)|timestamp(6)|signature(6)，**没有 key id 字段**⇒ 轮换只能是硬切换，
+不存在 API Key 那种「新旧并存宽限期」的协议表达。因此本端点**不提供** graceHours，
+并在响应里显式 warning；类注释与 CHANGELOG 都写清这一点，避免照搬 API Key 心智模型。
+
+安全属性：ADMIN + JWT 双门禁；签名未启用 503；单机模式 409（该模式密钥来自配置，
+轮换需重新部署）；密钥库坏 JSON / sysid 越界 / 空密钥一律 409 且**原文件逐字节不变**；
+返回体永不含密钥材料（逐字断言）；写入走临时文件 + ATOMIC_MOVE，
+文件系统不支持原子移动时明确报错而非静默降级。轮换后由 SigningKeyManager
+按 mtime 热更，无需重启。
+
+### 三、四个签名的配置项首次显式落进 profile
+
+mavlink.signing.* 四个开关此前只存在于代码（MavlinkSignatureConfig 的 @Value），
+任何一个 profile 里都查不到——运维靠读源码才知道有这些开关。现按 profile 显式声明，
+并在 prod 写明「打开前必须做什么」的三步。
+
+**出厂行为不变**：所有 profile 的 mavlink.signing.enabled 保持 false。
+打开它是机队范围的行为变更（无 key id ⇒ 打开即硬切换，未换密钥的设备会被整体拒绝），
+需单独拍板，不擅自执行。
+
+### 顺带修正 ROADMAP 的一处不准确描述
+
+ROADMAP:329 原称「MavlinkParser 层仍只切帧不验签」。逐条核对代码后确认该描述
+**不准确**：MavlinkParser 完整解析 13 字节签名块（linkId/timestamp/signature），
+验签在 UdpGateway 内完成且 fail-closed。真正的问题不是「没验签」，
+而是「没人验证它在工作」——这才是本提交补的东西。
+
+### 计数
+
+Java 4561 → **4587**（+26：UdpGatewaySigningTest 8 + SigningKeyStoreWriterTest 8
++ MavlinkSigningKeyControllerTest 10）；cloud-backend 2543 → **2561**；
+mavlink-core 462 → **470**。前端 245 不变。
 ## [Unreleased] — GCS 前端 UI 改造：导航分组化 + 设计系统统一 + 去 emoji（2026-10-10）
 
 > 用户指示"硬件项暂缓，做 UI 前端改良"。做法是实测驱动：先无头 Chrome 截图 +

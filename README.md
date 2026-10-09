@@ -24,7 +24,7 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**462 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**470 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（358 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 45 个功能面板（顶栏按 8 个业务域分组导航） | 不需要换 |
@@ -713,13 +713,13 @@ NexusSky/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 462 |
+| `mavlink-core` | 470 |
 | `drone-sim` | 1408 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2543 |
+| `cloud-backend` | 2561 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4561** |
+| **总计** | **4587** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
