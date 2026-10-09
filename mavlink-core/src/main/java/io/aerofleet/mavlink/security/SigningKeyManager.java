@@ -222,6 +222,18 @@ public class SigningKeyManager {
     }
 
     /**
+     * 密钥库文件路径（多机模式）。
+     * <p>
+     * 仅供同包写入器 {@link SigningKeyStoreWriter} 定位文件用；单机模式返回 null
+     * （单密钥来自配置，改它需要重新部署，不是写文件能解决的事）。
+     *
+     * @return 路径，或 null（单机模式）
+     */
+    public String getKeyStorePath() {
+        return keyStorePath == null ? null : keyStorePath.toString();
+    }
+
+    /**
      * 获取全局密钥指纹。
      *
      * @return 全局密钥的 8 字符 hex 指纹，或 {@code "none"}（无全局密钥时）
