@@ -720,12 +720,12 @@ NexusSky/
 | `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4539** |
+| **总计** | **4541** |
 =======
 | `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4539** |
+| **总计** | **4541** |
 >>>>>>> origin/master
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——

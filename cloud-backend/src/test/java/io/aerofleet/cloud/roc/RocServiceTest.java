@@ -161,6 +161,25 @@ class RocServiceTest {
             assertThatThrownBy(() -> incidents.report(id, 22.59, 113.93, "P9", "x"))
                     .hasMessageContaining("P0|P1|P2");
         }
+
+        @Test
+        void 警情坐标越界拒绝() {
+            long id = (Long) seats.create("op").get("seatId");
+            assertThatThrownBy(() -> incidents.report(id, 91.0, 113.93, "P1", "x"))
+                    .hasMessageContaining("out of range");
+            assertThatThrownBy(() -> incidents.report(id, 22.59, 181.0, "P1", "x"))
+                    .hasMessageContaining("out of range");
+        }
+
+        @Test
+        void 驻留时长越界拒绝() {
+            when(registry.get(9)).thenReturn(drone(9, true, false, 90, 22.5910, 113.9340, "STANDBY"));
+            long seatId = (Long) seats.create("op").get("seatId");
+            seats.bindFleet(seatId, List.of(9));
+            long incidentId = (Long) incidents.report(seatId, 22.5910, 113.9340, "P1", "x").get("incidentId");
+            assertThatThrownBy(() -> incidents.dispatch(seatId, incidentId, 999))
+                    .hasMessageContaining("holdSec");
+        }
     }
 
     // ------------------------------------------------------------------

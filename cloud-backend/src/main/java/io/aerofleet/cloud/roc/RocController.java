@@ -108,7 +108,6 @@ public class RocController {
                 sysids.add(n.intValue());
             }
         }
-        double alt = body.get("alt") instanceof Number n ? n.doubleValue() : 60;
         try {
             List<Integer> targets = seats.targetsOf(id, sysids);
             List<Map<String, Object>> results = new ArrayList<>();
@@ -118,7 +117,9 @@ public class RocController {
                 try {
                     switch (action) {
                         case "arm" -> commands.arm(sysid);
-                        case "takeoff" -> commands.takeoff(sysid, alt);
+                        // 批量 takeoff 固定 50m 安全高度：席位级批量操作取保守统一值
+                        // （多机同升同一净空层）；单机精调高度走单机指令面板。
+                        case "takeoff" -> commands.takeoff(sysid, 50);
                         case "rtl" -> commands.rtl(sysid);
                         case "land" -> commands.command(sysid, 21, 0, 0, 0, 0, 0, 0, 0);
                         default -> throw new IllegalArgumentException(

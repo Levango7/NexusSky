@@ -80,6 +80,11 @@ public class IncidentDispatchService {
         if (!priority.equals("P0") && !priority.equals("P1") && !priority.equals("P2")) {
             throw new IllegalArgumentException("priority must be P0|P1|P2: " + priority);
         }
+        // 坐标范围校验（c8fa5d7 任务航点同款口径）：越界 400，不给下游静默截断的机会
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+            throw new IllegalArgumentException(
+                    "incident location out of range: lat=" + lat + " lon=" + lon);
+        }
         RocSeatService.Seat seat = seatsOf(seatId);
         Incident inc = new Incident(idSeq.getAndIncrement(), lat, lon, priority, description);
         incidents.put(inc.id, inc);
@@ -144,6 +149,9 @@ public class IncidentDispatchService {
         if (inc.suggestedSysid == null) {
             throw new IllegalStateException("no suggestion to dispatch for incident " + incidentId);
         }
+        if (holdSec < 0 || holdSec > 300) {
+            throw new IllegalArgumentException("holdSec must be in [0, 300]: " + holdSec);
+        }
         int sysid = inc.suggestedSysid.intValue();
         try {
             commands.arm(sysid);
@@ -153,7 +161,10 @@ public class IncidentDispatchService {
                             io.aerofleet.mavlink.enums.MavEnums.MAV_FRAME_GLOBAL_RELATIVE_ALT,
                             io.aerofleet.mavlink.enums.MavEnums.MAV_CMD_NAV_WAYPOINT,
                             0, 0, (float) holdSec, 0f, 0f, 0f,
-                            (int) Math.round(inc.lat * 1e7), (int) Math.round(inc.lon * 1e7),
+                            // toIntExact：溢出抛 ArithmeticException 而非静默截断。
+                            // 范围已在 report() 校验（|lat*1e7| ≤ 9e8 < 2^31），此处是纵深防御。
+                            Math.toIntExact(Math.round(inc.lat * 1e7)),
+                            Math.toIntExact(Math.round(inc.lon * 1e7)),
                             50f, io.aerofleet.mavlink.enums.MavEnums.MAV_MISSION_TYPE_MISSION)));
             commands.startMission(sysid);
         } catch (Exception e) {
