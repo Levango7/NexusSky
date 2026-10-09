@@ -312,7 +312,7 @@ export default function DockPanel() {
                   </button>
                 </div>
               ))}
-              {schedules.length === 0 && <span style={{ color: '#94a3b8', fontSize: 13 }}>暂无定时任务</span>}
+              {schedules.length === 0 && <div className="empty-hint">暂无定时任务</div>}
             </div>
             <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
               <input placeholder="任务名" value={schedForm.name}

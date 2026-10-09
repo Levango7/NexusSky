@@ -471,9 +471,9 @@ export default function SurveillancePanel() {
             <button onClick={() => setShowRegister(true)} style={miniBtnStyle} title="注册设备">＋</button>
           </div>
           {devicesLoading ? (
-            <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 8 }}>加载中…</div>
+            <div className="empty-hint">加载中…</div>
           ) : devices.length === 0 ? (
-            <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 8 }}>暂无设备，点击「＋」注册</div>
+            <div className="empty-hint">暂无设备，点击「＋」注册</div>
           ) : (
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {devices.map((d) => {
@@ -638,7 +638,7 @@ export default function SurveillancePanel() {
                   )
                 })
               ) : (
-                <div style={{ color: 'var(--dim-2)', textAlign: 'center', padding: 8 }}>暂无安防事件</div>
+                <div className="empty-hint">暂无安防事件</div>
               )}
             </div>
           </div>
@@ -733,7 +733,7 @@ export default function SurveillancePanel() {
                   </div>
                 ))
               ) : (
-                <div style={{ color: 'var(--dim-2)', textAlign: 'center', padding: 12 }}>
+                <div className="empty-hint">
                   {discovering ? '正在扫描子网…' : '点击「扫描」发现设备'}
                 </div>
               )}

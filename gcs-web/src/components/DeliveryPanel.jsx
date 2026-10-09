@@ -342,7 +342,7 @@ export default function DeliveryPanel() {
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {tasks.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无配送任务</div>
+                <div className="empty-hint">暂无配送任务</div>
               ) : (
                 tasks.map((t, i) => {
                   const tid = pick(t, 'id', 'taskId')

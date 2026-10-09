@@ -258,7 +258,7 @@ export default function CommAdaptPanel() {
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {links.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>
+                <div className="empty-hint">
                   {linksError ? '刷新失败，等待重试' : '暂无链路数据'}
                 </div>
               ) : (
@@ -395,7 +395,7 @@ export default function CommAdaptPanel() {
             </div>
             <div style={{ maxHeight: 260, overflowY: 'auto' }}>
               {failoverHistory.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无故障切换记录</div>
+                <div className="empty-hint">暂无故障切换记录</div>
               ) : (
                 failoverHistory.map((h, i) => {
                   const sysid = pick(h, 'sysid', 'id')

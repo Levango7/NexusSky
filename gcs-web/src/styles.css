@@ -269,6 +269,17 @@ body {
 
 .cell-crit { border-color: rgba(255, 93, 93, .6) !important; background: var(--crit-dim) !important; }
 
+/* 底图源自定义浮层（MapView 左上，设计系统控件皮肤在全局类里） */
+.basemap-cfg {
+  position: absolute; top: 44px; left: 10px; z-index: 11;
+  width: 340px; max-width: calc(100% - 20px);
+  padding: 12px;
+  background: rgba(13, 17, 26, .95);
+  border: 1px solid var(--line-2); border-radius: 10px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .5);
+}
+
 /* ---------- 飞行仪表 ---------- */
 .mode-pill {
   font-size: 11px; font-weight: 700; letter-spacing: 1px;

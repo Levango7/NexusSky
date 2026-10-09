@@ -190,7 +190,7 @@ export default function RocPanel() {
                 </tr>
               ))}
               {incidents.length === 0 && (
-                <tr><td colSpan={6} style={{ padding: 8, color: '#94a3b8' }}>暂无警情</td></tr>
+                <tr><td colSpan={6} className="dim">暂无警情</td></tr>
               )}
             </tbody>
           </table>

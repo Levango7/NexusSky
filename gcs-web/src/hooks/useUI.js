@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { isPanelAvailable } from '../api.js'
 
 // 视图标签 -> 预算面板名称映射（用于丐版模式下隐藏不可用面板）
@@ -54,11 +54,29 @@ export const VIEW_PANEL_MAP = {
  * 管理 view、now（时钟）、mobileRail、budgetMode 状态
  * 包含时钟 effect 和丐版模式切换后自动回退视图的 effect
  */
+
+// 视图持久化：刷新/断线重连后回到上次的作业面（操作员常驻某个视图，
+// 每次回落到"操控"是干扰）。脏值由下面的"不可用即回退" effect 兜住。
+const VIEW_STORE_KEY = 'nexus_last_view'
+
 export default function useUI() {
   const [now, setNow] = useState(Date.now())
-  const [view, setView] = useState('control')
+  const [view, setViewState] = useState(() => {
+    try {
+      return localStorage.getItem(VIEW_STORE_KEY) || 'control'
+    } catch {
+      return 'control'
+    }
+  })
   const [mobileRail, setMobileRail] = useState(null) // null | 'left' | 'right'
   const [budgetMode, setBudgetMode] = useState(null) // null=完整版 | 'toy' | 'standard' | 'advanced' | 'emergency-toy' | 'emergency-standard'
+
+  const setView = useCallback((v) => {
+    setViewState(v)
+    try {
+      localStorage.setItem(VIEW_STORE_KEY, v)
+    } catch { /* localStorage 不可用时静默降级 */ }
+  }, [])
 
   // 时钟
   useEffect(() => {
@@ -71,7 +89,7 @@ export default function useUI() {
     if (!isPanelAvailable(VIEW_PANEL_MAP[view], budgetMode)) {
       setView('control')
     }
-  }, [budgetMode, view])
+  }, [budgetMode, view, setView])
 
   return {
     view,

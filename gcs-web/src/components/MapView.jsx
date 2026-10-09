@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 // maplibre-gl v6 起仅发布 ESM（无 UMD），默认导入不可用，须用命名空间导入
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -25,13 +25,41 @@ const BASEMAP_SOURCES = {
     attribution: '© Esri, Maxar, Earthstar Geographics',
   },
 }
-const MAP_STYLE = {
-  version: 8,
-  sources: BASEMAP_SOURCES,
-  layers: [
+// 自定义底图源（私有化交付用）：index.html 注入 window.__NEXUSSKY_BASEMAP_URL__，
+// 或在 UI「底图源」里保存到 localStorage（两者都支持，注入优先）。
+// **坐标系口径**：本系统全部图层按 WGS-84 渲染；挂 GCJ-02 底图（高德/百度瓦片）
+// 会与无人机位置错 50–500m——务必用天地图（CGCS2000，与 WGS-84 厘米级一致）
+// 或自建 WGS-84 瓦片。Esri 默认两源同为 WGS-84。
+const CUSTOM_BASEMAP_KEY = 'nexus_basemap_url'
+const CUSTOM_SOURCE_ID = 'basemap-custom'
+const CUSTOM_LAYER_ID = 'base-custom'
+const WGS84_NOTE = '坐标系须为 WGS-84（天地图 / 自建瓦片）；高德、百度等 GCJ-02 底图会与飞机位置偏移，勿用'
+
+function readCustomBasemapUrl() {
+  try {
+    return (typeof window !== 'undefined' && window.__NEXUSSKY_BASEMAP_URL__) ||
+      localStorage.getItem(CUSTOM_BASEMAP_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function customRasterSource(url) {
+  return { type: 'raster', tiles: [url], tileSize: 256, attribution: '自定义底图源' }
+}
+
+// 构建地图样式：默认两源（暗色/卫星）+ 配置了自定义源时追加一个 raster 层
+function buildMapStyle(customUrl) {
+  const sources = { ...BASEMAP_SOURCES }
+  const layers = [
     { id: 'base-imagery', type: 'raster', source: 'basemap-imagery', layout: { visibility: 'none' } },
     { id: 'base-dark', type: 'raster', source: 'basemap-dark', layout: { visibility: 'visible' } },
-  ],
+  ]
+  if (customUrl) {
+    sources[CUSTOM_SOURCE_ID] = customRasterSource(customUrl)
+    layers.push({ id: CUSTOM_LAYER_ID, type: 'raster', source: CUSTOM_SOURCE_ID, layout: { visibility: 'none' } })
+  }
+  return { version: 8, sources, layers }
 }
 
 const DRONE_HOME = { lat: 22.5907, lon: 113.9345 }
@@ -181,8 +209,12 @@ export default function MapView({
   const replayMarkerRef = useRef(null)
   // 着色模式内部状态（可与外部 trackColorMode prop 同步）
   const [colorMode, setColorMode] = useState(trackColorMode || 'single')
-  // 底图模式：dark（默认）/ imagery
+  // 底图模式：dark（默认）/ imagery / custom（配置了自定义源后可用）
   const [basemapMode, setBasemapMode] = useState('dark')
+  // 自定义底图源（localStorage/全局注入）+ 配置浮层状态
+  const [customBasemap, setCustomBasemap] = useState(readCustomBasemapUrl)
+  const [basemapCfgOpen, setBasemapCfgOpen] = useState(false)
+  const [basemapDraft, setBasemapDraft] = useState('')
   // 脉冲动画 ID
   const pulseAnimRef = useRef(null)
 
@@ -199,7 +231,7 @@ export default function MapView({
     try {
       map = new maplibregl.Map({
         container: mapRef.current,
-        style: MAP_STYLE,
+        style: buildMapStyle(readCustomBasemapUrl()),
         center: [DRONE_HOME.lon, DRONE_HOME.lat],
         zoom: 15,
         attributionControl: false,
@@ -916,13 +948,40 @@ export default function MapView({
     }
   }, [trackingOverlay, retryKey, loadedRetryKey])
 
-  // 底图切换：两套 raster 层互斥显隐（style 层，不受业务图层叠加顺序影响）
+  // 应用自定义底图源（不刷新页面）：先增删 source/layer，再切换模式
+  const applyCustomBasemap = useCallback((url) => {
+    const map = mapInstance.current
+    try {
+      if (map) {
+        if (map.getLayer(CUSTOM_LAYER_ID)) map.removeLayer(CUSTOM_LAYER_ID)
+        if (map.getSource(CUSTOM_SOURCE_ID)) map.removeSource(CUSTOM_SOURCE_ID)
+        if (url) {
+          map.addSource(CUSTOM_SOURCE_ID, customRasterSource(url))
+          map.addLayer({ id: CUSTOM_LAYER_ID, type: 'raster', source: CUSTOM_SOURCE_ID, layout: { visibility: 'none' } })
+        }
+      }
+    } catch (e) {
+      console.warn('自定义底图源应用失败:', e)
+    }
+    setCustomBasemap(url)
+    try {
+      if (url) localStorage.setItem(CUSTOM_BASEMAP_KEY, url)
+      else localStorage.removeItem(CUSTOM_BASEMAP_KEY)
+    } catch { /* localStorage 不可用时静默降级（本会话内仍生效） */ }
+    setBasemapMode(url ? 'custom' : 'dark')
+  }, [])
+
+  // 底图切换：三套 raster 层互斥显隐（style 层，不受业务图层叠加顺序影响）
   useEffect(() => {
     const map = mapInstance.current
     if (!map || !map.getLayer('base-dark')) return
     map.setLayoutProperty('base-dark', 'visibility', basemapMode === 'dark' ? 'visible' : 'none')
     map.setLayoutProperty('base-imagery', 'visibility', basemapMode === 'imagery' ? 'visible' : 'none')
-  }, [basemapMode, retryKey, loadedRetryKey])
+    // 自定义层只在配置过源时存在
+    if (map.getLayer(CUSTOM_LAYER_ID)) {
+      map.setLayoutProperty(CUSTOM_LAYER_ID, 'visibility', basemapMode === 'custom' ? 'visible' : 'none')
+    }
+  }, [basemapMode, retryKey, loadedRetryKey, customBasemap])
 
   // ─── 地图加载失败降级 UI ───────────────────────────────────
   if (mapError) {
@@ -950,7 +1009,7 @@ export default function MapView({
 
   return (
     <div ref={mapRef} className="map-view">
-      {/* 底图切换：暗色（默认）/ 卫星影像 */}
+      {/* 底图切换：暗色（默认）/ 卫星影像 / 自定义源（配置后出现）+ 源设置入口 */}
       <div
         className="basemap-mode-btns"
         style={{
@@ -963,7 +1022,7 @@ export default function MapView({
           pointerEvents: 'none',
         }}
       >
-        {['dark', 'imagery'].map(mode => (
+        {['dark', 'imagery', ...(customBasemap ? ['custom'] : [])].map(mode => (
           <button
             key={mode}
             className={`btn small ${basemapMode === mode ? 'primary' : ''}`}
@@ -975,10 +1034,50 @@ export default function MapView({
             }}
             onClick={() => setBasemapMode(mode)}
           >
-            {mode === 'dark' ? '暗色' : '卫星'}
+            {mode === 'dark' ? '暗色' : mode === 'imagery' ? '卫星' : '自定义'}
           </button>
         ))}
+        <button
+          className="btn small"
+          style={{ pointerEvents: 'auto', padding: '4px 8px', fontSize: 11, opacity: 0.6 }}
+          title={WGS84_NOTE}
+          onClick={() => { setBasemapDraft(customBasemap); setBasemapCfgOpen(v => !v) }}
+        >
+          底图源
+        </button>
       </div>
+      {basemapCfgOpen && (
+        <div className="basemap-cfg">
+          <div className="field">
+            <label>自定义瓦片 URL 模板（含 {'{z}/{x}/{y}'} 占位）</label>
+            <input
+              className="input"
+              value={basemapDraft}
+              onChange={(e) => setBasemapDraft(e.target.value)}
+              placeholder={'https://tile.example.com/{z}/{x}/{y}.png'}
+            />
+          </div>
+          <div className="field-row" style={{ marginTop: 8 }}>
+            <button
+              className="btn sm primary"
+              disabled={!basemapDraft.trim()}
+              onClick={() => { applyCustomBasemap(basemapDraft.trim()); setBasemapCfgOpen(false) }}
+            >
+              保存并切换
+            </button>
+            {customBasemap && (
+              <button
+                className="btn sm"
+                onClick={() => { applyCustomBasemap(''); setBasemapDraft(''); setBasemapCfgOpen(false) }}
+              >
+                清除
+              </button>
+            )}
+            <button className="btn sm" onClick={() => setBasemapCfgOpen(false)}>取消</button>
+          </div>
+          <div className="dim" style={{ fontSize: 10.5, marginTop: 6, lineHeight: 1.6 }}>{WGS84_NOTE}</div>
+        </div>
+      )}
       {/* 轨迹着色模式切换按钮组（仅有多机轨迹时显示） */}
       {multiTracks && Object.keys(multiTracks).length > 0 && (
         <div

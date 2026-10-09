@@ -200,7 +200,7 @@ export default function DroneLockPanel() {
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {allStates.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>
+                <div className="empty-hint">
                   暂无锁定状态记录
                 </div>
               ) : (

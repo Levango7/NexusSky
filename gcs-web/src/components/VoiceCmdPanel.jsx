@@ -290,7 +290,7 @@ export default function VoiceCmdPanel() {
             </div>
             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
               {pending.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无待确认指令</div>
+                <div className="empty-hint">暂无待确认指令</div>
               ) : (
                 pending.map((p, i) => {
                   const pid = pick(p, 'pendingId', 'id')
@@ -426,7 +426,7 @@ export default function VoiceCmdPanel() {
             </div>
             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
               {history.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无指令历史</div>
+                <div className="empty-hint">暂无指令历史</div>
               ) : (
                 history.map((h, i) => {
                   const status = pick(h, 'status')

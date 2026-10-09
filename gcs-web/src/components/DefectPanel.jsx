@@ -204,7 +204,7 @@ export default function DefectPanel() {
             </div>
           </div>
         ))}
-        {defects.length === 0 && <div style={{ color: '#94a3b8', fontSize: 13 }}>暂无缺陷——拍照自动晋升（conf≥0.6）或人工立案</div>}
+        {defects.length === 0 && <div className="empty-hint">暂无缺陷——拍照自动晋升（conf≥0.6）或人工立案</div>}
         <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
           <input placeholder="工单标题（可选）" value={woTitle}
                  onChange={(e) => setWoTitle(e.target.value)} style={{ flex: 1, padding: 4 }} />
@@ -254,7 +254,7 @@ export default function DefectPanel() {
             </div>
           </div>
         ))}
-        {workOrders.length === 0 && <div style={{ color: '#94a3b8', fontSize: 13 }}>暂无工单</div>}
+        {workOrders.length === 0 && <div className="empty-hint">暂无工单</div>}
       </div>
 
       {error && (

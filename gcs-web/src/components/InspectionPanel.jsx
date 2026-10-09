@@ -375,7 +375,7 @@ export default function InspectionPanel() {
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {filteredTasks.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无巡检任务</div>
+                <div className="empty-hint">暂无巡检任务</div>
               ) : (
                 filteredTasks.map((t, i) => {
                   const tid = pick(t, 'id', 'taskId') ?? i
@@ -511,7 +511,7 @@ export default function InspectionPanel() {
                 </div>
                 <div style={{ maxHeight: 240, overflowY: 'auto' }}>
                   {anomalies.length === 0 ? (
-                    <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无异常</div>
+                    <div className="empty-hint">暂无异常</div>
                   ) : (
                     anomalies.map((a, i) => {
                       const aid = pick(a, 'id', 'anomalyId') ?? i
@@ -570,7 +570,7 @@ export default function InspectionPanel() {
             </>
           ) : (
             <div style={{ ...cardStyle, padding: 20, textAlign: 'center' }}>
-              <div style={{ fontSize: 11, color: 'var(--dim-2)' }}>← 选择左侧任务查看详情</div>
+              <div className="empty-hint">← 选择左侧任务查看详情</div>
             </div>
           )}
         </div>

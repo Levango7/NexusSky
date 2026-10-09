@@ -604,7 +604,7 @@ export default function EmergencyOrchPanel() {
                 )
               })
             ) : (
-              <div style={{ color: 'var(--dim-2)', textAlign: 'center', padding: 12 }}>暂无事件</div>
+              <div className="empty-hint">暂无事件</div>
             )}
             <div ref={eventsEndRef} />
           </div>
