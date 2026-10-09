@@ -85,13 +85,27 @@ public class Gb28181Adapter implements VendorAdapter {
         return "gb28181-invite://" + id.value() + "?channel=" + channel;
     }
 
+    /**
+     * REST 契约口径 → 国标内部口径的翻译表。
+     * <p>
+     * 对外 API 用 camelCase（{@code zoomIn}/{@code zoomOut}，与 {@code OnvifClient.PTZ_COMMANDS}
+     * 的历史契约一致）；国标内部用 snake_case（{@link Gb28181PtzCommand#ZOOM_IN}）。
+     * 方向词两套写法一致，只有缩放不同。**适配器的职责就是做这层翻译**——
+     * 上层不应感知厂商口径差异（否则 GB28181 设备经 REST 调 PTZ 必然失败）。
+     */
+    private static final java.util.Map<String, String> CMD_ALIASES = java.util.Map.of(
+            "zoomIn", Gb28181PtzCommand.ZOOM_IN,
+            "zoomOut", Gb28181PtzCommand.ZOOM_OUT);
+
     /** PTZ：动作名 → 国标 A50F 指令码（hex 形态回传，真实字节语义）。 */
     @Override
     public String ptzControl(SurveillanceDevice device, String cmd) {
         validateDevice(device);
         Gb28181DeviceId.parse(device.id);   // 编码合法性（非法编码在控制面就该拒）
-        String code = Gb28181PtzCommand.encodeHex(cmd);
-        log.info("GB28181 PTZ control device={} cmd={} -> {}", device.id, cmd, code);
+        String normalized = CMD_ALIASES.getOrDefault(cmd, cmd);
+        String code = Gb28181PtzCommand.encodeHex(normalized);
+        log.info("GB28181 PTZ control device={} cmd={}{} -> {}", device.id, cmd,
+                normalized.equals(cmd) ? "" : " (-> " + normalized + ")", code);
         return code;
     }
 

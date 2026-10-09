@@ -4,7 +4,7 @@ package io.aerofleet.cloud.surveillance;
  * GB28181 PTZ 控制指令码（E5，国标 §A.3 控制 PTZ 指令格式）。
  * <p>
  * 4 字节：{@code A5 0F 01 <动作组合位>}——动作位可按位 OR 组合
- * （上=0x08/下=0x04/左=0x20/右=0x10/放大=0x80/缩小=0x40）。
+ * （上=0x08/下=0x04/左=0x20/右=0x10/放大=0x80/缩小=0x40；停止=0x00 无动作位）。
  * 输出真实国标字节，可逐字节断言。
  */
 public final class Gb28181PtzCommand {
@@ -15,9 +15,12 @@ public final class Gb28181PtzCommand {
     public static final String RIGHT = "right";
     public static final String ZOOM_IN = "zoom_in";
     public static final String ZOOM_OUT = "zoom_out";
+    /** 停止：国标用"无动作位"（0x00）表示终止当前动作——A5 0F 01 00。 */
+    public static final String STOP = "stop";
 
     private static final java.util.Map<String, Integer> ACTIONS = java.util.Map.of(
-            UP, 0x08, DOWN, 0x04, LEFT, 0x20, RIGHT, 0x10, ZOOM_IN, 0x80, ZOOM_OUT, 0x40);
+            UP, 0x08, DOWN, 0x04, LEFT, 0x20, RIGHT, 0x10,
+            ZOOM_IN, 0x80, ZOOM_OUT, 0x40, STOP, 0x00);
 
     private Gb28181PtzCommand() {
     }

@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,6 +35,7 @@ class SurveillanceControllerTest {
     private SurveillanceDeviceRegistry registry;
     private OnvifClient onvifClient;
     private RapidDeployService rapidDeployService;
+    private VendorAdapterRegistry vendorAdapterRegistry;
     private SurveillanceController controller;
     private MockMvc mockMvc;
 
@@ -42,7 +44,13 @@ class SurveillanceControllerTest {
         registry = new SurveillanceDeviceRegistry();
         onvifClient = new OnvifClient();
         rapidDeployService = new RapidDeployService(onvifClient, registry);
-        controller = new SurveillanceController(registry, onvifClient, rapidDeployService);
+        // 真实适配器组装（与 Spring 装配同形）：ONVIF 复用 OnvifClient，
+        // GB28181 走国标形状层（纯函数、无外部依赖）；三个私有协议适配器为模拟实现。
+        // PTZ/stream 端点按此注册表路由——测试路由行为本身，而非某个适配器内部。
+        vendorAdapterRegistry = new VendorAdapterRegistry(List.of(
+                new OnvifVendorAdapter(onvifClient),
+                new Gb28181Adapter(new Gb28181CatalogParser(), "00000000000000000001", "127.0.0.1:5060")));
+        controller = new SurveillanceController(registry, onvifClient, rapidDeployService, vendorAdapterRegistry);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -229,6 +237,43 @@ class SurveillanceControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("cmd", "up"))))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("PTZ 按厂商路由：GB28181 设备返回国标 A50F 指令码（camelCase 契约在适配器内翻译）")
+    void ptzControl_gb28181Device_routesToGbAdapter() throws Exception {
+        String gbId = "34020000001321320001";
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody(gbId, "GB28181"))));
+
+        // 契约命令 zoomIn（camelCase）→ 国标放大位 0x80（此前直连 ONVIF 时该调用必然失败）
+        mockMvc.perform(post("/api/v1/surveillance/devices/" + gbId + "/ptz")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("cmd", "zoomIn"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ok"))
+                .andExpect(jsonPath("$.result").value("A50F0180"));
+
+        // stop → 国标「无动作位」（0x00）
+        mockMvc.perform(post("/api/v1/surveillance/devices/" + gbId + "/ptz")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("cmd", "stop"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value("A50F0100"));
+    }
+
+    @Test
+    @DisplayName("stream 按厂商路由：GB28181 设备返回国标 INVITE 标识（不假扮可播地址）")
+    void getStreamUrl_gb28181Device_returnsInviteMarker() throws Exception {
+        String gbId = "34020000001321320001";
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody(gbId, "GB28181"))));
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/stream").param("channel", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rtspUrl").value(org.hamcrest.Matchers.startsWith("gb28181-invite://")));
     }
 
     // ===== POST /discover 发现 =====
