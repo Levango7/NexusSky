@@ -4,6 +4,22 @@
 
 ---
 
+## [Unreleased] — GCS 前端 UI 改造：导航分组化 + 设计系统统一 + 去 emoji（2026-10-10）
+
+> 用户指示"硬件项暂缓，做 UI 前端改良"。做法是实测驱动：先无头 Chrome 截图 +
+> 原生控件统计定位问题，再改样式层。**不改任何业务逻辑与 API**。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| UI.1 | **顶栏导航分组化** | 45 个视图平铺（118px／排 3 行）→ 8 个业务域分组（总览/飞行/任务/应急/通信/运营/合规/管理），顶栏 54px 一行；组内视图进下拉；`src/nav/viewGroups.js` 为标签与分组单一来源；预算档位过滤与 adminOnly 组行为保留；a11y：aria-haspopup/aria-expanded、role=menu/menuitem、Esc 与点击外部关闭 |
+| UI.2 | **设计系统（`.page` 作用域）** | 33 个面板接入统一皮肤：原生 button/input/select/table 兜底 + `.stat-grid/.stat-cell`、`.notice`、`.empty-state`、`.toolbar`、`.page-split` 通用类（新面板只需外层容器 `className="page"`）；顶栏预算档位下拉与 chip 一并统一；窄屏 chip 防逐字竖排 |
+| UI.3 | **去 emoji** | 60+ 处彩色 emoji 清除（按钮/空状态/状态文本改纯文字，类型表改色点，天气标记改中文单字）；保留排版符号（⚠ ✓ ✕ → ← ● ▶ ⟲） |
+| UI.4 | **UI 审计工具（入库）** | `gcs-web/scripts/ui-audit.mjs`：无头 Chrome 遍历全部 45 视图，检测浅色控件残留/JS 错误/顶栏高度，退出码作门禁判据；`scripts/ui-shot.mjs` 逐视图截图供人工复核 |
+
+**测试**：vitest 245/245（样式层改动零测试变更）；eslint 0 error（存量 warning 与改动前逐条一致）；GCS Web E2E（Playwright 真浏览器+真后端）通过；UI 审计实测 45/45 全绿（0 浅色控件残留、0 JS 错误、顶栏 54px）。
+
+**诚实边界**：地图底图仍为 Esri（国内网络偶发瓦片慢加载——"Map data not yet available" 是慢而非不可达；换国内底图涉及 GCJ-02 坐标偏移风险，另项评估）；移动端为人工验证（414px），审计脚本的移动端视口断言随后补入。
+
 ## [Unreleased] — E2 反制雷达侦测接入 + E4 5G-A 通感感知数据源预留（2026-10-09）
 
 > 依据 ROADMAP E2/E4（依赖 4a/M7✅）。两者同域：**非合作目标感知**——共用统一

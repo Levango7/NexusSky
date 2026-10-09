@@ -99,7 +99,9 @@ export default function VisionPanel({ drone, onOrbitActive }) {
 
   return (
     <section className="panel vision-panel">
-      <h3 className="panel-title">视觉闭环</h3>
+      <div className="panel-head">
+        <h3>视觉闭环</h3>
+      </div>
 
       {/* ---- 单拍 ---- */}
       <div className="vision-row">
