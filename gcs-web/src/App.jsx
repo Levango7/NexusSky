@@ -26,6 +26,7 @@ import DefectPanel from './components/DefectPanel.jsx'
 import RouteTemplatePanel from './components/RouteTemplatePanel.jsx'
 import OpsReportPanel from './components/OpsReportPanel.jsx'
 import RocPanel from './components/RocPanel.jsx'
+import SensingPanel from './components/SensingPanel.jsx'
 import DockPanel from './components/DockPanel.jsx'
 import DroneLockPanel from './components/DroneLockPanel.jsx'
 import AutoDispatchPanel from './components/AutoDispatchPanel.jsx'
@@ -224,6 +225,7 @@ export default function App() {
               { key: 'routetpl', label: '航线模板' },
               { key: 'opsreport', label: '运营报表' },
               { key: 'roc', label: 'ROC席位' },
+              { key: 'sensing', label: '侦测态势' },
               { key: 'dock', label: '机巢' },
               { key: 'dronelock', label: '锁机' },
               { key: 'autodispatch', label: '自动出警' },
@@ -417,6 +419,10 @@ export default function App() {
       ) : view === 'roc' ? (
         <PanelWrapper>
           <RocPanel />
+        </PanelWrapper>
+      ) : view === 'sensing' ? (
+        <PanelWrapper>
+          <SensingPanel />
         </PanelWrapper>
       ) : view === 'dock' ? (
         <PanelWrapper>

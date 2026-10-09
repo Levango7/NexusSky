@@ -15,7 +15,7 @@
 ```
 ┌──────────────┐   MAVLink/UDP    ┌──────────────────┐   REST/WS   ┌─────────────┐
 │  drone-sim   │ ───────────────► │  cloud-backend   │ ──────────► │   gcs-web   │
-│  虚拟无人机    │   14540 → 14554 │  Spring Boot 3    │  8080       │  React 地面站 │
+│  虚拟无人机    │   14540 → 14561 │  Spring Boot 3    │  8080       │  React 地面站 │
 │  (代替真飞控)  │ ◄─────────────── │  设备网关+API     │ ◄────────── │  MapLibre    │
 └──────────────┘                  └──────────────────┘             └─────────────┘
                                         ▲
@@ -93,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e-smoke.ps1
 MAVLink/UDP 链路损伤代理，插在飞机与云端之间，把"网络"从固定参数变成可编程的实验变量：
 
 ```
-[drone-sim --bind-ip 127.0.0.2]  <──受损链路──>  [link-sim :14600]  <──>  [cloud-backend :14554]
+[drone-sim --bind-ip 127.0.0.2]  <──受损链路──>  [link-sim :14600]  <──>  [cloud-backend :14561]
         每架飞机一个 127.x.y.z「网段身份」              7 种真实链路画像
 ```
 
@@ -605,7 +605,7 @@ DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理�
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
 1. **买真硬件**：Pixhawk 6C 飞控（约 ¥1000）+ 机架电机桨叶电池（约 ¥1500），或直接买 PX4 预装整机。
-2. **接线不变**：真飞控通过数传模块（如 Holybro SiK）或 ESP32 Bridge 以 **MAVLink over UDP** 发往 `cloud-backend` 的 14554 端口——协议和模拟器一模一样。
+2. **接线不变**：真飞控通过数传模块（如 Holybro SiK）或 ESP32 Bridge 以 **MAVLink over UDP** 发往 `cloud-backend` 的 14561 端口——协议和模拟器一模一样。
 3. **一步验证**：先跑 `mavlink-core` 单测（`mvn -pl mavlink-core test`），再接真机；若 CRC 全绿，链路即通。
 4. **地面站与云端零改动**。唯一要新增的是真机的失控保护参数（RTL 高度、低电量阈值），在 PX4 参数里配，不在代码里。
 
@@ -663,7 +663,7 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 | 端口 | 用途 |
 |---|---|
 | 14540/udp | 飞控(模拟器)侧 MAVLink |
-| 14554/udp | GCS/云端侧 MAVLink（与 QGroundControl 默认一致） |
+| 14561/udp | GCS/云端侧 MAVLink（与 QGroundControl 默认一致） |
 | 8080/tcp | 云端 REST + WebSocket |
 | 5173/tcp | GCS 开发服务器 |
 
@@ -716,10 +716,10 @@ NexusSky/
 | `mavlink-core` | 462 |
 | `drone-sim` | 1408 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2536 |
+| `cloud-backend` | 2543 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4554** |
+| **总计** | **4561** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -826,6 +826,13 @@ NexusSky/
 - **双栈网关（F5）的 DJI 侧是标记+路由骨架**：DeviceGateway SPI 与协议标记就位，
   dji-cloud 设备的命令被**明确拒绝**（不静默丢、不假成功）；真实 DJI Cloud API
   对端（MQTT/HTTPS/WS）接入属生产阶段——与 F2 机巢 mqtt seam 同一诚实口径。
+- **侦测接入（E2/E4）的立场与边界**：**只接侦测、不做反制**——无任何干扰/打击
+  控制面（反制器材属受管制装备）；模拟源是确定性演示数据（几何生成非物理模型）；
+  真实反制雷达厂商 SDK 与真实 5G-A 通感网元（3GPP R19 演进中）接入均属生产阶段
+  （实现 AerialSensingSource SPI 即接入聚合层）。
+- **出海合规（E3）是 USSP 服务接口形状**：四服务响应按 U-space 语义建模，
+  映射为字段级换名/换算（不做字节级帧编码）；飞行授权=限飞区几何求交
+  （不接入真实空域审批）；与真实 U-space 网络互联（CISP/EASA 认证）属生产阶段。
 - **RTK（F6）是 fix_type 上报语义**：协议层（GPS_FIX_TYPE 5/6）+ 展示链路就绪，
   坐标噪声模型未区分 RTK/单点——真实差分改正数接入属生产阶段（需 RTK 基站/网络 RTK）。
 - **缺陷闭环（F4）的复检与去重口径**：复检=真拍一张（复用 F1 captureAndLocate）+ 逐缺陷

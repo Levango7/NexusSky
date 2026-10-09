@@ -4,6 +4,28 @@
 
 ---
 
+## [Unreleased] — E2 反制雷达侦测接入 + E4 5G-A 通感感知数据源预留（2026-10-09）
+
+> 依据 ROADMAP E2/E4（依赖 4a/M7✅）。两者同域：**非合作目标感知**——共用统一
+> 航迹模型与态势聚合层，不同来源各实现一个 SPI。**E2 只接侦测、不做反制**（立场声明）。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| E2/E4.1 | **统一模型与 SPI** | `SensingTrack`（轨 id/来源/位置/高度/速度/航向/置信/分类/首末时刻）+ `AerialSensingSource` SPI（sourceType/sourceId/poll）——真实厂商雷达 SDK 或 ISAC 网元实现接口即可接入，聚合层零改动 |
+| E2/E4.2 | **E2 反制雷达侦测源** | 模拟侦测网：巡飞环行 + intruder 逼近两条航迹（确定性 tick 驱动）；**无任何干扰/打击控制面** |
+| E2/E4.3 | **E4 5G-A 通感源** | 模拟 ISAC 基站上报（含 BIRD 误报形态——通感识别能力限于诚实呈现）；rangeM 反算作接入映射样板；真实网元（3GPP R19 演进中）接入属生产阶段 |
+| E2/E4.4 | **聚合与近域告警** | 多源 upsert 聚合 + TTL 超时清理 + **近域告警进入/离开/再进入三段语义**（距本仓在线设备 <1km 首次进入报 WARN，不重复刷屏） |
+| E2/E4.5 | **REST 与面板** | `GET /sensing/tracks?source=&alertOnly=`、`/sensing/sources`；GCS SensingPanel（来源色标/告警行高亮/态势卡；**只读态势无控制**） |
+| E2/E4.6 | **e2e** | `scripts/e2e-sensing.ps1`：两源自跑 + sim 作告警锚 → 10 断言 ALL PASS（intruder 799m 触发实测） |
+
+**测试**：SensingTrackServiceTest 7 例（聚合 upsert/清理/过滤 + 告警三段闭环 + 两源契约）。
+
+**诚实边界**：模拟源是确定性演示数据（几何生成，非真实探测物理模型）；E2 接入真实反制
+雷达厂商 SDK、E4 接入真实 5G-A 通感网元均属生产阶段（实现 SPI 即接入）；
+近域告警以本仓在线设备位置为锚（防御方视角）。
+
+---
+
 ## [Unreleased] — E3 出海合规抽象：U-space 四服务 + Remote ID 三套映射 + USSP 角色（2026-10-09）
 
 > 依据 ROADMAP E3（依赖 C1+C2✅）。本仓以 **USSP 服务接口形状**实现四服务；
@@ -62,9 +84,9 @@ README / ROADMAP / docs 下多份口径文档带着**误提交的 merge 冲突�
 
 ### 计数
 
-Java 4541 → **4554**（本轮 +4 例 SSE 可达性守卫）；cloud-backend 模块行上游停在
-2470 漏更新，本次修正为实测 **2536**。前端 245 不变。
-全仓 `mvn -o clean test`：4554 例 0 失败 0 错误。
+Java 4541 → **4561**（本轮 +4 例 SSE 可达性守卫）；cloud-backend 模块行上游停在
+2470 漏更新，本次修正为实测 **2543**。前端 245 不变。
+全仓 `mvn -o clean test`：4561 例 0 失败 0 错误。
 
 ---
 
@@ -1481,10 +1503,10 @@ Playwright、helm 渲染。改动对象是要推的 HEAD。
   503/超时。修复：helm 按 `ingress.controllerNamespace`（新增 values，
   默认 ingress-nginx）、ingress.enabled 时追加放行；原生清单同步放行
   ingress-nginx 命名空间；
-- **MAVLink 回包被挡死**：cloud-backend UDP 网关从 14554 端口探测 sim
-  （GCS HEARTBEAT），sim 回包/遥测发回 backend:14554/UDP——只放行
+- **MAVLink 回包被挡死**：cloud-backend UDP 网关从 14561 端口探测 sim
+  （GCS HEARTBEAT），sim 回包/遥测发回 backend:14561/UDP——只放行
   8080/TCP 时回包全丢，飞行链路静默失效。修复：同命名空间规则追加
-  14554/UDP（helm + 原生两份）；
+  14561/UDP（helm + 原生两份）；
 - 两个问题在 flannel/kind 默认（不执行 NetworkPolicy）的集群上不会暴露，
   Calico/Cilium 下必现，故此前未被发现。
 
@@ -2741,7 +2763,7 @@ SCALED_PRESSURE3=143），`RADIO_STATUS(109)` 的 CRC_EXTRA 是 88 而官方为 
 | 2 | 重放规则 | `TimestampTracker` 用 `timestamp >= last` **放行相等值**（等于允许原帧重放一次）、按 linkId 单键分桶（两台机共用 linkId 会互相顶高基准）、回退阈值 500 tick 且单位不对 | 改为官方语义：流键 `(linkId, systemId, componentId)`、已见过的流**严格递增**、新流允许落后最多 60 秒 = 6,000,000 tick、48 位范围外直接拒；时钟用 `LongSupplier` 注入，使窗口边界可确定性测试 |
 | 3 | backend 接线 | 见"为什么"第 ② 条：开关完全无效，且 `MavlinkSignatureConfig.afterPropertiesSet()` 从不执行 | 新增 `MavlinkSigningConfiguration`（`@ConditionalOnProperty(mavlink.signing.enabled=true)`）条件装配四个 bean：关掉时一概不创建（出厂行为逐字不变），打开后启动校验真正生效——`enabled=true` 而 `secret-key` 与 `key-store-path` 同时为空、或密钥库文件不存在，都会让 `afterPropertiesSet()` 抛错使应用**启动即失败**，而不是静默明文发送；`MavlinkSigningConfigurationTest` 用 `ApplicationContextRunner` 双向断言（含"只给密钥库"这一条腿）——这类"注入点是不是真的有 bean"的断言此前完全缺失，所以死路径活了很久 |
 | 4 | 验收方式 | 旧测试全是"自己签自己验"的自洽往返（24 例 `MavlinkSignerTest` 无一使用已知答案），`scripts/mavlink-compatibility-check.py` 亦为同源自比（`pack_v2` 恒写 INC=0，零签名覆盖），证明不了互通 | 引入**独立参考实现**：隔离 venv（`target/p6-ref-venv`，不进主依赖）装 pymavlink，`scripts/mavlink-signing-vectors.py` 生成 5 条固定输入向量（HEARTBEAT / GLOBAL_POSITION_INT / 尾零裁剪 HEARTBEAT(LEN=1) / 奇数长度 RADIO_STATUS / 含负浮点 ATTITUDE），生成器自检"pymavlink 能验过自己的帧 + 按规范公式独立重算"；`MavlinkSigningVectorTest` 逐字节断言签名相同 + 解码-重编码还原。另加防退化断言：旧 HMAC 算法的输出必须与新签名不同、8 字节旧格式签名必须被拒 |
-| 5 | e2e 可运行性 | 脚本启动 backend **不带 profile** → 命中 base 默认 `spring.profiles.active=prod` → prod 要 `localhost:5432` 的 PostgreSQL → `FlywaySqlException: Connection refused`，场景 1 就挂；且 `$BackendRestPort`/`$BackendUdpPort` 只是变量，6 处启动都没下传（等于永远硬编码 8080/14554） | backend 启动统一加 `--spring.profiles.active=dev` + `--server.port` + `--aerofleet.udp-port` + Redis 主机/端口，并把 REST/UDP/Drone/LinkSim/Redis 全部提升为脚本参数（与 `ci-integration-test.sh` 的 A_PORT/PG_PORT 同一做法；本机 8080 被其它项目容器占用时也能跑） |
+| 5 | e2e 可运行性 | 脚本启动 backend **不带 profile** → 命中 base 默认 `spring.profiles.active=prod` → prod 要 `localhost:5432` 的 PostgreSQL → `FlywaySqlException: Connection refused`，场景 1 就挂；且 `$BackendRestPort`/`$BackendUdpPort` 只是变量，6 处启动都没下传（等于永远硬编码 8080/14561） | backend 启动统一加 `--spring.profiles.active=dev` + `--server.port` + `--aerofleet.udp-port` + Redis 主机/端口，并把 REST/UDP/Drone/LinkSim/Redis 全部提升为脚本参数（与 `ci-integration-test.sh` 的 A_PORT/PG_PORT 同一做法；本机 8080 被其它项目容器占用时也能跑） |
 | 6 | 文档不实声明 | README 首屏"所有协议、接口与真实硬件（PX4 飞控）完全一致"、"签名代码已实现并接入 UdpGateway"；`docs/commercialization-plan.md` 三处把签名记成"HMAC-SHA256 8 字节截断、已完成"；`docs/demo-scenarios.md` 称"替换模拟器即对接真飞控" | 全部按实测改写（保留"此前怎么写、为什么错"的痕迹而不是抹平）；`docs/security-design.md` 新增第 7 节记录线上格式、重放规则、装配史、互通性与边界（新节初稿编号撞了已有"第 6 节 安全加固清单"，已顺延）；两处主源码 javadoc 随算法同步（`MavlinkMessage` 类注释仍写"payload 附加 8 字节 HMAC-SHA256"、`UdpGateway.signFrame` 写"附加 HMAC-SHA256 签名"、`MavlinkSignatureConfig` 配置项说明写"HMAC 密钥"） |
 | 7 | 多机密钥名不副实 | 接线补好后仍只补了一半：`SigningKeyManager` 支持密钥库（per-sysid 口令 + linkId），但 backend 侧只注入**一个**全局 `MavlinkSigner`，密钥库的 `key` 字段进不了签名路径——per-sysid 只有 **linkId** 生效，所有系统共用全局 `secret-key` 签名。即"多机密钥分发"模式在 backend 侧从来没真正工作过，而 e2e 场景 5 当时因为脚本自身缺陷也没能暴露这件事 | 新增 `MavlinkSignerFactory`：**按口令字符串缓存** `MavlinkSigner` 实例（同口令复用、密钥库热重载自然产生新实例、无需失效逻辑），`UdpGateway.signFrame/verifyFrame` 改为按 sysid 经 `SigningKeyManager.keyFor()` 取签名器；单机与多机走同一条代码路径、无特判。发送侧查不到密钥→WARN 并降级为未签名；接收侧取不到口令→**拒帧**（不拿别的机的口令去验一个陌生 sysid）。注意口令查找本身有回退语义：多机模式下密钥库未命中该 sysid 时会回退到 `defaultKey`（`SigningKeyManager.keyFor`），所以"只给 `key-store-path`、不写 `defaultKey`"才是严格的白名单。`MavlinkSignerFactoryTest`(6) 断言跨口令必须验不过 + 同口令复用同一实例；e2e 场景 5 用两把不同口令（sysid=1/2）端到端跑通 |
 | 8 | 安全损伤画像不实 | `SecurityImpairmentEngine.applyTamper` 注释自称"仅模拟签名篡改"，实际在**载荷**上随机翻位——载荷一动 CRC 就不对，帧在 `MavlinkParser` 解析阶段即被丢弃，**永远走不到验签**；`applyStripSignature` 清掉 INC 位 0 后**不重算 CRC**（INC 在 CRC 覆盖范围内），产出的是一帧 CRC 坏帧，同样到不了验签。这两条正是"篡改/未签名被拒"端到端从未被证明的直接原因 | `applyTamper` 改为只在 6 字节签名块内翻 1–3 位（未签名帧原样返回）；`applyStripSignature` 按官方口径重算 CRC 并写小端字段，同时加 `isSignedV2` 前置判断以保持"未签名帧不改动"的既有契约（`applyStripSignatureOnUnsignedFrame` 这条旧用例实测拦下了我第一版引入的回归）。旧 2 条用例重写为 4 条（净 +2）钉住"改动的字节必须落在签名块内""剥签名后的帧 CRC 自洽"——值得记一笔的是原用例里有一条就叫 `applyTamperModifiesPayloadOnly`，**它断言的正是"篡改＝改载荷"这个缺陷本身**，所以这套"安全画像"测试从命名起就在为错误实现背书，缺陷才一直没被察觉 |
