@@ -15,7 +15,7 @@
 ```
 ┌──────────────┐   MAVLink/UDP    ┌──────────────────┐   REST/WS   ┌─────────────┐
 │  drone-sim   │ ───────────────► │  cloud-backend   │ ──────────► │   gcs-web   │
-│  虚拟无人机    │   14540 → 14550 │  Spring Boot 3    │  8080       │  React 地面站 │
+│  虚拟无人机    │   14540 → 14554 │  Spring Boot 3    │  8080       │  React 地面站 │
 │  (代替真飞控)  │ ◄─────────────── │  设备网关+API     │ ◄────────── │  MapLibre    │
 └──────────────┘                  └──────────────────┘             └─────────────┘
                                         ▲
@@ -93,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e-smoke.ps1
 MAVLink/UDP 链路损伤代理，插在飞机与云端之间，把"网络"从固定参数变成可编程的实验变量：
 
 ```
-[drone-sim --bind-ip 127.0.0.2]  <──受损链路──>  [link-sim :14600]  <──>  [cloud-backend :14550]
+[drone-sim --bind-ip 127.0.0.2]  <──受损链路──>  [link-sim :14600]  <──>  [cloud-backend :14554]
         每架飞机一个 127.x.y.z「网段身份」              7 种真实链路画像
 ```
 
@@ -605,7 +605,7 @@ DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理�
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
 1. **买真硬件**：Pixhawk 6C 飞控（约 ¥1000）+ 机架电机桨叶电池（约 ¥1500），或直接买 PX4 预装整机。
-2. **接线不变**：真飞控通过数传模块（如 Holybro SiK）或 ESP32 Bridge 以 **MAVLink over UDP** 发往 `cloud-backend` 的 14550 端口——协议和模拟器一模一样。
+2. **接线不变**：真飞控通过数传模块（如 Holybro SiK）或 ESP32 Bridge 以 **MAVLink over UDP** 发往 `cloud-backend` 的 14554 端口——协议和模拟器一模一样。
 3. **一步验证**：先跑 `mavlink-core` 单测（`mvn -pl mavlink-core test`），再接真机；若 CRC 全绿，链路即通。
 4. **地面站与云端零改动**。唯一要新增的是真机的失控保护参数（RTL 高度、低电量阈值），在 PX4 参数里配，不在代码里。
 
@@ -663,7 +663,7 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 | 端口 | 用途 |
 |---|---|
 | 14540/udp | 飞控(模拟器)侧 MAVLink |
-| 14550/udp | GCS/云端侧 MAVLink（与 QGroundControl 默认一致） |
+| 14554/udp | GCS/云端侧 MAVLink（与 QGroundControl 默认一致） |
 | 8080/tcp | 云端 REST + WebSocket |
 | 5173/tcp | GCS 开发服务器 |
 

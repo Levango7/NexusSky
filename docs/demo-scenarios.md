@@ -116,7 +116,7 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 |---|---|---|
 | JDK | ≥ 17 | `java -version` |
 | 构建产物 | drone-sim jar + cloud-backend jar | `mvn -pl drone-sim,cloud-backend -am package -DskipTests` |
-| 端口 | 8080(REST)、14540(MAVLink)、14550(GCS) 可用 | 无其他 Java 进程占用 |
+| 端口 | 8080(REST)、14540(MAVLink)、14554(GCS) 可用 | 无其他 Java 进程占用 |
 | 前端（可选） | gcs-web dev server (5173) | `cd gcs-web && npm install && npm run dev` |
 
 #### 操作步骤
@@ -164,7 +164,7 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 |---|---|
 | JDK | ≥ 17 |
 | 构建产物 | drone-sim jar + cloud-backend jar（+ link-sim jar 如用 `-IncludeRelay`） |
-| 端口 | 8080, 14550-14553 可用 |
+| 端口 | 8080, 14554-14553 可用 |
 | 参考点 | 深圳 (22.5431, 113.9578) |
 
 #### 操作步骤
