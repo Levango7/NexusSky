@@ -4,6 +4,56 @@
 
 ---
 
+## [Unreleased] — C4 遥测热态重启恢复：实测锚点测试（含对 ROADMAP 描述的修正）（2026-10-10）
+
+### 一件与 ROADMAP 不一致的实测结论
+
+ROADMAP:322-331 把 C4 的剩余缺口写成：
+
+> **C4 的"主数据"只在 provisioning 层面落库，遥测热态仍是内存**……
+> 意味着**重启后历史位置轨迹只能从 `flight_log` 重建**，不能从注册表恢复。
+
+逐条核对代码后确认这句**言过其实**：
+
+- 位置与电量**早就落库了**。`V5__track_last_known.sql` 建了
+  `drone_last_known_position` 表，`FlightTrackStore` 按 `PERSIST_INTERVAL`（=10）
+  节流写入（20Hz 遥测下约 0.5s/机）、`@PreDestroy` 兜底刷盘、
+  `@PostConstruct` 启动加载——**这条链是通的**。
+- 真正重启后丢失的只有 `DroneSnapshot.mode` / `armed` / `protocol` 三个字段，
+  且设备恢复出来本就是 `offline`（javadoc 声明的语义：等心跳确认），
+  下一条心跳就会把它们填上。
+- `devices` 表确实只存登记/在线/租户等 provisioning 字段，这部分描述准确。
+
+### 于是问题从"缺功能"变成"没人验证过这条链真的通"
+
+本提交补 `C4TelemetryRestoreTest`（4 例，真实 Spring + H2），
+把"重启后到底什么活下来"钉成测试：
+
+1. `throttledWrite_hitsDatabase` —— 节流阈值前不写、达到后才落库（直接查库，不经内存缓存）
+2. `reload_restoresLastKnownPosition` —— 清空内存后能重载最后已知位置与电量
+3. `preDestroy_flushesRegardlessOfThrottle` —— 低频打点时 `@PreDestroy` 仍兜底刷盘
+4. `modeArmedProtocol_areLostOnRestore` —— 三个字段确实丢失，**这就是真实边界**
+
+既防将来有人改坏恢复路径无人知晓，也把 ROADMAP 的过度声称固定住。
+
+### 测试过程中实测出的两个非显而易见行为（已写进注释）
+
+1. **落库是异步的**：走 `BatchedWriteQueue`（50 条一批 / 200ms 一刷），
+   `addPoint` 返回后立即查库必然为空。测试用 Awaitility 等队列刷新，
+   不用 sleep 硬等——否则会得到一个假红。
+2. **恢复值最多滞后一个节流周期**：节流触发时写的是"那一刻的点"，
+   所以重启取回的不是最后写入的那个点。测试按一个 interval 的容差断言，
+   而不是假装它等于最新点。
+
+---
+### 计数
+
+Java 4587 -> **4591**（cloud-backend 2561 -> **2565**，本轮 +4 例）。前端 245 不变。
+算术与 CI 实测一致：4591-4587=4、2565-2561=4，均等于本提交新增的 4 例。
+
+
+---
+
 ## [Unreleased] — C5 MAVLink 签名：补接收验签测试 + 密钥轮换端点 + 配置显式化（2026-10-09）
 
 ### 一、把「写了却没人验证」的验签路径纳入 CI
@@ -66,21 +116,6 @@ ROADMAP:329 原称「MavlinkParser 层仍只切帧不验签」。逐条核对代
 Java 4561 → **4587**（+26：UdpGatewaySigningTest 8 + SigningKeyStoreWriterTest 8
 + MavlinkSigningKeyControllerTest 10）；cloud-backend 2543 → **2561**；
 mavlink-core 462 → **470**。前端 245 不变。
-## [Unreleased] — GCS 前端 UI 改造：导航分组化 + 设计系统统一 + 去 emoji（2026-10-10）
-
-> 用户指示"硬件项暂缓，做 UI 前端改良"。做法是实测驱动：先无头 Chrome 截图 +
-> 原生控件统计定位问题，再改样式层。**不改任何业务逻辑与 API**。
-
-| # | 交付 | 内容 |
-|---|---|---|
-| UI.1 | **顶栏导航分组化** | 45 个视图平铺（118px／排 3 行）→ 8 个业务域分组（总览/飞行/任务/应急/通信/运营/合规/管理），顶栏 54px 一行；组内视图进下拉；`src/nav/viewGroups.js` 为标签与分组单一来源；预算档位过滤与 adminOnly 组行为保留；a11y：aria-haspopup/aria-expanded、role=menu/menuitem、Esc 与点击外部关闭 |
-| UI.2 | **设计系统（`.page` 作用域）** | 33 个面板接入统一皮肤：原生 button/input/select/table 兜底 + `.stat-grid/.stat-cell`、`.notice`、`.empty-state`、`.toolbar`、`.page-split` 通用类（新面板只需外层容器 `className="page"`）；顶栏预算档位下拉与 chip 一并统一；窄屏 chip 防逐字竖排 |
-| UI.3 | **去 emoji** | 60+ 处彩色 emoji 清除（按钮/空状态/状态文本改纯文字，类型表改色点，天气标记改中文单字）；保留排版符号（⚠ ✓ ✕ → ← ● ▶ ⟲） |
-| UI.4 | **UI 审计工具（入库）** | `gcs-web/scripts/ui-audit.mjs`：无头 Chrome 遍历全部 45 视图，检测浅色控件残留/JS 错误/顶栏高度，退出码作门禁判据；`scripts/ui-shot.mjs` 逐视图截图供人工复核 |
-
-**测试**：vitest 245/245（样式层改动零测试变更）；eslint 0 error（存量 warning 与改动前逐条一致）；GCS Web E2E（Playwright 真浏览器+真后端）通过；UI 审计实测 45/45 全绿（0 浅色控件残留、0 JS 错误、顶栏 54px）。
-
-**诚实边界**：地图底图仍为 Esri（国内网络偶发瓦片慢加载——"Map data not yet available" 是慢而非不可达；换国内底图涉及 GCJ-02 坐标偏移风险，另项评估）；移动端为人工验证（414px），审计脚本的移动端视口断言随后补入。
 
 ## [Unreleased] — E2 反制雷达侦测接入 + E4 5G-A 通感感知数据源预留（2026-10-09）
 
