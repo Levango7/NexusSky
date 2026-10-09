@@ -309,7 +309,7 @@ export default function GeofencePanel() {
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {zones.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无围栏区域</div>
+                <div className="empty-hint">暂无围栏区域</div>
               ) : (
                 zones.map((z) => {
                   const zid = z.id
@@ -561,7 +561,7 @@ export default function GeofencePanel() {
             </div>
             <div style={{ maxHeight: 420, overflowY: 'auto' }}>
               {filteredBreaches.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>
+                <div className="empty-hint">
                   {filterSysid.trim() !== '' ? '无匹配的越界事件' : '暂无越界事件'}
                 </div>
               ) : (

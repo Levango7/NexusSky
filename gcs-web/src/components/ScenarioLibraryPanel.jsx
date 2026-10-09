@@ -282,7 +282,7 @@ export default function ScenarioLibraryPanel() {
             </div>
             <div style={{ maxHeight: 400, overflowY: 'auto' }}>
               {templates.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无场景模板</div>
+                <div className="empty-hint">暂无场景模板</div>
               ) : (
                 templates.map((t, i) => {
                   const tid = pick(t, 'id', 'templateId') ?? i
@@ -411,7 +411,7 @@ export default function ScenarioLibraryPanel() {
             </div>
             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
               {activeLaunches.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无进行中场景</div>
+                <div className="empty-hint">暂无进行中场景</div>
               ) : (
                 activeLaunches.map((l, i) => {
                   const lid = pick(l, 'launchId', 'id') ?? i
@@ -453,7 +453,7 @@ export default function ScenarioLibraryPanel() {
             </div>
             <div style={{ maxHeight: 240, overflowY: 'auto' }}>
               {launchHistory.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无场景历史</div>
+                <div className="empty-hint">暂无场景历史</div>
               ) : (
                 launchHistory.map((l, i) => {
                   const lid = pick(l, 'launchId', 'id') ?? i

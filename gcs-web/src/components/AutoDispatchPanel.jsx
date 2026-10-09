@@ -435,7 +435,7 @@ export default function AutoDispatchPanel() {
             </div>
             <div style={{ maxHeight: 280, overflowY: 'auto' }}>
               {activeDispatches.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无进行中任务</div>
+                <div className="empty-hint">暂无进行中任务</div>
               ) : (
                 activeDispatches.map((d, i) => {
                   const did = pick(d, 'dispatchId', 'id', 'taskId') ?? i
@@ -588,7 +588,7 @@ export default function AutoDispatchPanel() {
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {history.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无出警历史</div>
+                <div className="empty-hint">暂无出警历史</div>
               ) : (
                 history.map((d, i) => {
                   const did = pick(d, 'dispatchId', 'id', 'taskId') ?? i

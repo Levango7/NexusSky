@@ -374,7 +374,7 @@ export default function TrackingPanel({ onTrackLoaded }) {
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {lostNorm.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>
+                <div className="empty-hint">
                   {lostError ? '刷新失败，等待重试' : '暂无失联无人机'}
                 </div>
               ) : (

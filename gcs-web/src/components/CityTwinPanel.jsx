@@ -304,7 +304,7 @@ export default function CityTwinPanel({ twinStates }) {
             </div>
             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
               {models.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无城市模型</div>
+                <div className="empty-hint">暂无城市模型</div>
               ) : (
                 models.map((m, i) => {
                   const mid = pick(m, 'id', 'modelId')
@@ -391,7 +391,7 @@ export default function CityTwinPanel({ twinStates }) {
             </div>
             <div style={{ maxHeight: 160, overflowY: 'auto' }}>
               {markers.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无标绘</div>
+                <div className="empty-hint">暂无标绘</div>
               ) : (
                 markers.map((m, i) => {
                   const markerType = pick(m, 'type')

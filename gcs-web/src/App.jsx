@@ -150,7 +150,7 @@ export default function App() {
   } = useWebSocket(selectedSysidRef, setTelemetry)
 
   // UI 状态（视图、时钟、移动端侧栏、丐版模式）
-  const { view, setView, now, mobileRail, setMobileRail, budgetMode, setBudgetMode } = useUI()
+  const { view: storedView, setView, now, mobileRail, setMobileRail, budgetMode, setBudgetMode } = useUI()
 
   // 任务规划
   const { missionDraft, setMissionDraft, orbitOverlay, setOrbitOverlay } = useMission()
@@ -184,6 +184,10 @@ export default function App() {
 
   const currentUser = getCurrentUser()
   const isAdmin = currentUser && currentUser.role === 'ADMIN'
+  // 越权视图防御：视图会持久化到 localStorage（也可被手工改值），非管理员
+  // 落进管理视图时不给渲染入口。后端 RBAC 是最终防线（无注解即 403），
+  // 这里只保证 UI 不出现越权面板。
+  const view = (!isAdmin && (storedView === 'tenants' || storedView === 'users')) ? 'dashboard' : storedView
 
   return (
     <div className="gcs-root">

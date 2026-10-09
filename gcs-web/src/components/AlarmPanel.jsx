@@ -345,7 +345,7 @@ export default function AlarmPanel() {
           <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
             <div style={{ maxHeight: 380, overflowY: 'auto' }}>
               {filteredEvents.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无报警事件</div>
+                <div className="empty-hint">暂无报警事件</div>
               ) : (
                 filteredEvents.map((e, i) => {
                   const eid = e.id || e.eventId || i
@@ -423,7 +423,7 @@ export default function AlarmPanel() {
             </div>
             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
               {rules.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 8, textAlign: 'center' }}>暂无联动规则</div>
+                <div className="empty-hint">暂无联动规则</div>
               ) : (
                 rules.map((r, i) => {
                   const rid = r.id || r.ruleId || i
@@ -486,7 +486,7 @@ export default function AlarmPanel() {
                   )
                 })
               ) : (
-                <div style={{ color: 'var(--dim-2)', textAlign: 'center', padding: 12 }}>暂无联动日志</div>
+                <div className="empty-hint">暂无联动日志</div>
               )}
             </div>
           </div>

@@ -291,7 +291,7 @@ export default function ShowPanel() {
             </div>
             <div style={{ maxHeight: 240, overflowY: 'auto' }}>
               {formations.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无队形定义</div>
+                <div className="empty-hint">暂无队形定义</div>
               ) : (
                 formations.map((f, i) => {
                   const fid = pick(f, 'id', 'formationId')
@@ -402,7 +402,7 @@ export default function ShowPanel() {
             </div>
             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
               {tasks.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无表演任务</div>
+                <div className="empty-hint">暂无表演任务</div>
               ) : (
                 tasks.map((t, i) => {
                   const tid = pick(t, 'id', 'taskId')

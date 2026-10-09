@@ -722,9 +722,9 @@ export default function UnifiedCommandPanel() {
             <span style={labelStyle}>安防设备（{survDevices.length}）</span>
           </div>
           {survDevicesLoading ? (
-            <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 8 }}>加载中…</div>
+            <div className="empty-hint">加载中…</div>
           ) : survDevices.length === 0 ? (
-            <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 8 }}>暂无安防设备</div>
+            <div className="empty-hint">暂无安防设备</div>
           ) : (
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
               {survDevices.map((d) => {
@@ -934,7 +934,7 @@ export default function UnifiedCommandPanel() {
             <div style={labelStyle}>无人机列表（{drones.length}）</div>
             <div style={{ maxHeight: 120, overflowY: 'auto' }}>
               {drones.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 4 }}>暂无无人机</div>
+                <div className="empty-hint">暂无无人机</div>
               ) : (
                 drones.slice(0, 8).map((d, i) => {
                   const sysid = d.sysid || d.id || i
@@ -973,7 +973,7 @@ export default function UnifiedCommandPanel() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, marginTop: 4 }}>
               {alarmEvents.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 8, textAlign: 'center' }}>暂无报警事件</div>
+                <div className="empty-hint">暂无报警事件</div>
               ) : (
                 alarmEvents.slice(0, 30).map((e, i) => {
                   const eid = e.id || e.eventId || i
@@ -1053,7 +1053,7 @@ export default function UnifiedCommandPanel() {
             <div style={labelStyle}>联动规则（{alarmRules.length}）</div>
             <div style={{ maxHeight: 80, overflowY: 'auto' }}>
               {alarmRules.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 4 }}>暂无联动规则</div>
+                <div className="empty-hint">暂无联动规则</div>
               ) : (
                 alarmRules.slice(0, 5).map((r, i) => (
                   <div key={r.id || i} style={{
@@ -1203,7 +1203,7 @@ export default function UnifiedCommandPanel() {
         <div style={{ ...cardStyle, padding: 6 }}>
           <div style={labelStyle}>优先级任务队列</div>
           {groupedTasks.length === 0 ? (
-            <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 8, textAlign: 'center' }}>暂无任务</div>
+            <div className="empty-hint">暂无任务</div>
           ) : (
             <div style={{ maxHeight: 100, overflowY: 'auto' }}>
               {groupedTasks.map(([priority, tasks]) => {

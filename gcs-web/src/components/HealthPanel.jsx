@@ -230,7 +230,7 @@ export default function HealthPanel() {
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {fleetHealth.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无机队健康数据</div>
+                <div className="empty-hint">暂无机队健康数据</div>
               ) : (
                 fleetHealth.map((d, i) => {
                   const sysid = pick(d, 'sysid', 'id') ?? i
@@ -274,7 +274,7 @@ export default function HealthPanel() {
             </div>
             <div style={{ maxHeight: 240, overflowY: 'auto' }}>
               {warnings.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无告警</div>
+                <div className="empty-hint">暂无告警</div>
               ) : (
                 warnings.map((w, i) => {
                   const wid = pick(w, 'id', 'warningId') ?? i
@@ -351,7 +351,7 @@ export default function HealthPanel() {
             </div>
           ) : (
             <div style={{ ...cardStyle, padding: 20, textAlign: 'center' }}>
-              <div style={{ fontSize: 11, color: 'var(--dim-2)' }}>← 选择左侧无人机查看详情</div>
+              <div className="empty-hint">← 选择左侧无人机查看详情</div>
             </div>
           )}
 
@@ -362,7 +362,7 @@ export default function HealthPanel() {
             </div>
             <div style={{ maxHeight: 180, overflowY: 'auto' }}>
               {predictions.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无维护建议</div>
+                <div className="empty-hint">暂无维护建议</div>
               ) : (
                 predictions.map((p, i) => {
                   const pid = pick(p, 'id', 'predictionId') ?? i
@@ -432,7 +432,7 @@ export default function HealthPanel() {
             </div>
             <div style={{ maxHeight: 240, overflowY: 'auto' }}>
               {records.length === 0 && schedule.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无维护记录</div>
+                <div className="empty-hint">暂无维护记录</div>
               ) : (
                 <>
                   {/* 维护计划（按时间排序）*/}

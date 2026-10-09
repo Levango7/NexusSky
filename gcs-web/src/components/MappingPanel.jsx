@@ -307,7 +307,7 @@ export default function MappingPanel() {
             </div>
             <div style={{ maxHeight: 320, overflowY: 'auto' }}>
               {tasks.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 16, textAlign: 'center' }}>暂无测绘任务</div>
+                <div className="empty-hint">暂无测绘任务</div>
               ) : (
                 tasks.map((t, i) => {
                   const tid = pick(t, 'id', 'taskId')
@@ -458,7 +458,7 @@ export default function MappingPanel() {
             </div>
             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
               {photos.length === 0 ? (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: 12, textAlign: 'center' }}>暂无照片</div>
+                <div className="empty-hint">暂无照片</div>
               ) : (
                 photos.map((p, i) => (
                   <div key={`photo-${i}`} style={{ fontSize: 9, color: 'var(--dim-2)', padding: '4px 10px', borderBottom: '1px solid var(--line-2)', fontFamily: 'var(--mono)' }}>
