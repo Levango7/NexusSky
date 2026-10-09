@@ -63,10 +63,13 @@ CHANGELOG 是**历史记录**，记的是"当时是什么状态"。改写历史�
 退出码：0=一致，1=存在不一致或找不到产物。
 """
 import argparse
+import io
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 # 当前口径文档：这些文件里的单测数是对外声称，必须与实测一致。
@@ -420,6 +423,122 @@ def measure_frontend(report_path):
     return data['numTotalTests'], data['numPassedTests'], data['numFailedTests']
 
 
+def find_conflict_marks(root, docs):
+    """返回 [(rel, [行号...])]，命中的文档带有未解决的 merge 冲突标记。"""
+    hits = []
+    for rel in docs:
+        path = os.path.join(root, rel)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding='utf-8') as fh:
+            lines = fh.readlines()
+        marks = [i + 1 for i, l in enumerate(lines)
+                 if l.startswith('<<<<<<< ') or l.startswith('>>>>>>> ')]
+        if marks:
+            hits.append((rel, marks))
+    return hits
+
+
+def self_test():
+    """离线自检：证明「冲突标记检出」这道防线真的会红，且不会误伤干净文档。
+
+    没有自检的门禁 = 又一个"看起来在检查"的东西。2026-10-08 那次静默失效
+    正是因为这类防护从未被证明有效过。
+
+    夹具全部落在临时目录，不碰真实仓库。
+    """
+    # 用真实存在的测试类构造 surefire XML，避免自检依赖是否跑过 mvn。
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.dirname(here)
+    docs = ['README.md']
+    ok = True
+
+    def build(case_doc):
+        tmp = tempfile.mkdtemp(prefix='countgate-selftest-')
+        reports = os.path.join(tmp, 'reports')
+        # 每个模块各 1 例：满足"缺模块即红"的前置条件，
+        # 这样自检走的是与 CI 完全同一条代码路径，而不是旁路。
+        for m in EXPECTED_MODULES:
+            pkg = os.path.join(reports, m)
+            os.makedirs(pkg)
+            xml = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<testsuite name="%s" tests="1" failures="0" errors="0" skipped="0">\n'
+                '  <testcase name="ok" classname="%s.DemoTest"/>\n'
+                '</testsuite>\n'
+            ) % (m, m)
+            with open(os.path.join(pkg, 'TEST-%s.DemoTest.xml' % m),
+                      'w', encoding='utf-8') as fh:
+                fh.write(xml)
+        with open(os.path.join(tmp, 'README.md'), 'w', encoding='utf-8') as fh:
+            fh.write(case_doc)
+        return tmp, reports
+
+    def run(tmp, reports):
+        # 夹具**故意**造红，stderr 会刷屏。静默掉，让自检结论一眼可读；
+        # 只留每个用例自己的 ok/失败说明。
+        saved_out, saved_err = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = io.StringIO(), io.StringIO()
+        try:
+            rc = _run(tmp, reports)
+        finally:
+            sys.stdout, sys.stderr = saved_out, saved_err
+        return rc
+
+    def clean_table(rows_total):
+        body = ['# Demo', '', '| 模块 | 单测数 |', '|---|---|']
+        for m in EXPECTED_MODULES:
+            body.append('| `%s` | 1 |' % m)
+        body.append('| **总计** | **%d** |' % rows_total)
+        return '\n'.join(body) + '\n'
+
+    # 干净文档：不得误伤（总计 = 模块数）
+    tmp, reports = build(clean_table(len(EXPECTED_MODULES)))
+    try:
+        rc = run(tmp, reports)
+        if rc != 0:
+            print('自检失败：干净文档被判红（rc=%s）——新检查存在误伤' % rc)
+            ok = False
+        else:
+            print('  ✓ 干净文档不被误伤')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # 数字真错时也必须判红（防止"冲突检查"把数字校验顶掉）
+    tmp, reports = build(clean_table(999))
+    try:
+        rc = run(tmp, reports)
+        if rc == 0:
+            print('自检失败：总计数字写错却判绿——数字校验被架空')
+            ok = False
+        else:
+            print('  ✓ 数字漂移仍被判红（未被新检查顶掉）')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # 带冲突标记、且冲突块正好吞掉计数表：必须判红
+    # 这一条就是 2026-10-08 事故的复现——表在冲突块里，旧版门禁会"全部一致"。
+    dirty = ('# Demo\n\n<<<<<<< HEAD\n'
+             + clean_table(999).replace('# Demo\n\n', '')
+             + '=======\n'
+             + clean_table(888).replace('# Demo\n\n', '')
+             + '>>>>>>> origin/master\n')
+    tmp, reports = build(dirty)
+    try:
+        rc = run(tmp, reports)
+        if rc == 0:
+            print('自检失败：带冲突标记的文档被判绿——'
+                  '这正是 2026-10-08 事故的形态，门禁又变哑了')
+            ok = False
+        else:
+            print('  ✓ 冲突标记（吞掉计数表）被判红')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    print('自检%s' % ('通过' if ok else '未通过'))
+    return 0 if ok else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description='校验文档声称的单测数与 surefire 实测一致')
     ap.add_argument('--root', default=os.path.abspath(os.path.join(os.path.dirname(__file__), '..')),
@@ -428,16 +547,26 @@ def main():
                     help='从该目录下的 <module>/TEST-*.xml 汇总（CI 聚合模式）')
     ap.add_argument('--print-actual', action='store_true', help='只打印实测数')
     ap.add_argument('--frontend-json', default=None,
-                    help='vitest json 报告路径（gcs-web/vitest-report.json）。'
-                         '给了才校验前端用例数；不给则只校验 Java 侧')
+                     help='vitest json 报告路径（gcs-web/vitest-report.json）。'
+                          '给了才校验前端用例数；不给则只校验 Java 侧')
+    ap.add_argument('--self-test', action='store_true',
+                    help='离线自检：用临时夹具证明「冲突标记检出」真的会红，'
+                         '且干净文档不会被误伤。无需任何测试产物。')
     args = ap.parse_args()
 
+    if args.self_test:
+        return self_test()
+
+    return _run(args.root, args.reports_root, args.frontend_json, args.print_actual)
+
+
+def _run(root, reports_root=None, frontend_json=None, print_actual=False):
     (actual, failures, errors, skipped, files,
-     per_module, missing, stale) = measure_actual(args.root, args.reports_root)
+     per_module, missing, stale) = measure_actual(root, reports_root)
 
     if files == 0:
-        if args.reports_root:
-            print('目录下没有 TEST-*.xml：%s' % args.reports_root, file=sys.stderr)
+        if reports_root:
+            print('目录下没有 TEST-*.xml：%s' % reports_root, file=sys.stderr)
         else:
             print('找不到 surefire 产物（*/target/surefire-reports/TEST-*.xml），'
                   '请先跑 mvn test', file=sys.stderr)
@@ -461,7 +590,7 @@ def main():
               % '，'.join(missing), file=sys.stderr)
         return 1
 
-    if args.print_actual:
+    if print_actual:
         return 0
 
     if failures or errors:
@@ -471,26 +600,58 @@ def main():
     # 前端实测值（--frontend-json 才启用）。取不到就红：静默跳过等于把
     # "没跑前端测试"当成"前端用例数无需核对"，那正是本门禁要消灭的失效面。
     fe_total = fe_passed = fe_failed = None
-    if args.frontend_json:
+    if frontend_json:
         try:
-            fe_total, fe_passed, fe_failed = measure_frontend(args.frontend_json)
+            fe_total, fe_passed, fe_failed = measure_frontend(frontend_json)
         except FileNotFoundError:
             print('找不到 vitest json 报告：%s（先跑 `npm run test:ci`）'
-                  % args.frontend_json, file=sys.stderr)
+                  % frontend_json, file=sys.stderr)
             return 1
         except ValueError as e:
             print('vitest 报告无法解析：%s' % e, file=sys.stderr)
             return 1
         print('实测（前端）：%d 用例 / %d 通过 / %d 失败（来自 %s）'
-              % (fe_total, fe_passed, fe_failed, args.frontend_json))
+              % (fe_total, fe_passed, fe_failed, frontend_json))
         if fe_failed:
             print('前端有用例未通过，先修测试再谈文档口径', file=sys.stderr)
             return 1
 
     print('\n校验当前口径文档：')
     bad = 0
+
+    # ---- 结构完整性前置检查 ----
+    # 2026-10-08 实测事故：master 上 README.md / ROADMAP.md 带着**误提交的 merge
+    # 冲突标记**（<<<<<<< HEAD … ======= … >>>>>>> origin/master）。两份文件的
+    # 测试规模表恰好都落在冲突块里，于是 test_table_rows() 认不出那些行、
+    # 逐格核对被**静默跳过**，门禁输出"全部一致"——而真实情况是表已损坏、
+    # 该核对的数字一个都没核。
+    #
+    # 这比"数字写错"更坏：它让门禁在最需要的时候变成哑的。
+    # 一个只会"匹配不到就不管"的校验器不是门禁，是装饰。
+    # 故先扫冲突标记：命中即红，且**明确说清后果**（哪些行没被核对）。
+    conflict_docs = []
     for rel in CURRENT_DOCS:
-        path = os.path.join(args.root, rel)
+        path = os.path.join(root, rel)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding='utf-8') as fh:
+            doc_lines = fh.readlines()
+        marks = [i + 1 for i, l in enumerate(doc_lines)
+                 if l.startswith('<<<<<<< ') or l.startswith('>>>>>>> ')]
+        if marks:
+            conflict_docs.append((rel, marks))
+    if conflict_docs:
+        print('\n❌ 文档里存在 merge 冲突标记，门禁已停：', file=sys.stderr)
+        for rel, marks in conflict_docs:
+            print('  %s：第 %s 行' % (rel, '、'.join(str(m) for m in marks[:10])),
+                  file=sys.stderr)
+        print('  后果：冲突块内的表格/数字无法被本门禁逐格核对，'
+              '"全部一致"在此情况下毫无意义（2026-10-08 实际发生过）。'
+              '\n  请先解决冲突再跑本门禁；不要用"看起来一致"当结论。', file=sys.stderr)
+        return 1
+
+    for rel in CURRENT_DOCS:
+        path = os.path.join(root, rel)
         if not os.path.exists(path):
             print('  ?? %s 不存在，跳过' % rel)
             continue

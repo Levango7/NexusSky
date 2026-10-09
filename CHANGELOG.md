@@ -22,6 +22,50 @@
 
 **诚实边界**：映射是字段级语义换名/换算（不做字节级帧编码——那是 MAVLink OPEN_DRONE_ID 通道职责）；飞行授权是限飞区几何求交（不接入真空域审批）；USSP 对外互联属生产阶段。
 
+## [Unreleased] — CVE-2026-47890 守卫测试落地 + 修门禁静默失效（2026-10-09）
+
+### 一、给已在 master 的 CVE-2026-47890 忽略补上守卫测试
+
+`.trivyignore.yaml` 已登记 `CVE-2026-47890`（030bfef 同步入库），但**当时没有配套守卫**：
+一条"写明了可达性证据"却没有任何测试持续核验的忽略条目，等于把结论写进注释然后任其过期。
+
+新增 `SseViewFragmentReachabilityTest`（4 例），把忽略理由变成持续可验证的：
+- 唯一 SSE 端点 `AlarmController#streamEvents` 只发 `.comment()`/`.data(Map)`，零视图对象；
+- 应用级控制器清一色 `@RestController`，无裸 `@Controller` ⇒ `ViewResolutionResultHandler`
+  永不参与；框架自带 `BasicErrorController` 已显式排除并在测试内注明理由
+  （仅错误响应渲染、不经 SSE）；
+- Spring 上下文 4 个 ViewResolver 均不渲染片段。
+
+**做过变异测试**：向该 SSE 流注入 `ModelAndView` 后守卫立刻转红
+（`Tests run: 4, Failures: 1`）——证明它真会咬。
+
+### 二、修门禁静默失效（比"数字写错"更严重的问题）
+
+README / ROADMAP / docs 下多份口径文档带着**误提交的 merge 冲突标记**
+（`<<<<<<< HEAD` … `>>>>>>> origin/master`），来源是历次合并时 JSX 冲突被修、
+**markdown 冲突被漏掉**，此后的提交一直在继承它：`ddd444a`/`a36c55c`/`ec4ddb5`/`e3304eb`
+每次合并都重新出现 42 处。这说明它是**流程问题**，修一次治标，不设防就会复发。
+
+后果：冲突块恰好吞掉测试规模表 ⇒ `test_table_rows()` 认不出表格行 ⇒
+逐格核对被**静默跳过** ⇒ 门禁输出"全部一致"，而表其实已损坏、该核对的数字一个都没核。
+在 `ddd444a` 上实测复现：未加固版报"全部一致"，加固版立刻拒绝并说明后果。
+
+本提交清除全部标记，并加两道防复发机制：
+1. `check-test-count-docs.py` 结构完整性前置检查：命中冲突标记即红，
+   并说清**哪些行没被核对**，拒绝在结构损坏的前提下给出任何数字结论；
+2. 新增 `--self-test`：用临时夹具证明这道防线自己会红（干净文档不误伤 /
+   数字漂移仍红 / 冲突标记必红），已在实际损坏的 `ddd444a` 上验证同样判红；
+   CI `Docs test-count gate` 在下载产物之前先跑自检，坏了最早暴露。
+
+清除方式：相同侧去重；README 里 F4「缺陷闭环」与 F2「机巢管控」是两条不同内容，
+两侧均保留，未丢信息。E1/E5/E6/F5/F6 正文与计数未受损（逐行集合比对）。
+
+### 计数
+
+Java 4541 → **4545**（本轮 +4 例 SSE 可达性守卫）；cloud-backend 模块行上游停在
+2470 漏更新，本次修正为实测 **2527**。前端 245 不变。
+全仓 `mvn -o clean test`：4545 例 0 失败 0 错误。
+
 ---
 
 ## [Unreleased] — E1 ROC 一控多机席位：席位化交互 + 批量指令 + 警情驱动调度（2026-10-09）
@@ -350,7 +394,7 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
    - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
      （模拟"裸写开关被吞 token"）。
 
-4. **计数基线 4380 → 4550（drone-sim 1397 → 1405）**
+4. **计数基线 4380 → 4541（drone-sim 1397 → 1405）**
    - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
 
 ---
