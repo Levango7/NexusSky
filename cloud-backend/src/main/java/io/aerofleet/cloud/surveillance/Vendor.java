@@ -16,6 +16,8 @@ public enum Vendor {
     UNIVIEW,
     /** ONVIF 标准协议（fallback，适用于所有支持 ONVIF 的设备）。 */
     ONVIF,
+    /** GB28181 政企视频网标准（国标 SIP 信令 + RTP/PS 媒体，E5 接入形状层）。 */
+    GB28181,
     /** 通用/未知厂商（当设备厂商无法识别时使用，自动降级到 ONVIF fallback）。 */
     GENERIC
 }

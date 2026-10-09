@@ -62,6 +62,7 @@ public class DeviceInfo {
             case DAHUA -> SurveillanceDevice.Vendor.DAHUA;
             case UNIVIEW -> SurveillanceDevice.Vendor.UNIVIEW;
             case ONVIF, GENERIC -> SurveillanceDevice.Vendor.ONVIF; // ONVIF 标准协议 fallback
+            case GB28181 -> SurveillanceDevice.Vendor.GB28181;      // 国标政企视频网（E5）
         };
         return new SurveillanceDevice(deviceId, name, deviceVendor, ip, port, username, password);
     }
