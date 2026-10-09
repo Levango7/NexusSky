@@ -115,7 +115,7 @@ export default function FleetOpsPanel({
   }
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
+    <div className="page">
       <h2 style={{ fontSize: 16, margin: '0 0 4px 0', color: 'var(--text)' }}>机队协同态势</h2>
       <div style={{ fontSize: 9, color: 'var(--dim-2)', marginBottom: 10, lineHeight: 1.6 }}>
         集群调度（M10 30048-30050）与空地联动（4a 30057-30059）实时流。

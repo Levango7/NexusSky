@@ -115,17 +115,17 @@ export default function MissionPlanner({ drone, missionDraft, setMissionDraft, o
       </div>
       <div className="panel-body">
         <div className="mission-hint" style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 6 }}>
-          💡 地图上 <b>Shift+点击</b> 可直接添加航点
+          地图上 <b>Shift+点击</b> 可直接添加航点
         </div>
         <div className="mission-actions">
           <button className="btn" onClick={() => addWaypoint()}>＋ 航点</button>
           <button className="btn" onClick={genSurvey}>▣ 测绘模板</button>
-          <button className="btn" onClick={genPatrol}>⇄ 巡检模板</button>
+          <button className="btn" onClick={genPatrol}>巡检模板</button>
           <button className="btn" onClick={() => setMissionDraft([])} disabled={missionDraft.length === 0}>
             ✕ 清空
           </button>
           <button className="btn" onClick={download} disabled={busy || !drone}>
-            ⬇ 读取机载任务
+            读取机载任务
           </button>
           <button
             className="btn primary"
@@ -133,7 +133,7 @@ export default function MissionPlanner({ drone, missionDraft, setMissionDraft, o
             onClick={upload}
             disabled={busy || !drone || missionDraft.length === 0}
           >
-            ⬆ 上传任务到飞机
+            上传任务到飞机
           </button>
         </div>
 

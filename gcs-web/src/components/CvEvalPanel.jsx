@@ -68,9 +68,9 @@ export default function CvEvalPanel() {
   const p95 = metrics?.latencyP95Ms
 
   return (
-    <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
+    <div className="page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18, color: 'var(--cyan)' }}>CV 智能识别评测</h2>
+        <h2 className="page-title">CV 智能识别评测</h2>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span className="chip mono" style={{ fontSize: 10 }}>
             帧数 {metrics?.frames ?? '--'}
@@ -160,7 +160,6 @@ export default function CvEvalPanel() {
 
       {metrics && metrics.frames === 0 && (
         <div style={{ textAlign: 'center', padding: 30, color: 'var(--dim)' }}>
-          <div style={{ fontSize: 28, marginBottom: 6 }}>🎯</div>
           <div style={{ fontSize: 13 }}>暂无评测数据</div>
           <div style={{ fontSize: 11, marginTop: 4 }}>执行一次「拍摄→定位」后此处将出现逐帧指标</div>
         </div>

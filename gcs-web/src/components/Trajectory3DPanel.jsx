@@ -270,9 +270,9 @@ export default function Trajectory3DPanel({
   }, [track, missionDraft, status, showHistory, showPredict, showWaypoints, showTerrain, predictSteps])
 
   return (
-    <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
+    <div className="page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18, color: 'var(--cyan)' }}>3D 轨迹增强</h2>
+        <h2 className="page-title">3D 轨迹增强</h2>
         <div style={{ display: 'flex', gap: 6 }}>
           <button
             className={`btn ${showHistory ? 'primary' : ''}`}

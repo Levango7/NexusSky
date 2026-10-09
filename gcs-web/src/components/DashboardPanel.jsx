@@ -184,7 +184,6 @@ export default function DashboardPanel({ drones, onSelect }) {
         {/* 卡片网格 */}
         {list.length === 0 ? (
           <div className="empty-hint">
-            <span className="big">🛰</span>
             暂无设备
             <br />
             启动 drone-sim 后约 2 秒内出现

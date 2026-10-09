@@ -21,10 +21,10 @@ import { toArray, pick, fmtTime, POLL_MS } from '../utils/panelUtils.js'
 
 // 行业预设模板
 const INDUSTRY_TEMPLATES = [
-  { key: 'POWER_GRID', label: '电力巡检', icon: '⚡', desc: '输电线路/铁塔/绝缘子巡检' },
-  { key: 'PIPELINE', label: '管道巡检', icon: '🔗', desc: '油气管道泄漏/腐蚀检测' },
-  { key: 'RAILWAY', label: '铁路巡检', icon: '🚆', desc: '铁轨/路基/接触网巡检' },
-  { key: 'SOLAR', label: '光伏巡检', icon: '☀', desc: '光伏面板热斑/裂纹检测' },
+  { key: 'POWER_GRID', label: '电力巡检', desc: '输电线路/铁塔/绝缘子巡检' },
+  { key: 'PIPELINE', label: '管道巡检', desc: '油气管道泄漏/腐蚀检测' },
+  { key: 'RAILWAY', label: '铁路巡检', desc: '铁轨/路基/接触网巡检' },
+  { key: 'SOLAR', label: '光伏巡检', desc: '光伏面板热斑/裂纹检测' },
 ]
 
 // 任务状态 → 颜色 / 标签
@@ -233,8 +233,8 @@ export default function InspectionPanel() {
     : tasks
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         智能巡检
         <span style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 8 }}>
           任务 {tasks.length}
@@ -242,7 +242,7 @@ export default function InspectionPanel() {
       </h2>
 
       {error && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {error}
         </div>
       )}
@@ -268,7 +268,6 @@ export default function InspectionPanel() {
                   }}
                 >
                   <div style={{ fontSize: 11, color: createForm.template === t.key ? 'var(--cyan)' : 'var(--text)', display: 'flex', gap: 4, alignItems: 'center' }}>
-                    <span>{t.icon}</span>
                     <span>{t.label}</span>
                   </div>
                   <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2 }}>{t.desc}</div>

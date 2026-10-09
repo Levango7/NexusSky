@@ -136,8 +136,8 @@ export default function RouteTemplatePanel({ drone }) {
   }
 
   return (
-    <div style={{ padding: 12, height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
-      <h3 style={{ margin: '0 0 8px' }}>行业航线模板</h3>
+    <div className="page">
+      <h3 className="page-title">行业航线模板</h3>
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         {TYPES.map((t) => (
           <button key={t.key} onClick={() => { setType(t.key); setResult(null) }}

@@ -156,7 +156,7 @@ export default function DefectPanel() {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 12, padding: 12, height: '100%', boxSizing: 'border-box' }}>
+    <div className="page page-split">
       {/* 左：缺陷 */}
       <div style={{ flex: 1, minWidth: 320, overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>

@@ -280,8 +280,8 @@ export default function TerrainMapPanel({ terrainData }) {
   )
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         复杂地形适配
       </h2>
 

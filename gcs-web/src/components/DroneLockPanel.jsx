@@ -166,8 +166,8 @@ export default function DroneLockPanel() {
   const lockedCount = lockedList.length
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         无人机远程锁定
         <span style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 8 }}>
           已锁定 {lockedCount} 架
@@ -228,7 +228,7 @@ export default function DroneLockPanel() {
                           flex: 1, minWidth: 0, flexWrap: 'wrap',
                         }}>
                           <span style={{ fontSize: 11, fontWeight: 'bold', color, flexShrink: 0 }}>
-                            {locked ? '🔒' : '🔓'} #{sysid}
+                            {locked ? '已锁' : '未锁'} #{sysid}
                           </span>
                           <span style={{
                             fontSize: 9, padding: '1px 5px', borderRadius: 2,
@@ -302,7 +302,7 @@ export default function DroneLockPanel() {
                         background: 'var(--bg-1)',
                       }}
                     >
-                      🔒 #{sysid}
+                      已锁 #{sysid}
                       {/* 4. 解锁按钮 */}
                       <button
                         onClick={() => handleUnlock(sysid)}
@@ -391,7 +391,7 @@ export default function DroneLockPanel() {
                   opacity: submitting ? 0.6 : 1, marginTop: 4,
                 }}
               >
-                {submitting ? '锁定中…' : '🔒 锁定无人机'}
+                {submitting ? '锁定中…' : '锁定无人机'}
               </button>
             </form>
           </div>

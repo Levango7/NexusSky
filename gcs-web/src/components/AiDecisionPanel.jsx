@@ -69,8 +69,8 @@ export default function AiDecisionPanel({
     .filter((p) => p && (p.lat != null || p.confidence != null || p.horizonSec != null))
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>AI 自主决策</h2>
+    <div className="page">
+      <h2 className="page-title">AI 自主决策</h2>
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* 决策事件流 */}

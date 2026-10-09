@@ -108,9 +108,9 @@ export default function RidPanel() {
   }
 
   return (
-    <div style={{ padding: 16, height: '100%', overflow: 'auto' }}>
+    <div className="page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18, color: 'var(--cyan)' }}>RID 运行识别状态</h2>
+        <h2 className="page-title">RID 运行识别状态</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className="chip mono" style={{ fontSize: 10, color: '#2de2a5', background: 'rgba(45,226,165,0.2)' }}>
             广播 {stats.broadcasting}
@@ -128,7 +128,6 @@ export default function RidPanel() {
 
       {!loading && !error && ridList.length === 0 && (
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)' }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>📡</div>
           <div style={{ fontSize: 14 }}>暂无 RID 状态数据</div>
           <div style={{ fontSize: 12, marginTop: 4 }}>等待无人机上报 Remote ID 信息…</div>
         </div>

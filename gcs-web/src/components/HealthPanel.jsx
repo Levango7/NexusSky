@@ -202,8 +202,8 @@ export default function HealthPanel() {
     : 0
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         健康管理
         <span style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 8 }}>
           机队 {fleetHealth.length} 架 · 告警 {warnings.length} · 维护 {records.length}
@@ -211,7 +211,7 @@ export default function HealthPanel() {
       </h2>
 
       {error && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {error}
         </div>
       )}
@@ -441,7 +441,7 @@ export default function HealthPanel() {
                     return (
                       <div key={'s_' + sid} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: '3px solid var(--cyan)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 11, color: 'var(--cyan)' }}>📅 #{pick(s, 'sysid') || '--'} · {pick(s, 'type') || '--'}</span>
+                          <span style={{ fontSize: 11, color: 'var(--cyan)' }}>#{pick(s, 'sysid') || '--'} · {pick(s, 'type') || '--'}</span>
                           <span style={{ fontSize: 9, color: 'var(--dim-2)' }}>{fmtTime(pick(s, 'scheduledAt', 'time', 'date'))}</span>
                         </div>
                         {pick(s, 'description', 'desc') != null && (
@@ -458,7 +458,7 @@ export default function HealthPanel() {
                     return (
                       <div key={'r_' + rid} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', borderLeft: `3px solid ${stColor}` }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 11, color: 'var(--text)' }}>🔧 #{pick(r, 'sysid') || '--'} · {pick(r, 'type') || '--'}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text)' }}>#{pick(r, 'sysid') || '--'} · {pick(r, 'type') || '--'}</span>
                           <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, border: `1px solid ${stColor}`, color: stColor }}>{st}</span>
                         </div>
                         <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>

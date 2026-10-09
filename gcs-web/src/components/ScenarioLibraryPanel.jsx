@@ -235,8 +235,8 @@ export default function ScenarioLibraryPanel() {
   const currentDetail = templateDetail || templates.find((t) => pick(t, 'id', 'templateId') === selectedTemplate)
 
   return (
-    <div style={{ padding: 16, color: 'var(--text)' }}>
-      <h2 style={{ fontSize: 16, margin: '0 0 12px 0', color: 'var(--text)' }}>
+    <div className="page">
+      <h2 className="page-title">
         应急场景库
         <span style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 8 }}>
           模板 {templates.length} · 进行中 {activeLaunches.length}
@@ -244,7 +244,7 @@ export default function ScenarioLibraryPanel() {
       </h2>
 
       {error && (
-        <div style={{ color: 'var(--crit)', fontSize: 11, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--crit)' }}>
+        <div className="notice crit" style={{ fontSize: 11 }}>
           ⚠ {error}
         </div>
       )}
@@ -374,14 +374,14 @@ export default function ScenarioLibraryPanel() {
                         disabled={launching}
                         style={{ ...miniBtnStyle, color: 'var(--warn)', borderColor: 'var(--warn)', padding: '4px 10px', cursor: launching ? 'not-allowed' : 'pointer', opacity: launching ? 0.5 : 1 }}
                       >
-                        {launching ? '启动中…' : '🚀 启动场景'}
+                        {launching ? '启动中…' : '启动场景'}
                       </button>
                       <button
                         onClick={handleDrill}
                         disabled={drilling}
                         style={{ ...miniBtnStyle, color: 'var(--cyan)', borderColor: 'var(--cyan)', padding: '4px 10px', cursor: drilling ? 'not-allowed' : 'pointer', opacity: drilling ? 0.5 : 1 }}
                       >
-                        {drilling ? '演练中…' : '🎬 演练模式'}
+                        {drilling ? '演练中…' : '演练模式'}
                       </button>
                     </div>
                   </div>

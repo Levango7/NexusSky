@@ -67,16 +67,62 @@ body {
 .topbar-center { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
 .topbar-right { display: flex; gap: 8px; align-items: center; flex: none; }
 .topbar-right .btn { white-space: nowrap; }
+/* 顶栏原生下拉（预算档位）与设计系统同皮肤 */
+.topbar select {
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--sans);
+}
+.topbar select:focus { outline: none; border-color: rgba(0, 212, 255, .6); box-shadow: 0 0 0 2px var(--cyan-dim); }
 
-/* 顶栏视图标签（35+ 个）：宽度不足时换行；按钮保持单行文本，禁止逐字竖排压缩 */
-.view-tabs { flex-wrap: wrap; justify-content: center; }
-.view-tabs .btn { white-space: nowrap; }
+/* 顶栏导航分组：45 个视图收进 8 个业务域，组内视图进下拉菜单（单行 56px） */
+.nav-groups { display: flex; gap: 2px; align-items: center; }
+.nav-group { position: relative; }
+.nav-group-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 11px; border-radius: 7px;
+  border: 1px solid transparent; background: none;
+  color: var(--dim); font-family: var(--sans); font-size: 12px; font-weight: 600;
+  letter-spacing: .5px; cursor: pointer; white-space: nowrap;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.nav-group-btn:hover { color: var(--text); background: var(--panel-2); }
+.nav-group-btn.active { color: var(--cyan); background: var(--cyan-dim); border-color: rgba(0, 212, 255, .35); }
+.nav-group-btn .caret {
+  width: 0; height: 0; flex: none;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 4px solid currentColor; opacity: .7;
+}
+.nav-menu {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 60;
+  min-width: 172px; max-height: 64vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1px; padding: 6px;
+  background: rgba(16, 20, 29, .97);
+  border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .55);
+  backdrop-filter: blur(10px);
+  animation: navMenuIn .14s ease-out;
+}
+@keyframes navMenuIn { from { opacity: 0; transform: translateY(-4px); } }
+.nav-item {
+  text-align: left; padding: 7px 11px; border-radius: 6px;
+  border: none; background: none; color: var(--text);
+  font-family: var(--sans); font-size: 12px; cursor: pointer;
+  white-space: nowrap;
+}
+.nav-item:hover { background: var(--line); }
+.nav-item.current { color: var(--cyan); background: var(--cyan-dim); font-weight: 600; }
 
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--text);
   background: var(--panel-2); border: 1px solid var(--line);
   padding: 4px 11px; border-radius: 999px;
+  white-space: nowrap;
 }
 .chip b { font-weight: 700; }
 .chip .dim { color: var(--dim-2); }
@@ -453,7 +499,8 @@ body {
 
 .db-summary {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 220px));
+  justify-content: start;
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -532,7 +579,7 @@ body {
 
 /* ============ 移动端响应式适配（@media max-width: 768px） ============ */
 @media (max-width: 768px) {
-  /* 顶栏：垂直排列，view-tabs 横向滚动 */
+  /* 顶栏：垂直排列，导航分组换行 */
   .topbar {
     height: auto;
     flex-direction: column;
@@ -546,23 +593,17 @@ body {
     gap: 6px;
   }
   .topbar-right { justify-content: center; }
+  /* 窄屏不显示用户 chip：保留 title 信息，避免顶栏第三行被挤成竖排 */
+  .user-chip { display: none; }
   .brand { justify-content: center; }
-  .view-tabs {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    max-width: 100%;
-    flex-wrap: nowrap !important;
-    padding-bottom: 4px;
-  }
-  .view-tabs::-webkit-scrollbar { height: 4px; }
-  .view-tabs::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 2px; }
-  /* 触摸友好：按钮最小 44px 触摸目标 */
-  .view-tabs .btn {
+  .nav-groups { flex-wrap: wrap; justify-content: center; max-width: 100%; }
+  /* 触摸友好：组按钮最小 36px 触摸目标 */
+  .nav-group-btn {
     min-height: 36px;
-    padding: 8px 14px !important;
-    font-size: 12px !important;
-    white-space: nowrap;
+    padding: 8px 12px;
+    font-size: 12px;
   }
+  .nav-menu { max-height: 50vh; }
   .btn { min-height: 44px; }
 
   /* 主体：单列布局，隐藏左右侧栏（可由 JS 改为抽屉，此处默认隐藏） */
@@ -810,3 +851,157 @@ body {
   font-family: var(--mono);
   font-weight: 700;
 }
+
+/* ============ 设计系统：整页面板统一皮肤（.page 作用域） ============ */
+/*
+ * 背景：45 个视图面板分三代——核心操控视图（机队/HUD/摇杆，CSS 类）、
+ * 中期面板（自带零散类名）、E/F 系列新面板（原生控件 + 内联样式，
+ * 出现白底按钮/默认输入框/默认 h3，一眼割裂）。
+ * 这里以 .page 为作用域给原生控件统一基础皮肤；需要特殊外观的元素
+ * 显式加 .btn / .raw 类豁免。新面板只需外层容器用 className="page"。
+ */
+
+/* 整页面板容器 */
+.page {
+  padding: 16px 18px 18px;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+/* 左右分栏型页面（如机巢/缺陷工单：列表 + 详情），各列自滚动 */
+.page-split { display: flex; gap: 12px; overflow: hidden; }
+.page-split > .split-main { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
+.page-split > .split-side { flex: none; min-height: 0; overflow-y: auto; }
+
+/* 页内标题：与 .panel-head h3（竖条 + 宽字距）同语言 */
+.page > h3,
+.page-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 700; color: var(--text);
+  letter-spacing: 2.5px; text-transform: uppercase;
+  margin: 0 0 12px;
+}
+.page > h3::before,
+.page-title::before {
+  content: ''; width: 3px; height: 13px; border-radius: 2px; flex: none;
+  background: linear-gradient(180deg, var(--cyan), #0077aa);
+}
+.page-sub { font-size: 11.5px; color: var(--dim); margin: -6px 0 12px; }
+
+/* 页内小节标题 */
+.page h4 {
+  font-size: 11px; font-weight: 700; color: var(--dim);
+  letter-spacing: 1.5px; text-transform: uppercase;
+  margin: 14px 0 8px;
+}
+
+/* 顶部工具行 */
+.toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.toolbar .spacer { flex: 1; }
+
+/* 表单控件：.page 作用域内原生控件兜底 + 显式可用的通用类 */
+.page input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+.page select,
+.page textarea,
+.input, .select, .textarea {
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-family: var(--sans);
+}
+.page input:focus, .page select:focus, .page textarea:focus,
+.input:focus, .select:focus {
+  outline: none;
+  border-color: rgba(0, 212, 255, .6);
+  box-shadow: 0 0 0 2px var(--cyan-dim);
+}
+.page input::placeholder, .input::placeholder { color: var(--dim-2); }
+.page input[type='checkbox'],
+.page input[type='radio'] { accent-color: var(--cyan); }
+
+/* 页内原生 button 兜底为 .btn 外观（显式 .btn / .raw 不受影响） */
+.page button:not(.btn):not(.raw) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 12px; border-radius: 8px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--sans); font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .1s;
+}
+.page button:not(.btn):not(.raw):hover:not(:disabled) { border-color: var(--dim); background: var(--line); }
+.page button:not(.btn):not(.raw):active:not(:disabled) { transform: translateY(0); }
+.page button:not(.btn):not(.raw):disabled { opacity: .35; cursor: not-allowed; }
+.page button:not(.btn):not(.raw)[aria-pressed='true'] {
+  border-color: rgba(0, 212, 255, .5); color: var(--cyan); background: var(--cyan-dim);
+}
+
+/* 数据表格 */
+.page table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.page table th {
+  text-align: left; white-space: nowrap;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--dim);
+  padding: 8px 10px; border-bottom: 1px solid var(--line-2);
+}
+.page table td { padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.page table tbody tr { transition: background .12s; }
+.page table tbody tr:hover { background: rgba(0, 212, 255, .05); }
+.page table .num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.page table tr.row-crit { background: var(--crit-dim); }
+.page table tr.row-warn { background: var(--warn-dim); }
+.table-wrap { border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+/* 内容少的报表类表格：不铺满全宽，避免列间大空隙 */
+.page table.fit { width: auto; min-width: 380px; }
+
+/* 统计卡（与仪表盘 db-sum-cell 同视觉，供整页面板复用；宽度有上界，宽屏不拉散） */
+.stat-grid {
+  display: grid; gap: 8px; margin-bottom: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 190px));
+  justify-content: start;
+}
+.stat-cell {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 9px 12px; min-width: 0;
+}
+.stat-cell label {
+  display: block; font-size: 10px; color: var(--dim);
+  letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 4px;
+}
+.stat-cell b { font-family: var(--mono); font-size: 17px; font-weight: 600; }
+.stat-cell.ok b { color: var(--ok); }
+.stat-cell.warn b { color: var(--warn); }
+.stat-cell.crit b { color: var(--crit); }
+.stat-cell .sub { font-size: 10.5px; color: var(--dim-2); }
+
+/* 提示条 */
+.notice {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: 8px;
+  font-size: 12px; border: 1px solid; margin-bottom: 12px;
+}
+.notice.info { color: var(--cyan); border-color: rgba(0, 212, 255, .35); background: var(--cyan-dim); }
+.notice.ok { color: var(--ok); border-color: rgba(45, 226, 165, .35); background: var(--ok-dim); }
+.notice.warn { color: var(--warn); border-color: rgba(255, 178, 36, .35); background: var(--warn-dim); }
+.notice.crit { color: var(--crit); border-color: rgba(255, 93, 93, .4); background: var(--crit-dim); }
+
+/* 空状态 */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 56px 16px; color: var(--dim); text-align: center;
+}
+.empty-state .es-title { font-size: 13px; color: var(--text); letter-spacing: .5px; }
+.empty-state .es-hint { font-size: 11.5px; color: var(--dim-2); line-height: 1.9; }
+
+/* 小尺寸按钮与表单行 */
+.btn.sm { padding: 5px 10px; font-size: 11px; border-radius: 6px; }
+.btn.xs { padding: 3px 8px; font-size: 10.5px; border-radius: 5px; }
+.field-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field > label { font-size: 10.5px; color: var(--dim); letter-spacing: .5px; }
