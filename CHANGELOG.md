@@ -4,6 +4,26 @@
 
 ---
 
+## [Unreleased] — E3 出海合规抽象：U-space 四服务 + Remote ID 三套映射 + USSP 角色（2026-10-09）
+
+> 依据 ROADMAP E3（依赖 C1+C2✅）。本仓以 **USSP 服务接口形状**实现四服务；
+> 与真实 U-space 网络互联（CISP 交换/EASA 认证）属生产阶段（诚实边界同 C1/C2 口径）。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| E3.1 | **Remote ID 三套映射** | `RemoteIdMapper` 纯函数：GB46750（内部直出）/ ASTM F3411（Part 89，速度 m/s→节、精度档位→厘米表）/ EU 2019/945（ASTM 超集 + UAS 注册号 + UA 分类 + UOM 换名）；统一脱敏口径与 RidController 一致；**分段到达容错**（RID 分段广播时缺失段输出 null 不 NPE——e2e 实测形态钉成单测） |
+| E3.2 | **网络识别** | `GET /uspace/net-rid?format=` 三套标准切换输出 |
+| E3.3 | **地理感知** | `GET /uspace/geo-awareness` 复用 C3 限飞区数据源（UAVolume 形状：圆/多边形 + 距离） |
+| E3.4 | **飞行授权** | `POST /uspace/flight-authorization` 与限飞区求交的几何判定：未相交 AUTHORIZED / 相交 DENIED（附区名）——**三态之 CONDITIONAL 不硬造**（当前数据源只有禁飞区语义） |
+| E3.5 | **交通信息** | `GET /uspace/traffic` 半径内在线机清单（距离排序；不暴露 operatorId，跨标准统一脱敏口径） |
+| E3.6 | **e2e** | `scripts/e2e-uspace.ps1`：真 RID 广播 + 测试限飞区文件 → 四服务 13 断言 ALL PASS |
+
+**测试**：UspaceComplianceTest 9 例（三套映射 7/几何 2）+ e2e 13 断言。
+
+**诚实边界**：映射是字段级语义换名/换算（不做字节级帧编码——那是 MAVLink OPEN_DRONE_ID 通道职责）；飞行授权是限飞区几何求交（不接入真空域审批）；USSP 对外互联属生产阶段。
+
+---
+
 ## [Unreleased] — E1 ROC 一控多机席位：席位化交互 + 批量指令 + 警情驱动调度（2026-10-09）
 
 > 依据 ROADMAP E1（依赖 M10✅）。对表深圳"1+7+N"——一名操作员控制 6-9 架、
@@ -330,7 +350,7 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
    - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
      （模拟"裸写开关被吞 token"）。
 
-4. **计数基线 4380 → 4541（drone-sim 1397 → 1405）**
+4. **计数基线 4380 → 4550（drone-sim 1397 → 1405）**
    - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
 
 ---

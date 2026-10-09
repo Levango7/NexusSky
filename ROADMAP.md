@@ -23,9 +23,9 @@
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
 <<<<<<< HEAD
-   4541 单测全绿（Java surefire 实测；前端已有 245 例 vitest——api.js 会话/预算
+   4550 单测全绿（Java surefire 实测；前端已有 245 例 vitest——api.js 会话/预算
 =======
-   4541 单测全绿（Java surefire 实测；前端已有 245 例 vitest——api.js 会话/预算
+   4550 单测全绿（Java surefire 实测；前端已有 245 例 vitest——api.js 会话/预算
 >>>>>>> origin/master
     档位/WS URL、组件逻辑、孪生同步换算与分桶、M11 决策三帧归一化；Playwright
     真浏览器 E2E 4 例已于 2026-10-04 补齐，见 docs/devops-enhancement-plan.md CI7）
@@ -353,7 +353,7 @@
 |---|---|---|---|
 | E1 | **ROC"一控多机"席位** ✅ | 席位化交互（一操作员≤9 架）+ 批量指令逐机结果 + 警情驱动三因子建议与确认派飞 + GCS RocPanel + e2e 双机全链（2026-10-09 交付） | M10（集群调度）✅ |
 | E2 | **侦测接入** | 反制雷达侦测数据源接入（不自研反制）；侦测态势面板 | 4a（空地一体化） |
-| E3 | **出海合规抽象** | U-space 四服务接口（network identification / geo-awareness / flight authorization / traffic information）+ Remote ID 字段统一建模（GB 46750 / Part 89 / EU 2019/945 三套映射）；欧洲 USSP 角色实现 | C1/C2（合规基础） |
+| E3 | **出海合规抽象** ✅ | U-space 四服务接口（net-rid/geo-awareness/flight-authorization/traffic，USSP 角色形状）+ Remote ID 三套映射（GB46750/ASTM F3411/EU 2019/945）+ e2e 13 断言（2026-10-09 交付）；真实 USSP 互联属生产阶段 | C1+C2 ✅ |
 | E4 | **5G-A 通感感知数据源预留** | 复用 SatelliteLink/TerrainSource 抽象模式；5G-A 通感一体化感知数据接入点 | M7（多层级中继） |
 | E5 | **GB28181 视频接入** ✅ | 国标形状层（20 位编码/PTZ 指令码/SIP 信令/Catalog 解析）+ VendorAdapter 接入，22 例逐字节断言；SIP 传输与媒体面属生产阶段（2026-10-08 交付） | 4a（ONVIF 已有）✅ |
 | E6 | **运营报表与单位经济** ✅ | 架次分割+三维聚合+参数化成本模型（cost-per-hour 部署方填）+ GCS 面板 + e2e 真飞对账（2026-10-08 交付） | C4（持久化）✅ |
@@ -432,9 +432,9 @@ M7 ──► E4(5G-A通感)
 2. 代码严格落在已有模块边界内：`cloud-backend`(调度/API)、`drone-sim`(载荷/执行)、
    `mavlink-core`(新消息)、`link-sim`(中继/链路)、`gcs-web`(观察)。
 <<<<<<< HEAD
-3. 每个里程碑必须有回归基线：现有 4541 单测（Java） + e2e 脚本不回归。
+3. 每个里程碑必须有回归基线：现有 4550 单测（Java） + e2e 脚本不回归。
 =======
-3. 每个里程碑必须有回归基线：现有 4541 单测（Java） + e2e 脚本不回归。
+3. 每个里程碑必须有回归基线：现有 4550 单测（Java） + e2e 脚本不回归。
 >>>>>>> origin/master
 4. 边界诚实声明：工作量 = 协议抽象 + 假数据源，非真硬件实现。
 5. **MAVLink msgId 全局唯一且避开官方分配带**：2026-10 治理搬迁后自定义消息统一使用私有方言段 **30000-30099**（common.xml 官方拥有 msgId 300-10000 分配带，旧 420-483 段位于其中，420/437/440 已与官方 RADIO_RC_CHANNELS / AVAILABLE_MODES_MONITOR / ILLUMINATOR_STATUS 实锤冲突，全部 51 条已等差平移 +29580）。已分配：30000-30021(M0a-M4)、30030-30047(M5-M9)、30048-30056(M10-M13)、30057-30059(4a 安防报警)、30060-30063(P2 灾害应急通讯组网扩展)；新增从 **30064+** 起分配，30064-30099 为增长预留。**自定义 MAV_CMD 同步治理（2026-10）**：8 条自定义命令（原 310-312/320-322/420/421）已搬入私有区命令子段 **30080-30087**（命令与消息分属不同命名空间，数值不冲突；分段纯为日志可读性，常量收口 `MavEnums.MAV_CMD_NEXUS_*`，守卫测试防回退）。冲突防护：`scripts/mavlink-compatibility-check.py --self-test` 内嵌 392 个官方已分配 msgId 快照逐条核对。Phase 2 预估 msgId 区间：C2(RID) 使用 `OPEN_DRONE_ID_*` 官方消息族（msgId 12900-12999，MAVLink 官方分配），C5(signing) 使用 MAVLink v2 签名帧（不占新 msgId），其余 C/F/E 系列按需从 30064+ 分配。
