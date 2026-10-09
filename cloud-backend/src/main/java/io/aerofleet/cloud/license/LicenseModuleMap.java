@@ -164,6 +164,8 @@ final class LicenseModuleMap {
         m.put("/api/v1/roc", EMERGENCY);
         // U-space 四服务（E3 出海合规）：合规域，与 rid/regulator 同档——归 emergency。
         m.put("/api/v1/uspace", EMERGENCY);
+        // 非合作目标侦测态势（E2 反制雷达侦测 + E4 5G-A 通感）：安防应急域——归 emergency。
+        m.put("/api/v1/sensing", EMERGENCY);
 
         // ============ mesh：M5 AODV-lite 自愈组网（基础版；2026-10-07 从 network 拆出）============
         // 定价文档 §5.1 把「M5 mesh」列为**基础版**卖点。mesh 是单机多机的组网自愈，

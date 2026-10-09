@@ -2344,6 +2344,23 @@ pipeline（line/stepM）；shoreline（polygon/stepM/offsetM）。响应含 wayp
 
 ---
 
+## 非合作目标侦测态势（E2/E4）
+
+### 基础路径 `/api/v1/sensing`
+
+**Controller**: `sensing/SensingController` | 反制雷达侦测 + 5G-A 通感统一态势（**只读，无控制**）
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/tracks?source=&alertOnly=` | 非合作目标航迹（来源过滤/仅告警） | OBSERVER |
+| GET | `/sources` | 来源清单（类型/标识/累计航迹数） | OBSERVER |
+
+**告警口径**：航迹距本仓在线设备 < `aerofleet.sensing.proximity-alert-m`（默认 1000m）
+标记 alert；进入/离开/再进入三段语义（不重复刷屏）。TTL `track-ttl-ms`（默认 30s）。
+**立场：只接侦测不做反制**——真实厂商 SDK/ISAC 网元接入属生产阶段。
+
+---
+
 ## U-space 出海合规（E3）
 
 ### 基础路径 `/api/v1/uspace`

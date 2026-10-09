@@ -25,6 +25,7 @@ export const VIEW_PANEL_MAP = {
   routetpl: 'mission',     // 行业航线模板归入任务范畴（千元级可用，F3）
   opsreport: 'mission',    // 运营报表归入任务范畴（千元级可用，E6；fleet 键不在档位清单会致丐版误隐藏）
   roc: 'emergency',      // ROC 一控多机席位归入应急范畴（千元级可用，E1——警情驱动对表 1+7+N）
+  sensing: 'emergency',    // 侦测态势归入应急范畴（千元级可用，E2/E4——反制侦测+5G-A 通感）
   dock: 'dock',            // 机巢管控独立面板（千元级可用，无人值守）
   dronelock: 'status',     // 远程锁机归入状态管理（百元级可用）
   autodispatch: 'emergency', // 自动出警归入应急范畴（千元级可用）
