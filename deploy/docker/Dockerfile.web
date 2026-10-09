@@ -5,7 +5,10 @@
 # Vite 构建产物默认输出到 gcs-web/dist，由 Nginx 提供静态服务 + API/WS 反代。
 
 # ===== 阶段 1：Node 构建 =====
-FROM node:20-alpine AS builder
+# 基础镜像注册表前缀：CI 通过 --build-arg 覆盖为公共镜像代理（Docker Hub 匿名拉取
+# 在共享 runner IP 上有 6h 窗口限流——2026-10-09 实测 429 致 7 个 job 红）；交付默认 docker.io。
+ARG BASE_REGISTRY=docker.io/library
+FROM ${BASE_REGISTRY}/node:20-alpine AS builder
 WORKDIR /build
 
 # 先拷 lockfile 利用层缓存
@@ -18,7 +21,10 @@ COPY gcs-web ./
 RUN npm run build
 
 # ===== 阶段 2：Nginx 运行时 =====
-FROM nginx:alpine
+# 基础镜像注册表前缀：CI 通过 --build-arg 覆盖为公共镜像代理（Docker Hub 匿名拉取
+# 在共享 runner IP 上有 6h 窗口限流——2026-10-09 实测 429 致 7 个 job 红）；交付默认 docker.io。
+ARG BASE_REGISTRY=docker.io/library
+FROM ${BASE_REGISTRY}/nginx:alpine
 # 反代上游缺省值：compose 服务名 / 原生 k8s Service 名都是 cloud-backend:8080；
 # helm 部署时由 chart 注入 NS_BACKEND_HOST=<release>-cloud-backend 覆盖。
 # nginx 官方镜像启动时对 /etc/nginx/templates/*.template 跑 envsubst 渲染到

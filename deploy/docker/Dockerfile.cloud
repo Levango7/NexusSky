@@ -13,7 +13,10 @@
 # 与 Dockerfile.sim 同一根因（详见该文件注释）。
 # 改用 Maven 官方镜像 maven:3.9-eclipse-temurin-17（含 Maven + JDK 17），
 # 标签经 docker-library/repo-info 核实存在。
-FROM maven:3.9-eclipse-temurin-17 AS builder
+# 基础镜像注册表前缀：CI 通过 --build-arg 覆盖为公共镜像代理（Docker Hub 匿名拉取
+# 在共享 runner IP 上有 6h 窗口限流——2026-10-09 实测 429 致 7 个 job 红）；交付默认 docker.io。
+ARG BASE_REGISTRY=docker.io/library
+FROM ${BASE_REGISTRY}/maven:3.9-eclipse-temurin-17 AS builder
 WORKDIR /build
 
 # 先拷 pom 与子模块 pom，利用层缓存加速依赖解析
@@ -37,7 +40,10 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn -q -pl cloud-backend -am package -DskipTests
 
 # ===== 阶段 2：JRE 运行时 =====
-FROM eclipse-temurin:17-jre
+# 基础镜像注册表前缀：CI 通过 --build-arg 覆盖为公共镜像代理（Docker Hub 匿名拉取
+# 在共享 runner IP 上有 6h 窗口限流——2026-10-09 实测 429 致 7 个 job 红）；交付默认 docker.io。
+ARG BASE_REGISTRY=docker.io/library
+FROM ${BASE_REGISTRY}/eclipse-temurin:17-jre
 WORKDIR /app
 
 # curl 用于容器内 healthcheck（docker-compose 用 curl 探活）

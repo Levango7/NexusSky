@@ -375,7 +375,7 @@ jobs:
     needs: [ java, frontend ]
     services:
       redis:
-        image: redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -441,7 +441,7 @@ jobs:
     needs: [ java ]
     services:
       redis:
-        image: redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -551,7 +551,7 @@ jobs:
     needs: [java]
     services:
       redis:
-        image: redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -565,7 +565,7 @@ jobs:
       # 的 DDL 直到上线才会暴露。库名/用户名与 application-prod.properties 默认值
       # 一致（localhost:5432/aerofleet_prod），脚本只需注入密码环境变量。
       postgres:
-        image: postgres:15-alpine
+        image: mirror.gcr.io/library/postgres:15-alpine
         env:
           POSTGRES_DB: aerofleet_prod
           POSTGRES_USER: aerofleet
@@ -602,7 +602,7 @@ jobs:
     needs: [ java ]
     services:
       redis:
-        image: redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -796,9 +796,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -817,16 +814,22 @@ jobs:
             type=raw,value=latest
             type=sha,format=short
 
+      # 原生 docker build/push（原为 build-push-action+buildx）：2026-10-09 实测
+      # buildx 的 docker-container driver 要先从 Docker Hub 拉 moby/buildkit 镜像，
+      # 在限流/超时下连续两轮致红 2/3 个模块。buildx 仅带来 gha 层缓存与 provenance
+      # 元数据，不值得把"能否构建"绑在 Docker Hub 可达性上——revert 到标准路径后，
+      # 唯一的镜像拉取是 base 镜像（已参数化走 mirror.gcr.io）。
       - name: Build and push ${{ matrix.module }}
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        shell: bash
+        run: |
+          set -e
+          TAG_ARGS=""
+          while IFS= read -r tag; do [ -n "$tag" ] && TAG_ARGS="$TAG_ARGS -t $tag"; done <<< "${{ steps.meta.outputs.tags }}"
+          LABEL_ARGS=""
+          while IFS= read -r l; do [ -n "$l" ] && LABEL_ARGS="$LABEL_ARGS --label $l"; done <<< "${{ steps.meta.outputs.labels }}"
+          # shellcheck disable=SC2086
+          docker build $TAG_ARGS $LABEL_ARGS             --build-arg BASE_REGISTRY=mirror.gcr.io/library             -f "${{ matrix.dockerfile }}" .
+          while IFS= read -r tag; do [ -n "$tag" ] && docker push "$tag"; done <<< "${{ steps.meta.outputs.tags }}"
   deploy-secrets:
     name: Deploy Secret Gate
     runs-on: ubuntu-latest
