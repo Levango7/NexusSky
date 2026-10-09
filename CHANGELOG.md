@@ -4,6 +4,31 @@
 
 ---
 
+## [Unreleased] — E5 GB28181 视频接入：国标形状层 + 适配器接入（2026-10-08）
+
+> 依据 ROADMAP E5（依赖 4a✅）。与 Uniview（私有 SDK 搁置）的口径不同：
+> **GB28181 的国标形状层是真实现**——编码/PTZ 指令码/信令构造/目录解析按
+> GB/T 28181-2016 落地，全部纯函数、22 例单测逐字节断言国标值。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| E5.1 | **20 位国标编码** | 中心 11/行业 2/类型 3/序号 4 分段构造/校验/解析；类型码表（131 摄像机/132 网络摄像机/200 报警输入/215 报警输出等）；未知类型码明确拒绝不静默 |
+| E5.2 | **PTZ 指令码** | 国标 A5 0F 01 动作位 4 字节（上 08/下 04/左 20/右 10/放大 80/缩小 40），hex 形态 A50F0108 |
+| E5.3 | **SIP 信令形状** | REGISTER / INVITE（点播+SDP，PS/9000）/ MESSAGE（Catalog，MANSCDP+xml）/ SUBSCRIBE（报警订阅）——纯构造器可断言 |
+| E5.4 | **目录解析** | Catalog XML 逐 Item 提取，非法 DeviceID 跳过并计数不静默，非 Catalog 结构明确拒绝 |
+| E5.5 | **适配器接入** | Vendor.GB28181（顶层+SurveillanceDevice 嵌套双枚举）+ Gb28181Adapter 实现 VendorAdapter 全接口，VendorAdapterRegistry 自动路由 |
+
+**诚实边界**：1) SIP 传输与 RTP/PS 媒体面属生产阶段——getStreamUrl 返回
+gb28181-invite:// 描述性标识并 WARN，不假扮可播 RTSP；2) **SurveillanceController
+的 PTZ 端点当前硬编码 ONVIF 路径**（不经 VendorAdapterRegistry 路由）——把该
+controller 改造为按 vendor 路由是既有行为变更，登记为后续项，本轮不混入；
+3) 鉴权 401 握手与设备目录的 SIP 收发属传输层。
+
+**测试**：Gb28181ShapeTest 22 例（编码 5/PTZ 3/信令 4/解析 4/适配器 6，含跨厂商
+设备拒绝与不假扮可播 RTSP 断言）；surveillance 全域连带回归 82/82。
+
+---
+
 ## [Unreleased] — E6 运营报表与单位经济：架次/时长/里程/能耗/成本核算（2026-10-08）
 
 > 依据 ROADMAP E6（依赖 C4 持久化✅）。物流与植保结算刚需——数据源是 flight_log
@@ -278,7 +303,7 @@ detection map 时只放 kind/lat/lon/id/truthErrorM，漏了 confidence（vision
    - **变异验证**：把 `lidar` 从 `BOOLEAN_FLAGS` 移除后 4 例立即转红
      （模拟"裸写开关被吞 token"）。
 
-4. **计数基线 4380 → 4504（drone-sim 1397 → 1405）**
+4. **计数基线 4380 → 4526（drone-sim 1397 → 1405）**
    - 门禁全绿，22 处文档声称同步；`demo-scenarios` 补上 `--lidar --imu` 前置。
 
 ---

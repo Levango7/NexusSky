@@ -25,7 +25,9 @@ public class SurveillanceDevice {
         /** 宇视。 */
         UNIVIEW,
         /** ONVIF 标准协议（fallback，适用于所有支持 ONVIF 的设备）。 */
-        ONVIF
+        ONVIF,
+        /** GB28181 政企视频网标准（国标 SIP 信令，E5 形状层接入）。 */
+        GB28181
     }
 
     /** 设备在线状态。 */

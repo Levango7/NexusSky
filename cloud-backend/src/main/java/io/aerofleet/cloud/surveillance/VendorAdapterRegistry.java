@@ -117,7 +117,7 @@ public final class VendorAdapterRegistry {
     /**
      * 将 {@link SurveillanceDevice.Vendor} 映射到 {@link Vendor} 枚举。
      * <p>
-     * SurveillanceDevice.Vendor 有 HIKVISION/DAHUA/UNIVIEW/ONVIF 四种，
+     * SurveillanceDevice.Vendor 有 HIKVISION/DAHUA/UNIVIEW/ONVIF/GB28181 五种，
      * 映射到 Vendor 枚举后可通过 fallback 机制处理。
      */
     private static Vendor mapDeviceVendor(SurveillanceDevice.Vendor deviceVendor) {
@@ -129,6 +129,7 @@ public final class VendorAdapterRegistry {
             case DAHUA -> Vendor.DAHUA;
             case UNIVIEW -> Vendor.UNIVIEW;
             case ONVIF -> Vendor.ONVIF;
+            case GB28181 -> Vendor.GB28181;
         };
     }
 }

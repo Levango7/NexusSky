@@ -720,12 +720,12 @@ NexusSky/
 | `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4504** |
+| **总计** | **4526** |
 =======
 | `cloud-backend` | 2470 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4504** |
+| **总计** | **4526** |
 >>>>>>> origin/master
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
@@ -821,6 +821,10 @@ NexusSky/
 - **行业航线模板（F3）的几何口径**：局部平面近似（<10km 区域误差厘米级）；弓字形无
   最小转弯优化；岸线偏移是顶点法向近似；杆塔号→坐标由请求方传入（真实台账/GIS 接入
   属生产阶段）。
+- **GB28181（E5）交付的是国标形状层**：编码/PTZ 指令码/SIP 信令/Catalog 解析为真实现
+  （22 例单测逐字节断言国标值）；SIP 传输与 RTP/PS 媒体面属生产阶段——点播返回
+  gb28181-invite:// 描述性标识，不假扮可播 RTSP。**SurveillanceController 的 PTZ
+  端点仍硬编码 ONVIF 路径**（按 vendor 路由的改造登记为后续项）。
 - **运营报表（E6）的成本是参数化模型**：`aerofleet.report.cost-per-hour`（默认 0）由
   部署方按其单位经济填——本仓不编造电价/折旧；能耗按电量百分比差，不换算 mAh；
   tenant 维度依赖帧上租户标记（未归属计入 unassigned）。
