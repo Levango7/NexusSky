@@ -27,3 +27,32 @@ vulnerabilities:
       ContentNegotiating），360 个 handler 映射中 /** 模式 0 个。
       撤销条件（任一成立即删除本条）：① spring-webmvc 升到 6.2.x 修复版或 7.x；
       ② 仓内引入任何 XSLT 视图解析或 /** 视图映射；③ 到期。
+
+  - id: CVE-2026-47890
+    paths:
+      - pom.xml
+      - cloud-backend/pom.xml
+    expired_at: "2027-01-31T00:00:00Z"
+    statement: >-
+      GHSA-j9f9-w8pj-32f8（CRITICAL，CVSS 9.8，同一 spring-boot-dependencies 3.5.16
+      管理的 org.springframework:spring-webmvc:6.2.19 落入 ">= 6.2.0, <= 6.2.19"）。
+      **与上一条 CVE-2026-47884 是两条不同 CVE，忽略理由与可达性证据均不通用。**
+      上游修复版（spring.io/security/cve-2026-47890，2026-10-08 查）：7.0.9 为 OSS，
+      **6.2.20 仅 Enterprise Support** ⇒ 对本仓所用的 Boot 3.5.x（OSS）6.2 线
+      仍无补丁，真修复路径同样是 Boot 3.5→4.x / Framework 6.2→7.0 大版本迁移。
+      故本条同为**风险登记**而非"已修复"。
+      触发前提（官方原文，三条须同时成立）：① 用 Spring MVC 或 WebFlux；
+      ② **通过 SSE 向客户端发送 view fragments**；③ 攻击者能控制推送给其他用户的数据。
+      本仓满足 ①，**② 不成立**（2026-10-08 本机实测，见 SseViewFragmentReachabilityTest）：
+      本后端虽用 SSE（AlarmController#streamEvents 是唯一 SSE 端点），但全仓 69 个应用级
+      控制器**清一色 @RestController**（无一个裸 @Controller），故
+      ViewResolutionResultHandler 永不参与；且该端点只发 .comment() 与 .data(Map)，
+      从不发视图片段；Spring 上下文 4 个 ViewResolver（BeanName/Composite/
+      InternalResource/ContentNegotiating）均不渲染片段。
+      框架自带的 BasicErrorController 确实是裸 @Controller，但其仅在错误响应下渲染、
+      **不经 SSE**，不构成触发路径（该测试已显式排除并注明理由）。
+      上游修复说明亦印证机制限定在
+      "view fragments rendered by ViewResolutionResultHandler / ResponseBodyEmitterReturnValueHandler"。
+      诚实边界：这是**本仓基于代码得出的可达性判断**，非厂商公告结论。
+      撤销条件（任一成立即删除本条）：① spring-webmvc 升到 6.2.20+ 或 7.0.9+；
+      ② 仓内引入任何裸 @Controller 或把视图对象送进 SSE 流；③ 到期。
