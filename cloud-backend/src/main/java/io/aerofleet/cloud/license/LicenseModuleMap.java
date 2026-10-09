@@ -97,6 +97,9 @@ final class LicenseModuleMap {
         m.put("/api/v1/geofence", CORE);
         m.put("/api/v1/rid", CORE);
         m.put("/api/v1/regulator", CORE);
+        // MAVLink 链路签名与 rid/regulator 同类：链路层的协议与合规能力，
+        // 是"飞起来"的地基而非增值项，故归 core（基础版即可获得）。
+        m.put("/api/v1/mavlink", CORE);
         m.put("/api/v1/tenants", CORE);
         m.put("/api/v1/users", CORE);
         m.put("/api/v1/audit", CORE);
