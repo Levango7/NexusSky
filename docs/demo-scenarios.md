@@ -76,14 +76,14 @@
 
 ### 1.4 测试基线
 
-当前项目测试基线：**4545 tests，0 failures**（全部通过）。
+当前项目测试基线：**4554 tests，0 failures**（全部通过）。
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
 | mavlink-core | 462 | MAVLink 协议编解码、CRC 一致性 |
 | drone-sim | 1408 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
-| cloud-backend | 2527 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **4545** | **全部通过，0 failures** |
+| cloud-backend | 2536 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **4554** | **全部通过，0 failures** |
 
 > 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
 
@@ -116,7 +116,7 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 |---|---|---|
 | JDK | ≥ 17 | `java -version` |
 | 构建产物 | drone-sim jar + cloud-backend jar | `mvn -pl drone-sim,cloud-backend -am package -DskipTests` |
-| 端口 | 8080(REST)、14540(MAVLink)、14550(GCS) 可用 | 无其他 Java 进程占用 |
+| 端口 | 8080(REST)、14540(MAVLink)、14554(GCS) 可用 | 无其他 Java 进程占用 |
 | 前端（可选） | gcs-web dev server (5173) | `cd gcs-web && npm install && npm run dev` |
 
 #### 操作步骤
@@ -164,7 +164,7 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 |---|---|
 | JDK | ≥ 17 |
 | 构建产物 | drone-sim jar + cloud-backend jar（+ link-sim jar 如用 `-IncludeRelay`） |
-| 端口 | 8080, 14550-14553 可用 |
+| 端口 | 8080, 14554-14553 可用 |
 | 参考点 | 深圳 (22.5431, 113.9578) |
 
 #### 操作步骤

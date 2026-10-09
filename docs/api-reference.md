@@ -2344,6 +2344,25 @@ pipeline（line/stepM）；shoreline（polygon/stepM/offsetM）。响应含 wayp
 
 ---
 
+## U-space 出海合规（E3）
+
+### 基础路径 `/api/v1/uspace`
+
+**Controller**: `uspace/UspaceController` | U-space 四服务（USSP 角色形状）+ Remote ID 三套标准映射
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/net-rid?format=gb46750\|astm\|eu` | 网络识别（RID 快照按标准映射） | OBSERVER |
+| GET | `/geo-awareness?lat=&lon=&radiusM=` | 地理感知（周边限飞区） | OBSERVER |
+| POST | `/flight-authorization` | 飞行授权（{uasId,lat,lon} → AUTHORIZED/DENIED） | OPERATOR |
+| GET | `/traffic?lat=&lon=&radiusM=` | 交通信息（周边在线机，脱敏） | OBSERVER |
+
+**标准映射口径**：`RemoteIdMapper` 纯函数——ASTM F3411 速度 0.25m/s 单位→节、
+精度档位→厘米表；EU 2019/945 为 ASTM 超集（UAS 注册号/UA 分类/UOM 换名）。
+分段广播容错：缺失段输出 null（缺报如实呈现）。**USSP 对外互联属生产阶段**。
+
+---
+
 ## ROC 一控多机席位
 
 ### 基础路径 `/api/v1/roc`
