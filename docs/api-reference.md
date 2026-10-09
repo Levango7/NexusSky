@@ -2344,6 +2344,28 @@ pipeline（line/stepM）；shoreline（polygon/stepM/offsetM）。响应含 wayp
 
 ---
 
+## ROC 一控多机席位
+
+### 基础路径 `/api/v1/roc`
+
+**Controller**: `roc/RocController` | 一控多机席位 + 警情驱动调度（E1，对表深圳 1+7+N）
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| POST | `/seats` | 创建席位（operatorName 唯一） | OPERATOR |
+| GET | `/seats` | 席位列表 | OBSERVER |
+| GET | `/seats/{id}` | 席位视图（机队实时快照） | OBSERVER |
+| PUT | `/seats/{id}/fleet` | 机队绑定（全量替换，≤9 架） | OPERATOR |
+| POST | `/seats/{id}/commands` | 批量指令（action: arm/takeoff/rtl/land；逐机结果） | OPERATOR |
+| POST | `/seats/{id}/incidents` | 警情登记（P0-P2）→ 三因子建议 | OPERATOR |
+| GET | `/seats/{id}/incidents` | 警情列表 | OBSERVER |
+| POST | `/seats/{id}/incidents/{iid}/dispatch` | 确认派飞（arm→任务上传→start） | OPERATOR |
+
+**评分口径**：距离 0.5 + 电量 0.3 + 空闲 0.2 线性加权；仅席位内在线非 armed 机参与；
+全忙建议为空不硬塞。**只建议不执行**——dispatch 由操作员显式确认。
+
+---
+
 ## 运营报表
 
 ### 基础路径 `/api/v1/operations`
