@@ -375,7 +375,7 @@ jobs:
     needs: [ java, frontend ]
     services:
       redis:
-        image: redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -441,7 +441,7 @@ jobs:
     needs: [ java ]
     services:
       redis:
-        image: redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -551,7 +551,7 @@ jobs:
     needs: [java]
     services:
       redis:
-        image: redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -565,7 +565,7 @@ jobs:
       # 的 DDL 直到上线才会暴露。库名/用户名与 application-prod.properties 默认值
       # 一致（localhost:5432/aerofleet_prod），脚本只需注入密码环境变量。
       postgres:
-        image: postgres:15-alpine
+        image: mirror.gcr.io/library/postgres:15-alpine
         env:
           POSTGRES_DB: aerofleet_prod
           POSTGRES_USER: aerofleet
@@ -602,7 +602,7 @@ jobs:
     needs: [ java ]
     services:
       redis:
-        image: redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -825,6 +825,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BASE_REGISTRY=mirror.gcr.io/library
           cache-from: type=gha
           cache-to: type=gha,mode=max
   deploy-secrets:
