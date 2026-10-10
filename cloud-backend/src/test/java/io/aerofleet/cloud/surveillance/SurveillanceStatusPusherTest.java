@@ -103,6 +103,40 @@ class SurveillanceStatusPusherTest {
     }
 
     @Test
+    @DisplayName("四态与多通道：FAULT→2 / MAINTENANCE→3；totalCameras 取设备模型（B2/B3）")
+    void mapsFourStatesAndMultiChannel() {
+        SurveillanceDevice fault = registerDevice("cam-fault", SurveillanceDevice.Vendor.HIKVISION, null);
+        fault.status = SurveillanceDevice.Status.FAULT;
+        fault.totalCameras = 4;
+        SurveillanceDevice maint = registerDevice("cam-maint", SurveillanceDevice.Vendor.UNIVIEW, null);
+        maint.status = SurveillanceDevice.Status.MAINTENANCE;
+
+        pusher.pushOnce();
+
+        ArgumentCaptor<MavlinkMessageEvent> captor =
+                ArgumentCaptor.forClass(MavlinkMessageEvent.class);
+        verify(publisher, times(2)).publishEvent(captor.capture());
+
+        SurveillanceStatusMsg faultMsg = null;
+        SurveillanceStatusMsg maintMsg = null;
+        for (MavlinkMessageEvent e : captor.getAllValues()) {
+            SurveillanceStatusMsg m = (SurveillanceStatusMsg) e.getMessage();
+            if (m.deviceId == SurveillanceStatusPusher.deviceIdToU16("cam-fault")) {
+                faultMsg = m;
+            }
+            if (m.deviceId == SurveillanceStatusPusher.deviceIdToU16("cam-maint")) {
+                maintMsg = m;
+            }
+        }
+        assertThat(faultMsg).isNotNull();
+        assertThat(faultMsg.status).isEqualTo(2);         // 故障（此前协议值不可达）
+        assertThat(faultMsg.totalCameras).isEqualTo(4);   // 多通道计数取模型
+        assertThat(faultMsg.onlineCameras).isEqualTo(0);  // 故障 → 0 在线
+        assertThat(maintMsg).isNotNull();
+        assertThat(maintMsg.status).isEqualTo(3);         // 维护（此前协议值不可达）
+    }
+
+    @Test
     @DisplayName("无 WS 客户端时跳过推送")
     void skipsWithoutWsClients() {
         when(wsHandler.connectionCount()).thenReturn(0);

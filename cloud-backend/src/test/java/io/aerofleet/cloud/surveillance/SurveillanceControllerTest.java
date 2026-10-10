@@ -239,6 +239,54 @@ class SurveillanceControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    // ===== 设备状态置位与多通道（B2/B3） =====
+
+    @Test
+    @DisplayName("注册带 channels → 视图暴露 totalCameras；置位 FAULT；非法状态 400；不存在 404")
+    void deviceStatusAndChannels() throws Exception {
+        Map<String, Object> b = deviceBody("cam-ch", "HIKVISION");
+        b.put("channels", 4);
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(b)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalCameras").value(4));
+
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-ch/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("status", "FAULT"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAULT"));
+
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-ch/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("status", "BROKEN"))))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/v1/surveillance/devices/nope/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("status", "FAULT"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("注册 channels 越界（0/256）返回 400")
+    void registerDevice_invalidChannels_returns400() throws Exception {
+        Map<String, Object> zero = deviceBody("cam-z", "HIKVISION");
+        zero.put("channels", 0);
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(zero)))
+                .andExpect(status().isBadRequest());
+
+        Map<String, Object> tooMany = deviceBody("cam-t", "HIKVISION");
+        tooMany.put("channels", 256);
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(tooMany)))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test
     @DisplayName("PTZ 按厂商路由：GB28181 设备返回国标 A50F 指令码（camelCase 契约在适配器内翻译）")
     void ptzControl_gb28181Device_routesToGbAdapter() throws Exception {

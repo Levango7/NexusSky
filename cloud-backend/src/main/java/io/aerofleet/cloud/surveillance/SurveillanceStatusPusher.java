@@ -24,9 +24,11 @@ import java.util.List;
  *       碰撞可能，REST 面以字符串 ID 为准）</li>
  *   <li>deviceType：{@link SurveillanceDevice.Vendor#ordinal()}——HIKVISION=0/
  *       DAHUA=1/UNIVIEW=2/ONVIF=3，与协议 0=海康/1=大华/2=宇视/3=其他 一致</li>
- *   <li>status：ONLINE→0/OFFLINE→1；协议 2=故障/3=维护不可达（模型仅两态）</li>
- *   <li>onlineCameras/totalCameras：模型每设备一路 RTSP 流（单通道），
- *       totalCameras=1，onlineCameras=在线?1:0；多通道计数需先扩设备模型</li>
+ *   <li>status：{@link SurveillanceDevice.Status#ordinal()} 直接映射——四态与
+ *       协议值域一致（0=在线/1=离线/2=故障/3=维护）</li>
+ *   <li>onlineCameras/totalCameras：totalCameras 取设备模型（注册时指定，默认 1）；
+ *       onlineCameras 按状态派生（ONLINE → 全部在线，否则 0）。
+ *       **部分通道离线**（4 路中 2 路在线）属生产阶段——需通道级状态上报</li>
  *   <li>uptimeSec：进程内首次注册以来的时长（重启重新计数）</li>
  *   <li>lastEventMs：最近心跳时间戳（u32 ms 截断）</li>
  * </ul>
@@ -79,9 +81,9 @@ public class SurveillanceStatusPusher {
                     Math.max(0, (now - d.firstSeenMs) / 1000),
                     deviceIdToU16(d.id),
                     d.vendor.ordinal(),
-                    d.status == SurveillanceDevice.Status.ONLINE ? 0 : 1,
-                    d.status == SurveillanceDevice.Status.ONLINE ? 1 : 0,
-                    1);
+                    d.status.ordinal(),   // 0=在线/1=离线/2=故障/3=维护（与协议值域一致）
+                    d.status == SurveillanceDevice.Status.ONLINE ? d.totalCameras : 0,
+                    d.totalCameras);
             eventPublisher.publishEvent(new MavlinkMessageEvent(
                     this, deviceIdToU16(d.id), SurveillanceStatusMsg.ID, msg, now,
                     d.tenantId));

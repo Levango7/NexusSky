@@ -30,10 +30,17 @@ public class SurveillanceDevice {
         GB28181
     }
 
-    /** 设备在线状态。 */
+    /**
+     * 设备状态（值与协议 {@code SurveillanceStatusMsg.status} 值域一致：0-3）。
+     * <p>
+     * FAULT/MAINTENANCE 是人工/检测置位（设备报障待修 / 运维检修中）——
+     * {@link #heartbeat()} 不覆盖它们（心跳不代表故障恢复或检修结束）。
+     */
     public enum Status {
         ONLINE,
-        OFFLINE
+        OFFLINE,
+        FAULT,
+        MAINTENANCE
     }
 
     /** 设备唯一标识（外部传入，注册表以此为键）。 */
@@ -52,6 +59,11 @@ public class SurveillanceDevice {
     public volatile String password;
     /** 在线状态。 */
     public volatile Status status;
+    /**
+     * 视频通道数（默认 1 = 单路 RTSP）。多通道设备注册时指定；
+     * 在线通道数暂按状态派生（ONLINE → 全部在线），部分通道离线属生产阶段。
+     */
+    public volatile int totalCameras = 1;
     /** 设备能力集合（如 "Media"、"PTZ"、"Events"、"Device"）。 */
     private volatile Set<String> capabilities = Collections.emptySet();
     /** RTSP 流地址（由 OnvifClient 解析得到）。 */
@@ -109,10 +121,19 @@ public class SurveillanceDevice {
                 : Collections.unmodifiableSet(new LinkedHashSet<>(capabilities));
     }
 
-    /** 触发一次心跳：更新 lastHeartbeatMs 并标记 ONLINE。 */
+    /**
+     * 触发一次心跳：更新 lastHeartbeatMs；OFFLINE → ONLINE。
+     * <p>
+     * **不覆盖 FAULT/MAINTENANCE**：它们是人工/检测置位（报障待修、检修中），
+     * 心跳只证明链路可达，不代表故障恢复或检修结束——恢复需显式置回 ONLINE
+     * （REST {@code /devices/{id}/status}）。离线扫描（{@code pruneStaleDevices}）
+     * 同样只动 ONLINE 设备，四态语义在这些既有路径上闭环。
+     */
     public synchronized void heartbeat() {
         this.lastHeartbeatMs = System.currentTimeMillis();
-        this.status = Status.ONLINE;
+        if (this.status == Status.OFFLINE) {
+            this.status = Status.ONLINE;
+        }
     }
 
     @Override
