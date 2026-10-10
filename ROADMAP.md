@@ -313,22 +313,47 @@
 | C1 | **UOM 数据对接层** | ✅ 已完成 | `cloud/regulator/` 23 文件；`RegulatorReportSink` 接口 + `UomReportSink`/`SimReportSink`/`NoopReportSink`；独立 `regulator-sim` 模块模拟 5 个 UOM 端点（`/api/verify\|activate\|cancel\|telemetry\|records`）+ `--delay-ms`/`--error-rate` 故障注入；`scripts/e2e-regulator.ps1`（25 KB）端到端 |
 | C2 | **运行识别（RID）广播** | ✅ 已完成 | `cloud/rid/` 14 文件 + drone-sim `rid/RidBroadcaster`；`OPEN_DRONE_ID_*` 官方 msgId **12900–12915**（6 条，取官方值而非自造）；`scripts/e2e-rid.ps1`（18 KB）覆盖 BROADCASTING/BasicId/Location/System + 停止后转 BROADCASTING_ERROR |
 | C3 | **电子围栏硬拦截** | ✅ 已完成 | `geofence/GeofenceInterceptService` + `InterceptChain` + `InterceptVerdict` + `InterceptLogStore`；ARM/TAKEOFF 前拦截，**异常时 fail-safe DENY**（`InterceptChain` javadoc 明载）；限飞区数据源 `RestrictionDataSource` + `LocalFileRestrictionSource` + `MockRestrictionSource` |
-| C4 | **PostgreSQL 持久化** | ✅ 已完成（主数据域） | Flyway **21 个迁移**（`db/migration/V1…V22`，无 V7）；prod `ddl-auto=validate`；CI `integration` job 在真 PostgreSQL 15 上跑 Pass C（Flyway + validate + 设备登记落行） |
-| C5 | **MAVLink v2 signing** | ✅ 已完成 | `MavlinkSignerFactory` **按 sysid 取签名器**（多机密钥）+ `MavlinkSigningConfiguration` 条件装配（此前四个注入点全是 `@Autowired(required=false)` 而裸 `@SpringBootApplication` 不扫 `io.aerofleet.mavlink.*`，开关打开也不签名）；`link-sim` 两个安全画像 `tamper`/`unsigned`；`scripts/e2e-signing.ps1`（37 KB，6 场景） |
+| C4 | **PostgreSQL 持久化** | ✅ 已完成（主数据域 + 最后已知位置/电量/飞行态） | Flyway **21 个迁移**（`db/migration/V1…V22`，无 V7）；prod `ddl-auto=validate`；CI `integration` job 在真 PostgreSQL 15 上跑 Pass C（Flyway + validate + 设备登记落行） |
+| C5 | **MAVLink v2 signing** | ✅ 已完成 | `MavlinkSignerFactory` **按 sysid 取签名器**（多机密钥）+ `MavlinkSigningConfiguration` 条件装配（此前四个注入点全是 `@Autowired(required=false)` 而裸 `@SpringBootApplication` 不扫 `io.aerofleet.mavlink.*`，开关打开也不签名）；`link-sim` 两个安全画像 `tamper`/`unsigned`；`scripts/e2e-signing.ps1`（37 KB，6 场景）；**验签路径已纳入 CI**（`UdpGatewaySigningTest` 8 例 + 变异测试）；密钥轮换端点就位（`SigningKeyStoreWriter` + `/api/v1/mavlink/signing/*`） |
 
 - C1/C3/C4/C5 互相独立，可并行；C2 依赖 C1（RID 上报复用 RegulatorReportSink 通道）。
 - **2026-11-01 是硬 deadline**：GB 46750 过渡期截止，不具备运行识别功能不应运行。
   → C2 已就绪，**该 deadline 的技术前置已满足**。
-- **C 系列剩余缺口（不是"未实现"，是"未闭合"）**：
-  ① **C4 的"主数据"只在 provisioning 层面落库，遥测热态仍是内存**：
+- **C 系列剩余缺口（不是"未实现"，是"未闭合"或"生产阶段边界"）**：
+  > 本节 2026-10-10 按代码实测修订。此前把 ① ② 写成"功能缺失"，逐条核对后
+  > 确认**言过其实**：① 的持久化链路本来就在工作，② 的验签也本来就 fail-closed。
+  > 真正的问题是"**没人验证它在工作**"——已由新增测试补上。修订依据与证据见
+  > `docs/roadmap-c-drift.md` 与 `C4TelemetryRestoreTest` / `UdpGatewaySigningTest`。
+
+  ① **C4 完整轨迹历史仍在内存，重启后只剩"最后已知"一个点**：
      `DeviceRegistry` 有 `aerofleet.device-registry.persist`（base 默认 false、
-     prod 显式 true），但落库的只是 `devices` 表的**登记/在线/租户**三列
-     （`DeviceEntity` 的 online/lastSeen/tenantId）；`DroneSnapshot` 的
-     电量/经纬/姿态/模式等 volatile 字段不落库——它们本就属高频瞬时态，
-     落库也无查询价值，但意味着**重启后历史位置轨迹只能从 `flight_log` 重建**，
-     不能从注册表恢复；② **C5 签名出厂仍明文**——`mavlink.signing.enabled` 默认 false 且
-     无 profile 配置，密钥/口令无轮换端点，`MavlinkParser` 层仍只切帧不验签；
+     prod 显式 true），落库的是 `devices` 表的登记/在线/租户等 provisioning 字段；
+     **最后已知位置与电量**另由 `drone_last_known_position`（V5）经
+     `FlightTrackStore` 按 `PERSIST_INTERVAL` 节流落库、`@PreDestroy` 兜底、
+     `@PostConstruct` 启动加载——**这条链是通的**（`C4TelemetryRestoreTest` 4 例钉住）。
+     `mode`/`armed`/`protocol` 三个飞行态字段 V25 起也已落库并恢复
+     （`DeviceFlightStateRestoreTest` 4 例）。**真正没恢复的是完整轨迹历史**
+     （`FlightTrackStore` 的有界内存 deque，默认 3600 点），需从 `flight_log` 重建。
+     两个非显而易见行为：落库是**异步**的（`BatchedWriteQueue`，50 条/200ms）；
+     恢复值**最多滞后一个节流周期**。已知局限：kill -9/OOM 不经历离线转换，
+     最近一次 mode/armed 会丢。
+
+  ② **C5 签名出厂默认关闭（有意决策，非遗漏）**：`mavlink.signing.enabled`
+     四个 profile 均已显式声明但保持 `false`。打开它是**机队范围的行为变更**——
+     MAVLink v2 签名块 `linkId(1)|timestamp(6)|signature(6)` **没有 key id 字段**，
+     打开即硬切换、无宽限期，未换密钥设备的帧会被整体拒绝。验签能力**本就
+     fail-closed**：`MavlinkParser` 完整解析 13 字节签名块，
+     `UdpGateway` 拒绝未签名帧、**按来源 sysid 取密钥**、取不到就拒、
+     timestamp 防重放（`UdpGatewaySigningTest` 8 例 + 变异测试）。
+     密钥轮换端点已就位（`SigningKeyStoreWriter` 原子落库 +
+     `GET/POST /api/v1/mavlink/signing/*`），**刻意不提供宽限期**——协议上做不到。
+     打开的正确顺序：先让 drone-sim 侧签名（CI 已在跑，rejectUnsigned=false）→
+     staging 观察 `signingStats` → 再收紧 `reject-unsigned` → 最后才动 prod。
+
   ③ **C1/C2 的对端都是模拟器**（`regulator-sim` / drone-sim），未与真实 UOM 平台联调。
+
+  > **给后来者**：这一节曾三次滞后于代码（2026-10-06 的 C1-C5 全部"待做"实则均已
+  > 实现、本次 ① ②）。读它做计划前请先按文中给出的**文件:行号或测试类名**核一遍。
 
 ### F 系列 — 付费场景核心（P1）
 

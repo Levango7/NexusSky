@@ -4,6 +4,53 @@
 
 ---
 
+## [Unreleased] — C5 签名让 CI 每次都走签名帧通路 + 修订 ROADMAP C 系列两处言过其实的描述（2026-10-10）
+
+### 一、C5 第一步：CI 的 flight e2e 全部改为"无人机侧签名"
+
+`.github/workflows/ci.yml` 三处启动 drone-sim 的地方（flight smoke / 能力腿三条 /
+SDK 集成）加 `--signing-key "$(openssl rand -hex 16)"`。
+
+- 密钥**运行时生成、不落字面量**——本项要证的只是"带 13 字节签名块的帧能正常穿过
+  UDP/Parser/CRC 不被破坏"，密钥取值无关；落字面量反而成为 secret 扫描目标。
+- drone-sim 侧 `rejectUnsigned` 保持 **false**，因此**不会**拒收 backend 的未签名命令。
+- backend 侧 `mavlink.signing.enabled` 仍为 false ⇒ `isSigningEnabled()` 短路，
+  不验签也不拒签。**出厂行为不变**。
+- 刻意**没有**给 `SimConfig` 设默认密钥：那会改变所有手动运行的默认行为，
+  且把密钥字面量引进源码。用 CI 侧传参达成同一目的，两者取风险小的那个。
+
+**本地 WSL2 对照实测**（backend + drone-sim + e2e-smoke.sh 全在 WSL2 内，
+与 ZCode 当初"WSL2 真 Linux 连续全绿"同环境）：
+
+| 组别 | drone-sim 参数 | 结果 |
+|---|---|---|
+| 对照 | 不带签名 | 11/11 PASS，exit=0 |
+| 实验 | `--signing-key <随机>` | 11/11 PASS，exit=0 |
+
+两组唯一差异就是 `--signing-key`；实验组日志确认
+`signing: enabled keyStore=single-key rejectUnsigned=false`。
+（另记录一个本地环境坑：Windows 上跑 Java + WSL 里跑 bash 脚本会因网络命名空间
+不同而全部 FAIL，与本改动无关。）
+
+### 二、修订 ROADMAP C 系列两处言过其实的描述
+
+ROADMAP:322-331 的「C 系列剩余缺口」此前把 ① ② 写成功能缺失，逐条核对代码后
+确认言过其实，本次按实测改写：
+
+- **① C4**：原文称"位置不落库、重启只能从 flight_log 重建"。实际最后已知位置/电量
+  早由 `drone_last_known_position`（V5）落库并恢复；`mode`/`armed`/`protocol`
+  也自 V25 起落库并恢复。**真正没恢复的只有完整轨迹历史**（有界内存 deque）。
+- **② C5**：原文称"`MavlinkParser` 层仍只切帧不验签"。实际 Parser 完整解析签名块，
+  验签在 `UdpGateway` 且 fail-closed。真问题是"没人验证它在工作"。
+- 同时把"打开签名"的协议约束与三步顺序写进 ROADMAP（签名块无 key id ⇒ 硬切换、
+  无宽限期），避免后人误以为是一行配置的事。
+
+C4/C5 两行表格描述同步补上测试锚点与轮换端点。
+
+### 计数
+
+无新增测试（纯 CI 参数 + 文档修订），Java 计数不变；前端 245 不变。
+
 ## [Unreleased] — 批次 4 flaky 测试治理：一处放宽、一处复核结论入档（2026-10-10）
 
 > 清单上的两个「已知 flaky」逐条实测处置（不照抄旧记录）。
