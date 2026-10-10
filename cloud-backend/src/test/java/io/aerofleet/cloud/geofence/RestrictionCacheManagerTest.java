@@ -21,6 +21,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </ul>
  * <p>
  * 直接实例化（无 Spring 上下文），用 AssertJ 断言。
+ * <p>
+ * <b>关于「并发偶发 flaky」的历史记录（2026-10-10 复核，批次 4）</b>：早前登记本类在
+ * 全量并发下偶发红。复核现状：测试手工 {@code new} 的实例上 {@code @Scheduled} 不生效
+ * （无 Spring 调度代理），init/refresh 全为同步调用、无时序窗口；本机连跑 5 次（含
+ * {@code testRefreshSuccess}）全绿。<b>该 flaky 记录已过期</b>——后续若再出现红，
+ * 先查是否有人引入后台刷新线程或跨用例共享状态，而不是回头改这个文件。
  */
 @DisplayName("RestrictionCacheManager 限飞区缓存管理器")
 class RestrictionCacheManagerTest {

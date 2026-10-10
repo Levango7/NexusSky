@@ -4,6 +4,17 @@
 
 ---
 
+## [Unreleased] — 批次 4 flaky 测试治理：一处放宽、一处复核结论入档（2026-10-10）
+
+> 清单上的两个「已知 flaky」逐条实测处置（不照抄旧记录）。
+
+| # | 处置对象 | 结论 |
+|---|---|---|
+| C3.1 | `assignTasksGaCompletesWithin100ms` | **真修**：硬阈值 100ms → **1s 护栏**。全量并发实测曾被压到 ~180ms（机器忙），硬 100ms 会把"忙"和"算法退化"混为一谈；1s 仍能抓 GA 崩坏级回归（正常量级个位数 ms）。阈值理由写进测试注释 |
+| C3.2 | `RestrictionCacheManagerTest.testRefreshSuccess` | **复核：旧记录已过期**——手工 `new` 的实例上 `@Scheduled` 不生效（无 Spring 调度代理），init/refresh 全为同步调用、无时序窗口；本机连跑 5 次全绿。复核结论与排查指引（"若再红先查是否引入后台刷新/共享状态"）写入类注释 |
+
+**测试**：cloud-backend 全量 **2581/0**（计数不变——本批只改阈值与注释，未动用例）。
+
 ## [Unreleased] — B4 调度 FAILED 态：失败生命周期路径 + 协议值域补齐（2026-10-10）
 
 > 依据缺口登记（GAPS「调度任务失败态」）。代码侧登记在 TaskAssignmentService 类注释
