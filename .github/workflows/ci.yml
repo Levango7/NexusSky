@@ -413,7 +413,13 @@ jobs:
           exit 1
       - name: Normal flight smoke (sim -> mission -> RTL + flightlog + joystick)
         run: |
-          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar &
+          # C5 第一步：让 CI 的每次 flight e2e 都走"签名帧"通路（后端仍未验签）。
+          # 密钥运行时生成、不落字面量——这里要证的只是"带 13 字节签名块的帧能正常
+          # 穿过 UDP/Parser/CRC 不被破坏"，密钥取值无关；后端 mavlink.signing.enabled
+          # 仍为 false ⇒ isSigningEnabled() 短路，不会验签也不会拒签。
+          SIM_SIGNING_KEY="$(openssl rand -hex 16)"
+          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar \
+            --signing-key "$SIM_SIGNING_KEY" &
           sleep 5
           bash scripts/e2e-smoke.sh
       - name: Fault-injection regression (gps-loss / battery-fault / link-loss)
@@ -485,8 +491,11 @@ jobs:
           # 该 flag 是 M2 执行机构（FR-01）的显式开关，见 SimConfig#parse 的 "actuators" 分支。
           # --lidar / --imu 同理：注入 SimulatedLiDARSource / SimulatedImuSource，
           # 否则 /api/v1/lidar/data、/api/v1/imu/data 恒 404（FR-21 / FR-22）。
+          # --signing-key：C5 第一步，让三条能力腿也走签名帧通路（密钥运行时生成，
+          # 不落字面量；后端未开验签，取值为无关项）。见本文件 415 行附近的同款说明。
+          SIM_SIGNING_KEY="$(openssl rand -hex 16)"
           java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar \
-            --actuators --lidar --imu &
+            --actuators --lidar --imu --signing-key "$SIM_SIGNING_KEY" &
           # 等 sim 注册上来：后三个脚本都以 sysid=1 在线为前置
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/api/v1/drones 2>/dev/null | grep -q '"sysid":1'; then
@@ -640,7 +649,10 @@ jobs:
           exit 1
       - name: Start drone-sim
         run: |
-          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar &
+          # C5 第一步：SDK 集成腿也走签名帧通路（同 415 行说明；密钥运行时生成）。
+          SIM_SIGNING_KEY="$(openssl rand -hex 16)"
+          java -jar drone-sim/target/aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar \
+            --signing-key "$SIM_SIGNING_KEY" &
           sleep 5
       - name: SDK integration tests
         run: |
