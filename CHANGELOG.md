@@ -4,6 +4,21 @@
 
 ---
 
+## [Unreleased] — B4 调度 FAILED 态：失败生命周期路径 + 协议值域补齐（2026-10-10）
+
+> 依据缺口登记（GAPS「调度任务失败态」）。代码侧登记在 TaskAssignmentService 类注释
+> （"FAILED 无生命周期路径（模型无失败态转换），协议值不可达"）——本轮闭合。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| B4.1 | **failTask 生命周期** | `TaskAssignmentService.failTask`：清无人机负载映射 + 出队 + 发布 `TaskStatusMsg(30050)` 的 **FAILED(3)** 帧（该协议值首次可达）；**任务记录保留** |
+| B4.2 | **区分规则（文档化）** | ABORTED = 主动取消（任何阶段，记录移除）；FAILED = 执行尝试后失败（已开始执行，记录保留可查）。重试/放弃策略由调用方决定，调度侧不自动重试（后续立项） |
+| B4.3 | **REST** | `POST /api/v1/scheduling/tasks/{id}/fail`（需 OPERATOR） |
+
+**测试**：TaskAssignmentServiceTest +1（事件捕获断言第 4 帧 status=3 + 记录保留 + 未知任务 false）；SchedulingControllerTest +1（端点接线与宽容语义）；cloud-backend 全量 **2581/0**。
+
+**边界**：失败**原因**未建模（帧无 reason 字段，仅日志）；自动重试/放弃策略未做；执行失败的**自动判定**（谁发现失败）由调用方/上层负责——当前为显式上报。
+
 ## [Unreleased] — B2/B3 安防设备四态与多通道：状态置位端点 + 协议值域补齐（2026-10-10）
 
 > 依据缺口登记（GAPS「监控设备故障/维护状态」「多通道摄像头」）。代码侧缺口登记在

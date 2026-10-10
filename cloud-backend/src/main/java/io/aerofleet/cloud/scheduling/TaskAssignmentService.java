@@ -22,10 +22,15 @@ import java.util.concurrent.PriorityBlockingQueue;
  *
  * 分配算法：综合评分 = 能力匹配(40%) + 电量因子(30%) + 距离因子(20%) + 优先级(10%)
  *
- * WS 帧生产（2026-10-05 边界清零）：分配成功发布 TaskAssignmentMsg(30048) +
- * TaskStatusMsg(30050, ASSIGNED)；startTask/pollNextTask 发布 IN_PROGRESS；
- * completeTask 发布 COMPLETED；cancelTask 发布 ABORTED。FAILED 无生命周期路径
- * （模型无失败态转换），协议值不可达——见 README 边界口径。
+ * WS 帧生产（2026-10-05 边界清零；2026-10-10 B4 补齐 FAILED）：分配成功发布
+ * TaskAssignmentMsg(30048) + TaskStatusMsg(30050, ASSIGNED)；startTask/pollNextTask
+ * 发布 IN_PROGRESS；completeTask 发布 COMPLETED；cancelTask 发布 ABORTED；
+ * failTask 发布 FAILED（此前协议值不可达）。
+ * <p>
+ * <b>ABORTED 与 FAILED 的区分规则</b>：ABORTED = 主动取消（任何阶段，上游/人工
+ * 决定不做了——任务记录随之移除）；FAILED = 执行尝试后失败（任务已开始执行、
+ * 执行侧报失败——记录保留可查）。两者的重试/放弃策略当前由调用方决定，
+ * 调度侧不做自动重试（属后续功能立项）。
  */
 @Service
 public class TaskAssignmentService {
@@ -510,6 +515,35 @@ public class TaskAssignmentService {
             publishTaskStatus(taskId, assignment.getAssignedSysid(),
                     TaskStatusEnum.COMPLETED.ordinal(), 100);
             log.info("Task {} completed, removed from drone {} load tracking",
+                    taskId, assignment.getAssignedSysid());
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 标记任务执行失败，从无人机负载映射中移除，并发布 FAILED 帧（B4）。
+     * <p>
+     * 与 {@link #cancelTask} 的区分：本方法是「执行尝试后失败」（任务已开始执行、
+     * 执行侧报失败），**任务记录保留**（失败任务可查）；主动取消走 cancelTask
+     * （ABORTED，记录移除）。两路都清负载映射与队列，避免"在飞任务"引用悬挂。
+     *
+     * @return true 若任务存在且分配成功
+     */
+    public synchronized boolean failTask(String taskId) {
+        AssignmentResult assignment = assignments.get(taskId);
+        if (assignment != null && assignment.isSuccess()) {
+            Set<String> activeTasks = droneToTaskIds.get(assignment.getAssignedSysid());
+            if (activeTasks != null) {
+                activeTasks.remove(taskId);
+                if (activeTasks.isEmpty()) {
+                    droneToTaskIds.remove(assignment.getAssignedSysid());
+                }
+            }
+            taskQueue.removeIf(req -> req.getTaskId().equals(taskId));
+            publishTaskStatus(taskId, assignment.getAssignedSysid(),
+                    TaskStatusEnum.FAILED.ordinal(), 0);
+            log.warn("Task {} failed, removed from drone {} load tracking",
                     taskId, assignment.getAssignedSysid());
             return true;
         }

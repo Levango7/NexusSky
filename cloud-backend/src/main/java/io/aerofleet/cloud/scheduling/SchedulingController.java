@@ -80,6 +80,22 @@ public class SchedulingController {
         return resp;
     }
 
+    /**
+     * 标记任务执行失败：解除无人机负载映射并发布 TaskStatus(30050) FAILED 帧（B4）。
+     * <p>
+     * 与取消（DELETE /tasks/{id}，ABORTED）的区分：本端点是「执行尝试后失败」，
+     * 任务记录保留可查；主动取消移除记录。
+     */
+    @PostMapping("/tasks/{id}/fail")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> failTask(@PathVariable String id) {
+        boolean ok = assignmentService.failTask(id);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("taskId", id);
+        resp.put("failed", ok);
+        return resp;
+    }
+
     @PostMapping("/conflicts/check")
     @RequireRole(Role.OPERATOR)
     public ConflictAvoidanceService.ConflictResult checkConflict(@RequestBody Map<String, Number> body) {
