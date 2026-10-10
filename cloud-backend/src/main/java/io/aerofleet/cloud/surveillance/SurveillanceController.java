@@ -63,6 +63,8 @@ public class SurveillanceController {
     private final SurveillanceDeviceRegistry registry;
     private final OnvifClient onvifClient;
     private final RapidDeployService rapidDeployService;
+    /** 按设备厂商路由（E5 后 GB28181 设备可注册：PTZ/流地址必须走对应适配器）。 */
+    private final VendorAdapterRegistry vendorAdapterRegistry;
     /** SSE 心跳调度器：单线程足够，多个 emitter 共享。 */
     private final ScheduledExecutorService sseScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -73,10 +75,12 @@ public class SurveillanceController {
 
     public SurveillanceController(SurveillanceDeviceRegistry registry,
                                   OnvifClient onvifClient,
-                                  RapidDeployService rapidDeployService) {
+                                  RapidDeployService rapidDeployService,
+                                  VendorAdapterRegistry vendorAdapterRegistry) {
         this.registry = registry;
         this.onvifClient = onvifClient;
         this.rapidDeployService = rapidDeployService;
+        this.vendorAdapterRegistry = vendorAdapterRegistry;
     }
 
     /**
@@ -212,7 +216,9 @@ public class SurveillanceController {
             return badRequest("channel must be >= 1");
         }
         try {
-            String url = onvifClient.getRtspUrl(d.ip, d.port, d.username, d.password, channel);
+            // 按设备厂商路由（ONVIF 适配器内部复用 OnvifClient；GB28181 返回
+            // gb28181-invite:// 描述性标识——E5 口径：不假扮可播地址）
+            String url = vendorAdapterRegistry.getAdapter(d).getStreamUrl(d, channel);
             d.rtspUrl = url;
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("deviceId", id);
@@ -250,8 +256,11 @@ public class SurveillanceController {
                     + ", supported: " + OnvifClient.PTZ_COMMANDS);
         }
         try {
-            String result = onvifClient.ptzControl(d.ip, d.port, d.username, d.password, cmd);
-            log.info("PTZ {} on device {}", cmd, id);
+            // 按设备厂商路由：此前直连 ONVIF，GB28181 设备必然失败——
+            // REST 契约用 camelCase（zoomIn/zoomOut），国标内部用 snake_case，
+            // 两种命名互不认；翻译职责在适配器内（见 Gb28181Adapter.CMD_ALIASES）
+            String result = vendorAdapterRegistry.getAdapter(d).ptzControl(d, cmd);
+            log.info("PTZ {} on device {} (vendor={})", cmd, id, d.vendor);
             return ResponseEntity.ok(Map.of("status", "ok", "cmd", cmd, "result", result));
         } catch (Exception e) {
             log.warn("PTZ {} failed for {}: {}", cmd, id, e.getMessage());
