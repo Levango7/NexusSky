@@ -4,6 +4,24 @@
 
 ---
 
+## [Unreleased] — B5 空域预约接入与 AIRSPACE 告警接线（2026-10-10）
+
+> 依据缺口登记（GAPS「空域预约冲突检测」）。**侦察修正了原估计**：预约表、
+> 4D 冲突检测、重叠判定在 `ConflictAvoidanceService` 中**已完整实现**
+> （含既有测试），真实缺口是「接入与告警接线」而非「新建模块」——
+> `reserveAirspace` 此前无任何生产调用者（只有测试）、`ConflictType.AIRSPACE`
+> 从未被任何生产者使用。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| B5.1 | **预约 REST 接入** | `POST /api/v1/scheduling/reservations`（提交 4D 预约，需 OPERATOR）+ `GET /api/v1/scheduling/reservations`（只读快照）；`tryReserve` 详情版（accepted + 冲突对方 sysid/水平距离/时段起始），`reserveAirspace` 保留并委托（既有调用零破坏） |
+| B5.2 | **AIRSPACE 告警接线** | 预约冲突（409）时发布 `ConflictAlertMsg(30049)` 的 **AIRSPACE** 类型帧——协议枚举 `ConflictType.AIRSPACE` 由此**首次拥有生产者**（机对几何扫描只产 COLLISION/PATH，该值此前不可达） |
+| B5.3 | **api-reference 补齐** | 调度段此前漏登记 3 个既有端点（`tasks/{id}/start`、`tasks/{id}/complete`、`conflicts/scan`），一并补入；端点计数 5→10 |
+
+**测试**：ConflictAvoidanceServiceTest +2（tryReserve 冲突详情 / 快照不可变拷贝）；SchedulingControllerTest +2（预约成功 → 快照 → 409+conflictSysid 全链、缺字段 400）；cloud-backend 全量 **2571/0**。
+
+**边界**：预约表仍是内存态（重启即空）——持久化属生产阶段（与 C4 遥测热态同口径）；「主动释放单个预约」未做（按过期清理已覆盖主要场景，释放语义待真实运营需求）；「任务调度自动带预约」（assignTasks 联动）属后续功能立项。
+
 ## [Unreleased] — C4 遥测热态重启恢复：实测锚点测试（含对 ROADMAP 描述的修正）（2026-10-10）
 
 ### 一件与 ROADMAP 不一致的实测结论

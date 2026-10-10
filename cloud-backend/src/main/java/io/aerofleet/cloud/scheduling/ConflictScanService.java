@@ -134,6 +134,37 @@ public class ConflictScanService {
         }
     }
 
+    /**
+     * 发布一条 AIRSPACE（空域预约）冲突帧——预约被拒时由调度层调用。
+     * <p>
+     * 这是协议枚举 {@code ConflictType.AIRSPACE} 的唯一生产者：机对几何扫描
+     * 只产出 COLLISION/PATH（见 {@link #conflictTypeOf}），空域预约冲突此前
+     * 只回 boolean、不上协议面。
+     *
+     * @param sysid                  申请方
+     * @param conflictSysid          冲突对方
+     * @param horizontalDistanceM    两预约区块中心水平距离(m)
+     * @param timeToConflictSec      距冲突时段开始秒数（≤0 表示已进入冲突窗口）
+     */
+    public void publishAirspaceConflict(int sysid, int conflictSysid,
+                                        double horizontalDistanceM, double timeToConflictSec) {
+        try {
+            ConflictAlertMsg msg = new ConflictAlertMsg(
+                    (float) horizontalDistanceM,
+                    (float) timeToConflictSec,
+                    sysid,
+                    ConflictType.AIRSPACE.ordinal(),
+                    conflictSysid,
+                    severityOf(timeToConflictSec));
+            eventPublisher.publishEvent(
+                    new MavlinkMessageEvent(this, sysid, ConflictAlertMsg.ID, msg,
+                            System.currentTimeMillis()));
+        } catch (Exception e) {
+            log.warn("airspace conflict frame publish failed: {} vs {}: {}",
+                    sysid, conflictSysid, e.getMessage());
+        }
+    }
+
     /** 4D 几何类型 → 协议枚举（HEAD-ON→COLLISION，CROSSING/OVERTAKE→PATH）。 */
     static ConflictType conflictTypeOf(String type4d) {
         if ("HEAD-ON".equals(type4d)) {
