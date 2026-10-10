@@ -33,9 +33,55 @@
 | B3.1 | **多通道** | `SurveillanceDevice.totalCameras`（注册 body `channels`，默认 1，[1,255] 校验）；Pusher 的 totalCameras 取模型，onlineCameras 按状态派生 |
 | — | **视图/文档** | deviceView 暴露 totalCameras；api-reference 补 status 端点与 channels 字段（顺带标注 PTZ/stream 的厂商路由） |
 
-**测试**：新增 `SurveillanceDeviceStatusTest` 5 例（默认值/心跳两向/扫描不动 FAULT/枚举值域）；PusherTest +1（FAULT→2、MAINTENANCE→3、多通道=4）；ControllerTest +2（channels 越界 400、status 端点全链）；cloud-backend 全量 **2579/0**。
+**测试**：新增 `SurveillanceDeviceStatusTest` 5 例（默认值/心跳两向/扫描不动 FAULT/枚举值域）；PusherTest +1（FAULT→2、MAINTENANCE→3、多通道=4）；ControllerTest +2（channels 越界 400、status 端点全链）；cloud-backend 全量 **2583/0**。
 
 **边界**：**部分通道离线**（4 路中 2 路在线）仍不可表达——onlineCameras 按设备状态派生，通道级状态上报属生产阶段；FAULT 的**自动检测**（设备自报/巡检发现）未做——当前为人工置位，自动检测规则待真实设备接入后定义。
+## [Unreleased] — C4 重启后恢复"最后已知飞行态"（mode/armed/protocol，V25）（2026-10-10）
+
+重启后 `DeviceRegistry.restoreFromRepository()` 只还原 sysid 与 tenantId，
+GCS 首屏拿不到"这架机最后在做什么"。
+
+位置与电量不在这条职责内——它们早已由 `drone_last_known_position`（V5）经
+`FlightTrackStore` 持久化并在 `@PostConstruct` 恢复（`C4TelemetryRestoreTest` 4 例已钉住）。
+本条补剩下三个没有持久化出路的字段。
+
+### 做法
+
+- `V25__devices_last_flight_state.sql`：`devices` 加 `last_mode` / `last_armed` /
+  `last_protocol`，**全部可空**
+- 写入搭两处**已有的低频路径**，不新增写放大：
+  - `registerIfAbsent`（首次见面，本来就要写那一行）
+  - `sweepOffline`（离线转换——"这架机是怎么收场的"最有价值的时刻）
+- `restoreFromRepository()` 还原三个字段，NULL 时**维持 DroneSnapshot 默认值**
+
+### 关键语义：NULL 不伪装成确定值
+
+刻意不用 NOT NULL + 默认值——那会把"没有记录"伪装成"记录为 mavlink/未锁定"。
+`DeviceFlightStateRestoreTest` 第 3 例专门钉这条。
+
+### 已知局限（写明，不假装解决）
+
+后端被 kill -9 / OOM / 断电时不经历离线转换，最近一次的 mode/armed 会丢，
+库里仍是上一次成功写入的值。要覆盖需引入周期节流写（`FlightTrackStore` 已为位置
+做过同样的取舍），现在刻意不做，改为把局限写进 javadoc。
+
+### 计数
+
+Java 4607 -> **4611**（cloud-backend 2581 -> **2585**，本轮 +4 例）。
+算术与 rebase 后的 base(74abbb4) 对齐：4607+4=4611、2581+4=2585。
+算术与 rebase 后的 base(114247d) 对齐：4609+4=4609、2583+4=2583。
+
+### 验证
+
+- `DeviceFlightStateRestoreTest` 4/4（落库 / 恢复 / NULL 语义 / persist=false 不碰库）
+- **变异测试**：删掉 restore 的 3 处赋值与 2 处 `writeFlightState` 调用后，
+  "离线落库"与"恢复"两例转红，NULL 与 persist=false 两例不受影响
+- 既有 `DeviceRegistryPersistenceTest` 14/14、`C4TelemetryRestoreTest` 4/4 未被改坏
+- **Pass C 本地真 PG 复刻**（不只跑 H2）：postgres:15-alpine + prod profile
+  从零跑 Flyway + `ddl-auto=validate`：
+  - `Started CloudBackend` = true
+  - `\d devices` 确认三列真实存在、可空、类型正确（varchar(64) / boolean）
+  - `flyway_schema_history` version=25 success=t
 
 ## [Unreleased] — B5 空域预约接入与 AIRSPACE 告警接线（2026-10-10）
 
@@ -101,7 +147,6 @@ ROADMAP:322-331 把 C4 的剩余缺口写成：
 
 Java 4587 -> **4591**（cloud-backend 2561 -> **2565**，本轮 +4 例）。前端 245 不变。
 算术与 CI 实测一致：4591-4587=4、2565-2561=4，均等于本提交新增的 4 例。
-
 
 ---
 
@@ -2846,8 +2891,6 @@ SCALED_PRESSURE3=143），`RADIO_STATUS(109)` 的 CRC_EXTRA 是 88 而官方为 
 
 **本轮未闭合**：真库上的**批量插入路径本身没有被端到端断言**——Pass C 没有设备接入，`flight_log` 是空表，那条断言只证明"PG 上表存在 + 查询方言可用 + schema 校验通过"。我曾打算加"POST /alarms/events 后再查 flight_log 非空"来钉住它，核实后放弃：REST 告警经 `AlarmLinkageEngine` 只写告警表，**不写 `flight_log`**（`flightLog.alert()` 只由订阅 AlertBus 的 `TelemetryPusher.pushAlert` 调用），那条断言会是空证。要在 CI 里钉住插入路径，需要 Pass C 接一台 sim 或加一个可写的内部端点。
 
-
-
 ## [Unreleased] — 覆盖率门禁：补齐两个未接模块 + 抬回 cloud-backend 的地板（2026-10-01）
 
 > **本轮验证**：`mvn -B -o test` 全 reactor **3852 用例 / 0 failures / 0 errors / 0 skipped**（BUILD SUCCESS；分模块 343/1324/117/2037/12/19，较 3838 基线净 +14 = `BatchedWriteQueueTest` 6 + `TelemetryWriteOffThreadTest` 8）。本机 `ci-integration-test.sh` **IT_EXIT=0、31 条 ✅**，关键是 **Pass C 在真 PostgreSQL 上正常启动**——方案 A 之前它启动即失败（`Schema-validation: missing sequence [flight_log_id_seq]`），这条腿是全仓唯一会校验 schema 的地方。
@@ -2913,7 +2956,6 @@ SCALED_PRESSURE3=143），`RADIO_STATUS(109)` 的 CRC_EXTRA 是 88 而官方为 
 **本轮未闭合**：`cloud-backend/data/aerofleet.{mv,trace}.db`（dev H2 数据文件）仍被跟踪，`.gitignore` 的 `/data/` 是根锚定、盖不到该路径——性质是数据不是构建产物，摘不摘由用户定；设备/边缘侧摄取端点（`POST /api/v1/edge/results`、`/loRa/alarm`、`/offline-alarm/batch-upload`、`/alarms/events`）已标 `OPERATOR`，但**仓库内没有任何带凭据的调用方**（唯一发 `X-API-Key` 的是 sdk-java `NexusSkyClient.java:490`），今天全靠 `dev-mode=true` 绕过，所以"设备必须持 key"目前是契约声明而非已验证通路，e2e 脚本与 compose 的凭据发放是下一件事；告警 SSE（`GET /api/v1/alarms/stream`）无法带 `Authorization` 头（`api.js:1171` 的 `alarmStreamUrl` 无 token、`EventSource` 也不支持自定义头），在 prod 下翻转前后都会在 Spring Security 层 401，属既有缺口；前端 110 余个调用点未逐一复验 OBSERVER 档的实际可见面；License 仍 fail-open。
 
 ---
-
 
 ## [Unreleased] — MAVLink v2 签名与官方协议对等 + backend 签名接线（2026-10-01）
 
