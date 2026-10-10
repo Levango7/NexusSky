@@ -116,6 +116,7 @@ public class SurveillanceController {
         String vendorStr = body.path("vendor").asText("");
         String ip = body.path("ip").asText("");
         int port = body.path("port").asInt(OnvifClient.DEFAULT_PORT);
+        int channels = body.path("channels").asInt(1);
         String username = body.path("username").asText("");
         String password = body.path("password").asText("");
 
@@ -135,9 +136,13 @@ public class SurveillanceController {
         if (port <= 0 || port > 65535) {
             return badRequest("port must be in [1, 65535]");
         }
+        if (channels < 1 || channels > 255) {
+            return badRequest("channels must be in [1, 255]");
+        }
 
         SurveillanceDevice device = new SurveillanceDevice(id, name, vendor, ip, port,
                 username, password);
+        device.totalCameras = channels;
         // 注册时同步获取设备能力（模拟实现）
         try {
             device.setCapabilities(onvifClient.getDeviceCapabilities(ip, port, username, password));
@@ -191,6 +196,40 @@ public class SurveillanceController {
             return notFound("device " + id + " not found");
         }
         return ResponseEntity.ok(Map.of("status", "ok", "id", id));
+    }
+
+    // ------------------------------------------------------------------
+    // 设备状态置位（FAULT/MAINTENANCE 四态运维面）
+    // ------------------------------------------------------------------
+
+    @Operation(summary = "置位设备状态",
+            description = "body: {\"status\": \"ONLINE\"/\"OFFLINE\"/\"FAULT\"/\"MAINTENANCE\"}。"
+                    + "FAULT/MAINTENANCE 是人工运维置位：心跳与离线扫描不覆盖，恢复需显式置回 ONLINE")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "置位成功"),
+        @ApiResponse(responseCode = "400", description = "status 非法"),
+        @ApiResponse(responseCode = "404", description = "设备不存在")
+    })
+    @PostMapping("/devices/{id}/status")
+    @RequireRole(Role.OPERATOR)
+    public ResponseEntity<Map<String, Object>> setDeviceStatus(@PathVariable("id") String id,
+                                                               @RequestBody JsonNode body) {
+        SurveillanceDevice d = registry.getDevice(id);
+        if (d == null) {
+            return notFound("device " + id + " not found");
+        }
+        String statusStr = body.path("status").asText("");
+        SurveillanceDevice.Status status;
+        try {
+            status = SurveillanceDevice.Status.valueOf(statusStr.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return badRequest("unknown status: " + statusStr
+                    + ", supported: ONLINE/OFFLINE/FAULT/MAINTENANCE");
+        }
+        SurveillanceDevice.Status previous = d.status;
+        d.status = status;
+        log.info("Surveillance device status changed via REST: id={} {} -> {}", id, previous, status);
+        return ResponseEntity.ok(deviceView(d));
     }
 
     // ------------------------------------------------------------------
@@ -518,6 +557,7 @@ public class SurveillanceController {
         v.put("port", d.port);
         v.put("username", d.username);
         v.put("status", d.status.name());
+        v.put("totalCameras", d.totalCameras);
         v.put("capabilities", d.getCapabilities());
         v.put("rtspUrl", maskRtspCredentials(d.rtspUrl));
         v.put("lastHeartbeatMs", d.lastHeartbeatMs);

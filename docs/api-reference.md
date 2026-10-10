@@ -351,8 +351,9 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
 | GET | `/devices` | 列出所有安防设备 | - | 200 {count,devices} |
 | GET | `/devices/{id}` | 获取设备详情 | - | 200 Device / 404 |
 | DELETE | `/devices/{id}` | 注销设备 | - | 200 {status,id} / 404 |
-| GET | `/devices/{id}/stream` | 获取 RTSP 流 URL | - | 200 {deviceId,channel,rtspUrl} / 400 / 404 / 502 |
-| POST | `/devices/{id}/ptz` | PTZ 控制 | {cmd} | 200 {status,cmd,result} / 400 / 404 / 502 |
+| POST | `/devices/{id}/status` | 置位设备状态（ONLINE/OFFLINE/FAULT/MAINTENANCE，需 OPERATOR） | {status} | 200 Device / 400 / 404 |
+| GET | `/devices/{id}/stream` | 获取 RTSP 流 URL（按厂商路由） | - | 200 {deviceId,channel,rtspUrl} / 400 / 404 / 502 |
+| POST | `/devices/{id}/ptz` | PTZ 控制（按厂商路由；契约 camelCase，国标适配器内翻译） | {cmd} | 200 {status,cmd,result} / 400 / 404 / 502 |
 | POST | `/discover` | 发现子网内设备 | {subnet} | 200 {subnet,count,devices} / 400 / 502 |
 | POST | `/rapid-deploy` | 一键扫描子网并自动注册布控球设备 | {subnet,username?,password?} | 200 {subnet,count,results} / 400 / 502 |
 | POST | `/scan` | 仅扫描子网发现设备（不注册） | {subnet} | 200 {subnet,count,results} / 400 / 502 |
@@ -362,8 +363,14 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
 #### 端点详情
 
 **POST /api/v1/surveillance/devices**
-- 请求体: `{id:String, name:String, vendor:"HIKVISION"|"DAHUA"|"UNIVIEW", ip:String, port:int, username:String, password:String}`
-- 响应: 200 - 设备详情（含能力信息）；400 - 参数错误
+- 请求体: `{id:String, name:String, vendor:"HIKVISION"|"DAHUA"|"UNIVIEW"|"ONVIF"|"GB28181", ip:String, port:int, username:String, password:String, channels:int?}`
+  （`channels` 可选，视频通道数，默认 1，取值 [1,255]）
+- 响应: 200 - 设备详情（含能力信息与 totalCameras）；400 - 参数错误
+
+**POST /api/v1/surveillance/devices/{id}/status** （需 OPERATOR 角色）
+- 请求体: `{status:"ONLINE"|"OFFLINE"|"FAULT"|"MAINTENANCE"}`
+- 语义: FAULT/MAINTENANCE 是人工运维置位——**心跳与离线扫描不覆盖**（心跳只把 OFFLINE 拉回 ONLINE），恢复需显式置回 ONLINE；协议 `SurveillanceStatusMsg(30059).status` 四态值域由此全部可达
+- 响应: 200 - 设备详情；400 - status 非法；404 - 设备不存在
 
 **GET /api/v1/surveillance/devices/{id}/stream**
 - 路径参数: `id` (String) - 设备 ID

@@ -4,6 +4,24 @@
 
 ---
 
+## [Unreleased] — B2/B3 安防设备四态与多通道：状态置位端点 + 协议值域补齐（2026-10-10）
+
+> 依据缺口登记（GAPS「监控设备故障/维护状态」「多通道摄像头」）。代码侧缺口登记在
+> `SurveillanceStatusPusher` 的字段映射 javadoc（"协议 2=故障/3=维护不可达（模型仅两态）"、
+> "多通道计数需先扩设备模型"）——本轮把这两条显式缺口闭合。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| B2.1 | **四态模型** | `SurveillanceDevice.Status` 扩为 ONLINE/OFFLINE/FAULT/MAINTENANCE（ordinal 与协议 `SurveillanceStatusMsg(30059).status` 值域 0-3 一致，Pusher 直接映射） |
+| B2.2 | **四态语义闭环** | 心跳只把 **OFFLINE→ONLINE**；**FAULT/MAINTENANCE 心跳与离线扫描都不覆盖**（人工/检测置位，恢复需显式）；`pruneStaleDevices` 本就只动 ONLINE 设备（核对确认，无需改） |
+| B2.3 | **状态置位端点** | `POST /api/v1/surveillance/devices/{id}/status`（需 OPERATOR）——运维置「故障待修/检修中/恢复」 |
+| B3.1 | **多通道** | `SurveillanceDevice.totalCameras`（注册 body `channels`，默认 1，[1,255] 校验）；Pusher 的 totalCameras 取模型，onlineCameras 按状态派生 |
+| — | **视图/文档** | deviceView 暴露 totalCameras；api-reference 补 status 端点与 channels 字段（顺带标注 PTZ/stream 的厂商路由） |
+
+**测试**：新增 `SurveillanceDeviceStatusTest` 5 例（默认值/心跳两向/扫描不动 FAULT/枚举值域）；PusherTest +1（FAULT→2、MAINTENANCE→3、多通道=4）；ControllerTest +2（channels 越界 400、status 端点全链）；cloud-backend 全量 **2579/0**。
+
+**边界**：**部分通道离线**（4 路中 2 路在线）仍不可表达——onlineCameras 按设备状态派生，通道级状态上报属生产阶段；FAULT 的**自动检测**（设备自报/巡检发现）未做——当前为人工置位，自动检测规则待真实设备接入后定义。
+
 ## [Unreleased] — B5 空域预约接入与 AIRSPACE 告警接线（2026-10-10）
 
 > 依据缺口登记（GAPS「空域预约冲突检测」）。**侦察修正了原估计**：预约表、
