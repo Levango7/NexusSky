@@ -4,6 +4,20 @@
 
 ---
 
+## [Unreleased] — 空域预约持久化 + 时间口径升级（相对秒 → epoch 毫秒）（2026-10-10）
+
+> B5 交付时登记的边界："预约表仍是内存态（重启即空）——持久化属生产阶段"。本轮闭合，
+> 并**修正一个设计债**：预约时间原为相对秒，落库后重启会语义断裂（相对窗口无绝对锚点）。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| — | **时间口径升级（设计债修正）** | `Reservation4D` 的 startTime/endTime 由相对秒升为 **epoch 毫秒**；overlap 判定比较大小关系，算法不变；REST 文档与 5 个既有测试同步迁移 |
+| — | **V26 迁移 + 实体 + repo** | `airspace_reservations` 表；`AirspaceReservationEntity`（from/to 转换）、`AirspaceReservationRepository`（恢复/过期清理/按机主释放三查询） |
+| — | **服务持久化** | `ConflictAvoidanceService`：`persist` 开关（`aerofleet.scheduling.reservation.persist`，默认 false，与 C4 同模式）+ repo 惰性注入 + `@PostConstruct` 恢复（未过期灌内存表、顺带清过期）；tryReserve 成功落库、purge 同步删库、clearReservations 含库。**内存表仍是权威热路径，库失败不影响它** |
+
+**测试**：ConflictAvoidanceServiceTest 34→36（+持久化往返/恢复、纯内存不触库）；5 个既有预约测试 + Controller 测试时间值迁移；cloud-backend 全量 **2587/0**；本地 H2 + `ddl-auto=validate` 演练通过（V26 与实体一致，Pass C 等价）。
+
+**边界**：「主动释放单个预约」未做（过期清理 + 按机主批量释放已备）；预约的租户归属未建模。
 ## [Unreleased] — C5 签名让 CI 每次都走签名帧通路 + 修订 ROADMAP C 系列两处言过其实的描述（2026-10-10）
 
 ### 一、C5 第一步：CI 的 flight e2e 全部改为"无人机侧签名"

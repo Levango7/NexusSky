@@ -955,12 +955,15 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 
 **POST /api/v1/scheduling/reservations** （需 OPERATOR 角色）
 - 请求体: `{sysid:int, lat:double, lon:double, alt:double, startTime:double, endTime:double, radius:double}`
-  时间为相对秒值；区块为球体近似（中心点 + 水平半径，垂直间隔取系统最小 10m）
+  时间为 **epoch 毫秒（绝对时间）**——相对秒在落库后重启会语义断裂（相对窗口无绝对锚点），
+  故 2026-10-10 随持久化升级；区块为球体近似（中心点 + 水平半径，垂直间隔取系统最小 10m）
 - 响应: 200 - `{status:"reserved", sysid}`；**409** - `{status:"rejected", conflictType:"AIRSPACE", conflictSysid, conflictDistanceM}`
   （冲突时同时发布 `ConflictAlertMsg(30049)` 的 **AIRSPACE** 类型帧——空域预约冲突是该协议枚举值的唯一生产者）；400 - 缺少必填字段
+- **持久化**：`aerofleet.scheduling.reservation.persist=true` 时预约落库（V26 `airspace_reservations`），
+  重启恢复未过期预约并清理过期；false（默认）= 纯内存（与 C4 device-registry.persist 同模式）
 
 **GET /api/v1/scheduling/reservations**
-- 响应: 200 - `{count, reservations:[{sysid,lat,lon,alt,startTime,endTime,radius}]}`
+- 响应: 200 - `{count, reservations:[{sysid,lat,lon,alt,startTime,endTime,radius}]}`（时间同为 epoch 毫秒）
 
 ### 基础路径 `/api/v1/squad`
 

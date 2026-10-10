@@ -1,7 +1,10 @@
 package io.aerofleet.cloud.scheduling;
 
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -62,6 +65,45 @@ public class ConflictAvoidanceService {
      */
     private final Map<Integer, List<Reservation4D>> reservationTable =
             Collections.synchronizedMap(new HashMap<>());
+
+    /**
+     * 预约持久化开关（false=纯内存，向后兼容；true=落库，重启恢复）。
+     * <p>
+     * 与 C4 的 {@code aerofleet.device-registry.persist} 同模式。
+     */
+    @Value("${aerofleet.scheduling.reservation.persist:false}")
+    private boolean persist;
+
+    /** 仓库 bean 不存在时（如纯单测环境）自动降级为纯内存，不影响现有行为。 */
+    @Autowired(required = false)
+    private AirspaceReservationRepository reservationRepository;
+
+    /**
+     * 启动恢复：从库加载未过期预约到内存表，并顺带清理已过期条目。
+     * <p>
+     * persist=false 或 repository 不可用时直接 return（纯内存语义不变）。
+     * <b>时间口径</b>：Reservation4D 的 startTime/endTime 为 <b>epoch 毫秒</b>——
+     * B5 初始为相对秒，落库后重启会语义断裂（相对窗口没有绝对锚点），
+     * 故随持久化一并升级；overlap 判定比较大小关系，升级不改变算法。
+     */
+    @PostConstruct
+    public void restorePersistedReservations() {
+        if (!persist || reservationRepository == null) {
+            return;
+        }
+        double nowMs = System.currentTimeMillis();
+        try {
+            for (AirspaceReservationEntity e : reservationRepository.findByEndMsGreaterThan(nowMs)) {
+                reservationTable.computeIfAbsent(e.getOwnerSysid(), k -> new ArrayList<>())
+                        .add(e.toReservation());
+            }
+            reservationRepository.deleteByEndMsLessThan(nowMs);
+            log.info("Airspace reservations restored from db: {} owner(s) in memory, expired purged",
+                    reservationTable.size());
+        } catch (Exception e) {
+            log.warn("airspace reservation restore failed (continuing in-memory): {}", e.getMessage());
+        }
+    }
 
     // ==================== 原有 API（向后兼容） ====================
 
@@ -392,8 +434,8 @@ public class ConflictAvoidanceService {
      * @param lat       区块中心纬度(°)
      * @param lon       区块中心经度(°)
      * @param alt       区块中心高度(m)
-     * @param startTime 起始时间(s)
-     * @param endTime   结束时间(s)
+     * @param startTime 窗口起点（epoch 毫秒，绝对时间）
+     * @param endTime   窗口终点（epoch 毫秒，绝对时间）
      * @param radius    区块水平半径(m)
      * @return true=预约成功；false=与已有预约冲突，拒绝
      */
@@ -441,6 +483,7 @@ public class ConflictAvoidanceService {
             }
             Reservation4D reservation = new Reservation4D(lat, lon, alt, startTime, endTime, radius);
             reservationTable.computeIfAbsent(sysid, k -> new ArrayList<>()).add(reservation);
+            saveReservation(sysid, reservation);
             log.info("Reservation accepted for sysid {}: ({},{},{}) t=[{},{}] r={}",
                     sysid, lat, lon, alt, startTime, endTime, radius);
             return ReservationAttempt.ok();
@@ -470,8 +513,8 @@ public class ConflictAvoidanceService {
      * @param lat       区块中心纬度(°)
      * @param lon       区块中心经度(°)
      * @param alt       区块中心高度(m)
-     * @param startTime 起始时间(s)
-     * @param endTime   结束时间(s)
+     * @param startTime 窗口起点（epoch 毫秒，绝对时间）
+     * @param endTime   窗口终点（epoch 毫秒，绝对时间）
      * @param radius    区块水平半径(m)
      * @return true=存在冲突；false=无冲突
      */
@@ -542,11 +585,39 @@ public class ConflictAvoidanceService {
         }
         // 清理空列表对应的 sysid 条目
         reservationTable.entrySet().removeIf(e -> e.getValue().isEmpty());
+        if (persist && reservationRepository != null) {
+            try {
+                reservationRepository.deleteByEndMsLessThan(currentTime);
+            } catch (Exception e) {
+                log.warn("airspace reservation db purge failed: {}", e.getMessage());
+            }
+        }
     }
 
-    /** 清空所有预约（测试辅助） */
+    /** 落库（persist 关或 repo 不可用时静默跳过；库失败不影响内存表——内存是权威热路径）。 */
+    private void saveReservation(int sysid, Reservation4D reservation) {
+        if (!persist || reservationRepository == null) {
+            return;
+        }
+        try {
+            reservationRepository.save(
+                    AirspaceReservationEntity.from(reservation, sysid, System.currentTimeMillis()));
+        } catch (Exception e) {
+            log.warn("airspace reservation persist failed for sysid {} (memory kept): {}",
+                    sysid, e.getMessage());
+        }
+    }
+
+    /** 清空所有预约（测试辅助；含库，避免残留下次恢复）。 */
     public void clearReservations() {
         reservationTable.clear();
+        if (persist && reservationRepository != null) {
+            try {
+                reservationRepository.deleteAll();
+            } catch (Exception e) {
+                log.warn("airspace reservation db clear failed: {}", e.getMessage());
+            }
+        }
     }
 
     /** 获取某无人机的所有预约（测试辅助，返回只读视图） */
