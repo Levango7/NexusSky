@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * </ul>
  */
 @Component
-public class DeviceRegistry {
+public class DeviceRegistry { // MUTANT
 
     private static final Logger log = LoggerFactory.getLogger(DeviceRegistry.class);
 
@@ -45,6 +45,11 @@ public class DeviceRegistry {
      * <p>
      * 所有恢复的设备初始状态为 offline，等待心跳确认后转为 online。
      * 当 persist=false 或 repository 不可用时直接 return，不影响现有行为。
+     *
+     * <p>同时还原 V25 新增的三个"最后已知飞行态"（last_mode / last_armed /
+     * last_protocol），让 GCS 首屏能显示这架机重启前在做什么。
+     * 这三个字段可空，NULL 时**保持 DroneSnapshot 的默认值**（UNKNOWN / false / mavlink）
+     * ——不把"没有记录"伪装成"记录为某个确定值"。
      */
     @PostConstruct
     public void restoreFromRepository() {
@@ -54,14 +59,27 @@ public class DeviceRegistry {
         try {
             List<DeviceEntity> entities = repository.findAll();
             int count = 0;
+            int withFlightState = 0;
             for (DeviceEntity entity : entities) {
                 DroneSnapshot snapshot = new DroneSnapshot(entity.getSysid());
                 snapshot.online = false;
                 snapshot.tenantId = entity.getTenantId();
+                // V25：还原上次已知的飞行态（NULL 则维持默认值）
+                if (entity.getLastMode() != null) {
+                    snapshot.mode = entity.getLastMode();
+                    withFlightState++;
+                }
+                if (entity.getLastArmed() != null) {
+                    snapshot.armed = entity.getLastArmed();
+                }
+                if (entity.getLastProtocol() != null) {
+                    snapshot.protocol = entity.getLastProtocol();
+                }
                 drones.put(entity.getSysid(), snapshot);
                 count++;
             }
-            log.info("Restored {} devices from repository (all offline, awaiting heartbeat)", count);
+            log.info("Restored {} devices from repository (all offline, awaiting heartbeat), "
+                    + "{} with last-known flight state", count, withFlightState);
         } catch (Exception e) {
             log.warn("设备恢复失败，降级为空缓存: {}", e.getMessage());
         }
@@ -83,6 +101,9 @@ public class DeviceRegistry {
                     if (s.tenantId != null) {
                         entity.setTenantId(s.tenantId);
                     }
+                    // V25：首次见面的飞行态一并记录（此刻通常是 UNKNOWN/未锁定，
+                    // 但写下来能让"从没同步过"与"同步过但确实未知"在库里有区分）。
+                    writeFlightState(entity, s);
                     repository.save(entity);
                 } catch (Exception e) {
                     log.warn("设备持久化失败 sysid={}: {}", id, e.getMessage());
@@ -292,6 +313,25 @@ public class DeviceRegistry {
      * HEARTBEAT arrived within the timeout window. Returns the sysids that
      * transitioned online -> offline on this pass.
      */
+    /**
+     * 把内存快照里的三个"最后已知飞行态"搬到实体上（V25）。
+     *
+     * <p><b>为什么只在注册与离线两个时刻写</b>：mode/armed/protocol 是低频语义状态，
+     * 逐帧写会直接放大成遥测频率的 DB 写（那正是 FlightTrackStore 要用
+     * {@code PERSIST_INTERVAL} 节流的原因）。注册与离线转换都是**低频且语义明确**的
+     * 时刻，且这两处本来就要写 devices 行，因此不新增写放大。
+     *
+     * <p><b>已知局限（诚实记录，不假装解决）</b>：后端异常杀掉（kill -9 / OOM /
+     * 断电）时不会经历离线转换，最近一次的 mode/armed 会丢，库里仍是上一次
+     * 成功写入的值。要覆盖这种场景就得引入周期节流写，那是另一个取舍——
+     * 现在刻意不做，改为把局限写明。
+     */
+    private void writeFlightState(DeviceEntity entity, DroneSnapshot snapshot) {
+        entity.setLastMode(snapshot.mode);
+        entity.setLastArmed(snapshot.armed);
+        entity.setLastProtocol(snapshot.protocol);
+    }
+
     public List<Integer> sweepOffline() {
         long cutoff = heartbeatTimeoutSeconds * 1000L;
         return drones.values().stream()
@@ -305,6 +345,9 @@ public class DeviceRegistry {
                         try {
                             repository.findById(s.sysid).ifPresent(entity -> {
                                 entity.setOnline(false);
+                                // V25：离线这一刻正是"这架机是怎么收场的"最有价值的时刻，
+                                // 顺路把飞行态落库。走的是本来就要写的那一行，不新增写放大。
+                                writeFlightState(entity, s);
                                 repository.save(entity);
                             });
                         } catch (Exception e) {
