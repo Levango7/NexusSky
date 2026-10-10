@@ -375,6 +375,35 @@ class ConflictAvoidanceServiceTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    @DisplayName("tryReserve 冲突时返回冲突对方 sysid 与水平距离（AIRSPACE 告警数据源）")
+    void tryReserveReturnsConflictPeer() {
+        ConflictAvoidanceService.ReservationAttempt first =
+                service.tryReserve(1, 30.0, 120.0, 100.0, 0, 30, 50);
+        assertThat(first.accepted()).isTrue();
+        assertThat(first.conflictSysid()).isNull();
+
+        ConflictAvoidanceService.ReservationAttempt second =
+                service.tryReserve(2, 30.0, 120.0, 100.0, 10, 40, 50);
+        assertThat(second.accepted()).isFalse();
+        assertThat(second.conflictSysid()).isEqualTo(1);
+        assertThat(second.conflictHorizontalDistanceM()).isLessThan(1.0); // 同点位
+        assertThat(second.conflictStartSec()).isEqualTo(0.0);
+        assertThat(service.getReservations(2)).isEmpty();                  // 拒绝不落表
+    }
+
+    @Test
+    @DisplayName("reservationSnapshot 返回全量快照，列表对外不可变")
+    void reservationSnapshotIsImmutableCopy() {
+        service.tryReserve(1, 30.0, 120.0, 100.0, 0, 30, 50);
+
+        var snap = service.reservationSnapshot();
+        assertThat(snap).containsKey(1);
+        assertThat(snap.get(1)).hasSize(1);
+        assertThatThrownBy(() -> snap.get(1).add(null))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
     // ==================== 冲突解决机动 ====================
 
     @Test

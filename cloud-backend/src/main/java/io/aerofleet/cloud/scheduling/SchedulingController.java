@@ -6,6 +6,7 @@ import io.aerofleet.cloud.security.Role;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -117,6 +118,69 @@ public class SchedulingController {
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("conflictCount", pairs.size());
         resp.put("conflicts", views);
+        return resp;
+    }
+
+    /**
+     * 提交 4D 空域预约（时间-空间区块）。
+     * <p>
+     * 冲突（409）时同时发布 ConflictAlertMsg(30049) 的 AIRSPACE 类型帧——
+     * 空域预约冲突是协议枚举 {@code ConflictType.AIRSPACE} 的唯一生产者
+     * （机对几何扫描只产 COLLISION/PATH）。
+     */
+    @PostMapping("/reservations")
+    @RequireRole(Role.OPERATOR)
+    public ResponseEntity<Map<String, Object>> reserveAirspace(@RequestBody Map<String, Number> body) {
+        String[] required = {"sysid", "lat", "lon", "alt", "startTime", "endTime", "radius"};
+        for (String key : required) {
+            if (body.get(key) == null) {
+                throw new BadRequestException("missing required field: " + key);
+            }
+        }
+        int sysid = body.get("sysid").intValue();
+        double startTime = body.get("startTime").doubleValue();
+        ConflictAvoidanceService.ReservationAttempt attempt = conflictService.tryReserve(sysid,
+                body.get("lat").doubleValue(), body.get("lon").doubleValue(),
+                body.get("alt").doubleValue(), startTime,
+                body.get("endTime").doubleValue(), body.get("radius").doubleValue());
+        if (!attempt.accepted()) {
+            conflictScanService.publishAirspaceConflict(sysid, attempt.conflictSysid(),
+                    attempt.conflictHorizontalDistanceM(),
+                    Math.max(0.0, attempt.conflictStartSec() - startTime));
+            Map<String, Object> conflict = new LinkedHashMap<>();
+            conflict.put("status", "rejected");
+            conflict.put("conflictType", "AIRSPACE");
+            conflict.put("conflictSysid", attempt.conflictSysid());
+            conflict.put("conflictDistanceM", attempt.conflictHorizontalDistanceM());
+            return ResponseEntity.status(409).body(conflict);
+        }
+        Map<String, Object> ok = new LinkedHashMap<>();
+        ok.put("status", "reserved");
+        ok.put("sysid", sysid);
+        return ResponseEntity.ok(ok);
+    }
+
+    /** 当前 4D 空域预约快照（只读视图，含每区块的时空参数）。 */
+    @GetMapping("/reservations")
+    public Map<String, Object> reservations() {
+        List<Map<String, Object>> items = new java.util.ArrayList<>();
+        for (Map.Entry<Integer, List<ConflictAvoidanceService.Reservation4D>> e
+                : conflictService.reservationSnapshot().entrySet()) {
+            for (ConflictAvoidanceService.Reservation4D r : e.getValue()) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("sysid", e.getKey());
+                item.put("lat", r.lat);
+                item.put("lon", r.lon);
+                item.put("alt", r.alt);
+                item.put("startTime", r.startTime);
+                item.put("endTime", r.endTime);
+                item.put("radius", r.radius);
+                items.add(item);
+            }
+        }
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("count", items.size());
+        resp.put("reservations", items);
         return resp;
     }
 

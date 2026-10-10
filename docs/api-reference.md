@@ -922,7 +922,12 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 | POST | `/tasks` | 创建调度任务（需 OPERATOR） | TaskRequest | 200 AssignmentResult |
 | GET | `/tasks` | 列出所有调度任务 | - | 200 Map<taskId,AssignmentResult> |
 | DELETE | `/tasks/{id}` | 取消调度任务（需 OPERATOR） | - | 200 {taskId,cancelled} |
+| POST | `/tasks/{id}/start` | 启动任务（需 OPERATOR） | - | 200 状态视图 |
+| POST | `/tasks/{id}/complete` | 完成任务（需 OPERATOR） | - | 200 状态视图 |
 | POST | `/conflicts/check` | 检查冲突 | {lat1,lon1,alt1,v1,h1,lat2,lon2,alt2,v2,h2} | 200 ConflictResult / 400 |
+| POST | `/conflicts/scan` | 机队冲突扫描（两两 4D 检测，逐冲突对发布 30049） | - | 200 {conflictCount,conflicts} |
+| POST | `/reservations` | **提交 4D 空域预约**（冲突 409 + 发布 AIRSPACE 类型 30049） | {sysid,lat,lon,alt,startTime,endTime,radius} | 200 {status:"reserved"} / 409 {conflictType:"AIRSPACE",conflictSysid} |
+| GET | `/reservations` | 当前 4D 空域预约快照 | - | 200 {count,reservations:[…]} |
 | GET | `/status` | 调度状态 | - | 200 {totalTasks,status} |
 
 #### 端点详情
@@ -934,6 +939,15 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 **POST /api/v1/scheduling/conflicts/check**
 - 请求体: `{lat1:double, lon1:double, alt1:double, v1:double, h1:double, lat2:double, lon2:double, alt2:double, v2:double, h2:double}`（两架无人机的位置/速度/航向）
 - 响应: 200 - 冲突检测结果；400 - 缺少必填字段
+
+**POST /api/v1/scheduling/reservations** （需 OPERATOR 角色）
+- 请求体: `{sysid:int, lat:double, lon:double, alt:double, startTime:double, endTime:double, radius:double}`
+  时间为相对秒值；区块为球体近似（中心点 + 水平半径，垂直间隔取系统最小 10m）
+- 响应: 200 - `{status:"reserved", sysid}`；**409** - `{status:"rejected", conflictType:"AIRSPACE", conflictSysid, conflictDistanceM}`
+  （冲突时同时发布 `ConflictAlertMsg(30049)` 的 **AIRSPACE** 类型帧——空域预约冲突是该协议枚举值的唯一生产者）；400 - 缺少必填字段
+
+**GET /api/v1/scheduling/reservations**
+- 响应: 200 - `{count, reservations:[{sysid,lat,lon,alt,startTime,endTime,radius}]}`
 
 ### 基础路径 `/api/v1/squad`
 
@@ -2566,7 +2580,7 @@ es.onerror = (e) => {
 | 通信组网 | CellTowerController | /api/v1/celltowers | 6 |
 | 通信组网 | SatLinkController | /api/v1/sat-link | 8 |
 | 通信组网 | TerrainController | /api/v1/terrain | 4 |
-| 集群调度 | SchedulingController | /api/v1/scheduling | 5 |
+| 集群调度 | SchedulingController | /api/v1/scheduling | 10 |
 | 集群调度 | SquadController | /api/v1/squad | 3 |
 | AI 决策 | DecisionMonitorController | /api/v1/ai | 2 |
 | 边缘计算 | EdgeCoordinationController | /api/v1/edge | 3 |

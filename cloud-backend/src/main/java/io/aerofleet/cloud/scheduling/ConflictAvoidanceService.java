@@ -399,6 +399,28 @@ public class ConflictAvoidanceService {
      */
     public boolean reserveAirspace(int sysid, double lat, double lon, double alt,
                                    double startTime, double endTime, double radius) {
+        return tryReserve(sysid, lat, lon, alt, startTime, endTime, radius).accepted();
+    }
+
+    /**
+     * 预约结果详情：accepted + 冲突对方（sysid / 水平距离 / 对方区块起始秒）。
+     * <p>
+     * 空域预约冲突是协议枚举 {@code ConflictType.AIRSPACE} 的唯一生产者场景——
+     * 只返回 boolean 拿不到冲突对方，无法构造 ConflictAlertMsg(30049)。
+     */
+    public record ReservationAttempt(boolean accepted, Integer conflictSysid,
+                                     double conflictHorizontalDistanceM, double conflictStartSec) {
+        static ReservationAttempt ok() {
+            return new ReservationAttempt(true, null, 0, 0);
+        }
+    }
+
+    /**
+     * 尝试预约（{@link #reserveAirspace} 的详情版）：与已有预约冲突时不落表，
+     * 返回冲突对方信息，供调用方发布 AIRSPACE 冲突告警。
+     */
+    public ReservationAttempt tryReserve(int sysid, double lat, double lon, double alt,
+                                         double startTime, double endTime, double radius) {
         if (endTime < startTime) {
             throw new IllegalArgumentException("endTime must be >= startTime");
         }
@@ -408,15 +430,34 @@ public class ConflictAvoidanceService {
         synchronized (reservationTable) {
             // 顺带清理已过期的预约（endTime < 新预约 startTime），避免预约表只增不减
             purgeExpiredReservationsInternal(startTime);
-            if (checkReservationConflict(sysid, lat, lon, alt, startTime, endTime, radius)) {
-                log.warn("Reservation rejected for sysid {}: conflict with existing reservation", sysid);
-                return false;
+            Map.Entry<Integer, Reservation4D> conflict = findReservationConflictBlock(
+                    sysid, lat, lon, alt, startTime, endTime, radius);
+            if (conflict != null) {
+                Reservation4D block = conflict.getValue();
+                log.warn("Reservation rejected for sysid {}: conflicts with sysid {} at ({}, {})",
+                        sysid, conflict.getKey(), block.lat, block.lon);
+                return new ReservationAttempt(false, conflict.getKey(),
+                        haversine(lat, lon, block.lat, block.lon), block.startTime);
             }
             Reservation4D reservation = new Reservation4D(lat, lon, alt, startTime, endTime, radius);
             reservationTable.computeIfAbsent(sysid, k -> new ArrayList<>()).add(reservation);
             log.info("Reservation accepted for sysid {}: ({},{},{}) t=[{},{}] r={}",
                     sysid, lat, lon, alt, startTime, endTime, radius);
-            return true;
+            return ReservationAttempt.ok();
+        }
+    }
+
+    /**
+     * 只读快照：sysid → 预约区块列表（拷贝，防外部修改）。
+     * 供 REST 视图与外部系统核对当前占用。
+     */
+    public Map<Integer, List<Reservation4D>> reservationSnapshot() {
+        synchronized (reservationTable) {
+            Map<Integer, List<Reservation4D>> out = new java.util.LinkedHashMap<>();
+            for (Map.Entry<Integer, List<Reservation4D>> e : reservationTable.entrySet()) {
+                out.put(e.getKey(), List.copyOf(e.getValue()));
+            }
+            return out;
         }
     }
 
@@ -437,19 +478,25 @@ public class ConflictAvoidanceService {
     public boolean checkReservationConflict(int sysid, double lat, double lon, double alt,
                                             double startTime, double endTime, double radius) {
         synchronized (reservationTable) {
-            for (Map.Entry<Integer, List<Reservation4D>> entry : reservationTable.entrySet()) {
-                int ownerSysid = entry.getKey();
-                if (ownerSysid == sysid) {
-                    continue; // 跳过自己
-                }
-                for (Reservation4D existing : entry.getValue()) {
-                    if (reservationsOverlap(lat, lon, alt, startTime, endTime, radius, existing)) {
-                        return true;
-                    }
+            return findReservationConflictBlock(sysid, lat, lon, alt, startTime, endTime, radius) != null;
+        }
+    }
+
+    /** 返回第一个冲突的预约区块（含归属 sysid）；无冲突返回 null。 */
+    private Map.Entry<Integer, Reservation4D> findReservationConflictBlock(
+            int sysid, double lat, double lon, double alt,
+            double startTime, double endTime, double radius) {
+        for (Map.Entry<Integer, List<Reservation4D>> entry : reservationTable.entrySet()) {
+            if (entry.getKey() == sysid) {
+                continue; // 跳过自己（允许同一无人机连续预约相邻区块）
+            }
+            for (Reservation4D existing : entry.getValue()) {
+                if (reservationsOverlap(lat, lon, alt, startTime, endTime, radius, existing)) {
+                    return Map.entry(entry.getKey(), existing);
                 }
             }
-            return false;
         }
+        return null;
     }
 
     /**
