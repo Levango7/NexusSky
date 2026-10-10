@@ -64,4 +64,14 @@ class SchedulingControllerTest {
                         .content("{\"sysid\":1}"))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void failTask_endpointIsWiredAndLenientOnUnknown() throws Exception {
+        // 未知任务返回 failed=false（与 start/complete/cancel 的宽容语义一致；
+        // true 路径由 TaskAssignmentServiceTest 覆盖——需要真实分配链）
+        mockMvc.perform(post("/api/v1/scheduling/tasks/not-exist/fail"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.taskId").value("not-exist"))
+                .andExpect(jsonPath("$.failed").value(false));
+    }
 }

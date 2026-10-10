@@ -2,6 +2,8 @@ package io.aerofleet.cloud.scheduling;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
+import io.aerofleet.mavlink.messages.TaskStatusMsg;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -173,6 +175,30 @@ class TaskAssignmentServiceTest {
     @DisplayName("cancelTask 未分配任务返回 false")
     void cancelTaskReturnsFalseForUnknown() {
         assertThat(service.cancelTask("not-exist")).isFalse();
+    }
+
+    @Test
+    @DisplayName("failTask 发布 FAILED(3) 帧、清负载映射，任务记录保留（B4）")
+    void failTaskPublishesFailedKeepsRecord() {
+        registry.add(onlineDrone(1, 80));
+        TaskRequest req = new TaskRequest("t-fail", "SURVEY", 5, 30.0, 120.0, 100.0);
+        service.assignTask(req);
+        service.startTask("t-fail");
+
+        assertThat(service.failTask("t-fail")).isTrue();
+
+        ArgumentCaptor<MavlinkMessageEvent> captor =
+                ArgumentCaptor.forClass(MavlinkMessageEvent.class);
+        // 事件序列：30048(分配) + 30050 ASSIGNED + 30050 IN_PROGRESS + 30050 FAILED
+        verify(eventPublisher, times(4)).publishEvent(captor.capture());
+        TaskStatusMsg last = (TaskStatusMsg) captor.getAllValues().get(3).getMessage();
+        assertThat(last.status).isEqualTo(3); // TaskStatusEnum.FAILED.ordinal()（此前协议值不可达）
+
+        // 记录保留（与 cancelTask 的"移除"形成区分规则）
+        assertThat(service.getAllAssignments()).containsKey("t-fail");
+
+        // 不存在 → false
+        assertThat(service.failTask("not-exist")).isFalse();
     }
 
     @Test
