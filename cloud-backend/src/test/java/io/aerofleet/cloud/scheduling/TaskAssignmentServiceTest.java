@@ -358,7 +358,7 @@ class TaskAssignmentServiceTest {
     }
 
     @Test
-    @DisplayName("assignTasks GA 100 次迭代在 100ms 内完成")
+    @DisplayName("assignTasks GA 100 次迭代在 1s 内完成（性能护栏，非正确性断言）")
     void assignTasksGaCompletesWithin100ms() {
         for (int i = 1; i <= 10; i++) {
             DroneSnapshot d = onlineDrone(i, 40 + i * 5);
@@ -376,7 +376,10 @@ class TaskAssignmentServiceTest {
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
 
         assertThat(results).hasSize(10);
-        assertThat(elapsedMs).isLessThan(100);
+        // 护栏值 1s（原 100ms）——全量并发下实测曾被压到 ~180ms，硬阈值 100ms 属 CI
+        // 噪声，会把"机器忙"和"算法退化"混为一谈；1s 仍能抓住 GA 崩坏级别的回归
+        // （正常量级为个位数 ms）。2026-10-10 批次 4 flaky 治理。
+        assertThat(elapsedMs).isLessThan(1000);
     }
 
     @Test
