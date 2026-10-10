@@ -34,10 +34,11 @@ class SchedulingControllerTest {
         // 独特坐标：预约表是单例 bean 的内存态，避开其他用例的残留
         double lat = 39.9001;
         double lon = 116.4001;
+        double now = System.currentTimeMillis();
 
         mockMvc.perform(post("/api/v1/scheduling/reservations")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                        .content(reservationBody(1, lat, lon, 100, 0, 100, 50)))
+                        .content(reservationBody(1, lat, lon, 100, now, now + 100_000, 50)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("reserved"))
                 .andExpect(jsonPath("$.sysid").value(1));
@@ -46,7 +47,7 @@ class SchedulingControllerTest {
         // 发布失败不影响响应——事件通道的无设备场景由 listener 侧忽略）
         mockMvc.perform(post("/api/v1/scheduling/reservations")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                        .content(reservationBody(2, lat, lon, 100, 50, 150, 50)))
+                        .content(reservationBody(2, lat, lon, 100, now + 50_000, now + 150_000, 50)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value("rejected"))
                 .andExpect(jsonPath("$.conflictType").value("AIRSPACE"))

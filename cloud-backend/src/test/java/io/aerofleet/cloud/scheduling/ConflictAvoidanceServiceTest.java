@@ -6,9 +6,20 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * ConflictAvoidanceService 空域冲突避免服务单测（M10）。
@@ -307,7 +318,8 @@ class ConflictAvoidanceServiceTest {
     @Test
     @DisplayName("reserveAirspace 无冲突时预约成功")
     void reserveAirspaceSuccess() {
-        boolean ok = service.reserveAirspace(1, 30.0, 120.0, 100.0, 0, 30, 50);
+        double now = System.currentTimeMillis();
+        boolean ok = service.reserveAirspace(1, 30.0, 120.0, 100.0, now, now + 30_000, 50);
 
         assertThat(ok).isTrue();
         assertThat(service.getReservations(1)).hasSize(1);
@@ -316,12 +328,13 @@ class ConflictAvoidanceServiceTest {
     @Test
     @DisplayName("reserveAirspace 有冲突时预约被拒")
     void reserveAirspaceRejectedOnConflict() {
-        // 无人机1 预约 (30, 120, 100) t=[0,30] r=50
-        boolean first = service.reserveAirspace(1, 30.0, 120.0, 100.0, 0, 30, 50);
+        double now = System.currentTimeMillis();
+        // 无人机1 预约 (30, 120, 100) 窗口 [now, now+30s] r=50
+        boolean first = service.reserveAirspace(1, 30.0, 120.0, 100.0, now, now + 30_000, 50);
         assertThat(first).isTrue();
 
-        // 无人机2 预约同位置同高度同时间段 → 冲突，拒绝
-        boolean second = service.reserveAirspace(2, 30.0, 120.0, 100.0, 10, 40, 50);
+        // 无人机2 预约同位置同高度，窗口重叠（now+10s ~ now+40s）→ 冲突，拒绝
+        boolean second = service.reserveAirspace(2, 30.0, 120.0, 100.0, now + 10_000, now + 40_000, 50);
         assertThat(second).isFalse();
         assertThat(service.getReservations(2)).isEmpty();
     }
@@ -329,11 +342,12 @@ class ConflictAvoidanceServiceTest {
     @Test
     @DisplayName("reserveAirspace 时间不重叠时预约成功")
     void reserveAirspaceNonOverlappingTimeSuccess() {
-        boolean first = service.reserveAirspace(1, 30.0, 120.0, 100.0, 0, 30, 50);
+        double now = System.currentTimeMillis();
+        boolean first = service.reserveAirspace(1, 30.0, 120.0, 100.0, now, now + 30_000, 50);
         assertThat(first).isTrue();
 
-        // 同位置但时间段不重叠 [40, 60]
-        boolean second = service.reserveAirspace(2, 30.0, 120.0, 100.0, 40, 60, 50);
+        // 同位置但窗口不重叠 [now+40s, now+60s]
+        boolean second = service.reserveAirspace(2, 30.0, 120.0, 100.0, now + 40_000, now + 60_000, 50);
         assertThat(second).isTrue();
     }
 
@@ -378,30 +392,84 @@ class ConflictAvoidanceServiceTest {
     @Test
     @DisplayName("tryReserve 冲突时返回冲突对方 sysid 与水平距离（AIRSPACE 告警数据源）")
     void tryReserveReturnsConflictPeer() {
+        double now = System.currentTimeMillis();
         ConflictAvoidanceService.ReservationAttempt first =
-                service.tryReserve(1, 30.0, 120.0, 100.0, 0, 30, 50);
+                service.tryReserve(1, 30.0, 120.0, 100.0, now, now + 30_000, 50);
         assertThat(first.accepted()).isTrue();
         assertThat(first.conflictSysid()).isNull();
 
         ConflictAvoidanceService.ReservationAttempt second =
-                service.tryReserve(2, 30.0, 120.0, 100.0, 10, 40, 50);
+                service.tryReserve(2, 30.0, 120.0, 100.0, now + 10_000, now + 40_000, 50);
         assertThat(second.accepted()).isFalse();
         assertThat(second.conflictSysid()).isEqualTo(1);
         assertThat(second.conflictHorizontalDistanceM()).isLessThan(1.0); // 同点位
-        assertThat(second.conflictStartSec()).isEqualTo(0.0);
+        assertThat(second.conflictStartSec()).isEqualTo(now);             // 对方区块起点（epoch ms）
         assertThat(service.getReservations(2)).isEmpty();                  // 拒绝不落表
     }
 
     @Test
     @DisplayName("reservationSnapshot 返回全量快照，列表对外不可变")
     void reservationSnapshotIsImmutableCopy() {
-        service.tryReserve(1, 30.0, 120.0, 100.0, 0, 30, 50);
+        double now = System.currentTimeMillis();
+        service.tryReserve(1, 30.0, 120.0, 100.0, now, now + 30_000, 50);
 
         var snap = service.reservationSnapshot();
         assertThat(snap).containsKey(1);
         assertThat(snap.get(1)).hasSize(1);
         assertThatThrownBy(() -> snap.get(1).add(null))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    @DisplayName("持久化：预约落库 + 重启（新实例）从未过期条目恢复")
+    void persistRoundTripAndRestore() {
+        AirspaceReservationRepository repo = mock(AirspaceReservationRepository.class);
+        ArgumentCaptor<AirspaceReservationEntity> saved =
+                ArgumentCaptor.forClass(AirspaceReservationEntity.class);
+
+        ConflictAvoidanceService persisting = new ConflictAvoidanceService();
+        ReflectionTestUtils.setField(persisting, "persist", true);
+        ReflectionTestUtils.setField(persisting, "reservationRepository", repo);
+
+        double now = System.currentTimeMillis();
+        assertThat(persisting.tryReserve(7, 30.0, 120.0, 100.0,
+                now, now + 30_000, 50).accepted()).isTrue();
+        verify(repo, times(1)).save(saved.capture());
+        assertThat(saved.getValue().getOwnerSysid()).isEqualTo(7);
+        assertThat(saved.getValue().getEndMs()).isEqualTo(now + 30_000);
+
+        // 过期清理同步删库：tryReserve 内顺带 purge（B5 原有逻辑）+ 显式 purge 各一次
+        verify(repo, times(1)).deleteByEndMsLessThan(anyDouble());
+        persisting.purgeExpiredReservations(now + 31_000);
+        verify(repo, times(2)).deleteByEndMsLessThan(anyDouble());
+
+        // 重启恢复：repo 返回一条未过期预约 → 新实例内存表恢复
+        when(repo.findByEndMsGreaterThan(anyDouble())).thenReturn(java.util.List.of(
+                new AirspaceReservationEntity(7, 30.0, 120.0, 100.0,
+                        now, now + 60_000, 50, (long) now)));
+        ConflictAvoidanceService restarted = new ConflictAvoidanceService();
+        ReflectionTestUtils.setField(restarted, "persist", true);
+        ReflectionTestUtils.setField(restarted, "reservationRepository", repo);
+        restarted.restorePersistedReservations();
+        assertThat(restarted.getReservations(7)).hasSize(1);
+        assertThat(restarted.getReservations(7).get(0).endTime).isEqualTo(now + 60_000);
+        // 恢复时也清了过期（db 侧累计第三次删：tryReserve 顺带 + purge + restore）
+        verify(repo, times(3)).deleteByEndMsLessThan(anyDouble());
+    }
+
+    @Test
+    @DisplayName("纯内存（persist=false）：不触库，行为与升级前一致")
+    void memoryOnlyDoesNotTouchRepository() {
+        AirspaceReservationRepository repo = mock(AirspaceReservationRepository.class);
+        ConflictAvoidanceService inMemory = new ConflictAvoidanceService(); // persist 默认 false
+        ReflectionTestUtils.setField(inMemory, "reservationRepository", repo);
+
+        double now = System.currentTimeMillis();
+        assertThat(inMemory.tryReserve(1, 30.0, 120.0, 100.0, now, now + 30_000, 50).accepted())
+                .isTrue();
+        verify(repo, never()).save(any());
+        inMemory.restorePersistedReservations();
+        verify(repo, never()).findByEndMsGreaterThan(anyDouble());
     }
 
     // ==================== 冲突解决机动 ====================
