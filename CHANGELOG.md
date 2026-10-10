@@ -18,6 +18,58 @@
 **测试**：ConflictAvoidanceServiceTest 34→36（+持久化往返/恢复、纯内存不触库）；5 个既有预约测试 + Controller 测试时间值迁移；cloud-backend 全量 **2587/0**；本地 H2 + `ddl-auto=validate` 演练通过（V26 与实体一致，Pass C 等价）。
 
 **边界**：「主动释放单个预约」未做（过期清理 + 按机主批量释放已备）；预约的租户归属未建模。
+## [Unreleased] — C5 第一步：staging 打开签名但不拒未签名（2026-10-10）
+
+MAVLink v2 签名块 `linkId(1)|timestamp(6)|signature(6)` **没有 key id 字段**，
+打开即硬切换、无宽限期。所以不能一步到 prod；先用"开着但不拒未签名"的演练姿态，
+在不打断任何旧固件/第三方设备的前提下，从 `signingStats` 观察到底有多少帧真的在验签。
+
+（`docs/low-altitude-economy-demand-research.md:189` 已把 MAVLink v2 signing 列为
+**GB 42590 数据链路安全项**——它是合规项而非可选加固，只是不绑 2026-11-01 那个
+GB 46750 的运行识别 deadline。）
+
+### 改了什么
+
+- `application-staging.properties`：`mavlink.signing.enabled=true` +
+  `reject-unsigned=false`，密钥走 `${MAVLINK_SIGNING_SECRET_KEY}`（不写默认值，
+  与 prod 同口径）。
+- 新增 `UdpGatewaySigningPermissiveTest`（6 例）钉住"开着但不拒"的完整语义。
+
+### 最关键的一点：reject-unsigned=false 保护谁
+
+| 帧 | 结果 |
+|---|---|
+| 未签名 | **放行**（这一步的全部意义） |
+| 签名 + 密钥正确 | 放行，且与未签名帧共存 |
+| 签名 + 密钥错误 | **仍拒绝** |
+| 篡改 | **仍拒绝** |
+| 未知 sysid（取不到密钥） | **仍拒绝** |
+| 重放（同一 timestamp） | **仍拒绝** |
+
+`reject-unsigned=false` **只**保护未签名客户端，**不**保护"签错密钥"的客户端——
+后者照样被丢（要么被篡改、要么密钥配错，两种情况都不该放行）。
+这个不对称是刻意设计，测试第 3 例专门钉它。
+
+### 验证
+
+- `UdpGatewaySigningPermissiveTest` 6/6 + 既有 `UdpGatewaySigningTest` 8/8
+- **变异测试**：把 permissive 用例的 `rejectUnsigned` 从 false 改成 true后，
+  两个 permissive 断言（未签名放行 / 混合共存）立刻转红，另 4 个"仍拒绝"的
+  不受影响——断言确实按语义分区在咬
+- **本地实启三种情景**（dev profile + H2，显式覆盖那三个签名键）：
+  staging 等价配置 → Started；同配置但不给密钥 → **启动失败**（fail-closed）；
+  出厂默认 → Started 且签名组件不装配
+
+### 未做（有意）
+
+- 没在 CI 里跑 staging profile（需要 PostgreSQL + `AEROFLEET_*` 一组环境变量，
+  属部署侧）。本轮只把配置与语义钉住，实际演练由部署方执行。
+- 没动 prod 的 `enabled=false`——prod 打开仍是单独拍板的事。
+
+### 计数
+
+Java 4613 → **4619**（cloud-backend 2587 → **2593**，本轮 +6 例）。前端 245 不变。
+
 ## [Unreleased] — C5 签名让 CI 每次都走签名帧通路 + 修订 ROADMAP C 系列两处言过其实的描述（2026-10-10）
 
 ### 一、C5 第一步：CI 的 flight e2e 全部改为"无人机侧签名"
