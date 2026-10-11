@@ -4,6 +4,7 @@ import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.security.TenantContext;
+import org.springframework.beans.factory.annotation.Value;
 import io.aerofleet.mavlink.enums.TaskStatusEnum;
 import io.aerofleet.mavlink.enums.TaskType;
 import io.aerofleet.mavlink.messages.TaskAssignmentMsg;
@@ -74,9 +75,37 @@ public class TaskAssignmentService {
     /** 地球半径（m），用于 haversine 距离计算 */
     private static final double EARTH_RADIUS_M = 6371000.0;
 
-    public TaskAssignmentService(DeviceRegistry registry, ApplicationEventPublisher eventPublisher) {
+    /** 自动预约默认半径（m）：任务坐标为中心的球体近似占位。 */
+    private static final double AUTO_RESERVATION_RADIUS_M = 500.0;
+    /** 自动预约默认窗口（ms）：任务时长不可知，取运营可解释的保守占位；到期自动 purge。 */
+    private static final long AUTO_RESERVATION_WINDOW_MS = 30 * 60 * 1000L;
+
+    private final ConflictAvoidanceService conflictService;
+    private final ConflictScanService conflictScanService;
+
+    /** 自动预约半径/窗口（运行时可配）。 */
+    private double autoReservationRadiusM = AUTO_RESERVATION_RADIUS_M;
+    private long autoReservationWindowMs = AUTO_RESERVATION_WINDOW_MS;
+
+    public TaskAssignmentService(DeviceRegistry registry, ApplicationEventPublisher eventPublisher,
+                                 ConflictAvoidanceService conflictService,
+                                 ConflictScanService conflictScanService) {
         this.registry = registry;
         this.eventPublisher = eventPublisher;
+        this.conflictService = conflictService;
+        this.conflictScanService = conflictScanService;
+    }
+
+    /** 自动预约半径（m）——部署方可配。 */
+    @Value("${aerofleet.scheduling.reservation.auto-radius-m:500}")
+    public void setAutoReservationRadiusM(double radiusM) {
+        this.autoReservationRadiusM = radiusM;
+    }
+
+    /** 自动预约窗口（ms）——部署方可配；到期由 ConflictAvoidanceService 自动清理。 */
+    @Value("${aerofleet.scheduling.reservation.auto-window-ms:1800000}")
+    public void setAutoReservationWindowMs(long windowMs) {
+        this.autoReservationWindowMs = windowMs;
     }
 
     /** 分配任务到最优无人机 */
@@ -127,6 +156,7 @@ public class TaskAssignmentService {
         taskQueue.offer(req);
         log.info("Task {} assigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
         publishAssignmentFrames(req, best.sysid);
+        autoReserve(req, best.sysid);
         return result;
     }
 
@@ -175,10 +205,49 @@ public class TaskAssignmentService {
             }
             taskQueue.offer(requests.get(i));
             publishAssignmentFrames(requests.get(i), d.sysid);
+            autoReserve(requests.get(i), d.sysid);
             results.add(r);
         }
         log.info("assignTasks: {} tasks to {} drones via {}", nTasks, nDrones, algo);
         return results;
+    }
+
+    /**
+     * 分配成功即代任务占住时空块（B5 预约的首个生产调用者）。
+     * <p>
+     * 窗口=分配时刻起算的固定时长（默认 30min，可配），半径以任务坐标为中心
+     * （默认 500m，可配）；到期由 ConflictAvoidanceService 自动清理。
+     * <p>
+     * <b>软约束</b>：冲突时不回退分配（硬拦截会把预约检查塞进评分主路径，
+     * 影响面大且真实运营中相邻空域常见）——分配照常、冲突发
+     * {@code ConflictAlertMsg(30049)} 的 AIRSPACE 帧上态势面，让冲突先可见。
+     *
+     * @param req  已分配任务
+     * @param sysid 分配到的无人机
+     */
+    private void autoReserve(TaskRequest req, int sysid) {
+        double lat = req.getTargetLat();
+        double lon = req.getTargetLon();
+        if (Double.isNaN(lat) || Double.isNaN(lon)) {
+            log.debug("auto-reserve skipped for task {}: no target position", req.getTaskId());
+            return;
+        }
+        double alt = Double.isNaN(req.getTargetAlt()) ? 0.0 : req.getTargetAlt();
+        long start = System.currentTimeMillis();
+        long end = start + autoReservationWindowMs;
+        ConflictAvoidanceService.ReservationAttempt attempt =
+                conflictService.tryReserve(sysid, lat, lon, alt, start, end, autoReservationRadiusM);
+        if (attempt.accepted()) {
+            log.info("auto-reserve accepted: task {} sysid {} window={}ms radius={}m",
+                    req.getTaskId(), sysid, autoReservationWindowMs, autoReservationRadiusM);
+        } else {
+            Integer conflictSysid = attempt.conflictSysid();
+            log.warn("auto-reserve rejected (soft): task {} sysid {} conflicts with {}",
+                    req.getTaskId(), sysid, conflictSysid);
+            conflictScanService.publishAirspaceConflict(sysid, conflictSysid == null ? 0 : conflictSysid,
+                    attempt.conflictHorizontalDistanceM(),
+                    Math.max(0.0, attempt.conflictStartSec() - start));
+        }
     }
 
     // ==================== 遗传算法（GA） ====================

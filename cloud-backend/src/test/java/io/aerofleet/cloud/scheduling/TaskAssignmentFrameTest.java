@@ -44,7 +44,10 @@ class TaskAssignmentFrameTest {
     void setUp() {
         registry = new StubRegistry();
         publisher = mock(ApplicationEventPublisher.class);
-        service = new TaskAssignmentService(registry, publisher);
+        ConflictAvoidanceService conflictService = new ConflictAvoidanceService();
+        io.aerofleet.cloud.api.ws.TelemetryWebSocketHandler ws = mock(io.aerofleet.cloud.api.ws.TelemetryWebSocketHandler.class);
+        ConflictScanService conflictScanService = new ConflictScanService(registry, conflictService, publisher, ws);
+        service = new TaskAssignmentService(registry, publisher, conflictService, conflictScanService);
     }
 
     private static TaskRequest request(String taskId, String type, int priority) {
