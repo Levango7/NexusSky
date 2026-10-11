@@ -40,6 +40,42 @@ class SurveillanceDeviceStatusTest {
     }
 
     @Test
+    @DisplayName("通道联动：heartbeat 恢复 ONLINE 时 onlineCameras 恢复全量；FAULT 不动（B3）")
+    void channelCountFollowsStateTransitions() {
+        SurveillanceDevice d = device();
+        d.totalCameras = 4;
+        d.onlineCameras = 2;                       // 4 路中 2 路在线
+
+        d.heartbeat();                             // ONLINE 保持
+        assertThat(d.onlineCameras).isEqualTo(2);  // 心跳不覆盖人工维护值
+
+        d.status = SurveillanceDevice.Status.OFFLINE;
+        d.onlineCameras = 0;
+        d.heartbeat();                             // OFFLINE → ONLINE
+        assertThat(d.onlineCameras).isEqualTo(4);  // 链路恢复默认全恢复
+
+        d.onlineCameras = 1;
+        d.status = SurveillanceDevice.Status.FAULT;
+        d.heartbeat();
+        assertThat(d.onlineCameras).isEqualTo(1);  // FAULT 人工态不动
+    }
+
+    @Test
+    @DisplayName("pruneStaleDevices 置 OFFLINE 时 onlineCameras 归零（整体离线→通道全不可用）")
+    void pruneZeroesOnlineCameras() {
+        SurveillanceDeviceRegistry registry = new SurveillanceDeviceRegistry();
+        SurveillanceDevice d = device();
+        d.totalCameras = 4;
+        d.onlineCameras = 3;
+        d.lastHeartbeatMs = 1;
+        registry.register(d);
+
+        registry.pruneStaleDevices(1000);
+        assertThat(d.status).isEqualTo(SurveillanceDevice.Status.OFFLINE);
+        assertThat(d.onlineCameras).isZero();
+    }
+
+    @Test
     @DisplayName("心跳不覆盖 FAULT / MAINTENANCE（需显式恢复）")
     void heartbeatDoesNotClearFaultOrMaintenance() {
         SurveillanceDevice fault = device();

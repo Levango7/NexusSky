@@ -210,6 +210,8 @@ public class SurveillanceDeviceRegistry {
                         && dev.lastHeartbeatMs > 0
                         && now - dev.lastHeartbeatMs > timeoutMs) {
                     dev.status = SurveillanceDevice.Status.OFFLINE;
+                    // 整体离线 → 通道全部不可用（在线通道数归零）
+                    dev.onlineCameras = 0;
                     stale.add(k);
                     log.warn("Surveillance device stale (offline): id={} lastHeartbeatMs={} ago={}ms",
                             k, dev.lastHeartbeatMs, now - dev.lastHeartbeatMs);

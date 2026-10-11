@@ -270,6 +270,42 @@ class SurveillanceControllerTest {
     }
 
     @Test
+    @DisplayName("通道端点：注册默认全在线 + /devices/{id}/channels 置位/越界 400/不存在 404（B3）")
+    void deviceChannelsEndpoint() throws Exception {
+        Map<String, Object> b = deviceBody("cam-ch2", "HIKVISION");
+        b.put("channels", 4);
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(b)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalCameras").value(4))
+                .andExpect(jsonPath("$.onlineCameras").value(4)); // 注册默认全在线
+
+        // 4 路中 2 路在线（部分通道离线的真实表达）
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-ch2/channels")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("onlineCameras", 2))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onlineCameras").value(2));
+
+        // 越界（> totalCameras）400；负值 400
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-ch2/channels")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("onlineCameras", 5))))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-ch2/channels")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("onlineCameras", -1))))
+                .andExpect(status().isBadRequest());
+
+        // 不存在 404
+        mockMvc.perform(post("/api/v1/surveillance/devices/nope/channels")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("onlineCameras", 1))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("注册 channels 越界（0/256）返回 400")
     void registerDevice_invalidChannels_returns400() throws Exception {
         Map<String, Object> zero = deviceBody("cam-z", "HIKVISION");
