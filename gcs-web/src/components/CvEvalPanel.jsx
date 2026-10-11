@@ -160,7 +160,7 @@ export default function CvEvalPanel() {
 
       {metrics && metrics.frames === 0 && (
         <div style={{ textAlign: 'center', padding: 30, color: 'var(--dim)' }}>
-          <div style={{ fontSize: 13 }}>暂无评测数据</div>
+          <div className="empty-hint">暂无评测数据</div>
           <div style={{ fontSize: 11, marginTop: 4 }}>执行一次「拍摄→定位」后此处将出现逐帧指标</div>
         </div>
       )}

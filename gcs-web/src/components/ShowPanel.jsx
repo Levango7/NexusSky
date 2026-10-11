@@ -452,7 +452,7 @@ export default function ShowPanel() {
                   <div>无人机数：{pick(taskDetail, 'droneCount') || '--'}</div>
                 </div>
               ) : (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无详情</div>
+                <div className="empty-hint">暂无详情</div>
               )}
             </div>
           )}

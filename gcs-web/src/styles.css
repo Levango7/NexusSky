@@ -191,7 +191,7 @@ body {
 }
 .panel-body { padding: 0 14px 14px; }
 
-.empty-hint { color: var(--dim); font-size: 12px; padding: 14px 0; line-height: 1.8; text-align: center; }
+.empty-hint { display: block; color: var(--dim); font-size: 12px; padding: 14px 0; line-height: 1.8; text-align: center; }
 .empty-hint .big { font-size: 26px; display: block; margin-bottom: 6px; opacity: .5; }
 
 /* ---------- 机队列表 ---------- */

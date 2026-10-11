@@ -346,7 +346,7 @@ export default function HealthPanel() {
                   </div>
                 </div>
               ) : (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无健康数据</div>
+                <div className="empty-hint">暂无健康数据</div>
               )}
             </div>
           ) : (

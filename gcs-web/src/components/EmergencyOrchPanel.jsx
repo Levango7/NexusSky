@@ -567,7 +567,7 @@ export default function EmergencyOrchPanel() {
               })}
             </div>
           ) : (
-            <div style={{ fontSize: 10, color: 'var(--dim-2)', marginTop: 4 }}>暂无优先级任务</div>
+            <div className="empty-hint">暂无优先级任务</div>
           )}
         </div>
       )}

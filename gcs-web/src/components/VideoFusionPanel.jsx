@@ -636,7 +636,7 @@ export default function VideoFusionPanel() {
                 </span>
               )
             }) : (
-              <span style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无安防摄像头</span>
+              <span className="empty-hint">暂无安防摄像头</span>
             )}
           </div>
         </div>
@@ -672,7 +672,7 @@ export default function VideoFusionPanel() {
                 </span>
               )
             }) : (
-              <span style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无无人机航拍</span>
+              <span className="empty-hint">暂无无人机航拍</span>
             )}
           </div>
         </div>

@@ -486,7 +486,7 @@ export default function MappingPanel() {
                 {pick(result, 'modelUrl', 'model3dUrl', 'model') && <div>3D 模型：<a href={pick(result, 'modelUrl', 'model3dUrl', 'model')} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--cyan)' }}>查看</a></div>}
               </div>
             ) : (
-              <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无测绘成果</div>
+              <div className="empty-hint">暂无测绘成果</div>
             )}
           </div>
         </div>

@@ -433,7 +433,7 @@ export default function TrackingPanel({ onTrackLoaded }) {
               ) : guideLoading ? null : guide ? (
                 <GuideView guide={guide} />
               ) : (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无搜索引导数据</div>
+                <div className="empty-hint">暂无搜索引导数据</div>
               )}
             </div>
           )}
@@ -621,7 +621,7 @@ function TrackTable({ points, loading, emptyHint }) {
     return <div style={{ fontSize: 10, color: 'var(--cyan)', padding: '8px 0' }}>加载中…</div>
   }
   if (!points || points.length === 0) {
-    return <div style={{ fontSize: 10, color: 'var(--dim-2)', padding: '8px 0' }}>{emptyHint || '暂无数据'}</div>
+    return <div className="empty-hint" style={{ padding: '8px 0' }}>{emptyHint || '暂无数据'}</div>
   }
   const rows = points.map(normTrackPoint)
   return (

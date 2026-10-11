@@ -335,7 +335,7 @@ export default function CityTwinPanel({ twinStates }) {
                 <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>告警：<b style={{ color: 'var(--crit)' }}>{entityCounts.alerts}</b></div>
               </div>
             ) : (
-              <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无态势数据</div>
+              <div className="empty-hint">暂无态势数据</div>
             )}
           </div>
 
@@ -495,7 +495,7 @@ export default function CityTwinPanel({ twinStates }) {
                   <div>当前帧：{pick(simDetail, 'currentFrame', 'frame') != null ? pick(simDetail, 'currentFrame', 'frame') : '--'}</div>
                 </div>
               ) : (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无模拟详情</div>
+                <div className="empty-hint">暂无模拟详情</div>
               )}
             </div>
           )}
