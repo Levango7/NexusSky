@@ -258,8 +258,11 @@ public abstract class MavlinkMessage {
 
         // 标准协议签名：先构造临时签名帧获取 frameBytes（帧头至 CRC），再对其计算真正的签名
         int linkId = signer.getLinkId();
-        // 官方时间戳口径：48 位、单位 10 微秒、纪元 2015-01-01（不是 10ms tick）
-        long timestamp = MavlinkSigner.currentSigningTimestamp();
+        // 官方时间戳口径：48 位、单位 10 微秒、纪元 2015-01-01（不是 10ms tick）。
+        // 取「单调递增」而非「当前墙钟」：规范要求每发一帧 timestamp +1，
+        // 直接取墙钟会在同 tick 内多帧拿到相同值、被对端判重放（实测曾致
+        // 大规模遥测被拒）。见 MavlinkSigner#nextTimestamp 的完整说明。
+        long timestamp = signer.nextTimestamp(linkId, systemId, componentId);
 
         // 用占位签名构造临时帧，以获取正确的帧字节（INC=0x01 的 CRC）
         byte[] placeholderSig = new byte[SIGNATURE_LENGTH];
