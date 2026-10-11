@@ -22,6 +22,11 @@ import { chromium } from 'playwright'
 import { VIEW_GROUPS, VIEW_LABELS } from '../src/nav/viewGroups.js'
 
 const BASE = process.env.UI_BASE || 'http://127.0.0.1:5300'
+// 无后端模式（CI 的 ui-audit job 用）：跳过“云端已连接”等待——请求落在
+// 404/失败上，面板呈现空/错状态。要审的（浅色控件残留 / JS 错误 / 顶栏高度）
+// 在无数据时同样成立，且空状态本身就在被审面内。
+const OFFLINE = !!process.env.UI_AUDIT_OFFLINE
+const OFFLINE_WAIT_MS = Number(process.env.UI_AUDIT_OFFLINE_WAIT_MS || 2500)
 // 假 JWT（三段结构）：api.js 的登录门只校验形状（三段非空），不验签名。
 // 刻意用运行时拼装而非字面量：CI 的 Trivy secret 扫描按形态识别，
 // 源码里的完整 JWT 字面量会被判成 jwt-token 泄漏（PR #22 实测误报 2 条）。
@@ -38,7 +43,13 @@ const groupOf = (v) => VIEW_GROUPS.find((g) => g.views.includes(v))
 const MOBILE_VIEWS = ['control', 'dashboard', 'dock', 'sensing']
 const MOBILE_VIEWPORT = { width: 414, height: 896 }
 
-const browser = await chromium.launch({ channel: 'chrome', headless: true })
+// 浏览器：默认系统 Chrome（快，不下载）。UI_AUDIT_BROWSER=chromium 时改用
+// Playwright 自带的 chromium（CI 上若 runner 镜像没预装 Chrome 时兜底，
+// 需先 npx playwright install chromium）。
+const browser = await chromium.launch(
+    process.env.UI_AUDIT_BROWSER === 'chromium'
+        ? { headless: true }
+        : { channel: 'chrome', headless: true })
 const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, colorScheme: 'dark', locale: 'zh-CN' })
 await ctx.addInitScript(([t, u]) => {
   try {
@@ -59,7 +70,8 @@ async function auditViews(views, viewport, tag) {
     pageErrors.length = 0
     await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
     await page.waitForFunction(() => document.querySelectorAll('.chip').length > 0, { timeout: 15000 }).catch(() => {})
-    await page.waitForTimeout(600)
+    // 无后端不等后端轮询；有后端则在 600ms 后由 async 逻辑继续
+    await page.waitForTimeout(OFFLINE ? OFFLINE_WAIT_MS : 600)
     if (view !== 'control') {
       const g = groupOf(view)
       try {

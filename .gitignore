@@ -40,3 +40,6 @@ gcs-web/data/
 # UI 验收临时产物（无头截图与调试脚本的本地工作目录），不入库
 gcs-web/shots/
 .ui-logs/
+
+# vite 依赖预构建缓存（dev server 产物，勿入库；本机曾从仓库根误起 vite）
+.vite/

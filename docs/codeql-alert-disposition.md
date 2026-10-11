@@ -82,16 +82,23 @@ gh api -X PATCH repos/Levango7/NexusSky/code-scanning/alerts/<n> \
   绝不兜底成"0 条"——不让"没查到"伪装成"没问题"。（这一条是实现时真实踩到的：
   把限流对象当空数组就会静默放行，由负向验证抓到。）
 
-### 当前登记清单
+### 当前登记清单（2026-10-11 已清零）
 
-CI workflow 里 `--allow` 的编号与此表一一对应：
+4 条已全部去 GitHub 面板 dismiss（#1 false positive；#2/#5/#6 won't fix，
+理由与证据见上）。CI workflow 的 `--allow` 登记随之清空，守卫回到
+"默认全关"：**再出现 open 即红**，将来确需保留某条必须显式提
+`--max-open` 并在本表登记理由——不允许悄悄堆积。
 
-| 编号 | 规则 | 等级 | 登记理由 | 该消失的条件 |
+| 编号 | 规则 | 等级 | 关闭方式 | dismiss 理由（写在面板上的） |
 |---|---|---|---|---|
-| 1 | js/request-forgery | critical | `resolveApiUrl()` 已强制同源 + `/api/v1/` 前缀；`apiUrlGuard.test.js` 13 处覆盖 | 有人去面板 dismiss |
-| 2 | java/tainted-numeric-cast | critical | MAVLink COMMAND_LONG param 是 4 字节 float，窄化是协议必需 | 有人去面板 dismiss |
-| 5 | java/spring-disabled-csrf-protection | high | STATELESS + 无 Cookie；前提由 `HttpAuthChainTest.csrfPremise_noAmbientCookieCredential` 机器复核 | 有人去面板 dismiss |
-| 6 | java/spring-disabled-csrf-protection | high | 同上（第二个 `csrf.disable()` 调用点） | 有人去面板 dismiss |
+| 1 | js/request-forgery | critical | false positive | `resolveApiUrl()` 强制同源 + `/api/v1/` 前缀；`apiUrlGuard.test.js` 13 处覆盖 |
+| 2 | java/tainted-numeric-cast | critical | won't fix | MAVLink COMMAND_LONG param 在线路是 4 字节 float，窄化协议必需 |
+| 5 | java/spring-disabled-csrf-protection | high | won't fix | STATELESS + 无 Cookie；前提由 `HttpAuthChainTest.csrfPremise_noAmbientCookieCredential` 机器复核 |
+| 6 | java/spring-disabled-csrf-protection | high | won't fix | 同上（第二个 `csrf.disable()` 调用点） |
+
+**登记的失效条件反过来也成立**：若将来有人把这些代码改坏（例如
+`resolveApiUrl` 被绕过、认证改成 cookie 会话型），CodeQL 会产生**新**
+alert，守卫立刻红——登记的是历史 disposition，不是永久免罪。
 
 **维护规则**：每 dismiss 一条，就同时从 `.github/workflows/ci.yml` 的 `--allow`
 里删掉该编号，并把上表那行划掉。清单应该只减不增；若确实要新增登记，
