@@ -4,6 +4,70 @@
 
 ---
 
+## [Unreleased] — 修 C5 签名时间戳非单调：高帧率下大规模遥测被误判重放（2026-10-11）
+
+### 根因
+
+实测暴露：真 PostgreSQL + staging profile + reject-unsigned=false 下
+`signing: verified=613 rejected=635`，1278 条拒绝全是
+`Timestamp 校验失败（疑似重放）`，且 timestamp 是同一个值。
+
+**发送端违反协议**：`MavlinkMessage#toFrame(..., signer)` 直接调
+`currentSigningTimestamp()` 取墙上时钟。timestamp 单位 10µs（1ms=100 tick），
+drone-sim 的 tick 间隔小于该分辨率 ⇒ 同 tick 内多帧拿到相同 timestamp ⇒
+接收端按"严格递增"判重放 ⇒ 遥测大面积被丢。
+
+规范原文（mavlink.io/en/guide/message_signing.html → Timestamp Handling）：
+
+> "The timestamp should be **incremented by one** on each message sent from a
+> particular link."
+> "the timestamp **may get ahead of GMT time** if the packet rate averages more
+> than 100,000 packets per second."
+
+即高帧率下时间戳**应该**跑在墙前，这是协议允许且预期的行为。所以这不是
+"绕过校验"，而是把发送端按协议实现。
+
+### 改了什么
+
+1. `MavlinkSigner`：加 per-stream 计数器，key = `(linkId, sysid, compid)`
+   三元组（与接收端流划分同一口径）。`nextTimestamp() = max(墙钟, 上一帧+1)`。
+   用 max 而非纯自增：重启后计数器归零，纯自增会发出远小于上一会话的时间戳
+   而被判重放；取 max 让新会话从墙钟起步（规范："startup 取 clock 与 stored
+   的较大者"，我们不持久化 stored 项）。
+2. `MavlinkMessage#toFrame(..., signer)`：改用 `nextTimestamp()`。
+3. `TimestampTracker`：接收端按官方口径把「<= 上一帧」放宽为「< 上一帧」
+   （官方原话只要求拒绝更旧的："rejected if it is smaller"）。
+   **回退仍然拒绝，重放防护不减弱。**
+
+### 验证
+
+- mavlink-core **478/478** 全绿（含 `MavlinkSigningVectorTest` 与官方 pymavlink
+  已知答案向量逐字节一致，证明签名算法本身未被破坏）
+- 新增 `SigningTimestampMonotonicTest`（8 例）：同 tick 内连发严格递增、
+  不同 sysid/compid/linkId 分流、不倒退到墙钟以下、`lastTimestamp` 可观测
+- **变异测试 1**：`nextTimestamp` 退回纯墙钟 ⇒ 3 例转红
+- **变异测试 2**：`TimestampTracker` 不再拒绝回退 ⇒ 6 例转红
+- 两个既有"重放"用例按官方口径改写：从"原样重发同一帧"改为"回带更旧 timestamp"
+  （那才是重放攻击的真实形态；原断言依赖"相等也拒"，已不成立）
+- **本地真 PG + staging 实测**（同一脚本、同一密钥、同样时长）：
+
+  | 指标 | 修复前 | 修复后 |
+  |---|---|---|
+  | verified | 613 | 1259 |
+  | rejected | 635 | **0** |
+  | Timestamp 校验失败 | 1278 | **0** |
+
+### 未做（有意）
+
+- 没做 timestamp 持久化（规范建议，属另一取舍；我们没有跨重启续会话的需求）
+- e2e-smoke 本轮仍未全绿，原因是 staging 的 `device-whitelist-enabled=true`
+  而本地脚本没先 provision 设备（1359 条白名单拒绝）——**与签名无关**，
+  是本地演练脚本缺一步；签名的 `rejected=0` 已证明本修复有效
+
+### 计数
+
+Java 4625 → **4633**（mavlink-core 470 → **478**，本轮 +8 例）。
+
 ## [Unreleased] — 空域预约持久化 + 时间口径升级（相对秒 → epoch 毫秒）（2026-10-10）
 
 > B5 交付时登记的边界："预约表仍是内存态（重启即空）——持久化属生产阶段"。本轮闭合，

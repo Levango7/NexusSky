@@ -53,15 +53,20 @@ class TimestampTrackerTest {
     }
 
     @Test
-    @DisplayName("时间戳相等必须被拒（旧实现用 >= 放行，是原帧重放）")
-    void equalTimestampRejected() {
+    @DisplayName("时间戳相等放行、回退才拒（官方口径：rejected if it is smaller）")
+    void equalTimestampAccepted_backwardsRejected() {
         TimestampTracker tracker = trackerAt(NOW);
         assertThat(tracker.check(LINK_ID, SYSID, COMPID, 700)).isTrue();
 
-        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 700)).isFalse();
-        // 被拒后基准不应被改写
-        assertThat(tracker.lastKnown(new TimestampTracker.StreamKey(LINK_ID, SYSID, COMPID)))
-                .isEqualTo(700);
+        // 相等：官方原话只要求拒绝"更旧"的（"Timestamp is older than the previous
+        // packet ... then it should be discarded"）。发送端历史实现直接取墙钟时，
+        // 同 tick 内多帧会拿到相同值；把相等也判重放曾导致大规模遥测被拒
+        // （实测 verified=613 / rejected=635，1278 条全是 Timestamp 校验失败）。
+        // 发送端现已按规范改为逐帧 +1，相等本不该出现，但接收端不为此买单。
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 700)).isTrue();
+
+        // 回退：仍然拒绝——重放防护不因上述放宽而减弱。
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, 699)).isFalse();
     }
 
     @Test
@@ -164,7 +169,10 @@ class TimestampTrackerTest {
         long now = MavlinkSigner.currentSigningTimestamp();
 
         assertThat(tracker.check(LINK_ID, SYSID, COMPID, now)).isTrue();
-        assertThat(tracker.check(LINK_ID, SYSID, COMPID, now)).isFalse();
+        // 相等放行（官方口径，见 equalTimestampAccepted_backwardsRejected 的说明）
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, now)).isTrue();
         assertThat(tracker.check(LINK_ID, SYSID, COMPID, now + 1)).isTrue();
+        // 回退仍然拒绝
+        assertThat(tracker.check(LINK_ID, SYSID, COMPID, now)).isFalse();
     }
 }
