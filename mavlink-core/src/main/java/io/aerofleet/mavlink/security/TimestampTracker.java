@@ -61,8 +61,13 @@ public class TimestampTracker {
         Long last = lastTimestamps.get(key);
 
         if (last != null) {
-            if (timestamp <= last) {
-                // 官方要求严格递增：相等或回退都按重放处理
+            if (timestamp < last) {
+                // 官方口径：只拒绝**更旧**的（"rejected if it is smaller"）。
+                // 相等的 timestamp 不是官方要求拒绝的形态；发送端历史实现直接取
+                // 墙钟时，同 tick 内多帧会拿到相同值，把它们全判重放曾导致大规模
+                // 遥测被拒。发送端现已按规范改为「每帧 +1」（MavlinkSigner#
+                // nextTimestamp），相等本不该再出现，但接收端不为此买单。
+                // 回退仍然拒绝——重放防护不因此减弱。
                 return false;
             }
         } else if (timestamp + MavlinkSigner.REPLAY_WINDOW_TICKS < now) {

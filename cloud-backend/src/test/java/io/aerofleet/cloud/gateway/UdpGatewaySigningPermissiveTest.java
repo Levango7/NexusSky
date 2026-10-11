@@ -207,13 +207,27 @@ class UdpGatewaySigningPermissiveTest {
     }
 
     @Test
-    @DisplayName("6. 重放：仍被拒（与姿态无关）")
+    @DisplayName("6. 重放：回带更旧 timestamp 仍被拒（与姿态无关）")
     void replay_isStillRejected() throws Exception {
-        byte[] frame = signedFrame(42, 0, SECRET);
+        MavlinkSigner signer = new MavlinkSigner(true, SECRET, 42 & 0xFF, false);
+        long now = MavlinkSigner.currentSigningTimestamp();
+        byte[] frame = droneHeartbeat().toFrame(42, 1, 0, signer).encodeV2();
         send(frame);
         verify(ingest, timeout(2000)).handle(any(MavlinkFrame.class));
 
-        send(frame); // 原样重发
+        // 用一个旧 50 秒（5,000,000 tick）的时间戳重签一帧：签名合法、timestamp 回退。
+        // 注意不能用 signer.nextTimestamp（它会保证递增），所以这里直接用旧 ts 签名。
+        byte[] body = new byte[frame.length - 13];
+        System.arraycopy(frame, 0, body, 0, body.length);
+        byte[] sig = signer.sign(body, 42 & 0xFF, now - 5_000_000L);
+        byte[] replay = io.aerofleet.mavlink.MavlinkFrame.ofSigned(
+                42, 1, 1, io.aerofleet.mavlink.messages.Heartbeat.ID,
+                io.aerofleet.mavlink.MavlinkMessageInfo.crcExtraOf(
+                        io.aerofleet.mavlink.messages.Heartbeat.ID),
+                new io.aerofleet.mavlink.messages.Heartbeat(0, 2, 6, 0,
+                        io.aerofleet.mavlink.enums.MavEnums.MAV_STATE_ACTIVE).encode(),
+                42 & 0xFF, now - 5_000_000L, sig).encodeV2();
+        send(replay);
         Thread.sleep(1200);
         verify(ingest, times(1)).handle(any(MavlinkFrame.class));
     }

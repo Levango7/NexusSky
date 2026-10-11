@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * MAVLink v2 消息签名器：与官方签名规范逐字节对齐（sha256_48）。
@@ -52,6 +53,24 @@ public class MavlinkSigner {
     private final byte[] secretKeyBytes;
     private final int linkId;
     private final boolean rejectUnsigned;
+
+    /**
+     * 每个逻辑流最后使用的签名时间戳。
+     *
+     * <p><b>为什么需要它</b>：官方规范要求「每发一帧，timestamp 比上一帧多 1」，
+     * 而不是「取当前墙上时间」。旧实现直接调 {@link #currentSigningTimestamp()}，
+     * 帧间隔小于 10µs 分辨率（1ms = 100 tick）时会拿到相同时间戳，接收端按
+     * 严格递增判定为重放，链路遥测被大面积丢弃。
+     *
+     * <p>规范对此有明确预期：「the timestamp may get ahead of GMT time if the
+     * packet rate averages more than 100,000 packets per second」——高帧率下
+     * 时间戳<b>应该</b>跑在墙前，这是协议允许且预期的行为。
+     *
+     * <p>key 用 {@link TimestampTracker.StreamKey}(linkId, sysid, compid) 三元组，
+     * 与接收端的流划分同一口径：不同 sysid/compid 的流互不干扰。
+     */
+    private final ConcurrentHashMap<TimestampTracker.StreamKey, Long> lastTimestamps =
+            new ConcurrentHashMap<>();
 
     /**
      * 通过配置构造签名器。
@@ -113,6 +132,52 @@ public class MavlinkSigner {
     /** 是否拒绝未签名消息（fail-closed 默认 true）。 */
     public boolean isRejectUnsigned() {
         return rejectUnsigned;
+    }
+
+    /**
+     * 取该逻辑流下一个可用的签名时间戳。
+     *
+     * <p>口径：{@code max(当前墙钟, 上一帧 + 1)}。
+     * <ul>
+     *   <li>常规帧率（间隔 > 10µs）=> 等于墙钟，行为与旧实现一致；</li>
+     *   <li>高帧率/同一 tick 内多帧 => 自动 +1 递增，正是规范描述的
+     *       "timestamp may get ahead of GMT time"。</li>
+     * </ul>
+     *
+     * <p><b>为什么用 max 而不是纯自增</b>：进程重启后自增计数器归零，若墙钟
+     * 已前进，纯自增会发出<b>远小于</b>上一会话的时间戳，被对端判为重放。
+     * 取 max 让"新会话从墙钟起步"，与规范「startup 取 clock 与 stored 的较大者」
+     * 同向（我们不持久化 stored 项，故只有 clock 一侧）。
+     *
+     * @param linkId     链路 ID
+     * @param sysid      源系统 ID
+     * @param componentId 源组件 ID
+     * @return 单调递增的时间戳（10µs 单位）
+     */
+    public long nextTimestamp(int linkId, int sysid, int componentId) {
+        TimestampTracker.StreamKey key =
+                new TimestampTracker.StreamKey(linkId, sysid, componentId);
+        long now = currentSigningTimestamp();
+        Long last = lastTimestamps.get(key);
+        long next = (last == null) ? now : Math.max(now, last + 1);
+        if (next > MAX_TIMESTAMP_48) {
+            // 48 位耗尽（ pract不可能，但避免静默回绕）
+            throw new IllegalStateException(
+                    "MAVLink signing timestamp exhausted 48-bit space for stream " + key);
+        }
+        lastTimestamps.put(key, next);
+        return next;
+    }
+
+    /** 该流当前最后使用的时间戳（null=未发过）；供测试与观测。 */
+    public Long lastTimestamp(int linkId, int sysid, int componentId) {
+        return lastTimestamps.get(
+                new TimestampTracker.StreamKey(linkId, sysid, componentId));
+    }
+
+    /** 已跟踪的流数量（测试用）。 */
+    public int trackedStreamCount() {
+        return lastTimestamps.size();
     }
 
     // ==================== 签名与验证 ====================

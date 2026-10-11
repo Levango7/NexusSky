@@ -2,6 +2,7 @@ package io.aerofleet.cloud.gateway;
 
 import io.aerofleet.cloud.telemetry.PendingAcks;
 import io.aerofleet.mavlink.MavlinkFrame;
+import io.aerofleet.mavlink.MavlinkMessageInfo;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.Heartbeat;
 import io.aerofleet.mavlink.security.MavlinkSignatureConfig;
@@ -157,6 +158,29 @@ class UdpGatewaySigningTest {
         return droneHeartbeat().toFrame(sysid, 1, seq, signer).encodeV2();
     }
 
+    /**
+     * 用**指定** timestamp 签一帧。
+     *
+     * <p>不能复用 {@link MavlinkMessage#toFrame(int,int,int,MavlinkSigner)}：它内部
+     * 走 {@link MavlinkSigner#nextTimestamp} 保证逐帧递增，造不出"回退"的帧。
+     * 重放用例需要的正是"签名合法、timestamp 回退"这一攻击形态。
+     */
+    private byte[] signedFrame(int sysid, int seq, String secret, long timestamp) {
+        MavlinkSigner signer = new MavlinkSigner(true, secret, sysid & 0xFF, true);
+        Heartbeat hb = droneHeartbeat();
+        byte[] payload = hb.encode();
+        // 先用占位签名构造临时帧，取"帧头至 CRC"的 12+len 字节作为签名输入
+        byte[] placeholder = new byte[MavlinkSigner.SIGNATURE_LENGTH];
+        byte[] all = MavlinkFrame.ofSigned(sysid, 1, seq, Heartbeat.ID,
+                MavlinkMessageInfo.crcExtraOf(Heartbeat.ID), payload,
+                sysid & 0xFF, timestamp, placeholder).encodeV2();
+        byte[] frameBytes = java.util.Arrays.copyOf(all, 12 + payload.length);
+        byte[] sig = signer.sign(frameBytes, sysid & 0xFF, timestamp);
+        return MavlinkFrame.ofSigned(sysid, 1, seq, Heartbeat.ID,
+                MavlinkMessageInfo.crcExtraOf(Heartbeat.ID), payload,
+                sysid & 0xFF, timestamp, sig).encodeV2();
+    }
+
     /** 篡改：动 13 字节签名块的最后一个字节（CRC 在签名块之前，仍然合法）。 */
     private byte[] tamperSignature(byte[] frame) {
         byte[] copy = frame.clone();
@@ -246,8 +270,10 @@ class UdpGatewaySigningTest {
         send(frame);
         verify(ingest, timeout(2000)).handle(any(MavlinkFrame.class));
 
-        // 原样重发：签名仍合法，但 timestamp 与上一帧相同 → 官方口径判重放
-        send(frame);
+        // 重放的真实形态：回带一个**更旧**的 timestamp。签名合法，但 timestamp
+        // 回退 ⇒ 按官方口径（Timestamp is older than the previous packet）拒绝。
+        // 不再"原样重发同一帧"：接收端已按官方改为"相等放行、仅回退拒绝"。
+        send(signedFrame(42, 1, SECRET, MavlinkSigner.currentSigningTimestamp() - 5_000_000L));
         Thread.sleep(1200);
         verify(ingest, times(1)).handle(any(MavlinkFrame.class));
     }
