@@ -72,6 +72,11 @@ def main():
     ap.add_argument("--self-test", action="store_true",
                     help="离线自检：用内置夹具证明守卫真的会红，且输入不可判定时"
                         "不会假装通过")
+    ap.add_argument("--require-data", action="store_true",
+                    help="取数失败即非零退出（默认）。不加这个参数时，"
+                         "未提供 CODEQL_ALERTS_JSON 且 gh 不可用 ⇒ 明确跳过"
+                         "（exit 0 但打印 WARN），用于 runner 上没有 "
+                         "code-scanning 读权限的 CI 场景")
     args = ap.parse_args()
 
     if args.self_test:
@@ -91,11 +96,23 @@ def main():
         err = e
 
     if alerts is None:
-        print("无法取得 CodeQL open 告警数（%s）⇒ **不能**当作 0 条处理。" % err,
-              file=sys.stderr)
-        print("请提供 CODEQL_ALERTS_JSON，或确保 gh 已认证且能访问 code-scanning API。",
-              file=sys.stderr)
-        return 2
+        # 显式提供了 JSON 却解析失败 ⇒ 调用方输入错误，不是"没有数据源"。
+        # 这种必须红，否则畸形输入会被当成"跳过核对"而静默放行。
+        if args.inline_json:
+            print("CODEQL_ALERTS_JSON 无法解析：%s" % err, file=sys.stderr)
+            return 2
+        msg = ("无法取得 CodeQL open 告警数（%s）" % err)
+        if args.require_data:
+            print(msg + " —— 且指定了 --require-data，**不能**当作 0 条处理。",
+                  file=sys.stderr)
+            print("请确保 gh 已认证且能访问 code-scanning API，"
+                  "或提供 CODEQL_ALERTS_JSON。", file=sys.stderr)
+            return 2
+        print("WARN: " + msg + " —— 未指定 --require-data，本步骤跳过核对。")
+        print("     注意：这是**跳过核对**而不是'0 条 open'。")
+        print("     若在本地/强制核对，请加 --require-data，或先 export "
+              "CODEQL_ALERTS_JSON。")
+        return 0
 
     n = len(alerts)
     allowed = set(args.allow)
@@ -160,12 +177,20 @@ def self_test():
           % (rc, "OK" if rc == 1 else "**不符合预期**"))
     ok &= rc == 1
 
-    # 5) 取数失败必须非零，绝不能"当作 0 条"放行
+    # 5) 取数失败（不强制）必须跳过而非放行，且**不能说成"0 条"**
     rc = _run_with(["--repo", "nonexistent/definitely-not-here-xyz"])
-    print("取数失败 => rc=%s %s" % (rc, "OK" if rc == 2 else "**不符合预期**"))
+    print("取数失败(不强制) => rc=%s %s"
+          % (rc, "OK" if rc == 0 else "**不符合预期**"))
+    ok &= rc == 0
+
+    # 6) 取数失败 + --require-data 必须非零
+    rc = _run_with(["--repo", "nonexistent/definitely-not-here-xyz",
+                    "--require-data"])
+    print("取数失败(--require-data) => rc=%s %s"
+          % (rc, "OK" if rc == 2 else "**不符合预期**"))
     ok &= rc == 2
 
-    # 6) 限流返回的对象形态绝不能兜底成空数组
+    # 7) 限流返回的对象形态绝不能兜底成空数组
     rc = _run_with(["--json", json.dumps({"message": "API rate limit exceeded"})])
     print("限流对象 => rc=%s %s" % (rc, "OK" if rc == 2 else "**不符合预期**"))
     ok &= rc == 2

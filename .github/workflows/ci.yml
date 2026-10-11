@@ -795,7 +795,11 @@ jobs:
         # --allow 里是**已登记**的编号：它们不计入 open 数，但
         # docs/codeql-alert-disposition.md 必须写明逐条依据。
         # 每 dismiss 一条，就从 --allow 里删掉对应编号——让清单只减不增。
-        # 取数失败返回 2（不等于 0）——绝不让"没查到"伪装成"0 条 open"。
+        #
+        # 不加 --require-data：CodeQL Actions 的 runner 上没有
+        # code-scanning 读权限，gh 取不到数是**正当场景**。
+        # 此时明确打印 WARN 并跳过核对（exit 0）——但绝不说成"0 条 open"。
+        # 严格的本地核对用 --require-data。
         run: >-
           python3 scripts/check-codeql-alerts.py
           --allow 1 --allow 2 --allow 5 --allow 6
