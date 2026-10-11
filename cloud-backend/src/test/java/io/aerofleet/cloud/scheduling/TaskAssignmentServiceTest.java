@@ -7,6 +7,7 @@ import io.aerofleet.mavlink.messages.TaskStatusMsg;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import io.aerofleet.cloud.api.ws.TelemetryWebSocketHandler;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -19,6 +20,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -34,12 +36,18 @@ class TaskAssignmentServiceTest {
 
     private StubRegistry registry;
     private TaskAssignmentService service;
+    private ConflictAvoidanceService conflictService;
+    private ConflictScanService conflictScanService;
+
     private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
 
     @BeforeEach
     void setUp() {
         registry = new StubRegistry();
-        service = new TaskAssignmentService(registry, eventPublisher);
+        conflictService = new ConflictAvoidanceService();
+        io.aerofleet.cloud.api.ws.TelemetryWebSocketHandler ws = mock(io.aerofleet.cloud.api.ws.TelemetryWebSocketHandler.class);
+        conflictScanService = new ConflictScanService(registry, conflictService, eventPublisher, ws);
+        service = new TaskAssignmentService(registry, eventPublisher, conflictService, conflictScanService);
     }
 
     @Test
@@ -131,6 +139,69 @@ class TaskAssignmentServiceTest {
         AssignmentResult result = service.assignTask(req);
 
         assertThat(result.getAssignedSysid()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("分配即自动预约：assignTask 成功后在预约表可查到（30min 窗口、坐标中心）")
+    void assignTaskAutoReserves() {
+        DroneSnapshot d = onlineDrone(1, 80);
+        registry.add(d);
+        double now = System.currentTimeMillis();
+        TaskRequest req = new TaskRequest("ar-1", "SURVEY", 5, 30.5, 120.5, 100.0);
+
+        AssignmentResult result = service.assignTask(req);
+
+        assertThat(result.isSuccess()).isTrue();
+        List<ConflictAvoidanceService.Reservation4D> reservations = conflictService.getReservations(1);
+        assertThat(reservations).hasSize(1);
+        assertThat(reservations.get(0).lat).isEqualTo(30.5);
+        assertThat(reservations.get(0).radius).isGreaterThan(0);
+    }
+
+    @Test
+    @DisplayName("自动预约被拒为软约束：分配仍成功 + AIRSPACE 冲突帧发布（不硬拦截）")
+    void autoReserveRejectionIsSoft() {
+        DroneSnapshot d1 = onlineDrone(1, 80);
+        DroneSnapshot d2 = onlineDrone(2, 90);
+        registry.add(d1, d2);
+
+        // 机 1 先占块（任务在 30.5, 120.5）并进入执行态——
+        // 否则 assignTask 不看已有分配，两个任务会落到同一架机（"自己撞自己"
+        // 不冲突是预约表的设计：同机可连续占相邻块）
+        TaskRequest first = new TaskRequest("ar-first", "SURVEY", 5, 30.5, 120.5, 100.0);
+        assertThat(service.assignTask(first).isSuccess()).isTrue();
+        service.startTask("ar-first");
+
+        // 机 2 的新任务落点相同 → 自动预约冲突；分配不应被硬拦截
+        ArgumentCaptor<MavlinkMessageEvent> captor =
+                ArgumentCaptor.forClass(MavlinkMessageEvent.class);
+        TaskRequest second = new TaskRequest("ar-second", "SURVEY", 5, 30.5001, 120.5001, 100.0);
+        AssignmentResult result = service.assignTask(second);
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getAssignedSysid()).isEqualTo(1);
+        // 先到者的预约保留（软约束不动它），后到者被拒（不硬拦截分配）
+ // 先到任务分给机 2（评分高），第二个任务改落机 1——只有跨机才构成预约冲突
+        // （评分选哪架机不确定——电量更高的会被先来任务选中，故只断总数）
+        int totalReservations = conflictService.getReservations(1).size()
+                + conflictService.getReservations(2).size();
+        assertThat(totalReservations).isEqualTo(1);
+        // AIRSPACE 帧已发布（30049，AIRSPACE 静态枚举 ordinal=0）
+        verify(eventPublisher, atLeastOnce()).publishEvent(captor.capture());
+        boolean airspacePublished = captor.getAllValues().stream()
+                .anyMatch(e -> e.getMsgId() == io.aerofleet.mavlink.messages.ConflictAlertMsg.ID);
+        assertThat(airspacePublished).isTrue();
+    }
+
+    @Test
+    @DisplayName("无目标坐标的任务跳过自动预约（不占块、不告警）")
+    void autoReserveSkippedWithoutPosition() {
+        DroneSnapshot d = onlineDrone(1, 80);
+        registry.add(d);
+        TaskRequest req = new TaskRequest("ar-nopos", "SURVEY", 5, Double.NaN, Double.NaN, 100.0);
+
+        assertThat(service.assignTask(req).isSuccess()).isTrue();
+        assertThat(conflictService.getReservations(1)).isEmpty();
     }
 
     @Test

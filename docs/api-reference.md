@@ -975,6 +975,12 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
   （冲突时同时发布 `ConflictAlertMsg(30049)` 的 **AIRSPACE** 类型帧——空域预约冲突是该协议枚举值的唯一生产者）；400 - 缺少必填字段
 - **持久化**：`aerofleet.scheduling.reservation.persist=true` 时预约落库（V26 `airspace_reservations`），
   重启恢复未过期预约并清理过期；false（默认）= 纯内存（与 C4 device-registry.persist 同模式）
+- **自动预约（首个生产调用者）**：任务分配成功即自动占块——
+  `assignTask`/`assignTasks` 两条路径均生效。窗口=分配时刻起固定时长
+  （`aerofleet.scheduling.reservation.auto-window-ms`，默认 30 分钟，到期自动清理），
+  半径以任务坐标为中心（`aerofleet.scheduling.reservation.auto-radius-m`，默认 500m）。
+  **软约束**：冲突不硬拦截分配（硬拦截要把预约检查塞进评分主路径），仅发
+  AIRSPACE 冲突帧上态势面——冲突先可见，是否收紧由运营数据决定
 
 **GET /api/v1/scheduling/reservations**
 - 响应: 200 - `{count, reservations:[{sysid,lat,lon,alt,startTime,endTime,radius}]}`（时间同为 epoch 毫秒）
