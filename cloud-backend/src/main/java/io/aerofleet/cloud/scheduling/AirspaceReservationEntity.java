@@ -54,13 +54,29 @@ public class AirspaceReservationEntity {
     @Column(name = "created_at", nullable = false)
     private long createdAt;
 
+    /**
+     * 归属租户（可空——null 表示全局/未归属）。
+     * <p>
+     * 语义是归属记录（审计面），<b>不参与冲突判定</b>——空域是物理的，
+     * 跨租户同样冲突，检测始终全局。
+     */
+    @Column(name = "tenant_id")
+    private Integer tenantId;
+
     protected AirspaceReservationEntity() {
     }
 
     public AirspaceReservationEntity(int ownerSysid, double lat, double lon, double alt,
                                      double startMs, double endMs, double radiusM,
                                      long createdAt) {
+        this(ownerSysid, lat, lon, alt, startMs, endMs, radiusM, createdAt, null);
+    }
+
+    public AirspaceReservationEntity(int ownerSysid, double lat, double lon, double alt,
+                                     double startMs, double endMs, double radiusM,
+                                     long createdAt, Integer tenantId) {
         this.ownerSysid = ownerSysid;
+        this.tenantId = tenantId;
         this.lat = lat;
         this.lon = lon;
         this.alt = alt;
@@ -70,11 +86,11 @@ public class AirspaceReservationEntity {
         this.createdAt = createdAt;
     }
 
-    /** 内存预约 → 实体（落库口径）。 */
+    /** 内存预约 → 实体（落库口径；tenantId 由调用方从认证上下文取——内存表不带租户）。 */
     public static AirspaceReservationEntity from(ConflictAvoidanceService.Reservation4D r,
-                                                 int ownerSysid, long nowMs) {
+                                                 int ownerSysid, long nowMs, Integer tenantId) {
         return new AirspaceReservationEntity(ownerSysid, r.lat, r.lon, r.alt,
-                r.startTime, r.endTime, r.radius, nowMs);
+                r.startTime, r.endTime, r.radius, nowMs, tenantId);
     }
 
     /** 实体 → 内存预约（恢复口径）。 */
@@ -92,5 +108,9 @@ public class AirspaceReservationEntity {
 
     public double getEndMs() {
         return endMs;
+    }
+
+    public Integer getTenantId() {
+        return tenantId;
     }
 }

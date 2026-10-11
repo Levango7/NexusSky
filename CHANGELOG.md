@@ -70,6 +70,18 @@ GB 46750 的运行识别 deadline。）
 
 Java 4613 → **4619**（cloud-backend 2587 → **2593**，本轮 +6 例）。前端 245 不变。
 
+## [Unreleased] — 预约运营面补全：主动释放端点 + 归属租户列（V27）（2026-10-11）
+
+> B5 预约持久化时登记的边界："主动释放单个预约未做（按过期清理已覆盖主要场景）；
+> 预约的租户归属未建模"。两条一并闭合。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| — | **释放端点** | `DELETE /api/v1/scheduling/reservations/{sysid}`（OPERATOR）——释放该机全部预约（清内存+删库+返回条数）。运营场景：任务提前完成/撤防，时空块不必等窗口过期。repo 的 `deleteByOwnerSysid` 自 B5 持久化起已备，本批接线 |
+| — | **归属租户列（V27）** | `airspace_reservations.tenant_id`（可空，`ALTER TABLE ADD COLUMN`）；落库时从 `TenantContext` 取。**语义是审计记录，不参与冲突判定**——空域是物理的，跨租户同样冲突，检测始终全局 |
+
+**测试**：ConflictAvoidanceServiceTest +2（释放按机主清内存+删库+别机不动+无预约 0；落库带租户）；SchedulingControllerTest +1（释放端点全链：释放→快照→无预约宽容）；cloud-backend 全量 **2602/0**；全 reactor **4628/0**；H2+`ddl-auto=validate` 演练通过（V27 与实体一致）。
+
 ## [Unreleased] — GB28181 事件订阅路由（B1 的 events 收尾）（2026-10-11）
 
 > B1（PTZ/RTSP 按厂商路由）时登记："事件订阅端点仍直连 OnvifClient——涉及订阅 handle

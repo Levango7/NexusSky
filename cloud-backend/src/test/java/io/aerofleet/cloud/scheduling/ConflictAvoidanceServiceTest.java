@@ -458,6 +458,49 @@ class ConflictAvoidanceServiceTest {
     }
 
     @Test
+    @DisplayName("释放按机主：清内存 + 删库 + 返回条数；无预约返回 0")
+    void releaseReservationsByOwner() {
+        AirspaceReservationRepository repo = mock(AirspaceReservationRepository.class);
+        ConflictAvoidanceService persisting = new ConflictAvoidanceService();
+        ReflectionTestUtils.setField(persisting, "persist", true);
+        ReflectionTestUtils.setField(persisting, "reservationRepository", repo);
+
+        double now = System.currentTimeMillis();
+        persisting.tryReserve(5, 31.0, 121.0, 100.0, now, now + 60_000, 50);
+        persisting.tryReserve(5, 31.0, 121.1, 100.0, now, now + 60_000, 50);
+        persisting.tryReserve(6, 32.0, 122.0, 100.0, now, now + 60_000, 50);
+
+        assertThat(persisting.releaseReservations(5)).isEqualTo(2);
+        assertThat(persisting.getReservations(5)).isEmpty();
+        assertThat(persisting.getReservations(6)).isNotEmpty();   // 别机的预约不动
+        verify(repo, times(1)).deleteByOwnerSysid(5);
+        verify(repo, never()).deleteByOwnerSysid(6);
+        assertThat(persisting.releaseReservations(99)).isZero();  // 无预约
+    }
+
+    @Test
+    @DisplayName("落库带归属租户（TenantContext 取值；内存表不带租户）")
+    void persistRecordsTenantId() {
+        AirspaceReservationRepository repo = mock(AirspaceReservationRepository.class);
+        ArgumentCaptor<AirspaceReservationEntity> saved =
+                ArgumentCaptor.forClass(AirspaceReservationEntity.class);
+        ConflictAvoidanceService persisting = new ConflictAvoidanceService();
+        ReflectionTestUtils.setField(persisting, "persist", true);
+        ReflectionTestUtils.setField(persisting, "reservationRepository", repo);
+
+        Integer tenant = 42;
+        io.aerofleet.cloud.security.TenantContext.setTenantId(tenant);
+        try {
+            double now = System.currentTimeMillis();
+            persisting.tryReserve(7, 30.0, 120.0, 100.0, now, now + 30_000, 50);
+        } finally {
+            io.aerofleet.cloud.security.TenantContext.clear();
+        }
+        verify(repo, times(1)).save(saved.capture());
+        assertThat(saved.getValue().getTenantId()).isEqualTo(42);
+    }
+
+    @Test
     @DisplayName("纯内存（persist=false）：不触库，行为与升级前一致")
     void memoryOnlyDoesNotTouchRepository() {
         AirspaceReservationRepository repo = mock(AirspaceReservationRepository.class);
