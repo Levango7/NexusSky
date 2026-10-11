@@ -22,7 +22,7 @@
 - **真实卫星接入预留**：天通/铱星/星链三种卫星通信系统占位实现类，统一 SatelliteLink
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
-   4642 单测全绿（Java surefire 实测；前端已有 245 例 vitest——api.js 会话/预算
+   4644 单测全绿（Java surefire 实测；前端已有 245 例 vitest——api.js 会话/预算
     档位/WS URL、组件逻辑、孪生同步换算与分桶、M11 决策三帧归一化；Playwright
     真浏览器 E2E 4 例已于 2026-10-04 补齐，见 docs/devops-enhancement-plan.md CI7）
   > 第六轮（2026-10-02）明细见 CHANGELOG「Unreleased — 第六轮审查」。此前此处写
@@ -338,8 +338,10 @@
      恢复值**最多滞后一个节流周期**。已知局限：kill -9/OOM 不经历离线转换，
      最近一次 mode/armed 会丢。
 
-  ② **C5 签名出厂默认关闭（有意决策，非遗漏）**：`mavlink.signing.enabled`
-     四个 profile 均已显式声明但保持 `false`。打开它是**机队范围的行为变更**——
+  ② **C5 签名出厂默认关闭（有意决策，非遗漏）；staging 已收紧为 strict，prod 仍关闭**：
+     `mavlink.signing.enabled` 四个 profile 均已显式声明；**staging 自 2026-10-11 起为
+     `true` + `reject-unsigned=true`（第二步已完成）**，prod 保持 `false`（第三步，需单独拍板）。
+     打开 prod 是**机队范围的行为变更**——
      MAVLink v2 签名块 `linkId(1)|timestamp(6)|signature(6)` **没有 key id 字段**，
      打开即硬切换、无宽限期，未换密钥设备的帧会被整体拒绝。验签能力**本就
      fail-closed**：`MavlinkParser` 完整解析 13 字节签名块，
@@ -347,8 +349,12 @@
      timestamp 防重放（`UdpGatewaySigningTest` 8 例 + 变异测试）。
      密钥轮换端点已就位（`SigningKeyStoreWriter` 原子落库 +
      `GET/POST /api/v1/mavlink/signing/*`），**刻意不提供宽限期**——协议上做不到。
-     打开的正确顺序：先让 drone-sim 侧签名（CI 已在跑，rejectUnsigned=false）→
-     staging 观察 `signingStats` → 再收紧 `reject-unsigned` → 最后才动 prod。
+     正确顺序的三步现状：**①** drone-sim 侧签名（CI 每次 flight e2e 都走签名帧通路）
+     ✅ → **②** staging 观察 `signingStats`（实测 `verified=1259 rejected=0`，且先修掉了
+     timestamp 非单调造成的 635 条误拒）✅ → **③** staging 收紧 `reject-unsigned`
+     ✅（2026-10-11）→ **④** 动 prod ⬜ **仍待拍板**。
+     这三步的姿态被 `MavlinkSigningConfigurationTest` 的两个用例钉死
+     （`stagingProfileAssemblesStrict` / `prodProfileStaysDisabled`），改动会被 CI 拦下。
 
   ③ **C1/C2 的对端都是模拟器**（`regulator-sim` / drone-sim），未与真实 UOM 平台联调。
 
@@ -452,6 +458,6 @@ M7 ──► E4(5G-A通感)
 1. 每个里程碑走完整 SDD；单个里程碑内尽量原子化（2–4h/任务）。
 2. 代码严格落在已有模块边界内：`cloud-backend`(调度/API)、`drone-sim`(载荷/执行)、
    `mavlink-core`(新消息)、`link-sim`(中继/链路)、`gcs-web`(观察)。
-3. 每个里程碑必须有回归基线：现有 4642 单测（Java） + e2e 脚本不回归。
+3. 每个里程碑必须有回归基线：现有 4644 单测（Java） + e2e 脚本不回归。
 4. 边界诚实声明：工作量 = 协议抽象 + 假数据源，非真硬件实现。
 5. **MAVLink msgId 全局唯一且避开官方分配带**：2026-10 治理搬迁后自定义消息统一使用私有方言段 **30000-30099**（common.xml 官方拥有 msgId 300-10000 分配带，旧 420-483 段位于其中，420/437/440 已与官方 RADIO_RC_CHANNELS / AVAILABLE_MODES_MONITOR / ILLUMINATOR_STATUS 实锤冲突，全部 51 条已等差平移 +29580）。已分配：30000-30021(M0a-M4)、30030-30047(M5-M9)、30048-30056(M10-M13)、30057-30059(4a 安防报警)、30060-30063(P2 灾害应急通讯组网扩展)；新增从 **30064+** 起分配，30064-30099 为增长预留。**自定义 MAV_CMD 同步治理（2026-10）**：8 条自定义命令（原 310-312/320-322/420/421）已搬入私有区命令子段 **30080-30087**（命令与消息分属不同命名空间，数值不冲突；分段纯为日志可读性，常量收口 `MavEnums.MAV_CMD_NEXUS_*`，守卫测试防回退）。冲突防护：`scripts/mavlink-compatibility-check.py --self-test` 内嵌 392 个官方已分配 msgId 快照逐条核对。Phase 2 预估 msgId 区间：C2(RID) 使用 `OPEN_DRONE_ID_*` 官方消息族（msgId 12900-12999，MAVLink 官方分配），C5(signing) 使用 MAVLink v2 签名帧（不占新 msgId），其余 C/F/E 系列按需从 30064+ 分配。

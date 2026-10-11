@@ -11,8 +11,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -168,6 +170,71 @@ class MavlinkSigningConfigurationTest {
                     assertThat(messageChain(context.getStartupFailure()))
                             .contains("non-existent file");
                 });
+    }
+
+    // ==================== 部署姿态：profile 文件本身 ====================
+    //
+    // 上面所有用例都是通过 withPropertyValues 手工喂值的——它们证明的是
+    // "装配逻辑对"，证明不了"**部署时真的是这个姿态**"。而 C5 恰恰栽在这里：
+    // 第一步（staging 开着签名但不拒未签名）落地时没有任何东西告诉后来人
+    // "现在 staging 是有意 permissive 的"，于是它看起来像 bug、看起来像默认值忘了改。
+    // 下面两个用例直接把 profile 文件钉死，让改姿态必须是一个显式的、被审到的一步。
+
+    @Test
+    @DisplayName("staging profile 装配成 strict（C5 第二步收紧后的实际部署姿态）")
+    void stagingProfileAssemblesStrict() throws IOException {
+        Properties staging = classpathProperties("application-staging.properties");
+
+        assertThat(staging.getProperty("mavlink.signing.enabled"))
+                .as("staging 必须开着签名，否则下面装配出的 strict 毫无意义")
+                .isEqualTo("true");
+        assertThat(staging.getProperty("mavlink.signing.reject-unsigned"))
+                .as("C5 第二步：staging 已从 permissive 收紧为 fail-closed，未签名帧必须被拒。"
+                        + "退回 false 是一次**行为变更**（未签名流量会重新在明文状态下被放行），"
+                        + "不是调参——要改请连带改 CHANGELOG 与 ROADMAP 的三步表述。")
+                .isEqualTo("true");
+
+        // 不只读字面值：把这两个值真喂进上下文，确认它们装配出的签名器确实是 strict。
+        // 读字面值只能证明"文件写了 true"，这段能证明"true 真的传导到了 MavlinkSigner"。
+        runner.withPropertyValues(
+                        "mavlink.signing.enabled=" + staging.getProperty("mavlink.signing.enabled"),
+                        "mavlink.signing.reject-unsigned=" + staging.getProperty("mavlink.signing.reject-unsigned"),
+                        "mavlink.signing.secret-key=" + SECRET)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    MavlinkSigner signer = context.getBean(MavlinkSignerFactory.class).signerFor(1);
+                    assertThat(signer.isEnabled()).isTrue();
+                    assertThat(signer.isRejectUnsigned())
+                            .as("staging 的 reject-unsigned=true 必须真的传导到签名器，"
+                                    + "否则配置文件改了、行为没变，是最难查的那种假修复")
+                            .isTrue();
+                });
+    }
+
+    @Test
+    @DisplayName("prod profile 仍是 enabled=false（第三步需单独拍板，不在本轮范围）")
+    void prodProfileStaysDisabled() throws IOException {
+        Properties prod = classpathProperties("application-prod.properties");
+
+        assertThat(prod.getProperty("mavlink.signing.enabled"))
+                .as("prod 打开签名是机队范围的行为变更（签名块无 key id ⇒ 硬切换、无宽限期），"
+                        + "约定需单独拍板。有人顺手改成 true 时，这里会转红并要求先把拍板过程写下来。")
+                .isEqualTo("false");
+        assertThat(prod.getProperty("mavlink.signing.reject-unsigned"))
+                .as("prod 的 reject-unsigned 保持 fail-closed 默认 true，"
+                        + "这样第三步一旦翻开关就是 strict，不需要连着改两个值")
+                .isEqualTo("true");
+    }
+
+    /** 读 classpath 上的 properties 文件（profile 文件在 main/resources，测试可见）。 */
+    private static Properties classpathProperties(String name) throws IOException {
+        try (InputStream in = MavlinkSigningConfigurationTest.class.getClassLoader()
+                .getResourceAsStream(name)) {
+            assertThat(in).as("classpath 上找不到 %s——profile 文件被挪走或改了名？", name).isNotNull();
+            Properties props = new Properties();
+            props.load(in);
+            return props;
+        }
     }
 
     /** 拼接异常因果链上的所有消息（Spring 的 BeanCreationException 嵌套格式不保证）。 */

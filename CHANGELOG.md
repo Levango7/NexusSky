@@ -4,6 +4,116 @@
 
 ---
 
+## [Unreleased] — C5 第二步：staging 收紧为 strict + 补齐部署侧注入链路 + 签名 e2e 首次进 CI（2026-10-11）
+
+C5 的三步里，第一步（staging 开着签名但不拒未签名）早已落地，但后面卡住了。
+本轮一次推完剩下的可做部分：**部署侧注入链路**（硬前提）、**staging 收紧**（第二步）、
+**签名 e2e 进 CI**（补上"没人验证它在工作"的缺口），外加一处文档漂移订正。
+prod 打开签名（第三步）**未动**，仍需单独拍板。
+
+### ① 部署侧此前根本没有签名注入落点（新发现）
+
+比"收紧 staging"更朴素的前提问题此前没人提：
+**`MAVLINK_SIGNING_SECRET_KEY` 在任何部署清单里都没有落点**——
+`deploy/k8s/secret.yaml`、helm values/templates、`deploy/docker/docker-compose.yml`
+全都没有它。也就是说"往 prod 打开签名"在当时**于部署侧无处可填**，
+配置里的 `${MAVLINK_SIGNING_SECRET_KEY}` 永远拿不到值。
+
+更糟的是 `scripts/check-deploy-secrets.sh` 的泄漏扫描只认 `AEROFLEET_` 前缀，
+即便有人把真口令写进清单也扫不出来。
+
+现补齐：
+
+| 文件 | 改动 |
+|---|---|
+| `deploy/helm/nexussky/values.yaml` | 新增 `mavlinkSigning` 块（enabled / rejectUnsigned / secretKey / keyStorePath） |
+| `deploy/helm/.../templates/secret.yaml` | opt-in 渲染口令/密钥库；开启时口令仍是占位串 ⇒ helm 阶段直接 fail |
+| `deploy/helm/.../templates/configmap.yaml` | opt-in 渲染 `MAVLINK_SIGNING_ENABLED` / `_REJECT_UNSIGNED` |
+| `deploy/k8s/configmap.yaml` | 加**注释掉**的开签名示例 |
+| `deploy/k8s/secret.yaml` | 加**注释掉**的口令示例 |
+| `deploy/docker/docker-compose.yml` | 4 个变量，具名缺省 |
+| `scripts/check-deploy-secrets.sh` | 前缀扩到 `MAVLINK_SIGNING_*`；新增方向 D/E/F |
+
+**为什么是 opt-in 而不是无条件渲染**：env 的优先级高于 profile 专属 properties
+（实测属性源顺序 `systemProperties > systemEnvironment > Config resource`），
+所以若 chart 在关闭时还无条件渲染 `MAVLINK_SIGNING_ENABLED=false`，
+一个用默认 values 部署 staging 的 release 会把 staging 自带的 `enabled=true`
+**静默改成 false**。安全姿态不该由「忘了配某个值」决定。
+
+**顺带实测的一条承重假设**（不是靠记忆）：上面那个属性源顺序是真的，
+`reject-unsigned` → `MAVLINK_SIGNING_REJECT_UNSIGNED` 的 relaxed binding 也成立。
+同时发现**空字符串会让 `@Value("${...:false}")` 绑定失败而非回落默认值**——
+这就是清单里开关一律给具名缺省、绝不注入空值的原因。
+
+### ② staging 收紧为 strict（C5 第二步）
+
+`application-staging.properties`：`reject-unsigned` `false` → `true`。
+
+依据是第一步的实测结论：真 PostgreSQL + staging profile 下 `signing: verified=1259
+rejected=0`（先修掉 timestamp 非单调造成的 635 条误拒），即在网端**已全量在签**，
+没有靠「不拒未签名」兜底的对象。停在第一步的话，签名只挡住了"签错/被篡改"，
+没挡住"没签"——未签名流量是在明文状态下被放行的。
+
+⚠️ **收紧是硬切换**：签名块 `linkId(1)|timestamp(6)|signature(6)` 没有 key id 字段，
+不存在新旧密钥并存的宽限期。未配密钥的设备下行帧会被整体丢弃（遥测中断）。
+
+⚠️ 收紧后 `signingStats.unsigned` 计数恒为 0（未签名帧直接计入 `rejected`）。
+定位"谁还在发未签名帧"要改看 `WARN 拒绝未签名帧：sysid=<id> msgId=<id>`。
+
+新增 `MavlinkSigningConfigurationTest` 两个用例把姿态钉死：
+
+- `stagingProfileAssemblesStrict` — 读 `application-staging.properties` 实际字面值，
+  **并把它们真喂进上下文**，确认 `true` 真的传导到 `MavlinkSigner.isRejectUnsigned()`。
+  只读字面值只能证明"文件写了 true"，那段能证明"行为真的变了"。
+- `prodProfileStaysDisabled` — prod 仍是 `enabled=false`。有人顺手翻开关时 CI 会转红。
+
+变异测试：把 staging 退回 `false` → 前者转红；把 prod 改成 `true` → 后者转红。
+
+### ③ 签名 e2e 首次进 CI
+
+`scripts/e2e-signing.ps1`（884 行 / 6 场景）**从未被任何 workflow 调用过**
+（`docs/roadmap-c-drift.md:66` 早就登记了）。现接为 `e2e-signing` job。
+
+接之前**必须先改跨平台**，否则是必然失败而非 flaky：
+
+| 问题 | 后果 | 处理 |
+|---|---|---|
+| `$env:TEMP` ×16 | Linux 上该变量不存在，`Join-Path` 退化成相对路径、日志落进仓库目录 | 收敛到 `$TempDir`（TEMP → TMPDIR → `GetTempPath()`） |
+| `-WindowStyle Hidden` ×15 | 该参数只在 Windows 的 `Start-Process` 上存在，Linux 上直接报"找不到参数" | 删除 |
+| `Get-CimInstance Win32_Process` ×2 | Windows-only cmdlet。**静默失败比报错更糟**：会让"清理上个场景残留"变成什么都不做，端口被占，表现为莫名其妙的超时 | 加 `$IsWindows` 分支，Linux 走 `ps` |
+
+带 `continue-on-error` 以**观察模式**接入（与 `e2e-capability` 同款先例）：
+脚本此前只在本机 Windows 跑过，Linux CI 连续复跑的稳定性未知。
+若干次 run 全绿后删掉这行即转为硬门禁，删标记 = "跑过"升级为"必须通过"，不涉脚本改动。
+
+**Windows 回归验证**（改完脚本后本机实跑）：6 场景 38 项断言全 PASS
+（正常签名 / 篡改检测 / 未签名拒绝 / 密钥不匹配 / 多机密钥分发 / 签名关闭兼容）。
+
+### ④ 文档漂移订正
+
+- `README.md`：「默认 false 且**任何 profile 都未配置**」——双重过时（四个 profile 早已显式声明，staging 早已是 true）
+- `ROADMAP.md`：「四个 profile 均已显式声明但保持 `false`」与 staging=true 冲突；三步表述改为标出①②已完成、④待拍板
+- `docs/roadmap-c-drift.md`：`MavlinkSignatureConfig:33` → 实为 `:25`（`enabled` 在 25 行，33 行是 `key-store-path`）；e2e-signing 与"没改 staging"两处已被推翻的记载更新
+- `docs/security-design.md` §7.5 三处已被代码推翻的断言用删除线标出并给出正解：
+  "没有轮换端点"（PR #23 已补）、"Parser 层只切帧不验签"（`MavlinkParser.java:77,106-118` 完整解析）、
+  "时间戳 1 毫秒粒度需调用方自增"（2026-10-11 改 per-stream `nextTimestamp()`）
+- `docs/PRODUCT-POSITIONING.md`：「无轮换端点」过时
+
+### 未做（有意）
+
+- **prod 打开签名**（第三步）：机队范围的行为变更，约定需单独拍板。
+  `prodProfileStaysDisabled` 用例把它钉住，改动必须显式改测试。
+- 没做多密钥库的部署侧路径验证（`key-store-path` 在 k8s 里需要额外挂卷，
+  本轮只把声明位与门禁铺好，没有为它加 volume 约定）。
+- `e2e-signing` job 仍是观察模式，未转硬门禁（见上）。
+- 签名统计仍只进日志，无 Micrometer 指标与告警（`security-design.md §7.5` 已登记的边界）。
+
+### 计数
+
+Java 4642 → **4644**（`cloud-backend` 2608 → **2610**，+2 个姿态用例）
+
+---
+
 ## [Unreleased] — 修 C5 签名时间戳非单调：高帧率下大规模遥测被误判重放（2026-10-11）
 
 ### 根因

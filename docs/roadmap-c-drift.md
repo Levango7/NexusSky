@@ -56,7 +56,7 @@
 
 | 原文断言 | 实测 |
 |---|---|
-| `mavlink.signing.enabled` 默认 false | ✅ 属实（`MavlinkSignatureConfig:33`），且**我刻意没有改**——见下 |
+| `mavlink.signing.enabled` 默认 false | ✅ 属实（`MavlinkSignatureConfig:25`，此处曾误记为 `:33`——行号已漂移，`enabled` 的 `@Value` 在第 25 行，第 33 行是 `key-store-path`）。且**prod 刻意没有改**——见下 |
 | 无 profile 配置 | ✅ **当时属实，PR #23 已修**：四个 `mavlink.signing.*` 现已显式落进 4 个 profile（此前只存在于 `@Value`，任何 profile 都查不到） |
 | 密钥/口令无轮换端点 | ✅ **当时属实，PR #23 已修**：新增 `SigningKeyStoreWriter`（原子落盘）+ `GET/POST /api/v1/mavlink/signing/*` |
 | 「`MavlinkParser` 层仍只切帧不验签」 | ❌ **不准确**。`MavlinkParser.java:77,106-118` 完整解析 13 字节签名块（linkId/timestamp/signature）；验签在 `UdpGateway.java:447`，含拒绝未签名、**按来源 sysid 取密钥**、取不到就拒、timestamp 防重放，全部 fail-closed |
@@ -64,6 +64,11 @@
 ### 当时的真问题不是「没验签」，而是「没人验证它在工作」
 
 - `scripts/e2e-signing.ps1`（884 行 / 6 场景）**从未被任何 workflow 调用**——CI 只跑 9 个 e2e，签名不在其中
+  > **2026-10-11 已修**：接进 CI 的 `e2e-signing` job（首次以观察模式
+  > `continue-on-error` 接入，与 `e2e-capability` 同款）。接之前先把脚本改成跨平台：
+  > `$env:TEMP`×16 → `$TempDir`（Linux 上该变量不存在）、`-WindowStyle Hidden`×15 → 删除
+  > （Windows-only 参数）、`Get-CimInstance Win32_Process`×2 → 加 `$IsWindows` 分支。
+  > 三者都会让 Linux 上**必然失败**（而不是 flaky），所以必须先改再接。
 - `UdpGatewayTest` 有 10+ 个 UDP 测试，**0 个签名测试**
 - ⇒ `UdpGateway` 那段 fail-closed 决策此前**零测试覆盖**
 
@@ -80,6 +85,37 @@ MAVLink v2 签名的 13 字节数据块是 `linkId(1) | timestamp(6) | signature
 2. **打开签名同样是硬切换**：未换密钥的设备帧会被整体拒绝。
    所以我**没有**把 prod 的 `mavlink.signing.enabled` 设成 true（机队范围的行为变更，
    需单独拍板），只在 prod profile 里写明「打开前必须做什么」三步。
+
+   > **2026-10-11 进展**：第一步与第二步已完成——staging 先以
+   > `enabled=true` + `reject-unsigned=false` 演练（用来回答"在网设备到底签没签"，
+   > 实测 `verified=1259 rejected=0`，期间先修掉了 timestamp 非单调导致的 635 条误拒），
+   > 确认无对象靠"不拒未签名"兜底后收紧为 `reject-unsigned=true`（strict）。
+   > prod 仍是 `false`，第三步待拍板。
+   > 两个决策姿态由 `MavlinkSigningConfigurationTest.stagingProfileAssemblesStrict`
+   > 与 `prodProfileStaysDisabled` 钉死。
+
+---
+
+### 另一个缺口：部署侧根本没有签名注入落点（2026-10-11 修）
+
+上面三步能推进，还有一个更朴素的前提问题没人提过：
+**`MAVLINK_SIGNING_SECRET_KEY` 在任何部署清单里都没有落点**——
+`deploy/k8s/secret.yaml`、helm values/templates、`deploy/docker/docker-compose.yml`
+全都没有它。也就是说"往 prod 打开签名"这件事当时**在部署侧无处可填**，
+配置里 `${MAVLINK_SIGNING_SECRET_KEY}` 永远拿不到值。
+
+更糟的是 `scripts/check-deploy-secrets.sh` 的泄漏扫描只认 `AEROFLEET_` 前缀，
+即便有人把真口令写进清单也扫不出来。
+
+现已补齐：helm 增加 `mavlinkSigning` 块 + **opt-in 语义**（关闭时一个 `MAVLINK_SIGNING_*`
+都不渲染，否则用默认 values 部署 staging 会把 staging 自带的 `enabled=true` 静默改成
+false）；扫描器前缀扩到 `MAVLINK_SIGNING_*` 并新增方向 D/E/F。
+
+顺带实测了一条承重假设（env 能否覆盖 profile 专属 properties）：
+属性源顺序为 `systemProperties > systemEnvironment > Config resource`，
+所以 k8s `envFrom` 注入的值确实能压住 `application-<profile>.properties` 里写死的同名项。
+同时发现**空字符串会让 `@Value("${...:false}")` 绑定失败而非回落默认值**——
+这就是清单里开关一律给具名缺省、绝不注入空值的原因。
 
 ---
 

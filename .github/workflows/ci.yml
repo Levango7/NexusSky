@@ -707,6 +707,73 @@ jobs:
             echo "docker-compose not available, skipping"
           fi
 
+  # C5 签名 e2e 首次接进门禁。
+  #
+  # 背景：scripts/e2e-signing.ps1 有 884 行 / 6 个场景（正常签名、篡改检测、未签名拒绝、
+  # 密钥不匹配、多机密钥分发、签名关闭兼容），但**从未被任何 workflow 调用过**——
+  # docs/roadmap-c-drift.md:66 早就登记了这件事。也就是说"签名在工作"这句话此前只有
+  # 本机手工跑过一次撑着，C5 第二步（收紧 reject-unsigned）也就没有跨平台的回归护栏。
+  #
+  # 接进来之前先把脚本改成跨平台了（否则是必然失败而非 flaky）：
+  #   - `$env:TEMP` x16 → `$TempDir`（Linux 上 PowerShell 不定义 $env:TEMP，
+  #     Join-Path 会退化成相对路径、日志落进仓库目录）
+  #   - `-WindowStyle Hidden` x15 → 删除（该参数只在 Windows 的 Start-Process 上存在，
+  #     Linux 上直接报"找不到参数"）
+  #   - `Get-CimInstance Win32_Process` x2 → 加 $IsWindows 分支，Linux 走 `ps`
+  #     （静默失败不可接受：那会让"清理上个场景残留"变成什么都不做，端口被占，
+  #      表现为莫名其妙的超时）
+  #
+  # 为什么带 continue-on-error：与 e2e-capability 同款——脚本此前只在本机 Windows
+  # PowerShell 跑过，从未在 Linux CI 上连续复跑，稳定性未知。先以观察模式收集 flaky
+  # 数据（步骤显示 "failed but continued"，日志可见），若干次 run 全绿后再删掉这行
+  # 转为硬门禁。删标记 = 把"跑过"升级为"必须通过"，不涉及脚本改动。
+  e2e-signing:
+    name: E2E MAVLink signing (6 scenarios)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [ java, frontend ]
+    continue-on-error: true
+    services:
+      redis:
+        image: mirror.gcr.io/library/redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      - name: Build all
+        run: mvn -B -DskipTests package
+      - name: Signing e2e (6 scenarios)
+        run: |
+          # 端口用高位段，避开 runner 上任何可能占着默认段的进程；
+          # 脚本自带端口占用检查，撞上会直接退出而不是假失败。
+          pwsh -NoProfile -File scripts/e2e-signing.ps1 -SkipBuild \
+            -BackendRestPort 18080 -BackendUdpPort 24550 \
+            -DronePort 24540 -DronePort2 24541 -LinkSimPort 24600 \
+            -RedisHost localhost -RedisPort 6379
+      - name: Upload signing e2e logs on failure
+        if: failure()
+        run: |
+          mkdir -p signing-logs
+          find "${{ runner.temp }}" -maxdepth 1 -name 'signing-e2e-*.log' \
+            -exec cp {} signing-logs/ \; 2>/dev/null || true
+          ls -la signing-logs/ || echo "(no logs captured)"
+
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
