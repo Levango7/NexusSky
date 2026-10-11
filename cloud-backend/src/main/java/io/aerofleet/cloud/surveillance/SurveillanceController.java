@@ -460,9 +460,12 @@ public class SurveillanceController {
      * <p>
      * 客户端通过 EventSource 连接本端点，服务端会：
      * <ol>
-     *   <li>调用 OnvifClient.subscribeEvents 注册回调</li>
+     *   <li>调用设备所属厂商适配器的 {@code subscribeEvents} 注册回调
+     *       （ONVIF 复用 OnvifClient；GB28181 构造国标 SUBSCRIBE 信令——
+     *       此前直连 OnvifClient，国标设备的事件源语义错置）</li>
      *   <li>每 15 秒发送一次 SSE 心跳注释，保持连接</li>
-     *   <li>当 OnvifClient 模拟事件触发时，通过 emitter 推送事件数据</li>
+     *   <li>连接结束/超时/出错时经同一适配器退订（handle 契约由
+     *       VendorAdapter 统一）</li>
      * </ol>
      */
     @Operation(summary = "订阅设备事件（SSE）", description = "每 15 秒发送心跳，事件触发时推送数据")
@@ -486,17 +489,17 @@ public class SurveillanceController {
         } catch (Exception e) {
             log.debug("SSE initial send failed for device {}: {}", id, e.getMessage());
         }
-        String handle = onvifClient.subscribeEvents(d.ip, d.port, d.username, d.password,
-                payload -> {
-                    try {
-                        emitter.send(SseEmitter.event()
-                                .name("surveillance-event")
-                                .data(payload));
-                    } catch (Exception e) {
-                        log.debug("SSE send failed for device {}: {}", id, e.getMessage());
-                        emitter.completeWithError(e);
-                    }
-                });
+        VendorAdapter adapter = vendorAdapterRegistry.getAdapter(d);
+        String handle = adapter.subscribeEvents(d, payload -> {
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("surveillance-event")
+                        .data(payload));
+            } catch (Exception e) {
+                log.debug("SSE send failed for device {}: {}", id, e.getMessage());
+                emitter.completeWithError(e);
+            }
+        });
         // SSE 心跳：每 15 秒发送注释行，保持连接活跃
         ScheduledFuture<?> heartbeatFuture = sseScheduler.scheduleAtFixedRate(() -> {
             try {
@@ -509,17 +512,17 @@ public class SurveillanceController {
 
         emitter.onCompletion(() -> {
             heartbeatFuture.cancel(false);
-            onvifClient.unsubscribeEvents(handle);
+            adapter.unsubscribeEvents(handle);
             log.info("SSE subscription completed for device {}", id);
         });
         emitter.onTimeout(() -> {
             heartbeatFuture.cancel(false);
-            onvifClient.unsubscribeEvents(handle);
+            adapter.unsubscribeEvents(handle);
             log.info("SSE subscription timed out for device {}", id);
         });
         emitter.onError(e -> {
             heartbeatFuture.cancel(false);
-            onvifClient.unsubscribeEvents(handle);
+            adapter.unsubscribeEvents(handle);
             log.warn("SSE subscription error for device {}: {}", id, e.getMessage());
         });
         log.info("SSE subscription established for device {}", id);

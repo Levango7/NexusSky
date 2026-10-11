@@ -70,6 +70,19 @@ GB 46750 的运行识别 deadline。）
 
 Java 4613 → **4619**（cloud-backend 2587 → **2593**，本轮 +6 例）。前端 245 不变。
 
+## [Unreleased] — GB28181 事件订阅路由（B1 的 events 收尾）（2026-10-11）
+
+> B1（PTZ/RTSP 按厂商路由）时登记："事件订阅端点仍直连 OnvifClient——涉及订阅 handle
+> 的生命周期语义统一，留独立评估"。评估结论：**VendorAdapter 的 subscribe/unsubscribe
+> 契约早已齐备**（五个适配器全部实现 unsubscribeEvents），只差 Controller 接线。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| — | **订阅路由** | `/devices/{id}/events`（SSE）：订阅与三处退订（结束/超时/出错）均经 `getAdapter(device)`——此前直连 OnvifClient，GB28181 设备的事件源语义错置（进 ONVIF 模拟回调表，国标信令永远不触发） |
+| — | **测试** | +2：GB28181 设备经国标信令层建立 SSE 订阅（asyncStarted）；设备不存在 → 200 + 流内错误终止（SSE 语义勘误：响应头已提交，错误只能流内表达，非 5xx） |
+
+**验证**：cloud-backend 全量 **2599/0**；全 reactor 全绿；文档计数门禁 22 处同步后"全部一致"。
+
 ## [Unreleased] — B3 通道级状态：部分通道离线可表达（4 路中 2 路在线）（2026-10-10）
 
 > B2/B3 交付时登记的边界："部分通道离线（4 路中 2 路在线）仍不可表达——onlineCameras

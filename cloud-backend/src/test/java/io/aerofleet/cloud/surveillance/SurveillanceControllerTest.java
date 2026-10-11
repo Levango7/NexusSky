@@ -413,6 +413,33 @@ class SurveillanceControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    // ===== GET /devices/{id}/events SSE 事件订阅（按厂商路由） =====
+
+    @Test
+    @DisplayName("SSE 事件订阅按厂商路由：GB28181 设备经国标信令层建立订阅")
+    void subscribeEvents_gb28181Device_routesToGbAdapter() throws Exception {
+        String gbId = "34020000001321320001";
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody(gbId, "GB28181"))));
+
+        // 此前直连 OnvifClient：国标设备的事件源语义错置（进 ONVIF 模拟回调表，
+        // 国标信令永远不触发）。路由后走 Gb28181Adapter（构造 SUBSCRIBE 信令返回 handle）
+        MvcResult result = mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/events"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.request().asyncStarted())
+                .andReturn();
+        result.getRequest().getAsyncContext().complete();
+    }
+
+    @Test
+    @DisplayName("SSE 事件订阅：不存在设备立即以错误终止流（200——SSE 语义，错误在流内表达）")
+    void subscribeEvents_unknownDevice_errorStream() throws Exception {
+        mockMvc.perform(get("/api/v1/surveillance/devices/nope/events"))
+                .andExpect(status().isOk())
+                .andReturn(); // emitter.completeWithError：SSE 响应头已提交为 200，
+                              // 错误只能以流终止表达（HTTP 语义，非服务端 5xx）
+    }
+
     // ===== GET /events 全局安防事件查询 =====
 
     @Test
