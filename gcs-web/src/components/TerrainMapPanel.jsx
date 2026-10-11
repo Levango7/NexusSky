@@ -232,7 +232,7 @@ export default function TerrainMapPanel({ terrainData }) {
           </tbody>
         </table>
       ) : (
-        <div style={{ color: 'var(--dim-2)', fontSize: 10 }}>暂无飞行限制区数据</div>
+        <div className="empty-hint">暂无飞行限制区数据</div>
       )}
     </div>
   )
@@ -274,7 +274,7 @@ export default function TerrainMapPanel({ terrainData }) {
           </tbody>
         </table>
       ) : (
-        <div style={{ color: 'var(--dim-2)', fontSize: 10 }}>暂无变更历史</div>
+        <div className="empty-hint">暂无变更历史</div>
       )}
     </div>
   )

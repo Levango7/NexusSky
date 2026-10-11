@@ -1333,7 +1333,7 @@ export default function UnifiedCommandPanel() {
             <div>
               <div style={{ fontSize: 9, color: 'var(--ok)', fontWeight: 'bold', marginBottom: 2 }}>地面单位</div>
               {(airGroundSituation.groundUnits || airGroundSituation.groundPersonnel || []).length === 0 ? (
-                <div style={{ fontSize: 9, color: 'var(--dim-2)' }}>暂无地面单位</div>
+                <div className="empty-hint">暂无地面单位</div>
               ) : (
                 (airGroundSituation.groundUnits || airGroundSituation.groundPersonnel || []).slice(0, 5).map((u, i) => (
                   <div key={u.id || i} style={{
@@ -1354,7 +1354,7 @@ export default function UnifiedCommandPanel() {
             <div>
               <div style={{ fontSize: 9, color: 'var(--cyan)', fontWeight: 'bold', marginBottom: 2 }}>空中单位</div>
               {(airGroundSituation.aerialUnits || airGroundSituation.drones || []).length === 0 ? (
-                <div style={{ fontSize: 9, color: 'var(--dim-2)' }}>暂无空中单位</div>
+                <div className="empty-hint">暂无空中单位</div>
               ) : (
                 (airGroundSituation.aerialUnits || airGroundSituation.drones || []).slice(0, 5).map((u, i) => {
                   const sysid = u.sysid || u.id || i
@@ -1378,7 +1378,7 @@ export default function UnifiedCommandPanel() {
             <div>
               <div style={{ fontSize: 9, color: 'var(--warn)', fontWeight: 'bold', marginBottom: 2 }}>协同任务</div>
               {(airGroundSituation.coordinationTasks || airGroundSituation.tasks || []).length === 0 ? (
-                <div style={{ fontSize: 9, color: 'var(--dim-2)' }}>暂无协同任务</div>
+                <div className="empty-hint">暂无协同任务</div>
               ) : (
                 (airGroundSituation.coordinationTasks || airGroundSituation.tasks || []).slice(0, 5).map((t, i) => (
                   <div key={t.id || t.taskId || i} style={{

@@ -128,7 +128,7 @@ export default function RidPanel() {
 
       {!loading && !error && ridList.length === 0 && (
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)' }}>
-          <div style={{ fontSize: 14 }}>暂无 RID 状态数据</div>
+          <div className="empty-hint">暂无 RID 状态数据</div>
           <div style={{ fontSize: 12, marginTop: 4 }}>等待无人机上报 Remote ID 信息…</div>
         </div>
       )}

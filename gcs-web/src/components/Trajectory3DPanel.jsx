@@ -333,7 +333,7 @@ export default function Trajectory3DPanel({
       )}
 
       {status === 'ready' && track.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 20, color: 'var(--dim)' }}>暂无轨迹数据</div>
+        <div className="empty-hint">暂无轨迹数据</div>
       )}
 
       {status === 'ready' && track.length > 0 && (

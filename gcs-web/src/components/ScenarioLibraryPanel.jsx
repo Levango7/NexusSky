@@ -399,7 +399,7 @@ export default function ScenarioLibraryPanel() {
                   )}
                 </div>
               ) : (
-                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无详情数据</div>
+                <div className="empty-hint">暂无详情数据</div>
               )}
             </div>
           )}

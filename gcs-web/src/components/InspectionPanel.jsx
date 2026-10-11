@@ -462,7 +462,7 @@ export default function InspectionPanel() {
                     ))}
                   </div>
                 ) : (
-                  <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>暂无详情</div>
+                  <div className="empty-hint">暂无详情</div>
                 )}
 
                 {/* 进度 */}

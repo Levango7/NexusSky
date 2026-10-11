@@ -231,7 +231,7 @@ export default function SatLinkPanel({ satLinkData }) {
             </tbody>
           </table>
         ) : (
-          <div style={{ color: 'var(--dim-2)', fontSize: 10 }}>暂无过境计划数据</div>
+          <div className="empty-hint">暂无过境计划数据</div>
         )}
       </div>
 
@@ -269,7 +269,7 @@ export default function SatLinkPanel({ satLinkData }) {
             </tbody>
           </table>
         ) : (
-          <div style={{ color: 'var(--dim-2)', fontSize: 10 }}>暂无路由决策数据</div>
+          <div className="empty-hint">暂无路由决策数据</div>
         )}
       </div>
     </div>

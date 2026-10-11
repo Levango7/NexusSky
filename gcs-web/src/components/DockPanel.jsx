@@ -343,7 +343,7 @@ export default function DockPanel() {
                 </div>
               ))}
               {(detail.recentTransitions || []).length === 0 && (
-                <span style={{ color: '#94a3b8' }}>暂无迁移记录</span>
+                <span className="empty-hint">暂无迁移记录</span>
               )}
             </div>
           </>
