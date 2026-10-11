@@ -368,6 +368,45 @@ jobs:
             gcs-web/.e2e-logs/
           retention-days: 7
 
+  ui-audit:
+    name: UI Audit (Headless Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: gcs-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: gcs-web/package-lock.json
+      - run: npm install
+      - name: Build frontend bundle
+        run: npm run build
+      # 预览服务与审计收在同一个 step：GitHub Actions 每个 run 是独立 shell，
+      # 上一步 & 起的进程会随 step 结束被回收（2026-10-04 在起后端时踩过，
+      # 症状是连接被拒、难归因）。
+      # 无后端模式（UI_AUDIT_OFFLINE=1）：请求落 404，面板呈空/错状态——
+      # 要审的（浅色控件残留 / JS 错误 / 顶栏高度）在无数据时同样成立，
+      # 且空状态本身就在被审面内。
+      # 浏览器用 ubuntu-latest 预装的系统 Chrome（channel:'chrome'，
+      # 不下载 Playwright 浏览器）；视图取覆盖四类布局的子集（全 45 约 6 分钟，
+      # job 预算不值），移动端 4 视图同跑。
+      - name: Serve preview + audit
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 --strictPort &
+          PREVIEW_PID=$!
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4173/ > /dev/null && break
+            sleep 1
+          done
+          UI_BASE=http://127.0.0.1:4173 UI_AUDIT_OFFLINE=1             UI_AUDIT_VIEWS=control,dashboard,dock,sensing,roc,opsreport,defect,fleetops             node scripts/ui-audit.mjs
+          RC=$?
+          kill $PREVIEW_PID 2>/dev/null || true
+          exit $RC
+
   e2e-smoke:
     name: E2E smoke + fault + failsafe + vision
     runs-on: ubuntu-latest
@@ -800,9 +839,12 @@ jobs:
         # code-scanning 读权限，gh 取不到数是**正当场景**。
         # 此时明确打印 WARN 并跳过核对（exit 0）——但绝不说成"0 条 open"。
         # 严格的本地核对用 --require-data。
+        # 2026-10-11：4 条历史告警已全部去面板 dismiss（见
+        # docs/codeql-alert-disposition.md），--allow 登记随之清空——
+        # 守卫回到“默认全关”：再出现 open 即红，需要新增 open 必须显式提
+        # --max-open 并在处置文档登记理由。
         run: >-
           python3 scripts/check-codeql-alerts.py
-          --allow 1 --allow 2 --allow 5 --allow 6
 
   docker-build:
     name: Docker Build & Push

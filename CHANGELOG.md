@@ -134,6 +134,18 @@ GB 46750 的运行识别 deadline。）
 
 Java 4613 → **4619**（cloud-backend 2587 → **2593**，本轮 +6 例）。前端 245 不变。
 
+## [Unreleased] — CI 巩固：UI 视觉审计入 CI + CodeQL 告警登记清零（2026-10-11）
+
+> 两条线：把“本地判据”升级成 CI 门禁；把“面板噪音”清零。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| — | **UI Audit job（新）** | `gcs-web/scripts/ui-audit.mjs` 挂进 ci.yml：npm build + vite preview + **无后端审计**（`UI_AUDIT_OFFLINE`）+ **系统 Chrome**（`channel:'chrome'`，不下载 Playwright 浏览器）。preview 与审计**同一步**（GH Actions 每 step 独立 shell，`&` 起的进程会被回收——2026-10-04 的坑）。视图取覆盖四类布局的子集（桌面 8 + 移动端 4，约 2 分钟）；全 45 视图本地跑（不设 `UI_AUDIT_VIEWS` 即全量） |
+| — | **ui-audit.mjs 新开关** | `UI_AUDIT_OFFLINE`（无后端跳过“云端已连接”等待——404 下面板空/错状态照样审：浅色控件残留/JS 错误/顶栏高度，空状态本身就在被审面内）+ `UI_AUDIT_BROWSER=chromium` 兜底 |
+| — | **CodeQL 告警清零** | 4 条全部 dismiss（#1 false positive；#2/#5/#6 won't fix——理由与证据见 `docs/codeql-alert-disposition.md`），仓上 open=0。CI 守卫的 `--allow` 登记随之清空，回到“默认全关：再出现 open 即红”。守卫方向本地双向验证：喂空数组→过；喂一条未登记 open→红 |
+
+**验证**：本地 offline 子集审计 8 视图次 0 问题、exit 0；守卫 `CODEQL_ALERTS_JSON` 两个方向实测；YAML 解析 18 jobs。
+
 ## [Unreleased] — B4 补全：失败重试 retryTask（原请求重新分配，可能换机）（2026-10-11）
 
 > B4 交付时登记的边界："重试/放弃策略当前由调用方决定，调度侧不自动重试（属后续功能立项）"。
