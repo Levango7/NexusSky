@@ -358,7 +358,7 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
 | POST | `/discover` | 发现子网内设备 | {subnet} | 200 {subnet,count,devices} / 400 / 502 |
 | POST | `/rapid-deploy` | 一键扫描子网并自动注册布控球设备 | {subnet,username?,password?} | 200 {subnet,count,results} / 400 / 502 |
 | POST | `/scan` | 仅扫描子网发现设备（不注册） | {subnet} | 200 {subnet,count,results} / 400 / 502 |
-| GET | `/devices/{id}/events` | 订阅设备事件（SSE，每 15 秒心跳） | - | 200 text/event-stream / 404 |
+| GET | `/devices/{id}/events` | 订阅设备事件（SSE，每 15 秒心跳，按厂商路由） | - | 200 text/event-stream / 404 |
 | GET | `/events` | 查询全局安防事件列表（分页） | - | 200 {items,total,page,size} / 400 |
 
 #### 端点详情
@@ -367,6 +367,12 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
 - 请求体: `{id:String, name:String, vendor:"HIKVISION"|"DAHUA"|"UNIVIEW"|"ONVIF"|"GB28181", ip:String, port:int, username:String, password:String, channels:int?}`
   （`channels` 可选，视频总通道数，默认 1，取值 [1,255]；注册时 onlineCameras=channels 全在线）
 - 响应: 200 - 设备详情（含能力信息与 totalCameras）；400 - 参数错误
+
+**GET /api/v1/surveillance/devices/{id}/events**
+- 语义: **按厂商路由**——订阅/退订经设备所属 VendorAdapter（ONVIF 复用 OnvifClient；
+  GB28181 构造国标 SUBSCRIBE 信令）。连接结束/超时/出错经同一适配器退订（handle 契约统一）
+- 响应: 200 - SSE 流（`stream-established` 注释先行；每 15s `heartbeat` 注释；事件以
+  `surveillance-event` 事件推送）；设备不存在 → 200 + 流内错误终止（SSE 语义）
 
 **POST /api/v1/surveillance/devices/{id}/status** （需 OPERATOR 角色）
 - 请求体: `{status:"ONLINE"|"OFFLINE"|"FAULT"|"MAINTENANCE"}`
