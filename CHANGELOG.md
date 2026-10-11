@@ -70,6 +70,21 @@ GB 46750 的运行识别 deadline。）
 
 Java 4613 → **4619**（cloud-backend 2587 → **2593**，本轮 +6 例）。前端 245 不变。
 
+## [Unreleased] — B3 通道级状态：部分通道离线可表达（4 路中 2 路在线）（2026-10-10）
+
+> B2/B3 交付时登记的边界："部分通道离线（4 路中 2 路在线）仍不可表达——onlineCameras
+> 按设备状态派生，通道级状态上报属生产阶段"。本轮闭合。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| B3.1 | **模型** | `SurveillanceDevice.onlineCameras` 字段（部分通道可离线）；联动规则：链路断（prune 置 OFFLINE）归零、心跳恢复默认全恢复、FAULT/MAINTENANCE 人工态不自动改 |
+| B3.2 | **Pusher** | 帧 `onlineCameras` 取设备维护值（此前按状态派生，恒等于 0 或 totalCameras）——**通道级的真实状态上协议面** |
+| B3.3 | **REST** | `POST /api/v1/surveillance/devices/{id}/channels`（需 OPERATOR）：`onlineCameras ∈ [0, totalCameras]`，越界 400 |
+
+**测试**：SurveillanceDeviceStatusTest +2（通道联动/prune 归零）；SurveillanceControllerTest +1（端点全链：默认全在线/置位/越界/404）；SurveillanceStatusPusherTest +1（部分通道帧值 2/4）；cloud-backend 全量 **2597/0**。
+
+**边界**：通道在线数的**自动探测**（谁发现哪路坏）未做——当前由运维经 REST 手动标记；单个通道的独立流地址/分辨率属性仍无（表与消息粒度都是计数级）。
+
 ## [Unreleased] — C5 签名让 CI 每次都走签名帧通路 + 修订 ROADMAP C 系列两处言过其实的描述（2026-10-10）
 
 ### 一、C5 第一步：CI 的 flight e2e 全部改为"无人机侧签名"

@@ -26,9 +26,9 @@ import java.util.List;
  *       DAHUA=1/UNIVIEW=2/ONVIF=3，与协议 0=海康/1=大华/2=宇视/3=其他 一致</li>
  *   <li>status：{@link SurveillanceDevice.Status#ordinal()} 直接映射——四态与
  *       协议值域一致（0=在线/1=离线/2=故障/3=维护）</li>
- *   <li>onlineCameras/totalCameras：totalCameras 取设备模型（注册时指定，默认 1）；
- *       onlineCameras 按状态派生（ONLINE → 全部在线，否则 0）。
- *       **部分通道离线**（4 路中 2 路在线）属生产阶段——需通道级状态上报</li>
+ *   <li>onlineCameras/totalCameras：totalCameras 为设备总通道（注册时指定）；
+ *       onlineCameras 为在线通道数——**部分通道离线可表达**（4 路中 2 路在线），
+ *       由运维经 {@code POST /devices/{id}/channels} 维护（B3 闭环）</li>
  *   <li>uptimeSec：进程内首次注册以来的时长（重启重新计数）</li>
  *   <li>lastEventMs：最近心跳时间戳（u32 ms 截断）</li>
  * </ul>
@@ -82,7 +82,10 @@ public class SurveillanceStatusPusher {
                     deviceIdToU16(d.id),
                     d.vendor.ordinal(),
                     d.status.ordinal(),   // 0=在线/1=离线/2=故障/3=维护（与协议值域一致）
-                    d.status == SurveillanceDevice.Status.ONLINE ? d.totalCameras : 0,
+                    // 部分通道可离线（4 路中 2 路在线）：ONLINE 时取设备维护值，
+                    // 其余态归零（OFFLINE 由扫描置零、FAULT/MAINTENANCE 的通道状态
+                    // 由运维经 /devices/{id}/channels 维护——此处只取现状）
+                    d.status == SurveillanceDevice.Status.ONLINE ? d.onlineCameras : 0,
                     d.totalCameras);
             eventPublisher.publishEvent(new MavlinkMessageEvent(
                     this, deviceIdToU16(d.id), SurveillanceStatusMsg.ID, msg, now,

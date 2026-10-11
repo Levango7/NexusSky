@@ -143,6 +143,7 @@ public class SurveillanceController {
         SurveillanceDevice device = new SurveillanceDevice(id, name, vendor, ip, port,
                 username, password);
         device.totalCameras = channels;
+        device.onlineCameras = channels; // 注册时默认全在线
         // 注册时同步获取设备能力（模拟实现）
         try {
             device.setCapabilities(onvifClient.getDeviceCapabilities(ip, port, username, password));
@@ -229,6 +230,30 @@ public class SurveillanceController {
         SurveillanceDevice.Status previous = d.status;
         d.status = status;
         log.info("Surveillance device status changed via REST: id={} {} -> {}", id, previous, status);
+        return ResponseEntity.ok(deviceView(d));
+    }
+
+    /**
+     * 置位在线通道数（B3：部分通道离线的真实表达——4 路中 2 路在线）。
+     * <p>
+     * 语义：{@code onlineCameras ∈ [0, totalCameras]}；链路断（设备 OFFLINE）时
+     * 由扫描归零，心跳恢复时默认全恢复——本端点是运维对"设备侧通道故障"的手动标记。
+     */
+    @PostMapping("/devices/{id}/channels")
+    @RequireRole(Role.OPERATOR)
+    public ResponseEntity<Map<String, Object>> setOnlineCameras(@PathVariable("id") String id,
+                                                                @RequestBody JsonNode body) {
+        SurveillanceDevice d = registry.getDevice(id);
+        if (d == null) {
+            return notFound("device " + id + " not found");
+        }
+        int n = body.path("onlineCameras").asInt(-1);
+        if (n < 0 || n > d.totalCameras) {
+            return badRequest("onlineCameras must be in [0, " + d.totalCameras + "]");
+        }
+        d.onlineCameras = n;
+        log.info("Surveillance device channels changed via REST: id={} online={}/{}",
+                id, n, d.totalCameras);
         return ResponseEntity.ok(deviceView(d));
     }
 
@@ -558,6 +583,7 @@ public class SurveillanceController {
         v.put("username", d.username);
         v.put("status", d.status.name());
         v.put("totalCameras", d.totalCameras);
+        v.put("onlineCameras", d.onlineCameras);
         v.put("capabilities", d.getCapabilities());
         v.put("rtspUrl", maskRtspCredentials(d.rtspUrl));
         v.put("lastHeartbeatMs", d.lastHeartbeatMs);

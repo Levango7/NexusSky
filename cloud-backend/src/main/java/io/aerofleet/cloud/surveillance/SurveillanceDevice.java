@@ -60,10 +60,23 @@ public class SurveillanceDevice {
     /** 在线状态。 */
     public volatile Status status;
     /**
-     * 视频通道数（默认 1 = 单路 RTSP）。多通道设备注册时指定；
-     * 在线通道数暂按状态派生（ONLINE → 全部在线），部分通道离线属生产阶段。
+     * 视频通道数（默认 1 = 单路 RTSP）。多通道设备注册时指定。
      */
     public volatile int totalCameras = 1;
+
+    /**
+     * 在线视频通道数（<b>部分通道可离线</b>：4 路中 2 路在线的真实表达）。
+     * <p>
+     * 维护规则：
+     * <ul>
+     *   <li>注册时默认 = totalCameras（全在线）</li>
+     *   <li>链路断（{@code pruneStaleDevices} 置 OFFLINE）时归零——整体离线则通道全不可用</li>
+     *   <li>心跳把 OFFLINE 拉回 ONLINE 时恢复 = totalCameras（默认全恢复，坏通道由运维经
+     *       {@code POST /devices/{id}/channels} 下调）</li>
+     *   <li>FAULT/MAINTENANCE 人工态期间不自动改动</li>
+     * </ul>
+     */
+    public volatile int onlineCameras = 1;
     /** 设备能力集合（如 "Media"、"PTZ"、"Events"、"Device"）。 */
     private volatile Set<String> capabilities = Collections.emptySet();
     /** RTSP 流地址（由 OnvifClient 解析得到）。 */
@@ -133,6 +146,9 @@ public class SurveillanceDevice {
         this.lastHeartbeatMs = System.currentTimeMillis();
         if (this.status == Status.OFFLINE) {
             this.status = Status.ONLINE;
+            // 链路恢复：通道默认全恢复（坏通道由运维经 REST 下调；
+            // 心跳不探知设备侧通道故障——它只证明链路可达）
+            this.onlineCameras = this.totalCameras;
         }
     }
 

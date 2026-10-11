@@ -137,6 +137,23 @@ class SurveillanceStatusPusherTest {
     }
 
     @Test
+    @DisplayName("部分通道在线：ONLINE 设备帧 onlineCameras 取设备维护值（B3）")
+    void partialChannelCountsReported() {
+        SurveillanceDevice d = registerDevice("cam-partial", SurveillanceDevice.Vendor.HIKVISION, null);
+        d.totalCameras = 4;
+        d.onlineCameras = 2; // 4 路中 2 路在线
+
+        pusher.pushOnce();
+
+        ArgumentCaptor<MavlinkMessageEvent> captor =
+                ArgumentCaptor.forClass(MavlinkMessageEvent.class);
+        verify(publisher, times(1)).publishEvent(captor.capture());
+        SurveillanceStatusMsg msg = (SurveillanceStatusMsg) captor.getValue().getMessage();
+        assertThat(msg.onlineCameras).isEqualTo(2);
+        assertThat(msg.totalCameras).isEqualTo(4);
+    }
+
+    @Test
     @DisplayName("无 WS 客户端时跳过推送")
     void skipsWithoutWsClients() {
         when(wsHandler.connectionCount()).thenReturn(0);

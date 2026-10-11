@@ -352,6 +352,7 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
 | GET | `/devices/{id}` | 获取设备详情 | - | 200 Device / 404 |
 | DELETE | `/devices/{id}` | 注销设备 | - | 200 {status,id} / 404 |
 | POST | `/devices/{id}/status` | 置位设备状态（ONLINE/OFFLINE/FAULT/MAINTENANCE，需 OPERATOR） | {status} | 200 Device / 400 / 404 |
+| POST | `/devices/{id}/channels` | 置位在线通道数（部分通道离线：4 路中 2 路在线，需 OPERATOR） | {onlineCameras} | 200 Device / 400 / 404 |
 | GET | `/devices/{id}/stream` | 获取 RTSP 流 URL（按厂商路由） | - | 200 {deviceId,channel,rtspUrl} / 400 / 404 / 502 |
 | POST | `/devices/{id}/ptz` | PTZ 控制（按厂商路由；契约 camelCase，国标适配器内翻译） | {cmd} | 200 {status,cmd,result} / 400 / 404 / 502 |
 | POST | `/discover` | 发现子网内设备 | {subnet} | 200 {subnet,count,devices} / 400 / 502 |
@@ -364,13 +365,19 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
 
 **POST /api/v1/surveillance/devices**
 - 请求体: `{id:String, name:String, vendor:"HIKVISION"|"DAHUA"|"UNIVIEW"|"ONVIF"|"GB28181", ip:String, port:int, username:String, password:String, channels:int?}`
-  （`channels` 可选，视频通道数，默认 1，取值 [1,255]）
+  （`channels` 可选，视频总通道数，默认 1，取值 [1,255]；注册时 onlineCameras=channels 全在线）
 - 响应: 200 - 设备详情（含能力信息与 totalCameras）；400 - 参数错误
 
 **POST /api/v1/surveillance/devices/{id}/status** （需 OPERATOR 角色）
 - 请求体: `{status:"ONLINE"|"OFFLINE"|"FAULT"|"MAINTENANCE"}`
 - 语义: FAULT/MAINTENANCE 是人工运维置位——**心跳与离线扫描不覆盖**（心跳只把 OFFLINE 拉回 ONLINE），恢复需显式置回 ONLINE；协议 `SurveillanceStatusMsg(30059).status` 四态值域由此全部可达
 - 响应: 200 - 设备详情；400 - status 非法；404 - 设备不存在
+
+**POST /api/v1/surveillance/devices/{id}/channels** （需 OPERATOR 角色）
+- 请求体: `{onlineCameras:int}`，取值 `[0, totalCameras]`
+- 语义: **部分通道离线**的真实表达（4 路中 2 路在线）。运维对"设备侧通道故障"的手动标记：
+  链路断（设备 OFFLINE）时由扫描归零、心跳恢复时默认全恢复——本端点不受心跳影响
+- 响应: 200 - 设备详情（含 onlineCameras）；400 - 越界；404 - 设备不存在
 
 **GET /api/v1/surveillance/devices/{id}/stream**
 - 路径参数: `id` (String) - 设备 ID
@@ -2580,7 +2587,7 @@ es.onerror = (e) => {
 | 飞行追踪 | TrackingController | /api/v1/tracking | 6 |
 | 电子围栏 | GeofenceController | /api/v1/geofence | 7 |
 | 远程锁机 | DroneLockController | /api/v1/drone-lock | 6 |
-| 安防监控 | SurveillanceController | /api/v1/surveillance | 11 |
+| 安防监控 | SurveillanceController | /api/v1/surveillance | 12 |
 | 报警联动 | AlarmController | /api/v1/alarms | 13 |
 | 应急指挥 | EmergencyCommandController | /api/v1/emergency-command | 10 |
 | 应急指挥 | EmergencyOrchController | /api/v1/emergency | 10 |
