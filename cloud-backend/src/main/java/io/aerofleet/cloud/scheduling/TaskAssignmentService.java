@@ -44,6 +44,13 @@ public class TaskAssignmentService {
     private final Map<String, AssignmentResult> assignments = new ConcurrentHashMap<>();
     /** 无人机 → 正在执行的任务ID集合（反向映射，用于负载跟踪） */
     private final Map<Integer, Set<String>> droneToTaskIds = new ConcurrentHashMap<>();
+    /** 任务请求快照（taskId → 请求）：失败重试的输入源——队列消费后原请求即失。 */
+    private final Map<String, TaskRequest> taskRequests = new ConcurrentHashMap<>();
+    /** 每任务的重试计数（防死循环；上限可配，默认 1 次）。 */
+    private final Map<String, Integer> retryCounts = new ConcurrentHashMap<>();
+
+    /** 失败重试上限（默认 1 次）——死循环护栏。 */
+    private int maxRetries = 1;
     /** taskId → tenantId（租户隔离映射） */
     private final Map<String, Integer> taskTenantMap = new ConcurrentHashMap<>();
 
@@ -108,6 +115,12 @@ public class TaskAssignmentService {
         this.autoReservationWindowMs = windowMs;
     }
 
+    /** 失败重试上限（次）——部署方可配。 */
+    @Value("${aerofleet.scheduling.retry.max:1}")
+    public void setMaxRetries(int maxRetries) {
+        this.maxRetries = maxRetries;
+    }
+
     /** 分配任务到最优无人机 */
     public synchronized AssignmentResult assignTask(TaskRequest req) {
         List<DroneSnapshot> drones = registry.all();
@@ -154,6 +167,7 @@ public class TaskAssignmentService {
             taskTenantMap.put(req.getTaskId(), tenantId);
         }
         taskQueue.offer(req);
+        taskRequests.put(req.getTaskId(), req);
         log.info("Task {} assigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
         publishAssignmentFrames(req, best.sysid);
         autoReserve(req, best.sysid);
@@ -204,6 +218,7 @@ public class TaskAssignmentService {
                 taskTenantMap.put(requests.get(i).getTaskId(), tenantId);
             }
             taskQueue.offer(requests.get(i));
+            taskRequests.put(requests.get(i).getTaskId(), requests.get(i));
             publishAssignmentFrames(requests.get(i), d.sysid);
             autoReserve(requests.get(i), d.sysid);
             results.add(r);
@@ -490,6 +505,11 @@ public class TaskAssignmentService {
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // 米
     }
 
+    /** 查询单个任务的分配结果（无租户过滤——retry 端点回报用）。 */
+    public AssignmentResult getAssignment(String taskId) {
+        return assignments.get(taskId);
+    }
+
     /** 查询所有分配，自动按当前租户过滤。 */
     public Map<String, AssignmentResult> getAllAssignments() {
         Integer tenantId = TenantContext.getEffectiveTenantId();
@@ -617,6 +637,38 @@ public class TaskAssignmentService {
             return true;
         }
         return false;
+    }
+
+    /**
+     * 失败重试：对已失败任务用原请求重新分配（可能换机）。
+     * <p>
+     * 背景：{@link #failTask} 之后任务死守在原分配记录上（记录保留可查），
+     * 没有重新分配的入口；本方法补上。上限（默认 1 次）防死循环——
+     * 真实的重试/放弃策略（指数退避、次数运营化）属后续。
+     *
+     * @param taskId 失败任务 ID
+     * @return true 若请求存在且未达上限且重新分配成功
+     */
+    public synchronized boolean retryTask(String taskId) {
+        TaskRequest req = taskRequests.get(taskId);
+        if (req == null) {
+            log.warn("retryTask {}: no request snapshot (never assigned?)", taskId);
+            return false;
+        }
+        int used = retryCounts.getOrDefault(taskId, 0);
+        if (used >= maxRetries) {
+            log.warn("retryTask {}: retry budget exhausted ({}/{})", taskId, used, maxRetries);
+            return false;
+        }
+        AssignmentResult result = assignTask(req);
+        if (!result.isSuccess()) {
+            log.warn("retryTask {}: reassignment failed: {}", taskId, result.getReason());
+            return false;
+        }
+        retryCounts.merge(taskId, 1, Integer::sum);
+        log.info("retryTask {}: reassigned to sysid {} (retry {}/{})",
+                taskId, result.getAssignedSysid(), used + 1, maxRetries);
+        return true;
     }
 
     /**

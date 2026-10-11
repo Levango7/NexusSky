@@ -134,6 +134,21 @@ GB 46750 的运行识别 deadline。）
 
 Java 4613 → **4619**（cloud-backend 2587 → **2593**，本轮 +6 例）。前端 245 不变。
 
+## [Unreleased] — B4 补全：失败重试 retryTask（原请求重新分配，可能换机）（2026-10-11）
+
+> B4 交付时登记的边界："重试/放弃策略当前由调用方决定，调度侧不自动重试（属后续功能立项）"。
+  本轮闭合：failTask 之后有明确的重新分配入口。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| — | **请求快照** | `taskRequests`（taskId → TaskRequest）——队列消费后原请求即失，重试的输入源 |
+| — | **retryTask** | 用原请求重新走 `assignTask`（重新评分、可换机、自动预约随之刷新）；上限默认 1 次（`aerofleet.scheduling.retry.max`）防死循环 |
+| — | **REST** | `POST /tasks/{id}/retry`（OPERATOR；无快照/超上限返回 retried=false 宽容语义） |
+
+**测试**：TaskAssignmentServiceTest +2（失败→重试→覆盖分配记录→超上限 false；无快照 false）；SchedulingControllerTest +1（端点宽容语义）；cloud-backend 全量 **2607/0**；全 reactor 全绿；文档计数门禁 22 处同步后"全部一致"。
+
+**边界**：真实的重试策略（指数退避/次数运营化/放弃策略）未做——那是调度引擎的策略层，按当时评审结论单独立项。
+
 ## [Unreleased] — B5 闭环：分配即自动预约（软约束 + AIRSPACE 告警）（2026-10-11）
 
 > 预约能力建成后一直没有生产调用者（此前只有 REST 手动提交）——本轮让

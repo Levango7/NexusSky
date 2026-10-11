@@ -96,6 +96,26 @@ public class SchedulingController {
         return resp;
     }
 
+    /**
+     * 失败重试：对已失败任务用原请求重新分配（可能换机）。
+     * <p>
+     * 与 failTask 的区分：fail 标记执行失败（记录保留）；retry 以原请求重新评分
+     * 分配。上限默认 1 次（可配）——真正的重试/放弃策略属后续。
+     */
+    @PostMapping("/tasks/{id}/retry")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> retryTask(@PathVariable("id") String id) {
+        boolean ok = assignmentService.retryTask(id);
+        AssignmentResult r = assignmentService.getAssignment(id);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("taskId", id);
+        resp.put("retried", ok);
+        if (ok && r != null) {
+            resp.put("sysid", r.getAssignedSysid());
+        }
+        return resp;
+    }
+
     @PostMapping("/conflicts/check")
     @RequireRole(Role.OPERATOR)
     public ConflictAvoidanceService.ConflictResult checkConflict(@RequestBody Map<String, Number> body) {
