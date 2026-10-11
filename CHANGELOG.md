@@ -134,6 +134,23 @@ GB 46750 的运行识别 deadline。）
 
 Java 4613 → **4619**（cloud-backend 2587 → **2593**，本轮 +6 例）。前端 245 不变。
 
+## [Unreleased] — P1 基准落定：UDP 零分配“不改造”（数字驱动）（2026-10-12）
+
+> ROADMAP P1 原条目“UDP 接收线程零分配：帧解码对象池化 + GC 抖动消除”。
+  按“先测量、再决定改不改”的纪律建基准后，结论是**不做**——这是基准的
+  正常产出：防止用风险换不存在的问题。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| — | **基准 harness** | `mavlink-core/src/test/java/io/aerofleet/mavlink/ParseAllocationBenchmark.java`（-Dbench=1 显式开启、默认 assumeTrue 跳过——不进 CI 时长）。测量：解析吞吐、每帧堆分配（com.sun.management.ThreadMXBean 线程分配计量）、单帧最坏耗时 |
+| — | **实测数字** | 解析吞吐 **2,132,196 帧/秒**；每帧堆分配 **192 B/帧**；单帧最坏 **2.4 μs**。参考负载：遥测 5Hz×9 机 = **45 帧/秒**（余量约 4.7 万倍）；可预见上限 50 机×50Hz = 2,500 帧/秒（仍余 850 倍） |
+| — | **结论与重开条件** | **不改造**：唯一正解是把 MavlinkFrame 改零拷贝窗口（payload 逃逸给异步 WS 推送，池化有数据竞态），会改变公共 API 语义并波及全部 payload 消费方——为一个不存在的问题付这笔账不成立。重开条件：实测负载达 10 万帧/秒量级，或满载遥测下可观测 young GC 停顿（需先复现） |
+| — | **文档** | 新增 docs/performance.md（方法/数字/结论/重开条件）；ROADMAP P1 翻正为“已评估：不改造” |
+
+**基线备注**：UdpMavlinkTransport.receiveLoop 的 buf/packet 本就在循环外复用（每包
+零分配）；本条要动的只剩 parser 每帧的三个对象（payload + MavlinkFrame +
+ParseResult），即基准所测的 192 B/帧。
+
 ## [Unreleased] — 空状态全量统一：23 处收口（.empty-hint 单一来源）（2026-10-11）
 
 > PR #26（UI 改造）只统一了代表性面板，扫描发现仍有 23 处“各写各”的空状态。
