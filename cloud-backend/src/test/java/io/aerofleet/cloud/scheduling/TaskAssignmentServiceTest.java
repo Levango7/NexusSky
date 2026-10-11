@@ -205,6 +205,32 @@ class TaskAssignmentServiceTest {
     }
 
     @Test
+    @DisplayName("failTask 后可 retryTask 重新分配（同请求，可能换机）")
+    void failThenRetryReassigns() {
+        DroneSnapshot d1 = onlineDrone(1, 80);
+        DroneSnapshot d2 = onlineDrone(2, 90);
+        registry.add(d1, d2);
+
+        TaskRequest req = new TaskRequest("rt-1", "SURVEY", 5, 30.5, 120.5, 100.0);
+        assertThat(service.assignTask(req).isSuccess()).isTrue();
+        assertThat(service.failTask("rt-1")).isTrue();
+
+        assertThat(service.retryTask("rt-1")).isTrue();
+        // 重试后分配记录被覆盖（同一 taskId 的新分配）
+        assertThat(service.getAssignment("rt-1")).isNotNull();
+        assertThat(service.getAssignment("rt-1").isSuccess()).isTrue();
+
+        // 第二次 retry 超上限（默认 1 次）
+        assertThat(service.retryTask("rt-1")).isFalse();
+    }
+
+    @Test
+    @DisplayName("retryTask 无请求快照 → false；上限可配")
+    void retryWithoutSnapshotFails() {
+        assertThat(service.retryTask("never-assigned")).isFalse();
+    }
+
+    @Test
     @DisplayName("getAllAssignments 初始为空，分配后包含已分配任务")
     void getAllAssignmentsTracksAssignments() {
         assertThat(service.getAllAssignments()).isEmpty();

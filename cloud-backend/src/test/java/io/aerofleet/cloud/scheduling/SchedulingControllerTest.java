@@ -67,6 +67,14 @@ class SchedulingControllerTest {
     }
 
     @Test
+    void retryTask_endpoint() throws Exception {
+        // 无快照 → retried=false（宽容语义，与 fail/release 一致）
+        mockMvc.perform(post("/api/v1/scheduling/tasks/not-exist/retry"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.retried").value(false));
+    }
+
+    @Test
     void releaseReservations_endpoint() throws Exception {
         double now = System.currentTimeMillis();
         double lat = 39.9101, lon = 116.4101;

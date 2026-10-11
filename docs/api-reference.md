@@ -945,6 +945,7 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 | POST | `/tasks/{id}/start` | 启动任务（需 OPERATOR） | - | 200 状态视图 |
 | POST | `/tasks/{id}/complete` | 完成任务（需 OPERATOR） | - | 200 状态视图 |
 | POST | `/tasks/{id}/fail` | 标记任务执行失败（需 OPERATOR，B4） | - | 200 {taskId,failed} |
+| POST | `/tasks/{id}/retry` | 失败重试：原请求重新分配（需 OPERATOR） | - | 200 {taskId,retried,sysid?} |
 | POST | `/conflicts/check` | 检查冲突 | {lat1,lon1,alt1,v1,h1,lat2,lon2,alt2,v2,h2} | 200 ConflictResult / 400 |
 | POST | `/conflicts/scan` | 机队冲突扫描（两两 4D 检测，逐冲突对发布 30049） | - | 200 {conflictCount,conflicts} |
 | POST | `/reservations` | **提交 4D 空域预约**（冲突 409 + 发布 AIRSPACE 类型 30049） | {sysid,lat,lon,alt,startTime,endTime,radius} | 200 {status:"reserved"} / 409 {conflictType:"AIRSPACE",conflictSysid} |
@@ -961,6 +962,13 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 **POST /api/v1/scheduling/conflicts/check**
 - 请求体: `{lat1:double, lon1:double, alt1:double, v1:double, h1:double, lat2:double, lon2:double, alt2:double, v2:double, h2:double}`（两架无人机的位置/速度/航向）
 - 响应: 200 - 冲突检测结果；400 - 缺少必填字段
+
+**POST /api/v1/scheduling/tasks/{id}/retry** （需 OPERATOR 角色）
+- 语义: 失败重试——用分配时的原请求快照重新评分分配（**可能换机**）。failTask 之后
+  任务死守原记录，retry 补上重新分配入口。上限默认 1 次
+  （`aerofleet.scheduling.retry.max`，防死循环）
+- 响应: 200 - `{taskId, retried:true|false, sysid?}`；false = 无请求快照/超上限/无可用机
+  （宽容语义，与 fail/release 端点一致）
 
 **POST /api/v1/scheduling/tasks/{id}/fail** （需 OPERATOR 角色）
 - 语义: **执行尝试后失败**（任务已开始执行、执行侧报失败）——发布 `TaskStatusMsg(30050)` 的 **FAILED(3)** 帧（该协议值此前不可达）；任务记录**保留**可查
