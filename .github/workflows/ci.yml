@@ -786,6 +786,23 @@ jobs:
       - uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
+      - name: Guard open CodeQL alert count
+        # 2026-10-11 发现仓上 4 条 open 告警全部停留在创建日（2026-09-25）从未更新，
+        # 而逐条对照代码后确认处置都已存在——缺的只是没人去关。
+        # 这种"面板登记滞后于代码"不会让任何测试转红，于是永久留在那里，
+        # 将来真出现新告警时会被这 4 条历史噪音淹没。
+        #
+        # --allow 里是**已登记**的编号：它们不计入 open 数，但
+        # docs/codeql-alert-disposition.md 必须写明逐条依据。
+        # 每 dismiss 一条，就从 --allow 里删掉对应编号——让清单只减不增。
+        #
+        # 不加 --require-data：CodeQL Actions 的 runner 上没有
+        # code-scanning 读权限，gh 取不到数是**正当场景**。
+        # 此时明确打印 WARN 并跳过核对（exit 0）——但绝不说成"0 条 open"。
+        # 严格的本地核对用 --require-data。
+        run: >-
+          python3 scripts/check-codeql-alerts.py
+          --allow 1 --allow 2 --allow 5 --allow 6
 
   docker-build:
     name: Docker Build & Push
