@@ -649,15 +649,29 @@ backend 日志里真实出现过的那一行，例如
   默认打开等于首启即断链。它按 GB 42590 数据链路安全项的定位留给需要的部署**显式开启**
   （开启而缺密钥 → 启动即失败，见 7.3，不存在"半开"状态）。默认值翻转的先决条件是
   真机联调证据（见下"未与真机联调"条），在那之前不动。
+  > **2026-10-11 进展**：**staging 已先开启并收紧为 strict**
+  > （`enabled=true` + `reject-unsigned=true`），prod 仍是 `false`。
+  > 放宽范围发生在 staging，不是出厂默认值——两者是两件事。姿态由
+  > `MavlinkSigningConfigurationTest` 的两个用例钉死，改动需显式改测试。
 - 口令与密钥库都是**明文**：`secret-key` 写在配置里（走命令行会进进程列表），
-  `key-store-path` 指向的 JSON 不做加密，也没有轮换端点。
+  `key-store-path` 指向的 JSON 不做加密。
+  > **轮换端点已补**（原文此处写"也没有轮换端点"，已被代码推翻）：`SigningKeyStoreWriter`
+  > 原子落盘 + `GET/POST /api/v1/mavlink/signing/*`。刻意不提供 `graceHours`——
+  > 签名块无 key id，协议上做不到新旧并存。
+  > 部署侧注入落点（helm `mavlinkSigning` / k8s / docker-compose 的 `MAVLINK_SIGNING_*`）
+  > 亦已补齐，并纳入 `scripts/check-deploy-secrets.sh` 的泄漏扫描与占位串门禁。
 - 多机模式（`key-store-path`）现在确实按 sysid 取口令（`MavlinkSignerFactory` →
   `SigningKeyManager.keyFor()`），但**未命中该 sysid 时会回退 `defaultKey`**；
   要"只认密钥库里列出的机子"，必须显式不配 `defaultKey`，否则陌生 sysid 的签名帧
   会被拿去和 `defaultKey` 比对（比对失败仍拒，但这不是一次成员白名单检查）。
-- `MavlinkParser` 层只切帧、不验签；验签发生在 `MavlinkMessage.decode(frame, signer)`
-  与 `UdpGateway.verifyFrame`。
-- 时间戳由毫秒时钟换算，粒度是 1 毫秒（100 tick）；同一毫秒内连发多帧需要调用方自行递增。
+- ~~`MavlinkParser` 层只切帧、不验签~~ **此断言已被代码推翻**：`MavlinkParser.java:77,106-118`
+  完整解析 13 字节签名块（linkId/timestamp/signature）；验签在 `UdpGateway.verifyFrame`。
+- ~~时间戳由毫秒时钟换算，粒度是 1 毫秒（100 tick）~~ **已被推翻**（2026-10-11）：
+  改为 per-stream `nextTimestamp()` 严格单调递增——同一毫秒内连发多帧不再需要调用方自增。
+  实测修掉 staging 下 635 条「疑似重放」误拒（`verified=613 → 1259`，`rejected → 0`）。
 - 重放与时间戳回退只有单元测试证据：link-sim 的损伤画像会篡改签名字节、剥离签名块，
   但不会转发一条已签名的原帧来触发重放分支。
 - 签名统计（`signing: verified=/rejected=/unsigned=`）只进日志，既无指标也无告警。
+  > 注意：收紧为 `reject-unsigned=true` 后 **`unsigned` 计数恒为 0**（未签名帧直接计入
+  > `rejected`）。定位"谁还在发未签名帧"要改看
+  > `WARN 拒绝未签名帧：sysid=<id> msgId=<id>` 这行日志——它带 sysid 与 msgId。

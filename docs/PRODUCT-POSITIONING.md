@@ -518,8 +518,10 @@ java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
 > （见 §7.2），过期边界不再保留。
 
 - **模拟器为简化气动**：物理引擎 v2 含加速度/协调转弯/bank/姿态，非真飞控级气动。
-- **MAVLink 签名已与官方逐字节对等**（2026-10-01），但出厂默认明文
-  （`mavlink.signing.enabled=false`），口令与密钥库明文、无轮换端点。
+- **MAVLink 签名已与官方逐字节对等**（2026-10-01）；**prod 出厂仍明文**
+  （`mavlink.signing.enabled=false`，需单独拍板才打开，属机队范围的行为变更），
+  但 **staging 已开启并收紧为 strict**（2026-10-11）。轮换端点与部署侧注入链路均已就位；
+  口令与密钥库内容仍是**明文**（未做静态加密）。
 - **检测器是投影可见性**：无真实 CV 模型，接入点在 `CaptureService` 第 2 步。
 - **「自主决策」已接线为 advisory（只建议不执行），「边缘 AI」仍是库**：M11 决策
   引擎经 `AutonomyAdvisor` 接入 `VirtualDrone.tickOnce`（1Hz，STATUSTEXT 建议，

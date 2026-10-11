@@ -14,8 +14,8 @@
 # 前置检查：cloud-backend / drone-sim / link-sim jar 存在、端口可用
 #
 # 用法：
-#   powershell -ExecutionPolicy Bypass -File scripts\e2e-signing.ps1
-#   powershell -ExecutionPolicy Bypass -File scripts\e2e-signing.ps1 -SkipBuild
+#   powershell -ExecutionPolicy Bypass -File scripts/e2e-signing.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts/e2e-signing.ps1 -SkipBuild
 #
 # 前置：JDK 17 + Maven（自动构建缺失 jar）
 
@@ -38,6 +38,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+
+# 临时目录：Windows 有 $env:TEMP；Linux/macOS 上 PowerShell **不定义**它（为空），
+# 此时 Join-Path 会退化成相对路径、日志落进仓库目录。统一收敛到一个变量。
+$TempDir = if ($env:TEMP) { $env:TEMP }
+elseif ($env:TMPDIR) { $env:TMPDIR }
+else { [System.IO.Path]::GetTempPath().TrimEnd('/', '\') }
 $Fail = 0
 $script:CleanupActions = @()
 
@@ -76,7 +82,7 @@ function Assert-Java17([string]$JavaExe) {
     $ok = if ($major -eq 1) { $minor -ge 17 } else { $major -ge 17 }
     if (-not $ok) {
         Write-Host "需要 Java >= 17，当前: $v" -ForegroundColor Red
-        Write-Host '设置 $env:JAVA_HOME 指向 JDK17（或 $env:AF_JAVA 指向 java.exe）后重跑' -ForegroundColor Red
+        Write-Host '设置 $env:JAVA_HOME 指向 JDK17（或 $env:AF_JAVA 指向 java 可执行文件）后重跑' -ForegroundColor Red
         exit 1
     }
 }
@@ -132,12 +138,29 @@ trap { Invoke-Cleanup; break }
 # 清理旧实验进程（避免端口占用）
 # ============================================================
 function Cleanup-OldProcesses {
-    Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.CommandLine -match 'cloud-backend.*signing-e2e' `
-            -or $_.CommandLine -match 'drone-sim.*signing-e2e' `
-            -or $_.CommandLine -match 'link-sim.*signing-e2e') {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
+    # 找"上次跑剩下来的"签名 e2e 进程。按命令行里的 jar 名 + 端口标记匹配，
+    # 刻意只杀自己开的——绝不按 java 进程一刀切，那会连带杀掉别的 agent 的东西。
+    #
+    # 跨平台：Windows 走 CIM，Linux/macOS 没有 Win32_Process，改用 ps 的
+    # pid,args 输出。这里不能只依赖 Get-CimInstance 静默失败——那会让清理
+    # 在 Linux 上变成**什么都不做**，端口被上次残留占住，表现为莫名其妙的超时。
+    $markers = 'aerofleet-cloud-backend.*signing-e2e|aerofleet-drone-sim.*signing-e2e|aerofleet-link-sim.*signing-e2e'
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
+        & ps -eo pid,args --no-headers 2>$null |
+            Where-Object { $_ -match 'java' -and $_ -match $markers } |
+            ForEach-Object {
+                $pid0 = [int](($_ -split '\s+', 2)[0])
+                Write-Host "  清理残留 PID=$pid0"
+                Stop-Process -Id $pid0 -Force -ErrorAction SilentlyContinue
+            }
+    } else {
+        Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                if ($_.CommandLine -match $markers) {
+                    Write-Host "  清理残留 PID=$($_.ProcessId)"
+                    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                }
+            }
     }
     Start-Sleep 1
 }
@@ -207,8 +230,10 @@ function Wait-LogPattern($logFile, $pattern, $maxSeconds) {
 # ============================================================
 function Build-Jars {
     $mavenCmd = 'mvn'
-    if ($env:MAVEN_HOME -and (Test-Path (Join-Path $env:MAVEN_HOME "bin\mvn.cmd"))) {
-        $mavenCmd = Join-Path $env:MAVEN_HOME "bin\mvn.cmd"
+    # mvn 在 Windows 是 mvn.cmd、在 Linux 是 mvn，写死任何一个都会在另一端找不到
+    $mvnName = if ($IsWindows -or $PSVersionTable.PSVersion.Major -lt 6) { "mvn.cmd" } else { "mvn" }
+    if ($env:MAVEN_HOME -and (Test-Path (Join-Path $env:MAVEN_HOME "bin/$mvnName"))) {
+        $mavenCmd = Join-Path $env:MAVEN_HOME "bin/$mvnName"
     }
 
     $jdk17Home = 'E:\dev-tools\jdk17.0.20_8'
@@ -239,11 +264,23 @@ function Build-Jars {
 # ============================================================
 function Stop-SceneProcesses {
     Invoke-Cleanup
-    # 额外清理：确保所有 signing-e2e 相关 java 进程被终止
-    Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.CommandLine -match 'signing-e2e') {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
+    # 额外清理：确保所有 signing-e2e 相关 java 进程被终止。
+    # 同样必须跨平台——Linux 上没有 Win32_Process，若只留 CIM 分支，这里会退化成
+    # 静默什么都不做，上个场景的进程活到下个场景，两个 backend 抢同一端口，
+    # 表现为"第二个场景莫名超时"这种极难归因的失败。
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
+        & ps -eo pid,args --no-headers 2>$null |
+            Where-Object { $_ -match 'java' -and $_ -match 'signing-e2e' } |
+            ForEach-Object {
+                Stop-Process -Id [int](($_ -split '\s+', 2)[0]) -Force -ErrorAction SilentlyContinue
+            }
+    } else {
+        Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                if ($_.CommandLine -match 'signing-e2e') {
+                    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                }
+            }
     }
     Start-Sleep 2
 }
@@ -253,18 +290,24 @@ function Stop-SceneProcesses {
 # ============================================================
 
 # ---- Java 探测 + 版本自检 ----
+# java 在 Windows 是 java.exe、在 Linux 没有后缀。写死 "java.exe" 会让 Linux 上
+# 第一行版本自检就报 "The term java.exe is not recognized"。
+# 注意必须**在 if 链之前**赋值：PowerShell 的 elseif 条件是在走到那里时才求值的，
+# 若把赋值夹在 if 与 elseif 之间，$javaName 到用的时候还是 $null，路径退化成 "bin/"。
+$javaName = if ($IsWindows -or $PSVersionTable.PSVersion.Major -lt 6) { "java.exe" } else { "java" }
 if ($env:AF_JAVA) { $java = $env:AF_JAVA }
-elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" }
-else { $java = "java.exe" }
+elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin/$javaName"))) {
+    $java = Join-Path $env:JAVA_HOME "bin/$javaName"
+} else { $java = $javaName }
 Assert-Java17 $java
 Info "Java: $java"
 
 # ---- 前置检查：jar 存在 ----
 Step '前置检查（jar 存在、端口可用）'
 
-$backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend\target\*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-$droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim\target\*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-$linkSimJar = Get-ChildItem (Join-Path $Root 'link-sim\target\*link-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend/target/*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim/target/*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$linkSimJar = Get-ChildItem (Join-Path $Root 'link-sim/target/*link-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
 
 $backendOk = $null -ne $backendJar
 $droneSimOk = $null -ne $droneSimJar
@@ -283,9 +326,9 @@ if (-not ($backendOk -and $droneSimOk -and $linkSimOk)) {
     Info '部分 jar 缺失，自动构建...'
     Build-Jars
     # 重新检测
-    $backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend\target\*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-    $droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim\target\*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-    $linkSimJar = Get-ChildItem (Join-Path $Root 'link-sim\target\*link-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend/target/*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim/target/*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $linkSimJar = Get-ChildItem (Join-Path $Root 'link-sim/target/*link-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
     $backendOk = $null -ne $backendJar
     $droneSimOk = $null -ne $droneSimJar
     $linkSimOk = $null -ne $linkSimJar
@@ -334,7 +377,7 @@ Cleanup-OldProcesses
 # ============================================================
 Step '场景1：正常签名通信（签名启用 + 同一密钥）'
 
-$backendLog1 = Join-Path $env:TEMP "signing-e2e-backend-s1.log"
+$backendLog1 = Join-Path $TempDir "signing-e2e-backend-s1.log"
 if (Test-Path $backendLog1) { Remove-Item $backendLog1 -Force }
 
 $backend1 = Start-Process -FilePath $java -ArgumentList @(
@@ -349,7 +392,7 @@ $backend1 = Start-Process -FilePath $java -ArgumentList @(
     '--aerofleet.security.dev-mode=true',
     '--mavlink.signing.enabled=true',
     "--mavlink.signing.secret-key=$SigningKey"
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog1
+) -PassThru -RedirectStandardOutput $backendLog1
 Register-Cleanup { Stop-Process -Id $backend1.Id -Force -ErrorAction SilentlyContinue }
 Info "backend PID=$($backend1.Id)"
 
@@ -361,7 +404,7 @@ if (-not $backendUp1) {
     exit 1
 }
 
-$droneLog1 = Join-Path $env:TEMP "signing-e2e-drone-s1.log"
+$droneLog1 = Join-Path $TempDir "signing-e2e-drone-s1.log"
 if (Test-Path $droneLog1) { Remove-Item $droneLog1 -Force }
 
 $drone1 = Start-Process -FilePath $java -ArgumentList @(
@@ -370,7 +413,7 @@ $drone1 = Start-Process -FilePath $java -ArgumentList @(
     '--sysid', '1',
     '--name', 'AF-SIGN-01',
     '--signing-key', $SigningKey
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog1
+) -PassThru -RedirectStandardOutput $droneLog1
 Register-Cleanup { Stop-Process -Id $drone1.Id -Force -ErrorAction SilentlyContinue }
 Info "drone-sim PID=$($drone1.Id)"
 Start-Sleep 2
@@ -418,7 +461,7 @@ Stop-SceneProcesses
 # ============================================================
 Step '场景2：篡改检测（link-sim --profile tamper）'
 
-$backendLog2 = Join-Path $env:TEMP "signing-e2e-backend-s2.log"
+$backendLog2 = Join-Path $TempDir "signing-e2e-backend-s2.log"
 if (Test-Path $backendLog2) { Remove-Item $backendLog2 -Force }
 
 $backend2 = Start-Process -FilePath $java -ArgumentList @(
@@ -433,7 +476,7 @@ $backend2 = Start-Process -FilePath $java -ArgumentList @(
     '--aerofleet.security.dev-mode=true',
     '--mavlink.signing.enabled=true',
     "--mavlink.signing.secret-key=$SigningKey"
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog2
+) -PassThru -RedirectStandardOutput $backendLog2
 Register-Cleanup { Stop-Process -Id $backend2.Id -Force -ErrorAction SilentlyContinue }
 Info "backend PID=$($backend2.Id)"
 
@@ -446,7 +489,7 @@ if (-not $backendUp2) {
 }
 
 # 启动 link-sim（篡改画像）
-$linkSimLog2 = Join-Path $env:TEMP "signing-e2e-linksim-s2.log"
+$linkSimLog2 = Join-Path $TempDir "signing-e2e-linksim-s2.log"
 if (Test-Path $linkSimLog2) { Remove-Item $linkSimLog2 -Force }
 
 $linkSim2 = Start-Process -FilePath $java -ArgumentList @(
@@ -459,7 +502,7 @@ $linkSim2 = Start-Process -FilePath $java -ArgumentList @(
     '--drone-ip', '127.0.0.1',
     '--drone-port', $DronePort,
     '--tamper-rate', '1.0'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $linkSimLog2
+) -PassThru -RedirectStandardOutput $linkSimLog2
 Register-Cleanup { Stop-Process -Id $linkSim2.Id -Force -ErrorAction SilentlyContinue }
 Info "link-sim PID=$($linkSim2.Id) (profile=tamper)"
 Start-Sleep 2
@@ -468,7 +511,7 @@ $linkSim2Alive = -not $linkSim2.HasExited
 Check '场景2: link-sim 启动成功（tamper 画像）' $linkSim2Alive
 
 # 启动 drone-sim（签名启用）
-$droneLog2 = Join-Path $env:TEMP "signing-e2e-drone-s2.log"
+$droneLog2 = Join-Path $TempDir "signing-e2e-drone-s2.log"
 if (Test-Path $droneLog2) { Remove-Item $droneLog2 -Force }
 
 $drone2 = Start-Process -FilePath $java -ArgumentList @(
@@ -477,7 +520,7 @@ $drone2 = Start-Process -FilePath $java -ArgumentList @(
     '--sysid', '1',
     '--name', 'AF-SIGN-02',
     '--signing-key', $SigningKey
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog2
+) -PassThru -RedirectStandardOutput $droneLog2
 Register-Cleanup { Stop-Process -Id $drone2.Id -Force -ErrorAction SilentlyContinue }
 Info "drone-sim PID=$($drone2.Id)"
 Start-Sleep 2
@@ -521,7 +564,7 @@ Check '场景2: link-sim 日志可见篡改统计（停止后读取）' $tamperS
 # ============================================================
 Step '场景3：未签名拒绝（link-sim --profile unsigned）'
 
-$backendLog3 = Join-Path $env:TEMP "signing-e2e-backend-s3.log"
+$backendLog3 = Join-Path $TempDir "signing-e2e-backend-s3.log"
 if (Test-Path $backendLog3) { Remove-Item $backendLog3 -Force }
 
 $backend3 = Start-Process -FilePath $java -ArgumentList @(
@@ -537,7 +580,7 @@ $backend3 = Start-Process -FilePath $java -ArgumentList @(
     '--mavlink.signing.enabled=true',
     "--mavlink.signing.secret-key=$SigningKey",
     '--mavlink.signing.reject-unsigned=true'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog3
+) -PassThru -RedirectStandardOutput $backendLog3
 Register-Cleanup { Stop-Process -Id $backend3.Id -Force -ErrorAction SilentlyContinue }
 Info "backend PID=$($backend3.Id)"
 
@@ -550,7 +593,7 @@ if (-not $backendUp3) {
 }
 
 # 启动 link-sim（未签名画像）
-$linkSimLog3 = Join-Path $env:TEMP "signing-e2e-linksim-s3.log"
+$linkSimLog3 = Join-Path $TempDir "signing-e2e-linksim-s3.log"
 if (Test-Path $linkSimLog3) { Remove-Item $linkSimLog3 -Force }
 
 $linkSim3 = Start-Process -FilePath $java -ArgumentList @(
@@ -560,7 +603,7 @@ $linkSim3 = Start-Process -FilePath $java -ArgumentList @(
     '--port', $LinkSimPort,
     '--drone-ip', '127.0.0.1',
     '--drone-port', $DronePort
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $linkSimLog3
+) -PassThru -RedirectStandardOutput $linkSimLog3
 Register-Cleanup { Stop-Process -Id $linkSim3.Id -Force -ErrorAction SilentlyContinue }
 Info "link-sim PID=$($linkSim3.Id) (profile=unsigned)"
 Start-Sleep 2
@@ -569,7 +612,7 @@ $linkSim3Alive = -not $linkSim3.HasExited
 Check '场景3: link-sim 启动成功（unsigned 画像）' $linkSim3Alive
 
 # 启动 drone-sim（签名启用）
-$droneLog3 = Join-Path $env:TEMP "signing-e2e-drone-s3.log"
+$droneLog3 = Join-Path $TempDir "signing-e2e-drone-s3.log"
 if (Test-Path $droneLog3) { Remove-Item $droneLog3 -Force }
 
 $drone3 = Start-Process -FilePath $java -ArgumentList @(
@@ -578,7 +621,7 @@ $drone3 = Start-Process -FilePath $java -ArgumentList @(
     '--sysid', '1',
     '--name', 'AF-SIGN-03',
     '--signing-key', $SigningKey
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog3
+) -PassThru -RedirectStandardOutput $droneLog3
 Register-Cleanup { Stop-Process -Id $drone3.Id -Force -ErrorAction SilentlyContinue }
 Info "drone-sim PID=$($drone3.Id)"
 Start-Sleep 2
@@ -607,7 +650,7 @@ Check '场景3: link-sim 日志可见签名剥离统计（停止后读取）' $s
 # ============================================================
 Step '场景4：密钥不匹配（backend key=A, drone-sim key=B）'
 
-$backendLog4 = Join-Path $env:TEMP "signing-e2e-backend-s4.log"
+$backendLog4 = Join-Path $TempDir "signing-e2e-backend-s4.log"
 if (Test-Path $backendLog4) { Remove-Item $backendLog4 -Force }
 
 $backend4 = Start-Process -FilePath $java -ArgumentList @(
@@ -622,7 +665,7 @@ $backend4 = Start-Process -FilePath $java -ArgumentList @(
     '--aerofleet.security.dev-mode=true',
     '--mavlink.signing.enabled=true',
     "--mavlink.signing.secret-key=$SigningKey"
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog4
+) -PassThru -RedirectStandardOutput $backendLog4
 Register-Cleanup { Stop-Process -Id $backend4.Id -Force -ErrorAction SilentlyContinue }
 Info "backend PID=$($backend4.Id) (key=$SigningKey)"
 
@@ -635,7 +678,7 @@ if (-not $backendUp4) {
 }
 
 # drone-sim 使用不同的密钥
-$droneLog4 = Join-Path $env:TEMP "signing-e2e-drone-s4.log"
+$droneLog4 = Join-Path $TempDir "signing-e2e-drone-s4.log"
 if (Test-Path $droneLog4) { Remove-Item $droneLog4 -Force }
 
 $drone4 = Start-Process -FilePath $java -ArgumentList @(
@@ -644,7 +687,7 @@ $drone4 = Start-Process -FilePath $java -ArgumentList @(
     '--sysid', '1',
     '--name', 'AF-SIGN-04',
     '--signing-key', $SigningKeyAlt
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog4
+) -PassThru -RedirectStandardOutput $droneLog4
 Register-Cleanup { Stop-Process -Id $drone4.Id -Force -ErrorAction SilentlyContinue }
 Info "drone-sim PID=$($drone4.Id) (key=$SigningKeyAlt)"
 Start-Sleep 2
@@ -673,7 +716,7 @@ Stop-SceneProcesses
 Step '场景5：多机密钥分发（密钥文件配置不同 sysid 的密钥）'
 
 # 创建临时 JSON 密钥文件
-$keyStoreFile = Join-Path $env:TEMP "signing-e2e-keystore.json"
+$keyStoreFile = Join-Path $TempDir "signing-e2e-keystore.json"
 $keyStoreJson = @{
     version = 1
     defaultKey = $SigningKey
@@ -686,7 +729,7 @@ Set-Content -Path $keyStoreFile -Value $keyStoreJson -Encoding UTF8
 Info "密钥文件: $keyStoreFile"
 Info "密钥文件内容: $keyStoreJson"
 
-$backendLog5 = Join-Path $env:TEMP "signing-e2e-backend-s5.log"
+$backendLog5 = Join-Path $TempDir "signing-e2e-backend-s5.log"
 if (Test-Path $backendLog5) { Remove-Item $backendLog5 -Force }
 
 $backend5 = Start-Process -FilePath $java -ArgumentList @(
@@ -702,7 +745,7 @@ $backend5 = Start-Process -FilePath $java -ArgumentList @(
     '--aerofleet.security.dev-mode=true',
     '--mavlink.signing.enabled=true',
     "--mavlink.signing.key-store-path=$keyStoreFile"
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog5
+) -PassThru -RedirectStandardOutput $backendLog5
 Register-Cleanup { Stop-Process -Id $backend5.Id -Force -ErrorAction SilentlyContinue }
 Info "backend PID=$($backend5.Id) (multi-key mode)"
 
@@ -715,7 +758,7 @@ if (-not $backendUp5) {
 }
 
 # 启动 drone-sim 1（sysid=1, key=sys1-secret）
-$droneLog5a = Join-Path $env:TEMP "signing-e2e-drone-s5a.log"
+$droneLog5a = Join-Path $TempDir "signing-e2e-drone-s5a.log"
 if (Test-Path $droneLog5a) { Remove-Item $droneLog5a -Force }
 
 $drone5a = Start-Process -FilePath $java -ArgumentList @(
@@ -724,7 +767,7 @@ $drone5a = Start-Process -FilePath $java -ArgumentList @(
     '--sysid', '1',
     '--name', 'AF-SIGN-05A',
     '--signing-key', $Sys1Key
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog5a
+) -PassThru -RedirectStandardOutput $droneLog5a
 Register-Cleanup { Stop-Process -Id $drone5a.Id -Force -ErrorAction SilentlyContinue }
 Info "drone-sim 1 PID=$($drone5a.Id) (sysid=1, key=$Sys1Key)"
 Start-Sleep 2
@@ -733,7 +776,7 @@ $drone5aAlive = -not $drone5a.HasExited
 Check '场景5: drone-sim 1 启动成功（sysid=1）' $drone5aAlive
 
 # 启动 drone-sim 2（sysid=2, key=sys2-secret）
-$droneLog5b = Join-Path $env:TEMP "signing-e2e-drone-s5b.log"
+$droneLog5b = Join-Path $TempDir "signing-e2e-drone-s5b.log"
 if (Test-Path $droneLog5b) { Remove-Item $droneLog5b -Force }
 
 $drone5b = Start-Process -FilePath $java -ArgumentList @(
@@ -742,7 +785,7 @@ $drone5b = Start-Process -FilePath $java -ArgumentList @(
     '--sysid', '2',
     '--name', 'AF-SIGN-05B',
     '--signing-key', $Sys2Key
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog5b
+) -PassThru -RedirectStandardOutput $droneLog5b
 Register-Cleanup { Stop-Process -Id $drone5b.Id -Force -ErrorAction SilentlyContinue }
 Info "drone-sim 2 PID=$($drone5b.Id) (sysid=2, key=$Sys2Key)"
 Start-Sleep 2
@@ -795,7 +838,7 @@ if (Test-Path $keyStoreFile) { Remove-Item $keyStoreFile -Force }
 # ============================================================
 Step '场景6：签名未启用兼容（不启用签名 → 通信正常）'
 
-$backendLog6 = Join-Path $env:TEMP "signing-e2e-backend-s6.log"
+$backendLog6 = Join-Path $TempDir "signing-e2e-backend-s6.log"
 if (Test-Path $backendLog6) { Remove-Item $backendLog6 -Force }
 
 $backend6 = Start-Process -FilePath $java -ArgumentList @(
@@ -808,7 +851,7 @@ $backend6 = Start-Process -FilePath $java -ArgumentList @(
     "--aerofleet.drone-port=$DronePort",
     '--aerofleet.security.rbac-enabled=false',
     '--aerofleet.security.dev-mode=true'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog6
+) -PassThru -RedirectStandardOutput $backendLog6
 Register-Cleanup { Stop-Process -Id $backend6.Id -Force -ErrorAction SilentlyContinue }
 Info "backend PID=$($backend6.Id) (signing disabled)"
 
@@ -821,7 +864,7 @@ if (-not $backendUp6) {
 }
 
 # drone-sim 不启用签名（不传 --signing-key 参数）
-$droneLog6 = Join-Path $env:TEMP "signing-e2e-drone-s6.log"
+$droneLog6 = Join-Path $TempDir "signing-e2e-drone-s6.log"
 if (Test-Path $droneLog6) { Remove-Item $droneLog6 -Force }
 
 $drone6 = Start-Process -FilePath $java -ArgumentList @(
@@ -829,7 +872,7 @@ $drone6 = Start-Process -FilePath $java -ArgumentList @(
     '--port', $DronePort,
     '--sysid', '1',
     '--name', 'AF-SIGN-06'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog6
+) -PassThru -RedirectStandardOutput $droneLog6
 Register-Cleanup { Stop-Process -Id $drone6.Id -Force -ErrorAction SilentlyContinue }
 Info "drone-sim PID=$($drone6.Id) (signing disabled)"
 Start-Sleep 2

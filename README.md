@@ -716,10 +716,10 @@ NexusSky/
 | `mavlink-core` | 478 |
 | `drone-sim` | 1408 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2608 |
+| `cloud-backend` | 2610 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 19 |
-| **总计** | **4642** |
+| **总计** | **4644** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -855,8 +855,13 @@ NexusSky/
   （`MavlinkSigningVectorTest`，向量生成器 `scripts/mavlink-signing-vectors.py`）。
   此前是 15 字节（HMAC-SHA256 取 8 字节 + 大端时间戳），与 PX4/pymavlink 混流既验不过签名
   又会因帧长差 2 字节错帧
-- 签名**出厂仍是明文**：`mavlink.signing.enabled` 默认 false 且任何 profile 都未配置。
-  而且接线此前是断的——backend 的四个签名注入点全是 `@Autowired(required=false)`，
+- 签名**出厂仍是明文，但不再"无配置"**：`mavlink.signing.enabled` 出厂默认 `false`，
+  四个 profile 均已显式声明；其中 **staging 已开到 `enabled=true` + `reject-unsigned=true`
+  （strict / fail-closed，2026-10-11 完成 C5 第二步）**，prod 仍为 `false`——打开 prod 是
+  机队范围的行为变更，需单独拍板。部署侧注入链路（helm / k8s / docker-compose 的
+  `MAVLINK_SIGNING_*`）与占位凭据门禁见 `deploy/helm/nexussky/values.yaml` 的
+  `mavlinkSigning` 块。
+  接线此前是断的——backend 的四个签名注入点全是 `@Autowired(required=false)`，
   而裸 `@SpringBootApplication` 不扫 `io.aerofleet.mavlink.*` 包，故四个字段恒为 null、
   `UdpGateway.isSigningEnabled()` 恒 false，把开关打开也不签名（现在由
   `MavlinkSigningConfiguration` 按开关条件装配，`MavlinkSigningConfigurationTest` 盯住这条路径）。

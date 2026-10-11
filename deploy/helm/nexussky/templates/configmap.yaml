@@ -24,6 +24,24 @@ data:
   MANAGEMENT_ENDPOINT_HEALTH_GROUP_LIVENESS_INCLUDE: "livenessState"
   # 飞行日志目录：必须与 Deployment 的 flight-logs 卷 mountPath 一致（/app/logs）
   AEROFLEET_FLIGHTLOG_DIR: "/app/logs"
+  {{- if .Values.mavlinkSigning.enabled }}
+  # ===== MAVLink v2 链路签名（C5）=====
+  # 这两个开关**只在 mavlinkSigning.enabled=true 时注入**。关闭时一个键都不渲染，
+  # 让后端按 profile 文件自身的取值走——否则用默认 values 部署 staging profile
+  # 的 release 会把 staging 自带的 enabled=true 静默改成 false。
+  #
+  # env 变量的优先级高于 profile-specific 的 application-<profile>.properties
+  # （实测：属性源顺序 systemProperties > systemEnvironment > Config resource），
+  # 所以这里注入的值确实能覆盖 profile 文件里写死的同名项。
+  #
+  # 注意 reject-unsigned 的 relaxed binding 形态是 MAVLINK_SIGNING_REJECT_UNSIGNED
+  # （连字符 → 下划线），不是 ..._REJECT.UNSIGNED。
+  #
+  # ⚠️ 绝对不要注入空字符串：@Value("${mavlink.signing.enabled:false}") 遇到
+  # 空值是**绑定失败**而非回落默认值，后端会直接启动失败。
+  MAVLINK_SIGNING_ENABLED: "true"
+  MAVLINK_SIGNING_REJECT_UNSIGNED: {{ .Values.mavlinkSigning.rejectUnsigned | quote }}
+  {{- end }}
   # MAVLink UDP 网关绑定地址：**有意不设置**，保持 prod 默认 0.0.0.0。
   # Pod IP 每次重建都会变，绑具体 IP 会导致 UDP 网关起不来；
   # 入站收口由 networkpolicy.yaml 完成（仅放行同命名空间 → 14550/UDP）。

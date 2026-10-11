@@ -32,6 +32,26 @@ data:
   # 注：UDP 端口（14550）此处也不设置——UdpGateway 的
   # @Value("${aerofleet.udp-port:14550}") 已内置同值默认，
   # networkpolicy.yaml 亦按 14550 硬编码。三处一致，无需再声明一份副本。
+  # ===== MAVLink v2 链路签名（C5）=====
+  # **默认不设置**（保持 prod 出厂姿态），需要打开签名时取消注释下面两行，
+  # 并在 secret.yaml 里同时给出 MAVLINK_SIGNING_SECRET_KEY。
+  #
+  # 为什么不直接写死 "false"：env 的优先级高于 profile 文件
+  # （属性源顺序 systemProperties > systemEnvironment > Config resource），
+  # 无条件写死会让「用本清单部署 staging namespace」把 staging 自带的
+  # enabled=true 静默改成 false。安全姿态不该由「少配一个键」决定。
+  #
+  # ⚠️ 别把值写成空串：@Value("${mavlink.signing.enabled:false}") 遇空值是
+  # **绑定失败**而不是回落默认值，后端会直接启动失败。要关就整个键不出现。
+  # MAVLINK_SIGNING_ENABLED: "true"
+  # # 观察期才设 false：先让签名开着、不拒未签名，从日志
+  # # `signing: verified=/rejected=/unsigned=` 看在网设备签没签，unsigned 归零后收紧 true
+  # MAVLINK_SIGNING_REJECT_UNSIGNED: "true"
+  #
+  # 打开签名前三步见 cloud-backend/src/main/resources/application-prod.properties
+  # 的「打开前必须做什么」：MAVLink v2 签名块 linkId(1)|timestamp(6)|signature(6)
+  # **没有 key id 字段**，打开即硬切换、没有宽限期，未换密钥设备的帧会被整体丢弃。
+  #
   # schema 由启动时的 Flyway 迁移建立后校验（与 prod 同口径）；
   # update 会让 Hibernate 隐式建表/补列，绕开迁移脚本
   SPRING_JPA_HIBERNATE_DDL_AUTO: "validate"

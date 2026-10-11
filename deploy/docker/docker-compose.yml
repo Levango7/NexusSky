@@ -89,6 +89,26 @@ services:
       # 相当于让 Hibernate 隐式建表，迁移脚本从未在生产通路被验证过）。
       - SPRING_FLYWAY_ENABLED=true
       - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
+      # ===== MAVLink v2 链路签名（C5）=====
+      # 本栈是 prod 口径（SPRING_PROFILES_ACTIVE=prod），所以三个开关的缺省值
+      # 与 application-prod.properties 的出厂值一致：签名关、严格模式默认开。
+      # 打开方式：export MAVLINK_SIGNING_ENABLED=true MAVLINK_SIGNING_SECRET_KEY=...
+      # 并让 drone-sim 的 --signing-key 与之**完全一致**，否则 sim 的签名帧会被
+      # UdpGateway 全部按验签失败丢弃。
+      #
+      # ⚠️ 两个坑，都踩过就白搭一次部署：
+      #  1) 开关**给了具名缺省而不是留空**。@Value("${mavlink.signing.enabled:false}")
+      #     遇到空字符串是**绑定失败**、不是回落默认值，后端会直接启动失败。
+      #  2) 改了 SPRING_PROFILES_ACTIVE=staging 的同学注意：这里显式的 false 会
+      #     **覆盖** staging profile 自带的 enabled=true（env 优先级高于 properties
+      #     文件，实测 systemEnvironment > Config resource）。届时须一并把
+      #     MAVLINK_SIGNING_ENABLED 设成 true。
+      # 打开前必读的三步：cloud-backend/src/main/resources/application-prod.properties
+      # 的「打开前必须做什么」（MAVLink v2 签名块无 key id ⇒ 打开即硬切换、无宽限期）。
+      - MAVLINK_SIGNING_ENABLED=${MAVLINK_SIGNING_ENABLED:-false}
+      - MAVLINK_SIGNING_REJECT_UNSIGNED=${MAVLINK_SIGNING_REJECT_UNSIGNED:-true}
+      - MAVLINK_SIGNING_SECRET_KEY=${MAVLINK_SIGNING_SECRET_KEY:-}
+      - MAVLINK_SIGNING_KEY_STORE=${MAVLINK_SIGNING_KEY_STORE:-}
       # MAVLink UDP 网关绑定地址：此处**有意不注入**，保持 prod 默认 0.0.0.0。
       # 容器内必须监听所有接口才能被上方 `ports:` 映射（绑 127.0.0.1 会让映射失效）。
       # 真正的入站收口由网络层完成（K8s 见 deploy/k8s/networkpolicy.yaml 的 14550/UDP 规则）。

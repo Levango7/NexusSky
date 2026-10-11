@@ -127,6 +127,34 @@ security:
   bootstrapAdminUsername: "admin"
   bootstrapAdminTenantId: "1"
 
+# ---- MAVLink v2 链路签名（C5）----
+# **默认整块不注入**：enabled=false 时 chart 一个 MAVLINK_SIGNING_* 变量都不渲染，
+# 于是后端按 profile 文件自身的取值走（prod 文件自带 enabled=false、
+# staging 文件自带 enabled=true）。这是刻意的——
+# 若这里无条件渲染 MAVLINK_SIGNING_ENABLED=false，一个用默认 values 部署
+# staging profile 的 release 会把 staging 自带的签名**静默关掉**。
+# 安全姿态不该由「忘了配某个值」来改。
+mavlinkSigning:
+  # 是否打开签名。true 时才渲染 MAVLINK_SIGNING_* 并启用下面的占位串门禁。
+  # 出厂 false 是**有意决策**：MAVLink v2 签名块 linkId(1)|timestamp(6)|signature(6)
+  # **没有 key id 字段** ⇒ 打开即硬切换、不存在宽限期，未换密钥的设备帧会被整体丢弃
+  # （遥测全线中断）。打开前三步见 cloud-backend/src/main/resources/
+  # application-prod.properties 的「打开前必须做什么」。
+  enabled: false
+  # 严格模式：开了签名却不拒未签名等于没开（未签名帧照样进来）。
+  # 唯一该设 false 的窗口是「观察期」——从日志
+  # `signing: verified=/rejected=/unsigned=` 观察在网设备到底签没签，
+  # unsigned 收敛到 0 之后再收紧为 true。
+  rejectUnsigned: true
+  # 单密钥模式口令。**必须与 drone-sim 的 --signing-key 完全一致**，
+  # 否则 sim 下发的签名帧全部验签失败被丢。
+  # 与 security.jwtSecret 同款处理：留占位串时 helm 直接 fail（见 templates/secret.yaml）。
+  secretKey: "REPLACE_WITH_MAVLINK_SIGNING_SECRET_KEY"
+  # 多机密钥库路径（SigningKeyManager 多密钥模式）。留空=单密钥模式。
+  # 与 secretKey **给其一即可**；都给时 keyStorePath 优先。
+  # 密钥库内容是 linkId->key 的 JSON，由 MavlinkSigningKeyController 的轮换端点原子落盘。
+  keyStorePath: ""
+
 # ---- 数据库（PostgreSQL，与 prod profile 口径一致） ----
 # 必须指向可达的 PG 实例：dev/prod 两个 profile 的数据源缺省都是 PG，prod 的
 # driver 硬编码 org.postgresql.Driver；DB 写通路只在 CI Pass C 的真 PG 上有门禁
