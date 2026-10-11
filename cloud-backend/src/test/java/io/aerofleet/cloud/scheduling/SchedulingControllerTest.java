@@ -67,6 +67,30 @@ class SchedulingControllerTest {
     }
 
     @Test
+    void releaseReservations_endpoint() throws Exception {
+        double now = System.currentTimeMillis();
+        double lat = 39.9101, lon = 116.4101;
+        mockMvc.perform(post("/api/v1/scheduling/reservations")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(reservationBody(9, lat, lon, 100, now, now + 100_000, 50)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(delete("/api/v1/scheduling/reservations/9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sysid").value(9))
+                .andExpect(jsonPath("$.released").value(1));
+
+        // 释放后快照不含该机
+        mockMvc.perform(get("/api/v1/scheduling/reservations"))
+                .andExpect(status().isOk());
+
+        // 无预约的机释放 → released=0（宽容语义）
+        mockMvc.perform(delete("/api/v1/scheduling/reservations/99"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.released").value(0));
+    }
+
+    @Test
     void failTask_endpointIsWiredAndLenientOnUnknown() throws Exception {
         // 未知任务返回 failed=false（与 start/complete/cancel 的宽容语义一致；
         // true 路径由 TaskAssignmentServiceTest 覆盖——需要真实分配链）

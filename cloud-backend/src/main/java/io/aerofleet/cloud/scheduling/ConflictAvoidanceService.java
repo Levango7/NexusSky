@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import io.aerofleet.cloud.security.TenantContext;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -600,11 +602,35 @@ public class ConflictAvoidanceService {
             return;
         }
         try {
-            reservationRepository.save(
-                    AirspaceReservationEntity.from(reservation, sysid, System.currentTimeMillis()));
+            Integer tenantId = TenantContext.getEffectiveTenantId();
+            reservationRepository.save(AirspaceReservationEntity.from(
+                    reservation, sysid, System.currentTimeMillis(), tenantId));
         } catch (Exception e) {
             log.warn("airspace reservation persist failed for sysid {} (memory kept): {}",
                     sysid, e.getMessage());
+        }
+    }
+
+    /**
+     * 释放某无人机的全部预约（运营语义："这架机的活都结束了，让出时空块"）。
+     * <p>
+     * 清内存表 + 删库；返回释放条数。任务提前完成/撤防时调用——
+     * 不释放则空域块要等到窗口过期才让出。
+     */
+    public int releaseReservations(int sysid) {
+        synchronized (reservationTable) {
+            List<Reservation4D> removed = reservationTable.remove(sysid);
+            int count = removed == null ? 0 : removed.size();
+            if (persist && reservationRepository != null) {
+                try {
+                    reservationRepository.deleteByOwnerSysid(sysid);
+                } catch (Exception e) {
+                    log.warn("airspace reservation db release failed for sysid {}: {}",
+                            sysid, e.getMessage());
+                }
+            }
+            log.info("Released {} airspace reservation(s) for sysid {}", count, sysid);
+            return count;
         }
     }
 

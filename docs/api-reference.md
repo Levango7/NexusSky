@@ -949,6 +949,7 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 | POST | `/conflicts/scan` | 机队冲突扫描（两两 4D 检测，逐冲突对发布 30049） | - | 200 {conflictCount,conflicts} |
 | POST | `/reservations` | **提交 4D 空域预约**（冲突 409 + 发布 AIRSPACE 类型 30049） | {sysid,lat,lon,alt,startTime,endTime,radius} | 200 {status:"reserved"} / 409 {conflictType:"AIRSPACE",conflictSysid} |
 | GET | `/reservations` | 当前 4D 空域预约快照 | - | 200 {count,reservations:[…]} |
+| DELETE | `/reservations/{sysid}` | 释放某机全部预约（任务提前完成/撤防让出时空块，需 OPERATOR） | - | 200 {sysid,released} |
 | GET | `/status` | 调度状态 | - | 200 {totalTasks,status} |
 
 #### 端点详情
@@ -977,6 +978,12 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 
 **GET /api/v1/scheduling/reservations**
 - 响应: 200 - `{count, reservations:[{sysid,lat,lon,alt,startTime,endTime,radius}]}`（时间同为 epoch 毫秒）
+
+**DELETE /api/v1/scheduling/reservations/{sysid}** （需 OPERATOR 角色）
+- 语义: 释放该无人机的**全部**预约（清内存 + 删库）——运营场景"任务提前完成/撤防，
+  时空块不必等窗口过期"。返回释放条数；无预约返回 `{released:0}`（宽容语义）
+- 落库的预约带**归属租户**列（`tenant_id`，V27；从认证上下文取，可空）
+  ——语义是审计记录（"谁的调度占了这块空域"），**不参与冲突判定**（空域是物理的，跨租户同样冲突）
 
 ### 基础路径 `/api/v1/squad`
 

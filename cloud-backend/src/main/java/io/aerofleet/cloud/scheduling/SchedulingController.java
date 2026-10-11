@@ -200,6 +200,19 @@ public class SchedulingController {
         return resp;
     }
 
+    /**
+     * 释放某无人机的全部空域预约（运营语义：任务提前完成/撤防，让出时空块）。
+     */
+    @DeleteMapping("/reservations/{sysid}")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> releaseReservations(@PathVariable("sysid") int sysid) {
+        int released = conflictService.releaseReservations(sysid);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("sysid", sysid);
+        resp.put("released", released);
+        return resp;
+    }
+
     @GetMapping("/status")
     public Map<String, Object> status() {
         Map<String, Object> s = new LinkedHashMap<>();
