@@ -14,8 +14,8 @@
 # 前置检查：cloud-backend / drone-sim / link-sim jar 存在、端口可用
 #
 # 用法：
-#   powershell -ExecutionPolicy Bypass -File scripts\e2e-signing.ps1
-#   powershell -ExecutionPolicy Bypass -File scripts\e2e-signing.ps1 -SkipBuild
+#   powershell -ExecutionPolicy Bypass -File scripts/e2e-signing.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts/e2e-signing.ps1 -SkipBuild
 #
 # 前置：JDK 17 + Maven（自动构建缺失 jar）
 
@@ -82,7 +82,7 @@ function Assert-Java17([string]$JavaExe) {
     $ok = if ($major -eq 1) { $minor -ge 17 } else { $major -ge 17 }
     if (-not $ok) {
         Write-Host "需要 Java >= 17，当前: $v" -ForegroundColor Red
-        Write-Host '设置 $env:JAVA_HOME 指向 JDK17（或 $env:AF_JAVA 指向 java.exe）后重跑' -ForegroundColor Red
+        Write-Host '设置 $env:JAVA_HOME 指向 JDK17（或 $env:AF_JAVA 指向 java 可执行文件）后重跑' -ForegroundColor Red
         exit 1
     }
 }
@@ -230,8 +230,10 @@ function Wait-LogPattern($logFile, $pattern, $maxSeconds) {
 # ============================================================
 function Build-Jars {
     $mavenCmd = 'mvn'
-    if ($env:MAVEN_HOME -and (Test-Path (Join-Path $env:MAVEN_HOME "bin\mvn.cmd"))) {
-        $mavenCmd = Join-Path $env:MAVEN_HOME "bin\mvn.cmd"
+    # mvn 在 Windows 是 mvn.cmd、在 Linux 是 mvn，写死任何一个都会在另一端找不到
+    $mvnName = if ($IsWindows -or $PSVersionTable.PSVersion.Major -lt 6) { "mvn.cmd" } else { "mvn" }
+    if ($env:MAVEN_HOME -and (Test-Path (Join-Path $env:MAVEN_HOME "bin/$mvnName"))) {
+        $mavenCmd = Join-Path $env:MAVEN_HOME "bin/$mvnName"
     }
 
     $jdk17Home = 'E:\dev-tools\jdk17.0.20_8'
@@ -288,18 +290,24 @@ function Stop-SceneProcesses {
 # ============================================================
 
 # ---- Java 探测 + 版本自检 ----
+# java 在 Windows 是 java.exe、在 Linux 没有后缀。写死 "java.exe" 会让 Linux 上
+# 第一行版本自检就报 "The term java.exe is not recognized"。
+# 注意必须**在 if 链之前**赋值：PowerShell 的 elseif 条件是在走到那里时才求值的，
+# 若把赋值夹在 if 与 elseif 之间，$javaName 到用的时候还是 $null，路径退化成 "bin/"。
+$javaName = if ($IsWindows -or $PSVersionTable.PSVersion.Major -lt 6) { "java.exe" } else { "java" }
 if ($env:AF_JAVA) { $java = $env:AF_JAVA }
-elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" }
-else { $java = "java.exe" }
+elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin/$javaName"))) {
+    $java = Join-Path $env:JAVA_HOME "bin/$javaName"
+} else { $java = $javaName }
 Assert-Java17 $java
 Info "Java: $java"
 
 # ---- 前置检查：jar 存在 ----
 Step '前置检查（jar 存在、端口可用）'
 
-$backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend\target\*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-$droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim\target\*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-$linkSimJar = Get-ChildItem (Join-Path $Root 'link-sim\target\*link-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend/target/*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim/target/*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$linkSimJar = Get-ChildItem (Join-Path $Root 'link-sim/target/*link-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
 
 $backendOk = $null -ne $backendJar
 $droneSimOk = $null -ne $droneSimJar
@@ -318,9 +326,9 @@ if (-not ($backendOk -and $droneSimOk -and $linkSimOk)) {
     Info '部分 jar 缺失，自动构建...'
     Build-Jars
     # 重新检测
-    $backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend\target\*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-    $droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim\target\*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-    $linkSimJar = Get-ChildItem (Join-Path $Root 'link-sim\target\*link-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend/target/*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim/target/*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $linkSimJar = Get-ChildItem (Join-Path $Root 'link-sim/target/*link-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
     $backendOk = $null -ne $backendJar
     $droneSimOk = $null -ne $droneSimJar
     $linkSimOk = $null -ne $linkSimJar
