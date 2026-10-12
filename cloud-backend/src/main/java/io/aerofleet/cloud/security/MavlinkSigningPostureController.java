@@ -63,7 +63,7 @@ public class MavlinkSigningPostureController {
             return ResponseEntity.ok(body(r, posture.recentEvents()));
         } catch (SigningPostureService.PostureRejectedException e) {
             // 消息里已含名单（服务层负责，保证非 HTTP 调用方也能看到）；响应体再给一份结构化的，
-            // GCS 才能直接渲染"该去配这几种台"而不是去 parse 中文句子。
+            // GCS 才能直接渲染"该去配哪几台"而不是去 parse 中文句子。
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("error", e.getMessage());
             m.put("missingSigningEvidence", e.missing());
