@@ -4,6 +4,65 @@
 
 ---
 
+## [Unreleased] — 签名统计接入 Prometheus：最该被监控的安全计数器此前对监控不可见（2026-10-11）
+
+### 问题
+
+`micrometer-registry-prometheus` 早已接好、`/actuator/prometheus` 早已暴露、
+`MetricsConfig`/`ApiMetricsFilter`/`DroneMetrics` 早已在位——但**签名统计是
+`UdpGateway` 里的纯内存计数器**，每 60s 打一条 `log.info` 就清零。
+
+也就是说：本系统最该被监控的安全计数器，对**已经在采集的 Prometheus 是不可见的**。
+有人在爆破签名时 `rejected` 在涨，但没有任何东西能据此告警。
+`docs/security-design.md §7.5` 早就把"签名统计只进日志，既无指标也无告警"
+登记为已知边界——现在它不再是边界。
+
+### 改动
+
+`DroneMetrics` 新增三个计数器：
+
+| 指标 | 类型 | 说明 |
+|---|---|---|
+| `aerofleet.signing.verified` | Counter | 验签通过的帧数 |
+| `aerofleet.signing.rejected{reason=...}` | Counter | 验签拒绝，**按 reason 标签** |
+| `aerofleet.signing.unsigned` | Counter | 未签名但被放行（仅 permissive 姿态非零） |
+
+reason 五值：`unsigned` / `no-key` / `bad-signature` / `timestamp-replay` / `error`。
+
+**为什么 rejected 要带 reason 而非裸计数**：裸的"拒了多少"不可行动，
+"因为什么被拒"才可行动。`unsigned` 是有客户端没升级签名；
+`no-key` 意味着**有帧带着有效签名但来源 sysid 不在密钥库里**——后者更值得警惕，
+两者混成一个数字就没法定位了。五个取值，基数安全。
+
+`UdpGateway` 把 reason 穿过 5 个拒绝点，并同步给 `DroneMetrics`。
+`droneMetrics` 是 `@Autowired(required=false)`：**指标是可选依赖不是启动依赖**——
+没有 MeterRegistry 时签名链路必须照常工作（`worksWithoutMetricsBean` 盯这条）。
+
+### 顺带一个观测红利
+
+`aerofleet.signing.unsigned` 在 fail-closed 姿态下**应恒为 0**。
+staging 自 2026-10-11 起 `reject-unsigned=true`，所以这个计数器直接就是
+「收紧是否生效」的证据——它开始动，就说明有人把配置退回了 permissive。
+
+建议告警表达式已写进 `docs/security-design.md §7.5`（**未内置告警规则**，
+按环境实际标签名调整）。
+
+### 测试
+
+新增 `UdpGatewaySigningMetricsTest`（8 例）：打真实 UDP 字节走生产同一条路
+（`DatagramSocket → UdpMavlinkTransport → MavlinkParser → onFrame → verifyFrame`），
+直接读 `SimpleMeterRegistry`。断言端到端接线而非"计数器会加"——真正会坏的是接线。
+
+变异测试：
+- 删掉 verified 的指标记录（内存计数保留）→ 2 例转红（这正是"看起来接了实际没记"的假修复）
+- 把 bad-signature 错标成 unsigned → 3 例转红（归类错了功能不失效，但告警会指错方向，更隐蔽）
+
+### 计数
+
+Java 4644 → **4653**（`cloud-backend` 2610 → **2619**，+9）
+
+---
+
 ## [Unreleased] — C5 第二步：staging 收紧为 strict + 补齐部署侧注入链路 + 签名 e2e 首次进 CI（2026-10-11）
 
 C5 的三步里，第一步（staging 开着签名但不拒未签名）早已落地，但后面卡住了。
