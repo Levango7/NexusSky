@@ -1,20 +1,25 @@
 ﻿# 监管合规端到端验证脚本（C1-T16）
 #
-# 依据：design.md §监管合规 + spec.md FR-31~FR-35
+# 依据：design.md §监管合规 + spec.md FR-31~FR-39
 # 场景：regulator-sim + cloud-backend + drone-sim 全链路监管合规验证
 #
-# 断言目标（FR-31~35）：
+# 断言目标（FR-31~39）：
 #   FR-31 实名验证全链路（POST /verify → VERIFIED → GET /status → VERIFIED）
 #   FR-32 激活上报全链路（POST /activate → activationId → GET /status → ACTIVATED）
 #   FR-33 遥测上报全链路（等待 ≤2 周期 → GET /api/records?type=telemetry → 包含 sysid）
 #   FR-34 注销全链路（POST /cancel → cancellationId → GET /status → CANCELLED → 等待 2 周期 → 无新遥测记录）
 #   FR-35 regulator-sim 不可达时降级（停止 regulator-sim → POST /verify → ERROR）
+#   FR-36 激活幂等：同 serialNo 重复 activate → 返回同一 activationId（打 sim 本体）
+#   FR-37 未激活上报拒绝：未 activate 的 serialNo telemetry → 403 NOT_ACTIVATED（打 sim 本体）
+#   FR-38 注销后激活拒绝：已注销 serialNo 再 activate → 403 CANCELLED（打 sim 本体）
+#   FR-39 reset 生效：POST /api/reset 后状态归零、可重新激活（打 sim 本体）
 #
 # 前置检查：regulator-sim / cloud-backend / drone-sim jar 存在、端口可用
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File scripts\e2e-regulator.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts\e2e-regulator.ps1 -SkipBuild
+#   $env:AF_BACKEND_PORT=18099; ...   # 8080 被常驻服务占用时避开（另可选 AF_REGULATOR_PORT / AF_DRONE_PORT）
 #
 # 前置：JDK 17 + Maven（自动构建缺失 jar）
 
@@ -26,9 +31,10 @@ $Fail = 0
 $script:CleanupActions = @()
 
 # ---- 端口配置 ----
-$RegulatorPort = 18080
-$BackendPort = 8080
-$DronePort = 14555
+# 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_PORT 覆盖
+$RegulatorPort = if ($env:AF_REGULATOR_PORT) { [int]$env:AF_REGULATOR_PORT } else { 18080 }
+$BackendPort = if ($env:AF_BACKEND_PORT) { [int]$env:AF_BACKEND_PORT } else { 8080 }
+$DronePort = if ($env:AF_DRONE_PORT) { [int]$env:AF_DRONE_PORT } else { 14555 }
 $DroneSysid = 2
 
 # ---- 测试数据（regulator-sim 预置数据）----
@@ -105,6 +111,44 @@ function Send-GetJson($url) {
     return $resp.Content | ConvertFrom-Json
 }
 
+function Send-PostJsonAllowFailure($url, $body) {
+    # 语义拒绝（403 等）与成功都要拿到 body，才能断言 verdict/reason。这里不走
+    # Invoke-WebRequest：PS 5.1 会在抛错前把响应流吃掉（GetResponseStream() 读出
+    # 来是空串），裸 HttpWebRequest 的流不被预消费，非 2xx 的 body 照样读得到。
+    # 返回 @{ Status = <int，0 表示网络层失败>; Json = <解析后对象或 $null> }。
+    $json = $body | ConvertTo-Json -Depth 10 -Compress
+    $req = [System.Net.HttpWebRequest]::Create($url)
+    $req.Method = 'POST'
+    $req.ContentType = 'application/json; charset=UTF-8'
+    $req.Timeout = 30000
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+    $req.ContentLength = $bytes.Length
+    $stream = $req.GetRequestStream()
+    try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Close() }
+
+    $statusCode = 0
+    $content = ''
+    try {
+        $resp = $req.GetResponse()
+        $statusCode = [int]$resp.StatusCode
+        $reader = New-Object System.IO.StreamReader($resp.GetResponseStream(), [System.Text.Encoding]::UTF8)
+        try { $content = $reader.ReadToEnd() } finally { $reader.Close(); $resp.Close() }
+    } catch [System.Net.WebException] {
+        $errResp = $_.Exception.Response
+        if ($null -ne $errResp) {
+            $statusCode = [int]$errResp.StatusCode
+            $reader = New-Object System.IO.StreamReader($errResp.GetResponseStream(), [System.Text.Encoding]::UTF8)
+            try { $content = $reader.ReadToEnd() } finally { $reader.Close() }
+        }
+    }
+
+    $parsed = $null
+    if (-not [string]::IsNullOrWhiteSpace($content)) {
+        try { $parsed = $content | ConvertFrom-Json } catch { $parsed = $null }
+    }
+    return @{ Status = $statusCode; Json = $parsed }
+}
+
 # ============================================================
 # 清理注册
 # ============================================================
@@ -123,8 +167,8 @@ trap { Invoke-Cleanup; break }
 function Cleanup-OldProcesses {
     Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
         if ($_.CommandLine -match 'regulator-sim' `
-            -or $_.CommandLine -match 'cloud-backend.*regulator-e2e' `
-            -or $_.CommandLine -match 'drone-sim.*regulator-e2e') {
+            -or $_.CommandLine -match 'cloud-backend.*aerofleet\.regulator\.' `
+            -or $_.CommandLine -match 'drone-sim.*AF-REG') {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
     }
@@ -243,9 +287,9 @@ if (-not ($portRegulatorFree -and $portBackendFree -and $portDroneFree)) {
 Cleanup-OldProcesses
 
 # ============================================================
-# 1. 启动 regulator-sim（--port 18080）
+# 1. 启动 regulator-sim（--port $RegulatorPort）
 # ============================================================
-Step '启动 regulator-sim（--port 18080）'
+Step "启动 regulator-sim（--port $RegulatorPort）"
 
 $regulatorLog = Join-Path $env:TEMP "regulator-e2e-sim.log"
 if (Test-Path $regulatorLog) { Remove-Item $regulatorLog -Force }
@@ -285,10 +329,12 @@ if (Test-Path $backendLog) { Remove-Item $backendLog -Force }
 
 $backendProc = Start-Process -FilePath $java -ArgumentList @(
     '-jar', $backendJar.FullName,
+    "--server.port=$BackendPort",
     '--spring.profiles.active=dev',
     "--aerofleet.regulator.sink-type=sim",
     "--aerofleet.regulator.sim-base-url=http://localhost:$RegulatorPort",
     "--aerofleet.regulator.telemetry-report-interval=$TelemetryIntervalSec",
+    "--aerofleet.drone-port=$DronePort",
     "--aerofleet.security.rbac-enabled=false",
     '--aerofleet.security.dev-mode=true'
 ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
@@ -296,11 +342,14 @@ Register-Cleanup { Stop-Process -Id $backendProc.Id -Force -ErrorAction Silently
 Info "cloud-backend PID=$($backendProc.Id), log=$backendLog"
 
 # 等待 cloud-backend 启动
+# 业务就绪判据而非 actuator/health：dev profile 连本地 Redis，本机 6379 若不通/带口令，
+# RedisHealthContributor 会把 health 打成 503——与"服务是否可用"无关，据此判失败是误杀。
+# /drones 只读且恒 200（cv-eval 同款），足以证明 web 层与持久层已就绪。
 $backendUp = $false
 for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep 1
     try {
-        $r = Invoke-WebRequest -Uri "http://localhost:$BackendPort/actuator/health" -TimeoutSec 2 -UseBasicParsing
+        $r = Invoke-WebRequest -Uri "http://localhost:$BackendPort/api/v1/drones" -TimeoutSec 2 -UseBasicParsing
         if ($r.StatusCode -eq 200) { $backendUp = $true; break }
     } catch { }
 }
@@ -468,6 +517,80 @@ Check "FR-33: 遥测记录包含 sysid=$DroneSysid" $telemetryContainsSysid
 # GET /api/v1/regulator/status/{sysid} → status=CANCELLED
 # 等待 2 周期 → 无新遥测记录
 # ============================================================
+Step 'FR-36~39：UOM 激活状态机（幂等/未激活拒绝/注销后拒绝/reset —— sim HTTP 面）'
+
+# C1 高保真模拟（2026-10-12）：regulator-sim 的 activate/cancel/telemetry
+# 不再无条件 success，而是按真实 UOM 语义做状态机。以下断言直连 sim（HTTP 面），
+# 不经 cloud-backend——后端自己的合规状态机按 sysid 且只进不退，重复激活在入口
+# 就被 409 挡掉，sim 的 serialNo 维度语义根本触达不到；要验 sim 就得打 sim。
+# 拒绝用 403 表达（非 2xx），故统一走 Send-PostJsonAllowFailure 取 body 断言。
+$SimApi = "$RegulatorBase/api"
+
+# FR-36：激活幂等——同 serialNo 重复 activate 返回同一 activationId
+$firstActivate = $null
+$secondActivate = $null
+try {
+    $firstActivate = Send-PostJsonAllowFailure "$SimApi/activate" @{ serialNo = $TestSerialNo }
+    $secondActivate = Send-PostJsonAllowFailure "$SimApi/activate" @{ serialNo = $TestSerialNo }
+    Info "activate 第 1 次: status=$($firstActivate.Status) $($firstActivate.Json | ConvertTo-Json -Compress)"
+    Info "activate 第 2 次: status=$($secondActivate.Status) $($secondActivate.Json | ConvertTo-Json -Compress)"
+    $id1 = $firstActivate.Json.activationId
+    $id2 = $secondActivate.Json.activationId
+    Check 'FR-36: 重复 activate 返回同一 activationId' ($id1 -and $id1 -eq $id2)
+    Check 'FR-36: 重复 activate 第二次带幂等标记 idempotent=true' ($secondActivate.Json.idempotent -eq $true)
+} catch {
+    Info "activate 幂等测试异常: $_"
+    Check 'FR-36: 重复 activate 返回同一 activationId' $false
+    Check 'FR-36: 重复 activate 第二次带幂等标记 idempotent=true' $false
+}
+
+# FR-37：未实名/未激活拒绝——reset 后 UNVERIFIED 的 serialNo 既激活不了也上报不了
+try {
+    # 直连 sim reset（用例间隔离；预置数据与记录不动）
+    Invoke-RestMethod -Uri "$SimApi/reset" -Method Post -TimeoutSec 5 | Out-Null
+    # TEST-002 预置状态 UNVERIFIED：activate 应被拒（NOT_VERIFIED），自然处于未激活态
+    $badActivate = Send-PostJsonAllowFailure "$SimApi/activate" @{ serialNo = $TestSerialNoUnverified }
+    Info "TEST-002 activate 响应: status=$($badActivate.Status) $($badActivate.Json | ConvertTo-Json -Compress)"
+    Check 'FR-37: 未实名（UNVERIFIED）serialNo 激活被拒' ($badActivate.Status -eq 403 -and $badActivate.Json.success -eq $false)
+    Check 'FR-37: 拒绝原因为 NOT_VERIFIED 语义' ($badActivate.Json.verdict -eq 'NOT_VERIFIED')
+    # 未激活的 serialNo 直接上报遥测：应被拒（NOT_ACTIVATED），不进记录
+    $unactivatedTelemetry = Send-PostJsonAllowFailure "$SimApi/telemetry" @{ sysid = $DroneSysid; serialNo = $TestSerialNoUnverified }
+    Info "TEST-002 遥测上报响应: status=$($unactivatedTelemetry.Status) $($unactivatedTelemetry.Json | ConvertTo-Json -Compress)"
+    Check 'FR-37: 未激活 serialNo 的遥测上报被拒（403 + success≠true）' ($unactivatedTelemetry.Status -eq 403 -and $unactivatedTelemetry.Json.success -ne $true)
+    Check 'FR-37: 遥测拒绝原因为 NOT_ACTIVATED' ($unactivatedTelemetry.Json.verdict -eq 'NOT_ACTIVATED')
+} catch {
+    Info "未激活拒绝测试异常: $_"
+    Check 'FR-37: 未实名（UNVERIFIED）serialNo 激活被拒' $false
+    Check 'FR-37: 未激活 serialNo 的遥测上报被拒（403 + success≠true）' $false
+}
+
+# FR-38：注销后激活拒绝——先注销再激活应被拒（sim 状态 CANCELLED）
+try {
+    # 先恢复 FR-36 激活过的 TEST-001，再注销，否则断言的是"从未激活"而非"已注销"
+    Send-PostJsonAllowFailure "$SimApi/activate" @{ serialNo = $TestSerialNo } | Out-Null
+    $midCancel = Send-PostJsonAllowFailure "$SimApi/cancel" @{ serialNo = $TestSerialNo; reason = 'e2e-fr38' }
+    Info "FR-38 cancel 响应: status=$($midCancel.Status) $($midCancel.Json | ConvertTo-Json -Compress)"
+    $afterCancelActivate = Send-PostJsonAllowFailure "$SimApi/activate" @{ serialNo = $TestSerialNo }
+    Info "注销后再 activate 响应: status=$($afterCancelActivate.Status) $($afterCancelActivate.Json | ConvertTo-Json -Compress)"
+    Check 'FR-38: 已注销 serialNo 再激活被拒（403 + success=false）' ($afterCancelActivate.Status -eq 403 -and $afterCancelActivate.Json.success -eq $false)
+    Check 'FR-38: 拒绝原因为 CANCELLED' ($afterCancelActivate.Json.verdict -eq 'CANCELLED')
+} catch {
+    Info "注销后激活测试异常: $_"
+    Check 'FR-38: 已注销 serialNo 再激活被拒（403 + success=false）' $false
+}
+
+# FR-39：reset 生效——状态归零后同一 serialNo 可重新完整激活
+try {
+    Invoke-RestMethod -Uri "$SimApi/reset" -Method Post -TimeoutSec 5 | Out-Null
+    $freshActivate = Send-PostJsonAllowFailure "$SimApi/activate" @{ serialNo = $TestSerialNo }
+    Info "reset 后 activate 响应: status=$($freshActivate.Status) $($freshActivate.Json | ConvertTo-Json -Compress)"
+    Check 'FR-39: reset 后同一 serialNo 可重新激活（success=true 且有新 activationId）' `
+        ($freshActivate.Status -eq 200 -and $freshActivate.Json.success -eq $true -and $freshActivate.Json.activationId -and $freshActivate.Json.idempotent -ne $true)
+} catch {
+    Info "reset 测试异常: $_"
+    Check 'FR-39: reset 后同一 serialNo 可重新激活（success=true 且有新 activationId）' $false
+}
+
 Step 'FR-34：注销全链路（POST /cancel → cancellationId → CANCELLED → 无新遥测）'
 
 # 记录注销前的遥测记录数
@@ -574,8 +697,8 @@ Invoke-Cleanup
 # 确保所有 java 进程已清理
 Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
     if ($_.CommandLine -match 'regulator-sim' `
-        -or $_.CommandLine -match 'cloud-backend.*regulator-e2e' `
-        -or $_.CommandLine -match 'drone-sim.*regulator-e2e') {
+        -or $_.CommandLine -match 'cloud-backend.*aerofleet\.regulator\.' `
+        -or $_.CommandLine -match 'drone-sim.*AF-REG') {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
 }
@@ -585,7 +708,7 @@ Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyCon
 # ============================================================
 Write-Host ''
 if ($Fail -eq 0) {
-    Write-Host 'REGULATOR E2E PASSED（FR-31~35 端到端验证通过）' -ForegroundColor Green
+    Write-Host 'REGULATOR E2E PASSED（FR-31~39 端到端验证通过）' -ForegroundColor Green
     exit 0
 } else {
     Write-Host 'REGULATOR E2E FAILED（部分断言未通过，见上方 FAIL 行）' -ForegroundColor Red

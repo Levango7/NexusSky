@@ -2,6 +2,7 @@ package io.aerofleet.regulatorsim;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,15 +25,21 @@ import java.util.stream.Collectors;
  * 模拟 UOM 监管平台 HTTP API 服务器。
  * <p>
  * 使用 JDK 内置 {@link com.sun.net.httpserver.HttpServer}，无外部 HTTP 框架依赖。
- * 提供五个 API 端点模拟 UOM 平台交互：
+ * 提供六个 API 端点模拟 UOM 平台交互：
  * <ul>
  *   <li>{@code GET /api/verify?serialNo=...&certNo=...} — 实名验证模拟</li>
- *   <li>{@code POST /api/activate} — 激活上报模拟</li>
- *   <li>{@code POST /api/cancel} — 注销模拟</li>
- *   <li>{@code POST /api/telemetry} — 遥测上报模拟</li>
+ *   <li>{@code POST /api/activate} — 激活上报模拟（<b>状态机：幂等 + 实名前置校验</b>）</li>
+ *   <li>{@code POST /api/cancel} — 注销模拟（幂等）</li>
+ *   <li>{@code POST /api/telemetry} — 遥测上报模拟（<b>需有效激活</b>）</li>
  *   <li>{@code GET /api/records?type=...} — 上报记录查询</li>
+ *   <li>{@code POST /api/reset} — 清空激活状态（e2e 用例间隔离）</li>
  * </ul>
  * 支持响应延迟模拟（{@code Thread.sleep(delayMs)}）和随机错误模拟（{@code errorRate} 概率返回 HTTP 500）。
+ * <p>
+ * <b>C1 高保真模拟（2026-10-12）</b>：activate/cancel/telemetry 不再是"无条件
+ * success"，而是经 {@link ActivationStateMachine} 走真实 UOM 的语义——
+ * 未实名不可激活、未激活不可上报、注销后拒绝、重试返回同一 ID。cloud-backend
+ * 的上报链路在 PoC 环境即可按这些规则验收。
  */
 public final class MockUomServer {
 
@@ -49,6 +56,25 @@ public final class MockUomServer {
     private final AtomicInteger activationSeq = new AtomicInteger(0);
     /** 注销 ID 序列号。 */
     private final AtomicInteger cancellationSeq = new AtomicInteger(0);
+
+    /**
+     * 激活状态机（serialNo 维度）：C1 高保真模拟的核心——activate 幂等、
+     * telemetry 需有效激活、cancel 幂等、注销后拒绝（详见 ActivationStateMachine）。
+     */
+    private final ActivationStateMachine activations = new ActivationStateMachine();
+
+    /** ID 生成器：ACT-/CAN-<timestamp>-<seq>（与原格式一致，e2e 不断言格式）。 */
+    private final ActivationStateMachine.IdGenerator idGenerator = new ActivationStateMachine.IdGenerator() {
+        @Override
+        public String nextActivation(String serialNo, long nowMs) {
+            return "ACT-" + nowMs + "-" + activationSeq.incrementAndGet();
+        }
+
+        @Override
+        public String nextCancellation(String serialNo, long nowMs) {
+            return "CAN-" + nowMs + "-" + cancellationSeq.incrementAndGet();
+        }
+    };
 
     /**
      * 创建 MockUomServer 实例。
@@ -74,15 +100,31 @@ public final class MockUomServer {
         this.errorRate = config.errorRate;
         this.server = HttpServer.create(new InetSocketAddress(config.port), 0);
 
-        // 注册五个 API 端点
-        server.createContext("/api/verify", this::handleVerify);
-        server.createContext("/api/activate", this::handleActivate);
-        server.createContext("/api/cancel", this::handleCancel);
-        server.createContext("/api/telemetry", this::handleTelemetry);
-        server.createContext("/api/records", this::handleRecords);
+        // 注册六个 API 端点
+        register("/api/verify", this::handleVerify);
+        register("/api/activate", this::handleActivate);
+        register("/api/cancel", this::handleCancel);
+        register("/api/telemetry", this::handleTelemetry);
+        register("/api/records", this::handleRecords);
+        // 测试隔离：清空激活状态（e2e 用例之间互不影响）
+        register("/api/reset", this::handleReset);
 
         // 使用默认执行器（每个请求一个线程）
         server.setExecutor(null);
+    }
+
+    /**
+     * 注册端点，并给每个收到的请求留一行日志（方法 + URI）。
+     * <p>
+     * mock 平台必须能自证"请求到没到"：com.sun.net.httpserver 在 handler 抛异常时
+     * 是静默关闭连接、不回任何字节，客户端侧只能看到"连接被关"，分不清是请求没送达
+     * 还是处理中炸了。有这行日志，客户端报无响应时先看 sim 收没收到。
+     */
+    private void register(String path, HttpHandler handler) {
+        server.createContext(path, exchange -> {
+            log.info("[req] {} {}", exchange.getRequestMethod(), exchange.getRequestURI());
+            handler.handle(exchange);
+        });
     }
 
     /**
@@ -158,6 +200,15 @@ public final class MockUomServer {
      * <p>
      * 请求体：{serialNo, activationTime, lat, lon}
      * 响应：{success: true, activationId: "ACT-<timestamp>-<seq>"}
+     * <p>
+     * <b>状态机语义（2026-10-12 C1 高保真模拟）</b>：
+     * <ul>
+     *   <li>serialNo 未实名注册 → 403 {success:false, reason:"未实名注册"}</li>
+     *   <li>实名状态非 VERIFIED（如 UNVERIFIED/REVOKED）→ 403 {success:false, reason}</li>
+     *   <li>已激活（未注销）→ 200 {success:true, activationId:<原ID>, idempotent:true}
+     *       （客户端重试/重复上报不新发 ID）</li>
+     *   <li>已注销 → 403 {success:false, reason:"已注销，不可重新激活"}</li>
+     * </ul>
      */
     @SuppressWarnings("unchecked")
     private void handleActivate(HttpExchange exchange) throws IOException {
@@ -174,24 +225,39 @@ public final class MockUomServer {
         String serialNo = (String) requestBody.get("serialNo");
 
         long timestamp = System.currentTimeMillis();
-        int seq = activationSeq.incrementAndGet();
-        String activationId = "ACT-" + timestamp + "-" + seq;
+        PresetDataStore.PresetEntry entry = presetData.find(serialNo);
+        ActivationStateMachine.VerdictOutcome outcome = activations.activate(
+                serialNo, entry != null ? entry.status : null, timestamp, idGenerator);
 
-        // 存入 RecordStore
+        if (outcome.verdict() != ActivationStateMachine.Verdict.GRANTED
+                && outcome.verdict() != ActivationStateMachine.Verdict.IDEMPOTENT) {
+            // 拒绝：真实 UOM 的错误语义（实名/注销前置校验）——不再无条件 success
+            Map<String, Object> rejected = new HashMap<>();
+            rejected.put("success", false);
+            rejected.put("reason", outcome.reason());
+            rejected.put("verdict", outcome.verdict().name());
+            sendJson(exchange, 403, rejected);
+            return;
+        }
+
+        // 存入 RecordStore（含幂等标记：重复激活也留痕，便于对账）
         Map<String, Object> recordData = new HashMap<>();
         recordData.put("serialNo", serialNo);
         recordData.put("activationTime", requestBody.get("activationTime"));
         recordData.put("lat", requestBody.get("lat"));
         recordData.put("lon", requestBody.get("lon"));
-        recordData.put("activationId", activationId);
+        recordData.put("activationId", outcome.id());
+        recordData.put("idempotent", outcome.verdict() == ActivationStateMachine.Verdict.IDEMPOTENT);
 
         records.add("activation", new RecordStore.Record(
                 "activation", serialNo, timestamp, recordData));
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
-        response.put("activationId", activationId);
-
+        response.put("activationId", outcome.id());
+        if (outcome.verdict() == ActivationStateMachine.Verdict.IDEMPOTENT) {
+            response.put("idempotent", true);
+        }
         sendJson(exchange, 200, response);
     }
 
@@ -200,6 +266,9 @@ public final class MockUomServer {
      * <p>
      * 请求体：{serialNo, reason}
      * 响应：{success: true, cancellationId: "CAN-<timestamp>-<seq>"}
+     * <p>
+     * <b>状态机语义</b>：已注销 → 幂等返回原 cancellationId（不新发）；
+     * 未激活也可注销（登记即可，真实 UOM 允许空注销）。
      */
     @SuppressWarnings("unchecked")
     private void handleCancel(HttpExchange exchange) throws IOException {
@@ -216,22 +285,24 @@ public final class MockUomServer {
         String serialNo = (String) requestBody.get("serialNo");
 
         long timestamp = System.currentTimeMillis();
-        int seq = cancellationSeq.incrementAndGet();
-        String cancellationId = "CAN-" + timestamp + "-" + seq;
+        ActivationStateMachine.VerdictOutcome outcome = activations.cancel(
+                serialNo, timestamp, idGenerator);
 
         // 存入 RecordStore
         Map<String, Object> recordData = new HashMap<>();
         recordData.put("serialNo", serialNo);
         recordData.put("reason", requestBody.get("reason"));
-        recordData.put("cancellationId", cancellationId);
+        recordData.put("cancellationId", outcome.id());
 
         records.add("cancellation", new RecordStore.Record(
                 "cancellation", serialNo, timestamp, recordData));
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
-        response.put("cancellationId", cancellationId);
-
+        response.put("cancellationId", outcome.id());
+        if (outcome.verdict() == ActivationStateMachine.Verdict.IDEMPOTENT) {
+            response.put("idempotent", true);
+        }
         sendJson(exchange, 200, response);
     }
 
@@ -240,6 +311,9 @@ public final class MockUomServer {
      * <p>
      * 请求体：{sysid, serialNo, timestamp, lat, lon, ...}
      * 响应：{success: true}
+     * <p>
+     * <b>状态机语义</b>：仅<b>已激活</b>的 serialNo 接收（真实 UOM 的
+     * 激活-上报关联）；未激活 → 403 NOT_ACTIVATED；已注销 → 403 CANCELLED。
      */
     @SuppressWarnings("unchecked")
     private void handleTelemetry(HttpExchange exchange) throws IOException {
@@ -257,6 +331,17 @@ public final class MockUomServer {
 
         long timestamp = System.currentTimeMillis();
 
+        ActivationStateMachine.TelemOutcome outcome =
+                activations.recordTelemetry(serialNo, timestamp);
+        if (outcome.verdict() != ActivationStateMachine.TelemVerdict.ACCEPTED) {
+            Map<String, Object> rejected = new HashMap<>();
+            rejected.put("success", false);
+            rejected.put("reason", outcome.reason());
+            rejected.put("verdict", outcome.verdict().name());
+            sendJson(exchange, 403, rejected);
+            return;
+        }
+
         // 存入 RecordStore
         records.add("telemetry", new RecordStore.Record(
                 "telemetry", serialNo, timestamp, requestBody));
@@ -264,6 +349,20 @@ public final class MockUomServer {
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
 
+        sendJson(exchange, 200, response);
+    }
+
+    /**
+     * POST /api/reset —— 清空激活状态（e2e 用例间隔离用，不影响预置数据与记录）。
+     */
+    private void handleReset(HttpExchange exchange) throws IOException {
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            sendMethodNotAllowed(exchange);
+            return;
+        }
+        activations.reset();
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
         sendJson(exchange, 200, response);
     }
 

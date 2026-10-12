@@ -317,8 +317,24 @@ class RegulatorSimMainTest {
         // ── POST /api/telemetry ──
 
         @Test
-        @DisplayName("POST /api/telemetry 返回 success=true")
+        @DisplayName("POST /api/telemetry 返回 success=true（真实链路形状：先激活再上报）")
         void telemetryEndpoint() throws Exception {
+            // C1 状态机（2026-10-12）：未激活的 serialNo 遥测会被 403 拒绝——
+            // 这正是真实 UOM 的激活-上报关联，e2e 之前单测先钉住。
+            // 注意预置 TEST-001 实名状态为 VERIFIED，可激活。
+            Map<String, Object> activateBody = new HashMap<>();
+            activateBody.put("serialNo", "TEST-001");
+            activateBody.put("activationTime", System.currentTimeMillis());
+            activateBody.put("lat", 39.9);
+            activateBody.put("lon", 116.3);
+            HttpRequest activateReq = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + PORT_DEFAULT + "/api/activate"))
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(activateBody)))
+                    .header("Content-Type", "application/json")
+                    .build();
+            assertThat(httpClient.send(activateReq, HttpResponse.BodyHandlers.ofString()).statusCode())
+                    .isEqualTo(200);
+
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("sysid", 1);
             requestBody.put("serialNo", "TEST-001");
