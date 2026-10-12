@@ -1296,7 +1296,7 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 
 **POST /api/v1/autodispatch/trigger**
 - 请求体: `{lat:double, lon:double, alarmId:String?, droneCount:int}`（alarmId 缺失时自动生成 `manual-<timestamp>`）
-- 响应: 200 - `{dispatchId, status:"DISPATCHED"|"FAILED", dispatchedDrones:[{sysid,taskAssigned,estimatedArrivalSec}], message, timestamp}`；400 - 请求体格式错误
+- 响应: 200 - `{dispatchId, status:"SUCCESS"|"PARTIAL"|"NO_DRONE"|"FAILED", dispatchedDrones:[{sysid,taskAssigned,estimatedArrivalSec}], message, timestamp}`；400 - 请求体格式错误。status 语义：SUCCESS=全部送达、PARTIAL=部分送达、NO_DRONE=无可用无人机、FAILED=选中了但一架都没送达（上传超时/被拒/命令面缺席）；`taskAssigned` 即该架是否真的收到任务
 
 **GET /api/v1/autodispatch/history**
 - 查询参数: `limit` (int, 默认 100) - 最多返回条数

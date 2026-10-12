@@ -108,7 +108,7 @@ function PanelWrapper({ children }) {
 
 export default function App() {
   // 认证状态
-  const { authed, setAuthed, handleLoginSuccess, handleLogout } = useAuth()
+  const { authed, setAuthed, authError, handleLoginSuccess, handleLogout } = useAuth()
 
   // 无人机数据（含指数退避轮询、遥测加载）
   const {
@@ -179,7 +179,7 @@ export default function App() {
 
   // 未认证时渲染登录面板
   if (!authed) {
-    return <LoginPanel onLoginSuccess={handleLoginSuccess} />
+    return <LoginPanel onLoginSuccess={handleLoginSuccess} authError={authError} />
   }
 
   const currentUser = getCurrentUser()
