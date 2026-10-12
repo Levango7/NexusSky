@@ -62,11 +62,6 @@ SPI_INTERFACES = [
 # 豁免账。每条都要能回答"为什么现在没人验、什么时候补"。
 # 生成未验清单用 --print，别手抄类名。
 EXEMPT = {
-    "UomReportSink": {
-        "reason": "sim 线正在改本文件的 4xx 终态与 ReportRetryPolicy（未提交）；"
-                  "等它合入后补假 UOM 契约测试（JDK HttpServer 当对端）。见 .coord/INBOX-zcode.md",
-        "expires": "2026-10-26",
-    },
     "MavlinkDeviceGateway": {
         "reason": "F5 只交付了协议标记+路由骨架；CommandGatewayTest 用的是接口替身，"
                   "本类从未被点名。待补：把替身换成真实例、断言 dji-cloud 命令被明确拒绝",
