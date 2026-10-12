@@ -217,15 +217,21 @@ public class SimReportSink implements RegulatorReportSink {
     // ─── 内部方法 ───
 
     /**
-     * 执行 HTTP 请求，失败时按指数退避策略重试。
+     * 执行 HTTP 请求。
      * <p>
-     * 重试次数最多 {@code maxRetry} 次，退避间隔为 1s → 2s → 4s（即 {@code 1000 * 2^attempt}）。
-     * HTTP 状态码非 2xx 或网络异常均视为失败，触发重试。
+     * <b>4xx 是终态，不会再试</b>：真实平台的"未实名""已注销""签名过期"都是 4xx，
+     * 换时间重发一样被拒，只会把同一个请求打成 3 遍（1s+2s+4s 共 7 秒），
+     * 还可能被平台判为滥用触发限流。这类响应的 body 里带着真实原因
+     * （sim 是 {@code {"success":false,"reason":"..."}}），直接回给调用方解析——
+     * 调用方本来就会读 {@code success} 字段，不需要在这里伪装成 null。
+     * <p>
+     * 5xx、网络异常、超时、限流（429）仍按指数退避重试最多 {@code maxRetry} 次
+     * （1s → 2s → 4s）。
      *
      * @param url     请求 URL
      * @param method  HTTP 方法（GET 或 POST）
      * @param body    POST 请求体（GET 时为 null）
-     * @return 响应 JSON 节点，所有重试均失败时返回 null
+     * @return 响应 JSON 节点：2xx 与 4xx 都返回真实 body；重试耗尽返回 null
      */
     private JsonNode executeWithRetry(String url, String method, Map<String, Object> body) {
         int attempts = 0;
@@ -253,7 +259,15 @@ public class SimReportSink implements RegulatorReportSink {
                     return objectMapper.readTree(response.body());
                 }
 
-                log.warn("HTTP {} {} 返回状态码 {}（第 {} 次尝试）",
+                if (ReportRetryPolicy.isTerminal(response.statusCode())) {
+                    // 终态：把真实响应体交回调用方，让它自己读 success/reason。
+                    // 绝不再试，也绝不计为"不可达"——那是语义拒绝，不是故障。
+                    log.warn("HTTP {} {} 返回终态 {}（不重试）: {}",
+                            method, url, response.statusCode(), bodyPreview(response.body()));
+                    return objectMapper.readTree(response.body());
+                }
+
+                log.warn("HTTP {} {} 返回状态码 {}（第 {} 次尝试，将重试）",
                         method, url, response.statusCode(), attempts + 1);
             } catch (Exception e) {
                 lastException = e;
@@ -279,6 +293,20 @@ public class SimReportSink implements RegulatorReportSink {
             log.error("HTTP {} {} 全部重试失败: {}", method, url, lastException.getMessage());
         }
         return null;
+    }
+
+    /**
+     * 取响应体前若干字符用于日志。
+     *
+     * <p>监管平台的错误响应体往往正是定位依据（"未实名""已注销""签名过期"），
+     * 所以不截断到只剩状态码。同时防越界与防 body 里含换行把日志冲乱。
+     */
+    private static String bodyPreview(String body) {
+        if (body == null || body.isEmpty()) {
+            return "(empty)";
+        }
+        String oneLine = body.replaceAll("\\s+", " ").trim();
+        return oneLine.length() <= 200 ? oneLine : oneLine.substring(0, 200) + "…";
     }
 
     /**
