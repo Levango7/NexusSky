@@ -67,10 +67,15 @@
                                 <rule>
                                     <element>BUNDLE</element>
                                     <limits>
+                                        <!--
+                                            LINE 覆盖率阈值由 ci-coverage-threshold.sh 的 strict 模式
+                                            强制与"实测向下取整到 5%"对齐。本轮新测试把实测从 70%
+                                            抬到 75%，故声明值同步抬到 0.75（不抬则 strict 判红）。
+                                        -->
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.70</minimum>
+                                            <minimum>0.75</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

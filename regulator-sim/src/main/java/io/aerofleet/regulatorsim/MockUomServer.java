@@ -48,8 +48,20 @@ public final class MockUomServer {
     private final HttpServer server;
     private final PresetDataStore presetData;
     private final RecordStore records;
+
+    /**
+     * 收到的请求总数（按方法+路径计数）。
+     * <p>
+     * 为什么需要它：e2e 要验"4xx 不再重试"——旧行为会把同一个请求打 4 遍
+     * （1 次 + 3 次退避重试）。靠耗时推断（7s vs 立即）是个弱信号，
+     * 有精确计数才能断言"只来了 1 次"。{@code POST /api/reset} 一并清零。
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>
+            requestCounts = new java.util.concurrent.ConcurrentHashMap<>();
     private final int delayMs;
     private final double errorRate;
+    /** 故障注入返回的状态码（默认 500；设成 4xx 即可验"语义终态不重试"）。 */
+    private final int errorStatus;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 激活 ID 序列号。 */
@@ -98,6 +110,7 @@ public final class MockUomServer {
         this.records = new RecordStore();
         this.delayMs = config.delayMs;
         this.errorRate = config.errorRate;
+        this.errorStatus = config.errorStatus;
         this.server = HttpServer.create(new InetSocketAddress(config.port), 0);
 
         // 注册六个 API 端点
@@ -106,8 +119,10 @@ public final class MockUomServer {
         register("/api/cancel", this::handleCancel);
         register("/api/telemetry", this::handleTelemetry);
         register("/api/records", this::handleRecords);
-        // 测试隔离：清空激活状态（e2e 用例之间互不影响）
+        // 测试隔离：清空激活状态（e2e 用例之间互受影响）
         register("/api/reset", this::handleReset);
+        // 只读观测：每个端点收到了多少请求（e2e 验重试次数用）
+        register("/api/stats", this::handleStats);
 
         // 使用默认执行器（每个请求一个线程）
         server.setExecutor(null);
@@ -122,9 +137,15 @@ public final class MockUomServer {
      */
     private void register(String path, HttpHandler handler) {
         server.createContext(path, exchange -> {
+            countRequest(exchange.getRequestMethod(), path);
             log.info("[req] {} {}", exchange.getRequestMethod(), exchange.getRequestURI());
             handler.handle(exchange);
         });
+    }
+
+    private void countRequest(String method, String path) {
+        String key = method + " " + path;
+        requestCounts.computeIfAbsent(key, k -> new java.util.concurrent.atomic.AtomicLong()).incrementAndGet();
     }
 
     /**
@@ -353,6 +374,26 @@ public final class MockUomServer {
     }
 
     /**
+     * GET /api/stats —— 各端点的请求计数（e2e 用），形如
+     * {@code {"requests": {"POST /api/verify": 1, ...}}}。
+     * <p>
+     * 只读、不改变任何状态；reset 时一并清零。
+     */
+    private void handleStats(HttpExchange exchange) throws IOException {
+        if (!"GET".equals(exchange.getRequestMethod())) {
+            sendMethodNotAllowed(exchange);
+            return;
+        }
+        Map<String, Object> body = new HashMap<>();
+        Map<String, Object> counts = new java.util.LinkedHashMap<>();
+        requestCounts.entrySet().stream()
+                .sorted(java.util.Map.Entry.comparingByKey())
+                .forEach(e -> counts.put(e.getKey(), e.getValue().get()));
+        body.put("requests", counts);
+        sendJson(exchange, 200, body);
+    }
+
+    /**
      * POST /api/reset —— 清空激活状态（e2e 用例间隔离用，不影响预置数据与记录）。
      */
     private void handleReset(HttpExchange exchange) throws IOException {
@@ -361,6 +402,7 @@ public final class MockUomServer {
             return;
         }
         activations.reset();
+        requestCounts.clear();
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         sendJson(exchange, 200, response);
@@ -434,7 +476,7 @@ public final class MockUomServer {
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("error", "simulated server error");
             errorResponse.put("success", false);
-            sendJson(exchange, 500, errorResponse);
+            sendJson(exchange, errorStatus, errorResponse);
             return true;
         }
 
