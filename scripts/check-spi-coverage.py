@@ -76,11 +76,6 @@ EXEMPT = {
                   "待补：注入桩数据源断言取值路径；真环境部分标为集成测试",
         "expires": "2026-11-02",
     },
-    "DeliveryAdapter": {"reason": "编排模块适配器：StepExecutorTest 只引用接口，未点名实现", "expires": "2026-11-02"},
-    "EmergencyAdapter": {"reason": "同上", "expires": "2026-11-02"},
-    "FormationAdapter": {"reason": "同上", "expires": "2026-11-02"},
-    "MappingAdapter": {"reason": "同上", "expires": "2026-11-02"},
-    "ShowAdapter": {"reason": "同上", "expires": "2026-11-02"},
 }
 
 SKIP_DIRS = {".git", "target", "node_modules", "dist", "build", ".m2", ".idea"}
