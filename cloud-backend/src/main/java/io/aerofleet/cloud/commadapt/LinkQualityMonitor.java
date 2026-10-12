@@ -235,6 +235,16 @@ public class LinkQualityMonitor {
      *
      * @param sysid 无人机 systemId
      */
+    /**
+     * 已纳入采集的无人机 sysid 集合（副本）。
+     * <p>
+     * 为什么需要它：注册循环要清掉"已离线/已删除"的机，但 qualityData 的 key 只有
+     * 采集才知道。没有这个入口，接线层就只能加不能减，质量表会无限增长。
+     */
+    public java.util.Set<Integer> knownDrones() {
+        return java.util.Collections.unmodifiableSet(qualityData.keySet());
+    }
+
     public void initDrone(int sysid) {
         // P1-fix: 使用 ConcurrentHashMap 替代 EnumMap，保证多线程安全
         qualityData.computeIfAbsent(sysid, k -> new ConcurrentHashMap<>());

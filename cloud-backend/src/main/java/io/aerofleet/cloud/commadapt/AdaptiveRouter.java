@@ -168,6 +168,45 @@ public class AdaptiveRouter {
      *
      * @return sysid → 切换决策的映射
      */
+    /**
+     * 评估机队：对有质量数据的每一架给出"是否需要切换"的结论，并把首次见面的机
+     * 以当前最优链路登记为当前链路。
+     *
+     * <p><b>首次见面为什么直接登记</b>：系统里没有"飞机现在用的是哪条链路"的权威
+     * 来源（DeviceRegistry 不跟踪链路态）。若不登记，{@link #currentLinks} 永远是空的，
+     * {@link #getRecommendations()} 也就永远返回空——这正是本方法要修的问题：先给一个
+     * 可比较的当前值（当前最优），之后评分劣化到阈值以下才会产生切换建议。
+     *
+     * <p>只评估、不切换：物理切换由 {@link FailoverManager} 经
+     * {@code POST /api/v1/comm-adapt/switch/{sysid}} 人工触发。
+     *
+     * @return sysid → 建议切换到的链路（只含真的建议换的；不含"维持现状"的机）
+     */
+    public Map<Integer, LinkQuality.LinkType> evaluateAll() {
+        Map<Integer, LinkQuality.LinkType> recommendations = new LinkedHashMap<>();
+        for (Integer sysid : monitor.knownDrones()) {
+            LinkQuality.LinkType best = bestLinkOf(sysid);
+            if (best == null) {
+                continue;   // 没采集到数据，不下结论
+            }
+            if (currentLinks.get(sysid) == null) {
+                currentLinks.put(sysid, best);
+                continue;   // 首次登记，不算切换建议
+            }
+            SwitchDecision decision = shouldSwitch(sysid, currentLinks.get(sysid));
+            if (decision.getUrgency() != SwitchDecision.Urgency.NO_SWITCH) {
+                recommendations.put(sysid, decision.getRecommendedLink());
+            }
+        }
+        return recommendations;
+    }
+
+    /** 取某架机当前最优链路；无数据返回 null。 */
+    private LinkQuality.LinkType bestLinkOf(int sysid) {
+        CommQualityScore score = monitor.getOverallQuality(sysid);
+        return score == null ? null : score.getBestLinkType();
+    }
+
     public Map<Integer, SwitchDecision> getRecommendations() {
         Map<Integer, SwitchDecision> recommendations = new LinkedHashMap<>();
         for (Integer sysid : currentLinks.keySet()) {
