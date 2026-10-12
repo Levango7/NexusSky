@@ -2,6 +2,7 @@ package io.aerofleet.cloud.dock;
 
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -49,7 +50,11 @@ public class DockController {
         Double lon = num(body, "lon");
         Integer droneSysid = body.get("droneSysid") instanceof Number n ? n.intValue() : null;
         try {
-            DockEntity d = docks.register(name, model, sn, lat, lon, droneSysid, null);
+            // 归属当前写入方租户：此前硬编码 null ⇒ 机巢永远"未归属"，
+            // 任何具体租户的 OBSERVER 因此在列表里看到全部机巢（跨租户读取）。
+            DockEntity d = docks.register(name, model, sn, lat, lon, droneSysid,
+                    TenantContext.getWritableTenantId() == null
+                            ? null : String.valueOf(TenantContext.getWritableTenantId()));
             return ResponseEntity.status(201).body(view(d));
         } catch (IllegalStateException e) {
             return ResponseEntity.status(409).body(error(e.getMessage()));
