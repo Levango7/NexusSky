@@ -4,6 +4,27 @@
 
 ---
 
+## [Unreleased] — 外部评估报告 P1 续整改：WS 两个并发/计数缺陷 + 租户隔离两处漏滤（2026-10-12）
+
+> 同一份外部评估报告的 P1 项里，挑出**有明确代码证据、属本仓可自行闭合**的四项修掉。
+> 每项都配回归测试，其中两项做了变异验证（改回旧行为立刻转红）。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| ① | **WS 连接限流双重扣减** | 被拒连接在拒绝处扣一次、连接关闭时 `afterConnectionClosed` 又按同一 IP/租户扣一次 → 计数只减不增，限流随时间漂移成"形同虚设"。现扣减只发生在关闭路径一处，拒绝路径不再预扣（日志同步改为报"现活跃含本次"） |
+| ② | **WS 同会话并发发送无同步** | `dispatch` 对同一会话 `sendMessage` 未加锁，而遥测/调度/告警帧来自不同线程 → 并发写同一条连接会帧交错或抛 IllegalStateException（客户端表现=偶发断连/半包 JSON）。现按会话加锁；日志说明与 Spring `ConcurrentWebSocketSessionDecorator` 内部同一把监视器 |
+| ③ | **机巢（dock）三处租户漏滤** | `register` 把 tenantId 硬编码 null ⇒ 机巢永远"未归属"，任一租户的 OBSERVER 在列表里看到全部机巢含位置；`list()` 无过滤；`get()/recentLog()` 不判可见性。现：注册时归属当前写入方租户（`getWritableTenantId()`，哨兵不会被落库）、列表走 `findByTenantIdOrderById`、越权 ID 与"不存在"同一应答（不制造探测面）。口径与 `AlarmEventStore.isVisibleTo()` 对齐 |
+| ④ | **AI 决策端点两处漏滤** | `GET /api/v1/ai/decisions` 直接回全量分桶、`/decisions/{sysid}` 不判归属。现按 `DeviceRegistry.tenantOf(sysid)` 过滤：租户会话只看本租户设备，未归属设备只对全局管理员可见 |
+
+**测试**：`TelemetryWsConcurrencyTest` +2（限流只扣一次 / 同会话发送互斥，**变异验证**：去掉 synchronized 即红）、
+`DockTenantIsolationTest` +7（归属写入/列表过滤/全局可见/NO_ACCESS 看不到/越权同不存在/本租户可取，
+**变异验证**：去掉列表过滤即红）、`DecisionMonitorTenantIsolationTest` +4（单机/全量/全局/未归属四种域）。
+全 reactor BUILD SUCCESS；Java 4681 → **4694**（cloud-backend 2630 → 2643）；前端 245 不变；门禁与自测全绿。
+
+**仍开（有意不动）**：`AdaptiveRouter` 整套从未被实例化（commadapt 决策层是死代码，接线需先定 owner）；
+mavlink-core 三项（未知 incompat 位、签名时间戳竞态、UDP 回调吞异常）属另一 agent 域；
+sdk-python 0 单测；前端 WS 重连无退避/无节流、主轨迹不实时、DockPanel 绕过统一 API 层。
+
 ## [Unreleased] — 外部评估报告 P0 四项整改（2026-10-12）
 
 > 由第三方做的全仓深度评估（HEAD 973db62）给了 P0 四项：自动出警假闭环、
