@@ -4,6 +4,32 @@
 
 ---
 
+## [Unreleased] — 外部评估报告 P0 四项整改（2026-10-12）
+
+> 由第三方做的全仓深度评估（HEAD 973db62）给了 P0 四项：自动出警假闭环、
+> MISSION_ACK 寻址错、登录 401 整页刷新、ai 包空壳。**逐条核对后四项全部属实**，
+> 本轮全部修掉并补回归。评估报告同时发现的另两个问题（AdaptiveRouter 从未被实例化、
+> README 端口口径 14561 与代码 14550 不一致）也一并处理/订正。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| ① | **自动出警假闭环 → 真下发** | 旧实现生成 MAVLink 航点后只打日志、**从不下发**，却向调用方返回"派遣成功"——安防监控显示"已出警"而飞机不动。现接入 `DroneCommandService.uploadMission` 真实上传四段航点（起飞→飞往报警点→悬停→返航），并按**真实送达数**判定：新增 `DispatchResult.Status.FAILED`（选中了却一架都没送达），部分送达为 PARTIAL。**不自动 ARM/MISSION_START**——是否自动起飞是安全策略问题，留给操作员确认 |
+| ② | **MISSION_REQUEST/ACK 寻址指向 GCS** | `VirtualDrone` 的上传方向把 MISSION_ACK 的 `target_system` 填成无人机自身 sysid（同文件另两处正确填 gcsSysid），严格 GCS（按 target_system 路由的 QGC/PX4 类）会认为 ACK 不是发给自己的，**任务上传握手永远等不到最终 ACK**。现上传会话记录请求方 `uploadingGcsSysid`，MISSION_REQUEST 与 ACK 一律指向它（含 count=0 清空、NO_SPACE 拒绝路径）。顺带 `lastGcsRxMs` 补 volatile（写在锁外、读在锁内，与类注释"共享状态由 intrinsic lock 保护"自相矛盾） |
+| ③ | **401 不再整页刷新** | 旧实现在 401 时 `location.reload()`，而防循环守卫判 `location.pathname.includes('/login')`——SPA 视图切换不产生路由，守卫恒为假：登录输错密码也刷新（错误提示被毁，用户只见页面闪一下）、作业中任何后台 401 把现场一起刷掉。改为发 `nexus-auth-expired` 事件，`useAuth` 订阅后翻登录态，原因经事件 detail 带到 LoginPanel 显示 |
+| ④ | **决策事件落监控** | `DecisionMonitorService.recordDecision` **零调用方**，`GET /api/v1/ai/decisions` 恒为空——对外是"有接口无数据"的假能力。而 WS 面一直在出同一批 DECISION_EVENT(30051)（ drone-sim `AutonomyAdvisor` 真实产生的决策帧）：两个面分裂。现 `TelemetryIngestService` 解码到 DecisionEventMsg 时落库（含类型码越界 → `UNKNOWN(n)` 不打断收包线程） |
+| — | **修：README/客户文档端口口径** | README 4 处、customer-onboarding-guide 2 处写 14561，而代码与 Helm/k8s 清单都是 **14550**——照 README 接真机会连到不存在的端口 |
+| — | **订正：api-reference 的 trigger 响应枚举** | 文档写 `status:"DISPATCHED"\|"FAILED"`，实际枚举是 SUCCESS/PARTIAL/NO_DRONE（+本轮新增的 FAILED），照文档对接会解析失败 |
+| — | **测试** | drone-sim `MissionUploadAckTargetTest` +2（**变异验证过**：把目标改回 config.sysid 即转红）、cloud-backend `AutoDispatchServiceTest` +4（真实上传四段航点/上传失败报 FAILED/命令面缺席报 FAILED/部分送达报 PARTIAL）+ `TelemetryIngestServiceTest` +3、前端 `auth401.test.js` +2（401 不 reload、只发事件并清令牌）。既有 9 个 autodispatch 用例与 3 个 controller 用例原本断言的就是那个假闭环，改为注入"上传成功"的命令面 mock——**它们断言的成功从假变真** |
+
+**验证**：全 reactor BUILD SUCCESS；前端 247/247 + lint 0 error（55 个存量 warning 不变）；
+门禁与自测全绿。Java 4663 → **4672**（drone-sim 1408→1410、cloud-backend 2614→2621）。
+
+**核对结论（报告里属实/已修 vs 仍开）**：P0 四项全部属实且已修；`AdaptiveRouter`
+（commadapt"决策层"）**从未被 `new` 过、也没有调度调用方**——比报告写的"ai 空壳"更值得
+注意，属已登记未接线，本轮未动（要接需要先定调度与策略 owner）；报告列的 mavlink-core
+三项（未知 incompat 位不丢帧、签名时间戳竞态、UDP 回调吞异常）**属另一 agent 的域**，
+未触碰；sdk-python 0 测试属实，未动。
+
 ## [Unreleased] — C5 第二步：staging 收紧为 strict + 补齐部署侧注入链路 + 签名 e2e 首次进 CI（2026-10-11）
 
 C5 的三步里，第一步（staging 开着签名但不拒未签名）早已落地，但后面卡住了。

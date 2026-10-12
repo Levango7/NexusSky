@@ -105,7 +105,7 @@ public final class VirtualDrone implements AutoCloseable {
     /** Set once when the GPS-loss event fires, cleared on recovery. */
     private boolean gpsLossAnnounced = false;
     /** Epoch ms of the last received GCS packet (drives the datalink failsafe). */
-    private long lastGcsRxMs = 0;
+    private volatile long lastGcsRxMs = 0;
     /** 灯光状态（FR-12）：volatile 保证接收线程写与 tick 线程读可见性。 */
     private volatile LedState ledState = LedState.off();
     /**
@@ -662,9 +662,9 @@ public final class VirtualDrone implements AutoCloseable {
         try {
             synchronized (this) {
                 if (msg instanceof MissionCountMsg mc) {
-                    handleMissionCount(mc);
+                    handleMissionCount(mc, frame.getSystemId());
                 } else if (msg instanceof MissionItemInt item) {
-                    handleMissionItem(item);
+                    handleMissionItem(item, frame.getSystemId());
                 } else if (msg instanceof io.aerofleet.mavlink.messages.MissionRequestList rl) {
                     handleMissionRequestList(rl, frame.getSystemId());
                 } else if (msg instanceof io.aerofleet.mavlink.messages.MissionRequestInt mr) {
@@ -756,20 +756,23 @@ public final class VirtualDrone implements AutoCloseable {
         send(new MissionCountMsg(count, gcsSysid, COMPONENT_ID, rl.missionType, 0));
     }
 
-    private void handleMissionCount(MissionCountMsg mc) throws IOException {
+    private void handleMissionCount(MissionCountMsg mc, int gcsSysid) throws IOException {
         // Mission upload is allowed both before and after arming (PX4 behavior).
         if (mc.count <= 0) {
             SimLog.info("MISSION_COUNT 0 received: clearing mission");
+            uploadingGcsSysid = 0;
             missions.abortUpload();
-            send(new MissionAckMsg(config.sysid, COMPONENT_ID,
+            send(new MissionAckMsg(gcsSysid, COMPONENT_ID,
                     MavEnums.MAV_MISSION_ACCEPTED, mc.missionType, 0));
             return;
         }
+        uploadingGcsSysid = gcsSysid;
         int first = missions.beginUpload(mc.count);
-        SimLog.info("MISSION_COUNT received: " + mc.count + " items, requesting seq 0");
+        SimLog.info("MISSION_COUNT received: " + mc.count + " items from gcs=" + gcsSysid + ", requesting seq 0");
         if (first < 0) {
-            send(new MissionAckMsg(config.sysid, COMPONENT_ID,
+            send(new MissionAckMsg(gcsSysid, COMPONENT_ID,
                     MavEnums.MAV_MISSION_NO_SPACE, mc.missionType, 0));
+            uploadingGcsSysid = 0;
             missions.abortUpload();
             return;
         }
@@ -794,16 +797,17 @@ public final class VirtualDrone implements AutoCloseable {
 
     private long lastUploadProgressMs = 0;
 
-    private void handleMissionItem(MissionItemInt item) throws IOException {
+    private void handleMissionItem(MissionItemInt item, int gcsSysid) throws IOException {
         int next = missions.onItem(item);
         lastUploadProgressMs = System.currentTimeMillis();
         if (next < 0) {
             // All items received: accept and store.
             SimLog.info("mission upload complete: " + missions.size() + " items stored");
             SimLog.info(missions.summary());
-            send(new MissionAckMsg(config.sysid, COMPONENT_ID,
+            send(new MissionAckMsg(gcsSysid, COMPONENT_ID,
                     MavEnums.MAV_MISSION_ACCEPTED, 0, 0));
             missions.commit();
+            uploadingGcsSysid = 0;
             missionNotifiedComplete = false;
             pushStatus(MavEnums.MAV_SEVERITY_INFO,
                     "Mission uploaded: " + missions.size() + " waypoints");
@@ -817,8 +821,18 @@ public final class VirtualDrone implements AutoCloseable {
     }
 
     private void sendMissionRequest(int seq, int missionType) throws IOException {
-        send(new MissionRequestInt(seq, config.sysid, COMPONENT_ID, missionType));
+        send(new MissionRequestInt(seq, uploadingGcsSysid, COMPONENT_ID, missionType));
     }
+
+    /**
+     * 当前上传会话的请求方（GCS）sysid。0 = 无会话。
+     * <p>
+     * 上传方向是"GCS 推、飞机收"：飞机发的 MISSION_REQUEST / MISSION_ACK 的
+     * targetSystem 都该指向这个 GCS。此前两处都填成 config.sysid（飞机自己），
+     * 严格 GCS（按 target_system 路由的 QGC/PX4 类）会认为这些帧不是发给自己的
+     * ——任务上传握手永远等不到最终 ACK。
+     */
+    private int uploadingGcsSysid = 0;
 
     // ------------------------------------------------------------------
     // COMMAND_LONG handling

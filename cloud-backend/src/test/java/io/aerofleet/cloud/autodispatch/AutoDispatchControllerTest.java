@@ -4,16 +4,24 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
+import io.aerofleet.cloud.mission.common.MissionUploadResult;
 import io.aerofleet.cloud.tracking.FlightTrackStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -46,6 +54,12 @@ class AutoDispatchControllerTest {
         config = new AutoDispatchConfig();
         config.setEnabled(true);
         service = new AutoDispatchService(registry, trackStore, config);
+        // 派遣必须真实送达才算成功（2026-10-12 假闭环修复）：不注入命令面时
+        // 一律 FAILED，REST 层的成功断言因此也必须走"命令面在场"。
+        DroneCommandService commandService = mock(DroneCommandService.class);
+        when(commandService.uploadMission(anyInt(), anyList()))
+                .thenReturn(MissionUploadResult.ok(4));
+        ReflectionTestUtils.setField(service, "commandService", commandService);
         controller = new AutoDispatchController(service);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new ApiExceptionHandler())

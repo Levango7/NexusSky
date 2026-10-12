@@ -2,7 +2,12 @@ package io.aerofleet.cloud.autodispatch;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
+import io.aerofleet.cloud.mission.common.MissionUploadResult;
 import io.aerofleet.cloud.tracking.FlightTrackStore;
+import io.aerofleet.mavlink.enums.MavEnums;
+import io.aerofleet.mavlink.messages.CommandLong;
+import io.aerofleet.mavlink.messages.MissionItemInt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,6 +50,15 @@ public class AutoDispatchService {
 
     private final DeviceRegistry deviceRegistry;
     private final FlightTrackStore trackStore;
+    /**
+     * 任务上传通道（可选注入，null = 未接后端命令面）。
+     * <p>
+     * 为什么必须接：自动出警此前只"生成航点 + 打日志"就向调用方报派遣成功，
+     * 航点从未下达到飞机——监控上显示"已出警"而飞机不动（虚假闭环）。接入后
+     * 上传失败即如实按未派遣上报，不谎报。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DroneCommandService commandService;
     /** 自动出警配置（volatile 字段支持运行时更新）。 */
     private final AutoDispatchConfig config;
     /** 活跃出警记录：dispatchId → record。 */
@@ -119,21 +133,45 @@ public class AutoDispatchService {
         for (int i = 0; i < actualCount; i++) {
             CandidateDrone c = candidates.get(i);
             int etaSec = estimateArrivalSec(c.distanceM);
-            dispatched.add(new DispatchResult.DispatchedDrone(c.sysid, true, etaSec));
             // 生成 MAVLink 航点任务（起飞→飞往报警点→悬停侦察→返航）
             List<MavlinkWaypoint> waypoints = buildWaypoints(lat, lon, config.getHoverAltitudeM(),
                     config.getHoverDurationSec());
-            log.info("dispatched drone: sysid={} distanceM={} etaSec={} waypoints={}",
-                    c.sysid, c.distanceM, etaSec, waypoints.size());
+            // 真实下达：上传失败（超时/被拒/命令面缺席）不得算作出警成功
+            boolean delivered = uploadDispatchMission(c.sysid, waypoints);
+            dispatched.add(new DispatchResult.DispatchedDrone(c.sysid, delivered, etaSec));
+            if (delivered) {
+                log.info("dispatched drone: sysid={} distanceM={} etaSec={} waypoints={}",
+                        c.sysid, c.distanceM, etaSec, waypoints.size());
+            } else {
+                log.warn("dispatch upload failed: sysid={} distanceM={} etaSec={}",
+                        c.sysid, c.distanceM, etaSec);
+            }
         }
 
-        // 4. 构造结果（全部派遣成功为 SUCCESS，部分为 PARTIAL）
-        DispatchResult.Status status = actualCount == requested
-                ? DispatchResult.Status.SUCCESS
-                : DispatchResult.Status.PARTIAL;
-        String message = status == DispatchResult.Status.SUCCESS
-                ? "dispatched " + actualCount + " drone(s)"
-                : "only " + actualCount + " of " + requested + " drone(s) dispatched";
+        // 4. 构造结果（按真实送达数判定，不按"选中了几架"）
+        int deliveredCount = 0;
+        for (DispatchResult.DispatchedDrone d : dispatched) {
+            if (d.isTaskAssigned()) {
+                deliveredCount++;
+            }
+        }
+        DispatchResult.Status status;
+        if (deliveredCount == 0) {
+            status = DispatchResult.Status.FAILED;
+        } else if (deliveredCount == requested) {
+            status = DispatchResult.Status.SUCCESS;
+        } else {
+            status = DispatchResult.Status.PARTIAL;
+        }
+        String message;
+        if (status == DispatchResult.Status.SUCCESS) {
+            message = "dispatched " + deliveredCount + " drone(s)";
+        } else if (status == DispatchResult.Status.FAILED) {
+            message = "mission upload failed for all " + actualCount + " selected drone(s)";
+        } else {
+            message = "mission uploaded to " + deliveredCount + " of " + actualCount
+                    + " selected drone(s), requested " + requested;
+        }
         DispatchResult result = new DispatchResult(dispatchId, status, dispatched, message);
         recordDispatch(dispatchId, alarmId, triggerTime, lat, lon, result);
 
@@ -355,6 +393,49 @@ public class AutoDispatchService {
      * <p>
      * 字段对齐 MAVLink MISSION_ITEM_INT：seq, cmd, lat, lon, alt, param1-3。
      */
+    /**
+     * 把出警航点真实上传到指定无人机。
+     *
+     * <p>返回是否送达：命令面缺席（未注入）、上传超时、被飞控拒绝都返回 false，
+     * 由调用方如实标记该架"未派遣成功"。<b>不抛异常</b>——派遣失败是运营问题，
+     * 不该把异常抛给报警联动链（那会把"派警失败"升级成"告警处理失败"）。
+     *
+     * <p>只上传任务、不 ARM 也不 MISSION_START：是否自动起飞是安全策略问题，
+     * 由操作员确认后执行更稳，任务上传后驻留等待人工启动。
+     *
+     * @param sysid     目标无人机
+     * @param waypoints 出警航点（起飞→报警点→悬停→返航）
+     * @return true = 上传成功（飞控已 ACCEPT 全部航点）
+     */
+    private boolean uploadDispatchMission(int sysid, List<MavlinkWaypoint> waypoints) {
+        if (commandService == null) {
+            log.warn("dispatch upload skipped: command service not wired, sysid={}", sysid);
+            return false;
+        }
+        try {
+            List<MissionItemInt> items = new ArrayList<>(waypoints.size());
+            for (MavlinkWaypoint wp : waypoints) {
+                items.add(new MissionItemInt(sysid, 1, wp.seq,
+                        MavEnums.MAV_FRAME_GLOBAL_RELATIVE_ALT, wp.cmd,
+                        0, 1,
+                        (float) wp.param1, (float) wp.param2, (float) wp.param3, 0f,
+                        (int) Math.round(wp.lat * 1e7), (int) Math.round(wp.lon * 1e7),
+                        (float) wp.alt, MavEnums.MAV_MISSION_TYPE_MISSION));
+            }
+            MissionUploadResult result = commandService.uploadMission(sysid, items);
+            if (!"ok".equals(result.status())) {
+                log.warn("dispatch upload rejected: sysid={} status={} ack={} error={}",
+                        sysid, result.status(), result.ackResult(), result.error());
+                return false;
+            }
+            log.info("dispatch upload accepted: sysid={} items={}", sysid, result.uploaded());
+            return true;
+        } catch (RuntimeException e) {
+            log.warn("dispatch upload exception: sysid={} error={}", sysid, e.getMessage());
+            return false;
+        }
+    }
+
     public static final class MavlinkWaypoint {
         /** 航点序号。 */
         public final int seq;

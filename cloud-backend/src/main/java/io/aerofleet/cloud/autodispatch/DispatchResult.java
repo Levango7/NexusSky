@@ -25,7 +25,14 @@ public class DispatchResult {
         /** 无可用无人机。 */
         NO_DRONE,
         /** 部分无人机派遣成功。 */
-        PARTIAL
+        PARTIAL,
+        /**
+         * 选中了无人机但任务<b>一架都没送达</b>（上传超时/被拒/命令面缺席）。
+         * <p>
+         * 必须与 PARTIAL 区分：旧实现把"生成了航点"记为成功，于是这个分支
+         * 永远走不到——调用方拿到 SUCCESS，而飞机根本不知道有这回事。
+         */
+        FAILED
     }
 
     /** 派遣 ID（UUID）。 */

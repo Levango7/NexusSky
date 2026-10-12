@@ -4,7 +4,7 @@ import { api, setAuthToken, setCurrentUser } from '../api.js'
 // 登录面板组件
 // 居中卡片式布局，使用现有 CSS 变量风格
 // 登录成功后调用 setAuthToken + setCurrentUser + onLoginSuccess 回调
-export default function LoginPanel({ onLoginSuccess }) {
+export default function LoginPanel({ onLoginSuccess, authError }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)
@@ -128,7 +128,7 @@ export default function LoginPanel({ onLoginSuccess }) {
             />
           </div>
 
-          {error && (
+          {(error || authError) && (
             <div style={{
               padding: '8px 12px',
               borderRadius: 6,
@@ -137,7 +137,7 @@ export default function LoginPanel({ onLoginSuccess }) {
               background: 'var(--crit-dim)',
               border: '1px solid rgba(255,93,93,.3)',
             }}>
-              {error}
+              {error || authError}
             </div>
           )}
 

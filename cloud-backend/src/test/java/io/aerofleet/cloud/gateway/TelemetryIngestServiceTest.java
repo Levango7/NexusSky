@@ -1,7 +1,9 @@
 package io.aerofleet.cloud.gateway;
 
+import io.aerofleet.cloud.ai.DecisionMonitorService;
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.messages.CommandAck;
+import io.aerofleet.mavlink.messages.DecisionEventMsg;
 import io.aerofleet.mavlink.messages.Heartbeat;
 import io.aerofleet.mavlink.messages.SysStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,9 +11,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Unit tests for {@link TelemetryIngestService}.
@@ -91,5 +95,49 @@ class TelemetryIngestServiceTest {
     void handle_corruptedFrame_noException() {
         MavlinkFrame frame = MavlinkFrame.of(SYSID, COMPID, SEQ, Heartbeat.ID, Heartbeat.CRC_EXTRA, new byte[0]);
         assertThatCode(() -> service.handle(frame)).doesNotThrowAnyException();
+    }
+
+    // ---- 决策事件落监控（2026-10-12：此前 DECISION_EVENT 只转发 WS、从不落库，
+    // /api/v1/ai/decisions 恒为空——对外是个"有接口无数据"的假能力）----
+
+    @Test
+    @DisplayName("DECISION_EVENT：记入决策监控（类型名/原因/置信度）")
+    void handle_decisionEvent_recordsIntoMonitor() {
+        DecisionMonitorService monitor = new DecisionMonitorService();
+        ReflectionTestUtils.setField(service, "decisionMonitor", monitor);
+
+        // decisionType=1 → DecisionType.AVOID
+        DecisionEventMsg msg = new DecisionEventMsg(12.5f, 0.75f, 1_700_000_000_000L,
+                SYSID, 1, 7);
+        service.handle(msg.toFrame(SYSID, COMPID, SEQ));
+
+        java.util.List<java.util.Map<String, Object>> decisions = monitor.getDecisions(SYSID);
+        assertThat(decisions).hasSize(1);
+        assertThat(decisions.get(0).get("type")).isEqualTo("AVOID");
+        assertThat(decisions.get(0).get("confidence")).isEqualTo(0.75);
+        assertThat(decisions.get(0).get("reason").toString()).contains("reason=7");
+        // 事件照旧发布（WS 面不受影响）
+        verify(eventPublisher).publishEvent(any(MavlinkMessageEvent.class));
+    }
+
+    @Test
+    @DisplayName("决策类型码越界：记 UNKNOWN(n)，不抛异常也不打断收包线程")
+    void handle_decisionEvent_unknownTypeCode_doesNotThrow() {
+        DecisionMonitorService monitor = new DecisionMonitorService();
+        ReflectionTestUtils.setField(service, "decisionMonitor", monitor);
+
+        DecisionEventMsg msg = new DecisionEventMsg(0f, 0.5f, 1L, SYSID, 99, 0);
+        assertThatCode(() -> service.handle(msg.toFrame(SYSID, COMPID, SEQ)))
+                .doesNotThrowAnyException();
+
+        assertThat(monitor.getDecisions(SYSID).get(0).get("type")).isEqualTo("UNKNOWN(99)");
+    }
+
+    @Test
+    @DisplayName("决策监控未注入（ai 模块缺席）：解码照样不抛")
+    void handle_decisionEvent_monitorAbsent_noException() {
+        DecisionEventMsg msg = new DecisionEventMsg(0f, 0.5f, 1L, SYSID, 0, 0);
+        assertThatCode(() -> service.handle(msg.toFrame(SYSID, COMPID, SEQ)))
+                .doesNotThrowAnyException();
     }
 }
