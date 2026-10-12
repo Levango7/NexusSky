@@ -2,14 +2,22 @@ package io.aerofleet.cloud.autodispatch;
 
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
+import io.aerofleet.cloud.mission.common.MissionUploadResult;
 import io.aerofleet.cloud.tracking.FlightTrackStore;
+import io.aerofleet.mavlink.messages.MissionItemInt;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * {@link AutoDispatchService} 单元测试（P0-1 安防报警→无人机自动出警闭环）。
@@ -24,6 +32,7 @@ class AutoDispatchServiceTest {
     private FlightTrackStore trackStore;
     private AutoDispatchConfig config;
     private AutoDispatchService service;
+    private DroneCommandService commandService;
 
     @BeforeEach
     void setUp() {
@@ -32,11 +41,84 @@ class AutoDispatchServiceTest {
         config = new AutoDispatchConfig();
         config.setEnabled(true);
         service = new AutoDispatchService(registry, trackStore, config);
+        // 默认注入"上传成功"的命令面：出警的成功必须是真送达，而不是只看选中了几架
+        commandService = mock(DroneCommandService.class);
+        when(commandService.uploadMission(anyInt(), anyList()))
+                .thenReturn(MissionUploadResult.ok(4));
+        ReflectionTestUtils.setField(service, "commandService", commandService);
     }
 
-    /**
-     * 注册一架在线无人机：位置 (lat, lon)，电量 batteryPct，未 armed。
-     */
+    // ---- 真实下达（2026-10-12：修"假闭环"——航点生成后从不发送却报派遣成功）----
+
+    @Test
+    @DisplayName("派遣会真实上传四段出警航点（起飞→飞往→悬停→返航）")
+    void dispatchUploadsWaypointSequence() {
+        registerDrone(2, 39.901, 116.301, 90);
+
+        DispatchResult result = service.dispatchDrone(39.9, 116.3, "alarm-1", 1);
+
+        assertThat(result.getStatus()).isEqualTo(DispatchResult.Status.SUCCESS);
+        var captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        org.mockito.Mockito.verify(commandService).uploadMission(org.mockito.ArgumentMatchers.eq(2),
+                captor.capture());
+        @SuppressWarnings("unchecked")
+        List<MissionItemInt> items = captor.getValue();
+        assertThat(items).hasSize(4);
+        assertThat(items.get(0).command).isEqualTo(22); // TAKEOFF
+        assertThat(items.get(1).command).isEqualTo(16); // WAYPOINT
+        assertThat(items.get(2).command).isEqualTo(17); // LOITER_TIME
+        assertThat(items.get(3).command).isEqualTo(20); // RTL
+        // 目标点必须是报警点（1e7 定点表示）
+        assertThat(items.get(1).x).isEqualTo((int) Math.round(39.9 * 1e7));
+        assertThat(items.get(1).y).isEqualTo((int) Math.round(116.3 * 1e7));
+    }
+
+    @Test
+    @DisplayName("上传失败：该架标记未派遣，整体 FAILED（不谎报派遣成功）")
+    void dispatchUploadFailureReportsFailed() {
+        registerDrone(2, 39.901, 116.301, 90);
+        when(commandService.uploadMission(anyInt(), anyList()))
+                .thenReturn(MissionUploadResult.failure("upload timeout"));
+
+        DispatchResult result = service.dispatchDrone(39.9, 116.3, "alarm-1", 1);
+
+        assertThat(result.getStatus()).isEqualTo(DispatchResult.Status.FAILED);
+        assertThat(result.getDispatchedDrones().get(0).isTaskAssigned()).isFalse();
+    }
+
+    @Test
+    @DisplayName("命令面缺席（未注入）：同样 FAILED，而不是假装派出去了")
+    void dispatchWithoutCommandServiceReportsFailed() {
+        registerDrone(2, 39.901, 116.301, 90);
+        ReflectionTestUtils.setField(service, "commandService", null);
+
+        DispatchResult result = service.dispatchDrone(39.9, 116.3, "alarm-1", 1);
+
+        assertThat(result.getStatus()).isEqualTo(DispatchResult.Status.FAILED);
+        assertThat(result.getDispatchedDrones().get(0).isTaskAssigned()).isFalse();
+    }
+
+    @Test
+    @DisplayName("多架部分送达：PARTIAL 且只标记送达的那些")
+    void dispatchPartialDeliveryReportsPartial() {
+        registerDrone(1, 39.901, 116.301, 90);
+        registerDrone(2, 39.902, 116.302, 90);
+        // 第一架（sysid=1，较近）送达，第二架超时
+        when(commandService.uploadMission(org.mockito.ArgumentMatchers.eq(1), anyList()))
+                .thenReturn(MissionUploadResult.ok(4));
+        when(commandService.uploadMission(org.mockito.ArgumentMatchers.eq(2), anyList()))
+                .thenReturn(MissionUploadResult.failure("timeout"));
+
+        DispatchResult result = service.dispatchDrone(39.9, 116.3, "alarm-1", 2);
+
+        assertThat(result.getStatus()).isEqualTo(DispatchResult.Status.PARTIAL);
+        assertThat(result.getDispatchedDrones().get(0).getSysid()).isEqualTo(1);
+        assertThat(result.getDispatchedDrones().get(0).isTaskAssigned()).isTrue();
+        assertThat(result.getDispatchedDrones().get(1).getSysid()).isEqualTo(2);
+        assertThat(result.getDispatchedDrones().get(1).isTaskAssigned()).isFalse();
+    }
+
+    /** 注册一架在线无人机：位置 (lat, lon)，电量 batteryPct，未 armed。 */
     private DroneSnapshot registerDrone(int sysid, double lat, double lon, int batteryPct) {
         DroneSnapshot drone = registry.registerIfAbsent(sysid);
         drone.online = true;
@@ -150,7 +232,8 @@ class AutoDispatchServiceTest {
 
         assertThat(result.getStatus()).isEqualTo(DispatchResult.Status.PARTIAL);
         assertThat(result.getDispatchedDrones()).hasSize(2);
-        assertThat(result.getMessage()).contains("only 2 of 5");
+        // 文案随"如实上报送达数"改写：可用 2 架、请求 5 架、两架都送达
+        assertThat(result.getMessage()).contains("requested 5");
     }
 
     @Test

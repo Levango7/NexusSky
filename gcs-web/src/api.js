@@ -110,14 +110,17 @@ async function jsonFetch(rawUrl, options = {}) {
     clearTimeout(timer)
   }
 
-  // 401 响应：token 过期或无效，自动清除并跳转登录
+  // 401 响应：token 过期或无效。清除令牌，并让界面切回登录态。
+  // **不整页 reload**：本前端是 SPA（视图切换不产生路由），location.pathname
+  // 永远不含 /login，旧代码那道"避免循环跳转"的守卫恒为假——于是登录输错密码
+  // 也会触发刷新，错误提示被一起毁掉（用户只见页面闪一下）；而作业中任何后台
+  // 401 又会把整个页面连现场一起刷掉。改为只发事件，由 useAuth 翻登录态，
+  // 调用方的错误信息（下面这句）照常抛给界面显示。
   if (res.status === 401) {
     clearAuthToken()
-    // 避免在登录页面自身触发循环跳转
-    if (!location.pathname.includes('/login')) {
-      location.reload()
-    }
-    throw new Error('认证已过期，请重新登录')
+    const message = '认证已过期，请重新登录'
+    window.dispatchEvent(new CustomEvent('nexus-auth-expired', { detail: { message } }))
+    throw new Error(message)
   }
 
   let body = null

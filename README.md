@@ -15,7 +15,7 @@
 ```
 ┌──────────────┐   MAVLink/UDP    ┌──────────────────┐   REST/WS   ┌─────────────┐
 │  drone-sim   │ ───────────────► │  cloud-backend   │ ──────────► │   gcs-web   │
-│  虚拟无人机    │   14540 → 14561 │  Spring Boot 3    │  8080       │  React 地面站 │
+│  虚拟无人机    │   14540 → 14550 │  Spring Boot 3    │  8080       │  React 地面站 │
 │  (代替真飞控)  │ ◄─────────────── │  设备网关+API     │ ◄────────── │  MapLibre    │
 └──────────────┘                  └──────────────────┘             └─────────────┘
                                         ▲
@@ -93,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e-smoke.ps1
 MAVLink/UDP 链路损伤代理，插在飞机与云端之间，把"网络"从固定参数变成可编程的实验变量：
 
 ```
-[drone-sim --bind-ip 127.0.0.2]  <──受损链路──>  [link-sim :14600]  <──>  [cloud-backend :14561]
+[drone-sim --bind-ip 127.0.0.2]  <──受损链路──>  [link-sim :14600]  <──>  [cloud-backend :14550]
         每架飞机一个 127.x.y.z「网段身份」              7 种真实链路画像
 ```
 
@@ -605,7 +605,7 @@ DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理�
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
 1. **买真硬件**：Pixhawk 6C 飞控（约 ¥1000）+ 机架电机桨叶电池（约 ¥1500），或直接买 PX4 预装整机。
-2. **接线不变**：真飞控通过数传模块（如 Holybro SiK）或 ESP32 Bridge 以 **MAVLink over UDP** 发往 `cloud-backend` 的 14561 端口——协议和模拟器一模一样。
+2. **接线不变**：真飞控通过数传模块（如 Holybro SiK）或 ESP32 Bridge 以 **MAVLink over UDP** 发往 `cloud-backend` 的 14550 端口——协议和模拟器一模一样。
 3. **一步验证**：先跑 `mavlink-core` 单测（`mvn -pl mavlink-core test`），再接真机；若 CRC 全绿，链路即通。
 4. **地面站与云端零改动**。唯一要新增的是真机的失控保护参数（RTL 高度、低电量阈值），在 PX4 参数里配，不在代码里。
 
@@ -663,7 +663,7 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 | 端口 | 用途 |
 |---|---|
 | 14540/udp | 飞控(模拟器)侧 MAVLink |
-| 14561/udp | GCS/云端侧 MAVLink（与 QGroundControl 默认一致） |
+| 14550/udp | GCS/云端侧 MAVLink（与 QGroundControl 默认一致） |
 | 8080/tcp | 云端 REST + WebSocket |
 | 5173/tcp | GCS 开发服务器 |
 
@@ -714,12 +714,12 @@ NexusSky/
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 478 |
-| `drone-sim` | 1408 |
+| `drone-sim` | 1410 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2626 |
+| `cloud-backend` | 2643 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 34 |
-| **总计** | **4675** |
+| **总计** | **4694** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -874,7 +874,7 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 245 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 247 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）；
   `npm run test` 实测

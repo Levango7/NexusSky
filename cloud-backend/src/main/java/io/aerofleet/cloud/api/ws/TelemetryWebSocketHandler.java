@@ -122,9 +122,11 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
         if (clientIp != null && maxConnectionsPerIp > 0) {
             int ipCount = ipConnectionCounts.merge(clientIp, 1, Integer::sum);
             if (ipCount > maxConnectionsPerIp) {
-                log.warn("WS 连接数超限（IP {} 已有 {} 连接，上限 {}），拒绝: {}",
-                        clientIp, ipCount - 1, maxConnectionsPerIp, session.getId());
-                ipConnectionCounts.merge(clientIp, -1, Integer::sum);
+                // 不在这里扣减：连接关闭时 afterConnectionClosed 会按
+                // ATTR_CLIENT_IP 扣一次。两处都扣 = 被拒连接被扣两次，计数只减不增，
+                // 限流会随时间漂移成"形同虚设"。
+                log.warn("WS 连接数超限（IP {} 现活跃 {} 连接含本次，上限 {}），拒绝: {}",
+                        clientIp, ipCount, maxConnectionsPerIp, session.getId());
                 closeQuietly(session, CloseStatus.POLICY_VIOLATION);
                 return;
             }
@@ -142,9 +144,9 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
         if (tenantId != null && maxConnectionsPerTenant > 0) {
             int tenantCount = tenantConnectionCounts.merge(tenantId, 1, Integer::sum);
             if (tenantCount > maxConnectionsPerTenant) {
-                log.warn("WS 连接数超限（租户 {} 已有 {} 连接，上限 {}），拒绝: {}",
-                        tenantId, tenantCount - 1, maxConnectionsPerTenant, session.getId());
-                tenantConnectionCounts.merge(tenantId, -1, Integer::sum);
+                // 同 IP 分支：扣减只发生在 afterConnectionClosed
+                log.warn("WS 连接数超限（租户 {} 现活跃 {} 连接含本次，上限 {}），拒绝: {}",
+                        tenantId, tenantCount, maxConnectionsPerTenant, session.getId());
                 closeQuietly(session, CloseStatus.POLICY_VIOLATION);
                 return;
             }
@@ -338,7 +340,13 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
                 continue;
             }
             try {
-                s.sendMessage(msg);
+                // 同一会话可能被多个线程同时广播（遥测帧 + 调度帧 + 告警帧来源不同）。
+                // WebSocketSession 不是线程安全的：并发 sendMessage 会帧交错/抛
+                // IllegalStateException（客户端表现=偶发断连或半包 JSON）。按会话加锁，
+                // 与 Spring 的 ConcurrentWebSocketSessionDecorator 内部用同一把监视器。
+                synchronized (s) {
+                    s.sendMessage(msg);
+                }
             } catch (Exception e) {
                 log.debug("WS send failed to {}: {}", s.getId(), e.getMessage());
                 sessions.remove(s.getId());
