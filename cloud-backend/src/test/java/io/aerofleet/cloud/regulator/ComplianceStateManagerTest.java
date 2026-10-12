@@ -355,16 +355,60 @@ class ComplianceStateManagerTest {
         }
     }
 
+    // ─── 产品序列号绑定（遥测上报的身份来源）──
+
+    @Nested
+    @DisplayName("产品序列号绑定")
+    class SerialBinding {
+
+        @Test
+        @DisplayName("初始化时带 productSerialNo 即落库")
+        void initBindsSerial() {
+            ComplianceStatus status = manager.transition(7, ComplianceState.UNVERIFIED, "TEST-001");
+            assertThat(status.productSerialNo()).isEqualTo("TEST-001");
+        }
+
+        @Test
+        @DisplayName("已绑定的序列号在后续流转中保留（遥测上报据此拼身份）")
+        void serialSurvivesTransitions() {
+            manager.transition(7, ComplianceState.UNVERIFIED, "TEST-001");
+            ComplianceStatus verified = manager.transition(7, ComplianceState.VERIFIED, "TEST-001");
+            ComplianceStatus activated = manager.transition(7, ComplianceState.ACTIVATED, "TEST-001");
+            ComplianceStatus operating = manager.transition(7, ComplianceState.OPERATING);
+
+            assertThat(verified.productSerialNo()).isEqualTo("TEST-001");
+            assertThat(activated.productSerialNo()).isEqualTo("TEST-001");
+            // 不带序列号的调用（如遥测驱动的 ACTIVATED → OPERATING）不能把身份擦掉
+            assertThat(operating.productSerialNo()).isEqualTo("TEST-001");
+        }
+
+        @Test
+        @DisplayName("新值非空则覆盖（以最新一次实名/激活请求为准）")
+        void serialRebindOverwrites() {
+            manager.transition(7, ComplianceState.UNVERIFIED, "OLD-001");
+            ComplianceStatus rebound = manager.transition(7, ComplianceState.VERIFIED, "NEW-002");
+            assertThat(rebound.productSerialNo()).isEqualTo("NEW-002");
+        }
+
+        @Test
+        @DisplayName("两参重载不改变已绑定的序列号")
+        void twoArgOverloadKeepsSerial() {
+            manager.transition(7, ComplianceState.UNVERIFIED, "TEST-001");
+            manager.transition(7, ComplianceState.VERIFIED, "TEST-001");
+            ComplianceStatus activated = manager.transition(7, ComplianceState.ACTIVATED);
+            assertThat(activated.productSerialNo()).isEqualTo("TEST-001");
+        }
+    }
+
     // ─── 状态记录字段保持 ───
 
     @Test
-    @DisplayName("状态流转后 productSerialNo 等字段保持不变")
+    @DisplayName("两参流转保持既有字段不变（未绑定时序列号仍为 null）")
     void transition_preservesFields() {
         manager.transition(1, ComplianceState.UNVERIFIED);
         manager.transition(1, ComplianceState.VERIFIED);
         ComplianceStatus afterActivated = manager.transition(1, ComplianceState.ACTIVATED);
 
-        // transition 方法不修改 productSerialNo 等字段（它们在初始化时为 null/0）
         assertThat(afterActivated.sysid()).isEqualTo(1);
         assertThat(afterActivated.productSerialNo()).isNull();
         assertThat(afterActivated.activationId()).isNull();

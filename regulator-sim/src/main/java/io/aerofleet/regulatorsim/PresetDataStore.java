@@ -84,11 +84,15 @@ public final class PresetDataStore {
     /**
      * 按 serialNo 查询预置数据。
      *
-     * @param serialNo 产品序列号
+     * @param serialNo 产品序列号（null/空白按"查无此机"处理，不抛——
+     *                 {@link ConcurrentHashMap} 不接受 null key）
      * @return 匹配的预置条目，不存在时返回 null（用于 NOT_FOUND 场景）
      */
     public PresetEntry find(String serialNo) {
-        return data.get(serialNo);
+        if (serialNo == null || serialNo.isBlank()) {
+            return null;
+        }
+        return data.get(serialNo.trim());
     }
 
     /**

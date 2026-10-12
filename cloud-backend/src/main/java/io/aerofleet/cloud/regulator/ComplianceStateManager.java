@@ -45,6 +45,27 @@ public class ComplianceStateManager {
      * @throws IllegalStateException 若流转不合法（逆向、跳跃或跳过初始状态）
      */
     public ComplianceStatus transition(int sysid, ComplianceState newState) {
+        return transition(sysid, newState, null);
+    }
+
+    /**
+     * 状态流转，并在同一次原子更新里绑定/保留产品序列号。
+     * <p>
+     * 为什么要带 serialNo：遥测上报（{@code TelemetryReportService}）是从合规状态里
+     * 取 {@code productSerialNo} 拼上报体的，而原实现从初始化起就写死 null——于是
+     * "已实名、已激活"的设备，遥测上报反而丢了身份标识，监管平台无法把上报关联到
+     * 激活记录（sim 侧表现为 NOT_IDENTIFIED 拒绝）。
+     * <p>
+     * 绑定语义：新值非空则覆盖（以最新一次实名/激活请求为准），新值为空则保留原值
+     * （避免一次不带序列号的调用把已绑定的身份擦掉）。
+     *
+     * @param sysid           无人机系统标识（MAVLink sysid）
+     * @param newState        目标状态
+     * @param productSerialNo 产品序列号（可空）
+     * @return 变更后的合规状态记录
+     * @throws IllegalStateException 若流转不合法（逆向、跳跃或跳过初始状态）
+     */
+    public ComplianceStatus transition(int sysid, ComplianceState newState, String productSerialNo) {
         return statusMap.compute(sysid, (key, existing) -> {
             long now = System.currentTimeMillis();
 
@@ -55,8 +76,9 @@ public class ComplianceStateManager {
                                     + "（必须从 UNVERIFIED 开始）");
                 }
                 ComplianceStatus initial = new ComplianceStatus(
-                        sysid, null, newState, null, null, 0, 0, 0);
-                log.info("合规状态初始化: sysid={}, status={}, timestamp={}", sysid, newState, now);
+                        sysid, productSerialNo, newState, null, null, 0, 0, 0);
+                log.info("合规状态初始化: sysid={}, status={}, serialNo={}, timestamp={}",
+                        sysid, newState, productSerialNo, now);
                 return initial;
             }
 
@@ -66,9 +88,10 @@ public class ComplianceStateManager {
                         "非法状态流转: sysid=" + sysid + ", from=" + oldState + ", to=" + newState);
             }
 
+            String serialNo = productSerialNo != null ? productSerialNo : existing.productSerialNo();
             ComplianceStatus updated = new ComplianceStatus(
                     sysid,
-                    existing.productSerialNo(),
+                    serialNo,
                     newState,
                     existing.activationId(),
                     existing.cancellationId(),
@@ -77,7 +100,8 @@ public class ComplianceStateManager {
                     existing.lastTelemetryReportTime()
             );
 
-            log.info("合规状态变更: sysid={}, from={}, to={}, timestamp={}", sysid, oldState, newState, now);
+            log.info("合规状态变更: sysid={}, from={}, to={}, serialNo={}, timestamp={}",
+                    sysid, oldState, newState, serialNo, now);
             return updated;
         });
     }

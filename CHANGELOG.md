@@ -244,6 +244,45 @@ GB 46750 的运行识别 deadline。）
 
 Java 4613 → **4619**（cloud-backend 2587 → **2593**，本轮 +6 例）。前端 245 不变。
 
+## [Unreleased] — C1 模拟环境深化：regulator-sim 激活状态机（幂等/关联校验/注销拒绝）（2026-10-12）
+
+> 用户指令："还是做模拟环境来搞吧"——把原"等真实 UOM 联调"的 C1 边界
+> 用高保真模拟推进。目标：让真实联调时 90% 的问题（状态/幂等/时序）
+> 在 PoC 环境就暴露并验收。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| — | **ActivationStateMachine**（regulator-sim 新类） | 按 serialNo 激活生命周期：NONE → ACTIVATED → CANCELLED。activate 幂等（重试返回同一 ID 不新发）、实名前置校验（未注册/非 VERIFIED 拒绝）、telemetry 仅 ACTIVATED 接收（未激活 403 NOT_ACTIVATED、已注销 403 CANCELLED）、cancel 幂等、reset 清空 |
+| — | **MockUomServer 接入** | activate/cancel/telemetry 经状态机裁决（拒绝返回 403 + reason/verdict，不再无条件 success）；新增 POST /api/reset（e2e 用例间隔离，不影响预置数据与记录） |
+| — | **cloud-backend 零改动** | TelemetryReport/ActivationRequest 契约本就不带 activationId——状态机按 serialNo 维度做，上报链路与响应字段不变，只是语义变真 |
+| — | **测试** | ActivationStateMachineTest +15（未注册拒绝/非 VERIFIED/幂等/未激活遥测拒/注销封锁/reset/多机隔离/null 与空白 serialNo 不炸/trim 归一）；存量 RegulatorSimMainTest.telemetryEndpoint 改为"先 activate 再上报"（真实链路形状——旧写法正是无条件 success 时代的残留） |
+| — | **e2e** | FR-36~39（sim HTTP 面）：重复 activate 同 ID + idempotent 标记；UNVERIFIED 激活被拒且遥测被拒；注销后再激活被拒；reset 后可重新完整激活 |
+| — | **修：sim null serialNo 炸连接** | ConcurrentHashMap 不接受 null key，handler 一个 NPE 就被 com.sun.net.httpserver 静默关连接——客户端只看到"HTTP/1.1 header parser received no bytes"，比明确拒绝难查得多。现 null/空白统一归一为"未标识设备"：activate/cancel → 403 NOT_FOUND、telemetry → 403 NOT_IDENTIFIED，附中文 reason；PresetDataStore.find 同样 null 安全 |
+| — | **修：backend 上报丢身份** | `ComplianceStateManager.transition` 从初始化起就把 productSerialNo 写死 null，而遥测上报正是从合规状态取 serialNo 拼上报体——"已实名、已激活"的设备，上报反而没有产品序列号，监管侧只能拒。新增带 serialNo 的重载（非空覆盖、空不清空），verify/activate 三处调用带入请求里的 productSerialNo |
+| — | **修：e2e-regulator 三处路基缺陷**（该脚本自诞生只提交过一次、从未进 CI，一直没人跑） | ① `$BackendPort` 从未传给 backend（脚本只拿它做健康检查，应用按 application.properties 的 8080 起）→ 补 `--server.port`；② drone-sim 的 14555 从未告知 backend，而 UDP 发现名单只有默认 14540~14543 → 设备从未被发现、遥测快照恒空（**FR-33 因此从未绿过**）→ 补 `--aerofleet.drone-port`；③ 就绪判据用 actuator health，而本机 Redis 无口令会把 health 打成 503 → 误杀，改业务端点 `/api/v1/drones`（与 e2e-cv-eval 同款）。另加 AF_BACKEND_PORT/AF_REGULATOR_PORT/AF_DRONE_PORT 覆盖（8080 常驻容器占用）、清理进程的匹配模式修正、`Send-PostJsonAllowFailure`（PS 5.1 的 Invoke-WebRequest 非 2xx 抛错前会吃掉响应流，断言不了 verdict，改走裸 HttpWebRequest） |
+| — | **sim 可观测性** | 每个收到的请求打一行 `[req] METHOD URI`——mock 平台要能自证"请求到没到"，否则客户端报无响应时无法区分没送达与 handler 炸了 |
+| — | **修：门禁两个盲点** | ① `<100 不当测试数`的常识过滤把小模块整表放过——README 测试表里 regulator-sim 19（实为 34）长期隐身，表格相加还比总数少 15 都没人发现；现已知模块名不再套该过滤。② 第二种陈旧报告形态：类还在源码树里、只是本轮没跑（`ParseAllocationBenchmark` 不匹配 surefire 默认 include，`mvn test` 从来不跑它，但 target/ 里躺着上次 `-Dtest=` 显式跑的报告帧）→ 本机量到 4664、CI 量到 4663，本地绿 CI 红；现判定规则与 surefire 默认 include 对齐 |
+
+**验证**：regulator-sim 单测 34/34；cloud-backend 合规域单测 28/28 + RegulatorControllerTest 23/23；e2e-regulator 全量 FR-31~39（31 断言 0 失败）。
+
+### 计数
+
+Java 4619 → **4663**。其中本轮新增：regulator-sim 27 → **34**（+7 null/空白与归一用例）、
+cloud-backend 2610 → **2614**（+4 序列号绑定用例）；其余为订正此前合入未同步的存量漂移
+（mavlink-core 478 等），以 `check-test-count-docs.py` 实测为准（11 份文档同步）。前端 245 不变。
+
+> **坑（门禁 third fix）**：本机门禁一度量到 4664，CI 量到 4663，差在 mavlink-core 一例。
+> 根因是 `ParseAllocationBenchmark`（`-Dbench=1` 门控）**不匹配 surefire 默认 include**，
+> `mvn test` 从来不跑它，但 target/ 里躺着它上次被 `-Dtest=` 显式跑过的报告帧（04:31），
+> 本机全量 reactor 07:52 那轮根本没重写。本地绿、CI 红就是这么来的。
+> 现门禁把"类简单名不匹配 surefire 默认 include"的报告一律判为历史遗留、不计入统计
+> （判定规则与 surefire 用同一套）。这是 `_class_has_source`（类被删）之外的第二种陈旧报告形态：
+> **类还在源码树里，只是本轮没跑**。
+
+**边界（更新后的 C1 口径）**：sim 侧已按真实 UOM 语义运行；真实联调的剩余差异
+= 真实平台的 HTTPS 端点/证书/配额/鉴权（UomReportSink 的 HTTPS 客户端已就绪）、
+以及真实错误码字典——属环境接入，不是逻辑缺口。
+
 ## [Unreleased] — P1 基准落定：UDP 零分配“不改造”（数字驱动）（2026-10-12）
 
 > ROADMAP P1 原条目“UDP 接收线程零分配：帧解码对象池化 + GC 抖动消除”。
