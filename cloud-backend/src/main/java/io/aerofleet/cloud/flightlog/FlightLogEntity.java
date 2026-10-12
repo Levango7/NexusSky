@@ -350,15 +350,22 @@ public class FlightLogEntity {
     }
 
     /**
-     * 每列的 java.sql.Types，供 null 值显式 setNull 使用
-     * （{@code setObject(i, null)} 在 PostgreSQL 驱动上会因无法推断类型而报错）。
+     * 每列的 java.sql.Types。两件事都要它：null 值显式 {@code setNull}
+     * （{@code setObject(i, null)} 在 PG 驱动上会因无法推断类型而报错），
+     * 以及**非 null 值也按它绑定**（见 {@code FlightLogService#flushBatch}）。
+     * <p>
+     * {@code Instant} 列必须是 {@code TIMESTAMP_WITH_TIMEZONE}：以前用 {@code Types.TIMESTAMP}
+     * 且非 null 路径根本没传类型，驱动就把一个绝对时刻按 JVM 默认时区摊成"无时区墙钟"写进
+     * {@code timestamp} 列——+08 机器上"当天的飞行历史"因此读到空（详见 V29 迁移与
+     * {@code .coord/GAPS.md} §七）。列改成 {@code timestamptz} 之后，绑定口径也必须跟着是
+     * 带时区的，否则错误只是从"存墙钟"变成"用另一个时区解释墙钟"。
      */
     public static int[] insertSqlTypes() {
         int[] types = new int[INSERT_FIELDS.size()];
         for (int i = 0; i < types.length; i++) {
             Class<?> t = INSERT_FIELDS.get(i).getType();
             if (t == java.time.Instant.class) {
-                types[i] = java.sql.Types.TIMESTAMP;
+                types[i] = java.sql.Types.TIMESTAMP_WITH_TIMEZONE;
             } else if (t == String.class) {
                 types[i] = java.sql.Types.VARCHAR;
             } else if (t == Integer.class || t == int.class) {
@@ -376,13 +383,18 @@ public class FlightLogEntity {
         return types;
     }
 
-    /** 取本实体各列的值（{@code Instant} 转 {@link java.sql.Timestamp}，驱动兼容）。 */
+    /**
+     * 取本实体各列的值。
+     * <p>{@code Instant} 这里**不再转 {@code java.sql.Timestamp}**：{@code Timestamp} 是个"无时区的
+     * 绝对时刻"对象，驱动要按某个时区把它摊成字面量才能写进列——这一步正是以前墙钟漂移的落点。
+     * 直接交 {@code Instant} 并配 {@link java.sql.Types#TIMESTAMP_WITH_TIMEZONE}（见
+     * {@link #insertSqlTypes()}），驱动拿到的是带偏移的时刻，不再需要猜时区。
+     */
     public static Object[] insertValues(FlightLogEntity entity) {
         Object[] values = new Object[INSERT_FIELDS.size()];
         for (int i = 0; i < values.length; i++) {
             try {
-                Object v = INSERT_FIELDS.get(i).get(entity);
-                values[i] = v instanceof java.time.Instant ts ? java.sql.Timestamp.from(ts) : v;
+                values[i] = INSERT_FIELDS.get(i).get(entity);
             } catch (IllegalAccessException e) {
                 throw new IllegalStateException("无法读取 " + INSERT_FIELDS.get(i).getName(), e);
             }

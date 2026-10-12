@@ -203,7 +203,10 @@ public class FlightLogService {
                         if (row[i] == null) {
                             ps.setNull(i + 1, types[i]);
                         } else {
-                            ps.setObject(i + 1, row[i]);
+                            // 非 null 也必须带目标类型：漏掉时驱动会自己挑一个渲染方式，
+                            // 而它给 java.sql.Timestamp 挑的正是"按 JVM 默认时区摊成无时区字面量"，
+                            // 于是 timestamptz 之前那版在 +08 机器上写进了本地墙钟。
+                            ps.setObject(i + 1, row[i], types[i]);
                         }
                     }
                 });

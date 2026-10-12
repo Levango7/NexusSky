@@ -660,6 +660,21 @@ jobs:
           chmod +x scripts/ci-integration-test.sh
           scripts/ci-integration-test.sh
 
+      - name: Integration tests under a non-UTC deployment timezone
+        # 这条腿是 V29 那个缺陷的**证伪测试**，不是重复劳动。
+        # 症状：flight_log 的显式批量写路径过去不带目标类型地绑定 java.sql.Timestamp
+        #   ⇒ pgjdbc 按 **JVM 默认时区**把绝对时刻摊成"无时区墙钟"写进 timestamp 列；
+        #   而读侧走 Hibernate 的 Instant 映射，它固定按 **UTC** 渲染边界。
+        #   两边口径不同 ⇒ +08 部署上"当天的飞行历史"读到空，`day=明天` 才看得见。
+        # runner 是 UTC ⇒ 默认时区==UTC ⇒ 两侧恰好抵消 ⇒ **只有把时区钉成非 UTC 才会红**。
+        # 修复前的复现证据（本机 +08，真 PG）：真库确有 65 行 sysid=231 遥测，
+        #   GET /api/v1/flightlog?day=<今天> → []，?day=<明天> → 65 行。
+        # Java 在 Linux 上读 TZ 环境变量决定默认时区，这里不改任何脚本默认值。
+        env:
+          TZ: Asia/Shanghai
+        run: |
+          TZ=Asia/Shanghai bash scripts/ci-integration-test.sh
+
   sdk-integration:
     name: SDK Integration E2E
     runs-on: ubuntu-latest
