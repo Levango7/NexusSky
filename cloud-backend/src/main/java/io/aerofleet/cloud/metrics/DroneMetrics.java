@@ -31,6 +31,21 @@ import java.util.function.Supplier;
  *   <li>{@code aerofleet.orch.phase}        — 编排引擎当前阶段（Gauge，按 sysId 标签）</li>
  *   <li>{@code aerofleet.formation.active}  — 活跃编队数（Gauge）</li>
  *   <li>{@code aerofleet.celltower.connected} — 连接的地面终端数（Gauge，按 towerId 标签）</li>
+ *   <li>{@code aerofleet.signing.verified}   — 验签通过的帧数（Counter）</li>
+ *   <li>{@code aerofleet.signing.rejected}   — 验签拒绝的帧数（Counter，<b>按 reason 标签</b>）</li>
+ *   <li>{@code aerofleet.signing.unsigned}   — 未签名但被放行的帧数（Counter，仅 reject-unsigned=false 时非零）</li>
+ * </ul>
+ *
+ * <p>关于 {@code aerofleet.signing.*}（2026-10-11 补）：
+ * <ul>
+ *   <li>此前签名统计是 {@code UdpGateway} 里的纯内存计数器，每 60s 打一条
+ *       {@code log.info} 然后清零。于是本系统最该被监控的安全计数器，
+ *       对**已经接好的 Prometheus 端点是不可见的**——有人在爆破签名时
+ *       {@code rejected} 在涨，但没有任何东西能据此告警。</li>
+ *   <li>{@code rejected} 带 {@code reason} 标签而非裸计数，因为"拒了多少"不可行动，
+ *       "因为什么被拒"才可行动：{@code unsigned} 是有客户端没升级签名，
+ *       {@code no-key} 意味着**有帧带着有效签名但来源 sysid 不在密钥库里**（更值得警惕），
+ *       {@code timestamp-replay} 是重放，{@code error} 是代码异常。五种取值，基数安全。</li>
  * </ul>
  *
  * <p>设计说明：
@@ -82,6 +97,10 @@ public class DroneMetrics {
     private final ConcurrentHashMap<Integer, Counter> messageReceivedCounters = new ConcurrentHashMap<>();
     private final Counter messageDecodedCounter;
     private final Counter messageErrorCounter;
+    private final Counter signingVerifiedCounter;
+    private final Counter signingUnsignedCounter;
+    /** reason → 验签拒绝 Counter（按 reason 标签动态创建，取值集合固定，基数安全）。 */
+    private final ConcurrentHashMap<String, Counter> signingRejectedByReason = new ConcurrentHashMap<>();
 
     public DroneMetrics(MeterRegistry meterRegistry,
                         ObjectProvider<DeviceRegistry> deviceRegistryProvider,
@@ -104,6 +123,15 @@ public class DroneMetrics {
                 .register(meterRegistry);
         this.messageErrorCounter = Counter.builder("aerofleet.messages.errors")
                 .description("MAVLink 消息解码错误数")
+                .register(meterRegistry);
+
+        // --- 签名（rejected 的 reason 标签在首次记录时按需创建，不预注册空值）---
+        this.signingVerifiedCounter = Counter.builder("aerofleet.signing.verified")
+                .description("MAVLink v2 签名验签通过的帧数")
+                .register(meterRegistry);
+        this.signingUnsignedCounter = Counter.builder("aerofleet.signing.unsigned")
+                .description("未签名但被放行的帧数（仅 reject-unsigned=false 时非零；"
+                        + "收紧为 true 后该值应恒为 0）")
                 .register(meterRegistry);
 
         log.info("DroneMetrics initialized; deviceRegistry={}, formationService={}",
@@ -202,6 +230,50 @@ public class DroneMetrics {
     /** 记录一条解码错误。 */
     public void recordMessageError() {
         messageErrorCounter.increment();
+    }
+
+    // ==================== 签名（MAVLink v2） ====================
+
+    /** 验签拒绝的原因（{@code aerofleet.signing.rejected} 的 reason 标签取值）。 */
+    public static final class SigningRejectReason {
+        /** 未签名帧且 reject-unsigned=true：有客户端没升级签名。 */
+        public static final String UNSIGNED = "unsigned";
+        /** 帧带着有效签名，但来源 sysid 在密钥库里取不到口令——最值得警惕的一种。 */
+        public static final String NO_KEY = "no-key";
+        /** 签名值不匹配（被篡改，或两端密钥配错）。 */
+        public static final String BAD_SIGNATURE = "bad-signature";
+        /** timestamp 非单调，疑似重放。 */
+        public static final String TIMESTAMP_REPLAY = "timestamp-replay";
+        /** 验签过程抛异常（代码缺陷或帧结构异常）。 */
+        public static final String ERROR = "error";
+
+        private SigningRejectReason() {
+        }
+    }
+
+    /** 记录一帧验签通过。 */
+    public void recordSigningVerified() {
+        signingVerifiedCounter.increment();
+    }
+
+    /**
+     * 记录一帧未签名但被放行。
+     * 仅在 {@code reject-unsigned=false}（观察期姿态）下非零；
+     * 收紧为 fail-closed 后该计数器应恒为 0——这是"staging 已收紧"的观测证据。
+     */
+    public void recordSigningUnsigned() {
+        signingUnsignedCounter.increment();
+    }
+
+    /** 记录一帧验签拒绝，并带上原因标签。 */
+    public void recordSigningRejected(String reason) {
+        Counter c = signingRejectedByReason.computeIfAbsent(
+                reason == null ? SigningRejectReason.ERROR : reason,
+                r -> Counter.builder("aerofleet.signing.rejected")
+                        .description("MAVLink v2 签名验签拒绝的帧数")
+                        .tag("reason", r)
+                        .register(meterRegistry));
+        c.increment();
     }
 
     /** 手动更新在线无人机数（当未注入 DeviceRegistry 时作为 Gauge 数据源）。 */

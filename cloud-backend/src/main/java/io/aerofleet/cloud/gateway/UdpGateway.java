@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.gateway;
 
+import io.aerofleet.cloud.metrics.DroneMetrics;
 import io.aerofleet.cloud.rid.RidIngestService;
 import io.aerofleet.cloud.telemetry.PendingAcks;
 import io.aerofleet.mavlink.MavlinkFrame;
@@ -12,6 +13,7 @@ import io.aerofleet.mavlink.security.MavlinkSignerFactory;
 import io.aerofleet.mavlink.security.SigningKeyManager;
 import io.aerofleet.mavlink.security.TimestampTracker;
 import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
+import org.springframework.beans.factory.ObjectProvider;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -96,8 +98,51 @@ public class UdpGateway {
     @Autowired(required = false)
     private RidIngestService ridIngestService;
 
+    /**
+     * 可观测性指标：<b>必须用 ObjectProvider，不能直接注入</b>。
+     *
+     * <p>签名统计此前只进日志、对已接好的 Prometheus 端点不可见，这里把它同步给
+     * {@link DroneMetrics}。
+     *
+     * <p><b>为什么是 ObjectProvider 而不是 {@code @Autowired DroneMetrics}</b>：
+     * 直接字段注入会在 UdpGateway 创建期间就急切解析 DroneMetrics，而 DroneMetrics
+     * 的构造参数里有 {@code ObjectProvider<FormationService>}——它会被解析成
+     * FormationService bean，而 FormationService → droneCommandService → udpGateway，
+     * 于是形成 <b>udpGateway ⇄ droneCommandService 循环</b>，Spring 抛
+     * {@code BeanCurrentlyInCreationException}，整个上下文起不来（实测 13 个
+     * {@code @SpringBootTest} 上下文全挂）。本仓到处用 ObjectProvider 正是为了破环。
+     * 用 provider 则在真正验签时（上下文已就绪）才解析，顺带天然满足
+     * 「指标是可选依赖、不是启动依赖」。
+     */
+    @Autowired(required = false)
+    private ObjectProvider<DroneMetrics> droneMetricsProvider;
+
+    /** DroneMetrics 的惰性缓存：每帧都走 getIfAvailable() 没必要。 */
+    private volatile DroneMetrics droneMetrics;
+
     /** 签名统计计数器（60s 周期报告）。 */
     private final SigningStats signingStats = new SigningStats();
+
+    /** 惰性解析 DroneMetrics（首次需要时才找 bean，避免创建期循环依赖）。 */
+    private DroneMetrics metrics() {
+        DroneMetrics m = droneMetrics;
+        if (m == null && droneMetricsProvider != null) {
+            m = droneMetricsProvider.getIfAvailable();
+            if (m != null) {
+                droneMetrics = m;
+            }
+        }
+        return m;
+    }
+
+    /** 记一次验签拒绝：内存计数（周期日志）+ Prometheus 计数（可告警）两处同步。 */
+    private void rejectSigning(String reason) {
+        signingStats.rejected++;
+        DroneMetrics m = metrics();
+        if (m != null) {
+            m.recordSigningRejected(reason);
+        }
+    }
 
     /** 每 sysid 滑动窗口频率限制器：key=sysid, value=最近1秒内的时间戳队列。 */
     private final ConcurrentHashMap<Integer, Deque<Long>> rateLimitWindows = new ConcurrentHashMap<>();
@@ -414,12 +459,16 @@ public class UdpGateway {
         if (!isSigned) {
             // 未签名帧：根据 rejectUnsigned 配置处理
             if (signatureConfig.isRejectUnsigned()) {
-                signingStats.rejected++;
+                rejectSigning(DroneMetrics.SigningRejectReason.UNSIGNED);
                 log.warn("拒绝未签名帧：sysid={} msgId={} (rejectUnsigned=true)",
                         frame.getSystemId(), frame.getMessageId());
                 return false;
             } else {
                 signingStats.unsigned++;
+                DroneMetrics m = metrics();
+                if (m != null) {
+                    m.recordSigningUnsigned();
+                }
                 return true; // 允许未签名帧通过
             }
         }
@@ -439,13 +488,13 @@ public class UdpGateway {
             // 否则等于把一个未知来源的帧当成本机队成员放行）
             MavlinkSigner signer = signerFactory.signerFor(frame.getSystemId());
             if (signer == null) {
-                signingStats.rejected++;
+                rejectSigning(DroneMetrics.SigningRejectReason.NO_KEY);
                 log.warn("签名验证拒绝：sysid={} 无可用密钥（msgId={}），按未授权帧丢弃",
                         frame.getSystemId(), frame.getMessageId());
                 return false;
             }
             if (!signer.verify(frameBytes, linkId, timestamp, signature)) {
-                signingStats.rejected++;
+                rejectSigning(DroneMetrics.SigningRejectReason.BAD_SIGNATURE);
                 log.warn("签名验证失败：sysid={} linkId={} msgId={}",
                         frame.getSystemId(), linkId, frame.getMessageId());
                 return false;
@@ -454,16 +503,20 @@ public class UdpGateway {
             // 验证 timestamp（重放攻击防护，官方按 linkId+sysid+compid 分流且要求严格递增）
             if (timestampTracker != null && !timestampTracker.check(linkId, frame.getSystemId(),
                     frame.getComponentId(), timestamp)) {
-                signingStats.rejected++;
+                rejectSigning(DroneMetrics.SigningRejectReason.TIMESTAMP_REPLAY);
                 log.warn("Timestamp 校验失败（疑似重放）：sysid={} linkId={} timestamp={}",
                         frame.getSystemId(), linkId, timestamp);
                 return false;
             }
 
             signingStats.verified++;
+            DroneMetrics m = metrics();
+            if (m != null) {
+                m.recordSigningVerified();
+            }
             return true;
         } catch (Exception e) {
-            signingStats.rejected++;
+            rejectSigning(DroneMetrics.SigningRejectReason.ERROR);
             log.warn("签名验证异常：sysid={} {}", frame.getSystemId(), e.getMessage());
             return false;
         }

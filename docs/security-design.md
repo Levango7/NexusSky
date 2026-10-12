@@ -671,7 +671,35 @@ backend 日志里真实出现过的那一行，例如
   实测修掉 staging 下 635 条「疑似重放」误拒（`verified=613 → 1259`，`rejected → 0`）。
 - 重放与时间戳回退只有单元测试证据：link-sim 的损伤画像会篡改签名字节、剥离签名块，
   但不会转发一条已签名的原帧来触发重放分支。
-- 签名统计（`signing: verified=/rejected=/unsigned=`）只进日志，既无指标也无告警。
+- ~~签名统计只进日志，既无指标也无告警~~ **已补指标（2026-10-11）**：
+  `aerofleet.signing.{verified,unsigned}` 两个 Counter +
+  `aerofleet.signing.rejected{reason=...}`（reason 取五值：`unsigned` / `no-key` /
+  `bad-signature` / `timestamp-replay` / `error`），随既有
+  `micrometer-registry-prometheus` 经 `/actuator/prometheus` 导出。
+  此前 `micrometer-registry-prometheus` 早已接好、`prometheus` 端点早已暴露，
+  而签名统计是 `UdpGateway` 里的纯内存计数器、每 60s 打一条 `log.info` 就清零——
+  等于**本系统最该被监控的安全计数器对已在采集的 Prometheus 不可见**：
+  有人在爆破签名时 `rejected` 在涨，但没有任何东西能据此告警。
+
+  建议告警表达式（**未内置**，按环境实际标签名调整）：
+
+  ```promql
+  # 验签拒绝突增——总体信号，优先看 reason 标签定位方向
+  rate(aerofleet_signing_rejected_total[5m]) > 0
+
+  # 有帧带着有效签名但来源 sysid 取不到口令：最值得警惕的一类
+  # （既可能是密钥没同步，也可能是有人在用不属于自己的 sysid 试探）
+  rate(aerofleet_signing_rejected_total{reason="no-key"}[5m]) > 0
+
+  # 重放尝试
+  increase(aerofleet_signing_rejected_total{reason="timestamp-replay"}[10m]) > 0
+
+  # fail-closed 姿态下 unsigned 应恒为 0；非零说明姿态被改回去了
+  rate(aerofleet_signing_unsigned_total[5m]) > 0
+  ```
+
+  ⚠️ 最后一条同时是「收紧是否生效」的观测证据：staging 自 2026-10-11 起
+  `reject-unsigned=true`，该计数器应恒为 0；若它开始动，说明有人把配置退回了 permissive。
   > 注意：收紧为 `reject-unsigned=true` 后 **`unsigned` 计数恒为 0**（未签名帧直接计入
   > `rejected`）。定位"谁还在发未签名帧"要改看
   > `WARN 拒绝未签名帧：sysid=<id> msgId=<id>` 这行日志——它带 sysid 与 msgId。
