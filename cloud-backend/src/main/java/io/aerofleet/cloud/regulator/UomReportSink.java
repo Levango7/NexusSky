@@ -307,7 +307,16 @@ public class UomReportSink implements RegulatorReportSink {
                     return objectMapper.readTree(response.body());
                 }
 
-                log.warn("HTTP {} {} 返回状态码 {}（第 {} 次尝试）",
+                if (ReportRetryPolicy.isTerminal(response.statusCode())) {
+                    // 终态：4xx 是请求本身被拒（签名过期/未实名/已注销/重复激活），
+                    // 重试救不回来，只会把同一请求打 3 遍、约 7 秒后被平台判为滥用。
+                    // body 里带真实原因，交回调用方读。
+                    log.warn("HTTP {} {} 返回终态 {}（不重试）: {}",
+                            method, url, response.statusCode(), bodyPreview(response.body()));
+                    return objectMapper.readTree(response.body());
+                }
+
+                log.warn("HTTP {} {} 返回状态码 {}（第 {} 次尝试，将重试）",
                         method, url, response.statusCode(), attempts + 1);
             } catch (Exception e) {
                 lastException = e;
@@ -357,6 +366,20 @@ public class UomReportSink implements RegulatorReportSink {
         mac.init(keySpec);
         byte[] hmacBytes = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
         return Base64.getEncoder().encodeToString(hmacBytes);
+    }
+
+    /**
+     * 取响应体前若干字符用于日志。
+     *
+     * <p>真实 UOM 平台的错误响应体正是定位依据（"签名过期""配额用尽""未实名"），
+     * 所以不截断到只剩状态码。同时压掉换行，避免把日志冲乱。
+     */
+    private static String bodyPreview(String body) {
+        if (body == null || body.isEmpty()) {
+            return "(empty)";
+        }
+        String oneLine = body.replaceAll("\\s+", " ").trim();
+        return oneLine.length() <= 200 ? oneLine : oneLine.substring(0, 200) + "…";
     }
 
     /**

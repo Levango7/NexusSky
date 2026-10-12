@@ -249,6 +249,86 @@ class SimReportSinkTest {
         }
 
         @Test
+        @DisplayName("403 是终态：只请求一次，重试次数开满也不重试")
+        void forbidden403_isTerminal_noRetry() throws InterruptedException {
+            // 这是本组测试里最要紧的一条。
+            //
+            // 实现要点：maxRetry 必须显式开大。本类 setUp 默认 maxRetry=0，
+            // 而"403 只请求一次"在 maxRetry=0 下**无论实现对错都会成立**——
+            // 那样的断言是空转的（变异测试第一次就是这么骗过我的）。
+            // 只有把重试次数开满，requestCount==1 才真正证明"判定把 403 认成了终态"。
+            config.setMaxRetry(3);
+            AtomicInteger requestCount = new AtomicInteger(0);
+            server.createContext("/api/activate", exchange -> {
+                consumeRequestBody(exchange);
+                requestCount.incrementAndGet();
+                String response = "{\"success\":false,\"reason\":\"未实名注册\"}";
+                sendJsonResponse(exchange, 403, response);
+            });
+            server.start();
+
+            sink = new SimReportSink(config, objectMapper);
+            ActivationRequest request = new ActivationRequest(1, "SN-001", 0, 39.9, 116.3);
+            ActivationResult result = sink.reportActivation(request);
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.errorMessage()).isNotNull();
+            assertThat(requestCount.get())
+                    .as("maxRetry=3 下仍只请求 1 次，才证明 403 被判定为终态")
+                    .isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("401 签名过期同样是终态：重试次数开满也只请求一次")
+        void unauthorized401_isTerminal_noRetry() throws InterruptedException {
+            // 真实平台最常见的 4xx 就是签名过期/时钟偏移，重试毫无意义。
+            config.setMaxRetry(3);
+            AtomicInteger requestCount = new AtomicInteger(0);
+            server.createContext("/api/activate", exchange -> {
+                consumeRequestBody(exchange);
+                requestCount.incrementAndGet();
+                sendJsonResponse(exchange, 401, "{\"success\":false,\"reason\":\"signature expired\"}");
+            });
+            server.start();
+
+            sink = new SimReportSink(config, objectMapper);
+            ActivationRequest req = new ActivationRequest(1, "SN-001", 0, 39.9, 116.3);
+            ActivationResult result = sink.reportActivation(req);
+
+            assertThat(result.success()).isFalse();
+            assertThat(requestCount.get()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("429 限流不是终态：仍要重试")
+        void tooManyRequests429_stillRetries() throws InterruptedException {
+            // 429 与 408 是 4xx 里唯二"该退避重试"的：前者通常带 Retry-After，
+            // 后者本身就是超时语义。把它们误判成终态会白白丢掉本来能成功的上报。
+            config.setMaxRetry(1);
+            AtomicInteger requestCount = new AtomicInteger(0);
+            server.createContext("/api/activate", exchange -> {
+                consumeRequestBody(exchange);
+                int count = requestCount.incrementAndGet();
+                if (count == 1) {
+                    exchange.sendResponseHeaders(429, 0);
+                    exchange.close();
+                } else {
+                    sendJsonResponse(exchange, 200, "{\"success\":true,\"activationId\":\"ACT-429\"}");
+                }
+            });
+            server.start();
+
+            sink = new SimReportSink(config, objectMapper);
+            ActivationRequest request = new ActivationRequest(1, "SN-001", 0, 39.9, 116.3);
+            ActivationResult result = sink.reportActivation(request);
+
+            // 单调断言优先级低于请求次数：次数为 2 本身就证明了"429 之后又发了一次"。
+            assertThat(requestCount.get())
+                    .as("429 之后必须再发一次（本类 setUp 默认 maxRetry=0，故此处显式开 1）")
+                    .isEqualTo(2);
+        }
+
+        @Test
         @DisplayName("maxRetry=1 时首次失败后重试成功")
         void retryOnce_thenSuccess() throws InterruptedException {
             config.setMaxRetry(1);
