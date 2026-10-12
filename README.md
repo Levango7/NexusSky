@@ -29,7 +29,7 @@
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（358 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 45 个功能面板（顶栏按 8 个业务域分组导航） | 不需要换 |
 | `link-sim` | 纯 Java 17 | MAVLink/UDP 链路损伤代理：延迟/Gilbert-Elliot 突发丢包/令牌桶带宽/周期分区四引擎 + 7 种链路画像 + 一跳/多跳静态中继 | 不需要换——损伤模型本身就是要保留的实验变量 |
-| `regulator-sim` | 纯 Java 17 + JDK HttpServer | 模拟 CAAC UOM 监管平台 HTTP API（`/api/verify\|activate\|cancel\|telemetry\|records` 五端点 + `--delay-ms`/`--error-rate` 故障注入），独立进程，供 regulator 包集成测试与本地开发 | 不需要换——对接端是真 UOM 平台 |
+| `regulator-sim` | 纯 Java 17 + JDK HttpServer | 模拟 CAAC UOM 监管平台 HTTP API（`/api/verify\|activate\|cancel\|telemetry\|records\|reset` 六端点 + `--delay-ms`/`--error-rate` 故障注入），独立进程，供 regulator 包集成测试与本地开发 | 不需要换——对接端是真 UOM 平台 |
 | `sdk-java` | 纯 Java 11 | Java 客户端 SDK（drones / missions / flightLogs 三域 + 20 余便捷方法），12 单测 | 不需要换 |
 | `sdk-python` | Python 3 | Python 客户端 SDK（drones / missions / flightlog + exceptions），7 文件、**0 单测** | 不需要换 |
 
@@ -686,7 +686,7 @@ NexusSky/
 │   └── transport/      UDP 传输
 ├── drone-sim/           虚拟无人机（状态机 + 任务协议服务端 + 物理引擎 v2）
 ├── link-sim/            链路损伤代理（延迟/丢包/带宽/分区 + Mesh 中继）
-├── regulator-sim/       UOM 监管平台模拟器（5 个 HTTP 端点 + 延迟/错误率注入）
+├── regulator-sim/       UOM 监管平台模拟器（6 个 HTTP 端点 + 延迟/错误率注入）
 ├── cloud-backend/       Spring Boot 单体（网关/机队/任务/推送/安全/编排）
 │   └── 37 个功能包：ai, alarm, api, audit, autodispatch, citytwin, commadapt,
 │       config, delivery2, drone, edge, flightlog, gateway, geofence, health,
@@ -716,10 +716,10 @@ NexusSky/
 | `mavlink-core` | 478 |
 | `drone-sim` | 1408 |
 | `link-sim` | 117 |
-| `cloud-backend` | 2610 |
+| `cloud-backend` | 2614 |
 | `sdk-java` | 12 |
-| `regulator-sim` | 19 |
-| **总计** | **4644** |
+| `regulator-sim` | 34 |
+| **总计** | **4663** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写

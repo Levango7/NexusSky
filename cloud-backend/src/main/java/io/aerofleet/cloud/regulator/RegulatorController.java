@@ -84,9 +84,9 @@ public class RegulatorController {
             return conflict("sysid=" + request.sysid() + " 已注销，拒绝监管操作");
         }
 
-        // 确保 sysid 已初始化为 UNVERIFIED
+        // 确保 sysid 已初始化为 UNVERIFIED（同时绑定产品序列号：后续遥测上报要带）
         if (existing == null) {
-            stateManager.transition(request.sysid(), ComplianceState.UNVERIFIED);
+            stateManager.transition(request.sysid(), ComplianceState.UNVERIFIED, request.productSerialNo());
         }
 
         // 调用监管平台验证
@@ -96,7 +96,7 @@ public class RegulatorController {
         if (result.status() == VerifyStatus.VERIFIED) {
             ComplianceStatus current = stateManager.get(request.sysid());
             if (current != null && current.status() == ComplianceState.UNVERIFIED) {
-                stateManager.transition(request.sysid(), ComplianceState.VERIFIED);
+                stateManager.transition(request.sysid(), ComplianceState.VERIFIED, request.productSerialNo());
             }
             log.info("实名验证成功: sysid={}", request.sysid());
         } else {
@@ -155,7 +155,7 @@ public class RegulatorController {
 
         // 成功时状态流转 + 启动遥测上报
         if (result.success()) {
-            stateManager.transition(request.sysid(), ComplianceState.ACTIVATED);
+            stateManager.transition(request.sysid(), ComplianceState.ACTIVATED, request.productSerialNo());
             telemetryReportService.startReporting(request.sysid());
             log.info("激活上报成功: sysid={}, activationId={}", request.sysid(), result.activationId());
         } else {

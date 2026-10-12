@@ -193,6 +193,19 @@ def _suite_class(fn):
     return name.split('$')[0]
 
 
+# surefire 3.x 的默认 include（本仓未在 pom 里配自定义 include）：
+#   **/Test*.java / **/*Test.java / **/*Tests.java / **/*TestCase.java
+# 不匹配的类 `mvn test` 根本不跑；target/surefire-reports 里若躺着它的 XML，只可能是
+# 历史上被 `-Dtest=` 显式跑过一次留下的。2026-10-12 实测：ParseAllocationBenchmark
+# 就是这么让本机量到 479 而 CI（干净 checkout）是 478 的——本地门禁绿、CI 红。
+# 判定规则与 surefire 保持一致，杜绝这种"说不清差 1"的平台差异。
+_SUREFIRE_DEFAULT_INCLUDE = re.compile(r'(?:^Test.*|.*Tests?$|.*TestCase$)')
+
+
+def _matches_surefire_default_include(fqcn):
+    return _SUREFIRE_DEFAULT_INCLUDE.match(fqcn.rsplit('.', 1)[-1]) is not None
+
+
 def _class_has_source(root, module, fqcn):
     """该测试类在本模块 ``src/test`` 下是否还有源文件。
 
@@ -243,8 +256,13 @@ def measure_actual(root, reports_root=None):
 
     def absorb(module, path):
         nonlocal total, failures, errors, skipped, files
-        if not _class_has_source(root, module, _suite_class(os.path.basename(path))):
+        fqcn = _suite_class(os.path.basename(path))
+        if not _class_has_source(root, module, fqcn):
             stale.append('%s: %s' % (module, os.path.basename(path)))
+            return
+        if not _matches_surefire_default_include(fqcn):
+            stale.append('%s: %s（surefire 默认 include 不匹配，本轮不会跑，XML 是历史遗留）'
+                         % (module, os.path.basename(path)))
             return
         got = _read_suite(path)
         if got is None:
@@ -380,11 +398,14 @@ def row_claim(line, per_module):
     if not m:
         return None
     value = _parse_count(m.group(1))
-    # 常识过滤：单测数不会小到 2 位数；防把「第 3 阶段」之类误当测试数
-    if value < 100:
-        return None
+    # 常识过滤：单测数不会小到 2 位数；防把「第 3 阶段」之类误当测试数。
+    # **但不套在已知模块名上**：2026-10-12 发现该过滤让 regulator-sim 的 19（实为 34）
+    # 在 README 测试表里永久隐身——首列已是模块名 + 第二列是前导整数，误判空间本就
+    # 远小于自由文本，为小模块开口子的代价（docs 表格和实测永远对不上）比误报大。
     if name in per_module:
         return name, value, exact
+    if value < 100:
+        return None
     if name in TOTAL_LABELS:
         return '__total__', value, exact
     return None
