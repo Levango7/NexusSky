@@ -54,6 +54,66 @@ class MeshRelayTest {
         return new ImpairmentEngine(0, 0, 1.0, 1.0, 0, 0, 0, 0, 0, 0);
     }
 
+    /**
+     * 用<b>真实 MAVLink v2 帧</b>证明一跳中继是字节级透明转发。
+     *
+     * <p><b>为什么必须用真实帧</b>：2026-10-12 拆除的多跳扩展曾有一整套测试
+     * （MultiHopRelayTest，11 例）全绿，而它在真实帧上根本不可能工作——
+     * 那些测试用的是 {@code new byte[13]} 这类合成数组。合成数组的"最后一字节"
+     * 是随手填的 7，真实帧的最后一字节是 <b>CRC</b>。于是 11 个通过的测试
+     * 一起掩盖了"读 CRC 当跳数、又覆写 CRC"这个致命缺陷。
+     *
+     * <p>现在这个用例以真实帧为输入，断言中继输出与输入逐字节相同。
+     * 它同时是拆除后留下的回归护栏：有人再往转发路径里塞任何
+     * "顺手改一下帧字节"的逻辑，这里会立刻红。
+     */
+    @Test
+    @Timeout(20)
+    void realMavlinkFrame_isForwardedByteForByte() throws Exception {
+        int gcsPort = nextPort(), relayPort = nextPort();
+
+        RelayConfig cfg = newCfg(gcsPort, relayPort);
+        RelayNode node = new RelayNode(cfg, lanEngine(), lanEngine());
+        startRelay(node);
+
+        // 真实 MAVLink v2 帧（Heartbeat + 签名块），不是合成数组
+        io.aerofleet.mavlink.messages.Heartbeat hb =
+                new io.aerofleet.mavlink.messages.Heartbeat(
+                        0, 2, 6, 0, io.aerofleet.mavlink.enums.MavEnums.MAV_STATE_ACTIVE);
+        byte[] real = hb.toFrame(42, 1, 0).encodeV2();
+
+        try (DatagramSocket droneListener = new DatagramSocket(new InetSocketAddress("127.0.0.1", 0));
+             DatagramSocket gcs = new DatagramSocket()) {
+
+            // 地址学习：relayPort 收过谁就记住谁是飞机，gcsPort 收过谁就记住谁是 GCS。
+            // 注意后一个探针本身就会被当上行转发给飞机，所以要先排空它。
+            send(droneListener, relayPort, new byte[]{9});   // 让中继学到 droneAddr
+            Thread.sleep(80);
+            send(gcs, gcsPort, new byte[]{2});               // 让中继学到 gcsAddr
+            Thread.sleep(80);
+
+            DatagramPacket drainPkt = new DatagramPacket(new byte[2048], 2048);
+            droneListener.setSoTimeout(3000);
+            try {
+                droneListener.receive(drainPkt);             // 吃掉被转发的探针
+            } catch (java.net.SocketTimeoutException ignored) {
+                // 没收到也不致命：不影响下面的断言
+            }
+
+            // GCS -> 飞机：真实帧走上行
+            send(gcs, gcsPort, real);
+
+            byte[] buf = new byte[2048];
+            DatagramPacket pkt = new DatagramPacket(buf, buf.length);
+            droneListener.setSoTimeout(5000);
+            droneListener.receive(pkt);
+            byte[] got = Arrays.copyOf(buf, pkt.getLength());
+
+            Assertions.assertArrayEquals(real, got,
+                    "一跳中继必须字节级透明：输入真实帧 " + real.length + "B，输出 " + got.length + "B");
+        }
+    }
+
     /** 在 daemon 线程启动中继（run 阻塞，daemon 不阻止 JVM 退出）。 */
     private static Thread startRelay(RelayNode node) {
         Thread t = new Thread(() -> {
