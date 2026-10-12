@@ -514,6 +514,12 @@ public class UdpGateway {
             if (m != null) {
                 m.recordSigningVerified();
             }
+            // C5 第三步的地面证据：这台机"确实有签名帧通过验签"。收紧 reject-unsigned 前的就绪判定
+            // 只看它——计数器是全机队汇总的，回答不了"具体哪台没配密钥"。
+            // 注册表内部按节流落库，此处不在每帧路径上写库。
+            if (deviceRegistry != null) {
+                deviceRegistry.markSigningVerified(frame.getSystemId());
+            }
             return true;
         } catch (Exception e) {
             rejectSigning(DroneMetrics.SigningRejectReason.ERROR);

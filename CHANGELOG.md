@@ -4,6 +4,88 @@
 
 ---
 
+## [Unreleased] — C5 第三步动手做：把"能不能收紧签名"变成代码门禁，翻丢了会自己退回来（2026-10-12）
+
+### 问题
+
+`docs/signing-prod-rollout.md`（PR #58）把 prod 收紧的**操作层**写清楚了，但那份手册的第 2 步
+依赖一件不存在的事：**有人盯着**。`mavlink.signing.reject-unsigned=true` 之后唯一的失败模式是
+"某台设备没配密钥"，而它的表现是**那台机的遥测静默消失**——没有错误码、没有掉线事件、
+`/api/v1/drones` 里它就是不见了。人值守不是门禁。
+
+第二条约束决定了判据不能图省事：**地面"配了密钥"≠ 现场在签名**。本仓没有任何向飞控下发
+参数的通路（全仓 grep `PARAM_SET` 只命中一处无关注释），设备侧密钥来自进程启动参数，
+`MavlinkSigningKeyController.rotateKey` 只写地面 keystore、没有"通知设备"这一步。
+所以只看地面记录会把"我以为配了"当成"配好了"——正是要防的那类假象。
+
+### 改动
+
+| 件 | 内容 |
+|---|---|
+| `SigningPostureService` | 三态 OFF / PERMISSIVE / STRICT。**收紧前**要求每台**在线**设备在证据窗口内都有"签名帧通过验签"的记录，缺任何一台直接抛 `PostureRejectedException` 并点名 sysid；**收紧后**看门狗（`@Scheduled`，默认 30s）发现仍有在线设备无证据 ⇒ **自动退回 PERMISSIVE** 并写审计。判据用"有没有签名帧通过验签"，不用"库里配没配密钥" |
+| `MavlinkSigningPostureController` | `GET /api/v1/mavlink/signing/posture`（OBSERVER，把 `onlineDevices / covered / missing / readyToTighten` 摊开）；`POST /strict`、`POST /permissive`（ADMIN **且必须是 JWT 主体**——API Key 是机器凭据，不该能改变安全姿态）。不就绪返回 **409** + 结构化 `missingSigningEvidence` |
+| `V28__device_signing_state.sql` | `devices` 加 `signing_verified_at` / `signing_key_fingerprint`，**都可空且无默认值**（给默认等于把所有历史设备伪装成"已验证"，那正是本迁移要消灭的东西）。两列语义分开：指纹="地面已生成、等现场写入"，verified_at="系统真看到它的签名帧" |
+| `DeviceRegistry` | 验签通过时记证据：内存**每帧**更新、落库**按 60s 节流**（遥测 5Hz × N 机，每帧写库会把 ingestion 压垮，而 ingestion 停摆的表现是全体掉线，比签名本身严重）；写失败只 WARN 不抛；`restoreFromRepository()` 回填证据，否则重启后首屏会把"刚重启"误判成"全部设备都没签名" ⇒ 收紧永远打不开 |
+| `MavlinkSignatureConfig` | `rejectUnsigned` 改 `volatile`：读在 UDP 收包线程、写在 HTTP 线程，翻转必须立即可见 |
+
+**只看在线设备**是刻意的：离线的机器此刻不影响任何事，等它上线时由看门狗兜住。否则一台正在
+维修换件的机会永久卡住收紧——那等于把这个开关变成"永远打不开"，而收紧的代价（失联）明显
+大于收益（少一层未签名放行），所以宁可"先收紧、掉了自动退"。
+
+### 两处踩坑（比改动本身更该留档）
+
+**1. 我第一版看门狗用例是空转的，而根因是 Windows 的时钟分辨率。**
+为了表示"证据已过期"，我写了 `setEvidenceWindow(Duration.ofNanos(1))`。它没过——但不是"不稳定"：
+本机实测（JDK 17）**20 万次连续 `Instant.now()` 只产生 17 个不同读数，最长一次连续 28822 次同值**，
+所以 `evidence.isBefore(now.minus(1ns))` 在同一读数内恒为 false，那句话**永不成立**。
+改法是把时钟做成可注入的 `Clock`（生产 `Clock.systemUTC()`，测试 `Clock.offset(…, 16min)`），
+并且**先断言"这一步确实制造出了缺失"**（`evaluateReadiness().missing()` 非空）再断言行为——
+否则"关掉自动退回"那条用例会因为前提从未满足而永远真。
+
+**2. 我自己写的验收断言用了手抄码点，导致校验恒假。**
+CHANGELOG 解冲突的脚本里我拿 `\u2014 C5 \u7b2c\u4e09\u6b55` 当锚点，"步"的真值是 U+6B65，
+我抄成了 U+6B55 ⇒ 断言"我的条目只出现一次"在任何正确文件上都失败，看起来像"文件没改对"，
+其实是**校验本身是坏的**。字面量与标识符一律现查，不凭印象。
+
+### 验证
+
+- 新增 12 例：`SigningPostureServiceTest` 7（拒绝并点名 / 收紧成功 / 离线不计 / 看门狗自动退回 /
+  可关兜底 / 签名未启用时两向都拒 / 零敞口可读）+ `MavlinkSigningPostureControllerTest` 5
+  （API Key 不能翻且 `rejectUnsigned` 未被改动 / 不就绪 409 带名单 / 成功收紧的审计 actor 是 JWT 主体 /
+  状态查询摊开 / 签名未启用时退回是 409）。
+- **变异验证**：摘掉 `/strict` 里的 JWT 门禁 ⇒ `apiKeyCannotChangePosture` 立刻转红（形态是
+  `ClassCastException`，即生产里那一步会从"干净 401"退化成"未处理异常"）。撤销变异后回绿。
+- 全量 `mvn -B -o package` BUILD SUCCESS（rebase 到 `47fc983` 之后复跑）；
+  **Java 4703 → 4715**（cloud-backend **2652 → 2664**），
+  口径 = `scripts/check-test-count-docs.py` 读 surefire 实测，文档同步由它驱动、不手填
+  （本次 19+1 处替换，复跑门禁 `exit 0`）。顺带对上一笔合并漏改的一行做了对齐：
+  `ROADMAP.md:25` 在 master 上仍写着 4681（该轮实测已是 4703），本批一并改成 4715。
+- **`V28` 不在单测覆盖面里**：`application-test.properties:25 spring.flyway.enabled=false` +
+  `ddl-auto=create-drop` ⇒ 那 2664 条单测**一条迁移都不跑**。真验证只在 IT **Pass C**
+  （prod profile + 真实 PostgreSQL：Flyway 从零建库 + Hibernate `ddl-auto=validate` 逐实体校验）。
+  本机 Pass C（一次性 `postgres:15-alpine` 容器，全新库）结果：**断言 1–6 全绿**——含断言 1 的
+  Flyway 在 PG 上从零建库（`flyway_schema_history` 实测 `28 | device signing state | success`）与
+  prod 的 `ddl-auto=validate` 逐实体校验通过（应用活到 health UP，V28 两列在
+  `information_schema.columns` 里存在）⇒ **V28 已被真实 PostgreSQL 验过**。
+  **断言 7 判红，但不是本批引入的**：真库里其实落了 65 行 `sysid=231 / tenant_id=1` 的遥测，
+  而 `GET /api/v1/flightlog?day=2026-10-12` 读到 0 行、`day=2026-10-13`（**明天**）读到 65 行。
+  根因是本仓既有的时区缺陷：`flight_log.timestamp` 是 `timestamp without time zone`，写入落的是
+  本地墙钟（19:04），读取的日窗却按 `day.atStartOfDay(systemDefault).toInstant()` 变成 UTC-naive
+  边界（`[10-11 16:00, 10-12 16:00)`）⇒ +08 的机器上"今天"这一页永远空。CI 的 runner 是 UTC，
+  两边重合，所以这条断言在 CI 上**结构性看不见**这个缺陷。已另案登记，不在本批顺手改。
+- `@Scheduled` 看门狗有调度器可跑（`CloudBackendApplication:12` 有 `@EnableScheduling`，实测）；
+  新端点被 `RbacEndpointCoverageTest`（反射扫全仓 `@RestController`）判为"声明齐全"。
+
+### 没做（有意）
+
+- 不改任何出厂默认值：`mavlink.signing.enabled` 仍 `false`，`reject-unsigned` 仍默认 `true`，
+  姿态端点在未启用签名时**两向都拒**（绝不"设置成功"却什么都没发生）。
+- 设备列表的"签名态"列与批量生成密钥的 UI 没做——那是 `gcs-web/**`，是另一条线（#57）的地盘。
+- 自动退回的默认宽限 2 分钟、证据窗口 15 分钟，都是配置项（`aerofleet.signing.posture.*`），
+  真实机队的取值要等第一次 prod 演练的观测数据来定。
+
+---
+
 ## [Unreleased] — 前端三项 + 面板测试补面 + 通信自适应接线（2026-10-12）
 
 > 用户指令："前端做吧 / 测试做吧 / 通信自适应如果查不到责任人或者责任人不在线，那就给你做"。
@@ -139,6 +221,50 @@ Java 4672 → **4675**（`cloud-backend` 2623 → **2626**，+3）
 **仍开（有意不动）**：`AdaptiveRouter` 整套从未被实例化（commadapt 决策层是死代码，接线需先定 owner）；
 mavlink-core 三项（未知 incompat 位、签名时间戳竞态、UDP 回调吞异常）属另一 agent 域；
 sdk-python 0 单测；前端 WS 重连无退避/无节流、主轨迹不实时、DockPanel 绕过统一 API 层。
+
+---
+
+## [Unreleased] — 两件"让沉默变红灯"的守卫：SPI 可验证性（35 个适配器实现里 9 个零测试引用）+ 状态板生成器（2026-10-12）
+
+- **发现方式与数字**：人肉扫了一遍 master（`0a85c38`）——13 个 SPI 接口下 **35 个生产实现**，
+  其中 **9 个在所有 `*/src/test/**/*.java` 里一次都没出现过**：`UomReportSink`（真监管上报的 HTTP 客户端，
+  带 baseUrl/apiKey/重试）、`MavlinkDeviceGateway`（F5 双栈网关）、`UdpTransportAdapter`、`RealEnvSource`、
+  以及 5 个 `ModuleAdapter` 实现（Delivery/Emergency/Formation/Mapping/Show）。
+  这类代码编译通过、启动正常、日志里"看起来在工作"，但**没有一条断言钉过**——
+  报文格式/重试/超时/鉴权头一错，只在真机或真平台暴露，而"加适配器"本身不会让任何东西变红。
+- **补上信号（`scripts/check-spi-coverage.py`，接进 `dep-gate` job 两步）**：
+  1. `Self-test the SPI gate itself`——离线夹具自证六情形，且断言的是**具体错误文案**不只看退出码：
+     未验无豁免→1 / 豁免未到期→0 / 豁免到期→1 / 豁免可撤销→1 / **一个实现都没扫到→2** / 僵尸豁免→1；
+  2. `SPI verifiability gate`——**默认全关、例外显式、到期自动回红**：豁免账每条必须写理由 + `expires`，
+     四种情况一律红（新增未验实现、改名后留下的僵尸豁免、其实已被测试引用却还占着账、豁免到期）。
+     退出码 **2 专用于"无法判定"**：扫描器失明时绝不伪装成 0（这条是本仓门禁反复踩过的失效面）。
+- **口径的局限（写清楚，免得被当成覆盖率）**：判据是"类名是否出现在测试源码里"。
+  因此 **经接口或 Spring 上下文间接经过的不算已验**——`ModuleAdapter` 接口在 `StepExecutorTest` 出现 4 次，
+  但那 5 个具体实现一次都没被点名，仍判未验；反之"被点名"也**不等于行为被断言**（可能只是 import/mock）。
+  要行覆盖/分支覆盖请走 `scripts/ci-coverage-threshold.sh` 那条腿，本门禁只管"有没有被测试触及"。
+- **9 条豁免都带补测方向**，不是一句"暂时不管"：`UomReportSink` 那条写明"sim 线正在改本文件的 4xx 终态
+  与 `ReportRetryPolicy`（未提交），等它合入后用 JDK `HttpServer` 当假 UOM 补契约测试"——
+  到期日 2026-10-26，届时无动作即红。
+- **验证**：`--self-test` 六情形全过；真仓库首跑 exit 0（35/9/9 与独立探针逐项一致）；
+  植入合成探针 `SyntheticSpiProbeSink implements RegulatorReportSink` ⇒ exit 1 并**点名该类**，
+  撤除后 exit 0 且工作树零残留（合成文件而不是产品代码，避免为了证明门禁有效去改产品）；
+  `yaml.safe_load` 解析 19 个 job，两步顺序为"自测在前、真跑在后"。
+- **边界**：本门禁只提高"没人验的适配器"的可见度，**不等于这 9 条已被清偿**。清偿是把豁免账逐条删掉，
+  账上条目减少才算进展；条目原地续期就是没进展，而且到期会变红。
+- **同一批还落了 C｜状态板生成器 `scripts/coord-status.sh`**：`.coord/STATUS.md` 的「在途与占用」段
+  此前靠人手写，10-12 那次它停在 10-10，而 master 两天里合了 12 笔、多出两个在写的 worktree——
+  过期的共享状态板比没有更危险，因为下一个人会照它行动。现在该段由脚本实测生成（标记块内幂等、
+  gh 不可用时报 `UNVERIFIED` 而不是"没有在途 PR"、发现手写同名段并存就拒绝写入）。
+  `COORDINATION.md` 第三节里那份写死 sha 的"当前状态"快照同步删除——**同一事实不留两处**。
+- **C 的自测与一次真实的自我推翻**：`--self-test` 断言五种情形。第一版只查"标记块出现 1 次"，
+  而 `--write` 的 awk 替换丢了 `inside` 追踪、把旧块正文留在原地——**自测照样绿**。是反向变异
+  （在 `scripts/` 里造一个退回旧写法的副本再测）才暴露它；随后又发现第二次 `--write` 其实是被
+  并存守卫拦成 exit 1，而 T3 只看"文件没变"就误判通过 ⇒ 断言补上"重写必须 exit 0"。
+  两次都是同一个教训：**绿的自测不等于测到了东西**，变异一次才算数。
+  另注：自测的目标路径也做成了可注入（`COORD_STATUS_SELF`），否则副本测的是原文件——这个坑我
+  在本仓已经踩过第三回。
+
+---
 
 ## [Unreleased] — 外部评估报告 P0 四项整改（2026-10-12）
 
