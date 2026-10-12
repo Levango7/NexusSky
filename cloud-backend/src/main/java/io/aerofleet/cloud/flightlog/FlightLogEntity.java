@@ -385,16 +385,25 @@ public class FlightLogEntity {
 
     /**
      * 取本实体各列的值。
-     * <p>{@code Instant} 这里**不再转 {@code java.sql.Timestamp}**：{@code Timestamp} 是个"无时区的
-     * 绝对时刻"对象，驱动要按某个时区把它摊成字面量才能写进列——这一步正是以前墙钟漂移的落点。
-     * 直接交 {@code Instant} 并配 {@link java.sql.Types#TIMESTAMP_WITH_TIMEZONE}（见
-     * {@link #insertSqlTypes()}），驱动拿到的是带偏移的时刻，不再需要猜时区。
+     * <p>{@code Instant} 在这里转成 **UTC 的 {@code OffsetDateTime}** 交给驱动，原因有两条，
+     * 都是实测出来的（不是理论偏好）：
+     * <ul>
+     *   <li>pgjdbc 42.7.3 明确<b>拒绝</b> {@code setObject(i, Instant, Types.TIMESTAMP_WITH_TIMEZONE)}
+     *       （"不能转换一个 java.time.Instant 实例到类型 Types.TIMESTAMP_WITH_TIMEZONE"），
+     *       而不带类型的 {@code setObject(i, Instant)} 又说"无法推断 SQL 类型"——
+     *       所以"直接交 Instant"这条路在 PG 上根本走不通；</li>
+     *   <li>旧写法交的是 {@code java.sql.Timestamp}（无时区）且不带目标类型，
+     *       驱动只能按 JVM 默认时区去摊平它——这正是 +08 部署上墙钟漂移的入口。</li>
+     * </ul>
+     * {@code OffsetDateTime} 带偏移，驱动与列（{@code timestamptz}）之间没有"再猜一次时区"的空间。
      */
     public static Object[] insertValues(FlightLogEntity entity) {
         Object[] values = new Object[INSERT_FIELDS.size()];
         for (int i = 0; i < values.length; i++) {
             try {
-                values[i] = INSERT_FIELDS.get(i).get(entity);
+                Object v = INSERT_FIELDS.get(i).get(entity);
+                values[i] = v instanceof java.time.Instant instant
+                        ? instant.atOffset(java.time.ZoneOffset.UTC) : v;
             } catch (IllegalAccessException e) {
                 throw new IllegalStateException("无法读取 " + INSERT_FIELDS.get(i).getName(), e);
             }

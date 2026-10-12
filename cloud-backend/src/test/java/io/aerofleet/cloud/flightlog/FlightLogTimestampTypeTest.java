@@ -53,19 +53,24 @@ class FlightLogTimestampTypeTest {
     }
 
     @Test
-    @DisplayName("2. 绑定值保持 Instant：转成 java.sql.Timestamp 会重新引入'按默认时区摊平'那一步")
-    void boundValueStaysAnInstantNotATimestamp() throws IllegalAccessException {
+    @DisplayName("2. 绑定值是 UTC 偏移的 OffsetDateTime：Instant 会被 pgjdbc 拒、Timestamp 会招它自己挑时区")
+    void boundValueIsUtcOffset() throws IllegalAccessException {
+        Instant moment = Instant.parse("2026-10-12T16:30:00Z");
         FlightLogEntity e = new FlightLogEntity();
-        e.setTimestamp(Instant.parse("2026-10-12T16:30:00Z"));
+        e.setTimestamp(moment);
 
-        Object[] row = FlightLogEntity.insertValues(e);
-        Object bound = row[timestampColumnIndex()];
+        Object bound = FlightLogEntity.insertValues(e)[timestampColumnIndex()];
 
         assertThat(bound)
-                .as("交给 setObject 的值")
-                .isInstanceOf(Instant.class)
+                .as("交给 setObject 的值——必须自带偏移，驱动才没有'按机器时区摊平'的空间")
+                .isInstanceOf(java.time.OffsetDateTime.class)
                 .isNotInstanceOf(java.sql.Timestamp.class);
-        assertThat((Instant) bound).isEqualTo(Instant.parse("2026-10-12T16:30:00Z"));
+        java.time.OffsetDateTime odt = (java.time.OffsetDateTime) bound;
+        assertThat(odt.getOffset()).isEqualTo(java.time.ZoneOffset.UTC);
+        assertThat(odt.toInstant()).isEqualTo(moment);
+        // 这一条是"为什么不能用 Instant + TIMESTAMP_WITH_TIMEZONE"的留档：
+        // pgjdbc 42.7.3 对那个组合直接抛"不能转换"，实测过（本机 +08 连真 PG）。
+        assertThat(odt.toInstant().toString()).isEqualTo("2026-10-12T16:30:00Z");
     }
 
     @Test
