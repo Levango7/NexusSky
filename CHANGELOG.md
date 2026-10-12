@@ -25,6 +25,38 @@
 mavlink-core 三项（未知 incompat 位、签名时间戳竞态、UDP 回调吞异常）属另一 agent 域；
 sdk-python 0 单测；前端 WS 重连无退避/无节流、主轨迹不实时、DockPanel 绕过统一 API 层。
 
+---
+
+## [Unreleased] — SPI 可验证性门禁：35 个"外部世界适配器"里 9 个从未被测试点名（2026-10-12）
+
+- **发现方式与数字**：人肉扫了一遍 master（`0a85c38`）——13 个 SPI 接口下 **35 个生产实现**，
+  其中 **9 个在所有 `*/src/test/**/*.java` 里一次都没出现过**：`UomReportSink`（真监管上报的 HTTP 客户端，
+  带 baseUrl/apiKey/重试）、`MavlinkDeviceGateway`（F5 双栈网关）、`UdpTransportAdapter`、`RealEnvSource`、
+  以及 5 个 `ModuleAdapter` 实现（Delivery/Emergency/Formation/Mapping/Show）。
+  这类代码编译通过、启动正常、日志里"看起来在工作"，但**没有一条断言钉过**——
+  报文格式/重试/超时/鉴权头一错，只在真机或真平台暴露，而"加适配器"本身不会让任何东西变红。
+- **补上信号（`scripts/check-spi-coverage.py`，接进 `dep-gate` job 两步）**：
+  1. `Self-test the SPI gate itself`——离线夹具自证六情形，且断言的是**具体错误文案**不只看退出码：
+     未验无豁免→1 / 豁免未到期→0 / 豁免到期→1 / 豁免可撤销→1 / **一个实现都没扫到→2** / 僵尸豁免→1；
+  2. `SPI verifiability gate`——**默认全关、例外显式、到期自动回红**：豁免账每条必须写理由 + `expires`，
+     四种情况一律红（新增未验实现、改名后留下的僵尸豁免、其实已被测试引用却还占着账、豁免到期）。
+     退出码 **2 专用于"无法判定"**：扫描器失明时绝不伪装成 0（这条是本仓门禁反复踩过的失效面）。
+- **口径的局限（写清楚，免得被当成覆盖率）**：判据是"类名是否出现在测试源码里"。
+  因此 **经接口或 Spring 上下文间接经过的不算已验**——`ModuleAdapter` 接口在 `StepExecutorTest` 出现 4 次，
+  但那 5 个具体实现一次都没被点名，仍判未验；反之"被点名"也**不等于行为被断言**（可能只是 import/mock）。
+  要行覆盖/分支覆盖请走 `scripts/ci-coverage-threshold.sh` 那条腿，本门禁只管"有没有被测试触及"。
+- **9 条豁免都带补测方向**，不是一句"暂时不管"：`UomReportSink` 那条写明"sim 线正在改本文件的 4xx 终态
+  与 `ReportRetryPolicy`（未提交），等它合入后用 JDK `HttpServer` 当假 UOM 补契约测试"——
+  到期日 2026-10-26，届时无动作即红。
+- **验证**：`--self-test` 六情形全过；真仓库首跑 exit 0（35/9/9 与独立探针逐项一致）；
+  植入合成探针 `SyntheticSpiProbeSink implements RegulatorReportSink` ⇒ exit 1 并**点名该类**，
+  撤除后 exit 0 且工作树零残留（合成文件而不是产品代码，避免为了证明门禁有效去改产品）；
+  `yaml.safe_load` 解析 19 个 job，两步顺序为"自测在前、真跑在后"。
+- **边界**：本门禁只提高"没人验的适配器"的可见度，**不等于这 9 条已被清偿**。清偿是把豁免账逐条删掉，
+  账上条目减少才算进展；条目原地续期就是没进展，而且到期会变红。
+
+---
+
 ## [Unreleased] — 外部评估报告 P0 四项整改（2026-10-12）
 
 > 由第三方做的全仓深度评估（HEAD 973db62）给了 P0 四项：自动出警假闭环、

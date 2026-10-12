@@ -56,6 +56,18 @@ jobs:
         # （release/source 混用、继承覆盖等），不需要已编译产物。
         # 产物字节码核对在 java-level 作业里做（那里才有 target/classes）。
         run: python3 scripts/check-java-level.py --list
+      - name: Self-test the SPI gate itself
+        # 离线夹具自证六情形（未验无豁免→1 / 豁免未到期→0 / 到期→1 / 可撤销→1 /
+        # 一个实现都没扫到→2 / 僵尸豁免→1）。放在真跑之前：判据自己坏掉时最早暴露，
+        # 而不是等到某天"全绿"却其实一直在跳过。
+        run: python3 scripts/check-spi-coverage.py --self-test
+      - name: SPI verifiability gate
+        # 通往外部世界的适配器（监管上报、厂商网关、传输、传感器源）必须有测试点名它。
+        # 2026-10-12 首跑实测：13 个 SPI 接口 / 35 个生产实现 / **9 个在全部测试源码里
+        # 一次都没出现**（含 UomReportSink、MavlinkDeviceGateway、5 个 ModuleAdapter 实现）。
+        # 这类代码编译通过、启动正常，但没有一条断言钉过——缺陷只会在真机/真平台暴露。
+        # 例外走豁免账：必须写理由 + 到期日，到期即红，不许悄悄续期（见脚本 docstring）。
+        run: python3 scripts/check-spi-coverage.py
 
   java-upward-compat:
     name: Java 26 Upward Compatibility (compile only)
