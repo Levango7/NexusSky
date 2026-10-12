@@ -290,6 +290,8 @@ public final class VirtualDrone implements AutoCloseable {
     private boolean batteryWarned = false;
 
     public VirtualDrone(SimConfig config) throws IOException {
+        this.uploadSessionTimeoutMs = Long.getLong(
+                "aerofleet.sim.upload-session-timeout-ms", DEFAULT_UPLOAD_SESSION_TIMEOUT_MS);
         this.config = config;
         this.transport = new UdpMavlinkTransport(config.bindIp, config.port);
         this.missions = new MissionStore(config.sysid);
@@ -717,6 +719,28 @@ public final class VirtualDrone implements AutoCloseable {
     // Mission Protocol (server role)
     // ------------------------------------------------------------------
 
+    /**
+     * 上传会话超时（ms）：GCS 宣告 MISSION_COUNT 后长时间收不到下一项，就认为这次上传
+     * 已经死了（对端掉线/被取消），主动中止会话。
+     *
+     * 为什么必须有：旧逻辑里 reRequestIfStalled() 每 3s 无限重发 MISSION_REQUEST，
+     * GCS 中途消失则会话永久挂着——飞机每 3 秒空喊一次要下一项，且 uploadSessionActive
+     * 一直为真，**同一条链路上的下载请求也全被吞掉**，直到新的 MISSION_COUNT 到达。
+     *
+     * <p>默认 60s，可用系统属性 {@code -Daerofleet.sim.upload-session-timeout-ms=<n>}
+     * 覆盖（测试据此把 60s 缩到几百毫秒，避免把回归拖成一分钟）。
+     */
+    private static final long DEFAULT_UPLOAD_SESSION_TIMEOUT_MS = 60_000L;
+
+    /**
+     * 本实例的上传会话超时（构造时读一次，见 {@link #DEFAULT_UPLOAD_SESSION_TIMEOUT_MS}）。
+     * <p>
+     * 刻意不用 static final：那个在类加载时定值，别的测试类先加载 {@code VirtualDrone}
+     * 就把默认 60s 钉死了，之后设系统属性也不生效——顺序敏感的测试污染。实例字段
+     * 让"构造前设属性"始终可靠。
+     */
+    private final long uploadSessionTimeoutMs;
+
     /** GCS requested stored item #seq during a download: serve it. */
     private void handleMissionItemRequest(
             io.aerofleet.mavlink.messages.MissionRequestInt mr, int gcsSysid)
@@ -746,6 +770,15 @@ public final class VirtualDrone implements AutoCloseable {
      */
     private void handleMissionRequestList(io.aerofleet.mavlink.messages.MissionRequestList rl,
                                           int gcsSysid) throws IOException {
+        // GCS 主动要求读任务 = 明确的下行意图。若此时还挂着一个上传会话（大概率是
+        // 上一次没走完的死会话），先中止它，否则这个下载请求会被"正在上传"的判断
+        // 无条件吞掉，操作员在界面上看到的是"点了没反应"。
+        if (missions.isUploading()) {
+            SimLog.warn("download request while uploading: aborting stale upload session");
+            missions.abortUpload();
+            uploadingGcsSysid = 0;
+            lastUploadProgressMs = 0;
+        }
         if (state == FlightState.CRASHED) {
             send(new MissionAckMsg(gcsSysid, COMPONENT_ID,
                     MavEnums.MAV_MISSION_DENIED, rl.missionType, 0));
@@ -767,6 +800,7 @@ public final class VirtualDrone implements AutoCloseable {
             return;
         }
         uploadingGcsSysid = gcsSysid;
+        uploadStartedAtMs = System.currentTimeMillis();
         int first = missions.beginUpload(mc.count);
         SimLog.info("MISSION_COUNT received: " + mc.count + " items from gcs=" + gcsSysid + ", requesting seq 0");
         if (first < 0) {
@@ -788,12 +822,30 @@ public final class VirtualDrone implements AutoCloseable {
         }
         long now = System.currentTimeMillis();
         if (now - lastUploadProgressMs > 3_000) {
+            // 整个会话静默太久：对端大概已经不在了。中止会话并回一个失败 ACK，
+            // 否则 reRequest 永远空转、下载请求也一直被这个死会话吞掉。
+            if (now - uploadStartedAtMs > uploadSessionTimeoutMs) {
+                SimLog.warn("upload session timed out, aborting (waiting seq=" + missions.nextExpectedSeq() + ")");
+                int gcs = uploadingGcsSysid;
+                missions.abortUpload();
+                uploadingGcsSysid = 0;
+                lastUploadProgressMs = 0;
+                if (gcs != 0) {
+                    // OPERATION_CANCELLED：会话是我们主动中止的，不是飞机能力不足
+                    send(new MissionAckMsg(gcs, COMPONENT_ID,
+                            MavEnums.MAV_MISSION_OPERATION_CANCELLED, 0, 0));
+                }
+                return;
+            }
             int want = missions.nextExpectedSeq();
             SimLog.info("upload stalled, re-requesting seq " + want);
             sendMissionRequest(want, 0);
             lastUploadProgressMs = now;
         }
     }
+
+    /** 当前上传会话的开始时间（用于 {@link #UPLOAD_SESSION_TIMEOUT_MS} 判定）。 */
+    private long uploadStartedAtMs = 0;
 
     private long lastUploadProgressMs = 0;
 

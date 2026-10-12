@@ -4,6 +4,20 @@
 
 ---
 
+## [Unreleased] — 任务上传会话超时中止 + 死会话不再吞下载请求（2026-10-12）
+
+> 外部评估报告 P1 剩余项（drone-sim）："任务上传会话无超时/无重试上限，GCS 中途消失则永久
+> 卡死；下载请求被无条件吞掉直到新 MISSION_COUNT 到达"。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| ① | **上传会话超时中止** | 旧逻辑 `reRequestIfStalled()` 每 3s 无限重发 MISSION_REQUEST：GCS 掉线/取消后会话永久挂着，飞机一直空喊要下一项。现会话静默超过 **60s** 主动中止，并回 `MAV_MISSION_OPERATION_CANCELLED` 给请求方（不是能力不足，是主动取消） |
+| ② | **下载请求不再被死会话吞掉** | 会话挂着时 `isUploading()` 恒真，同链路的 MISSION_REQUEST_LIST 全被忽略——操作员在 GCS 上"点了没反应"。现 GCS 主动要求下载时先中止旧会话再回 MISSION_COUNT |
+| — | **超时值可配** | `-Daerofleet.sim.upload-session-timeout-ms=<n>` 覆盖默认 60s。**刻意用实例字段而非 static final**：static final 在类加载时定值，别的测试类先加载 VirtualDrone 就钉死默认值，之后再设属性也不生效（顺序敏感的测试污染——第一版就是这么挂的） |
+
+**测试**：`MissionUploadSessionTest` +2（超时后回 CANCELLED 且不再重发 / 下载中止死会话）。
+**变异验证**：把超时分支改 `if (false)` 立刻转红，且跑满 60s 空转——正是旧症状。
+drone-sim 1412/0；全 reactor BUILD SUCCESS。
 ## [Unreleased] — 拆掉 link-sim 帧尾私有字节方案的多跳扩展：它在真实帧上不可能工作（2026-10-12）
 
 ### 结论先行
