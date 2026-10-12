@@ -1,6 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { api } from '../api.js'
 
+/** 主轨迹保留的最大点数（约 5Hz × 300s = 1500，超出按最近优先截断）。 */
+const MAX_TRACK_POINTS = 1500
+
 /**
  * 无人机数据管理 hook
  * 管理 drones、selectedSysid、telemetry、track、apiOk 状态
@@ -47,6 +50,25 @@ export default function useDrones() {
     }
   }, [])
 
+  /**
+   * 追加一个实时航迹点（由 useWebSocket 的帧合并刷新调用）。
+   * <p>
+   * 为什么需要它：主地图的 track 此前只在"切换选中机"时从后端 GET 一次，飞行中
+   * 再没有数据源——实时飞行的折线是**静止的**，与产品预期"实时轨迹增长"不符。
+   * WS 面本来就在收这些帧（multiTracks 一直在长），只是没写回 track。
+   *
+   * <p>去重：同一时间戳的点直接忽略（flush 重入 / 后端重发保护）。
+   */
+  const appendTrackPoint = useCallback((point) => {
+    if (!point || point.lat == null || point.lon == null) return
+    setTrack((prev) => {
+      if (prev.length > 0 && prev[prev.length - 1].ts === point.ts) return prev
+      const next = [...prev, point]
+      // 与后端 track 的窗口一致：只保留最近 MAX_TRACK_POINTS 个点
+      return next.length > MAX_TRACK_POINTS ? next.slice(next.length - MAX_TRACK_POINTS) : next
+    })
+  }, [])
+
   // refreshDrones 轮询：正常 2s，API 离线时指数退避（2→4→8→16→30s）
   const BACKOFF_STEPS = [2000, 4000, 8000, 16000, 30000]
   useEffect(() => {
@@ -84,5 +106,6 @@ export default function useDrones() {
     selectedSysidRef,
     refreshDrones,
     loadTelemetry,
+    appendTrackPoint,
   }
 }

@@ -2,6 +2,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import useWebSocket from '../src/hooks/useWebSocket.js'
 
+/**
+ * 2026-10-12：遥测帧从"逐帧 setState"改为"<=100ms 合并 flush"（多机 45 帧/秒时
+ * 逐帧 setState 会让 React 每帧重渲染整棵树）。语义不变（分桶/上限/选中机口径
+ * 都没动），只是落 state 的时机变了——所以这些用例现在需要先把帧灌完、再推进
+ * 定时器让 flush 发生，然后断言。
+ */
+const FLUSH_MS = 100
+
+/** 灌帧 + 等一次合并刷新。 */
+function emitAndFlush(ws, payloads) {
+  act(() => {
+    for (const p of payloads) ws.emit(p)
+  })
+  act(() => {
+    vi.advanceTimersByTime(FLUSH_MS)
+  })
+}
+
 // useWebSocket 只用到 api.js 的 getWsUrl，直接把整个模块替换掉，
 // 避免测试去碰 sessionStorage / fetch。
 vi.mock('../src/api.js', () => ({
@@ -47,8 +65,10 @@ describe('useWebSocket — telemetryHistory 按 sysid 分桶', () => {
   beforeEach(() => {
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket)
+    vi.useFakeTimers()
   })
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
@@ -61,11 +81,11 @@ describe('useWebSocket — telemetryHistory 按 sysid 分桶', () => {
     const { result } = mountHook(1)
     const ws = latestSocket()
 
-    act(() => {
-      ws.emit(telemetryMsg(1, { battery: 90, relativeAlt: 10 }))
-      ws.emit(telemetryMsg(2, { battery: 30, relativeAlt: 50 }))
-      ws.emit(telemetryMsg(1, { battery: 88, relativeAlt: 11 }))
-    })
+    emitAndFlush(ws, [
+      telemetryMsg(1, { battery: 90, relativeAlt: 10 }),
+      telemetryMsg(2, { battery: 30, relativeAlt: 50 }),
+      telemetryMsg(1, { battery: 88, relativeAlt: 11 }),
+    ])
 
     const h = result.current.telemetryHistory
     expect(h).not.toBeInstanceOf(Array) // 形状已从数组变为按机分桶的对象
@@ -82,10 +102,10 @@ describe('useWebSocket — telemetryHistory 按 sysid 分桶', () => {
     const { result } = mountHook(1)
     const ws = latestSocket()
 
-    act(() => {
-      for (let i = 0; i < 5; i++) ws.emit(telemetryMsg(1, { battery: 90 }))
-      ws.emit(telemetryMsg(2, { battery: 30 }))
-    })
+    emitAndFlush(ws, [
+      ...Array.from({ length: 5 }, () => telemetryMsg(1, { battery: 90 })),
+      telemetryMsg(2, { battery: 30 }),
+    ])
 
     expect(result.current.telemetryHistory[1]).toHaveLength(5)
     expect(result.current.telemetryHistory[2]).toHaveLength(1)
@@ -95,9 +115,7 @@ describe('useWebSocket — telemetryHistory 按 sysid 分桶', () => {
     const { result } = mountHook(1)
     const ws = latestSocket()
 
-    act(() => {
-      for (let i = 0; i < 320; i++) ws.emit(telemetryMsg(1, { battery: i }))
-    })
+    emitAndFlush(ws, Array.from({ length: 320 }, (_, i) => telemetryMsg(1, { battery: i })))
 
     const bucket = result.current.telemetryHistory[1]
     expect(bucket).toHaveLength(300)
@@ -110,10 +128,10 @@ describe('useWebSocket — telemetryHistory 按 sysid 分桶', () => {
     const { result } = mountHook(1)
     const ws = latestSocket()
 
-    act(() => {
-      for (let i = 0; i < 310; i++) ws.emit(telemetryMsg(1, { battery: i }))
-      for (let i = 0; i < 305; i++) ws.emit(telemetryMsg(2, { battery: i }))
-    })
+    emitAndFlush(ws, [
+      ...Array.from({ length: 310 }, (_, i) => telemetryMsg(1, { battery: i })),
+      ...Array.from({ length: 305 }, (_, i) => telemetryMsg(2, { battery: i })),
+    ])
 
     const h = result.current.telemetryHistory
     expect(h[1]).toHaveLength(300)
@@ -128,10 +146,10 @@ describe('useWebSocket — telemetryHistory 按 sysid 分桶', () => {
     renderHook(() => useWebSocket(ref, setTelemetry))
     const ws = latestSocket()
 
-    act(() => {
-      ws.emit(telemetryMsg(2, { battery: 30 }))
-      ws.emit(telemetryMsg(1, { battery: 90 }))
-    })
+    emitAndFlush(ws, [
+      telemetryMsg(2, { battery: 30 }),
+      telemetryMsg(1, { battery: 90 }),
+    ])
 
     // 只有 drone 1 的那条触发了 setTelemetry
     expect(setTelemetry).toHaveBeenCalledTimes(1)
@@ -139,6 +157,51 @@ describe('useWebSocket — telemetryHistory 按 sysid 分桶', () => {
     const merged = setTelemetry.mock.calls[0][0](null)
     expect(merged.sysid).toBe(1)
     expect(merged.battery).toBe(90)
+  })
+
+  it('批量合并：一个 flush 窗口内的多帧全部进历史（不因合批丢点）', () => {
+    const { result } = mountHook(1)
+    const ws = latestSocket()
+
+    // 一口气灌 50 帧再统一 flush：合批是为了减少渲染次数，不是减少数据点
+    emitAndFlush(ws, Array.from({ length: 50 }, (_, i) => telemetryMsg(1, { battery: i })))
+
+    expect(result.current.telemetryHistory[1]).toHaveLength(50)
+  })
+
+  it('批量合并：选中机一个窗口只 setTelemetry 一次（新增行为）', () => {
+    const ref = { current: 1 }
+    const setTelemetry = vi.fn()
+    renderHook(() => useWebSocket(ref, setTelemetry))
+    const ws = latestSocket()
+
+    emitAndFlush(ws, [
+      telemetryMsg(1, { battery: 90 }),
+      telemetryMsg(1, { battery: 88 }),
+      telemetryMsg(1, { battery: 87 }),
+    ])
+
+    // 逐帧 setState 时代这里是 3 次；合批后一次，且合并的是最后一帧
+    expect(setTelemetry).toHaveBeenCalledTimes(1)
+    const merged = setTelemetry.mock.calls[0][0](null)
+    expect(merged.battery).toBe(87)
+  })
+
+  it('缓存按年龄裁剪：超过 1s 的旧帧不会无限堆积', () => {
+    const { result } = mountHook(1)
+    const ws = latestSocket()
+
+    act(() => {
+      for (let i = 0; i < 20; i++) ws.emit(telemetryMsg(1, { battery: i }))
+    })
+    // 2 秒后同一窗口的 flush：旧帧已 Aging 掉，只剩窗口内后到的
+    act(() => {
+      vi.advanceTimersByTime(FLUSH_MS + 2_000)
+    })
+
+    const bucket = result.current.telemetryHistory[1]
+    expect(bucket.length).toBeGreaterThan(0)
+    expect(bucket.length).toBeLessThanOrEqual(20)
   })
 
   it('malformed JSON 不炸、不写历史', () => {

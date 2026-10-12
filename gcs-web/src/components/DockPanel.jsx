@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { getAuthToken } from '../api.js'
+import { docks as docksApi } from '../api.js'
 import { fmtPct } from '../utils/format'
 
 const POLL_MS = 5000
 
 /** 状态 → 色标（与后端 DockState 枚举一一对应）。 */
-const STATE_COLORS = {
+export const STATE_COLORS = {
   OFFLINE: '#6b7280',
   IDLE: '#22c55e',
   OPENING: '#eab308',
@@ -17,7 +17,7 @@ const STATE_COLORS = {
   MAINTENANCE: '#94a3b8',
 }
 
-const STATE_LABELS = {
+export const STATE_LABELS = {
   OFFLINE: '离线',
   IDLE: '空闲',
   OPENING: '开门中',
@@ -30,7 +30,7 @@ const STATE_LABELS = {
 }
 
 /** 动作按钮：仅在后端状态机允许的状态下可点（前端置灰只是提示，裁决在后端）。 */
-const ACTIONS = [
+export const ACTIONS = [
   { method: 'door_open', label: '开门', allow: ['IDLE', 'CHARGING'] },
   { method: 'door_close', label: '关门', allow: ['OPEN'] },
   { method: 'battery_swap', label: '换电', allow: ['IDLE', 'CHARGING'] },
@@ -57,33 +57,28 @@ export default function DockPanel() {
   const [schedForm, setSchedForm] = useState({ name: '', cron: '0 0 6 * * *', waypoints: '[[22.5916,113.9345,60]]' })
   const selectedRef = useRef(selectedId)
 
-  const authHeaders = useCallback(() => {
-    const token = getAuthToken()
-    return token ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
-  }, [])
-
   const loadAll = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/docks', { headers: authHeaders() })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const list = await res.json()
+      // 统一走 api 层：超时控制、401 翻登录态、同源校验都由 jsonFetch 负责。
+      // 机巢列表是主数据，失败必须冒泡给用户；详情/计划/度量是次要数据，失败容错。
+      const list = await docksApi.list()
       setDocks(list)
       setError(null)
       const id = selectedRef.current
       if (id != null) {
-        const [dRes, sRes, mRes] = await Promise.all([
-          fetch(`/api/v1/docks/${id}`, { headers: authHeaders() }),
-          fetch(`/api/v1/docks/${id}/schedules`, { headers: authHeaders() }),
-          fetch(`/api/v1/docks/${id}/metrics?days=7`, { headers: authHeaders() }),
+        const [detail, schedules, metrics] = await Promise.all([
+          docksApi.detail(id).catch(() => null),
+          docksApi.schedules(id).catch(() => null),
+          docksApi.metrics(id, 7).catch(() => null),
         ])
-        if (dRes.ok) setDetail(await dRes.json())
-        if (sRes.ok) setSchedules(await sRes.json())
-        if (mRes.ok) setMetrics(await mRes.json())
+        if (detail) setDetail(detail)
+        if (schedules) setSchedules(schedules)
+        if (metrics) setMetrics(metrics)
       }
     } catch (e) {
       setError(e.message || '获取机巢列表失败')
     }
-  }, [authHeaders])
+  }, [])
 
   useEffect(() => {
     selectedRef.current = selectedId
@@ -96,14 +91,9 @@ export default function DockPanel() {
     if (selectedId == null) return
     setBusy(true)
     try {
-      const res = await fetch(`/api/v1/docks/${selectedId}/commands`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ method }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) {
-          setError(`命令被拒绝（${res.status}）：${body.result || body.message || '未知原因'}`)
+      const body = await docksApi.command(selectedId, { method })
+      if (body && body.success === false) {
+          setError(`命令被拒：${body.result || body.message || '未知原因'}`)
       } else {
         setError(null)
       }
@@ -117,21 +107,12 @@ export default function DockPanel() {
 
   const registerDock = async () => {
     try {
-      const res = await fetch('/api/v1/docks', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          name: form.name,
-          sn: form.sn,
-          model: form.model,
-          droneSysid: form.droneSysid ? Number(form.droneSysid) : null,
-        }),
+      const body = await docksApi.register({
+        name: form.name,
+        sn: form.sn,
+        model: form.model,
+        droneSysid: form.droneSysid ? Number(form.droneSysid) : null,
       })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(`注册失败（${res.status}）：${body.result || '未知原因'}`)
-        return
-      }
       setShowRegister(false)
       setForm({ name: '', sn: '', model: '', droneSysid: '' })
       setSelectedId(body.id)
@@ -151,16 +132,7 @@ export default function DockPanel() {
         setError('航点 JSON 解析失败')
         return
       }
-      const res = await fetch(`/api/v1/docks/${selectedId}/schedules`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ name: schedForm.name, cron: schedForm.cron, waypoints }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(`创建定时任务失败（${res.status}）：${body.result || '未知原因'}`)
-        return
-      }
+      await docksApi.createSchedule(selectedId, { name: schedForm.name, cron: schedForm.cron, waypoints })
       setSchedForm({ ...schedForm, name: '' })
       setError(null)
       await loadAll()
@@ -171,11 +143,7 @@ export default function DockPanel() {
 
   const toggleSchedule = async (sid, enabled) => {
     try {
-      await fetch(`/api/v1/docks/${selectedId}/schedules/${sid}/enable`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ enabled }),
-      })
+      await docksApi.setScheduleEnabled(selectedId, sid, enabled)
       await loadAll()
     } catch (e) {
       setError(e.message || '切换定时任务失败')

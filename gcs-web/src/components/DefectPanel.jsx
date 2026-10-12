@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { getAuthToken } from '../api.js'
+import { defects as defectsApi } from '../api.js'
 
 const POLL_MS = 5000
 
-const SEVERITY_COLORS = { P0: '#ef4444', P1: '#f97316', P2: '#eab308', P3: '#6b7280' }
-const DEFECT_STATUS_LABELS = { OPEN: '待确认', CONFIRMED: '已确认', DISMISSED: '已驳回' }
-const WO_STATUS_LABELS = {
+export const SEVERITY_COLORS = { P0: '#ef4444', P1: '#f97316', P2: '#eab308', P3: '#6b7280' }
+export const DEFECT_STATUS_LABELS = { OPEN: '待确认', CONFIRMED: '已确认', DISMISSED: '已驳回' }
+export const WO_STATUS_LABELS = {
   OPEN: '待派单', DISPATCHED: '已派单', IN_PROGRESS: '处置中',
   RESOLVED: '待复检', VERIFIED: '已闭环', REOPENED: '复检退回', CANCELLED: '已取消',
 }
 // 与后端 WorkOrderStateMachine.ALLOWED 一致（前端置灰只是提示，裁决在后端）
-const WO_ACTIONS = [
+export const WO_ACTIONS = [
   { action: 'dispatch', label: '派单', allow: ['OPEN', 'REOPENED'] },
   { action: 'start', label: '开工', allow: ['DISPATCHED', 'REOPENED'] },
   { action: 'resolve', label: '完成处置', allow: ['IN_PROGRESS'] },
@@ -35,26 +35,20 @@ export default function DefectPanel() {
   const selRef = useRef(selected)
   const sysidRef = useRef(verifySysid)
 
-  const authHeaders = useCallback(() => {
-    const token = getAuthToken()
-    return token
-      ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-      : { 'Content-Type': 'application/json' }
-  }, [])
-
   const load = useCallback(async () => {
     try {
+      // 主列表（缺陷）失败必须让用户看到错误；工单列表是次要数据，失败不影响主列表展示
       const [d, w] = await Promise.all([
-        fetch('/api/v1/defects', { headers: authHeaders() }),
-        fetch('/api/v1/defects/work-orders', { headers: authHeaders() }),
+        defectsApi.list(),
+        defectsApi.workOrders().catch(() => null),
       ])
-      if (d.ok) setDefects(await d.json())
-      if (w.ok) setWorkOrders(await w.json())
+      setDefects(d)
+      if (w) setWorkOrders(w)
       setError(null)
     } catch (e) {
       setError(e.message || '加载失败')
     }
-  }, [authHeaders])
+  }, [])
 
   useEffect(() => {
     selRef.current = selected
@@ -77,19 +71,10 @@ export default function DefectPanel() {
     if (ids.length === 0) return
     setBusy(true)
     try {
-      const res = await fetch('/api/v1/defects/work-orders', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ defectIds: ids, title: woTitle || null }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(`创建工单失败（${res.status}）：${body.result || ''}`)
-      } else {
-        setSelected(new Set())
-        setWoTitle('')
-        setError(null)
-      }
+      await defectsApi.createWorkOrder({ defectIds: ids, title: woTitle || null })
+      setSelected(new Set())
+      setWoTitle('')
+      setError(null)
       await load()
     } finally {
       setBusy(false)
@@ -99,14 +84,8 @@ export default function DefectPanel() {
   const woTransition = async (id, action) => {
     setBusy(true)
     try {
-      const res = await fetch(`/api/v1/defects/work-orders/${id}/transition`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ action }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) setError(`流转被拒（${res.status}）：${body.result || ''}`)
-      else setError(null)
+      await defectsApi.transitionWorkOrder(id, action)
+      setError(null)
       await load()
     } finally {
       setBusy(false)
@@ -116,19 +95,10 @@ export default function DefectPanel() {
   const woVerify = async (id) => {
     setBusy(true)
     try {
-      const res = await fetch(`/api/v1/defects/work-orders/${id}/verify`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ sysid: Number(sysidRef.current) }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(`复检失败（${res.status}）：${body.result || ''}`)
-      } else {
-        setError(body.result === 'VERIFIED'
-          ? null
-          : `复检退回：命中缺陷 ${JSON.stringify(body.hitDefects)}`)
-      }
+      const body = await defectsApi.verifyWorkOrder(id, Number(sysidRef.current))
+      setError(body && body.result === 'VERIFIED'
+        ? null
+        : `复检退回：命中缺陷 ${JSON.stringify(body && body.hitDefects)}`)
       await load()
     } finally {
       setBusy(false)
@@ -138,17 +108,8 @@ export default function DefectPanel() {
   const setDefectStatus = async (id, status) => {
     setBusy(true)
     try {
-      const res = await fetch(`/api/v1/defects/${id}/status`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ status }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        setError(`状态裁决被拒（${res.status}）：${body.result || ''}`)
-      } else {
-        setError(null)
-      }
+      await defectsApi.setStatus(id, status)
+      setError(null)
       await load()
     } finally {
       setBusy(false)

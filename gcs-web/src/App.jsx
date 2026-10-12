@@ -121,6 +121,7 @@ export default function App() {
     apiOk,
     selectedSysidRef,
     loadTelemetry,
+    appendTrackPoint,
   } = useDrones()
 
   // WebSocket 实时推送数据（依赖 selectedSysidRef 和 setTelemetry）
@@ -147,7 +148,7 @@ export default function App() {
     alarmTriggers,
     alarmAcks,
     surveillanceStatuses,
-  } = useWebSocket(selectedSysidRef, setTelemetry)
+  } = useWebSocket(selectedSysidRef, setTelemetry, appendTrackPoint)
 
   // UI 状态（视图、时钟、移动端侧栏、丐版模式）
   const { view: storedView, setView, now, mobileRail, setMobileRail, budgetMode, setBudgetMode } = useUI()

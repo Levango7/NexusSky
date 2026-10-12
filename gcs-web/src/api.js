@@ -998,6 +998,84 @@ export const api = {
   deleteUser: (id) => jsonFetch(`${BASE}/users/${id}`, { method: 'DELETE' }),
 }
 
+// ---- Dock (机巢管控 F2) ----
+// DockPanel 此前用裸 fetch 自己拼 Authorization 头——绕过统一 API 层意味着：
+// 无超时控制、无 401 统一处理（token 过期时面板只显示 HTTP 401 而不翻登录态）、
+// 也没有 apiUrlGuard 的同源校验。现统一走 jsonFetch。
+export const docks = {
+  list: () => jsonFetch(`${BASE}/docks`),
+
+  detail: (id) => jsonFetch(`${BASE}/docks/${id}`),
+
+  metrics: (id, days = 7) => jsonFetch(`${BASE}/docks/${id}/metrics?days=${days}`),
+
+  schedules: (id) => jsonFetch(`${BASE}/docks/${id}/schedules`),
+
+  register: (body) =>
+    jsonFetch(`${BASE}/docks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  command: (id, body) =>
+    jsonFetch(`${BASE}/docks/${id}/commands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  createSchedule: (id, body) =>
+    jsonFetch(`${BASE}/docks/${id}/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  setScheduleEnabled: (id, sid, enabled) =>
+    jsonFetch(`${BASE}/docks/${id}/schedules/${sid}/enable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }),
+}
+
+// ---- Defects & Work Orders (缺陷闭环 F4) ----
+// 与 docks 同因收编：DefectPanel 此前也自己拼 Authorization 头（无超时/无 401 处理）。
+export const defects = {
+  list: () => jsonFetch(`${BASE}/defects`),
+
+  workOrders: () => jsonFetch(`${BASE}/defects/work-orders`),
+
+  createWorkOrder: (body) =>
+    jsonFetch(`${BASE}/defects/work-orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  transitionWorkOrder: (id, action) =>
+    jsonFetch(`${BASE}/defects/work-orders/${id}/transition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    }),
+
+  verifyWorkOrder: (id, sysid) =>
+    jsonFetch(`${BASE}/defects/work-orders/${id}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sysid }),
+    }),
+
+  setStatus: (id, status) =>
+    jsonFetch(`${BASE}/defects/${id}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }),
+}
+
 // ---- Emergency Orchestration (应急任务编排 M9) ----
 // 注意：应急编排 API 挂载在 /api/v1/emergency 下（独立于 v1 BASE，但带 v1 前缀）
 const EMERGENCY_BASE = '/api/v1/emergency'
