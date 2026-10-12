@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -75,11 +76,16 @@ public class DeviceRegistry { // MUTANT
                 if (entity.getLastProtocol() != null) {
                     snapshot.protocol = entity.getLastProtocol();
                 }
+                // V28：回填签名验证时间，否则重启后"就绪判定"会把在飞的设备误判成没配密钥
+                if (entity.getSigningVerifiedAt() != null) {
+                    signingVerifiedAt.put(entity.getSysid(), entity.getSigningVerifiedAt());
+                }
                 drones.put(entity.getSysid(), snapshot);
                 count++;
             }
             log.info("Restored {} devices from repository (all offline, awaiting heartbeat), "
-                    + "{} with last-known flight state", count, withFlightState);
+                    + "{} with last-known flight state, {} with signing evidence",
+                    count, withFlightState, signingVerifiedAt.size());
         } catch (Exception e) {
             log.warn("设备恢复失败，降级为空缓存: {}", e.getMessage());
         }
@@ -159,6 +165,78 @@ public class DeviceRegistry { // MUTANT
     /** 注册表是否会写数据库（{@code persist=true} 且数据源可用）。 */
     public boolean isPersisting() {
         return persist && repository != null;
+    }
+
+    // ===== C5 第三步：设备签名态（V28 两列的读写面）=====
+
+    /**
+     * 内存里的"最近一次看到该设备签名帧通过验签"表；DB 列 {@code devices.signing_verified_at} 是权威值，
+     * 这里只是为收帧路径免查库 + 为就绪判定提供 O(1) 读。重启后由 {@link #restoreFromRepository()} 回填。
+     */
+    private final Map<Integer, Instant> signingVerifiedAt = new ConcurrentHashMap<>();
+
+    /** 每台设备上次**落库**时间，用于节流：验签通过是每帧事件，绝不每帧写库。 */
+    private final Map<Integer, Instant> signingVerifyDbWriteAt = new ConcurrentHashMap<>();
+
+    /** 落库节流窗口（秒）。默认 60s：就绪判定看的是"这台机近期有没有签名帧"，分钟级精度足够。 */
+    @Value("${aerofleet.device-registry.signing-verify-write-interval-seconds:60}")
+    private int signingVerifyWriteIntervalSeconds;
+
+    /**
+     * 记下一台设备的"签名帧验签通过"。由 {@code UdpGateway} 的验签成功分支调用。
+     *
+     * <p><b>为什么必须节流</b>：这条路径在每帧上（遥测 5Hz × N 机），直接 {@code repository.save}
+     * 会把 ingestion 压垮——而 ingestion 停摆的表现是"所有设备一起掉线"，比签名本身还严重。
+     *
+     * <p><b>失败不抛</b>：这里只是可观测性副产物，写库失败不能让遥测断掉；但必须打日志，
+     * 否则"就绪判定"会拿着空表把"没证据"误判成"没配密钥"。
+     */
+    public void markSigningVerified(int sysid) {
+        Instant now = Instant.now();
+        signingVerifiedAt.put(sysid, now);
+        Instant lastWrite = signingVerifyDbWriteAt.get(sysid);
+        if (lastWrite != null
+                && now.minusSeconds(Math.max(1, signingVerifyWriteIntervalSeconds)).isBefore(lastWrite)) {
+            return; // 节流窗口内，只更新内存
+        }
+        signingVerifyDbWriteAt.put(sysid, now);
+        if (!isPersisting()) {
+            return;
+        }
+        try {
+            DeviceEntity entity = repository.findById(sysid).orElseGet(() -> new DeviceEntity(sysid));
+            entity.setSigningVerifiedAt(now);
+            repository.save(entity);
+        } catch (Exception e) {
+            log.warn("签名验证时间落库失败 sysid={}: {}", sysid, e.getMessage());
+        }
+    }
+
+    /** 该设备最近一次签名通过验签的时刻；null = 地面从未见过它的签名帧。 */
+    public Instant signingVerifiedAt(int sysid) {
+        return signingVerifiedAt.get(sysid);
+    }
+
+    /** 当前已知设备里有签名证据的集合（供收紧前的就绪判定与只读端点使用）。 */
+    public Map<Integer, Instant> signingVerifiedSnapshot() {
+        return Map.copyOf(signingVerifiedAt);
+    }
+
+    /**
+     * 记下地面为该设备生成/轮换过的密钥指纹（"已生成，等现场写入"那一半状态）。
+     * 与 {@link #markSigningVerified(int)} 分开：只有真看到签名帧才算过线。
+     */
+    public void recordSigningKeyFingerprint(int sysid, String fingerprint) {
+        if (!isPersisting()) {
+            return;
+        }
+        try {
+            DeviceEntity entity = repository.findById(sysid).orElseGet(() -> new DeviceEntity(sysid));
+            entity.setSigningKeyFingerprint(fingerprint);
+            repository.save(entity);
+        } catch (Exception e) {
+            log.warn("签名密钥指纹落库失败 sysid={}: {}", sysid, e.getMessage());
+        }
     }
 
     /**

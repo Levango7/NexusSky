@@ -67,6 +67,27 @@ public class DeviceEntity {
     @Column(name = "last_protocol")
     private String lastProtocol;
 
+    /**
+     * 最近一次收到该设备**通过验签的签名帧**的时刻；NULL = 从未见过它的签名帧。
+     *
+     * <p>这是 C5 收紧姿态唯一的地面证据：{@code reject-unsigned=true} 之后，没配密钥的设备不会报错、
+     * 不会掉线通知，只是遥测静默消失。所以"能不能翻 strict"只能问"在线设备是不是都有这个时间戳"。
+     *
+     * <p>由 {@link DeviceRegistry#markSigningVerified(int)} 按节流写入（每帧写库会把 ingestion 压垮）。
+     */
+    @Column(name = "signing_verified_at")
+    private Instant signingVerifiedAt;
+
+    /**
+     * 地面为该设备生成/轮换过的签名密钥**指纹**（非明文）；NULL = 地面没给过它密钥。
+     *
+     * <p>与 {@link #signingVerifiedAt} 配对使用，用来把两种常被混为一谈的状态分开：
+     * "已生成、等现场写进飞控"（只有指纹）与"真的在签名"（有 verified 时间）。
+     * 只有后者才算过线。
+     */
+    @Column(name = "signing_key_fingerprint")
+    private String signingKeyFingerprint;
+
     public DeviceEntity() {
     }
 
@@ -154,5 +175,21 @@ public class DeviceEntity {
 
     public void setLastProtocol(String lastProtocol) {
         this.lastProtocol = lastProtocol;
+    }
+
+    public Instant getSigningVerifiedAt() {
+        return signingVerifiedAt;
+    }
+
+    public void setSigningVerifiedAt(Instant signingVerifiedAt) {
+        this.signingVerifiedAt = signingVerifiedAt;
+    }
+
+    public String getSigningKeyFingerprint() {
+        return signingKeyFingerprint;
+    }
+
+    public void setSigningKeyFingerprint(String signingKeyFingerprint) {
+        this.signingKeyFingerprint = signingKeyFingerprint;
     }
 }

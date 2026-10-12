@@ -32,8 +32,14 @@ public class MavlinkSignatureConfig implements InitializingBean {
     private String keyStorePath;
 
     // fail-closed: 默认拒绝未签名消息（来源: 2026-09-19-security-switch-default-fail-closed-annotation-value）
+    //
+    // volatile 是必需的，不是风格问题：收紧姿态现在可以在运行时由 HTTP 线程经
+    // SigningPostureService 翻动（见 docs/signing-prod-rollout.md 的"门禁式翻牌 + 自动退回"），
+    // 而读它的是 UDP 收帧线程。非 volatile 的 boolean 在 JMM 下不保证跨线程可见，
+    // 后果是"翻牌已返回成功、收帧线程还在按旧姿态放行/拒绝"——这类不一致最难查。
+    // 只给这一个字段加：enabled 由 @ConditionalOnProperty 在装配期定死，从不运行时改。
     @Value("${mavlink.signing.reject-unsigned:true}")
-    private boolean rejectUnsigned;
+    private volatile boolean rejectUnsigned;
 
     public boolean isEnabled() {
         return enabled;
