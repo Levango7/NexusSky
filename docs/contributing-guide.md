@@ -115,19 +115,20 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e-failsafe.ps1
 
 Linux 版本：`scripts/e2e-smoke.sh`、`scripts/e2e-fault-linux.sh` 等。
 
-### 2.5 e2e 脚本台账（2026-10-14 本机实测）
+### 2.5 e2e 脚本台账（2026-10-14 本机实测 + 首批已接 CI）
 
-**CI 已覆盖（10 个）**：`e2e-smoke.sh`、`e2e-fault-linux.sh`、`e2e-failsafe-linux.sh`、
+**CI 已覆盖（13 个）**：`e2e-smoke.sh`、`e2e-fault-linux.sh`、`e2e-failsafe-linux.sh`、
 `e2e-vision-linux.sh`、`e2e-spray.sh`、`e2e-emergency.sh`、`e2e-hardware.sh`、
-`e2e-sdk-integration.sh`、`e2e-signing.ps1`、`e2e-docker-compose.sh`。
+`e2e-sdk-integration.sh`、`e2e-signing.ps1`、`e2e-docker-compose.sh`，
+外加 2026-10-14 新增的 `e2e-core-scripts` job（ubuntu + pwsh，观察模式）：
+`e2e-formation.ps1`、`e2e-mesh.ps1 -Mode simplified`、`e2e-rid.ps1`——三个脚本
+在 Linux runner 上首次跑即全绿（formation 24 项 / mesh 12 项 / rid 14 项），
+`continue-on-error` 待连续若干次全绿后摘掉转硬门禁。
 
-**本机实测全绿但未进 CI（15 个，合计 186 项断言）**：
+**本机实测全绿、尚未进 CI（12 个，合计 122 项断言）**：
 
 | 脚本 | 断言 | 跑法要点 |
 |---|---|---|
-| `e2e-formation.ps1` | 23 | 自起后端 + 3 台 drone-sim；编队演示闭环 |
-| `e2e-mesh.ps1 -Mode simplified` | 12 | 只起 link-sim，GCS/drone 用 PS socket 模拟 |
-| `e2e-rid.ps1` | 14 | 自起后端 + drone-sim（14540） |
 | `e2e-cv-eval.ps1` | 12 | 自起后端 + drone-sim（真值 HTTP 18080） |
 | `e2e-defect.ps1` | 18 | 自起后端 + drone-sim |
 | `e2e-dock.ps1` | 23 | 自起后端 + drone-sim + 机巢 sim |
@@ -143,6 +144,12 @@ Linux 版本：`scripts/e2e-smoke.sh`、`scripts/e2e-fault-linux.sh` 等。
 
 **唯一未跑通**：`e2e-px4-sitl.ps1`——缺 PX4 SITL 环境（脚本现在会明确报"前置条件缺失"）。
 装好后照 `docs/sitl-integration.md`。
+
+**跨平台改造复用 `scripts/e2e-common.ps1`**（新脚本照抄，别再各改各的）：
+`Get-E2eJar`（Linux 上反斜杠不是分隔符，`Join-Path $Root 'x\target\y.jar'` 会拼出
+不存在的路径）、`Get-E2eJava`（Linux 叫 `java`）、`Stop-E2eStaleProcesses`（Windows
+CIM / Linux 读 `/proc/*/cmdline`；**别用 `& ps -eo`**——`ps` 是 Get-Process 的别名，
+`-eo` 直接报错）、`Get-E2eTempDir`（Linux 上 `$env:TEMP` 常未设置）。
 
 **所有自起后端的脚本都已遵守的四条约定**（新脚本照抄，否则本机跑不起来）：
 
