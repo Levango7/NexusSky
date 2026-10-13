@@ -39,6 +39,14 @@ CHANGELOG 是**历史记录**，记的是"当时是什么状态"。改写历史�
 当成前端声称而误报。前端文法要求限定词紧贴数字（`前端测试覆盖 177 例` /
 `前端已有 168 例 vitest` / `177 例 vitest`），宁可漏检也不误报。
 
+**同一行同时含前后端两个声称时（2026-10-13 修）**
+--------------------------------------------
+先前命中前端文法即**整行跳过**，于是「Java 总数 + 前端例数」同处一行的写法
+（ROADMAP 的「4751 单测全绿（…前端已有 292 例 vitest…）」正如此）会把同行的
+Java 声称一并放过——CI 一直带 ``--frontend-json``，master 上 ROADMAP 的 Java 总数
+因此长期未被校验。现改为**把前端片段从行文本里挖掉后再做 Java 核对**：
+两个声称各自被校验，且 Java 的宽泛文法也不会再把前端的数抓去比 Java 实测值。
+
 **为什么不用静态数 ``it(``**
 ---------------------------
 静态计数给出 156（实测 177）：``test/flightCommands.test.jsx`` 与
@@ -467,7 +475,10 @@ def find_conflict_marks(root, docs):
 
 
 def self_test():
-    """离线自检：证明「冲突标记检出」这道防线真的会红，且不会误伤干净文档。
+    """离线自检：证明这道门禁的每条防线真的会红，且不会误伤干净文档。
+
+    覆盖：干净文档不误伤 / 数字漂移判红 / 冲突标记判红 / 陈旧报告判红 /
+    **同行含 Java+前端两个声称时 Java 声称仍被校验**（含"偏低值"那半）。
 
     没有自检的门禁 = 又一个"看起来在检查"的东西。2026-10-08 那次静默失效
     正是因为这类防护从未被证明有效过。
@@ -480,34 +491,40 @@ def self_test():
     docs = ['README.md']
     ok = True
 
-    def build(case_doc):
+    def build(case_doc, each=1):
         tmp = tempfile.mkdtemp(prefix='countgate-selftest-')
         reports = os.path.join(tmp, 'reports')
-        # 每个模块各 1 例：满足"缺模块即红"的前置条件，
+        # 每个模块各 ``each`` 例：满足"缺模块即红"的前置条件，
         # 这样自检走的是与 CI 完全同一条代码路径，而不是旁路。
         for m in EXPECTED_MODULES:
             pkg = os.path.join(reports, m)
             os.makedirs(pkg)
             xml = (
                 '<?xml version="1.0" encoding="UTF-8"?>\n'
-                '<testsuite name="%s" tests="1" failures="0" errors="0" skipped="0">\n'
+                '<testsuite name="%s" tests="%d" failures="0" errors="0" skipped="0">\n'
                 '  <testcase name="ok" classname="%s.DemoTest"/>\n'
                 '</testsuite>\n'
-            ) % (m, m)
+            ) % (m, each, m)
             with open(os.path.join(pkg, 'TEST-%s.DemoTest.xml' % m),
                       'w', encoding='utf-8') as fh:
                 fh.write(xml)
         with open(os.path.join(tmp, 'README.md'), 'w', encoding='utf-8') as fh:
             fh.write(case_doc)
+        # 前端夹具：**每个测试用例都写一份**，供"Java 与前端声称同行"的用例
+        # 走 --frontend-json 那条真实路径（不带它就绕过了被测分支）。
+        # 前端数刻意取 292——与真实 ROADMAP 那行一致；注意 _NUM 要求 3-5 位数字，
+        # 用一个一位数写夹具会让前端文法根本不命中、用例变成空跑（实测教训）。
+        with open(os.path.join(tmp, 'vitest.json'), 'w', encoding='utf-8') as fh:
+            json.dump({'numTotalTests': 292, 'numPassedTests': 292, 'numFailedTests': 0}, fh)
         return tmp, reports
 
-    def run(tmp, reports):
+    def run(tmp, reports, fe=None):
         # 夹具**故意**造红，stderr 会刷屏。静默掉，让自检结论一眼可读；
         # 只留每个用例自己的 ok/失败说明。
         saved_out, saved_err = sys.stdout, sys.stderr
         sys.stdout, sys.stderr = io.StringIO(), io.StringIO()
         try:
-            rc = _run(tmp, reports)
+            rc = _run(tmp, reports, fe)
         finally:
             sys.stdout, sys.stderr = saved_out, saved_err
         return rc
@@ -589,6 +606,37 @@ def self_test():
             ok = False
         else:
             print('  ✓ 注释提及已删类名 → 判陈旧（不许当类还在）')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # 同一行同时含「Java 声称 + 前端声称」时，Java 声称仍必须被校验。
+    # 2026-10-13 实测缺陷：旧版命中前端文法即整行 `continue`，同行的 Java 声称被
+    # 静默跳过——CI 一直带 --frontend-json，master 上 ROADMAP 的 Java 总数因此
+    # 长期未被校验（那行是「4751 单测全绿（…前端已有 292 例 vitest…）」）。
+    # 夹具：6 个模块各 100 例（实测 600），文档把总数写成 9999（偏高）。
+    mixed = '# Demo\n\n9999 单测全绿（前端已有 292 例 vitest）\n'
+    tmp, reports = build(mixed, each=100)
+    try:
+        rc = run(tmp, reports, os.path.join(tmp, 'vitest.json'))
+        if rc == 0:
+            print('自检失败：Java 声称与前端声称同行时被跳过——混合行重新变成盲区')
+            ok = False
+        else:
+            print('  ✓ 混合行里的 Java 声称仍被校验（不被前端匹配顶掉）')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # 反向（也是 G-3 点名要覆盖的一半）：混合行里 Java 声称**偏低**同样必须判红。
+    # 偏低的数不会让人刺眼，是最容易被放过的形态。
+    mixed_low = '# Demo\n\n500 单测全绿（前端已有 292 例 vitest）\n'
+    tmp, reports = build(mixed_low, each=100)
+    try:
+        rc = run(tmp, reports, os.path.join(tmp, 'vitest.json'))
+        if rc == 0:
+            print('自检失败：混合行里的 Java 声称偏低却被放过——「偏低值更危险」这半没覆盖')
+            ok = False
+        else:
+            print('  ✓ 混合行里的 Java 声称偏低也判红')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -724,19 +772,29 @@ def _run(root, reports_root=None, frontend_json=None, print_actual=False):
             if lineno in exempt_rows or _is_retrospective(line):
                 skipped_retro += 1
                 continue
-            # 前端声称（--frontend-json 启用时）。**在 Java 侧之前判、且 continue**：
-            # 同一行若同时含前后端两个数，Java 的宽泛文法会把前端的数也抓走，
-            # 拿 177 去比 4301，判红理由还是错的。
+            # 前端声称（--frontend-json 启用时）。**先抽取，再从行文本里挖掉这些片段**，
+            # 而不是"命中前端就整行 `continue`"：同一行常同时含「Java 总数 + 前端例数」
+            # （ROADMAP 的「4751 单测全绿（…前端已有 292 例 vitest…）」正是这种），
+            # 早先命中即跳过，同行的 Java 声称被一并放过。
+            # 2026-10-13 实测后果：CI 一直带 --frontend-json，master 上 ROADMAP 的
+            # Java 总数因此长期未被校验（G-2/G-3 记的"同一行两种实测值归类不同"，
+            # 真变量其实是这个开关：本地探针没带 --frontend-json 才判红）。
+            # 挖掉前端片段同时解决反向问题：Java 的宽泛文法不会再把前端的数抓走
+            # 拿去比 Java 实测值（那会给出理由错误的红）。
+            scan = line
             if fe_total is not None:
-                fe_matched = False
+                spans = []
                 for pat in FRONTEND_CLAIM_PATTERNS:
                     for m in pat.finditer(line):
                         claimed = _parse_count(m.group(1))
                         if 1 <= claimed <= 200_000:
                             fe_hits.append((lineno, claimed, line.strip()))
-                            fe_matched = True
-                if fe_matched:
-                    continue
+                            spans.append(m.span())
+                if spans:
+                    chars = list(line)
+                    for a, b in spans:
+                        chars[a:b] = ' ' * (b - a)
+                    scan = ''.join(chars)
             # 表格型模块/合计行：不要求本行出现"单测"字样（README 的测试规模表
             # 数据行是 "| `mavlink-core` | 449 |"，不带关键词——早先按关键词过滤
             # 会把整张表漏检，那正是最该被核对的地方）。
@@ -753,14 +811,16 @@ def _run(root, reports_root=None, frontend_json=None, print_actual=False):
             # 散文化声称（非表格行）：需含「单测 / 测试用例 / 单元测试」或英文 tests。
             # 英文关键词是 2026-10-05 补的：demo-scenarios.md 曾写
             # "4234 tests，0 failures"，不含任何中文关键词，整行静默逃检。
-            _low = line.lower()
-            if ('单测' not in line and '测试用例' not in line
-                    and '单元测试' not in line and 'tests' not in _low):
+            # 一律在 ``scan``（已挖掉前端片段）上匹配：既不漏 Java 声称，也不会
+            # 把同行的前端例数当 Java 数去比。
+            _low = scan.lower()
+            if ('单测' not in scan and '测试用例' not in scan
+                    and '单元测试' not in scan and 'tests' not in _low):
                 continue
             scope = scope_of(line, per_module)
             expected = per_module[scope] if scope else actual
             for pat in CLAIM_PATTERNS:
-                for m in pat.finditer(line):
+                for m in pat.finditer(scan):
                     claimed = _parse_count(m.group(1))
                     if 100 <= claimed <= 200_000:      # 过滤明显不是测试数的巧合数字
                         hits.append((lineno, claimed, expected, scope, line.strip()))
