@@ -100,7 +100,7 @@ class AuditRetentionTest {
         auditLogRepository.deleteById(auditLogRepository.findAllByOrderByIdAsc().get(0).getId());
 
         AuditService.ChainVerification v = auditService.verifyChain();
-        assertThat(v.ok()).isTrue();
+        assertChainOk(v);
         assertThat(v.truncated()).isTrue();
         assertThat(v.checked()).isEqualTo(2);
         assertThat(v.brokenAtId()).isNull();
@@ -129,7 +129,7 @@ class AuditRetentionTest {
         auditService.record("carol", "POST", "/api/v1/c", null, "10.0.0.3");
 
         auditLogRepository.deleteById(auditLogRepository.findAllByOrderByIdAsc().get(0).getId());
-        assertThat(auditService.verifyChain().ok()).isTrue(); // 前提：截断态本身是绿的
+        assertChainOk(auditService.verifyChain()); // 前提：截断态本身是绿的
 
         AuditLogEntity survivor = auditLogRepository.findAllByOrderByIdAsc().get(0);
         survivor.setTarget("/api/v1/tampered");
@@ -158,11 +158,27 @@ class AuditRetentionTest {
 
         // 被删的是链尾之后另插的一行，现存链仍从创世起算 → 不算截断
         AuditService.ChainVerification v = auditService.verifyChain();
-        assertThat(v.ok()).isTrue();
+        assertChainOk(v);
         assertThat(v.truncated()).isFalse();
     }
 
     // ===== 辅助方法 =====
+
+    /**
+     * 断言"链校验通过"时，把 {@code verifyChain()} 已经算出来的归因一起打出来。
+     * <p>
+     * 为什么不是直接 {@code assertThat(v.ok()).isTrue()}：链校验的返回值里带着
+     * {@code checked / brokenAtId / reason}（例如"第 2 条 prev_hash 不匹配"、
+     * "第 3 条 entry_hash 校验失败"），而裸断言红下来只剩
+     * {@code Expecting value to be true but was false}——归因信息在对象里躺着，
+     * 日志里一个字都没有，下一次偶发还是得从头猜。
+     */
+    private void assertChainOk(AuditService.ChainVerification v) {
+        assertThat(v.ok())
+                .as("链校验应通过；实际 reason=%s brokenAtId=%s truncated=%s checked=%d 库内行数=%d",
+                        v.reason(), v.brokenAtId(), v.truncated(), v.checked(), auditLogRepository.count())
+                .isTrue();
+    }
 
     /** 直接落一行可控时间的审计记录（保留删除按 timestamp 判定，与哈希值无关）。 */
     private void saveRow(String target, Instant timestamp) {
