@@ -29,6 +29,16 @@ public final class Anomaly {
     private final String description;
     private final Instant detectedAt;
     private final double confidencePct;
+    /**
+     * 是否为模拟检出的异常。
+     * <p>
+     * 与 {@code MappingResult.simulated} 同一理由：真实视觉模型未接入前恒为 {@code true}。
+     * 不暴露这个字段，前端就只能把"绝缘子破损 / 置信度 87%"当真实检测结果展示——
+     * 而它其实来自 {@link AnomalyDetectionService} 的概率模拟。
+     */
+    private final boolean simulated = true;
+    /** 模拟原因（{@link #simulated} 为 true 时说明缺什么）。 */
+    private String simulatedReason;
 
     public Anomaly(String id, String type, Severity severity,
                    double lat, double lon, String photoId,
@@ -53,4 +63,10 @@ public final class Anomaly {
     public String description() { return description; }
     public Instant detectedAt() { return detectedAt; }
     public double confidencePct() { return confidencePct; }
+
+    public boolean isSimulated() { return simulated; }
+
+    public String getSimulatedReason() { return simulatedReason; }
+
+    public void setSimulatedReason(String simulatedReason) { this.simulatedReason = simulatedReason; }
 }

@@ -25,6 +25,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>
  * 当前为模拟实现：基于照片元数据（航高、相机角度、行业类型）按概率生成异常，
  * 置信度由模拟分数推导。后续可接入真实视觉模型推理。
+ * <p>
+ * <b>诚实边界（2026-10-13）</b>：每条 {@link Anomaly} 都带 {@code simulated=true} 与
+ * {@link #SIMULATED_REASON}——"javadoc 里声明是模拟"不够，调用方与界面读不到 javadoc，
+ * 契约与界面必须也能区分。真实模型接入后把该标记置 false 即可。
  */
 @Service
 public class AnomalyDetectionService {
@@ -39,10 +43,20 @@ public class AnomalyDetectionService {
     private static final double MEDIUM_SEVERITY_PROB = 0.45;
 
     /**
+     * 模拟检出的统一原因（字段契约的一部分，调用方可据此在界面上标注）。
+     * <p>
+     * 2026-10-13 外部评估续整：原先只有<b>这个类的 javadoc</b>声明"当前为模拟实现"，
+     * 而 API 吐给前端的是 severity + 置信度 87% 且不带任何标记——操作员无从得知
+     * 那是概率模拟而非视觉模型推理。现在改成契约字段 + 界面标注双诚实。
+     */
+    private static final String SIMULATED_REASON =
+            "真实视觉模型未接入：异常由概率模拟生成（按行业类型 + 照片元数据），非推理结果";
+
+    /**
      * 分析巡检照片，检测异常。
      *
      * @param photo 巡检照片（含 GPS 标注与行业类型）
-     * @return 检测到的异常列表（可能为空）
+     * @return 检测到的异常列表（可能为空；每条都带 {@code simulated=true}）
      */
     public List<Anomaly> detect(InspectionPhoto photo) {
         List<Anomaly> anomalies = new ArrayList<>();
@@ -55,10 +69,12 @@ public class AnomalyDetectionService {
             String id = UUID.randomUUID().toString();
             String desc = buildDescription(anomalyType, severity, photo);
 
-            anomalies.add(new Anomaly(
+            Anomaly anomaly = new Anomaly(
                     id, anomalyType, severity,
                     photo.lat(), photo.lon(), photo.id(),
-                    desc, Instant.now(), confidence));
+                    desc, Instant.now(), confidence);
+            anomaly.setSimulatedReason(SIMULATED_REASON);
+            anomalies.add(anomaly);
         }
         log.debug("Anomaly detection: photo={} found={}", photo.id(), anomalies.size());
         return anomalies;

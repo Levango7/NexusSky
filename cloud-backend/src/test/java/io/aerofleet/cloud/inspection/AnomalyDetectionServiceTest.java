@@ -160,6 +160,44 @@ class AnomalyDetectionServiceTest {
         assertThat(totalAnomalies).isGreaterThan(0);
     }
 
+    // ---- 模拟诚实性（2026-10-13 外部评估续整）----
+
+    @Test
+    @DisplayName("检出的异常必须带 simulated=true 与原因（契约层诚实）")
+    void detectedAnomaliesAreMarkedSimulated() {
+        // 30% 概率：多跑几次必有一次命中，命中的那条必须带标
+        for (int i = 0; i < 50; i++) {
+            for (Anomaly a : detector.detect(photo(IndustryType.POWER_LINE))) {
+                assertThat(a.isSimulated())
+                        .as("真实视觉模型未接入，模拟检出的异常不许装成真检测")
+                        .isTrue();
+                assertThat(a.getSimulatedReason()).isNotBlank();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("模拟原因是统一文案（界面标注据此展示）")
+    void simulatedReasonIsShared() {
+        for (int i = 0; i < 50; i++) {
+            for (Anomaly a : detector.detect(photo(IndustryType.BRIDGE))) {
+                assertThat(a.getSimulatedReason())
+                        .contains("视觉模型未接入")
+                        .contains("非推理结果".substring(0, 3));
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("置信度仍在模拟区间内（70~95），不因为加标而改变语义")
+    void confidenceStaysInSimulatedRange() {
+        for (int i = 0; i < 100; i++) {
+            for (Anomaly a : detector.detect(photo(IndustryType.RAILWAY))) {
+                assertThat(a.confidencePct()).isBetween(70.0, 95.0);
+            }
+        }
+    }
+
     @Test
     @DisplayName("recommendationForIndustry 为每种行业返回维护建议")
     void recommendationForAllIndustries() {
