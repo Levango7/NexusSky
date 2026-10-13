@@ -3,6 +3,71 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — 短 payload 容忍解码的真实修复：两个用例的绿灯建立在生产造不出的帧形上
+
+### 怎么发现的
+
+在系统性排查「用合成/不可能数据冒充真实输入」的假绿测试时命中。两个用例都声称覆盖
+「短 payload 容忍解码」，写法是：
+
+```java
+new MavlinkFrame(1, 0, 0, 0, 1, 1, 30039, new byte[]{42, 0}, 0)   // LEN=1，payload 数组 2 字节
+```
+
+这是**自相矛盾状态**：`MavlinkParser` 恒有 `payload.length == payloadLen`，
+`MavlinkFrame.of` 也按 `payload.length` 定 LEN，生产任何路径都产不出 LEN 与数组长度不符的帧。
+测试专挑这个不可能的状态，于是绿灯建立在一个真空上。
+
+### 真空下面是什么
+
+`SatLinkStatusMsg.decode` / `SatPassScheduleMsg.decode` 的 javadoc 都写着
+「payload 短于 LEN 时容忍（缺失字段填 0）」，方法体内也确实对 8 个字段写了
+`len > N ? ... : 0` 守卫 —— **唯独第一个字段 `u16(b, 0)` 没有守卫**。
+`PayloadCodec.u16` 走 `ByteBuffer.getShort`，不足 2 字节必抛 `IndexOutOfBoundsException`。
+
+实测（真实形状的线上帧）：
+
+| 帧形 | LEN=1 / payload 1 字节（生产形态） | LEN=1 / payload 2 字节（旧测试） |
+|---|---|---|
+| 结果 | **IndexOutOfBoundsException** | 通过，satId=42 |
+
+### 实际影响（没有夸大）
+
+先核实过调用方，**不是单帧 DoS**：`TelemetryIngestService.handle` 与 `VirtualDrone`
+都用 `catch (RuntimeException)` 包住 `MavlinkMessage.decode`，畸形帧降级为丢帧 + 日志，
+收包循环不会中断。真实损害是：声明的「容忍」契约在这两个消息上并不存在，
+且日志里只会看到一条语焉不详的 decode 失败。
+
+### 为什么只改这两个，不把 84 个类一起改
+
+扫了全部消息类，有 84 个首字段无守卫。但要分两类：
+
+- **本仓自定义消息且 javadoc 承诺容忍** —— 契约违约，必须修（本次两个）
+- **标准 MAVLink 消息**（Heartbeat/Attitude/GpsRawInt…）—— LEN 由 dialect 固定，
+  短帧本身就是畸形。此时抛异常丢帧是**正确**行为；加守卫反而会把畸形帧悄悄编造成
+  一堆 0 值字段（比如 time_boot_ms=0），让人看不出数据有问题。保持现状是对的。
+
+### 改了什么
+
+- `SatLinkStatusMsg` / `SatPassScheduleMsg` 首个 u16 补 `len > 1` 守卫，
+  与同方法内其余字段口径一致（字段不完整即填 0，不拿半截字节凑值）
+- 两个用例改为**走完整生产路径**：`MavlinkFrame.of(截断 payload)` 按真实长度算 CRC →
+  `encodeV2()` 产出 LEN=截断长度的线上帧 → `MavlinkParser` 逐帧校验 CRC → decode。
+  只用公开 API，帧形由生产构造器保证可达
+- 断言里钉住生产不变式 `payloadLength == payload.length`，让今后再有人手搓矛盾帧会立刻红
+- 拆出 LEN=1（半截 u16）与 LEN=0 两个边界用例，精确钉住守卫语义
+
+### 变异验证
+
+移除两处守卫 → 4 个用例转 error；还原 → 全绿。LEN=2 那条在无守卫时仍绿是正确的，
+因为 2 字节本就够 `getShort` 读，它测的是「刚好够」的边界而非容忍。
+
+### 计数
+
+Java 4762 → **4766**（`mavlink-core` 478 → **482**：两个类各 1 条拆成 3 条，净 +4；
+其余模块取 master 实测值不变）
+
+
 
 ## [Unreleased] — 又把 4 个非 CI e2e 脚本救活：清跨轮污染、修调度器饿死、补两个真缺陷（2026-10-13）
 

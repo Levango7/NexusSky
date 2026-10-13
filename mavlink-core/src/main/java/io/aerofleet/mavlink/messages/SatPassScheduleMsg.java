@@ -73,7 +73,9 @@ public final class SatPassScheduleMsg extends MavlinkMessage {
         ByteBuffer b = le(f.getPayload());
         int len = f.getPayloadLength();
         return new SatPassScheduleMsg(
-                PayloadCodec.u16(b, 0),
+                // 首个字段也必须守卫：u16 需要 2 字节，len<=1 时 getShort 会抛
+                // IndexOutOfBoundsException（RuntimeException），收包侧只能丢帧。
+                len > 1 ? PayloadCodec.u16(b, 0) : 0,
                 len > 5 ? PayloadCodec.u32(b, 2) : 0L,
                 len > 9 ? PayloadCodec.u32(b, 6) : 0L,
                 len > 10 ? PayloadCodec.u8(b, 10) : 0,

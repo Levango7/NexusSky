@@ -1,8 +1,11 @@
 package io.aerofleet.mavlink.messages;
 
 import io.aerofleet.mavlink.MavlinkFrame;
+import io.aerofleet.mavlink.MavlinkParser;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.nio.ByteBuffer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -52,15 +55,62 @@ class SatLinkStatusMsgTest {
         assertThat(msg.messageId()).isEqualTo(30039);
     }
 
+    /**
+     * 短 payload 容忍解码：<b>走完整生产路径</b>。
+     * <p>
+     * 这里刻意不用 {@code new MavlinkFrame(..., payloadLength=1, payload=new byte[2])} ——
+     * 那是 LEN 字段与 payload 数组长度不一致的自相矛盾状态，{@code MavlinkParser} 恒有
+     * {@code payload.length == payloadLen}，{@code MavlinkFrame.of} 也按 payload.length 定 LEN，
+     * 所以生产任何路径都产不出它。旧测试正是在这个不可能的状态上绿灯，
+     * 于是首字段 {@code u16} 缺守卫（真实 1 字节帧上抛 IndexOutOfBoundsException）没被发现。
+     */
     @Test
-    @DisplayName("短 payload 容忍解码：仅 2 字节时只还原 satId")
-    void decodeShortPayloadTolerant() {
-        byte[] shortPayload = new byte[]{42, 0};
-        MavlinkFrame frame = new MavlinkFrame(1, 0, 0, 0, 1, 1, 30039, shortPayload, 0);
-        SatLinkStatusMsg msg = SatLinkStatusMsg.decode(frame);
+    @DisplayName("短 payload 容忍解码：真实线上帧 LEN=2 恰好还原 satId")
+    void decodeShortPayloadTolerant_realWireFrame() {
+        SatLinkStatusMsg msg = decodeOverWire(new byte[]{42, 0});
 
         assertThat(msg.satId).isEqualTo(42);
         assertThat(msg.visible).isZero();
+    }
+
+    /**
+     * LEN=1：satId 是 u16，首字段被截断。按本方法内其余 8 个字段一致的口径
+     * （字段不完整即填 0，而不是拿半截字节凑值）应为 0，且不得抛异常。
+     */
+    @Test
+    @DisplayName("半截 u16（LEN=1）容忍：satId 填 0 且不抛")
+    void decodeTruncatedU16_fillsZero() {
+        SatLinkStatusMsg msg = decodeOverWire(new byte[]{42});
+
+        assertThat(msg.satId).isZero();
+    }
+
+    /** 空 payload：连首个 u16 都读不出来，仍必须容忍并填 0。 */
+    @Test
+    @DisplayName("零长度 payload 容忍：所有字段填 0")
+    void decodeZeroPayloadTolerant() {
+        SatLinkStatusMsg msg = decodeOverWire(new byte[0]);
+
+        assertThat(msg.satId).isZero();
+        assertThat(msg.visible).isZero();
+    }
+
+    /**
+     * 用生产同构的方式解码：{@code MavlinkFrame.of} 按给定 payload 的真实长度算 CRC，
+     * {@code encodeV2()} 产出 LEN=截断长度的线上帧，{@code MavlinkParser} 逐帧校验 CRC，
+     * 再交给被测的 decode —— 与收包侧代码路径一致。
+     */
+    private static SatLinkStatusMsg decodeOverWire(byte[] truncatedPayload) {
+        byte[] wire = MavlinkFrame.of(1, 1, 0, SatLinkStatusMsg.ID,
+                SatLinkStatusMsg.CRC_EXTRA, truncatedPayload).encodeV2();
+        MavlinkParser.ParseResult parsed = new MavlinkParser().parse(ByteBuffer.wrap(wire));
+
+        assertThat(parsed).as("截断帧应通过 CRC 校验并被解析").isNotNull();
+        // 生产不变式：解析产出的帧 LEN 与 payload 数组长度必然一致
+        assertThat(parsed.frame.getPayloadLength())
+                .as("生产形态：payloadLength 必须等于 payload 数组长度")
+                .isEqualTo(parsed.frame.getPayload().length);
+        return SatLinkStatusMsg.decode(parsed.frame);
     }
 
     @Test
