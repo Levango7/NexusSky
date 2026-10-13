@@ -3,6 +3,33 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — SPI 豁免账清零：最后 3 条适配器各自落契约测试（2026-10-13）
+
+> SPI 可验证性门禁（`scripts/check-spi-coverage.py`）2026-10-12 上线时登记了 9 条"编译、启动、
+> 日志里看起来在工作，但没有任何断言钉过它"的生产适配器。前两批清偿 6 条（`UomReportSink` +
+> 5 个 `ModuleAdapter` 实现），本批清偿最后 3 条，`EXEMPT = {}` 清零。这条棘轮只准拧紧：
+> 此后新增的未验适配器必须带测试，任何"先欠着"都得重新登记并写明到期日。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| ① | **`MavlinkDeviceGateway` 契约测试**（9 例） | `protocol()=="mavlink"`；`send` 委派全部 9 个参数；`MAV_RESULT` 受理白名单——`ACCEPTED(0)` / `IN_PROGRESS(5)` 判 true，`TEMPORARILY_REJECTED` / `DENIED` / `UNSUPPORTED` / `FAILED` / 未知码 99 判 false |
+| ② | **`UdpTransportAdapter` 契约测试**（7 例） | 本机回环真帧收发（真实 `DatagramSocket`，非 mock）：默认目的地 / 末位 peer 兜底 / 无 peer 静默丢弃、构造期拒 null、`unwrap`/`port` 委派、关闭后 `send` 抛 `IOException`、入站帧回调 |
+| ③ | **`RealEnvSource` 契约测试**（2 例） | `snapshot()` 与 `evolve(1.0)` 均明确抛 `UnsupportedOperationException`（M0b 未实现的边界如实声明） |
+| ④ | **豁免账清零** | `EXEMPT = {}`；门禁自检 6/6、审计报 `未验 0 / 已豁免 0` |
+| ⑤ | **文档计数同步** | 本批 +18 例（cloud-backend +9、drone-sim +9）；全仓与分模块计数行按 `check-test-count-docs.py` 实测刷新（绝对数不手写，理由见状态板）；ROADMAP 第 25 行的滞留声称值一并纠正 |
+
+> 计数口径：本仓 CHANGELOG 条目**只记增量**，绝对数交给 `check-test-count-docs.py` 实测驱动——
+> 分支基点每跟一次 master，写死的绝对数就作废一次。
+
+**顺带验出的门禁自身缺陷**：ROADMAP 第 25 行同时含 Java 声称与前端声称，旧门禁的
+`if fe_matched: continue` 会把整行当作"已按前端口径处理"而跳过，该行的 Java 声称值因而长期逃检
+——这是 G-3 缺陷的同一处两面（另一面见 #72）。
+
+**边界**：契约测试钉的是"参数委派 / 返回码语义 / 回环可达 / 未实现即抛"这类可观测契约，
+不是真机硬件行为；真机适配仍需在真环境中补验。
+
+---
+
 ## [Unreleased] — 短 payload 容忍解码的真实修复：两个用例的绿灯建立在生产造不出的帧形上
 
 ### 怎么发现的
@@ -127,6 +154,7 @@ Java 4762 → **4766**（`mavlink-core` 478 → **482**：两个类各 1 条拆�
   ⇒ 真要翻 prod 必须同时改这条测试，改它的人就留下决策记录。本笔**没有**改它，也没有改任何 profile。
 - **边界**：以上基于 `drone-sim`/`link-sim` 模拟，只证明**协议层行为正确**，不证明现网兼容性；
   真机固件是否都支持 v2 签名块、逐机密钥发放流程，都要等 permissive 那一步用真实机队跑才有数。
+
 
 ---
 

@@ -8,6 +8,7 @@
 `RealEnvSource`、5 个 `ModuleAdapter` 实现）。这类代码不会让任何测试转红——它编译、它启动、
 它甚至在日志里"看起来在工作"，只是**没有任何断言钉过它**。外部适配器的缺陷（报文格式、重试、
 超时、鉴权头）恰好是最贵的一类：真机/真平台才暴露。
+（2026-10-13：上述 9 条已全部由契约测试点名，豁免账清零。）
 
 这个脚本把"新增了没人验的适配器"变成 CI 红灯。
 
@@ -61,22 +62,11 @@ SPI_INTERFACES = [
 
 # 豁免账。每条都要能回答"为什么现在没人验、什么时候补"。
 # 生成未验清单用 --print，别手抄类名。
-EXEMPT = {
-    "MavlinkDeviceGateway": {
-        "reason": "F5 只交付了协议标记+路由骨架；CommandGatewayTest 用的是接口替身，"
-                  "本类从未被点名。待补：把替身换成真实例、断言 dji-cloud 命令被明确拒绝",
-        "expires": "2026-10-26",
-    },
-    "UdpTransportAdapter": {
-        "reason": "drone-sim 传输腿，测试里零引用。待补：回环端口上的收发闭环 + 关闭后不再收包",
-        "expires": "2026-11-02",
-    },
-    "RealEnvSource": {
-        "reason": "drone-sim 环境源的真实实现（读外部数据），测试里零引用。"
-                  "待补：注入桩数据源断言取值路径；真环境部分标为集成测试",
-        "expires": "2026-11-02",
-    },
-}
+#
+# 2026-10-13：最后 3 条（MavlinkDeviceGateway / UdpTransportAdapter / RealEnvSource）
+# 已各自落契约测试点名，账清空。棘轮只准拧紧——此后新增的未验适配器必须带测试，
+# 任何"先欠着"都得重新登记并写明到期日（照原先的格式）。
+EXEMPT = {}
 
 SKIP_DIRS = {".git", "target", "node_modules", "dist", "build", ".m2", ".idea"}
 
