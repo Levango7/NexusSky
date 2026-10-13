@@ -28,6 +28,8 @@
 param([switch]$IncludeRelay)
 
 $ErrorActionPreference = 'Stop'
+# 跨平台公共库：jar 路径 / java 可执行 / 残留进程清理 / 临时目录（CI 在 ubuntu 上跑）
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $Fail = 0
 $script:CleanupActions = @()
@@ -132,14 +134,10 @@ function Invoke-Cleanup {
 trap { Invoke-Cleanup; break }
 
 # ---- 清理旧实验进程（避免端口占用）----
+# 只按本轮留痕的 -Dformation-e2e=true 标记杀，不按 java 一刀切（别人会话的 java 不能碰）；
+# 平台分支（Windows CIM / Linux /proc）在 e2e-common.ps1 里；别在 nix 上用 ps 别名
 function Cleanup-OldProcesses {
-    Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.CommandLine -match 'drone-sim.*formation-e2e' -or
-            $_.CommandLine -match 'cloud-backend.*formation-e2e' -or
-            $_.CommandLine -match 'link-sim.*--relay.*formation-e2e') {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    }
+    $null = Stop-E2eStaleProcesses -Marker 'formation-e2e'
     Start-Sleep 1
 }
 
@@ -211,9 +209,9 @@ function Wait-FormationState($formationId, $expectedState, $timeoutSec, $interva
 # ============================================================
 Step '前置检查（异常 5.5.3-1：jar 存在、端口可用、Java>=17）'
 
-$backendJar   = Join-Path $Root 'cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
-$droneSimJar  = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
-$linkSimJar   = Join-Path $Root 'link-sim\target\aerofleet-link-sim-0.1.0-SNAPSHOT.jar'
+$backendJar   = Get-E2eJar -Root $Root -Module 'cloud-backend' -Jar 'aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
+$droneSimJar  = Get-E2eJar -Root $Root -Module 'drone-sim'      -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
+$linkSimJar   = Get-E2eJar -Root $Root -Module 'link-sim'       -Jar 'aerofleet-link-sim-0.1.0-SNAPSHOT.jar'
 
 $backendOk  = Test-Path $backendJar
 $droneSimOk = Test-Path $droneSimJar
@@ -228,9 +226,7 @@ if (-not ($backendOk -and $droneSimOk)) {
 }
 
 # Java 探测 + 版本自检
-if ($env:AF_JAVA) { $java = $env:AF_JAVA }
-elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" }
-else { $java = "java.exe" }
+$java = Get-E2eJava
 Assert-Java17 $java
 Info "Java: $java"
 
@@ -265,6 +261,20 @@ foreach ($p in $DroneSimPorts) {
     if (-not $free) {
         Info "前置条件缺失：端口 $p 被占用，请清理旧进程后重跑"
         Write-Host "`nFORMATION E2E FAILED（前置条件缺失：端口 $p 占用，非编队缺陷）" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# 后端自己的 MAVLink 主口也要预检：它 bind 失败时后端直接起不来（BindException），
+# 而脚本原来只查了 14551-14553 与 REST 口——别处占着 14550 时报的是
+# "cloud-backend 启动失败"，看起来像编队/后端缺陷，其实是端口被占。
+if (-not $IncludeRelay) {
+    $backendUdpFree = Test-PortFree $BackendDronePort
+    Check "backend MAVLink 端口 $BackendDronePort 可用" $backendUdpFree
+    if (-not $backendUdpFree) {
+        Info "前置条件缺失：$BackendDronePort 被占（常见于别的 e2e 后端没退干净）"
+        Info '先跑 scripts\kill-stale-e2e-jobs.ps1 或手动结束占用进程，再重跑'
+        Write-Host "`nFORMATION E2E FAILED（前置条件缺失：$BackendDronePort 占用，非编队缺陷）" -ForegroundColor Red
         exit 1
     }
 }
@@ -313,7 +323,7 @@ try {
 $backendStartedByScript = $false
 if (-not $backendRunning) {
     Info '启动 cloud-backend（discovery 指向 3 台 drone-sim 端口）...'
-    $backendLog = Join-Path $env:TEMP "formation-backend.log"
+    $backendLog = Join-Path (Get-E2eTempDir) "formation-backend.log"
     if (Test-Path $backendLog) { Remove-Item $backendLog -Force }
 
     # 后端配置：drone-extra-ports 含 3 台 drone-sim 端口（直接发现场景，design.md §6.6）
@@ -346,7 +356,7 @@ if (-not $backendRunning) {
     $backendArgs += @('--spring.datasource.url=jdbc:h2:mem:formation-e2e;DB_CLOSE_DELAY=-1')
 
     $backend = Start-Process -FilePath $java -ArgumentList $backendArgs `
-        -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
+        -PassThru -RedirectStandardOutput $backendLog
     Register-E2eProcess $backend
     Info "backend PID=$($backend.Id), log=$backendLog"
     $backendStartedByScript = $true
@@ -367,7 +377,7 @@ if (-not $backendRunning) {
 # 可选：启动 link-sim --relay（M0a 中继复用，FR-22）
 if ($IncludeRelay) {
     Info '启动 link-sim --relay（M0a 中继复用，FR-22）...'
-    $relayLog = Join-Path $env:TEMP "formation-relay.log"
+    $relayLog = Join-Path (Get-E2eTempDir) "formation-relay.log"
     if (Test-Path $relayLog) { Remove-Item $relayLog -Force }
     $relay = Start-Process -FilePath $java -ArgumentList @(
         '-jar', $linkSimJar,
@@ -377,7 +387,7 @@ if ($IncludeRelay) {
         '--uplink-profile', $UplinkProfile,
         '--downlink-profile', $DownlinkProfile,
         '-Dformation-e2e=true'
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $relayLog
+    ) -PassThru -RedirectStandardOutput $relayLog
     Register-E2eProcess $relay
     Info "relay PID=$($relay.Id), gcsPort=$GcsPort, relayPort=$RelayPort"
     Start-Sleep 2
@@ -395,7 +405,7 @@ for ($i = 0; $i -lt $MemberSysids.Count; $i++) {
     $sid = $MemberSysids[$i]
     $port = $DroneSimPorts[$i]
     $name = "AF-FORM-0$sid"
-    $droneLog = Join-Path $env:TEMP "formation-drone-$sid.log"
+    $droneLog = Join-Path (Get-E2eTempDir) "formation-drone-$sid.log"
     if (Test-Path $droneLog) { Remove-Item $droneLog -Force }
 
     $droneArgs = @(
@@ -411,7 +421,7 @@ for ($i = 0; $i -lt $MemberSysids.Count; $i++) {
     # 直接发现场景下 drone-sim 绑定各自端口，后端通过 drone-extra-ports 发现
 
     $d = Start-Process -FilePath $java -ArgumentList $droneArgs `
-        -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog
+        -PassThru -RedirectStandardOutput $droneLog
     Register-E2eProcess $d
     $droneProcesses += $d
     Info "drone-sim[$i] PID=$($d.Id), sysid=$sid, port=$port, name=$name"

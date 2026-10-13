@@ -24,6 +24,8 @@
 param([switch]$SkipBuild)
 
 $ErrorActionPreference = 'Stop'
+# 跨平台公共库：jar 路径 / java 可执行 / 残留进程清理 / 临时目录（CI 在 ubuntu 上跑）
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $Fail = 0
 $script:CleanupActions = @()
@@ -114,12 +116,9 @@ trap { Invoke-Cleanup; break }
 # 清理旧实验进程（避免端口占用）
 # ============================================================
 function Cleanup-OldProcesses {
-    Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.CommandLine -match 'cloud-backend.*rid-e2e' `
-            -or $_.CommandLine -match 'drone-sim.*rid-e2e') {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    }
+    # 只按本轮留痕标记杀（-Drid-e2e=true），不按 java 一刀切；
+    # 平台分支（Windows CIM / Linux /proc）在 e2e-common.ps1 里。
+    $null = Stop-E2eStaleProcesses -Marker 'rid-e2e'
     Start-Sleep 1
 }
 
@@ -127,13 +126,16 @@ function Cleanup-OldProcesses {
 # 构建 jar（如果缺失且未指定 -SkipBuild）
 # ============================================================
 function Build-Jars {
+    # mvn 可执行：Windows 是 mvn.cmd，Linux 是 mvn
     $mavenCmd = 'mvn'
-    if ($env:MAVEN_HOME -and (Test-Path (Join-Path $env:MAVEN_HOME "bin\mvn.cmd"))) {
-        $mavenCmd = Join-Path $env:MAVEN_HOME "bin\mvn.cmd"
+    if ($env:MAVEN_HOME) {
+        $cand = Join-Path $env:MAVEN_HOME $(if (Test-E2eWindows) { 'bin/mvn.cmd' } else { 'bin/mvn' })
+        if (Test-Path $cand) { $mavenCmd = $cand }
     }
 
     # 设置 JDK17：尊重已设置且可用的 JAVA_HOME；未设/无效时回退 AF_JDK17_HOME → 内置默认路径
-    if (-not ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe")))) {
+    $javaExe = if (Test-E2eWindows) { 'java.exe' } else { 'java' }
+    if (-not ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin/$javaExe")))) {
         $jdk17Home = $env:AF_JDK17_HOME
         if (-not $jdk17Home) { $jdk17Home = 'E:\dev-tools\jdk17.0.20_8' }
         if (Test-Path $jdk17Home) {
@@ -144,7 +146,7 @@ function Build-Jars {
 
     Step '构建缺失的 jar（JDK17）'
     foreach ($module in @('cloud-backend', 'drone-sim')) {
-        $jarPath = Join-Path $Root "$module\target\*$module*.jar"
+        $jarPath = Get-E2eJar -Root $Root -Module $module -Jar "*$module*.jar"
         if (-not (Get-ChildItem $jarPath -ErrorAction SilentlyContinue)) {
             Info "构建 $module ..."
             & $mavenCmd -pl $module -am package -DskipTests -q
@@ -164,23 +166,15 @@ function Build-Jars {
 # ============================================================
 
 # ---- Java 探测 + 版本自检 ----
-if ($env:AF_JAVA) { $java = $env:AF_JAVA }
-elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" }
-elseif ($env:AF_JDK17_HOME -and (Test-Path (Join-Path $env:AF_JDK17_HOME "bin\java.exe"))) { $java = Join-Path $env:AF_JDK17_HOME "bin\java.exe" }
-else {
-    # 默认使用 JDK17 路径
-    $jdk17Default = 'E:\dev-tools\jdk17.0.20_8\bin\java.exe'
-    if (Test-Path $jdk17Default) { $java = $jdk17Default }
-    else { $java = "java.exe" }
-}
+$java = Get-E2eJava
 Assert-Java17 $java
 Info "Java: $java"
 
 # ---- 前置检查：jar 存在 ----
 Step '前置检查（jar 存在、端口可用）'
 
-$backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend\target\*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-$droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim\target\*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$backendJar = Get-ChildItem (Get-E2eJar -Root $Root -Module 'cloud-backend' -Jar '*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$droneSimJar = Get-ChildItem (Get-E2eJar -Root $Root -Module 'drone-sim'      -Jar '*drone-sim*.jar')      -ErrorAction SilentlyContinue | Select-Object -First 1
 
 $backendOk = $null -ne $backendJar
 $droneSimOk = $null -ne $droneSimJar
@@ -238,7 +232,7 @@ Cleanup-OldProcesses
 # ============================================================
 Step '启动 cloud-backend（默认配置，RID 自动接收）'
 
-$backendLog = Join-Path $env:TEMP "rid-e2e-backend.log"
+$backendLog = Join-Path (Get-E2eTempDir) "rid-e2e-backend.log"
 if (Test-Path $backendLog) { Remove-Item $backendLog -Force }
 
 $backendProc = Start-Process -FilePath $java -ArgumentList @(
@@ -256,8 +250,9 @@ $backendProc = Start-Process -FilePath $java -ArgumentList @(
     # 14550 + 14541-14543，而本脚本的飞机在 14540 —— 不显式加进来它永远注册不上。
     "--aerofleet.drone-extra-ports=$DronePort",
     "--aerofleet.security.rbac-enabled=false",
-    '--aerofleet.security.dev-mode=true'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
+    '--aerofleet.security.dev-mode=true',
+    '-Drid-e2e=true'          # 留痕标记：只让本轮清理杀自己，不碰别的会话的 java
+) -PassThru -RedirectStandardOutput $backendLog
 Register-Cleanup { Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue }
 Info "cloud-backend PID=$($backendProc.Id), log=$backendLog"
 
@@ -287,7 +282,7 @@ if (-not $backendUp) {
 # ============================================================
 Step "启动 drone-sim（sysid=$DroneSysid, rid=on, serial-no=$DroneSerialNo）"
 
-$droneLog = Join-Path $env:TEMP "rid-e2e-drone.log"
+$droneLog = Join-Path (Get-E2eTempDir) "rid-e2e-drone.log"
 if (Test-Path $droneLog) { Remove-Item $droneLog -Force }
 
 $droneProc = Start-Process -FilePath $java -ArgumentList @(
@@ -295,8 +290,9 @@ $droneProc = Start-Process -FilePath $java -ArgumentList @(
     '--port', $DronePort,
     '--sysid', $DroneSysid,
     '--rid=on',
-    '--serial-no', $DroneSerialNo
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog
+    '--serial-no', $DroneSerialNo,
+    '-Drid-e2e=true'          # 留痕标记：只让本轮清理杀自己
+) -PassThru -RedirectStandardOutput $droneLog
 Register-Cleanup { Stop-Process -Id $droneProc.Id -Force -ErrorAction SilentlyContinue }
 Info "drone-sim PID=$($droneProc.Id), log=$droneLog"
 Start-Sleep 2
