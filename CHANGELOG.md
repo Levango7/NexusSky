@@ -4,6 +4,33 @@
 
 ---
 
+## [Unreleased] — C5 第三步的拍板材料：`docs/signing-prod-rollout.md`（**不改任何默认值**，2026-10-12）
+
+- **为什么需要**：`docs/security-design.md` §7 把签名语义、装配、指标、告警表达式都写全了，但**没有一段回答
+  "prod 该怎么按顺序打开、看什么数字算成功、出事怎么退"**；而用户已明确 C5 在 prod 打开是**今年要拍的事**。
+  本笔只补这段操作层，设计层一律引用不重述。
+- **文档给出的关键内容**：三姿态对照表（off / permissive / strict，各自的后果与现成测试锚点）、
+  打开前的 5 条前置条件、**两步走顺序**（先 `reject-unsigned=false` 观察 `aerofleet.signing.unsigned` 归零，
+  再收紧 strict）、回滚方式（翻回 `enabled=false`，四个签名 bean 一概不创建、行为与改造前逐字节一致）、
+  以及仍需人回答的 3 个问题（谁逐机发密钥、能否接受 permissive 窗口、翻牌时有没有人值守）。
+- **为什么中间那步不能跳**：strict 唯一失败模式是"某台设备没配密钥"，表现为**该机遥测静默消失**——
+  在无人机场景里这是最坏的一类故障。协议层面也没有平滑过渡：v2 签名块 `linkId|timestamp|signature`
+  **无 key id 字段** ⇒ 新旧密钥无法并存，`SigningKeyStoreWriter` 类注释与 `MavlinkSigningKeyController`
+  都把"轮换只能是硬切换、没有 graceHours"写在代码里（**API Key 那套 `graceHours` 与它无关，别搬心智模型**）。
+- **实测台账（写清楚测到哪、没测到哪）**：本机跑签名四测试类共 **32 例全绿**（含"未签名 + reject=true 被拒"、
+  permissive 下"未签名放行但签错密钥仍拒"、指标三类 reason 互不串味、"开了签名却没给密钥 ⇒ 启动失败"）；
+  CI 的 `E2E MAVLink signing (6 scenarios)` 在 master run `38221403959` 为 success。
+  我**试图**本机直跑 `scripts/e2e-signing.ps1`（已把 REST/UDP 全换成 18080/15550/15540/15600 以避开并行 agent
+  的构建端口），**场景 1 即失败**：本机 6379 上的 Redis 要求认证（`NOAUTH HELLO must be called with the client
+  authenticated itself`），脚本无口令入口、本机也无自起的免密 redis ⇒ 这条 e2e 的可复现环境是 CI 或
+  `deploy/docker/docker-compose.yml`（自带 `redis:7-alpine`），**不是我这台机器**；文中不把 CI 的绿写成自己的验证。
+- **有意的摩擦**：`MavlinkSigningConfigurationTest` 有一条"prod profile 仍是 enabled=false（第三步需单独拍板）"
+  ⇒ 真要翻 prod 必须同时改这条测试，改它的人就留下决策记录。本笔**没有**改它，也没有改任何 profile。
+- **边界**：以上基于 `drone-sim`/`link-sim` 模拟，只证明**协议层行为正确**，不证明现网兼容性；
+  真机固件是否都支持 v2 签名块、逐机密钥发放流程，都要等 permissive 那一步用真实机队跑才有数。
+
+---
+
 ## [Unreleased] — 计数门禁：同行含前后端两个声称时，Java 声称不再被静默跳过（2026-10-13）
 
 > 现象先于定位。翻旧 CI 日志时发现一个矛盾：master 上一轮门禁实测 4703，而当时
@@ -18,6 +45,7 @@
 | ④ | **文档** | `ROADMAP.md:25` 的 Java 总数 4751 → **4755**（对齐 master 门禁实测）。全仓枚举后波及面只有这一行。 |
 
 **边界**：只治"同行混合"这一形态；`CHANGELOG.md` 作为历史记录仍照旧排除在门禁之外。
+
 
 ---
 
