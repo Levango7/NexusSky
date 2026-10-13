@@ -508,6 +508,9 @@ export default function InspectionPanel() {
               <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
                 <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)', fontSize: 11, color: 'var(--dim)' }}>
                   异常清单（{anomalies.length}）
+                  {anomalies.some((a) => pick(a, 'simulated') === true) && (
+                    <span style={{ fontSize: 9, color: 'var(--warn)' }}>·模拟检出</span>
+                  )}
                 </div>
                 <div style={{ maxHeight: 240, overflowY: 'auto' }}>
                   {anomalies.length === 0 ? (
@@ -529,6 +532,9 @@ export default function InspectionPanel() {
                             )}
                             {pick(a, 'confidence') != null && (
                               <span>置信度：{(Number(pick(a, 'confidence')) * (Number(pick(a, 'confidence')) <= 1 ? 100 : 1)).toFixed(0)}%</span>
+                            )}
+                            {pick(a, 'simulated') === true && (
+                              <span style={{ color: 'var(--warn)' }}>·模拟检出（非视觉模型推理）</span>
                             )}
                             {pick(a, 'description', 'desc') != null && (
                               <span>{pick(a, 'description', 'desc')}</span>
