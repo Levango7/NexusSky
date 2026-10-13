@@ -57,10 +57,13 @@ class MappingResultServiceTest {
         assertThat(result.getTaskId()).isEqualTo("task-001");
         assertThat(result.getType()).isEqualTo(MappingType.ORTHO_PHOTO);
         assertThat(result.getStatus()).isEqualTo(MappingResult.Status.COMPLETED);
-        assertThat(result.getOrthophotoUrl()).isNotNull();
-        assertThat(result.getOrthophotoUrl()).contains("orthophoto");
+        // 2026-10-12 外部评估整改：不再产出假下载 URL（真摄影测量管线未接入）
+        assertThat(result.getOrthophotoUrl()).isNull();
         assertThat(result.getDemUrl()).isNull();
         assertThat(result.getModelUrl()).isNull();
+        // 且必须显式告知"这是模拟成果"，契约上不能含糊
+        assertThat(result.isSimulated()).isTrue();
+        assertThat(result.getSimulatedReason()).contains("摄影测量");
         assertThat(result.getCoveragePct()).isGreaterThan(0);
         assertThat(result.getCoveragePct()).isLessThanOrEqualTo(100);
         assertThat(result.getResolutionCm()).isGreaterThan(0);
@@ -69,12 +72,14 @@ class MappingResultServiceTest {
     }
 
     @Test
-    @DisplayName("正射影像成果 URL 包含唯一 ID")
-    void orthophotoUrlContainsUniqueId() {
+    @DisplayName("成果 ID 唯一（替代原 URL 唯一性断言：URL 已不再伪造）")
+    void resultIdsAreUnique() {
         MappingResult r1 = resultService.generateOrthophoto("task-001", samplePhotos());
         MappingResult r2 = resultService.generateOrthophoto("task-002", samplePhotos());
 
-        assertThat(r1.getOrthophotoUrl()).isNotEqualTo(r2.getOrthophotoUrl());
+        assertThat(r1.getId()).isNotEqualTo(r2.getId());
+        assertThat(r1.isSimulated()).isTrue();
+        assertThat(r2.isSimulated()).isTrue();
     }
 
     // ========== DEM ==========
@@ -89,10 +94,10 @@ class MappingResultServiceTest {
         assertThat(result.getTaskId()).isEqualTo("task-001");
         assertThat(result.getType()).isEqualTo(MappingType.DEM);
         assertThat(result.getStatus()).isEqualTo(MappingResult.Status.COMPLETED);
-        assertThat(result.getDemUrl()).isNotNull();
-        assertThat(result.getDemUrl()).contains("dem");
+        assertThat(result.getDemUrl()).isNull();
         assertThat(result.getOrthophotoUrl()).isNull();
         assertThat(result.getModelUrl()).isNull();
+        assertThat(result.isSimulated()).isTrue();
         assertThat(result.getCoveragePct()).isGreaterThan(0);
         assertThat(result.getCoveragePct()).isLessThanOrEqualTo(100);
     }
@@ -109,10 +114,10 @@ class MappingResultServiceTest {
         assertThat(result.getTaskId()).isEqualTo("task-001");
         assertThat(result.getType()).isEqualTo(MappingType.THREE_D_MODEL);
         assertThat(result.getStatus()).isEqualTo(MappingResult.Status.COMPLETED);
-        assertThat(result.getModelUrl()).isNotNull();
-        assertThat(result.getModelUrl()).contains("model");
+        assertThat(result.getModelUrl()).isNull();
         assertThat(result.getOrthophotoUrl()).isNull();
         assertThat(result.getDemUrl()).isNull();
+        assertThat(result.isSimulated()).isTrue();
         assertThat(result.getCoveragePct()).isGreaterThan(0);
         assertThat(result.getCoveragePct()).isLessThanOrEqualTo(100);
     }

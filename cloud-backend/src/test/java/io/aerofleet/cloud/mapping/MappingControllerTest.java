@@ -437,9 +437,10 @@ class MappingControllerTest {
         Map<String, Object> processed = controller.processTask(id);
         assertThat(processed.get("status")).isEqualTo("COMPLETED");
 
-        // 获取成果
+        // 获取成果（2026-10-12：契约改为"无假 URL + 显式 simulated 标"）
         List<MappingResult> results = controller.getTaskResult(id);
         assertThat(results).hasSize(1);
-        assertThat(results.get(0).getOrthophotoUrl()).isNotNull();
+        assertThat(results.get(0).getOrthophotoUrl()).isNull();
+        assertThat(results.get(0).isSimulated()).isTrue();
     }
 }

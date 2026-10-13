@@ -15,12 +15,21 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * 测绘成果生成服务。
  * <p>
- * 模拟正射影像、DEM、三维模型的生成过程，产出包含下载链接与质量元数据的成果记录。
+ * 模拟正射影像、DEM、三维模型的生成过程，产出带质量元数据的成果记录。
+ * <p>
+ * <b>诚实边界（2026-10-12 外部评估整改）</b>：成果一律带 {@code simulated=true}，
+ * 且**不再产出下载 URL**——没有真实成果存储，给一个能点开的假域名只会让人误以为
+ * 系统坏了。真实产物要等摄影测量管线接入（属生产阶段项），届时把 simulated 置 false
+ * 并回填真实 URL 即可，字段契约不变。
  */
 @Service
 public class MappingResultService {
 
     private static final Logger log = LoggerFactory.getLogger(MappingResultService.class);
+
+    /** 模拟成果的统一原因（字段契约的一部分：调用方可据此在界面上标注）。 */
+    private static final String SIMULATED_REASON =
+            "真摄影测量管线未接入：无空中三角测量/正射校正/三维重建产物，本记录仅演示字段形状";
 
     /** 按成果 ID 存储的成果列表。 */
     private final ConcurrentHashMap<String, MappingResult> resultsById = new ConcurrentHashMap<>();
@@ -38,7 +47,8 @@ public class MappingResultService {
         log.info("Generating orthophoto for task {} with {} photos", taskId, photos.size());
 
         String resultId = UUID.randomUUID().toString();
-        String orthophotoUrl = "https://storage.mapping/results/" + resultId + "/orthophoto.tif";
+        // 没有真实成果存储，就不该给一个点得开的假域名（2026-10-12 外部评估整改）
+        String orthophotoUrl = null;
 
         // P1-fix: 使用 ThreadLocalRandom 替代 Math.random()，提升多线程性能
         double coveragePct = Math.min(100.0, 85.0 + ThreadLocalRandom.current().nextDouble() * 15);
@@ -60,6 +70,8 @@ public class MappingResultService {
                 processingTimeSec,
                 fileSizeMB
         );
+        result.setSimulated(true);
+        result.setSimulatedReason(SIMULATED_REASON);
 
         storeResult(taskId, result);
         log.info("Orthophoto generated: id={} coverage={}%, resolution={}cm, size={}MB",
@@ -78,7 +90,7 @@ public class MappingResultService {
         log.info("Generating DEM for task {} with {} photos", taskId, photos.size());
 
         String resultId = UUID.randomUUID().toString();
-        String demUrl = "https://storage.mapping/results/" + resultId + "/dem.tif";
+        String demUrl = null;
 
         // P1-fix: 使用 ThreadLocalRandom 替代 Math.random()，提升多线程性能
         double coveragePct = Math.min(100.0, 80.0 + ThreadLocalRandom.current().nextDouble() * 20);
@@ -100,6 +112,8 @@ public class MappingResultService {
                 processingTimeSec,
                 fileSizeMB
         );
+        result.setSimulated(true);
+        result.setSimulatedReason(SIMULATED_REASON);
 
         storeResult(taskId, result);
         log.info("DEM generated: id={} coverage={}%, resolution={}cm, size={}MB",
@@ -118,7 +132,7 @@ public class MappingResultService {
         log.info("Generating 3D model for task {} with {} photos", taskId, photos.size());
 
         String resultId = UUID.randomUUID().toString();
-        String modelUrl = "https://storage.mapping/results/" + resultId + "/model.obj";
+        String modelUrl = null;
 
         // P1-fix: 使用 ThreadLocalRandom 替代 Math.random()，提升多线程性能
         double coveragePct = Math.min(100.0, 75.0 + ThreadLocalRandom.current().nextDouble() * 25);
@@ -140,6 +154,8 @@ public class MappingResultService {
                 processingTimeSec,
                 fileSizeMB
         );
+        result.setSimulated(true);
+        result.setSimulatedReason(SIMULATED_REASON);
 
         storeResult(taskId, result);
         log.info("3D model generated: id={} coverage={}%, resolution={}cm, size={}MB",

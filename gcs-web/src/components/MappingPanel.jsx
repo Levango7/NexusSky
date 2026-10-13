@@ -481,6 +481,13 @@ export default function MappingPanel() {
             </div>
             {result ? (
               <div style={{ fontSize: 10, color: 'var(--dim-2)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {/* 模拟成果必须显式标注：后端不再给假下载域名，这里的链接本来就不该出现 */}
+                {result.simulated !== false && (
+                  <div className="notice warn" style={{ fontSize: 10 }}>
+                    模拟成果：真摄影测量管线未接入，无下载产物
+                    {result.simulatedReason ? `（${result.simulatedReason}）` : ''}
+                  </div>
+                )}
                 {pick(result, 'orthomosaicUrl', 'orthomosaic') && <div>正射影像：<a href={pick(result, 'orthomosaicUrl', 'orthomosaic')} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--cyan)' }}>查看</a></div>}
                 {pick(result, 'demUrl', 'dem') && <div>DEM：<a href={pick(result, 'demUrl', 'dem')} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--cyan)' }}>查看</a></div>}
                 {pick(result, 'modelUrl', 'model3dUrl', 'model') && <div>3D 模型：<a href={pick(result, 'modelUrl', 'model3dUrl', 'model')} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--cyan)' }}>查看</a></div>}
