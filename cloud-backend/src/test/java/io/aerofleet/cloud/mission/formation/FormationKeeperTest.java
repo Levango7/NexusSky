@@ -63,6 +63,7 @@ class FormationKeeperTest {
     private DroneSnapshot online(int sysid) {
         DroneSnapshot d = registry.registerIfAbsent(sysid);
         d.online = true;
+        d.armed = true;
         d.battery = 90;
         d.lat = HOME_LAT;
         d.lon = HOME_LON;
@@ -187,5 +188,25 @@ class FormationKeeperTest {
         verify(commands, never()).command(eq(1), eq(MavEnums.MAV_CMD_DO_REPOSITION),
                 anyFloat(), anyFloat(), anyFloat(), anyFloat(),
                 anyFloat(), anyFloat(), anyFloat());
+    }
+
+    @Test
+    void unarmedMemberSkipped() {
+        // 未解锁成员跳过：未解锁飞机必回 MAV_RESULT=2（DENIED），而
+        // DroneCommandService 的重试会阻塞单线程调度器数秒，拖死 RID 超时检测等
+        // 其他定时任务（2026-10-13 e2e-rid 实测到的 starvation）。
+        int id = createStableLine(1, 2);
+        registry.get(1).armed = false;
+        // sysid=2 偏差 > 1m
+        registry.get(2).lat = registry.get(2).lat + OFFSET_2M_DEG;
+        keeper.check();
+        // 仅已解锁的 sysid=2 收到修正
+        verify(commands, times(1)).command(eq(2), eq(MavEnums.MAV_CMD_DO_REPOSITION),
+                anyFloat(), anyFloat(), anyFloat(), anyFloat(),
+                anyFloat(), anyFloat(), anyFloat());
+        verify(commands, never()).command(eq(1), eq(MavEnums.MAV_CMD_DO_REPOSITION),
+                anyFloat(), anyFloat(), anyFloat(), anyFloat(),
+                anyFloat(), anyFloat(), anyFloat());
+        assertEquals(1, keeper.correctionCount(), "only the armed member is corrected");
     }
 }

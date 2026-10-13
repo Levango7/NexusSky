@@ -8,7 +8,10 @@
 #   2. 飞远后 RSSI 衰减（< -80 dBm，FSPL@~800m）
 #   3. REST rssiDbm 可查且 = 衰减值
 $ErrorActionPreference = 'Stop'
-$Base = 'http://localhost:8080/api/v1'
+# 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_REST_PORT 覆盖。
+# 覆盖时必须连带改后端的 MAVLink 口（默认 14550），否则 sim 发现不了本脚本要找的 sysid。
+$BackendRestPort = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }
+$Base = "http://localhost:$BackendRestPort/api/v1"
 $Fail = 0
 
 # ---- Java 版本自检（e2e 共用守卫）----

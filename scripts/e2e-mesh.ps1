@@ -381,6 +381,9 @@ function Run-Full {
             '-jar', $backendJar,
             '--spring.profiles.active=dev',
             "--server.port=$BackendRestPort",
+            # 自带内存库：dev profile 默认落 ./data/aerofleet 文件库，上一轮 e2e 残留的
+            # 编队会被 restore 复活，其 Keeper 会把同一批 sysid 的飞机往旧队形拽。
+            '--spring.datasource.url=jdbc:h2:mem:mesh-e2e;DB_CLOSE_DELAY=-1',
             "--aerofleet.drone-port=$GcsPort",
             "--aerofleet.drone-extra-ports=$RelayPort"
         ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog

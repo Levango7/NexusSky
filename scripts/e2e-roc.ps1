@@ -88,6 +88,9 @@ try {
     $backend = Start-Process -FilePath $java -ArgumentList @(
         '-jar', $backendJar, "--server.port=$BackendPort",
         '--spring.profiles.active=dev',
+        # 自带内存库：dev profile 默认落 ./data/aerofleet 文件库，上一轮 e2e 残留的
+        # 编队/任务会被 restore 复活并干扰本轮断言（同一 JVM 生命周期内不重启，mem 足够）。
+        '--spring.datasource.url=jdbc:h2:mem:roc-e2e;DB_CLOSE_DELAY=-1',
         '--aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef',
         '--aerofleet.drone-port=14580',
         '--aerofleet.drone-extra-ports=14581'

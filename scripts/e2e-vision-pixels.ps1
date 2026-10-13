@@ -1,5 +1,13 @@
 # AeroFleet 像素域视觉链路测试（Batch E2）
-# 前置：cloud-backend(8080/14550) 已运行；JAVA_HOME 指向 JDK17。
+# 前置：cloud-backend(8080/14550) 已运行，且按下面这样启动：
+#         --spring.profiles.active=dev
+#         --aerofleet.vision.source=pixels
+#         --aerofleet.sim-truth-base=http://127.0.0.1:18082
+#       JAVA_HOME 指向 JDK17。
+#       两个后端参数缺一不可：source=pixels 才会走"真 JPEG → 斑块检测"管道；
+#       sim-truth-base 默认指向 18080，而本脚本的模拟器挂在 18082，指错了后端
+#       拉不到 JPEG（ConnectException），整条像素链无从验证。8080 被占用时用
+#       AF_BACKEND_REST_PORT 指定 REST 口（后端 --server.port 要一致）。
 # 场景：模拟器带静态目标 -> 起飞到目标上空 -> 单拍。后端以 pixels 模式
 #       （拉真实 JPEG -> BlobDetector 检出斑块 -> 解算地理坐标）走全链，
 #       真值只用于打分。证明「渲染->检测->解算」像素链路自洽，不靠元数据神谕。
@@ -8,7 +16,10 @@
 #   2. 定位误差 < 3m（最近真值目标）
 #   3. 单拍返回 sizeBytes > 0（图像字节真实存在）
 $ErrorActionPreference = 'Stop'
-$Base = 'http://localhost:8080/api/v1'
+# 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_REST_PORT 覆盖。
+# 覆盖时必须连带改后端的 MAVLink 口（默认 14550），否则 sim 发现不了本脚本要找的 sysid。
+$BackendRestPort = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }
+$Base = "http://localhost:$BackendRestPort/api/v1"
 $Fail = 0
 
 # ---- Java 版本自检 ----
@@ -70,27 +81,46 @@ try {
     $null = Invoke-RestMethod -Method Post -Uri "$Base/drones/12/commands" -Body (@{ type='takeoff'; alt=60 } | ConvertTo-Json) -ContentType 'application/json' -TimeoutSec 30
     $null = Invoke-RestMethod -Method Post -Uri "$Base/drones/12/mission" -Body (@{
         items = @(@{ cmd='takeoff'; lat=22.5907; lon=113.9345; alt=60 },
-                   @{ cmd='waypoint'; lat=22.5916; lon=113.9345; alt=60 })   # 目标 A 上空
+                   # holdTime 必须给：到点后 mission 立即完成会触发 RTL 回家，飞机离开
+                   # 目标上空，后面怎么拍都拍不到斑块。
+                   @{ cmd='waypoint'; lat=22.5916; lon=113.9345; alt=60; holdTime=120 })
     } | ConvertTo-Json) -ContentType 'application/json' -TimeoutSec 30
     $null = Invoke-RestMethod -Method Post -Uri "$Base/drones/12/commands" -Body (@{ type='start_mission' } | ConvertTo-Json) -ContentType 'application/json' -TimeoutSec 10
-    Start-Sleep 20   # ~100m / 8m/s + hold
+    # 60m 爬升约 30s（2m/s）+ home→目标约 100m 巡航约 13s（8m/s）：等 50s 才到位。
+    # 原来只等 20s，飞机还在爬升段，目标根本不在画面里 —— 检出走 0 个斑块。
+    Start-Sleep 50
+    $t = Invoke-RestMethod "$Base/drones/12/telemetry" -TimeoutSec 5
+    Write-Host ("   到位检查: lat={0} lon={1} alt={2}m seq={3}/{4}" -f $t.lat, $t.lon, $t.relativeAlt, $t.missionSeq, $t.missionTotal)
 
     # ---- 3. pixels 模式单拍 ----
-    # 后端需以 aerofleet.vision.source=pixels 启动（README 说明）。此处拍一张，
-    # 断言 detections 不带 id（id=-1 或缺失）即证明走了 pixels 管道。
+    # 后端需以 --aerofleet.vision.source=pixels + --aerofleet.sim-truth-base=http://127.0.0.1:18082
+    # 启动（见文件头）。此处拍一张，断言 detections 不带 id（id=-1 或缺失）即证明走了 pixels 管道。
     Step 'pixels 模式单拍 -> 检测 -> 解算'
     $cap = Invoke-RestMethod -Method Post -Uri "$Base/vision/drones/12/capture" -TimeoutSec 30
-    $n = @($cap.detections).Count
+    # 后端把异常转成 {status:error,result:...}（HTTP 200），这里先拦一层：
+    # 否则下面 $cap.detections 取不到只会当成"0 个检测"，看不出是后端拉不到 JPEG。
+    if ($cap.status -eq 'error') {
+        Stop-Process -Id $sim.Id -Force -ErrorAction SilentlyContinue
+        Write-Host ("   capture 失败: " + $cap.result) -ForegroundColor Red
+        Write-Host '   检查后端是否按文件头启动（--aerofleet.vision.source=pixels --aerofleet.sim-truth-base=http://127.0.0.1:18082）' -ForegroundColor Red
+        Write-Host 'PIXELS E2E FAILED' -ForegroundColor Red
+        exit 1
+    }
+    # 注意：PowerShell 里 @($null).Count 等于 **1**（不是 0），所以缺失字段必须显式判空，
+    # 否则"没有 detections"会被数成 1 个、后面两个断言还会跟着假绿。
+    $detections = @()
+    if ($null -ne $cap.detections) { $detections = @($cap.detections) }
+    $n = $detections.Count
     Check "pixels 检出 >= 1 个目标 ($n 个)" ($n -ge 1)
     # pixels 管道: kind=blob 且 id=-1
-    $allBlob = $true
-    foreach ($d in $cap.detections) {
+    $allBlob = ($n -ge 1)
+    foreach ($d in $detections) {
         if ($d.id -ne -1) { $allBlob = $false }
     }
     Check 'pixels 检出为 blob（无目标 id）' $allBlob
     $maxErr = 0.0
-    foreach ($d in $cap.detections) {
-        if ($d.truthErrorM -gt $maxErr) { $maxErr = $d.truthErrorM }
+    foreach ($d in $detections) {
+        if ($null -ne $d.truthErrorM -and $d.truthErrorM -gt $maxErr) { $maxErr = $d.truthErrorM }
     }
     Check "pixels 定位误差 < 3m (max=$maxErr m)" ($maxErr -lt 3)
 
@@ -101,8 +131,11 @@ try {
     $size = [long]$last.sizeBytes
     Check "单拍 sizeBytes > 0 (got $size)" ($size -gt 0)
     # 且 jpg 端点可下载且是 JPEG 魔数
-    $jpeg = Invoke-WebRequest "http://127.0.0.1:18082/camera/shots/$($last.frameSeq).jpg" -TimeoutSec 5
-    $magic = $jpeg.RawContentStream.ReadByte()
+    # 不用 Invoke-WebRequest + RawContentStream：PS 5.1 下该属性常为 null
+    # （NullReferenceException，还会把整个 try 块炸掉、连累 exit code）。直接取字节。
+    $jpgUrl = "http://127.0.0.1:18082/camera/shots/$($last.frameSeq).jpg"
+    $bytes = (New-Object System.Net.WebClient).DownloadData($jpgUrl)
+    $magic = $bytes[0]
     Check "JPEG 端点返回 JPEG 魔数 (0xFF=$magic)" ($magic -eq 0xFF)
 } finally {
     Stop-Process -Id $sim.Id -Force -ErrorAction SilentlyContinue

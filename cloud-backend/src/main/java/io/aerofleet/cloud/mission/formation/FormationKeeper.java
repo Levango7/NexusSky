@@ -69,12 +69,19 @@ public class FormationKeeper {
 
     /**
      * STABLE 状态偏差检查：超容差下发 DO_REPOSITION（FR-08），容差内不下发（FR-07）。
+     *
+     * <p>未解锁（{@code !snap.armed}）成员一并跳过：模拟器/真机对未解锁飞机回
+     * MAV_RESULT=2（DENIED），而 {@code DroneCommandService} 会按重试策略再等若干秒。
+     * 这些 @Scheduled 任务共用同一个单线程调度器——一次卡住的 MAVLink 往返会把
+     * RID 超时检测、指标采集、自动调度全部拖住（2026-10-13 e2e-rid 实测：一条
+     * 恢复出来的历史编队把调度线程堵了 6 秒，RID 的 BROADCASTING_ERROR 超时判定
+     * 因此整个没跑）。对不可能执行修正的成员，一开始就不该发。
      */
     private void checkStableDeviations(Formation f) {
         for (int sysid : f.sortedMembers()) {
             DroneSnapshot snap = registry.get(sysid);
-            if (snap == null || !snap.online) {
-                continue;  // 离线成员跳过，不阻塞其余
+            if (snap == null || !snap.online || !snap.armed) {
+                continue;  // 离线/未解锁成员跳过，不阻塞其余
             }
             Formation.GeoPos target = f.targetPositions.get(sysid);
             if (target == null) {
