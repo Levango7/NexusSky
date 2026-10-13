@@ -11,6 +11,70 @@
 （class/interface/enum/record），并加自测用例钉住；本地陈旧报告已清。这是
 `_class_has_source`（类被删）之外的**第三种**陈旧报告形态：**类名在别处注释里活着**。
 
+## [Unreleased] — 审计链断言补齐归因：红下来不再是 "true but was false"
+
+> 只动测试，不改生产语义，也不新增用例（`@Test` 增删均为 0，单测计数不变）。
+
+### 触发它的事
+
+master `80a21e8` 的 push run `38335407472` 上，`Java cloud-backend` 唯一坏项是
+`AuditRetentionTest.chainContinuesAfterRetentionPurge`，而日志里只有：
+
+```
+org.opentest4j.AssertionFailedError:
+Expecting value to be true but was false
+    at ...AuditRetentionTest.chainContinuesAfterRetentionPurge(AuditRetentionTest.java:161)
+```
+
+同一份内容在 run `336`（#61 的 PR run）是绿的 ⇒ **偶发**。本地用 5 种组合（默认序 + 随机种子
+11/23/47 + 带/不带 jacoco，并把时区钉成 UTC 与 runner 对齐）跑满 2702 例都不复现。
+
+真正妨碍归因的是断言本身：`ChainVerification` 这个返回值**已经带着**
+`reason`（"第 N 条 prev_hash 不匹配" / "第 N 条 entry_hash 校验失败" / "校验失败（查询异常）…")、
+`brokenAtId`、`checked`、`truncated`，而测试写的是裸 `assertThat(v.ok()).isTrue()`——
+信息在对象里躺着，日志一个字不打。下一次再撞，还是从零猜。
+
+### 改了什么
+
+`AuditRetentionTest` 里三处 `assertThat(v.ok()).isTrue()` 收敛成一个私有辅助
+`assertChainOk(v)`，用 AssertJ 的 `.as(...)` 把归因字段连同**当时库里的行数**一起打出来。
+生产侧真实的三类 `reason` 文案是：`链首 prev_hash 不是创世哈希（…）`、
+`prev_hash 与前一条 entry_hash 不一致（历史行缺失或被改动）`、
+`entry_hash 与记录内容不符（内容被改动）`。红下来的形态是（其中 `reason` 值是 harness
+为了验证管道而**人为构造**的哨兵，不是生产输出）：
+
+```
+链校验应通过；实际 reason=第 4 条 entry_hash 校验失败 brokenAtId=4242 truncated=false checked=3 库内行数=2
+```
+
+行数为什么要带上：`verifyChain()` 在 `persistToDb` 为真时走的是
+`auditLogRepository.findAllByOrderByIdAsc()` ——**读库**，内存 deque 只是回退分支
+（`AuditService.java:194-220`）。所以"链不 ok"实际意味着"那一刻库里的行序不成链"，
+可能的出口只有三类：链首不接创世哈希、某行 `prev_hash` 接不上前一行、某行 `entry_hash`
+与内容不符。把 `checked` 与**库内行数**一起打出来，就能一次分诊是"多了一行不是本测试写的"
+（→ 状态耦合/共享 `jdbc:h2:mem` 表）还是"某行内容/时间戳对不上"（→ 落库精度问题），
+不用再去猜 `verifyChain` 到底读哪一边。
+
+### 验证（断言的是具体文案，不是"有没有红"）
+
+Harness 第一版**判自己 FAIL**，抓的是 harness 的错：它把"弄断链"的注入写在 `verifyChain()`
+**之后**，取到的 `v` 是破坏前的值，于是"验证通过"会是假的。改成直接构造一个 `ok=false` 的
+`ChainVerification` 喂进断言——只测本次真正改动的消息管道，不依赖 `verifyChain` 读内存还是读库：
+
+```
+步骤 1（注入 ok=false）  红=OK  前缀=OK  reason 透传=OK  brokenAtId 透传=OK  checked 透传=OK   5/5
+步骤 2（还原）           该类 6/6 绿，HARNESS-PROBE 探针无残留
+```
+
+### 没做
+
+- **没有"顺手修根因"**：那次偶发还没定性（最像是新增测试类改变 class 顺序 / 多 `@SpringBootTest`
+  上下文共用同一张 `jdbc:h2:mem` 的 `audit_log` 表所暴露的既有状态耦合），
+  在没有复现样本的情况下改隔离方式，属于用猜测换一次"看起来修好了"。
+- 没有重跑 master 那条红 run：`gh run rerun --failed` 会把当时被 skip 的 `Docker Build & Push`
+  一起复活并真的重推三个镜像（已实证：`rerun --failed` 会跑失败 job 的下游）。
+- 没动 `AuditPersistenceTest` 的断言（它的 `isFalse()` 处是"期望断链"，语义相反，不在本批）。
+
 ## [Unreleased] — sdk-python 从零测试到进 CI：27 例 pytest + 三处 API 不一致收口（2026-10-13）
 
 > 产品决策（用户拍板）：真实 UOM 平台"要花钱，暂时算了"，继续 sim；测绘维持模拟+标注；
