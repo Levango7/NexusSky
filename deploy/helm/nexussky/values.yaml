@@ -4,9 +4,14 @@
 
 # 全局镜像仓库前缀与 tag（不硬编码，便于 CI 注入）
 # 最终镜像 = <imageRegistry><组件 image>:<imageTag>，组件 image 形如 nexussky/<module>。
-# CI（.github/workflows/ci.yml）推送目标是 ghcr.io/levango7/nexussky/<module>，tag 为 latest 与 sha-<short>；
+# CI（.github/workflows/ci.yml）推送目标是 ghcr.io/levango7/nexussky/<module>。
+# 2026-10-13 起推送范围收窄：**只有 master 的 push 会推 `latest`**；PR 上的 Docker job
+# 照样构建，但不登录、不推送（改前是无条件推 `latest`，于是一条绿 PR 就会把 latest 换掉，
+# 而镜像里的 revision 还是 refs/pull/N/merge 那种仓库里不存在的 sha——见 .coord/GAPS.md G-4）。
+# `sha-<short>` 同理只在 master push 上产生；要按构建号钉死部署，请改用发布流程里的固定 tag。
 # 用 CI 产物部署需成对设置，例如：
 #   --set imageRegistry=ghcr.io/levango7/ --set imageTag=latest
+# （这一对现在保证拿到的是 master，不再可能是某条未合并的 PR。）
 # 留空则按 Docker Hub 的 nexussky/<module> 解析（默认 tag 0.1.0）。
 imageRegistry: ""
 imageTag: "0.1.0"

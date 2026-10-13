@@ -33,8 +33,13 @@
 | `Log in to GHCR` | 加同一条件——PR 上不再需要注册表凭据 |
 | 原 `Build and push` | 拆成 `Build`（无门槛，PR 照样构建）+ `Push`（只在 master 的 push 上跑） |
 
-部署清单不用改：全仓 grep 下来没有任何 manifest 钉 `:latest` 标签，它们引用的是
-`registry/nexussky/<module>`，语义由本笔收窄成"latest 只来自 master"。
+部署清单**要跟着改一处注释**（初稿这里写的是"部署清单不用改，没有任何 manifest 钉 `:latest`"——
+manifest 那半是对的：compose 钉的是 `1.0.0`、chart 的缺省 `imageTag` 是 `0.1.0`，
+全仓确实没有写死 `:latest` 的地方；但**文档化的部署路径本身就是让人 `--set imageTag=latest`**，
+所以那句"不用改"不成立，已更正）。改的是 `deploy/helm/nexussky/values.yaml` 头部注释：
+它原来写着"CI 推送 tag 为 latest 与 sha-<short>"，本笔之后准确的说法是
+**只有 master 的 push 才推**，于是那行 `--set imageRegistry=ghcr.io/levango7/ --set imageTag=latest`
+现在保证拿到的是 master，而不再是"某条未合并 PR 的构建"。
 
 ### 二、取件类红的取证与重试（`scripts/ci-mvn-retry.sh`，新）
 
