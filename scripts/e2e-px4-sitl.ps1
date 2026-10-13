@@ -49,10 +49,16 @@ $px4Cmd = $null
 try { $px4Cmd = Get-Command px4 -ErrorAction Stop } catch {}
 
 # 检查方式2：WSL2 内是否有 PX4-Autopilot
+# 坑：PowerShell 的 `-match` 是**子串正则**——`'NOTFOUND' -match 'FOUND'` 返回 True。
+# 原写法 `if ($wslResult -match 'FOUND')` 于是把"没装"判成"已装"，脚本去拉起一个
+# 不存在的 SITL，报"进程意外退出"，把环境缺失伪装成运行故障。改为整行严格相等，
+# 且 wsl 输出可能带 \r（WSL 在 Windows 上默认 CRLF）或空数组，都要容。
 $wslPx4Dir = $null
 try {
-    $wslResult = wsl -e bash -c 'ls -d ~/PX4-Autopilot 2>/dev/null && echo FOUND || echo NOTFOUND' 2>$null
-    if ($wslResult -match 'FOUND') { $wslPx4Dir = $true }
+    $wslLines = @(wsl -e bash -c 'ls -d ~/PX4-Autopilot 2>/dev/null && echo FOUND || echo NOTFOUND' 2>$null)
+    foreach ($line in $wslLines) {
+        if ("$line".Trim() -eq 'FOUND') { $wslPx4Dir = $true }
+    }
 } catch {}
 
 # 检查方式3：常见 Windows 安装路径
@@ -105,7 +111,13 @@ if ($null -ne $px4Cmd) {
     Write-Host ''
     Write-Host '   安装完成后重新运行此脚本。' -ForegroundColor Yellow
     Write-Host ''
-    Write-Host '   跳过 SITL 启动，将尝试仅验证 cloud-backend 连接...' -ForegroundColor Yellow
+    # 缺 PX4 就明确判"前置条件缺失"并退出：硬着头皮往下跑只会让心跳/任务/遥测
+    # 断言全红，看起来像 NexusSky 的协议有问题，其实是环境里没有飞控。
+    # 这与 e2e-formation / e2e-regulator 的"前置条件缺失，非 XX 缺陷"同口径。
+    Cleanup
+    Write-Host ''
+    Write-Host 'PX4 SITL E2E FAILED（前置条件缺失：本机未装 PX4 SITL，非协议缺陷）' -ForegroundColor Red
+    exit 1
 }
 
 # ───────────────────────── 启动 PX4 SITL ─────────────────────────

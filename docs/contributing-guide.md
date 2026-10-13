@@ -115,7 +115,49 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e-failsafe.ps1
 
 Linux 版本：`scripts/e2e-smoke.sh`、`scripts/e2e-fault-linux.sh` 等。
 
-### 2.5 Docker 构建
+### 2.5 e2e 脚本台账（2026-10-14 本机实测）
+
+**CI 已覆盖（10 个）**：`e2e-smoke.sh`、`e2e-fault-linux.sh`、`e2e-failsafe-linux.sh`、
+`e2e-vision-linux.sh`、`e2e-spray.sh`、`e2e-emergency.sh`、`e2e-hardware.sh`、
+`e2e-sdk-integration.sh`、`e2e-signing.ps1`、`e2e-docker-compose.sh`。
+
+**本机实测全绿但未进 CI（15 个，合计 186 项断言）**：
+
+| 脚本 | 断言 | 跑法要点 |
+|---|---|---|
+| `e2e-formation.ps1` | 23 | 自起后端 + 3 台 drone-sim；编队演示闭环 |
+| `e2e-mesh.ps1 -Mode simplified` | 12 | 只起 link-sim，GCS/drone 用 PS socket 模拟 |
+| `e2e-rid.ps1` | 14 | 自起后端 + drone-sim（14540） |
+| `e2e-cv-eval.ps1` | 12 | 自起后端 + drone-sim（真值 HTTP 18080） |
+| `e2e-defect.ps1` | 18 | 自起后端 + drone-sim |
+| `e2e-dock.ps1` | 23 | 自起后端 + drone-sim + 机巢 sim |
+| `e2e-operations.ps1` | 9 | 自起后端 + drone-sim（报表对账） |
+| `e2e-roc.ps1` | 14 | 双机 |
+| `e2e-route-templates.ps1` | 16 | 航线模板真飞 |
+| `e2e-rtk.ps1` | 3 | 三机 RTK 三态 |
+| `e2e-sensing.ps1` | 10 | 感知聚合 |
+| `e2e-uspace.ps1` | 13 | U-space 四服务 |
+| `e2e-network.ps1` | 9 | **需先起后端且 `--aerofleet.drone-port=14600`**，再 `AF_BACKEND_PORT=<口>` 跑脚本 |
+| `e2e-rf.ps1` | 4 | 需先起后端（sim 在 14543，默认 extra-ports 覆盖） |
+| `e2e-vision-pixels.ps1` | 6 | 需先起后端带 `--aerofleet.vision.source=pixels` + `--aerofleet.sim-truth-base=http://127.0.0.1:18082` |
+
+**唯一未跑通**：`e2e-px4-sitl.ps1`——缺 PX4 SITL 环境（脚本现在会明确报"前置条件缺失"）。
+装好后照 `docs/sitl-integration.md`。
+
+**所有自起后端的脚本都已遵守的四条约定**（新脚本照抄，否则本机跑不起来）：
+
+1. `AF_BACKEND_PORT` 覆盖 REST 端口——本机 8080 可能被其他服务（如 opsmesh 容器）长期占用；
+2. 显式 `--spring.profiles.active=dev`——不指定会落 prod 连 localhost:5432，启动即挂；
+3. 就绪判据用业务端点 `/api/v1/drones`（只读且恒 200）而非 `actuator/health`——本机 Redis
+   6379 要 AUTH 或不通时，`RedisHealthContributor` 把 health 打成 503，会把早就起来的后端误杀；
+4. 自带内存库 `--spring.datasource.url=jdbc:h2:mem:<脚本名>;DB_CLOSE_DELAY=-1`——dev profile
+   默认落 `./data/aerofleet` 文件库，上一轮 e2e 留下的编队会被 `restoreFormations` 复活，
+   旧编队的 Keeper 把同一批 sysid 的飞机往旧队形拽，新编队的到位判定永远失败。
+
+跑之前先 `powershell -ExecutionPolicy Bypass -File scripts\kill-stale-e2e-jobs.ps1`
+清残留模拟器（UDP 口被占会让后端 BindException 起不来）。
+
+### 2.6 Docker 构建
 
 ```bash
 mvn -DskipTests package
@@ -125,7 +167,7 @@ bash scripts/e2e-smoke.sh
 
 注意：docker-compose 仅在 Linux 上可运行（MAVLink UDP 需要 host 网络模式）。
 
-### 2.6 行尾（CRLF/LF）与本仓的现状
+### 2.7 行尾（CRLF/LF）与本仓的现状
 
 **结论：CI 不受影响，本地看到 CRLF 属正常。**
 
