@@ -112,7 +112,15 @@ public class FormationService {
             if (entity.getState() == Formation.FormationState.DISSOLVED) {
                 continue;
             }
-            Set<Integer> members = new HashSet<>(entity.getMembers());
+            // members 理论非空，但历史脏数据 / Hibernate 6 懒加载代理都可能给 null：
+            // @PostConstruct 里一个 NPE 会让整个 backend 起不来（上次失败跑残留的
+            // 编队行就把本次启动毒死了）。空集合进不了 assign，直接跳过该行。
+            List<Integer> rawMembers = entity.getMembers();
+            if (rawMembers == null || rawMembers.isEmpty()) {
+                log.warn("formation {} has no members, skipping restore", entity.getFormationId());
+                continue;
+            }
+            Set<Integer> members = new HashSet<>(rawMembers);
             List<FormationGeometry.LocalPos> localPositions = FormationGeometry.compute(
                     entity.getShape(), members.size(), entity.getSpacing(), entity.getHeading());
             Map<Integer, Formation.GeoPos> assignments = assign(

@@ -11,12 +11,13 @@ import org.springframework.stereotype.Component;
  * 5s 未更新视为基准失效（{@link #CLOCK_STALE_MS}）。
  *
  * 集成策略（design.md §2.1.3.4）：{@code FormationClock} 注入 {@link DeviceRegistry}，
- * 在 {@code FormationService} 内部按 1Hz 轮询 Leader 心跳时间戳推算 time_usec，
+ * 读路径失效时按 Leader sysid 自愈重采（{@link #refreshFromRegistry(int)}），
  * <b>零修改</b> {@code TelemetryIngestService}。
  *
  * 并发安全：
- *   - {@code formationClockUs} volatile long：心跳线程写、REST 线程读
+ *   - {@code formationClockUs} volatile long：REST 线程读、注册表重采写
  *   - {@code lastLeaderHeartbeatMs} volatile long：同上
+ *   - {@code leaderSysid} volatile int：创建时写、读路径读
  */
 @Component
 public class FormationClock {
@@ -29,6 +30,9 @@ public class FormationClock {
 
     /** 最近一次 Leader 心跳到达的 epoch ms。 */
     private volatile long lastLeaderHeartbeatMs = 0;
+
+    /** 最近一次轮询的 Leader sysid（<=0 = 未设置），供读路径自愈重采。 */
+    private volatile int leaderSysid = -1;
 
     private final DeviceRegistry registry;
 
@@ -52,6 +56,14 @@ public class FormationClock {
      * @return 队内时间基准（微秒），或 -1 表示未建立/已失效
      */
     public long formationClockUs() {
+        if (formationClockUs == 0
+                || System.currentTimeMillis() - lastLeaderHeartbeatMs > CLOCK_STALE_MS) {
+            // 读路径自愈：Leader 心跳一直在流，但基准只在编队创建时采过一次，
+            // 5s 后必然判失效 ⇒ sync=true 的灯光命令（FR-11）恒定 400。
+            // 重采口径不变：仍是"Leader 最新心跳"，Leader 真离线时 registry
+            // 给不出新心跳，基准照旧失效。
+            refreshFromRegistry(leaderSysid);
+        }
         if (formationClockUs == 0) {
             return -1;
         }
@@ -72,11 +84,17 @@ public class FormationClock {
 
     /**
      * 从 DeviceRegistry 轮询 Leader 心跳时间戳，推算 time_usec 并更新基准。
-     * 由 FormationService 按 1Hz 调用（零修改 TelemetryIngestService）。
+     * 由 {@code FormationService.create()} 调用；读路径失效时也会自愈重采。
      *
      * @param leaderSysid Leader 飞机 sysid（<= 0 表示无 Leader，跳过）
      */
     public void pollLeaderHeartbeat(int leaderSysid) {
+        this.leaderSysid = leaderSysid;
+        refreshFromRegistry(leaderSysid);
+    }
+
+    /** 按记住的 Leader sysid 重采一次心跳；Leader 不在线时保持原基准不动。 */
+    private void refreshFromRegistry(int leaderSysid) {
         if (leaderSysid <= 0) {
             return;
         }
@@ -85,7 +103,6 @@ public class FormationClock {
             return;
         }
         // 从 epoch ms 推算 time_usec（微秒）：心跳时间戳 × 1000
-        long timeUsec = snap.lastHeartbeatMs * 1000L;
-        onLeaderHeartbeat(timeUsec);
+        onLeaderHeartbeat(snap.lastHeartbeatMs * 1000L);
     }
 }

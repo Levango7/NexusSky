@@ -401,9 +401,15 @@ public class FlightLogService {
             return List.of();
         }
         Integer jsonlTenant = TenantContext.getEffectiveTenantId();
-        List<Map<String, Object>> out = new ArrayList<>();
-        try {
-            for (String line : Files.readAllLines(f, StandardCharsets.UTF_8)) {
+        // limit<=0 表示"全天"，仍可流式全收；limit>0 只需末尾 N 条。
+        // 用定长环形缓冲而不是全量 readAllLines：1 机 1 天 1Hz 就是 8.6 万行，
+        // 全量读+过滤会把整天文件拖进堆，N 机 N 天线性恶化。
+        int cap = limit > 0 ? limit : Integer.MAX_VALUE;
+        List<Map<String, Object>> ring = new ArrayList<>(Math.min(cap, 1024));
+        try (var lines = Files.lines(f, StandardCharsets.UTF_8)) {
+            var it = lines.iterator();
+            while (it.hasNext()) {
+                String line = it.next();
                 if (line.isBlank()) {
                     continue;
                 }
@@ -419,7 +425,14 @@ public class FlightLogService {
                     if (sysid != null && sysid.intValue() != ((Number) m.get("sysid")).intValue()) {
                         continue;
                     }
-                    out.add(m);
+                    if (cap == Integer.MAX_VALUE) {
+                        ring.add(m);
+                    } else {
+                        if (ring.size() == cap) {
+                            ring.remove(0);   // 丢最旧，保住"最新 N 条"
+                        }
+                        ring.add(m);
+                    }
                 } catch (IOException badLine) {
                     // skip malformed line
                 }
@@ -428,10 +441,7 @@ public class FlightLogService {
             log.warn("flight log read failed: {}", e.getMessage());
             return List.of();
         }
-        if (limit > 0 && out.size() > limit) {
-            return out.subList(out.size() - limit, out.size());
-        }
-        return out;
+        return ring;
     }
 
     /** Track points for a drone on a day, reconstructed from telemetry lines. */
