@@ -7,10 +7,11 @@ import org.slf4j.LoggerFactory;
  * regulator-sim 启动入口：模拟 UOM 监管平台 HTTP API 的独立进程。
  *
  * <pre>
- * java -jar regulator-sim.jar [--port N] [--delay-ms N] [--error-rate F] [--preset-file PATH] [--help]
+ * java -jar regulator-sim.jar [--port N] [--delay-ms N] [--error-rate F] [--error-status N] [--preset-file PATH] [--help]
  *   --port          HTTP 监听端口（默认 18080）
  *   --delay-ms      响应延迟毫秒（默认 0）
  *   --error-rate    随机错误率 0.0-1.0（默认 0.0）
+ *   --error-status  故障注入返回的状态码（默认 500；4xx 用于验证"语义终态不重试"）
  *   --preset-file   预置数据文件路径（默认内置）
  *   --help          打印帮助
  * </pre>
@@ -25,10 +26,11 @@ public final class RegulatorSimMain {
         SimConfig config = SimConfig.parse(args);
 
         log.info("[regulator-sim] AeroFleet regulator simulator");
-        log.info("[regulator-sim] port={} delay-ms={} error-rate={} preset-file={}",
+        log.info("[regulator-sim] port={} delay-ms={} error-rate={} error-status={} preset-file={}",
                 config.port,
                 config.delayMs,
                 config.errorRate,
+                config.errorStatus,
                 config.presetFile != null ? config.presetFile : "(builtin)");
 
         MockUomServer server = new MockUomServer(config);
@@ -47,10 +49,11 @@ public final class RegulatorSimMain {
 
     /** 打印命令行帮助信息。 */
     static void usage() {
-        log.info("[regulator-sim] usage: regulator-sim [--port N] [--delay-ms N] [--error-rate F] [--preset-file PATH] [--help]");
+        log.info("[regulator-sim] usage: regulator-sim [--port N] [--delay-ms N] [--error-rate F] [--error-status N] [--preset-file PATH] [--help]");
         log.info("[regulator-sim]   --port          HTTP listen port (default 18080)");
         log.info("[regulator-sim]   --delay-ms      response delay in ms (default 0)");
         log.info("[regulator-sim]   --error-rate    random error rate 0.0-1.0 (default 0.0)");
+        log.info("[regulator-sim]   --error-status  fault injection status code (default 500; 4xx verifies no-retry)");
         log.info("[regulator-sim]   --preset-file   preset data file path (default builtin)");
         log.info("[regulator-sim]   --help          print this help");
     }

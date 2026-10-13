@@ -4,6 +4,115 @@
 
 ---
 
+## [Unreleased] — CI 卫生：`:latest` 不再由 PR 产生，取件类红自带取证重试
+
+> 触发这件事的是两次与代码无关的红，以及顺着它们挖出来的一条发布卫生问题。
+> 登记见 `.coord/GAPS.md` G-3（门禁归类不稳定）与 G-4（PR 推 `:latest`）。
+
+### 一、G-4：`pull_request` 事件也在往 ghcr 推 `latest`
+
+原形态是 `docker-build` job 里没有 job 级 `if:`，metadata 步骤写的是**无条件**的
+`type=raw,value=latest`，而 `Build and push` 步骤里 `docker build` 与 `docker push` 同在一步、
+没有任何事件门槛。实证（PR #61 的 run `38288389281`，job `Docker Build & Push (cloud-backend…)`
+= 114953437186，日志原文）：
+
+- `DOCKER_METADATA_OUTPUT_TAGS: ghcr.io/levango7/nexussky/cloud-backend:latest`
+- `#25 naming to ghcr.io/levango7/nexussky/cloud-backend:latest done`
+- `The push refers to repository [ghcr.io/levango7/nexussky/cloud-backend]`
+- 而 label 里 `org.opencontainers.image.revision = 043b475d…` 是 `refs/pull/61/merge`
+  那个**不对应仓库任何分支提交**的 sha
+
+⇒ 任何一条绿 PR 都会覆盖 `latest`；按 `latest` 部署的人（chart / raw k8s / compose 都是这个口径）
+拿到的可能不是 master，且镜像里的 revision 指向一个仓库里不存在的 commit。
+
+**改法（保留 PR 的构建能力，只关发布）**：
+
+| 处 | 改后 |
+|---|---|
+| `tags:` | `latest` 加 `enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}`；`sha-*` 保留 |
+| `Log in to GHCR` | 加同一条件——PR 上不再需要注册表凭据 |
+| 原 `Build and push` | 拆成 `Build`（无门槛，PR 照样构建）+ `Push`（只在 master 的 push 上跑） |
+
+部署清单**要跟着改一处注释**（初稿这里写的是"部署清单不用改，没有任何 manifest 钉 `:latest`"——
+manifest 那半是对的：compose 钉的是 `1.0.0`、chart 的缺省 `imageTag` 是 `0.1.0`，
+全仓确实没有写死 `:latest` 的地方；但**文档化的部署路径本身就是让人 `--set imageTag=latest`**，
+所以那句"不用改"不成立，已更正）。改的是 `deploy/helm/nexussky/values.yaml` 头部注释：
+它原来写着"CI 推送 tag 为 latest 与 sha-<short>"，本笔之后准确的说法是
+**只有 master 的 push 才推**，于是那行 `--set imageRegistry=ghcr.io/levango7/ --set imageTag=latest`
+现在保证拿到的是 master，而不再是"某条未合并 PR 的构建"。
+
+### 二、取件类红的取证与重试（`scripts/ci-mvn-retry.sh`，新）
+
+两次红的日志只有 `Non-resolvable import POM: org.junit:junit-bom:pom:5.11.4 (absent):
+Could not find artifact … in central` 和 `… surefire-junit-platform:jar:3.5.2 (absent)`，
+而**同一时刻同一台开发机 curl 这两个 URL 都是 HTTP 200**（`junit-bom:5.11.4` 不可能"不存在"），
+且两次请求只隔 ~15ms。光凭日志分不出"坐标写错"与"这个 runner 到中央仓的通路坏了"，
+只能靠重跑碰运气——可红已经记在 PR 头上了。
+
+新脚本包住两处最容易栽的 mvn 调用（`java` 的 `Build & test`、`java-level` 的 `Compile all modules`）：
+命中 `could not be resolved / Could not find artifact / Non-resolvable import POM` 三类文本时，
+先由 **runner 自己**按坐标回查中央仓、把真实 HTTP 状态码打进日志，再重试一次；
+重试仍红就把判读口径写在末尾（probe 200 ⇒ 通路/缓存问题，可重跑或抬缓存键尾 v 号；
+probe 也 404 ⇒ 坐标本身错，是要改代码的红、不要重跑掩盖）。
+
+**边界是刻意的**：只认那三类文本。测试失败、编译错误一律**不重试**——那是要人看的红。
+
+自测 4 情形（`mktemp` 里的假 `mvn` 计数调用次数，不只判退出码）：
+
+```
+PASS A 成功            (calls=1 rc=0 probes=0)
+PASS B 取件红后重试成功  (calls=2 rc=0 probes=1)
+PASS C 一直取件红       (calls=2 rc=1 probes=2)
+PASS D 非取件类红不重试  (calls=1 rc=1 probes=0)
+```
+
+D 这一半是这条脚本唯一"不显得在起作用"的部分，所以必须验：否则它会悄悄把真失败也刷绿。
+
+### 没做
+
+- 没抬 maven 缓存键尾 `v2 → v3`。本笔不改缓存内容，抬号只会白白触发一次 30 分钟冷构建；
+  真要抬是等 `maven-warm` 的离线自检第二次报"工具链换代"警告时（那时才有证据）。
+- 没动 `maven-warm` 已有的键一致性守卫与离线自检（`scripts/ci-maven-cache-key.sh`）——
+  它们管的是"抢占保存者把残缺 m2 冻进缓存"这一族，与今天这次的"consumer 侧取件瞬态"不同因。
+- 没动其它 5 处 `mvn` 调用（`java-upward-compat`、`verify -DskipTests`、e2e 构建等）。
+  只包今天真红过的两处；其余等出现同类红再收，避免一次改整片工作流。
+- 没有重跑 master 那条红的 run。按"不让带副作用的重跑掩盖问题"处理：`gh run rerun --failed`
+  会把当时被 skip 的 `Docker Build & Push` 复活并**真的重推三个镜像**，
+  所以交给下一个正常 push 覆盖（本 PR 合入后的那条 run 会同时验证新门槛）。
+
+### 验证
+
+- `python -c yaml.safe_load` 解析通过，19 个 job；`docker-build` 的步骤结论为
+  login `if=push&&master`、`Build`（无 if）、`Push if=push&&master`，tags 首行带 `enable=`。
+- `shellcheck -S info scripts/ci-mvn-retry.sh` 干净。
+- 全仓只剩一处 `docker push`，且在门槛之内。
+- 真环境终判在 CI：PR run 应看到三个 Docker job **只构建不登录不推**；
+  合入 master 后的 push run 才推 `latest`。
+
+## [Unreleased] — e2e 首次用 --error-rate：验「4xx 语义终态不重试」（#55 留下的验证缺口）（2026-10-12）
+
+> #55 修退避策略时自己写明："修完才谈得上用 --error-rate 去验 backend 的退避路径"，而
+> e2e-regulator 从未用过 --error-rate——那条路径一直没人端到端验过。本轮补上。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| ① | **regulator-sim 故障注入可配状态码** | `--error-rate` 原先只能注入 500，而 500 永远可重试，**根本造不出终态场景**。新增 `--error-status`（默认 500，100-599） |
+| ② | **regulator-sim 请求计数端点** | `GET /api/stats` 按"方法+路径"给出精确计数（reset 一并清零）。否则"只打了 1 次还是 4 次"只能靠耗时推断，那是弱信号 |
+| ③ | **解析器对齐 drone-sim 口径** | 认 `--key value` 与 `--key=value` 两种写法；**未知参数只警告不 `System.exit(1)`**——原实现在未知参数上直接退出进程，我的测试第一次跑就把 surefire fork 整个杀掉（报"fork 猝死"而不是可读失败） |
+| ④ | **e2e FR-40（6 项断言）** | 起 `--error-rate 1.0 --error-status 403` 的 sim：403 只到 sim **1 次**、无退避等待（<2s）；对照 `--error-status 500`：仍 **4 次**、等 7s。两个方向都钉住，防止"不重试"被误做成"永不重试" |
+
+**验证**：e2e-regulator **37 断言 0 失败**（原 31 + FR-40 六项）；regulator-sim 40/40
+（新 `FaultInjectionTest` 6 例：默认/可配/非法回落、计数与 reset、两种参数写法、未知参数不退出）；
+全 reactor BUILD SUCCESS。
+
+**顺带纠正一处执行口径**：首轮 FR-40  FAIL 在"403 仍重试 4 次"——排查后不是代码问题，
+是 **e2e 用的是 07:47 的旧 backend jar**（不含 #55）。重建 jar 后即绿。教训：本地 jar 陈旧
+会让"刚修的东西"表现成没修，e2e 跑前先确认 jar 时间戳。
+
+**CI 红过一次（覆盖率阈值）**：新测试把 regulator-sim 实测从 70% 抬到 75%+，而 pom 里
+声明值还是 0.70——`ci-coverage-threshold.sh --strict` 要求"实测向下取整到 5%"与声明值一致。
+按仓库口径把声明值抬到 0.75（本地复跑 `--strict` 已自洽：实测 77% ≥ 声明 75%）。
+
 ## [Unreleased] — 任务上传会话超时中止 + 死会话不再吞下载请求（2026-10-12）
 
 > 外部评估报告 P1 剩余项（drone-sim）："任务上传会话无超时/无重试上限，GCS 中途消失则永久
@@ -65,7 +174,7 @@ drone-sim 1412/0；全 reactor BUILD SUCCESS。
 
 ### 计数
 
-Java 4715 → **4707**（`link-sim` 117 → **107**：拆掉 11 个多跳用例、补 1 个真实帧用例；
+Java 4723 → **4713**（`link-sim` 117 → **107**：拆掉 11 个多跳用例、补 1 个真实帧用例；
 `cloud-backend` 2664、`drone-sim` 1412、`mavlink-core` 478、`regulator-sim` 34、
 `sdk-java` 12 均不变——本轮只动 link-sim）
 `cloud-backend` 2664 不变——本轮没动它）

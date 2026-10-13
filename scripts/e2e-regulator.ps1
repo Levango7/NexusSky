@@ -13,6 +13,7 @@
 #   FR-37 未激活上报拒绝：未 activate 的 serialNo telemetry → 403 NOT_ACTIVATED（打 sim 本体）
 #   FR-38 注销后激活拒绝：已注销 serialNo 再 activate → 403 CANCELLED（打 sim 本体）
 #   FR-39 reset 生效：POST /api/reset 后状态归零、可重新激活（打 sim 本体）
+#   FR-40 4xx 语义终态：--error-status 403 只请求一次、500 仍退避（打 sim 本体）
 #
 # 前置检查：regulator-sim / cloud-backend / drone-sim jar 存在、端口可用
 #
@@ -689,6 +690,88 @@ try {
 }
 
 # ============================================================
+# FR-40：4xx 是语义终态，不得退避重试（#55 修完后补的验证）
+# 起一个 --error-rate 1.0 --error-status 403 的 sim，经后端发一次 /verify，
+# 断言：① 只到 sim 一次（不是 1+3 次）；② 5xx 才走退避（+2 次对比）。
+# 此前 e2e-regulator 从未用过 --error-rate，这条路径一直没人验过。
+# ============================================================
+Step 'FR-40：4xx 语义终态不重试（精确请求计数 + 5xx 对照）'
+
+function Sim-RequestCount($method, $path) {
+    $stats = Send-GetJson "$RegulatorBase/api/stats"
+    $key = "$method $path"
+    if ($stats.requests -and $stats.requests.$key) { return [int]$stats.requests.$key }
+    return 0
+}
+
+try {
+    # 1) 403 注入
+    Stop-Process -Id $regulatorProc.Id -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    $regulatorProc = Start-Process -FilePath $java -ArgumentList @(
+        '-jar', $regulatorJar.FullName,
+        '--port', $RegulatorPort,
+        '--error-rate', '1.0',
+        '--error-status', '403'
+    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $regulatorLog
+    Register-Cleanup { Stop-Process -Id $regulatorProc.Id -Force -ErrorAction SilentlyContinue }
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep 1
+        try { $null = Invoke-WebRequest -Uri "$RegulatorBase/api/stats" -TimeoutSec 2 -UseBasicParsing; break } catch { }
+    }
+    Info "sim 已按 --error-rate 1.0 --error-status 403 重启"
+
+    # 2) 经后端发一次 verify（新版状态机下 sysid=2 已注销，用一个新 sysid）
+    $retrySysid = 77
+    $retryBody = @{ sysid = $retrySysid; productSerialNo = $TestSerialNo; realNameCertNo = $TestCertNo }
+    Send-PostJson "$RegulatorBase/api/reset" @{} | Out-Null
+    Send-GetJson "$RegulatorBase/api/stats" | Out-Null   # 触发计数
+    $verifyBefore = Sim-RequestCount 'GET' '/api/verify'
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $retryResp = Send-PostJson "$BackendBase/verify" $retryBody
+    $sw.Stop()
+    Info "verify 响应: $($retryResp | ConvertTo-Json -Compress)（耗时 $($sw.ElapsedMilliseconds) ms）"
+
+    $verifyAfter = Sim-RequestCount 'GET' '/api/verify'
+    $requests = $verifyAfter - $verifyBefore
+    Info "sim 收到的 verify 次数: $requests（终态应=1，可重试旧行为会=4）"
+    Check 'FR-40: 4xx 只请求一次（不退避重试）' ($requests -eq 1)
+    Check 'FR-40: verify 返回 ERROR（失败如实上报）' ($retryResp.verifyStatus -eq 'ERROR')
+    # 无重试 ⇒ 不应有 1s/2s/4s 的退避等待
+    Check 'FR-40: 无退避等待（耗时 < 2s）' ($sw.ElapsedMilliseconds -lt 2000)
+
+    # 3) 对照：500 必须仍走退避（1+3 次），否则"不重试"会被误做成"永不重试"
+    Stop-Process -Id $regulatorProc.Id -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    $regulatorProc = Start-Process -FilePath $java -ArgumentList @(
+        '-jar', $regulatorJar.FullName,
+        '--port', $RegulatorPort,
+        '--error-rate', '1.0',
+        '--error-status', '500'
+    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $regulatorLog
+    Register-Cleanup { Stop-Process -Id $regulatorProc.Id -Force -ErrorAction SilentlyContinue }
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep 1
+        try { $null = Invoke-WebRequest -Uri "$RegulatorBase/api/stats" -TimeoutSec 2 -UseBasicParsing; break } catch { }
+    }
+    $verifyBefore = Sim-RequestCount 'GET' '/api/verify'
+
+    $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
+    $retryResp2 = Send-PostJson "$BackendBase/verify" $retryBody
+    $sw2.Stop()
+    $verifyAfter2 = Sim-RequestCount 'GET' '/api/verify'
+    $requests2 = $verifyAfter2 - $verifyBefore
+    Info "500 对照：sim 收到 $requests2 次，耗时 $($sw2.ElapsedMilliseconds) ms"
+    Check 'FR-40: 500 仍会退避重试（次数 > 1）' ($requests2 -gt 1)
+    Check 'FR-40: 500 的退避有实际等待（耗时 > 2s）' ($sw2.ElapsedMilliseconds -gt 2000)
+    Check 'FR-40: 500 同样如实返回 ERROR' ($retryResp2.verifyStatus -eq 'ERROR')
+} catch {
+    Info "FR-40 异常: $_"
+    Check 'FR-40: 4xx 语义终态不重试' $false
+}
+
+# ============================================================
 # 清理：停止所有进程
 # ============================================================
 Step '清理：停止所有进程'
@@ -708,7 +791,7 @@ Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyCon
 # ============================================================
 Write-Host ''
 if ($Fail -eq 0) {
-    Write-Host 'REGULATOR E2E PASSED（FR-31~39 端到端验证通过）' -ForegroundColor Green
+    Write-Host 'REGULATOR E2E PASSED（FR-31~40 端到端验证通过）' -ForegroundColor Green
     exit 0
 } else {
     Write-Host 'REGULATOR E2E FAILED（部分断言未通过，见上方 FAIL 行）' -ForegroundColor Red
