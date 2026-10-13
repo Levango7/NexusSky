@@ -18,10 +18,155 @@
 
 **测试**：`MappingResultServiceTest` 三条 URL 断言改为"null + simulated=true"、URL 唯一性用例改为成果 ID 唯一性；
 `MappingControllerTest.fullWorkflow` 同步改写；`SituationOverlayServiceTest` +1（simulatedLayers 契约）。
-cloud-backend 2665/0；全 reactor BUILD SUCCESS；前端 292 不变。
+cloud-backend 2699/0；全 reactor BUILD SUCCESS；前端 292 不变。
 
 **边界**：真实摄影测量产物（空中三角测量/正射校正/三维重建）属生产阶段项；接入时把
 `simulated` 置 false 并回填真实 URL 即可，字段契约不用再改。
+## [Unreleased] — SPI 豁免账续清 5 条：五个业务模块适配器落契约测试（8 → 3）
+
+> 门禁 `scripts/check-spi-coverage.py`（#56 已合）首跑记下 9 条"从未被测试点名的生产实现"。
+> 本批续清其中 5 条：`DeliveryAdapter` / `EmergencyAdapter` / `FormationAdapter` /
+> `MappingAdapter` / `ShowAdapter`。**账上还剩 3 条**（`MavlinkDeviceGateway`、
+> `UdpTransportAdapter`、`RealEnvSource`），每条要自己的理由与自己的测试，不在本批。
+
+### 这三类事实只有运行时才暴露，所以必须由断言守着
+
+① **路由字符串**。`StepExecutor` 用 `adapters.get(module.name())` 按字符串查适配器
+（`StepExecutor.java:218`），表里的 key 来自各实现的 `getModuleType()`。任何一处把
+`"FORMATION"` 写成别的，该模块的每一步都会静默变成
+「未找到模块类型 FORMATION 的适配器」（`StepExecutor.java:144`）——**编译不会响，
+既有单测也不会响**，因为 `StepExecutorTest` 喂进去的一直是接口替身，这五个真实现
+从未被点名（这正是门禁记它账的原因）。本批用 `@EnumSource` 把 5 个枚举名逐个核到实现返回值，
+并反向断言实现集合不多于枚举：多出来的名字是注册表里永远查不到的死条目。
+
+② **Map → DTO 的键名翻译**。参数来自计划里的 JSON 字符串，键名纯靠约定。抄错一个键不会报错，
+只会静默取默认值——任务照样创建成功，但飞错高度、按错重叠率、少带一台机器。
+所以每个适配器都用 `ArgumentCaptor` 断"下游 DTO 里真的是我传进去的那些值"：
+配送的单号/载荷/优先级/归属 sysid，编队的 members/shape（顺带验小写 `circle` 被归一化成
+`CIRCLE`）/spacing/refAlt，测绘的 altitudeM 与**多边形顶点的 lat-lon 顺序**，
+表演的 droneSysids 与缺省 60s/50m。
+
+③ **失败不越界 + 单号透传**。协作者抛异常时适配器必须吞成 `ModuleResult.fail` 并把原因带回
+（编排线程不能被一个模块的故障带崩）；查不到任务时必须回 fail，不能回一个 ok 带空状态；
+`createTask` 返回的 taskId 必须是上游给的那个——`CREATE_AND_START_TASK` 会把它直接喂给
+`startTask`（`StepExecutor.java:253`），返回 null 等于把 null 传进下游。
+
+另钉两条容易被"顺手统一"改坏的不对称语义：**应急的 `createTask` 直接调 `start()`（创建即启动），
+`startTask` 只回读、不得再触发第二次**；**编队的 `abortTask` 下发的是 `dissolve`**（编队没有"暂停"这档）。
+
+### 变异测试：6 处，每处映射到一条具名用例
+
+`DELIVERY`→`DELIVARY`（2 条路由断言转红）、测绘顶点 lat/lon 互换、编队中止下发 `rtl` 而非 `dissolve`、
+应急 `startTask` 里追加一次 `start()`、配送创建失败被吞成 `ok`、配送查不到状态回 `ok`。
+还原后 24/0/0 回绿。跑法本身也补了两道防自欺的闸：锚点命中数必须恰好 1（预检，不改任何文件就退出），
+以及"编译红/零用例"不能冒充"断言没转红"。
+
+### 一处自我更正（写注释时判错了，实核后改口）
+
+初稿注释里我写"五个适配器对『查不到任务』的口径不一致：配送/编队/应急回 fail，
+测绘/表演在缺 `status` 键时回 `ok(taskId, "UNKNOWN")`，步骤会被判成成功"。
+**这个说法不成立**：`MappingController.requireTask`（:444）对未知或他租户单号是直接抛
+`NotFoundException`，而 `taskSummary` 恒写入 `status`——那条 `getOrDefault` 缺省分支在
+当前接线下**不可达**。于是本批不把防御性死代码钉成契约（钉了就等于要求它永久保留），
+只在测试类注释里说明；真实结论是五个实现对外答复其实一致：都是 fail，区别只在靠显式 null
+检查还是靠上游异常被吞。
+
+### 门禁与账
+
+`check-spi-coverage.py` 删 5 条豁免。删之前门禁先以 **exit 1 自报「豁免可以撤销」**
+（测试已存在、账上还挂着），这再次证明这本账会自己睁眼；删后
+**接口 13 / 实现 35 / 未验 3 / 已豁免 3**，exit 0，自测 6 情形仍全过。
+
+### 计数
+
+本批 **+24 例**。绝对数由 `mvn -B -o package` 后 `scripts/check-test-count-docs.py` 读
+surefire 实测、再驱动文档刷新——本分支中途 rebase 到过 `00c655e`（#60 落地，drone-sim +2），
+手算出来的总数一定会错，所以流程固定为"先重测、再刷文档、复跑门禁到 exit 0"。
+
+### 没做
+
+- 没碰这五个适配器的任何生产行为；本批只有测试 + 删豁免 + 文档口径。
+- 没有清剩下 3 条豁免：`MavlinkDeviceGateway`（要真实现替掉接口替身）、
+  `UdpTransportAdapter` 与 `RealEnvSource`（在 drone-sim，b1 刚合了 `VirtualDrone` 的改动，
+  等它这轮静下来再动，避免同文件打架）。
+- 没动 `.github/workflows/ci.yml`：SPI 门禁早在 #56 就接进 `dep-gate` 了，本批只是把账上的条目划掉。
+
+## [Unreleased] — SPI 豁免账清偿第 1 条：`UomReportSink` 有了假 UOM 契约测试（9 → 8）
+
+### 这条在还什么债
+
+`scripts/check-spi-coverage.py`（PR #56 落的门禁）首跑实测 **13 接口 / 35 生产实现 /
+9 个从未被任何测试点名**。当时的处理是"把没人验变成看得见的账"，**一条都没算已清偿**。
+本批开始还第一条：外部监管平台的上报通道 `UomReportSink`。
+
+它值得先还：真机/真平台才暴露的缺陷（报文格式、鉴权头、签名口径、重试判断）都在这类适配器里，
+而它过去只被"编译通过 + 启动日志看起来在工作"证明过。
+
+### 加了什么
+
+`UomReportSinkContractTest` 10 例，用 JDK `com.sun.net.httpserver.HttpServer` 当假 UOM，
+断言的是**线上看得见的东西**而不是方法返回值：
+
+| # | 钉住什么 |
+|---|---|
+| 1 | 激活上报的线格式：`POST /api/activate`、`Content-Type`、`X-API-Key`、body 里 `serialNo/activationTime/lat/lon` |
+| 2 | **签名可被平台方复算**：测试自己按 `METHOD\nPATH\nTS\nBODY` 重算 HMAC-SHA256 并断言等于 `X-Signature` |
+| 3 | 不配 `signingKey` 时**不发**签名头（不留"配了空串也照样签"的半开状态） |
+| 4 | 403 是终态：`maxRetry=3` 也只发 1 次 |
+| 5 | 503 可重试，第二次成功后续跑；结果取第二次响应 |
+| 6 | 429 虽是 4xx 但必须重试（配额语义 ≠ 请求被拒） |
+| 7 | 实名查询脱敏在 sink 内完成（`张三 → 张*`），原名不外传 |
+| 8 | 平台给了不认识的 status 串 ⇒ `ERROR`，不抛也不当成 `VERIFIED` |
+| 9 | 平台不可达 ⇒ 走 `errorMessage` 返回，不抛异常（调用方是上报线程） |
+| 10 | 遥测报文带飞行态：`sysid/serialNo/alt/speed/heading/status=AIRBORNE` |
+
+**为什么必须显式 `setMaxRetry(>0)`**：#55 那条改动已经踩过一次——在 `maxRetry=0` 下
+"只发一次请求"无论实现对错都成立。第 4 条若不设 `maxRetry=3` 就是个空转断言。
+
+### 三条断言各自咬住什么（反向变异，不是自我表扬）
+
+一次性注入三处行为变异：签名字段顺序颠倒 / 脱敏去掉 / 绕过 `ReportRetryPolicy.isTerminal`
+⇒ 恰好 3 例转红，且一一对应：
+
+```
+UomReportSinkContractTest.signatureIsRecomputableByThePlatform:166   [签名串错一位…]
+UomReportSinkContractTest.client403IsTerminalNotRetried:197          [4xx 重试救不回来…]
+UomReportSinkContractTest.verifyMasksOwnerName:238
+```
+
+撤销变异后 10 例复绿。
+
+### 门禁自己抓了我一次（这条机制有效的直接证据）
+
+测试落地后、还没删账之前跑 `check-spi-coverage.py`：
+
+```
+违规 1 条：
+  - 豁免可以撤销：UomReportSink 现在已被测试引用，请从 EXEMPT 删除（棘轮只准拧紧）
+GATE_EXIT=1
+```
+
+删掉账上那一条之后 ⇒ `接口 13 / 实现 35 / 未验 8 / 已豁免 8`、`exit 0`，
+脚本 `--self-test` 6 种情形仍全过。**"9 条"这个数现在能由结构复现，不再是一句话。**
+
+### 没做
+
+- 本批只删 `UomReportSink` 这一条豁免，没有顺手清别的（当时账上余 8 条：`MavlinkDeviceGateway`、
+  `UdpTransportAdapter`、`RealEnvSource` 与 5 个 `ModuleAdapter`）。每条都要自己那段
+  "没断言过就说没验"的账；5 个 `ModuleAdapter` 由同分支的下一批补上，即本版里本条的上面那条。
+- 没有改 `UomReportSink` 的任何生产行为——本批只有测试 + 删一条豁免。
+- 没动脚本头部那段"13/35/9"的历史叙述：它记的是 2026-10-12 首跑时点的事实，改成今天的数就是篡改记录。
+
+### 计数
+
+本批 **+10 例**（一条 `UomReportSinkContractTest`）。绝对数不写在这里：这两批 SPI 测试在同一分支
+一起落地，中途 master 还并进过 #60（drone-sim +2），所以最终 Java / cloud-backend 计数一律以
+`mvn -B -o package` 后 `scripts/check-test-count-docs.py` 读到的 surefire 实测为准、由它驱动刷文档，
+本文只记自己那批的增量。上一版这里写的是 `4715 → 4725`，那是基点 `cf2748c` 上的量，rebase 后已不成立，
+故改成增量口径（分支尚未推送过，改的是未发布草稿，不是既成记录）。
+
+---
+
 ## [Unreleased] — CI 卫生：`:latest` 不再由 PR 产生，取件类红自带取证重试
 
 > 触发这件事的是两次与代码无关的红，以及顺着它们挖出来的一条发布卫生问题。
