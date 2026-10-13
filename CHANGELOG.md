@@ -4,6 +4,57 @@
 
 ---
 
+## [Unreleased] — 拆掉 link-sim 帧尾私有字节方案的多跳扩展：它在真实帧上不可能工作（2026-10-12）
+
+### 结论先行
+
+`--multi-hop` 此前是个**死旗标**（`MultiHopRelayConfig.parse()` 在主源码零调用，
+`RelayNode` 两个公开构造器都写死 `defaults()`）。原以为"接上线路"就能让 README 的
+多跳宣称变成真的。用真实 MAVLink v2 帧实测后确认：**接上线路的那一刻，
+约 100% 真实流量会被丢**。所以不是接线问题，是实现在真实帧上根本不可能工作。
+
+### 三处硬伤（全部实测，非推断）
+
+| # | 问题 | 实测证据 |
+|---|---|---|
+| 1 | `extractHopCount` 取帧**最后一个字节**当跳数，而 MAVLink v2 帧末两字节是 CRC | 一帧带签名的 Heartbeat：realLen=34，CRC 末字节=**106** > MAX_HOPS=15 ⇒ 入口即判「越界」丢弃 |
+| 2 | `writeHopCount` 对 >=13B 的帧**原地覆写**最后一字节，而所有真实帧都 >=13B | firstDiffAt=33（距帧尾 0 字节）⇒ 覆写的正是 CRC，帧到对端必然 CRC 校验失败 |
+| 3 | 改成「追加尾字节」在 link-sim 内部能自洽（解析器容忍帧尾多一字节），但链路对端（cloud-backend `UdpGateway` / drone-sim）不知道尾字节存在、不会剥 | 追加 1 字节后 21B→22B，`MavlinkParser` 仍解出 1 帧；但对端行为未定义 |
+
+根因：**MAVLink v2 帧本身没有 TTL/hop 字段**。真要多跳必须先定义双方都会的封装协议。
+
+### 为什么拆不是修
+
+留着这个开关的风险大于价值：
+
+- README 敢写「一跳/多跳静态中继」，用户以为能开
+- 它产生了 **11 个假绿测试**（`MultiHopRelayTest`），全部基于 `new byte[13]`
+  这类合成数组——合成数组的「最后一字节」是随手填的 7，真实帧的最后一字节是 CRC。
+  11 个用例全绿，也没能发现上面第 1、2 条。
+
+这与本仓反复出现的是同一个教训：**测试用的数据形态不对，绿了也证明不了任何事**。
+
+### 改了
+
+- 删 `MultiHopRelayConfig.java`（整个类）
+- `RelayNode.java` 回到纯粹的一跳透明转发：删 hopCount 相关的常量/字段/构造参数/
+  两个 extract/write 方法/四处判决块/`ScheduledPacket.hopCount`，**一行行为都不改**
+  （既有 `MeshRelayTest` 10 例全绿，含双向独立损伤、learn-once、丢包语义）
+- README：「一跳/多跳静态中继」→「一跳静态中继」，M0a 段补「为什么只有一跳」
+- `RelayNode` 底部留完整论证，将来要恢复多跳时先定协议
+
+### 补的回归护栏
+
+新增 `MeshRelayTest.realMavlinkFrame_isForwardedByteForByte`：用**真实 MAVLink v2 帧**
+断言中继输出与输入逐字节相同。这正是那 11 个测试该做而没做的事。
+变异验证（把上行丢弃判据判反）→ 6 个用例转红，含本用例。
+
+### 计数
+
+Java 4761 → **4751**（`link-sim` 117 → **107**：拆掉 11 个多跳用例、补 1 个真实帧用例；
+其余模块取 master 实测值不变）
+
+
 ## [Unreleased] — 修 flight_log 的时间戳口径：绝对时刻入库，并给 CI 装上唯一能看见它的眼睛（2026-10-12）
 
 ### 症状（本机 +08、真实 PostgreSQL 实测）
