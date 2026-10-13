@@ -76,11 +76,26 @@ class MeshRelayTest {
         RelayNode node = new RelayNode(cfg, lanEngine(), lanEngine());
         startRelay(node);
 
-        // 真实 MAVLink v2 帧（Heartbeat + 签名块），不是合成数组
+        // 真实 MAVLink v2 帧：Heartbeat + **签名块**（INC bit0 置位）。
+        //
+        // 这里必须用四参 toFrame(..., signer) 重载。踩过的坑：三参 toFrame(sysid, compid, seq)
+        // 走 MavlinkFrame.of(...)，incompatibilityFlags=0，产出的是未签名帧（21B）——
+        // 而拆多跳的实测证据恰恰来自**签名**帧（34B，CRC 末字节 106）。用未签名帧当护栏，
+        // 针对签名块 / applyStripSignature / 签名帧长度判据的回归全都抓不到。
+        // 所以下面另有断言钉死"这确实是一帧签名帧"，注释与构造不同步的事故不会再复发。
+        io.aerofleet.mavlink.security.MavlinkSigner signer =
+                new io.aerofleet.mavlink.security.MavlinkSigner(true, "link-sim-real-frame-secret");
         io.aerofleet.mavlink.messages.Heartbeat hb =
                 new io.aerofleet.mavlink.messages.Heartbeat(
                         0, 2, 6, 0, io.aerofleet.mavlink.enums.MavEnums.MAV_STATE_ACTIVE);
-        byte[] real = hb.toFrame(42, 1, 0).encodeV2();
+        byte[] real = hb.toFrame(42, 1, 0, signer).encodeV2();
+
+        // 钉死帧形：签名帧 = 10 字节 v2 帧头 + payload + 2 字节 CRC + SIGNATURE_DATA_LENGTH
+        int expectedLen = 10 + hb.encode().length + 2 + io.aerofleet.mavlink.MavlinkFrame.SIGNATURE_DATA_LENGTH;
+        Assertions.assertEquals(1, real[2] & 0x01,
+                "INC bit0 必须置位，否则这不是签名帧，本用例就退化成了未签名帧的护栏");
+        Assertions.assertEquals(expectedLen, real.length,
+                "签名帧长度应为 10+payload+2+" + io.aerofleet.mavlink.MavlinkFrame.SIGNATURE_DATA_LENGTH);
 
         try (DatagramSocket droneListener = new DatagramSocket(new InetSocketAddress("127.0.0.1", 0));
              DatagramSocket gcs = new DatagramSocket()) {
