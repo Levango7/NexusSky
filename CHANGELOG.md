@@ -65,7 +65,9 @@ drone-sim 1412/0；全 reactor BUILD SUCCESS。
 
 ### 计数
 
-Java 4715 → **4705**（`link-sim` 117 → **107**：拆掉 11 个多跳用例、补 1 个真实帧用例；
+Java 4715 → **4707**（`link-sim` 117 → **107**：拆掉 11 个多跳用例、补 1 个真实帧用例；
+`cloud-backend` 2664、`drone-sim` 1412、`mavlink-core` 478、`regulator-sim` 34、
+`sdk-java` 12 均不变——本轮只动 link-sim）
 `cloud-backend` 2664 不变——本轮没动它）
 
 ---
