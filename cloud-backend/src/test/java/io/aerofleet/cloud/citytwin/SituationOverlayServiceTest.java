@@ -3,6 +3,7 @@ package io.aerofleet.cloud.citytwin;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -149,5 +151,16 @@ class SituationOverlayServiceTest {
 
         List<RealtimeSituation> situations = service.getSituationsBetween(from, to);
         assertFalse(situations.isEmpty());
+    }
+
+    @Test
+    @DisplayName("快照显式声明哪些层是模拟的（车辆/人员/告警），无人机不算")
+    void situationDeclaresSimulatedLayers() {
+        RealtimeSituation situation = service.getCurrentSituation();
+
+        assertThat(situation.getSimulatedLayers())
+                .as("车辆/人员/告警由模拟生成，必须显式告知；无人机是 DeviceRegistry 真数据")
+                .containsExactlyInAnyOrder("vehicles", "personnel", "alerts");
+        assertThat(situation.getSimulatedLayers()).doesNotContain("drones");
     }
 }

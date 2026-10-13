@@ -14,8 +14,25 @@ public class RealtimeSituation {
     private List<VehiclePosition> vehicles;
     private List<PersonPosition> personnel;
     private List<AlertMarker> alerts;
+    /**
+     * 本快照里哪些层是<b>模拟</b>出来的（取值 {@code drones} / {@code vehicles} /
+     * {@code personnel} / {@code alerts}）。
+     * <p>
+     * 为什么必须显式：无人机位置来自 {@code DeviceRegistry} 真数据，而车辆/人员/告警
+     * 是 {@code SituationOverlayService} 的模拟生成。两类来源混在一个对象里返回，
+     * 消费端无法区分——界面上就会把模拟车流当成实时路况。空列表表示全部为真数据。
+     */
+    private List<String> simulatedLayers = List.of("vehicles", "personnel", "alerts");
 
     public RealtimeSituation() {
+    }
+
+    public List<String> getSimulatedLayers() {
+        return simulatedLayers;
+    }
+
+    public void setSimulatedLayers(List<String> simulatedLayers) {
+        this.simulatedLayers = simulatedLayers;
     }
 
     public RealtimeSituation(long timestamp, List<DronePosition> drones,

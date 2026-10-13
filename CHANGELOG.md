@@ -4,6 +4,24 @@
 
 ---
 
+## [Unreleased] — 测绘成果与城市孪生态势：不再假装有真数据（外部评估最后两项假能力）（2026-10-12）
+
+> 外部评估报告原话："界面上展示的面板 ≠ 后端有能力支撑——ai、mapping 成果、citytwin 态势、
+> autodispatch 下发四处存在'看起来能用、实际是假的'断层"。ai 与 autodispatch 已修（P0 两项），
+> 本轮清掉剩下两项。原则沿用同一条：**要么真做，要么如实说没有**。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| ① | **测绘成果不再伪造下载链接** | 原实现产出 `https://storage.mapping/results/<id>/orthophoto.tif` 这类**不存在的域名**，前端渲染成可点的"查看"——点开就是 DNS 错误，看起来像系统坏了。现在 URL 一律为 null；DTO 增加 `simulated`（恒 true）+ `simulatedReason`，把"真摄影测量管线未接入"写进字段契约，调用方与前端都能区分 |
+| ② | **城市孪生态势分层标注** | 快照把 DeviceRegistry 的真飞机位置与 `generateSimulated*` 造出来的车/人/告警混在一个对象里返回，消费端无法区分——界面上就把模拟车流当实时路况。现 `RealtimeSituation.simulatedLayers` 显式列出哪些层是模拟的（vehicles/personnel/alerts，**不含 drones**） |
+| ③ | **前端两处标注** | 测绘面板对模拟成果给警示条（含原因）、不再渲染假链接；城市孪生的车辆/人员/告警计数后加"·模拟"角标，无人机标"（真机）" |
+
+**测试**：`MappingResultServiceTest` 三条 URL 断言改为"null + simulated=true"、URL 唯一性用例改为成果 ID 唯一性；
+`MappingControllerTest.fullWorkflow` 同步改写；`SituationOverlayServiceTest` +1（simulatedLayers 契约）。
+cloud-backend 2703/0；全 reactor BUILD SUCCESS；前端 292 不变。
+
+**边界**：真实摄影测量产物（空中三角测量/正射校正/三维重建）属生产阶段项；接入时把
+`simulated` 置 false 并回填真实 URL 即可，字段契约不用再改。
 ## [Unreleased] — 拆掉 link-sim 帧尾私有字节方案的多跳扩展：它在真实帧上不可能工作（2026-10-12）
 
 ### 结论先行

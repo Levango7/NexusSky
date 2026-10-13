@@ -276,6 +276,12 @@ export default function CityTwinPanel({ twinStates }) {
     setMarkerForm((prev) => ({ ...prev, [key]: value }))
   }, [])
 
+  // 派生：哪些态势层是后端模拟生成的（后端 simulatedLayers 字段，缺省视为前向兼容=true）
+  const simulatedLayers = Array.isArray(pick(situation, 'simulatedLayers'))
+    ? pick(situation, 'simulatedLayers')
+    : (situation ? ['vehicles', 'personnel', 'alerts'] : [])
+  const isSimLayer = (name) => simulatedLayers.includes(name)
+
   // 派生：态势实体计数
   const entityCounts = situation ? {
     drones: Array.isArray(pick(situation, 'drones')) ? pick(situation, 'drones').length : 0,
@@ -329,10 +335,10 @@ export default function CityTwinPanel({ twinStates }) {
             <div style={{ fontSize: 11, color: 'var(--text)', marginBottom: 6 }}>实时态势</div>
             {situation ? (
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>无人机：<b style={{ color: 'var(--cyan)' }}>{entityCounts.drones}</b></div>
-                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>车辆：<b style={{ color: 'var(--ok)' }}>{entityCounts.vehicles}</b></div>
-                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>人员：<b style={{ color: 'var(--text)' }}>{entityCounts.persons}</b></div>
-                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>告警：<b style={{ color: 'var(--crit)' }}>{entityCounts.alerts}</b></div>
+                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>无人机：<b style={{ color: 'var(--cyan)' }}>{entityCounts.drones}</b>（真机）</div>
+                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>车辆：<b style={{ color: 'var(--ok)' }}>{entityCounts.vehicles}</b>{isSimLayer('vehicles') && <span style={{ color: 'var(--warn)' }}>·模拟</span>}</div>
+                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>人员：<b style={{ color: 'var(--text)' }}>{entityCounts.persons}</b>{isSimLayer('personnel') && <span style={{ color: 'var(--warn)' }}>·模拟</span>}</div>
+                <div style={{ fontSize: 10, color: 'var(--dim-2)' }}>告警：<b style={{ color: 'var(--crit)' }}>{entityCounts.alerts}</b>{isSimLayer('alerts') && <span style={{ color: 'var(--warn)' }}>·模拟</span>}</div>
               </div>
             ) : (
               <div className="empty-hint">暂无态势数据</div>

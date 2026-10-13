@@ -43,6 +43,16 @@ public final class MappingResult {
     private long processingTimeSec;
     /** 文件大小（MB）。 */
     private double fileSizeMB;
+    /**
+     * 是否为模拟成果。
+     * <p>
+     * 真摄影测量管线（空中三角测量/正射校正/三维重建）未接入前恒为 {@code true}。
+     * 暴露这个字段而不是把链接做成能点的样子：调用方与前端必须能区分"真成果"与
+     * "演示数据"，否则点开一个不存在的下载域名，只会让人以为系统坏了。
+     */
+    private boolean simulated = true;
+    /** 模拟原因（{@link #simulated} 为 true 时说明缺什么）。 */
+    private String simulatedReason;
 
     public MappingResult() {
     }
@@ -100,4 +110,20 @@ public final class MappingResult {
 
     public double getFileSizeMB() { return fileSizeMB; }
     public void setFileSizeMB(double fileSizeMB) { this.fileSizeMB = fileSizeMB; }
+
+    public boolean isSimulated() {
+        return simulated;
+    }
+
+    public void setSimulated(boolean simulated) {
+        this.simulated = simulated;
+    }
+
+    public String getSimulatedReason() {
+        return simulatedReason;
+    }
+
+    public void setSimulatedReason(String simulatedReason) {
+        this.simulatedReason = simulatedReason;
+    }
 }
