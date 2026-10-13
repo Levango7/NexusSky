@@ -51,10 +51,10 @@ mission = Mission(waypoints=[
     Waypoint(lat=39.9050, lon=116.4080, alt=60),
     Waypoint(lat=39.9060, lon=116.4090, alt=40),
 ])
-client.missions.upload(1, mission)
+client.missions().upload(1, mission)
 
 # 方式二：使用 Waypoint 列表
-client.missions.upload(1, [
+client.missions().upload(1, [
     Waypoint(lat=39.9042, lon=116.4074, alt=50),
     Waypoint(lat=39.9050, lon=116.4080, alt=60),
 ])
@@ -293,7 +293,7 @@ try:
         Waypoint(lat=39.9050, lon=116.4080, alt=60),
         Waypoint(lat=39.9060, lon=116.4090, alt=40),
     ])
-    client.missions.upload(1, mission)
+    client.missions().upload(1, mission)
     print("任务上传完成")
 
     # 5. 解锁并起飞
@@ -304,7 +304,7 @@ try:
     client.send_command(1, "start_mission")
 
     # 7. 查询飞行日志
-    logs = client.flight_logs.list()
+    logs = client.flight_logs().list()
     print(f"飞行日志数量: {len(logs)}")
 
     # 8. 返航

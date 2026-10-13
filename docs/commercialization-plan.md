@@ -296,9 +296,9 @@ client = NexusSkyClient(
 )
 
 # 设备管理
-drones = client.drones.list()
-drone = client.drones.get(1)
-telemetry = client.drones.telemetry(1)
+drones = client.drones().list()
+drone = client.drones().get(1)
+telemetry = client.drones().telemetry(1)
 
 # 任务上传
 mission = client.mission.builder() \
@@ -306,13 +306,13 @@ mission = client.mission.builder() \
     .add_waypoint(22.60, 113.94, 60) \
     .add_rtl() \
     .build()
-client.drones.upload_mission(1, mission)
+client.drones().upload_mission(1, mission)
 
 # 飞行命令
-client.drones.arm(1)
-client.drones.takeoff(1, altitude=30)
-client.drones.start_mission(1)
-client.drones.rtl(1)
+client.drones().arm(1)
+client.drones().takeoff(1, altitude=30)
+client.drones().start_mission(1)
+client.drones().rtl(1)
 
 # 集群调度
 result = client.scheduling.create_task(
