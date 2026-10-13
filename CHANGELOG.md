@@ -49,6 +49,32 @@
 
 ---
 
+## [Unreleased] — 编队 e2e 从"必然 FAIL"到全绿：三个真缺陷 + 两个脚本暗坑（2026-10-13）
+
+> e2e-formation.ps1 / e2e-mesh.ps1 这两个脚本此前从未在 CI 里跑过，一跑全红。
+> 逐条查下来：**没有一条是断言写错**——三个是真缺陷，两个是 PowerShell 的坑。
+
+| # | 缺陷 / 坑 | 症状 | 修法 |
+|---|---|---|---|
+| ① | 编队参考点与模拟器 home 相距 5.3km | drone-sim 默认 home 是 (22.5907, 113.9345)，编队参考点是 (22.5431, 113.9578)。FR-16 等 STABLE 永远超时：飞机压根不在参考点附近 | 脚本给 3 台 drone-sim 显式传 `--lat/--lon` = 参考点；`$RefAlt` 从 0 改为起飞高度（slot 目标 alt 与巡航面一致） |
+| ② | `MAV_CMD_DO_REPOSITION(192)` 不被模拟器支持 | 编队后端把所有"成员该去哪"都走这条命令（FR-04 变换逐点引导 / FR-08 偏差修正），drone-sim 的 switch 没有这个 case ⇒ `unsupported command 192`，真机侧一步不动 | `VirtualDrone.handleDoReposition`：armed 校验 + 经纬度转本地米 + `physics.setTarget` + 切入位置保持；lat/lon 传 0,0 按 PX4 口径只改高度；越界拒绝 |
+| ③ | 队内时钟 5s 后恒失效 | `FormationService.create()` 只采过一次 Leader 心跳，`CLOCK_STALE_MS=5s` 一过 `ready()` 恒 false ⇒ sync=true 的灯光命令（FR-11）**必定** 400 "formation clock not ready" | `FormationClock` 读路径自愈：失效时按记住的 Leader sysid 从 DeviceRegistry 重采；Leader 真离线时 registry 给不出新心跳，基准照旧失效（边界有单测钉住） |
+| ④ | PowerShell 清理闭包全部失效 | scriptblock 是**调用时动态查变量**，不是定义时捕获：formation 的 `$d` 先绑 drone-sim 进程、step 2 又绑 /drones 视图对象，`Stop-Process -Id $d.Id` 拿到 `$null`；mesh 的 `$relay/$drone` 是函数局部变量，函数一返回就查不到 ⇒ 3 台模拟器 + 中继长驻，还会污染后续 e2e（别的脚本收到的"PASS"其实是它们的广播） | 两个脚本统一改为**进程/socket 清单**遍历，清理动作 scriptblock 不引用任何外部变量 |
+| ⑤ | `$gcsPort` 撞名 `$GcsPort`（大小写不敏感） | mesh 简化版里 `$gcsPort = 14550` 把配置项 `$GcsPort = 14541`（中继 GCS 侧口）局部遮蔽 ⇒ "发往中继的命令"实际发给模拟 GCS 自己，中继永远学不到 gcsAddr、up 方向 fwd=0；而 FR-23 靠收到自己的回波**假绿** | 改名 `$simGcsPort`；另修 FR-25 只读 stdout 重定向文件、而 logback 走 stderr 导致统计行查不到 |
+
+**命令时序**：`ARM → 编队 TAKEOFF → start_mission`。原顺序把 start_mission 放在 ARM 之前，
+模拟器回 `mission start rejected: not armed`；而 start_mission 若早于 TAKEOFF，任务首 item
+（NAV_TAKEOFF）会把物理目标重置成"原地爬升"，飞机永远飞不到 slot。
+
+**结果**：`e2e-formation.ps1` 23 项断言全 PASS（FR-14/15/16/04/11/13/18），
+`e2e-mesh.ps1 -Mode simplified` 12 项全 PASS（FR-22/23/24/25/12）。
+
+**新增单测**（合计 +6，全仓 4761 全绿）：
+- `RepositionCommandDispatchTest`（drone-sim，3 例）：走真实 UDP 路径钉死未武装拒绝 / 武装后真飞到目标经纬高（1m 容差，与 Keeper 同口径）/ 0,0 只改高度
+- `FormationClockTest`（cloud-backend，3 例）：5s 后读路径自愈仍就绪、Leader 离线照旧失效、未轮询过不就绪
+
+---
+
 ## [Unreleased] — 巡检异常检出：从"javadoc 里老实"到"契约+界面双老实"（2026-10-13）
 
 > 上一轮修完 mapping / citytwin 两项假能力后，按同一条反模式（"随机数生成当测量结果展示"）

@@ -6,6 +6,7 @@ import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
@@ -37,7 +38,10 @@ public class FormationEntity {
     private double refAlt;
     private int leaderSysid;
 
-    @ElementCollection
+    // fetch=EAGER：restoreFormations 在 @PostConstruct（无 Session）里读 members，
+    // 默认 LAZY 会 LazyInitializationException 直接把 backend  startup 炸掉。
+    // 编队成员量级是个位到几十，急加载代价可忽略。
+    @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "formation_members", joinColumns = @JoinColumn(name = "formation_id"))
     @Column(name = "member_sysid")
     private List<Integer> members = new ArrayList<>();

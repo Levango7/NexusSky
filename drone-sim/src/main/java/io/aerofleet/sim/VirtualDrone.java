@@ -901,6 +901,7 @@ public final class VirtualDrone implements AutoCloseable {
                 // Not required, but easy: descend in place from wherever we are.
                 result = handleLand();
             }
+            case MavEnums.MAV_CMD_DO_REPOSITION -> result = handleDoReposition(cmd);
             case io.aerofleet.mavlink.enums.MavEnums.MAV_CMD_IMAGE_START_CAPTURE -> {
                 // Camera trigger: capture a shot of the synthetic world.
                 result = handleImageCapture(senderSysid);
@@ -1150,6 +1151,56 @@ public final class VirtualDrone implements AutoCloseable {
             return MavEnums.MAV_RESULT_DENIED;
         }
         physics.holdAt(0.0);
+        return MavEnums.MAV_RESULT_ACCEPTED;
+    }
+
+    /**
+     * MAV_CMD_DO_REPOSITION (192)：引导飞到指定经纬高并悬停保持。
+     *
+     * <p>编队后端（FR-04 队形变换逐点引导 / FR-08 偏差修正）把每个成员的目标位
+     * 用这条命令下发。此前模拟器不认识它 ⇒ "unsupported command 192"、变换与
+     * 保持链路在真机侧完全空转。
+     *
+     * <p>语义贴近 PX4 guided 模式：允许在任务执行中下发，立即把本机切到位置保持
+     * （ARMED），朝目标位飞行，到位后悬停；再次收到 DO_REPOSITION 就更新目标继续飞。
+     * 退出 MISSION 是必要的——否则 {@code advanceMission} 会把引导点判成"当前航点
+     * 已到位"并推进到下一个 item（编队前置任务里就是 RTL 回家），编队当场散架。
+     * lat/lon 传 0,0 表示只改高度（保持当前水平位置），与 PX4 同口径。
+     */
+    private int handleDoReposition(CommandLong cmd) {
+        if (state == FlightState.CRASHED) {
+            pushStatus(MavEnums.MAV_SEVERITY_ERROR, "Vehicle crashed: reboot required");
+            return MavEnums.MAV_RESULT_DENIED;
+        }
+        if (!state.armed()) {
+            SimLog.warn("DO_REPOSITION rejected: not armed");
+            pushStatus(MavEnums.MAV_SEVERITY_WARNING, "Reposition denied: not armed");
+            return MavEnums.MAV_RESULT_DENIED;
+        }
+        double lat = cmd.param5;
+        double lon = cmd.param6;
+        float alt = cmd.param7;
+        if (Double.isNaN(alt)) {
+            alt = (float) physics.alt();
+        }
+        if (lat == 0.0 && lon == 0.0) {
+            physics.holdAt(Math.max(alt, 0.0));
+            SimLog.info("DO_REPOSITION: hold at current position, alt="
+                    + String.format("%.1f", (double) alt) + "m");
+        } else {
+            if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                SimLog.warn("DO_REPOSITION rejected: lat/lon out of range ("
+                        + lat + "," + lon + ")");
+                return MavEnums.MAV_RESULT_DENIED;
+            }
+            double tn = GeoUtil.north(config.lat, config.lon, lat, lon);
+            double te = GeoUtil.east(config.lat, config.lon, lat, lon);
+            physics.setTarget(tn, te, Math.max(alt, 0.0));
+            SimLog.info("DO_REPOSITION: fly to lat=" + lat + " lon=" + lon
+                    + " alt=" + String.format("%.1f", (double) alt) + "m");
+        }
+        state = FlightState.ARMED;
+        pushStatus(MavEnums.MAV_SEVERITY_INFO, "Repositioning");
         return MavEnums.MAV_RESULT_ACCEPTED;
     }
 

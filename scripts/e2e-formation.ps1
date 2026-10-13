@@ -3,7 +3,7 @@
 # 依据：design.md §6.6 场景编排 + spec.md FR-18 + tasks.md T16
 # 场景：3 机编队创建 → 起飞到位 → 队形变换（LINE→CIRCLE）→ 灯光同步 → 解散
 #   - 启动 cloud-backend（UdpGateway discovery 指向 3 台 drone-sim 端口）
-#   - 启动 3 台 drone-sim（sysid=1/2/3，不同端口，同一参考点附近）
+#   - 启动 3 台 drone-sim（sysid=1/2/3，不同端口，home 显式设为编队参考点）
 #   - 可选启动 link-sim --relay（M0a 中继复用，FR-22，-IncludeRelay 开关）
 #
 # 断言目标（FR-18 编队演示闭环）：
@@ -33,7 +33,8 @@ $Fail = 0
 $script:CleanupActions = @()
 
 # ---- 端口配置（design.md §6.6 + 避免与 e2e-mesh.ps1 冲突）----
-$BackendRestPort  = 8080                          # cloud-backend REST 端口
+# 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_REST_PORT 覆盖
+$BackendRestPort  = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }   # cloud-backend REST 端口
 $BackendDronePort = 14550                         # 后端主 drone 端口（MAVLink GCS 标准）
 $DroneSimPorts    = @(14551, 14552, 14553)        # 3 台 drone-sim 绑定端口（sysid=1/2/3）
 $GcsPort          = 14541                         # 中继面向 GCS/后端侧（-IncludeRelay 时用）
@@ -51,7 +52,12 @@ $TakeoffAlt     = 10                             # 起飞高度（米）
 $TransitionSteps = 4                             # 队形变换插值航点数
 $RefLat         = 22.5431                         # 参考点纬度（深圳）
 $RefLon         = 113.9578                         # 参考点经度
-$RefAlt         = 0                               # 参考点高度
+# 参考点高度必须等于起飞高度：slot 目标 alt 就取这个值，Keeper 到位判定用水平
+# 距离，但飞往 slot 的 mission 航点 alt 若低于巡航高度，飞机会先去俯冲，队形
+# 全程不在巡航面上。drone-sim 的 home 也必须显式设成参考点——它的默认 home
+# （22.5907, 113.9345）离参考点 5.3km，飞机一起飞就"不在位"，STABLE 永远等不到。
+$RefAlt         = $TakeoffAlt                     # 参考点高度 = 巡航高度
+$SlotHoldSec    = 90                             # slot 悬停秒数（> 后续步骤耗时）
 
 # ---- 超时配置 ----
 $BackendStartTimeoutSec = 60                      # 后端启动超时
@@ -100,8 +106,24 @@ function Test-PortFree($port) {
 }
 
 # ---- 清理注册 ----
+# 教训（2026-10-13，本脚本曾把 3 台 drone-sim 全漏杀）：清理动作里**不能引用脚本级
+# 变量**。PowerShell 的 scriptblock 是调用时动态查变量，不是定义时捕获：本脚本 $d 先绑
+# drone-sim 进程，step 2 又绑 /drones 返回的视图对象，清理时 `Stop-Process -Id $d.Id`
+# 拿到的是 $null——三条动作一个都杀不掉，后端死了、3 台模拟器长驻，还会污染后续
+# e2e（占着 14551-14553，别的脚本收到的"PASS"其实是它们的广播）。
+# 所以进程统一进清单，清理时按清单遍历，动作 scriptblock 不引用任何外部变量。
+$script:E2eProcesses = New-Object System.Collections.ArrayList
+function Register-E2eProcess($proc) {
+    if ($null -ne $proc) { $null = $script:E2eProcesses.Add($proc) }
+}
 function Register-Cleanup($action) { $script:CleanupActions += $action }
-function Invoke-Cleanup() {
+function Invoke-Cleanup {
+    foreach ($p in $script:E2eProcesses) {
+        try {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+        } catch { }
+    }
+    $script:E2eProcesses.Clear()
     foreach ($a in $script:CleanupActions) {
         try { & $a } catch { }
     }
@@ -132,18 +154,21 @@ function Invoke-GetJson($url) {
 }
 
 # ---- 等待后端就绪 ----
-function Wait-BackendReady($timeoutSec) {
-    $healthUrl = "http://localhost:$BackendRestPort/actuator/health"
+ function Wait-BackendReady($timeoutSec) {
+    # 业务判据而非 actuator/health：dev profile 连本地 Redis，6379 不通/带口令时
+    # health 恒 503（RedisHealthContributor），但服务本身早已可用——据 health 判失败
+    # 会把 28 秒就起来的后端误杀。/api/v1/drones 只读且恒 200，同样证明 web 层就绪。
+    $readyUrl = "http://localhost:$BackendRestPort/api/v1/drones"
     $deadline = (Get-Date).AddSeconds($timeoutSec)
     while ((Get-Date) -lt $deadline) {
         Start-Sleep 1
         try {
-            $r = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 2 -UseBasicParsing
+            $r = Invoke-WebRequest -Uri $readyUrl -TimeoutSec 2 -UseBasicParsing
             if ($r.StatusCode -eq 200) { return $true }
         } catch { }
     }
     return $false
-}
+ }
 
 # ---- 等待 N 架飞机在线注册 ----
 function Wait-DronesOnline($expectedSysids, $timeoutSec) {
@@ -212,7 +237,9 @@ Info "Java: $java"
 # 端口可用性检查（REST 端口 + drone-sim 端口）
 $restPortFree = $true
 try {
-    $r = Invoke-WebRequest -Uri "http://localhost:$BackendRestPort/actuator/health" -TimeoutSec 2 -UseBasicParsing
+    # 业务判据而非 actuator/health：本机 Redis 不通会把 health 打成 503，
+    # 而服务其实可用。用只读的 /api/v1/drones 探活。
+    $r = Invoke-WebRequest -Uri "http://localhost:$BackendRestPort/api/v1/drones" -TimeoutSec 2 -UseBasicParsing
     if ($r.StatusCode -eq 200) {
         Info "cloud-backend 已在运行（端口 $BackendRestPort 可达），将复用既有后端"
     }
@@ -274,10 +301,13 @@ $FormationBase = "$Base/formation"
 Step '1. 启动阶段：cloud-backend + 3 台 drone-sim'
 
 # 检查后端是否已在运行
+# 业务就绪判据而非 actuator/health：dev profile 连本地 Redis，本机 6379 若不通/带口令，
+# RedisHealthContributor 会把 health 打成 503——与"服务是否可用"无关，据此判失败是误杀
+# （e2e-regulator 同款教训：backend 28s 就起来了，脚本却因 503 把它杀掉）。
 $backendRunning = $false
 try {
-    $r = Invoke-WebRequest -Uri "http://localhost:$BackendRestPort/actuator/health" -TimeoutSec 2 -UseBasicParsing
-    $backendRunning = $r.StatusCode -eq 200
+    $r = Invoke-WebRequest -Uri "http://localhost:$BackendRestPort/api/v1/drones" -TimeoutSec 2 -UseBasicParsing
+    if ($r.StatusCode -eq 200) { $backendRunning = $true }
 } catch { }
 
 $backendStartedByScript = $false
@@ -291,6 +321,8 @@ if (-not $backendRunning) {
     if ($IncludeRelay) {
         $backendArgs = @(
             '-jar', $backendJar,
+            '--spring.profiles.active=dev',
+            "--server.port=$BackendRestPort",
             "--aerofleet.drone-port=$GcsPort",
             "--aerofleet.drone-extra-ports=$RelayPort"
         )
@@ -298,6 +330,8 @@ if (-not $backendRunning) {
         $extraPorts = $DroneSimPorts -join ','
         $backendArgs = @(
             '-jar', $backendJar,
+            '--spring.profiles.active=dev',
+            "--server.port=$BackendRestPort",
             "--aerofleet.drone-port=$BackendDronePort",
             "--aerofleet.drone-extra-ports=$extraPorts"
         )
@@ -307,7 +341,7 @@ if (-not $backendRunning) {
 
     $backend = Start-Process -FilePath $java -ArgumentList $backendArgs `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
-    Register-Cleanup { Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue }
+    Register-E2eProcess $backend
     Info "backend PID=$($backend.Id), log=$backendLog"
     $backendStartedByScript = $true
 
@@ -338,7 +372,7 @@ if ($IncludeRelay) {
         '--downlink-profile', $DownlinkProfile,
         '-Dformation-e2e=true'
     ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $relayLog
-    Register-Cleanup { Stop-Process -Id $relay.Id -Force -ErrorAction SilentlyContinue }
+    Register-E2eProcess $relay
     Info "relay PID=$($relay.Id), gcsPort=$GcsPort, relayPort=$RelayPort"
     Start-Sleep 2
     $relayAlive = -not $relay.HasExited
@@ -363,6 +397,8 @@ for ($i = 0; $i -lt $MemberSysids.Count; $i++) {
         '--port', $port,
         '--sysid', $sid,
         '--name', $name,
+        '--lat', "$RefLat",
+        '--lon', "$RefLon",
         '-Dformation-e2e=true'
     )
     # -IncludeRelay 时，drone-sim 需向中继发包（当前 drone-sim 为被动模式，记录为环境限制）
@@ -370,7 +406,7 @@ for ($i = 0; $i -lt $MemberSysids.Count; $i++) {
 
     $d = Start-Process -FilePath $java -ArgumentList $droneArgs `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog
-    Register-Cleanup { Stop-Process -Id $d.Id -Force -ErrorAction SilentlyContinue }
+    Register-E2eProcess $d
     $droneProcesses += $d
     Info "drone-sim[$i] PID=$($d.Id), sysid=$sid, port=$port, name=$name"
 }
@@ -421,9 +457,9 @@ try {
 } catch { }
 
 # ============================================================
-# 3. 创建编队：POST /api/v1/formation/create
+# 3. 创建编队：POST /api/v1/formation
 # ============================================================
-Step '3. 创建编队：POST /api/v1/formation/create {members:[1,2,3], shape:LINE, spacing:5, heading:0}'
+Step '3. 创建编队：POST /api/v1/formation {members:[1,2,3], shape:LINE, spacing:5, heading:0}'
 
 # 创建请求 body（字段名 members 与后端 FormationCreateRequest DTO 一致，design.md §6.6 / tasks.md T4）
 $createBody = @{
@@ -438,7 +474,8 @@ $createBody = @{
 
 $formation = $null
 try {
-    $formation = Invoke-PostJson "$FormationBase/create" $createBody
+    # 创建编队走 POST /api/v1/formation（控制器 @PostMapping 无 /create 子路径）
+    $formation = Invoke-PostJson "$FormationBase" $createBody
 } catch {
     Info "编队创建请求失败: $_"
 }
@@ -454,23 +491,78 @@ if (-not $createOk) {
 $formationId = $formation.formationId
 Info "formationId = $formationId"
 Info "state = $($formation.state)"
+# assignments 是 Map<sysid, assignment>（对象，键即成员 sysid），不是数组。
+# 按键统计：ConvertFrom-Json 对单键对象不暴露 .Count，逐键取才稳。
+$assignmentKeys = @()
 if ($formation.assignments) {
-    Info "assignments 数量 = $($formation.assignments.Count)"
-    foreach ($a in $formation.assignments) {
-        Info "  sysid=$($a.sysid) → slotIndex=$($a.slotIndex), target=($($a.lat), $($a.lon), $($a.alt))"
+    $assignmentKeys = @($formation.assignments.PSObject.Properties.Name)
+    Info "assignments 数量 = $($assignmentKeys.Count)"
+    foreach ($k in $assignmentKeys) {
+        $a = $formation.assignments.$k
+        Info "  sysid=$k → slotIndex=$($a.slotIndex), target=($($a.lat), $($a.lon), $($a.alt))"
     }
 }
 
 # 断言：3 个分配 + state=FORMING
-$assignCountOk = $formation.assignments -and $formation.assignments.Count -eq $MemberSysids.Count
+$assignCountOk = $assignmentKeys.Count -eq $MemberSysids.Count
 Check "FR-14: 分配数量 = $($MemberSysids.Count)" $assignCountOk
 $stateFormingOk = $formation.state -eq 'FORMING'
 Check 'FR-14: 初始 state = FORMING' $stateFormingOk
 
 # ============================================================
-# 4. 起飞命令：POST /api/v1/formation/{id}/command {type:TAKEOFF, alt:10}
+# 3b. 逐机上传"飞往本机 slot"的 mission（Keeper 到位判定的前提）
 # ============================================================
-Step "4. 起飞命令：POST /api/v1/formation/$formationId/command {type:TAKEOFF, alt:$TakeoffAlt}"
+# 为什么必须有：Keeper 的 FORMING/TRANSITIONING → STABLE 判定要求每个在线成员
+# 已在自己 slot 目标位的 1m 容差内（FormationKeeper.KEEP_TOLERANCE_M）。
+# 创建编队只生成 assignment，飞机不会自己挪过去——TAKEOFF 只是原地升降。
+# 不把 slot 坐标作为航线下发，state 会永远卡在 FORMING，FR-16 必然是 FAIL。
+Step '3b. 逐机上传飞往 slot 的 mission（到位判定的前提）'
+$slotMissionOk = 0
+foreach ($k in $assignmentKeys) {
+    $a = $formation.assignments.$k
+    try {
+        # 传对象、不要传 ConvertTo-Json 后的字符串： Invoke-PostJson 内部会再做一次
+        # 序列化，二次转义后 items 变成 JSON 字符串，服务端报
+        # "body must contain a non-empty 'items' array"（400）。
+        # waypoint 的 holdTime 必须够长：hold 结束后 mission 会推进到 rtl 回家，
+        # 飞机离开 slot 就让 Keeper 判"不在位"。hold 期间发文变换命令
+        # （DO_REPOSITION）会接管本机，不受 hold 限制。
+        $body = @{
+            items = @(
+                @{ cmd = 'takeoff'; lat = $RefLat; lon = $RefLon; alt = $TakeoffAlt; holdTime = 0 }
+                @{ cmd = 'waypoint'; lat = $a.lat; lon = $a.lon; alt = $a.alt; holdTime = $SlotHoldSec }
+                @{ cmd = 'rtl';      lat = $RefLat; lon = $RefLon; alt = 0;      holdTime = 0 }
+            )
+        }
+        $null = Invoke-PostJson "$Base/drones/$k/mission" $body
+        $slotMissionOk++
+    } catch {
+        Info "slot mission 上传失败 sysid=$k : $_"
+    }
+}
+Info "slot mission 上传成功 $slotMissionOk/$($assignmentKeys.Count) 架"
+Check 'FR-14 前置: 逐机 slot mission 上传' ($slotMissionOk -eq $assignmentKeys.Count)
+
+# ============================================================
+# 4. 逐机 ARM → 编队起飞 → 逐机 start_mission
+# ============================================================
+# 顺序不能颠倒：drone-sim 未 armed 会拒 TAKEOFF / start_mission（MAV_RESULT=2），
+# 而 start_mission 若在 TAKEOFF 之前，任务的第一个 item（NAV_TAKEOFF）会把
+# physics 目标重置成"原地爬升"，之后才飞去 slot——先把编队 TAKEOFF 发出去，
+# start_mission 的 takeoff item 才是"已到位、秒过"，飞机直接奔 slot。
+Step "4. 逐机 ARM + 编队起飞 + start_mission {type:TAKEOFF, alt:$TakeoffAlt}"
+
+$armOk = 0
+foreach ($s in $MemberSysids) {
+    try {
+        $null = Invoke-PostJson "$Base/drones/$s/commands" @{ type = 'arm' }
+        $armOk++
+    } catch {
+        Info "ARM 失败 sysid=$s : $_"
+    }
+}
+Info "ARM 成功 $armOk/$($MemberSysids.Count) 架"
+Check 'FR-15 前置: 逐机 ARM' ($armOk -eq $MemberSysids.Count)
 
 $takeoffBody = @{
     type = 'TAKEOFF'
@@ -485,6 +577,21 @@ try {
     Info "起飞命令失败: $_"
 }
 Check 'FR-15: 起飞命令下发成功' $takeoffOk
+
+# start_mission 才会真正执行：只上传不启动，飞机仍停在原位。
+# 必须晚于 ARM（否则 rejected: not armed）和 TAKEOFF（否则 mission 首 item
+# 把爬升目标重置成原地，飞机永远到不了 slot）。
+$missionStartOk = 0
+foreach ($k in $assignmentKeys) {
+    try {
+        $null = Invoke-PostJson "$Base/drones/$k/commands" @{ type = 'start_mission' }
+        $missionStartOk++
+    } catch {
+        Info "start_mission 失败 sysid=$k : $_"
+    }
+}
+Info "start_mission 成功 $missionStartOk/$($assignmentKeys.Count) 架"
+Check 'FR-14 前置: 逐机 start_mission' ($missionStartOk -eq $assignmentKeys.Count)
 
 # ============================================================
 # 5. 等待稳定：轮询 GET /api/v1/formation/{id} 直到 state=STABLE
@@ -554,62 +661,72 @@ if ($transitionStableOk) {
 Step "8. 灯光控制：POST /api/v1/formation/$formationId/lights {pattern:RAINBOW, sync:true}"
 
 # 灯光命令 body（字段与后端 LedControlCommand DTO 一致，tasks.md T4）
-# RAINBOW 模式下 color 会被色相旋转覆盖，提供合理默认值
+# pattern 是 int（mavlink-core LightPattern 的 ordinal），不是枚举名：传 "RAINBOW"
+# 会被 Jackson 判 400（Cannot deserialize value of type `int` from String）。
+# 序位查 mavlink-core/enums/LightPattern.java：STEADY=0 BLINK=1 BREATHE=2 CHASE=3
+# RAINBOW=4。改枚举顺序时这里必须跟着改，否则灯效会静默变成另一种。
+$LightPatternRainbow = 4
 $lightsBody = @{
-    pattern    = 'RAINBOW'
     on         = $true
     colorR     = 255
     colorG     = 0
     colorB     = 0
+    pattern    = $LightPatternRainbow
     brightness = 80
     freq       = 2
     sync       = $true
 }
 $lightsOk = $false
+$lightsAllAckOk = $false
 try {
     $resp = Invoke-PostJson "$FormationBase/$formationId/lights" $lightsBody
     $lightsOk = $true
     Info "灯光命令已下发，响应: $($resp | ConvertTo-Json -Compress -Depth 4)"
+    # FR-11 逐机生效判据：results 里每个成员 result=0（offline 成员在该步会 fail）
+    $acked = 0
+    if ($resp.results) {
+        foreach ($m in $resp.results.PSObject.Properties) {
+            if ($m.Value.result -eq 0) { $acked++ }
+            else { Info "灯光未生效 sysid=$($m.Name): $($m.Value.error)" }
+        }
+    }
+    $lightsAllAckOk = ($acked -eq $MemberSysids.Count)
 } catch {
     Info "灯光命令失败: $_"
 }
 Check 'FR-11: 灯光同步命令下发成功' $lightsOk
+Check 'FR-11: 灯光逐机生效（所有成员 result=0）' $lightsAllAckOk
 
 # ============================================================
-# 9. 等待灯光：GET /api/v1/formation/{id}/lights 验证所有成员 active=true
+# 9. 灯光状态回读：GET /api/v1/formation/{id}/lights 验证命令被反映（FR-13）
 # ============================================================
-Step "9. 等待灯光：GET /api/v1/formation/$formationId/lights 验证所有成员 active=true"
+# api-reference.md 的契约：GET /lights 返回 {formationId, on, pattern, brightness,
+# freq, sync, colorR/G/B}（编队级最后一次灯光命令视图），没有 per-member active
+# 字段。逐机"是否收下命令"由 POST 的 results（每机 AckResult）表达，见第 8 步。
+Step "9. 灯光状态回读：GET /api/v1/formation/$formationId/lights（FR-13 全程可观测）"
 
-Info "等待灯光状态生效（超时 ${LightApplyTimeoutSec}s）..."
+Info "等待灯光状态可观测（超时 ${LightApplyTimeoutSec}s）..."
 $lightsVerified = $false
-$deadline = (Get-Date).AddSeconds($LightApplyTimeoutSec)
 $lastLightsResp = $null
+$deadline = (Get-Date).AddSeconds($LightApplyTimeoutSec)
 while ((Get-Date) -lt $deadline) {
     try {
         $lastLightsResp = Invoke-GetJson "$FormationBase/$formationId/lights"
-        # 检查所有成员灯光 active=true
-        $allActive = $true
-        if ($lastLightsResp.members) {
-            foreach ($m in $lastLightsResp.members) {
-                if (-not $m.active) { $allActive = $false; break }
-            }
-        } elseif ($lastLightsResp.active) {
-            # 单一灯光状态对象
-            $allActive = $lastLightsResp.active
-        } else {
-            $allActive = $false
+        # GET 视图反映的是最后一次命令：开灯 + RAINBOW 序位 + 同步标志
+        # （PowerShell 续行必须把运算符放行尾，放行首会解析失败）
+        if ($lastLightsResp.on -eq $true -and
+            $lastLightsResp.pattern -eq $LightPatternRainbow -and
+            $lastLightsResp.sync -eq $true) {
+            $lightsVerified = $true
+            break
         }
-        if ($allActive) { $lightsVerified = $true; break }
     } catch { }
     Start-Sleep $PollIntervalSec
 }
 
-Check 'FR-11: 灯光同步生效（所有成员 active=true）' $lightsVerified
-Check 'FR-13: GET /lights 反映灯光状态（全程可观测）' $lightsVerified
-if ($lightsVerified -and $lastLightsResp) {
+Check 'FR-13: GET /lights 反映灯光状态（on/pattern/sync）' $lightsVerified
+if ($lastLightsResp) {
     Info "灯光状态: $($lastLightsResp | ConvertTo-Json -Compress -Depth 4)"
-} elseif ($lastLightsResp) {
-    Info "最后灯光状态: $($lastLightsResp | ConvertTo-Json -Compress -Depth 4)"
 }
 
 # ============================================================

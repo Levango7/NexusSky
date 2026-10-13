@@ -28,6 +28,8 @@ $Fail = 0
 $script:CleanupActions = @()
 
 # ---- 端口配置（design.md §6.2）----
+# 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_REST_PORT 覆盖
+$BackendRestPort = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }
 $GcsPort = 14541      # 中继面向 GCS/后端侧
 $RelayPort = 14543    # 中继面向远端飞机侧
 $UplinkProfile = 'lte-edge'
@@ -82,8 +84,31 @@ function Compare-Bytes([byte[]]$a, [byte[]]$b) {
 }
 
 # ---- 清理注册 ----
+# 教训（2026-10-13，本脚本的中继/后端/socket 全部漏清）：清理动作里**不能引用变量**。
+# PowerShell 的 scriptblock 是调用时动态查变量、不是定义时捕获——这些 Start-Process
+# 都在 Run-Simplified/Run-Full 函数内，$relay/$drone/$backend 是函数局部变量，函数一
+# 返回，清理时按名字根本找不到，`Stop-Process -Id $relay.Id` 拿到 $null，什么都杀不掉。
+# 进程与 socket 统一进清单，清理时按清单遍历，动作 scriptblock 不引用任何外部变量。
+$script:E2eProcesses = New-Object System.Collections.ArrayList
+$script:E2eSockets = New-Object System.Collections.ArrayList
+function Register-E2eProcess($proc) {
+    if ($null -ne $proc) { $null = $script:E2eProcesses.Add($proc) }
+}
+function Register-E2eSocket($sock) {
+    if ($null -ne $sock) { $null = $script:E2eSockets.Add($sock) }
+}
 function Register-Cleanup($action) { $script:CleanupActions += $action }
 function Invoke-Cleanup() {
+    foreach ($p in $script:E2eProcesses) {
+        try {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+        } catch { }
+    }
+    $script:E2eProcesses.Clear()
+    foreach ($s in $script:E2eSockets) {
+        try { $s.Close() } catch { }
+    }
+    $script:E2eSockets.Clear()
     foreach ($a in $script:CleanupActions) {
         try { & $a } catch { }
     }
@@ -143,7 +168,9 @@ function Run-Simplified {
     Step '简化版：启动 link-sim --relay（uplink=lte-edge, downlink=wifi5）'
 
     $relayLog = Join-Path $env:TEMP "mesh-relay-simplified.log"
+    $relayErrLog = Join-Path $env:TEMP "mesh-relay-simplified.err.log"
     if (Test-Path $relayLog) { Remove-Item $relayLog -Force }
+    if (Test-Path $relayErrLog) { Remove-Item $relayErrLog -Force }
 
     $relay = Start-Process -FilePath $java -ArgumentList @(
         '-jar', $lsJar,
@@ -152,9 +179,9 @@ function Run-Simplified {
         '--relay-port', $RelayPort,
         '--uplink-profile', $UplinkProfile,
         '--downlink-profile', $DownlinkProfile
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $relayLog
-    Register-Cleanup { Stop-Process -Id $relay.Id -Force -ErrorAction SilentlyContinue }
-    Info "relay PID=$($relay.Id), log=$relayLog"
+    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $relayLog -RedirectStandardError $relayErrLog
+    Register-E2eProcess $relay
+    Info "relay PID=$($relay.Id), log=$relayLog (stderr=$relayErrLog)"
     Start-Sleep 2  # 等待中继绑定双 socket
 
     # 检查中继进程存活
@@ -162,7 +189,9 @@ function Run-Simplified {
     Check '中继进程启动成功' $relayAlive
     if (-not $relayAlive) {
         Info '中继启动失败，查看日志:'
-        if (Test-Path $relayLog) { Get-Content $relayLog | ForEach-Object { Info $_ } }
+        foreach ($lf in @($relayLog, $relayErrLog)) {
+            if (Test-Path $lf) { Get-Content $lf | ForEach-Object { Info $_ } }
+        }
         return
     }
 
@@ -172,14 +201,18 @@ function Run-Simplified {
     $dronePort = 14555
     $droneSock = [System.Net.Sockets.UdpClient]::new($dronePort)
     $droneSock.Client.ReceiveTimeout = 5000
-    Register-Cleanup { $droneSock.Close() }
+    Register-E2eSocket $droneSock
     $relayEP = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Loopback, $RelayPort)
 
-    # 模拟 GCS：绑定 14550，向中继 gcsPort 发命令
-    $gcsPort = 14550
-    $gcsSock = [System.Net.Sockets.UdpClient]::new($gcsPort)
+    # 模拟 GCS：绑定 14550（本仓 GCS 侧 MAVLink 口），向中继 gcsPort 发命令
+    # 变量名必须与配置项 $GcsPort 区分大小写之外的差异：PowerShell 变量**大小写不敏感**，
+    # 函数里写 $gcsPort = 14550 会让后面所有 $GcsPort 解析到这个局部值（14550），
+    # 于是"发往中继 14541"的命令实际发给了模拟 GCS 自己——中继永远学不到 gcsAddr，
+    # up 方向 fwd=0，FR-22/24/25 全红，而 FR-23 还能靠收到自己的回波假绿。
+    $simGcsPort = 14550
+    $gcsSock = [System.Net.Sockets.UdpClient]::new($simGcsPort)
     $gcsSock.Client.ReceiveTimeout = 5000
-    Register-Cleanup { $gcsSock.Close() }
+    Register-E2eSocket $gcsSock
     $gcsEP = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Loopback, $GcsPort)
 
     # 构造测试帧：模拟 MAVLink 命令帧（含 sysid=2 的标识字节）
@@ -265,11 +298,15 @@ function Run-Simplified {
     Start-Sleep 11
 
     # 读取中继日志检查统计输出
+    # 只读 stdout 重定向文件是查不到的：link-sim 的 logback 走 System.err，
+    # -RedirectStandardOutput 只接 stdout，所以统计行全落在控制台、文件恒空。
+    # 两个流都接、两个文件都查。
     $statsOk = $false
     $hasUplinkStats = $false
     $hasDownlinkStats = $false
-    if (Test-Path $relayLog) {
-        $logContent = Get-Content $relayLog -ErrorAction SilentlyContinue
+    foreach ($lf in @($relayLog, $relayErrLog)) {
+        if (-not (Test-Path $lf)) { continue }
+        $logContent = Get-Content $lf -ErrorAction SilentlyContinue
         foreach ($line in $logContent) {
             if ($line -match 'up\(gcs->drone\)') { $hasUplinkStats = $true; Info "上行统计: $line" }
             if ($line -match 'down\(drone->gcs\)') { $hasDownlinkStats = $true; Info "下行统计: $line" }
@@ -286,7 +323,7 @@ function Run-Simplified {
     Step 'FR-12：对端唯一性（learn-once，第三方源不改变转发目标）'
     $thirdPartySock = [System.Net.Sockets.UdpClient]::new(14566)
     $thirdPartySock.Client.ReceiveTimeout = 2000
-    Register-Cleanup { $thirdPartySock.Close() }
+    Register-E2eSocket $thirdPartySock
     # 第三方向 gcsPort 发包（伪装 GCS），中继应保持原 gcsAddr 不变
     $thirdPartyBytes = [byte[]](0xFD, 0xFF, 0x01, 0x00)
     $thirdPartySock.Send($thirdPartyBytes, $thirdPartyBytes.Length, $gcsEP) | Out-Null
@@ -323,12 +360,14 @@ function Run-Full {
         return $false
     }
 
-    $Base = 'http://localhost:8080/api/v1'
+    $Base = "http://localhost:$BackendRestPort/api/v1"
 
     # 检查后端是否已在运行
+    # 业务判据而非 actuator/health：dev profile 连本地 Redis，6379 不通/带口令时
+    # RedisHealthContributor 把 health 打成 503，与服务是否可用无关。
     $backendRunning = $false
     try {
-        $resp = Invoke-WebRequest -Uri 'http://localhost:8080/actuator/health' -TimeoutSec 2 -UseBasicParsing
+        $resp = Invoke-WebRequest -Uri "http://localhost:$BackendRestPort/api/v1/drones" -TimeoutSec 2 -UseBasicParsing
         $backendRunning = $resp.StatusCode -eq 200
     } catch { }
 
@@ -337,20 +376,24 @@ function Run-Full {
         $backendLog = Join-Path $env:TEMP "mesh-backend.log"
         if (Test-Path $backendLog) { Remove-Item $backendLog -Force }
         # 后端配置：drone-port 指向中继 gcsPort，drone-extra-ports 含中继 relayPort
+        # profile 必须显式 dev：不指定会落 prod 连 localhost:5432（本机没起 PG，启动即挂）
         $backend = Start-Process -FilePath $java -ArgumentList @(
             '-jar', $backendJar,
+            '--spring.profiles.active=dev',
+            "--server.port=$BackendRestPort",
             "--aerofleet.drone-port=$GcsPort",
             "--aerofleet.drone-extra-ports=$RelayPort"
         ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
-        Register-Cleanup { Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue }
+        Register-E2eProcess $backend
         Info "backend PID=$($backend.Id)"
 
-        # 等待后端启动
+        # 等待后端启动（业务判据：/api/v1/drones 恒 200；
+        # actuator/health 会被不通的 Redis 打成 503，误杀已起来的服务）
         $up = $false
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep 1
             try {
-                $r = Invoke-WebRequest -Uri 'http://localhost:8080/actuator/health' -TimeoutSec 2 -UseBasicParsing
+                $r = Invoke-WebRequest -Uri "http://localhost:$BackendRestPort/api/v1/drones" -TimeoutSec 2 -UseBasicParsing
                 if ($r.StatusCode -eq 200) { $up = $true; break }
             } catch { }
         }
@@ -362,7 +405,9 @@ function Run-Full {
 
     # 启动中继
     $relayLog = Join-Path $env:TEMP "mesh-relay-full.log"
+    $relayErrLog = Join-Path $env:TEMP "mesh-relay-full.err.log"
     if (Test-Path $relayLog) { Remove-Item $relayLog -Force }
+    if (Test-Path $relayErrLog) { Remove-Item $relayErrLog -Force }
     $relay = Start-Process -FilePath $java -ArgumentList @(
         '-jar', $lsJar,
         '--relay',
@@ -370,9 +415,9 @@ function Run-Full {
         '--relay-port', $RelayPort,
         '--uplink-profile', $UplinkProfile,
         '--downlink-profile', $DownlinkProfile
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $relayLog
-    Register-Cleanup { Stop-Process -Id $relay.Id -Force -ErrorAction SilentlyContinue }
-    Info "relay PID=$($relay.Id)"
+    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $relayLog -RedirectStandardError $relayErrLog
+    Register-E2eProcess $relay
+    Info "relay PID=$($relay.Id), log=$relayLog (stderr=$relayErrLog)"
     Start-Sleep 2
 
     # 启动远端 drone-sim（sysid=2，绑定 14555）
@@ -392,7 +437,7 @@ function Run-Full {
         '--sysid', $droneSysid,
         '--name', 'AF-MESH-02'
     ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog
-    Register-Cleanup { Stop-Process -Id $drone.Id -Force -ErrorAction SilentlyContinue }
+    Register-E2eProcess $drone
     Info "drone-sim PID=$($drone.Id), sysid=$droneSysid, port=$droneBindPort"
     Start-Sleep 2
 
