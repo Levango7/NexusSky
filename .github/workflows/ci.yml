@@ -284,6 +284,25 @@ jobs:
           python3 scripts/check-test-count-docs.py
           --reports-root surefire-reports
           --frontend-json gcs-web/vitest-report.json
+  sdk-python:
+    name: SDK Python (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: sdk-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install package + pytest
+        run: pip install -e . pytest
+      - name: Run pytest
+        # 覆盖率数字暂不设阈值（与 Java 侧不同：Python 侧还没有基线，
+        # 先有信号再谈门槛，避免一个假数字门禁挡住后续提交）。
+        run: python -m pytest tests/ -q
+
   frontend:
     name: GCS Web
     runs-on: ubuntu-latest

@@ -70,36 +70,46 @@ class NexusSkyClient:
     # API 模块属性（lazy init）
     # ===================================================================
 
-    @property
     def drones(self):
         """获取无人机 API 模块。
 
         Returns:
             DroneApi: 无人机 API 实例。
+
+        Note:
+            2026-10-13 从 property 改为方法，与 missions()/flight_logs() 及 Java SDK
+            的 drones()/missions()/flightLogs() 保持一致——此前三个子资源两种风格
+            （drones 是方法、另两个是 property），跨语言用户必踩。
         """
         if self._drones is None:
             from .drones import DroneApi
             self._drones = DroneApi(self)
         return self._drones
 
-    @property
     def missions(self):
         """获取任务 API 模块。
 
         Returns:
             MissionApi: 任务 API 实例。
+
+        Note:
+            2026-10-13 从 property 改为方法：与 {@code drones()} 及 Java SDK 的
+            {@code missions()/flightLogs()} 保持一致。此前同一份 SDK 里两个是属性、
+            一个是方法，跨语言用户必踩（property 上再调用会 TypeError）。
         """
         if self._missions is None:
             from .mission import MissionApi
             self._missions = MissionApi(self)
         return self._missions
 
-    @property
     def flight_logs(self):
         """获取飞行日志 API 模块。
 
         Returns:
             FlightLogApi: 飞行日志 API 实例。
+
+        Note:
+            2026-10-13 从 property 改为方法，理由同 missions()。
         """
         if self._flight_logs is None:
             from .flightlog import FlightLogApi

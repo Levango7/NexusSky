@@ -219,8 +219,14 @@ def _class_has_source(root, module, fqcn):
     expected = os.path.join(root, module, 'src', 'test', 'java', rel)
     if os.path.isfile(expected):
         return True
-    # 兜底：类可能写在同名之外的文件里（Java 允许包级私有类文件名不同）
+    # 兜底：类可能写在同名之外的文件里（Java 允许包级私有类文件名不同）。
+    # **必须匹配类型声明，不能裸匹配类名**——2026-10-13 实测教训：link-sim 删掉
+    # MultiHopRelayTest 后，MeshRelayTest 的注释里留了一句"（MultiHopRelayTest，11 例）"，
+    # 裸匹配因此把一份陈旧报告判成"类还在"，本地量出 118、CI 干净树量出 107，
+    # 本地门禁虚报"全部一致"。
     probe = fqcn.split('.')[-1]
+    declaration = re.compile(
+        r'\b(?:class|interface|enum|record)\s+' + re.escape(probe) + r'\b')
     test_dir = os.path.join(root, module, 'src', 'test', 'java')
     if not os.path.isdir(test_dir):
         return True  # 拿不到源码树时不判陈旧——宁可少报，不可误杀
@@ -230,7 +236,7 @@ def _class_has_source(root, module, fqcn):
                 try:
                     with open(os.path.join(dirpath, f), 'r', encoding='utf-8',
                               errors='ignore') as fh:
-                        if probe in fh.read():
+                        if declaration.search(fh.read()):
                             return True
                 except OSError:
                     continue
@@ -553,6 +559,36 @@ def self_test():
             ok = False
         else:
             print('  ✓ 冲突标记（吞掉计数表）被判红')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # 类已被删除、但别的测试文件的**注释**里提到了它的名字：陈旧报告必须被认出。
+    # 2026-10-13 实测教训：link-sim 删掉 MultiHopRelayTest 后，MeshRelayTest 的注释
+    # 里留了一句"（MultiHopRelayTest，11 例）"，旧版按裸类名探测把陈旧报告判成
+    # "类还在"，本地量出 118、CI 干净树量出 107——本地门禁虚报一致。
+    gone = 'GoneTest'
+    tmp, reports = build('# Demo\n\n' + clean_table(1))
+    try:
+        legacy = os.path.join(tmp, 'demo', 'src', 'test', 'java')
+        os.makedirs(legacy, exist_ok=True)
+        os.makedirs(os.path.join(reports, 'demo'), exist_ok=True)
+        note = ('class KeptTest {\n'
+                '  // ' + gone + '（11 例）全绿，而它在真实帧上根本不可能工作\n'
+                '}\n')
+        with open(os.path.join(legacy, 'KeptTest.java'), 'w', encoding='utf-8') as fh:
+            fh.write(note)
+        xml = ('<testsuite name="demo.GoneTest" tests="11" '
+               'failures="0" errors="0" skipped="0"/>\n')
+        with open(os.path.join(reports, 'demo', 'TEST-demo.GoneTest.xml'),
+                  'w', encoding='utf-8') as fh:
+            fh.write(xml)
+        stale = measure_actual(tmp, reports)[7]
+        if not any(gone in x for x in stale):
+            print('自检失败：注释里提到类名就被当成"类还在"——'
+                  '陈旧报告会重新污染本地计数')
+            ok = False
+        else:
+            print('  ✓ 注释提及已删类名 → 判陈旧（不许当类还在）')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

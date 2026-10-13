@@ -4,6 +4,30 @@
 
 ---
 
+**CI 红过一次（门禁自身缺陷，已修）**：CI 实测 link-sim 107 / 全仓 4752，本地实测 118 / 4763。
+根因是 #67 删掉 `MultiHopRelayTest`（11 例）后，**它的陈旧报告还留在我工作区**，而替换它的
+`MeshRelayTest` 注释里提了一句"（MultiHopRelayTest，11 例）"——门禁判陈旧用的"裸类名探测"
+被这条注释喂饱，把陈旧报告判成"类还在"，本地虚报"全部一致"。现探测收紧为**必须匹配类型声明**
+（class/interface/enum/record），并加自测用例钉住；本地陈旧报告已清。这是
+`_class_has_source`（类被删）之外的**第三种**陈旧报告形态：**类名在别处注释里活着**。
+
+## [Unreleased] — sdk-python 从零测试到进 CI：27 例 pytest + 三处 API 不一致收口（2026-10-13）
+
+> 产品决策（用户拍板）：真实 UOM 平台"要花钱，暂时算了"，继续 sim；测绘维持模拟+标注；
+> sdk-python 走"补测试 + 接入 CI"。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| ① | **sdk-python 27 例 pytest** | 该 SDK 723 行、5 个模块、**零测试**——后端契约一变（路径改名/字段改名/错误码语义调整），只在客户调用时才炸。测试用 `unittest.mock` 在 `requests.Session.request` 层打桩（不引 requests_mock 等新依赖），覆盖：URL 拼装（base_url + /api/v1 + path、尾斜杠归一）、X-API-Key 头透传、timeout 透传、状态码→异常映射（400/401/403/404/5xx/其他）、错误消息取自 body 的 error 字段、非 JSON 错误体回落状态码、空响应体、JSON 解析失败、RequestException 包装、三个子资源的路径与方法 |
+| ② | **收口三处 API 不一致** | 写测试时撞出来：`drones` 是**方法**、`missions`/`flight_logs` 却是**属性**——同一份 SDK 两种用法，且在 property 上再调用直接 TypeError。按"与 Java SDK（三个都是方法）+ 彼此一致"统一为方法，README 与商业化文档共 13 处示例随之订正。**加了一条一致性用例**（三个都必须是方法、不许回退成 property），防止再次漂移 |
+| ③ | **CI 新增 SDK Python (pytest) job** | ubuntu + Python 3.11，`pip install -e . pytest` 后 `pytest -q`。暂不设覆盖率阈值（Python 侧还没有基线，先有信号再谈门槛——又一个假数字门禁比没有更糟） |
+
+**验证**：本地 pytest 27/27；前端 292；全 reactor BUILD SUCCESS；门禁与自测全绿。
+Java 4763 不变（本轮无 Java 变更），pytest 27 例为新增维度。
+
+**文档**：README 的 missions/flight_logs 属性写法已改为方法调用；`docs/commercialization-plan.md`
+的 SDK 示例同步订正（它此前就是跑不通的）。
+
 ## [Unreleased] — 测绘成果与城市孪生态势：不再假装有真数据（外部评估最后两项假能力）（2026-10-12）
 
 > 外部评估报告原话："界面上展示的面板 ≠ 后端有能力支撑——ai、mapping 成果、citytwin 态势、
