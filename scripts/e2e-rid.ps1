@@ -29,7 +29,9 @@ $Fail = 0
 $script:CleanupActions = @()
 
 # ---- 端口配置 ----
-$BackendPort = 8080
+# 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_REST_PORT 覆盖。
+# 覆盖时后端 MAVLink 口（默认 14550）也要一并改，否则 drone-sim 注册不上来。
+$BackendPort = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }
 $DronePort = 14540
 $DroneSysid = 1
 $DroneSerialNo = 'TEST-001'
@@ -242,9 +244,17 @@ if (Test-Path $backendLog) { Remove-Item $backendLog -Force }
 $backendProc = Start-Process -FilePath $java -ArgumentList @(
     '-jar', $backendJar.FullName,
     '--spring.profiles.active=dev',
+    "--server.port=$BackendPort",
+    # 自带内存库，别用 dev profile 的 ./data/aerofleet 文件库：那里面可能残留着别的
+    # e2e 留下的编队/航线，本脚本的断言会被历史数据干扰（实测过一次：残留编队被
+    # restoreFormations 复活，Keeper 一直朝不存在的飞机发修正命令）。
+    "--spring.datasource.url=jdbc:h2:mem:rid-e2e;DB_CLOSE_DELAY=-1",
     "--aerofleet.rid.enabled=true",
     "--aerofleet.rid.broadcast-interval=$RidBroadcastInterval",
     "--aerofleet.rid.timeout-periods=$RidTimeoutPeriods",
+    # drone-sim 是被动的（只回给"最近一个对端"），必须后端主动去探它的端口。默认只探
+    # 14550 + 14541-14543，而本脚本的飞机在 14540 —— 不显式加进来它永远注册不上。
+    "--aerofleet.drone-extra-ports=$DronePort",
     "--aerofleet.security.rbac-enabled=false",
     '--aerofleet.security.dev-mode=true'
 ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
@@ -252,11 +262,14 @@ Register-Cleanup { Stop-Process -Id $backendProc.Id -Force -ErrorAction Silently
 Info "cloud-backend PID=$($backendProc.Id), log=$backendLog"
 
 # 等待 cloud-backend 启动
+# 业务判据而非 actuator/health：dev profile 连本地 Redis，6379 不通/带口令时
+# RedisHealthContributor 把 health 打成 503，与服务是否可用无关——据 health 判
+# 失败会把早就起来的后端误杀。/api/v1/drones 只读且恒 200，同样证明 web 层就绪。
 $backendUp = $false
 for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep 1
     try {
-        $r = Invoke-WebRequest -Uri "http://localhost:$BackendPort/actuator/health" -TimeoutSec 2 -UseBasicParsing
+        $r = Invoke-WebRequest -Uri "http://localhost:$BackendPort/api/v1/drones" -TimeoutSec 2 -UseBasicParsing
         if ($r.StatusCode -eq 200) { $backendUp = $true; break }
     } catch { }
 }

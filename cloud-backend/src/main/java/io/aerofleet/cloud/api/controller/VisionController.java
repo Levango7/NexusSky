@@ -58,8 +58,16 @@ public class VisionController {
         try {
             return capture.captureAndLocate(sysid, source);
         } catch (Exception e) {
-            log.warn("vision pipeline failed for sysid={}: {}", sysid, e.getMessage());
-            return Map.of("status", "error", "result", e.getMessage());
+            // 两处都不能省：① 日志必须带 throwable——只打 getMessage() 时 NPE 之类
+            // 的异常消息是 null，日志只剩一行 "failed: null"，什么都归因不了；
+            // ② Map.of 不接受 null value，用 captured message 直接塞会在 catch 里
+            // 再抛一个 NPE，把 500 和真正的异常一起冲掉（2026-10-13 e2e-vision-pixels
+            // 实测：pixels 管道失败 → 500，响应体里只有 internal error: NullPointerException）。
+            log.warn("vision pipeline failed for sysid={}: {}", sysid, e.toString(), e);
+            Map<String, Object> err = new java.util.LinkedHashMap<>();
+            err.put("status", "error");
+            err.put("result", String.valueOf(e.getMessage()));
+            return err;
         }
     }
 

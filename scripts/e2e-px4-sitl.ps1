@@ -186,12 +186,15 @@ Step '2. 启动 cloud-backend'
 
 $cloudRunning = $false
 # 检查 cloud-backend 是否已在运行
+# 业务判据而非 actuator/health：dev profile 连本地 Redis，6379 不通/带口令时
+# RedisHealthContributor 把 health 打成 503，与服务是否可用无关。/api/v1/drones
+# 只读且恒 200，同样证明 web 层就绪。本机 8080 可能被常驻服务占用，用
+# AF_BACKEND_REST_PORT 覆盖。
+$SitlBackendPort = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }
 try {
-    $health = Invoke-RestMethod -Uri 'http://localhost:8080/actuator/health' -TimeoutSec 3 -ErrorAction Stop
-    if ($health.status -eq 'UP') {
-        $cloudRunning = $true
-        Write-Host '   cloud-backend 已运行（health UP）' -ForegroundColor Green
-    }
+    $null = Invoke-RestMethod -Uri "http://localhost:$SitlBackendPort/api/v1/drones" -TimeoutSec 3 -ErrorAction Stop
+    $cloudRunning = $true
+    Write-Host "   cloud-backend 已运行（$SitlBackendPort 可应答）" -ForegroundColor Green
 } catch {}
 
 if (-not $cloudRunning) {
@@ -199,16 +202,23 @@ if (-not $cloudRunning) {
     $jarPath = "$PSScriptRoot\..\cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar"
     if (Test-Path $jarPath) {
         Write-Host "   启动 cloud-backend ($jarPath)..."
-        $script:CloudJob = Start-Process -FilePath 'java' -ArgumentList '-jar', $jarPath -PassThru -RedirectStandardOutput $CloudLogPath -RedirectStandardError $CloudLogPath -WindowStyle Hidden
+        # profile 必须显式 dev：不指定会落 prod 连 localhost:5432（本机没起 PG，启动即挂）；
+        # server.port 必须显式：默认 8080 在本机可能被常驻服务（Docker 容器等）占用。
+        # 自带内存库，避免上一轮 e2e 残留数据被 restore 复活干扰本轮断言。
+        $sitlBackendArgs = @(
+            '-jar', $jarPath,
+            '--spring.profiles.active=dev',
+            "--server.port=$SitlBackendPort",
+            '--spring.datasource.url=jdbc:h2:mem:px4-sitl-e2e;DB_CLOSE_DELAY=-1'
+        )
+        $script:CloudJob = Start-Process -FilePath 'java' -ArgumentList $sitlBackendArgs -PassThru -RedirectStandardOutput $CloudLogPath -RedirectStandardError $CloudLogPath -WindowStyle Hidden
         Write-Host "   cloud-backend PID=$($script:CloudJob.Id)，等待启动..."
         for ($i = 0; $i -lt 30; $i++) {
             try {
-                $health = Invoke-RestMethod -Uri 'http://localhost:8080/actuator/health' -TimeoutSec 2 -ErrorAction Stop
-                if ($health.status -eq 'UP') {
-                    $cloudRunning = $true
-                    Write-Host "   cloud-backend 已启动 (${i}s)" -ForegroundColor Green
-                    break
-                }
+                $null = Invoke-RestMethod -Uri "http://localhost:$SitlBackendPort/api/v1/drones" -TimeoutSec 2 -ErrorAction Stop
+                $cloudRunning = $true
+                Write-Host "   cloud-backend 已启动 (${i}s)" -ForegroundColor Green
+                break
             } catch {}
             Start-Sleep 1
         }

@@ -338,6 +338,12 @@ if (-not $backendRunning) {
     }
     # 标记命令行用于旧进程清理识别
     $backendArgs += @('-Dformation-e2e=true')
+    # 每次跑都自带内存库，别用 dev profile 的 ./data/aerofleet 文件库：上一轮跑完的编队
+    # 行会被 restoreFormations 复活，而它的成员和本轮完全相同（sysid=1/2/3）——旧编队的
+    # Keeper 会把飞机往**旧队形**的 slot 上拉，新编队的 FORMING→STABLE 永远等不到
+    # （2026-10-13 实测：FR-16 超时失败，而变换指令一发出来立刻就 STABLE，因为飞机
+    # 一直被往旧 CIRCLE 目标位拽）。同一份 JVM 生命周期内没有重启，mem 库足够。
+    $backendArgs += @('--spring.datasource.url=jdbc:h2:mem:formation-e2e;DB_CLOSE_DELAY=-1')
 
     $backend = Start-Process -FilePath $java -ArgumentList $backendArgs `
         -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog

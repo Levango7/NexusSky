@@ -4,6 +4,40 @@
 
 ---
 
+## [Unreleased] — 又把 4 个非 CI e2e 脚本救活：清跨轮污染、修调度器饿死、补两个真缺陷（2026-10-13）
+
+> #74 把 formation/mesh 救活后，按同一套"先跑一遍再说"继续推 e2e 覆盖面。本轮
+> rid / network / rf / vision-pixels 四个脚本由红转绿（合计 45 项断言），其中
+> **三个是生产代码真缺陷**，不是脚本问题。
+
+### 真缺陷
+
+| # | 缺陷 | 症状 | 修法 |
+|---|---|---|---|
+| ① | `FormationKeeper` 会给**未解锁**成员发 DO_REPOSITION | 未解锁飞机必回 `MAV_RESULT=2`（DENIED），而 `DroneCommandService` 按重试策略**阻塞数秒**等 ACK。Boot 默认调度池只有 1 个线程，这一卡就把 RID 超时检测、指标采集、自动调度全部拖住 | 未解锁成员直接跳过（对不可能执行修正的成员不该发）；`spring.task.scheduling.pool.size=8`——一次卡住的 MAVLink 往返不再连坐整池 |
+| ② | `VisionController` 的 catch 里 `Map.of(...getMessage())` | 异常消息为 null（NPE 之类）时，`Map.of` 拒收 null value ⇒ **catch 块自己抛 NPE**，500 响应里只剩 "internal error: NullPointerException"，真因被冲掉 | 改用 LinkedHashMap + `String.valueOf(...)` 兜底，日志补 throwable |
+| ③ | `drone-sim` 默认 home 之外的 e2e 会被**上一轮的 H2 数据**污染 | dev profile 落 `./data/aerofleet` 文件库，历史编队被 `restoreFormations` 复活后，旧编队的 Keeper 把同一批 sysid 的飞机往**旧队形**拽——新编队的 FORMING→STABLE 永远等不到（formation 脚本 FR-16 间歇性超时的真因） | 所有自起后端的 e2e 脚本统一传 `--spring.datasource.url=jdbc:h2:mem:<脚本名>;DB_CLOSE_DELAY=-1`，一轮一库、跑完即焚 |
+
+### e2e 脚本侧
+
+- **e2e-rid**：`--aerofleet.drone-extra-ports` 补上飞机端口——drone-sim 是被动的（只回给"最近一个对端"），后端默认只探 14550/14541-14543，飞机在 14540 永远注册不上；health 探针改业务端点。
+- **e2e-network**：补 `AF_BACKEND_REST_PORT` 覆盖与快速前置（后端没起就直说，别等 30 秒超时）；清理机制改进程清单（原来闭包引用的变量中途被重绑，3 条清理动作全落在同一个 PID 上）；旧进程清理从"匹配任意 link-sim"收窄到本脚本专属端口 14600/14540，不再误杀他人会话的中继。
+- **e2e-rf / e2e-vision-pixels**：REST 端口可覆盖；vision-pixels 另修三处——① 等待 20s 太短（60m 爬升就要 30s，飞机根本没到目标上空，画面里没有斑块），改 50s + 给航点加 `holdTime=120`（到点即完成 mission 会触发 RTL 飞走）；② 后端前置条件写进文件头（`vision.source=pixels` + `sim-truth-base` 指向本脚本的 18082，默认 18080 会 ConnectException）；③ `@($null).Count` 在 PowerShell 里等于 **1**，缺失字段被数成"1 个检测"、后面两个断言跟着假绿——显式判空；JPEG 下载改 `WebClient`（`Invoke-WebRequest` 的 `RawContentStream` 在 PS5.1 下为 null，会把 try 块炸掉）。
+- **e2e-px4-sitl**：同套端口/profile/就绪判据三件套（能否真跑仍取决于本机是否装了 PX4 SITL：`px4` 二进制或 WSL）。
+
+### 验证
+
+| 脚本 | 结果 |
+|---|---|
+| e2e-rid | 14 项全 PASS |
+| e2e-network | 9 项全 PASS（LTE 损伤链路 + Starlink 周期黑洞） |
+| e2e-rf | 4 项全 PASS（RSSI 衰减 + REST 可查） |
+| e2e-vision-pixels | 6 项全 PASS（2 个 blob、定位误差 0.1m、JPEG 52095 字节） |
+| cloud-backend 单测 | 2710 全绿（含 `FormationKeeperTest` 新增的"未解锁成员跳过"用例） |
+| 文档单测数门禁 | 4762，全仓一致 |
+
+---
+
 ## [Unreleased] — C5 第三步的拍板材料：`docs/signing-prod-rollout.md`（**不改任何默认值**，2026-10-12）
 
 - **为什么需要**：`docs/security-design.md` §7 把签名语义、装配、指标、告警表达式都写全了，但**没有一段回答
