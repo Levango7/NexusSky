@@ -18,10 +18,133 @@
 
 **测试**：`MappingResultServiceTest` 三条 URL 断言改为"null + simulated=true"、URL 唯一性用例改为成果 ID 唯一性；
 `MappingControllerTest.fullWorkflow` 同步改写；`SituationOverlayServiceTest` +1（simulatedLayers 契约）。
-cloud-backend 2699/0；全 reactor BUILD SUCCESS；前端 292 不变。
+cloud-backend 2703/0；全 reactor BUILD SUCCESS；前端 292 不变。
 
 **边界**：真实摄影测量产物（空中三角测量/正射校正/三维重建）属生产阶段项；接入时把
 `simulated` 置 false 并回填真实 URL 即可，字段契约不用再改。
+## [Unreleased] — 修 flight_log 的时间戳口径：绝对时刻入库，并给 CI 装上唯一能看见它的眼睛（2026-10-12）
+
+### 症状（本机 +08、真实 PostgreSQL 实测）
+
+`sysid=231` 的 **65 行遥测确实在库里**，但：
+
+| 请求 | 修复前 |
+|---|---|
+| `GET /api/v1/flightlog?day=<今天>` | **`[]`** |
+| `GET /api/v1/flightlog?day=<明天>` | **65 行** |
+
+也就是说客户在 +08 部署上看"今天的飞行历史"是空的，而 `IT Pass C 断言 7` 在 CI 上**一直绿**。
+
+### 根因不在读侧的日窗，而在**写入侧有两条口径不同的路**
+
+| 路径 | 写法 | 库里实际存的值（写入时刻 UTC 11:04 / 本地 19:04） |
+|---|---|---|
+| `flight_log` | 显式 JDBC 批量插入：`setObject(i, value)` **不带目标类型**，值是 `java.sql.Timestamp`（由 `Instant` 转换而来） | **`19:04`（本地墙钟）**——`Timestamp` 无时区，pgjdbc 只能按 JVM 默认时区把它摊成字面量写进 `timestamp`（无时区）列 |
+| `audit_log` | JPA 写 `Instant`（Hibernate 6 的 `Instant` 映射固定按 **UTC** 渲染） | `11:04`（UTC） |
+
+同一个应用、两类同名口径的 naive 列、两种时间。读侧的日窗也走 JPA 那条（UTC 渲染边界）
+⇒ 在 UTC 机器上两侧恰好重合，在非 UTC 部署上整段错 8 小时。
+**这就是"CI 全绿但产品在客户环境坏"的形状**：判据依赖机器状态，而 CI 的机器恰好是那个不暴露问题的取值。
+
+顺带一处细节：`insertSqlTypes()` 里那个类型数组**原来只用于 `setNull`**——
+非 null 值一律走驱动的默认渲染。所以"我们显式指定了类型"这句话当时并不成立。
+
+### 改动
+
+| 件 | 内容 |
+|---|---|
+| `V29__flight_log_timestamp_tz.sql` | `flight_log.timestamp` → `TIMESTAMPTZ`。**历史 naive 值按显式声明解释**：`AT TIME ZONE COALESCE(current_setting('nexussky.legacy_naive_tz', true), 'UTC')`——缺省 UTC 是为了"迁移可重放、不依赖机器状态"，**不是**因为 UTC 一定是那些行的身世；若某套环境的历史行是在非 UTC 机器上写的，先 `ALTER DATABASE ... SET nexussky.legacy_naive_tz = 'Asia/Shanghai'` 再跑迁移。代价写进注释：`ALTER TYPE` 重写整表并短暂持锁 |
+| `FlightLogEntity.insertSqlTypes()` | `Instant` 列声明为 `TIMESTAMP_WITH_TIMEZONE` |
+| `FlightLogEntity.insertValues()` | 不再把 `Instant` 转成 `Timestamp`（那一步正是"让驱动自己挑时区"的入口） |
+| `FlightLogService` 批量绑定 | 非 null 也带目标类型：`setObject(i, value, types[i])` |
+| `.github/workflows/ci.yml` | integration job 增一条 **`TZ=Asia/Shanghai`** 的腿。没有它，这个缺陷修完仍然没有信号——UTC runner 永远证伪不了它 |
+
+### 中途被本机实测否证的一次"修复"（值得留档）
+
+第一版把绑定写成 `setObject(i, instant, Types.TIMESTAMP_WITH_TIMEZONE)`，
+H2 侧 34 例全绿——**但 PG 直接拒绝这个组合**：
+
+```
+PSQLException: 不能转换一个 java.time.Instant 实例到类型 Types.TIMESTAMP_WITH_TIMEZONE
+```
+
+连真 `postgres:15-alpine` 把四种组合各跑一遍才有答案（JVM = Asia/Shanghai，列 = `timestamptz`）：
+
+| 绑定方式 | 结果 |
+|---|---|
+| `Instant` + `TIMESTAMP_WITH_TIMEZONE` | **被驱动拒绝** |
+| `Instant` 不带类型 | 被拒："无法推断 SQL 类型" |
+| `OffsetDateTime(UTC)` + `TIMESTAMP_WITH_TIMEZONE` | **正确**（存成 `2026-10-12 15:16:39+00`） |
+| `Timestamp` 不带类型（本缺陷的旧写法） | 这次恰好也对，但靠的是驱动自己猜时区 |
+
+取第三种：偏移显式，不靠推断。另有一处也是被本机打回的：第一版 V29 用了 PG 专属的
+`USING … current_setting(…)`，而 **dev profile 的 IT（Pass A/B）在 H2 的 PostgreSQL 模式上真跑 Flyway**
+⇒ Pass A 直接起不来（`[50004-232]`）。本仓迁移一直要求两种方言都认（V13/V17/V18 就是这么被方言化的），
+绕开这条约定就会"在一条方言上验过、冒充成验证过"。
+
+### 验证
+
+- `FlightLogTimestampTypeTest` 4 例，钉"列类型口径"与"绑定值类型"。
+  **反向验证**：把两处修复退回旧行为，其中 2 例转红（`but was: 93`＝`Types.TIMESTAMP`；
+  以及值不再是 UTC 偏移的 `OffsetDateTime`）。撤销变异后回绿。
+- 诚实标注单测的边界：H2（测试方言）那列本来就带时区，"写进去再读回来"在修复前后都成立，
+  所以**端到端证据不放在单测里**，只在真 PG。
+- **本机（+08）连一次性真 PostgreSQL 的 IT 全绿**：`=== All integration tests passed ===` / `IT_EXIT=0`，
+  其中 **Pass C 断言 7 从修复前的 `❌ 60s 内 flight_log 只见到 0 行` 变成
+  `✅ 收到活体遥测（sysid=231，3 行，等待 ≤4s）`**；库里独立复核
+  `min/max = 2026-10-12 15:16:39+00 / 15:16:43+00`（会话时区 UTC，存的是绝对时刻）。
+  这条前后对照就是这个 PR 的验收证据——它只在非 UTC 机器上可复现，而 CI 的 runner 是 UTC。
+- **CI 那条腿已经有判决了**（同分支 rebase 前的 run `38276552002`，27 job 全绿）：
+  新步骤 `Integration tests under a non-UTC deployment timezone` 输出里带 `TZ: Asia/Shanghai`，
+  其内 **`Pass C 断言 7` 实测 `✅ flight_log 在 PostgreSQL 上收到活体遥测（sysid=231，4 行，等待 ≤6s）`**。
+  判据成立的原因写在代码里而不是靠猜：`GET /api/v1/flightlog` 不带 `day` 时默认读"今天"
+  （`FlightLogController.java:41`），而"今天"用 `ZoneId.systemDefault()` 算窗口
+  （`FlightLogService.java:369`）——修复前这一页在 +08 上读到 0 行，所以这条腿一旦缺失，
+  同一份代码在 +08 部署上就是坏的。**"CI 结构性看不见这个缺陷"这件事，到此结束。**
+- 既有 H2 侧回归：`FlightLogPersistenceTest` 12 / `FlightLogRetentionTest` 3 /
+  `FlightLogServiceTest` 7 / `TelemetryWriteOffThreadTest` 8 / 新守卫 4 ⇒ 34 例全绿；
+  全 reactor BUILD SUCCESS（7 个模块全 SUCCESS、MVN_EXIT=0），Java **4761**（cloud-backend **2702**）；
+  分模块加总自洽：2702+1412+117+478+40+12 = 4761（= 基点上 master 的 4757 + 本 PR 的 4 例）。
+  本 PR 可长期复用的口径是那句**"自己只贡献 4 例"**（新守卫 `FlightLogTimestampTypeTest`）——
+  绝对数只是这一次构建的快照，基点再动就得按门禁重测。
+  口径 = `scripts/check-test-count-docs.py` 读 surefire 实测，文档同步由它驱动、不手填
+  （本批 20+2 = 22 处，复跑 `exit 0`）。
+  **为什么这里坚持写增量而不写死绝对数**：今晚这条分支的基点跟了四次
+  （`00c655e` #60 → `54175d1` #64 带进 regulator-sim 6 例 → `170e53b` #65 → `3c0eb13` #63 带进 34 例），
+  前两版我都写死过绝对数（`4719`、`4721`），每 rebase 一次就作废一次、就得重测一遍——
+  增量口径不会过期，绝对数交给门禁。
+  **两处取证上的不圆满，如实记下来**（都是同一族：本机多 worktree 并发时的端口/管道问题，
+  按既定规矩**不改任何测试**）：
+  1. 第一次构建在 link-sim 腿上红了一次，但我把 mvn 输出接了 `tail`，真正的失败原因没落进日志；
+     随后 `mvn -B -o -pl link-sim test` 单跑 117 例全绿、`-rf :aerofleet-link-sim` 续跑亦全绿
+     ⇒ 那条红**既没复现、也没留证**，按环境噪声处理。教训已改：后续构建一律把完整日志落文件、
+     退出码单独取，不再接 `tail`（接了 `tail` 之后 `$?` 是 `tail` 的，红会被读成绿）。
+  2. 第二次全量构建报 **16 个 error**，逐层挖到根因是
+     `Caused by: java.net.BindException: Address already in use: bind`——`UdpGateway` 构造时抢不到
+     UDP 端口，连带 3 个 `@SpringBootTest` 上下文起不来，16 个错全是这一条的级联
+     （`ApplicationContext failure threshold exceeded` 是尾巴不是原因）。端口一空，把那 12 例单跑：**全绿**。
+     同一轮里那份"实测 4721"**不能用**：reactor 在 regulator-sim 之前就中止，XML 是新混合的
+     （`regulator-sim=34` 是上一次的残留，本批应为 40）——所以最终数字来自随后那次完整跑完 7 个模块的构建。
+- **迁移顺序**：本分支基点今晚跟到 `170e53b`（中间并进了 #59 的 `V28`、#60、#64、#65），
+  所以库里看到的顺序仍是 `V27 → V28 → V29`，本机全新库跑 IT 时 Flyway 按这个顺序一路应用通过
+  （这也是为什么 #59 必须先合——反过来会让 V28 变成 out-of-order 迁移，
+  Flyway 默认 `outOfOrder=false` 会直接拒绝）。
+- JSONL 那条路径没动：文件里的 `t` 仍是操作者可读的本机墙钟（那是给人看的日志，不是数据库口径）。
+
+
+### 没做（有意，避免顺手扩大改动面）
+
+- **`audit_log` 的列类型不改**：它存的就是 UTC，与这个缺陷无关；把它一起改成 `timestamptz`
+  是另一件事，且要独立决定历史行的身世。
+- **"一天"要不要显式配业务时区**没做（`day.atStartOfDay(ZoneId.systemDefault())` 原样保留）：
+  入库改成绝对时刻之后，那行的语义已经是"服务器所在地的自然日"，**不再依赖机器状态决定数据读不读得到**。
+  如果产品要的是"客户所在时区的日界"（服务器与客户不在同一区时会有差异），那是一个需要拍板的口径，
+  不该被混进缺陷修复里顺手定掉。
+- 其余 naive `TIMESTAMP` 列（V1 5、V13 4、V17 2、V21 1、V6 2）逐个登记在 `.coord/GAPS.md` §七，
+  不在本批一次改完。
+
+---
+
 ## [Unreleased] — SPI 豁免账续清 5 条：五个业务模块适配器落契约测试（8 → 3）
 
 > 门禁 `scripts/check-spi-coverage.py`（#56 已合）首跑记下 9 条"从未被测试点名的生产实现"。
