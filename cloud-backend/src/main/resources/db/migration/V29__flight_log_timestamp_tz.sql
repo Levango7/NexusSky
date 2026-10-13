@@ -1,0 +1,34 @@
+-- V29__flight_log_timestamp_tz.sql: 把 flight_log 的时间戳从"无时区"改成"绝对时刻"
+--
+-- 为什么要改（缺陷证据见 .coord/GAPS.md §七 G-1，本机 +08 实测）：
+--   列原本是 `timestamp without time zone`，而写它的显式批量插入 `setObject(i, value)`
+--   **不带目标类型**，值又是 `java.sql.Timestamp`（由 `Instant` 转来）——驱动只能按 **JVM 默认时区**
+--   把绝对时刻摊成墙钟写进去。于是 +08 机器上"UTC 11:04 的那一行"存成了 `19:04`。
+--   读侧走 Hibernate 的 `Instant` 映射，它固定按 **UTC** 渲染边界 ⇒ 同一列两套口径。
+--   症状：**同一天里"今天"这一页读到 0 行，`day=明天` 才读得到**。
+--   CI 的 runner 是 UTC，写读两边恰好重合 ⇒ 这个缺陷在 CI 上结构性不可见（Pass C 断言 7 恒绿）。
+--   对照证据：同库里 `audit_log`（纯 JPA 写 `Instant`）存的就是 UTC。
+--
+-- 代价与边界：
+--   * `ALTER TYPE` 会重写整表并短暂持锁。遥测表可能很大——生产上线前应在维护窗执行，
+--     或先按 `flight_log` 的行数量级估时。
+--   * `idx_flight_log_timestamp` 随列类型一起重建，无需额外语句。
+--   * 本迁移只动 flight_log。`audit_log`/webhook/spray 等 naive 列是另一批事实
+--     （它们存的就是 UTC），已单独登记，不在这里顺手改。
+--
+-- 为什么这一句要写得"两种方言都认"（本机踩过一次才定下来）：
+--   dev profile 的 IT（Pass A/B）跑在 **H2 的 PostgreSQL 模式**上且 Flyway 是开的，
+--   所以迁移文件必须同时被 H2 与 PostgreSQL 接受——本仓既有迁移一直是这么约定的
+--   （V13/V17/V18 当年就是为了这个把 MySQL 方言改掉的）。
+--   第一版这里写的是 PG 专属的 `USING timestamp AT TIME ZONE current_setting(...)`，
+--   结果 Pass A 直接起不来（H2 报语法不支持 `[50004-232]`），而它在 PG 上是好的——
+--   即"只在一条方言上验过的 DDL"会伪装成"已经验证过"。
+--
+-- 历史 naive 值按什么时区解释：由 **会话时区**决定（PG 在把 `timestamp` 转成
+--   `timestamp with time zone` 时用的就是当前 session 的 timezone，缺省 UTC）。
+--   所以要在非 UTC 部署上正确换算历史行，**先设会话时区再跑迁移**：
+--     ALTER ROLE aerofleet SET timezone = 'Asia/Shanghai';   -- 然后重启 Flyway
+--   缺省（不设）= 按 UTC 解释，这与"CI/新库/演示数据"的现状一致；
+--   代码不去猜那些行原本属于哪个时区——那个信息只有部署方知道。
+
+ALTER TABLE flight_log ALTER COLUMN timestamp TYPE TIMESTAMP WITH TIME ZONE;
