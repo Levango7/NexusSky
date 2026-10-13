@@ -23,6 +23,8 @@
 param([string]$Mode = 'auto')
 
 $ErrorActionPreference = 'Stop'
+# 跨平台公共库：jar 路径 / java 可执行 / 残留进程清理 / 临时目录（CI 在 ubuntu 上跑）
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $Fail = 0
 $script:CleanupActions = @()
@@ -117,12 +119,11 @@ function Invoke-Cleanup() {
 trap { Invoke-Cleanup; break }
 
 # ---- 清理旧实验进程（避免端口占用）----
+# 只按本轮留痕标记杀：mesh 的 link-sim 带 --relay（用 -Dmesh-e2e=true 区分）、
+# drone-sim 带 mesh-e2e 标记。绝不按 "任意 link-sim" 一刀切——那会杀掉别的 e2e
+# （如 e2e-network）或他人会话正在跑的中继。平台分支在 e2e-common.ps1。
 function Cleanup-OldProcesses {
-    Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.CommandLine -match 'link-sim.*--relay' -or $_.CommandLine -match 'drone-sim.*mesh-e2e') {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    }
+    $null = Stop-E2eStaleProcesses -Marker 'mesh-e2e'
     Start-Sleep 1
 }
 
@@ -131,7 +132,7 @@ function Cleanup-OldProcesses {
 # ============================================================
 Step '前置检查（FR 5.6.3-1：link-sim jar 存在、端口可用）'
 
-$lsJar = Join-Path $Root 'link-sim\target\aerofleet-link-sim-0.1.0-SNAPSHOT.jar'
+$lsJar = Get-E2eJar -Root $Root -Module 'link-sim' -Jar 'aerofleet-link-sim-0.1.0-SNAPSHOT.jar'
 $jarOk = Test-Path $lsJar
 Check 'link-sim jar 存在（relay 扩展基础）' $jarOk
 if (-not $jarOk) {
@@ -151,10 +152,8 @@ if (-not ($portGcsFree -and $portRelayFree)) {
     exit 1
 }
 
-# Java 探测 + 版本自检
-if ($env:AF_JAVA) { $java = $env:AF_JAVA }
-elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" }
-else { $java = "java.exe" }
+# Java 探测 + 版本自检（平台无关解析在 e2e-common.ps1）
+$java = Get-E2eJava
 Assert-Java17 $java
 Info "Java: $java"
 
@@ -167,8 +166,8 @@ Cleanup-OldProcesses
 function Run-Simplified {
     Step '简化版：启动 link-sim --relay（uplink=lte-edge, downlink=wifi5）'
 
-    $relayLog = Join-Path $env:TEMP "mesh-relay-simplified.log"
-    $relayErrLog = Join-Path $env:TEMP "mesh-relay-simplified.err.log"
+    $relayLog = Join-Path (Get-E2eTempDir) "mesh-relay-simplified.log"
+    $relayErrLog = Join-Path (Get-E2eTempDir) "mesh-relay-simplified.err.log"
     if (Test-Path $relayLog) { Remove-Item $relayLog -Force }
     if (Test-Path $relayErrLog) { Remove-Item $relayErrLog -Force }
 
@@ -178,8 +177,9 @@ function Run-Simplified {
         '--gcs-port', $GcsPort,
         '--relay-port', $RelayPort,
         '--uplink-profile', $UplinkProfile,
-        '--downlink-profile', $DownlinkProfile
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $relayLog -RedirectStandardError $relayErrLog
+        '--downlink-profile', $DownlinkProfile,
+        '-Dmesh-e2e=true'          # 留痕标记：只让本轮清理杀自己，不碰别人的 link-sim
+    ) -PassThru -RedirectStandardOutput $relayLog -RedirectStandardError $relayErrLog
     Register-E2eProcess $relay
     Info "relay PID=$($relay.Id), log=$relayLog (stderr=$relayErrLog)"
     Start-Sleep 2  # 等待中继绑定双 socket
@@ -346,8 +346,8 @@ function Run-Simplified {
 function Run-Full {
     Step '完整版：启动 cloud-backend + link-sim --relay + drone-sim'
 
-    $backendJar = Join-Path $Root 'cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
-    $droneSimJar = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
+    $backendJar = Get-E2eJar -Root $Root -Module 'cloud-backend' -Jar 'aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
+    $droneSimJar = Get-E2eJar -Root $Root -Module 'drone-sim'      -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 
     $backendOk = Test-Path $backendJar
     $droneSimOk = Test-Path $droneSimJar
@@ -373,7 +373,7 @@ function Run-Full {
 
     if (-not $backendRunning) {
         Info '启动 cloud-backend（discovery 指向中继 gcsPort=14541）...'
-        $backendLog = Join-Path $env:TEMP "mesh-backend.log"
+        $backendLog = Join-Path (Get-E2eTempDir) "mesh-backend.log"
         if (Test-Path $backendLog) { Remove-Item $backendLog -Force }
         # 后端配置：drone-port 指向中继 gcsPort，drone-extra-ports 含中继 relayPort
         # profile 必须显式 dev：不指定会落 prod 连 localhost:5432（本机没起 PG，启动即挂）
@@ -385,8 +385,9 @@ function Run-Full {
             # 编队会被 restore 复活，其 Keeper 会把同一批 sysid 的飞机往旧队形拽。
             '--spring.datasource.url=jdbc:h2:mem:mesh-e2e;DB_CLOSE_DELAY=-1',
             "--aerofleet.drone-port=$GcsPort",
-            "--aerofleet.drone-extra-ports=$RelayPort"
-        ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
+            "--aerofleet.drone-extra-ports=$RelayPort",
+            '-Dmesh-e2e=true'          # 留痕标记：只让本轮清理杀自己
+        ) -PassThru -RedirectStandardOutput $backendLog
         Register-E2eProcess $backend
         Info "backend PID=$($backend.Id)"
 
@@ -407,8 +408,8 @@ function Run-Full {
     }
 
     # 启动中继
-    $relayLog = Join-Path $env:TEMP "mesh-relay-full.log"
-    $relayErrLog = Join-Path $env:TEMP "mesh-relay-full.err.log"
+    $relayLog = Join-Path (Get-E2eTempDir) "mesh-relay-full.log"
+    $relayErrLog = Join-Path (Get-E2eTempDir) "mesh-relay-full.err.log"
     if (Test-Path $relayLog) { Remove-Item $relayLog -Force }
     if (Test-Path $relayErrLog) { Remove-Item $relayErrLog -Force }
     $relay = Start-Process -FilePath $java -ArgumentList @(
@@ -417,8 +418,9 @@ function Run-Full {
         '--gcs-port', $GcsPort,
         '--relay-port', $RelayPort,
         '--uplink-profile', $UplinkProfile,
-        '--downlink-profile', $DownlinkProfile
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $relayLog -RedirectStandardError $relayErrLog
+        '--downlink-profile', $DownlinkProfile,
+        '-Dmesh-e2e=true'          # 留痕标记：只让本轮清理杀自己，不碰别人的 link-sim
+    ) -PassThru -RedirectStandardOutput $relayLog -RedirectStandardError $relayErrLog
     Register-E2eProcess $relay
     Info "relay PID=$($relay.Id), log=$relayLog (stderr=$relayErrLog)"
     Start-Sleep 2
@@ -432,14 +434,15 @@ function Run-Full {
     # → 完整版受限于 drone-sim 被动性，记录为环境限制
     $droneSysid = 2
     $droneBindPort = 14555
-    $droneLog = Join-Path $env:TEMP "mesh-drone.log"
+    $droneLog = Join-Path (Get-E2eTempDir) "mesh-drone.log"
     if (Test-Path $droneLog) { Remove-Item $droneLog -Force }
     $drone = Start-Process -FilePath $java -ArgumentList @(
         '-jar', $droneSimJar,
         '--port', $droneBindPort,
         '--sysid', $droneSysid,
-        '--name', 'AF-MESH-02'
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog
+        '--name', 'AF-MESH-02',
+        '-Dmesh-e2e=true'          # 留痕标记：只让本轮清理杀自己
+    ) -PassThru -RedirectStandardOutput $droneLog
     Register-E2eProcess $drone
     Info "drone-sim PID=$($drone.Id), sysid=$droneSysid, port=$droneBindPort"
     Start-Sleep 2

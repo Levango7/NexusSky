@@ -788,6 +788,93 @@ jobs:
   # PowerShell 跑过，从未在 Linux CI 上连续复跑，稳定性未知。先以观察模式收集 flaky
   # 数据（步骤显示 "failed but continued"，日志可见），若干次 run 全绿后再删掉这行
   # 转为硬门禁。删标记 = 把"跑过"升级为"必须通过"，不涉及脚本改动。
+  # e2e 救活计划第一批（2026-10-14）：formation / mesh / rid 三个脚本接进门禁。
+  #
+  # 背景：16 个 e2e 脚本从未进过 CI，其中 15 个已在本机逐个跑通（合计 186 项断言，
+  # 台账见 docs/contributing-guide.md §2.5）。本 job 先接价值最高的三个：
+  # 编队状态机闭环（FR-18）、中继透明转发（FR-22~25）、RID 广播与超时转态。
+  # "能跑"和"有人跑"之间差的正是这一行——不接进来，脚本迟早还会烂回去。
+  #
+  # 跨平台改造（与 e2e-signing 同源，但那三个脚本是各改各的；本次起抽成
+  # scripts/e2e-common.ps1 公共库，后续批次直接复用）：
+  #   - jar 路径 `Join-Path $Root 'x\target\y.jar'` → Get-E2eJar（Linux 上反斜杠
+  #     不是分隔符，Test-Path 恒 false，会报"jar 不存在"）
+  #   - java 可执行 java.exe → Get-E2eJava（Linux 叫 java）
+  #   - 残留清理 Get-CimInstance → Stop-E2eStaleProcesses（Windows CIM /
+  #     Linux 读 /proc/*/cmdline；**不要用 `& ps -eo`**——PowerShell 里 ps 是
+  #     Get-Process 的别名，-eo 直接 parameter binding 失败，e2e-signing 早年
+  #     那么写，Linux 分支从没真正跑起来过）
+  #   - $env:TEMP → Get-E2eTempDir（Linux runner 上 TEMP 常未设置）
+  #   - -WindowStyle Hidden 全部删除（只在 Windows 的 Start-Process 上存在）
+  #   - 清理按"命令行留痕标记"（-Dformation-e2e=true 等）精确杀自己，
+  #     不按 jar 名一刀切（那会杀掉别的 e2e / 别人会话正在跑的进程）
+  #
+  # 为什么带 continue-on-error：与 e2e-capability / e2e-signing 同款观察模式。
+  # 这三个脚本已在本机 Windows 全绿，但**未在 Linux 上连续复跑**，runner 上的
+  # 进程/端口/时序行为可能不同。先收集 flaky 数据，若干次 run 全绿后删掉这行
+  # 转为硬门禁。删标记 = 把"跑过"升级为"必须通过"，不涉及任何脚本改动。
+  e2e-core-scripts:
+    name: E2E core scripts (formation / mesh / rid) — observe
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [ java ]
+    continue-on-error: true
+    services:
+      redis:
+        image: mirror.gcr.io/library/redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      - name: Build all
+        run: mvn -B -DskipTests package
+      # 每轮开头主动清一次残留（runner 是干净容器，通常命中 0；命中非 0 说明
+      # 上个场景没退干净，日志里能看到线索）
+      - name: Clean leftovers before start
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'formation-e2e','mesh-e2e','rid-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-formation (FR-18 编队演示闭环)
+        run: pwsh -NoProfile -File scripts/e2e-formation.ps1
+        env:
+          AF_BACKEND_REST_PORT: 18080
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'formation-e2e','mesh-e2e','rid-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-mesh (FR-22~25 中继透明转发, simplified)
+        run: pwsh -NoProfile -File scripts/e2e-mesh.ps1 -Mode simplified
+        env:
+          AF_BACKEND_REST_PORT: 18081
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'formation-e2e','mesh-e2e','rid-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-rid (RID 广播 + 超时转态)
+        run: pwsh -NoProfile -File scripts/e2e-rid.ps1 -SkipBuild
+        env:
+          AF_BACKEND_PORT: 18082
+      - name: Upload core e2e logs on failure
+        if: failure()
+        run: |
+          mkdir -p core-e2e-logs
+          find "${{ runner.temp }}" -maxdepth 1 \
+            \( -name 'formation-*.log' -o -name 'mesh-*.log' -o -name 'rid-e2e-*.log' \) \
+            -exec cp {} core-e2e-logs/ \; 2>/dev/null || true
+          ls -la core-e2e-logs || echo "(no logs captured)"
+
   e2e-signing:
     name: E2E MAVLink signing (6 scenarios)
     runs-on: ubuntu-latest
