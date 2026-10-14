@@ -121,6 +121,11 @@ public class ObstacleDetector {
         this.emergencyHoverM = emergencyHoverM;
     }
 
+    /** 当前深度数据源；供调用方判断"喂数据"该喂给谁，避免覆盖被替换的源。 */
+    public DepthSource source() {
+        return depthSource;
+    }
+
     public double safetyDistanceM() {
         return safetyDistanceM;
     }

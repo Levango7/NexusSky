@@ -2198,6 +2198,10 @@ public final class VirtualDrone implements AutoCloseable {
      */
     private void runObstacleDetection() {
         try {
+            // 先给超声波喂一次读数。缺这一步，UltrasonicSource.lastReadings 永远是 null，
+            // detect() 便恒返回 threat=NONE（FR-13 的"无障碍"分支）——M3 避障在生产里
+            // 从来没真正工作过，而单测因为自己调了 measure() 看不出来。
+            feedUltrasonicFromScenario();
             ObstacleDetector.ObstacleReport report = obstacleDetector.detect();
             // 经 ObstacleReportMsg(30010) 上报至 cloud-backend
             float dist = report.distance() == Double.MAX_VALUE
@@ -2212,6 +2216,33 @@ public final class VirtualDrone implements AutoCloseable {
         } catch (Exception e) {
             SimLog.warn("obstacle detect failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * 把 {@code obstacle:} 场景事件换算成 4 路超声波读数喂给 {@link UltrasonicSource}。
+     * <p>
+     * 方位角按<b>相对机头</b>定义，所以这里不需要把无人机位姿接进感知层：
+     * 事件本身就是"机头正前方偏 X 度、r 米处"。无 obstacle 事件时也照样喂一次
+     * 满量程读数，让 {@code lastReadings} 从 null 变为"确实测过、确实没障碍"，
+     * 这样 {@code detect()} 走的是真实路径而不是 null 早退分支。
+     * <p>
+     * {@code obstacleDetector} 可能被 {@code setObstacleDetector} 换成别的 DepthSource
+     * （standard 模式允许注入高端传感器作冗余），那种情况下超声波不该覆盖它 ——
+     * 只有当超声波确实是当前数据源时才喂。
+     */
+    private void feedUltrasonicFromScenario() {
+        if (ultrasonicSource == null) {
+            return;
+        }
+        if (obstacleDetector != null && obstacleDetector.source() != ultrasonicSource) {
+            return;   // 上层已换成别的 DepthSource，别去覆盖它
+        }
+        double bootSec = (System.currentTimeMillis() - bootUnixMs) / 1000.0;
+        double rangeM = scenario.obstacleRangeM(bootSec);
+        double bearing = scenario.obstacleBearingDeg(bootSec);
+        ultrasonicSource.measureFromBearing(
+                Double.isNaN(rangeM) ? ultrasonicSource.maxRangeM() : rangeM,
+                Double.isNaN(bearing) ? 0.0 : bearing);
     }
 
     /**

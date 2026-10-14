@@ -16,25 +16,37 @@ import java.util.concurrent.ThreadLocalRandom;
  *   imu-bias:40:60:2        attitude estimate drifts at 2 deg/s for 60s
  *   baro-drift:30:60:0.1    reported altitude drifts 0.1 m/s for 60s
  *   mag-interference:50:20: yaw estimate wanders +/-15deg for 20s
+ *   obstacle:20:30:1.5:0     a static obstacle 1.5m at bearing 0deg (dead ahead),
+ *                            relative to the drone's own heading, for 30s from t=20s.
+ *                            This is the ONLY obstacle source in the sim: without
+ *                            it the ultrasonic DepthSource has nothing to report
+ *                            and M3 obstacle detection always yields threat=NONE.
  *
  * All state is confined to the simulator tick thread (called from tick()).
  */
 public final class ScenarioController {
 
     public enum Kind { GPS_LOSS, LINK_LOSS, BATTERY_FAULT, WIND, GPS_NOISE,
-                       IMU_BIAS, BARO_DRIFT, MAG_INTERFERENCE }
+                       IMU_BIAS, BARO_DRIFT, MAG_INTERFERENCE, OBSTACLE }
 
     public static final class Event {
         public final Kind kind;
         final double startSec;    // seconds since sim boot
         final double durationSec; // seconds the fault stays active
         final double param;       // kind-specific (wind m/s, noise m, battery %)
+        /** Second kind-specific parameter; NaN when the kind doesn't use one. */
+        final double param2;
 
         Event(Kind kind, double startSec, double durationSec, double param) {
+            this(kind, startSec, durationSec, param, Double.NaN);
+        }
+
+        Event(Kind kind, double startSec, double durationSec, double param, double param2) {
             this.kind = kind;
             this.startSec = startSec;
             this.durationSec = durationSec;
             this.param = param;
+            this.param2 = param2;
         }
 
         boolean activeAt(double t) {
@@ -78,6 +90,7 @@ public final class ScenarioController {
                     case "imu-bias" -> Kind.IMU_BIAS;
                     case "baro-drift" -> Kind.BARO_DRIFT;
                     case "mag-interference" -> Kind.MAG_INTERFERENCE;
+                    case "obstacle" -> Kind.OBSTACLE;
                     default -> null;
                 };
                 if (kind == null) {
@@ -87,7 +100,9 @@ public final class ScenarioController {
                 double start = Double.parseDouble(seg[1]);
                 double duration = seg.length > 2 ? Double.parseDouble(seg[2]) : defaultDuration(kind);
                 double param = seg.length > 3 ? Double.parseDouble(seg[3]) : defaultParam(kind);
-                events.add(new Event(kind, start, duration, param));
+                // 第 5 段目前只有 OBSTACLE 用（方位角）
+                double param2 = seg.length > 4 ? Double.parseDouble(seg[4]) : defaultParam2(kind);
+                events.add(new Event(kind, start, duration, param, param2));
                 SimLog.info("scenario armed: " + kind.name().toLowerCase().replace('_', '-')
                         + " start=" + start + "s duration=" + duration + "s param=" + param);
             } catch (NumberFormatException e) {
@@ -106,6 +121,15 @@ public final class ScenarioController {
             case IMU_BIAS -> 60;
             case BARO_DRIFT -> 60;
             case MAG_INTERFERENCE -> 20;
+            case OBSTACLE -> 30;
+        };
+    }
+
+    /** 第二参数默认值：只有 OBSTACLE 用（方位角，0=正前方，相对机头顺时针）。 */
+    private static double defaultParam2(Kind k) {
+        return switch (k) {
+            case OBSTACLE -> 0;
+            default -> Double.NaN;
         };
     }
 
@@ -119,7 +143,26 @@ public final class ScenarioController {
             case IMU_BIAS -> 2;       // deg/s drift rate
             case BARO_DRIFT -> 0.1;  // m/s altitude drift rate
             case MAG_INTERFERENCE -> 15; // deg wander amplitude
+            case OBSTACLE -> 2.0;      // m, straight ahead
         };
+    }
+
+    /**
+     * 障碍物距离（米），无障碍事件时返回 {@link Double#NaN}。
+     * <p>
+     * 这是全模拟器<b>唯一</b>的障碍物来源。超声波 {@code UltrasonicSource} 只有在
+     * {@link #measureFromBearing} 被喂过之后 {@code lastReadings} 才非 null，
+     * 否则 {@code ObstacleDetector.detect()} 恒返回 threat=NONE（FR-13 的"无障碍"分支）。
+     */
+    public double obstacleRangeM(double bootSec) {
+        Event e = find(Kind.OBSTACLE, bootSec);
+        return e != null ? e.param : Double.NaN;
+    }
+
+    /** 障碍物方位角（度，0=正前方，顺时针，相对机头）。无事件时 NaN。 */
+    public double obstacleBearingDeg(double bootSec) {
+        Event e = find(Kind.OBSTACLE, bootSec);
+        return e != null ? e.param2 : Double.NaN;
     }
 
     public boolean enabled() {

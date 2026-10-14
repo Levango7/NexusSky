@@ -202,6 +202,16 @@ EKF 带偏置陀螺仪的行为一致）：
 | 气压计漂移 | `baro-drift:30:60:0.1` | 高度读数 0.1m/s 缓慢发散（垂直通道失效经典相） |
 | 磁罗盘干扰 | `mag-interference:50:20` | yaw 在 ±15° 内随机游走（过高压线/钢结构） |
 
+**障碍物场景**（`--scenario` 第四类；这是模拟器里**唯一**的障碍物来源）：
+
+| 场景 | 语法 | 上报表现 |
+|---|---|---|
+| 静态障碍物 | `obstacle:20:30:1.5:0` | 开机 20s 起、持续 30s，机头正前方 1.5m 处有障碍；`ObstacleReportMsg(30010)` 报 `threat=CRITICAL`（toy 模式 safety=2.0/emergency=0.5） |
+
+方位角按**相对机头**定义（0=正前方，顺时针）。不带 `obstacle` 事件时超声波也会
+喂一次满量程读数，`detect()` 走的是"确实测过、确实没障碍"的真实路径，
+而不是 `lastReadings == null` 的早退分支。
+
 **地形与围栏**（PX4 GF_* 语义）：
 
 ```cmd
@@ -721,12 +731,12 @@ NexusSky/
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 482 |
-| `drone-sim` | 1426 |
+| `drone-sim` | 1443 |
 | `link-sim` | 107 |
 | `cloud-backend` | 2719 |
 | `sdk-java` | 12 |
 | `regulator-sim` | 40 |
-| **总计** | **4786** |
+| **总计** | **4803** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
