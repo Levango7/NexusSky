@@ -12,7 +12,8 @@
 > 而那条读的是 `DroneSnapshot.track = BoundedHistory<>(200)`
 > （`/tracking/{sysid}/track` 读的是 `FlightTrackStore` 的 3600 点 deque），
 > 两者都是内存窗口；后端重启后 `loadLastKnownPositions()` 只塞回 **1 个**最后已知点。
-> ⇒ 症状：重启或刷新页面后，地图上的历史轨迹消失，只剩最后位置一个点。
+> ⇒ 症状比"只剩一个点"更糟：`MapView.jsx:510` 画折线的守卫是 `track.length > 1`，
+> 所以点数 ≤ 1 时**整条历史轨迹根本不画**——重启或刷新后地图上什么轨迹都没有。
 
 | # | 交付 | 内容 |
 |---|---|---|
