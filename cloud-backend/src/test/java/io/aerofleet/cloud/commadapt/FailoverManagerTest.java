@@ -41,11 +41,17 @@ class FailoverManagerTest {
         int sysid = 1;
         monitor.collectQuality(sysid);
 
-        // 采集的数据是随机但合理的，通常 MESH 评分较高
         boolean failed = failoverManager.detectFailure(sysid);
-        // 由于 MESH 默认评分通常 > 40，不应判定故障
-        // 但因为随机性，不能100%保证，所以只验证不抛异常
-        assertNotNull(failed || !failed);
+
+        // 这里可以写死 assertFalse —— collectQuality 的 MESH 参数域是固定的
+        // （latency 5-25 / bw 500-2000 / loss 0-2 / rssi -40..-20），而
+        // calculateLinkScore 加权后的**最坏**值也有 69（见下），恒高于
+        // failoverThreshold=40，所以不存在随机翻车。
+        //
+        // 原写法是 assertNotNull(failed || !failed)：原始 boolean 表达式恒为 true，
+        // 装箱成 Boolean 后永不为 null —— 它对任何 boolean 都成立，
+        // 把 detectFailure 判反也不报错（实测）。
+        assertFalse(failed, "MESH 评分恒 ≥69 > 阈值 40，不应判定为故障");
     }
 
     @Test

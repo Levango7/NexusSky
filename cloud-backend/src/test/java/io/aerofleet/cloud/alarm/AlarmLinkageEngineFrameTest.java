@@ -174,8 +174,29 @@ class AlarmLinkageEngineFrameTest {
 
     @Test
     @DisplayName("旧构造器（无发布器）不发布帧且不崩溃")
-    void legacyConstructorSkipsPublishing() {
-        AlarmLinkageEngine legacy = new AlarmLinkageEngine(store, Mockito.mock(AlarmToOrchBridge.class));
+    void legacyConstructorSkipsPublishing() throws Exception {
+        // 关键：把 publisher **真的交给 legacy**，而不是验证 setUp 里那个
+        // 只给了另一个 engine 的 mock。原写法 verify(publisher, never()) 里，
+        // legacy 与 publisher 之间不存在任何引用关系 —— 那是一条结构性
+        // 不可能失败的断言，实测给 legacy 注入真实发布器后它照样全绿。
+        //
+        // 现在改成：先用 5 参构造器造一个同 publisher 的 engine 做正向对照，
+        // 再断言 legacy 自己持的 eventPublisher 是 null。
+        AlarmLinkageEngine legacy = new AlarmLinkageEngine(store,
+                Mockito.mock(AlarmToOrchBridge.class));
+
+        java.lang.reflect.Field f = AlarmLinkageEngine.class.getDeclaredField("eventPublisher");
+        f.setAccessible(true);
+        assertThat(f.get(legacy))
+                .as("旧构造器必须不持有发布器 —— 这才是「不发布帧」的前提")
+                .isNull();
+
+        // 反向对照：5 参构造器确实持有它，证明上面那条 null 不是构造器普遍如此
+        assertThat(f.get(engine))
+                .as("5 参构造器应持有发布器")
+                .isSameAs(publisher);
+
+        // 跑一遍事件处理，确认既不发布也不崩
         legacy.processEvent(event(AlarmEvent.EventType.MOTION, AlarmEvent.Severity.INFO,
                 "cam-5", null));
         verify(publisher, never()).publishEvent(any());

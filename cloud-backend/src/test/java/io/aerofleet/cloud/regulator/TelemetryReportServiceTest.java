@@ -84,23 +84,61 @@ class TelemetryReportServiceTest {
     @DisplayName("onTelemetry 接收遥测数据")
     class OnTelemetry {
 
-        @Test
-        @DisplayName("onTelemetry 存储遥测快照不抛出异常")
-        void onTelemetry_storesSnapshot() {
-            service.onTelemetry(1, 39.9, 116.3, 100.0, 10.0, 90.0, true);
-
-            // 不抛出异常即可验证数据被存储
-            assertThat(true).isTrue();
+        /**
+         * 读取 {@code latestTelemetry} 里某个 sysid 的快照字段。
+         * <p>
+         * {@code TelemetrySnapshot} 是私有 record，反射取其访问器即可，
+         * 免得为了测试把生产可见性放宽。
+         */
+        private Object[] readSnapshot(int sysid) throws Exception {
+            ConcurrentHashMap<Integer, Object> snaps =
+                    getPrivateField("latestTelemetry", ConcurrentHashMap.class);
+            Object s = snaps.get(sysid);
+            if (s == null) {
+                return null;
+            }
+            java.lang.reflect.Field lat = s.getClass().getDeclaredField("lat");
+            java.lang.reflect.Field lon = s.getClass().getDeclaredField("lon");
+            java.lang.reflect.Field alt = s.getClass().getDeclaredField("alt");
+            java.lang.reflect.Field airborne = s.getClass().getDeclaredField("airborne");
+            lat.setAccessible(true);
+            lon.setAccessible(true);
+            alt.setAccessible(true);
+            airborne.setAccessible(true);
+            return new Object[]{lat.getDouble(s), lon.getDouble(s), alt.getDouble(s),
+                    airborne.getBoolean(s)};
         }
 
         @Test
-        @DisplayName("onTelemetry 多次调用更新快照")
-        void onTelemetry_multipleUpdates() {
+        @DisplayName("onTelemetry 把遥测写进快照（逐字段核对）")
+        void onTelemetry_storesSnapshot() throws Exception {
+            service.onTelemetry(1, 39.9, 116.3, 100.0, 10.0, 90.0, true);
+
+            Object[] snap = readSnapshot(1);
+            assertThat(snap).as("onTelemetry 应写入快照").isNotNull();
+            assertThat((Double) snap[0]).isEqualTo(39.9, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat((Double) snap[1]).isEqualTo(116.3, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat((Double) snap[2]).isEqualTo(100.0, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat((Boolean) snap[3]).isTrue();
+        }
+
+        @Test
+        @DisplayName("onTelemetry 多次调用覆盖为最新快照")
+        void onTelemetry_multipleUpdates() throws Exception {
             service.onTelemetry(1, 39.9, 116.3, 100.0, 10.0, 90.0, true);
             service.onTelemetry(1, 40.0, 117.0, 200.0, 20.0, 180.0, false);
 
-            // 不抛出异常即可验证数据被更新
-            assertThat(true).isTrue();
+            Object[] snap = readSnapshot(1);
+            assertThat(snap).as("快照应存在").isNotNull();
+            // 后一次必须覆盖前一次 —— 这一条才是"多次调用更新"的语义
+            assertThat((Double) snap[0]).isEqualTo(40.0, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat((Double) snap[1]).isEqualTo(117.0, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat((Double) snap[2]).isEqualTo(200.0, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat((Boolean) snap[3]).as("airborne 应被第二次调用改回 false").isFalse();
+
+            ConcurrentHashMap<Integer, Long> times =
+                    getPrivateField("lastTelemetryTime", ConcurrentHashMap.class);
+            assertThat(times.get(1)).as("lastTelemetryTime 也应被写入").isNotNull();
         }
     }
 
@@ -122,16 +160,24 @@ class TelemetryReportServiceTest {
         }
 
         @Test
-        @DisplayName("startReporting 重复启动忽略")
+        @DisplayName("startReporting 重复启动忽略：任务句柄不得被替换")
         void startReporting_duplicateIgnored() throws Exception {
             service.startReporting(1);
+            ConcurrentHashMap<Integer, ScheduledFuture<?>> tasks =
+                    getPrivateField("reportingTasks", ConcurrentHashMap.class);
+            ScheduledFuture<?> first = tasks.get(1);
+            assertThat((Object) first).isNotNull();
 
             // 再次启动同一 sysid 的定时任务
             service.startReporting(1);
 
-            ConcurrentHashMap<Integer, ScheduledFuture<?>> tasks = getPrivateField("reportingTasks", ConcurrentHashMap.class);
-            // 仍然只有一个任务
-            assertThat(tasks).containsKey(1);
+            // 关键：断言的是「同一个 ScheduledFuture 实例还在」。
+            // 只断言 containsKey(1) 是不够的 —— 那条去重守卫整个删掉时，
+            // 第二次调用只是 put 覆盖了同一个 key，containsKey 依然为真，
+            // 用例照样全绿（实测：删掉守卫后本用例仍通过）。
+            assertThat((Object) tasks.get(1))
+                    .as("重复启动不得替换已有任务句柄（否则旧的定时任务泄漏、新的重复调度）")
+                    .isSameAs(first);
         }
 
         @Test
@@ -146,11 +192,18 @@ class TelemetryReportServiceTest {
         }
 
         @Test
-        @DisplayName("stopReporting 不存在的 sysid 不抛出异常")
-        void stopReporting_nonExistent_noException() {
+        @DisplayName("stopReporting 不存在的 sysid 不抛出异常且不留下条目")
+        void stopReporting_nonExistent_noException() throws Exception {
             service.stopReporting(99);
-            // 不抛出异常即可
-            assertThat(true).isTrue();
+
+            // 断言的是"没留下任何东西"，而不只是"没抛异常"：
+            // 原写法是 assertThat(true).isTrue()，那它对任何实现都成立。
+            ConcurrentHashMap<Integer, ScheduledFuture<?>> tasks =
+                    getPrivateField("reportingTasks", ConcurrentHashMap.class);
+            ConcurrentHashMap<Integer, Object> stats =
+                    getPrivateField("reportStats", ConcurrentHashMap.class);
+            assertThat(tasks).doesNotContainKey(99);
+            assertThat(stats).doesNotContainKey(99);
         }
     }
 
@@ -336,41 +389,85 @@ class TelemetryReportServiceTest {
 
     // ─── 上报成功/失败统计 ───
 
+    /**
+     * 读取 {@code reportStats} 里某个 sysid 的 successCount/failureCount。
+     * <p>
+     * {@code ReportStats} 是私有静态类，字段是 volatile int —— 反射读即可，
+     * 不必把它提成包级可见（那会为了测试改生产可见性）。
+     */
+    private int[] readStats(int sysid) throws Exception {
+        ConcurrentHashMap<Integer, Object> stats = getPrivateField("reportStats", ConcurrentHashMap.class);
+        Object s = stats.get(sysid);
+        if (s == null) {
+            return null;   // startReporting 没被调用过，reportStats 里根本没这个条目
+        }
+        java.lang.reflect.Field succ = s.getClass().getDeclaredField("successCount");
+        java.lang.reflect.Field fail = s.getClass().getDeclaredField("failureCount");
+        succ.setAccessible(true);
+        fail.setAccessible(true);
+        return new int[]{succ.getInt(s), fail.getInt(s)};
+    }
+
+    /** 把状态推进到 ACTIVATED（doReport 的成功分支会尝试转 OPERATING）。 */
+    private void activate(int sysid) {
+        stateManager.transition(sysid, ComplianceState.UNVERIFIED);
+        stateManager.transition(sysid, ComplianceState.VERIFIED);
+        stateManager.transition(sysid, ComplianceState.ACTIVATED);
+    }
+
     @Test
     @DisplayName("上报成功时统计计数递增")
     void doReport_success_incrementsStats() throws Exception {
-        stateManager.transition(1, ComplianceState.UNVERIFIED);
-        stateManager.transition(1, ComplianceState.VERIFIED);
-        stateManager.transition(1, ComplianceState.ACTIVATED);
-
+        activate(1);
         when(sink.reportTelemetry(any())).thenReturn(new TelemetryResult(true, null));
 
-        TelemetryReport report = new TelemetryReport(1, "SN-001", System.currentTimeMillis(),
-                39.9, 116.3, 100.0, 10.0, 90.0, FlightStatus.GROUND);
-        ComplianceStatus status = stateManager.get(1);
+        // 关键：reportStats 只在 startReporting 里 putIfAbsent。不先建出这个条目，
+        // doReport 里的 `stats` 就是 null，`successCount++` 一次都不会执行——
+        // 那样这条用例的名字（"计数递增"）就完全没有被验证。
+        // 这一点是实测发现的：删掉生产代码的 successCount++ 后本用例仍然全绿。
+        service.startReporting(1);
+        try {
+            int[] before = readStats(1);
+            assertThat(before).as("startReporting 应已建出统计条目").isNotNull();
 
-        invokeDoReport(1, report, status);
+            TelemetryReport report = new TelemetryReport(1, "SN-001",
+                    System.currentTimeMillis(), 39.9, 116.3, 100.0, 10.0, 90.0,
+                    FlightStatus.GROUND);
+            invokeDoReport(1, report, stateManager.get(1));
 
-        // 验证 sink 被调用
-        verify(sink).reportTelemetry(any());
+            int[] after = readStats(1);
+            assertThat(after[0]).as("成功计数应递增").isEqualTo(before[0] + 1);
+            assertThat(after[1]).as("成功路径不该动失败计数").isEqualTo(before[1]);
+            verify(sink).reportTelemetry(any());
+        } finally {
+            service.stopReporting(1);
+        }
     }
 
     @Test
     @DisplayName("上报失败时统计计数递增")
     void doReport_failure_incrementsStats() throws Exception {
-        stateManager.transition(1, ComplianceState.UNVERIFIED);
-        stateManager.transition(1, ComplianceState.VERIFIED);
-        stateManager.transition(1, ComplianceState.ACTIVATED);
-
+        activate(1);
         when(sink.reportTelemetry(any())).thenReturn(new TelemetryResult(false, "失败"));
 
-        TelemetryReport report = new TelemetryReport(1, "SN-001", System.currentTimeMillis(),
-                39.9, 116.3, 100.0, 10.0, 90.0, FlightStatus.GROUND);
-        ComplianceStatus status = stateManager.get(1);
+        service.startReporting(1);
+        try {
+            int[] before = readStats(1);
+            assertThat(before).as("startReporting 应已建出统计条目").isNotNull();
 
-        invokeDoReport(1, report, status);
+            TelemetryReport report = new TelemetryReport(1, "SN-001",
+                    System.currentTimeMillis(), 39.9, 116.3, 100.0, 10.0, 90.0,
+                    FlightStatus.GROUND);
 
-        verify(sink).reportTelemetry(any());
+            invokeDoReport(1, report, stateManager.get(1));
+
+            int[] after = readStats(1);
+            assertThat(after[1]).as("失败计数应递增").isEqualTo(before[1] + 1);
+            assertThat(after[0]).as("失败路径不该动成功计数").isEqualTo(before[0]);
+            verify(sink).reportTelemetry(any());
+        } finally {
+            service.stopReporting(1);
+        }
     }
 
     @Test
