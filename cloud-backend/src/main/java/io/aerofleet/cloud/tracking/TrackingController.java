@@ -69,17 +69,29 @@ public class TrackingController {
     }
 
     /**
-     * 历史轨迹回放：按时间范围查询轨迹点（按时间升序返回）。
+     * 轨迹回放：按时间范围查询**内存窗口内**的轨迹点（按时间升序返回）。
      * <p>
-     * 用于回放指定时间段的飞行轨迹，例如事故复盘、航线核查。
+     * 窗口边界必须说清，否则这个端点的名字会骗人：它读的是
+     * {@link FlightTrackStore} 的有界内存 deque（{@code aerofleet.tracking.max-points}，
+     * 默认 3600 点，20Hz 下约 3 分钟），**且后端重启后只剩
+     * {@link FlightTrackStore#loadLastKnownPositions()} 塞回的 1 个最后已知点**。
+     * 所以"事故复盘、航线核查"这种要回看几小时场景**不该用它**。
+     * <p>
+     * 要跨越重启的历史，用 {@code GET /api/v1/flightlog/track?day=&sysid=}——它从
+     * {@code flight_log} 按操作员本地日出 {lat,lon,alt,ts}，不受内存窗口与重启影响
+     * （前端 {@code useDrones.loadTelemetry} 已把两者合并）。
      *
      * @param sysid 无人机 systemId
      * @param from  起始时间戳（epoch ms），0 或不传表示不限起始
      * @param to    结束时间戳（epoch ms），0 或不传表示不限结束
      * @param limit 最多返回 N 条（<=0 表示不限制，默认 1000）
-     * @return 轨迹点列表（按时间升序）
+     * @return 轨迹点列表（按时间升序）；请求区间若早于内存窗口，返回的是窗口内命中的部分，
+     *         可能是空或只有 1 个点，**不代表那段时间没有飞行数据**
      */
-    @Operation(summary = "历史轨迹回放", description = "按时间范围 [from, to] 查询轨迹点，按时间升序返回。from=0 表示不限起始，to=0 表示不限结束，limit<=0 表示不限制数量。")
+    @Operation(summary = "轨迹回放（内存窗口内）",
+            description = "按时间范围 [from, to] 查询 FlightTrackStore 内存窗口内的轨迹点，按时间升序返回。"
+                    + "窗口默认 3600 点且重启后只剩 1 点——需要跨重启的历史，请用 "
+                    + "GET /api/v1/flightlog/track?day=&sysid=。from=0 表示不限起始，to=0 表示不限结束，limit<=0 表示不限制数量。")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "轨迹点列表"),
         @ApiResponse(responseCode = "404", description = "无人机未注册")
