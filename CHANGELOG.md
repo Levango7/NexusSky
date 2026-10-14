@@ -3,6 +3,68 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — 数据链 failsafe：「从未收到过 GCS 包」不再被静默豁免
+
+### 洞
+
+`FailsafeController` 计算数据链沉默时长：
+
+```java
+long silence = lastGcsRxMs > 0 ? nowMs - lastGcsRxMs : 0;   // 旧
+```
+
+`lastGcsRxMs == 0`（一次 GCS 包都没收到过）被折成 `silence = 0`，于是
+`linkNow = airborne && 0 > linkLossAfterMs` **恒 false**。
+
+结果是两种失联形态里，只管了一种：
+
+| 形态 | 旧行为 |
+|---|---|
+| 连上后中断（GCS 掉线） | ✅ 沉默时长正常累加，RTL 触发 |
+| **从未连上就起飞** | ❌ 永远免疫，failsafe 永不触发 |
+
+后者恰恰是更危险的那一种，却完全没有保护。洞不算宽 —— 任何 GCS 命令在
+`VirtualDrone.onFrame` 里都会先置 `lastGcsRxMs`，所以要撞上它得是
+"无人机已在空中、但本进程内从未收到过一个 GCS 包"（自主起飞、上次会话遗留状态等）。
+
+### 改法
+
+沉默基线从 boot 时刻兜底：
+
+```java
+long baseline = lastGcsRxMs > 0 ? lastGcsRxMs : bootMs;
+long silence = nowMs - baseline;
+```
+
+`bootMs` 走**构造器**而不是 `evaluate()` 参数 —— `evaluate()` 的签名和 20 个调用点
+一行没动。`VirtualDrone` 侧传 `bootUnixMs`（final 字段，在构造器体之前就初始化好了）。
+
+### 顺手堵掉一个编译期陷阱
+
+刻意**不提供**省略 `bootMs` 的构造器和无参 `defaults()`。因为 `bootMs = 0` 会让
+`silence = nowMs - 0` 恒为 epoch 毫秒数（约 1.7e12），立刻满足 `silence > 15000`
+⇒ 一开机就 RTL。让编译器强制每个构造点都显式面对这个基线。
+
+### 测试
+
+新增 2 条回归：
+
+- `linkLossTriggersEvenWhenGcsNeverConnected`：开机 60s、从无 GCS 包、在飞行 → 必须 ENTER_RTL
+- `gcsNeverConnected_respectsGracePeriod`：开机 10s（< 15s 宽限）仍须 NONE，越过门限后才 RTL
+  —— 证明"从 boot 起算"没有把宽限期吃掉
+
+同时 `linkLossIgnoredWhileDisarmed` 从**恒真断言**变成真断言：测试用的 `fx()` 把
+bootMs 设成 `NOW - 60s`，`silence` 已经超过门限，STANDBY 下仍必须是 NONE。
+此前 `lastGcsRxMs=0` 会把 silence 折成 0，这条用例压根测不到 `airborne` 门控，
+把 `airborne &&` 整段删掉照样绿。
+
+变异验证：把沉默基线改回 `silence=0` → 2 个用例转红；还原 → 全绿。
+
+### 计数
+
+Java 4784 → **4786**（`drone-sim` 1424 → **1426**，净 +2；其余模块取 master 实测值不变）
+
+
 ## [Unreleased] — SPI 豁免账清零：最后 3 条适配器各自落契约测试（2026-10-13）
 
 > SPI 可验证性门禁（`scripts/check-spi-coverage.py`）2026-10-12 上线时登记了 9 条"编译、启动、
