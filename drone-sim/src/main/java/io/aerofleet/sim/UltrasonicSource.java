@@ -113,6 +113,46 @@ public class UltrasonicSource implements DepthSource {
     }
 
     /**
+     * 按「障碍物距离 r、相对机头方位角 bearing」生成 4 路读数并写入 {@link #lastReadings}。
+     * <p>
+     * 这是把本类接入生产链路的入口。此前 {@link #measure(double[])} 在整个生产代码里
+     * 零调用方，{@code lastReadings} 永远是 {@code null}，于是
+     * {@link #nearestObstacle()} 恒早退返回 {@code (Double.MAX_VALUE, 0)}，
+     * M3 避障的 threat 永远是 NONE —— 测试却因为自己调了 {@code measure()} 而全绿。
+     *
+     * <p>传感器几何：{@code sensorCount} 路均布，各覆盖自身方位 ±(360/2n) 度。
+     * {@code sensorCount=4} 时为前/后/左/右各 ±45°，四个扇区首尾相接**铺满整圈**，
+     * 所以任意方位都至少被一个传感器看到（恰好落在 45°/135°/225°/315° 交接线上时
+     * 会被相邻两个同时看到 —— 这是扇区无空隙无重叠的必然结果，不是缺陷）。
+     * 落在视野外、或距离超出量程的，读数为 {@link #maxRangeM}。
+     *
+     * @param rangeM     障碍物距离（米）；超出量程时所有传感器读最大量程
+     * @param bearingDeg 方位角（度，0=正前方，顺时针为正，相对机头）
+     * @return 带噪声的读数数组（长度 = sensorCount），已写入 lastReadings
+     */
+    public double[] measureFromBearing(double rangeM, double bearingDeg) {
+        if (rangeM < 0 || Double.isNaN(rangeM)) {
+            throw new IllegalArgumentException("rangeM must be a non-negative number, got " + rangeM);
+        }
+        if (Double.isNaN(bearingDeg) || Double.isInfinite(bearingDeg)) {
+            throw new IllegalArgumentException("bearingDeg must be finite, got " + bearingDeg);
+        }
+        double halfFov = 360.0 / sensorCount / 2.0;
+        double[] trueDistances = new double[sensorCount];
+        for (int i = 0; i < sensorCount; i++) {
+            double offBy = Math.abs(angleDeltaDeg(bearingDeg, directionDeg(i)));
+            trueDistances[i] = offBy <= halfFov ? rangeM : maxRangeM;
+        }
+        return measure(trueDistances);
+    }
+
+    /** 两个角度之间的最小夹角，归一到 [0,180]。 */
+    private static double angleDeltaDeg(double a, double b) {
+        double d = Math.abs(((a - b) % 360.0 + 360.0) % 360.0);
+        return d > 180.0 ? 360.0 - d : d;
+    }
+
+    /**
      * 检测最近障碍物方向（0=前,1=后,2=左,3=右），无障碍返回 -1。
      *
      * @param readings   测距读数
