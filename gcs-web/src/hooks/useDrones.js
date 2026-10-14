@@ -1,8 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { api } from '../api.js'
-
-/** 主轨迹保留的最大点数（约 5Hz × 300s = 1500，超出按最近优先截断）。 */
-const MAX_TRACK_POINTS = 1500
+import { mergeTrack, MAX_TRACK_POINTS } from '../utils/trackMerge.js'
 
 /**
  * 无人机数据管理 hook
@@ -47,6 +45,18 @@ export default function useDrones() {
     } catch (e) {
       setTelemetry(null)
       setTrack([])
+    }
+
+    // 再叠一层**库内当日历史**。为什么必须叠：`/drones/{sysid}/track` 吃的是后端
+    // FlightTrackStore 的有界内存窗口，后端重启后那里只剩 loadLastKnownPositions()
+    // 塞回的 1 个最后已知点，地图上的历史折线就没了；而 `/flightlog/track?day=`
+    // 从 flight_log 出当天整条轨迹，不受重启影响（该端点早已存在，前端一直没用）。
+    // 单开一个 try：历史不可用只该少一段历史，不该把刚拿到的实时轨迹抹成空。
+    try {
+      const stored = await api.getDayTrack(sysid)
+      setTrack((prev) => mergeTrack(prev, stored))
+    } catch (e) {
+      // flight_log 未开库 / 查询失败：保留实时轨迹，本函数不额外报错
     }
   }, [])
 

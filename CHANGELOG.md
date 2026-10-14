@@ -3,6 +3,39 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — C4 收尾：当日历史轨迹接进前端，重启后折线不再只剩一个点（2026-10-14）
+
+> 先说清**缺的是什么**：不是"历史没落库"。`GET /api/v1/flightlog/track?day=&sysid=`
+> 早已存在，从 `flight_log` 出当天整条轨迹、不受重启影响，也有测试钉着
+> （`FlightLogServiceTest` / `FlightLogPersistenceTest`）。**缺的是前端从没调用过它**——
+> `api.js` 只绑了 `/flightlog` 列表，地图折线全吃 `/drones/{sysid}/track`，
+> 而那条读的是 `DroneSnapshot.track = BoundedHistory<>(200)`
+> （`/tracking/{sysid}/track` 读的是 `FlightTrackStore` 的 3600 点 deque），
+> 两者都是内存窗口；后端重启后 `loadLastKnownPositions()` 只塞回 **1 个**最后已知点。
+> ⇒ 症状：重启或刷新页面后，地图上的历史轨迹消失，只剩最后位置一个点。
+
+| # | 交付 | 内容 |
+|---|---|---|
+| ① | `src/utils/trackMerge.js`（新） | `mergeTrack(live, persisted, limit)`：按 `ts` 升序、**同 ts 保留 live 对象本身**（不重建不丢字段）、非有限 `ts` 直接丢、超限保留**最新** N 个、**不改入参**；`MAX_TRACK_POINTS` 从 `useDrones` 搬进来做单一真相源 |
+| ② | `api.getDayTrack(sysid, day?)` | 接上那条已存在的通路；`day` 省略时**不拼 `day=undefined`**，交后端按当天解释 |
+| ③ | `useDrones.loadTelemetry` 叠历史 | 内存窗口 + 当日库内历史合并后落 `track`。历史查询**单开一个 try**：`flight_log` 未开库/查询失败只该少一段历史，不该把刚拿到的实时轨迹抹成空——若并进原来那个 try，它的 `catch` 会顺手 `setTrack([])`。这条由变异 M8 验证过确实会红 |
+| ④ | `/tracking/{sysid}/replay` 文案改准 | 原文写"历史轨迹回放……用于事故复盘、航线核查"，实际只读内存窗口 ⇒ 改为如实说明窗口边界并指向日轨迹端点。**行为没动**，只把骗人的命题改对 |
+| ⑤ | 测试 18 例 + 变异验证 | 纯函数 13 例 + hook 验收 5 例（走 `loadTelemetry` 真路径，防"函数写了没人接"）；另跑 9 条变异，逐条确认由**指定**用例转红 |
+
+> 计数口径照旧：本条**只记增量**，绝对数由 `check-test-count-docs.py` 实测驱动。
+
+**刻意没做的事（留下来说明，不是遗漏）**：
+`/replay` 没有改成"回退查库"。`flight_log` 不存 `heading` 与 `vx/vy/vz`，而 `/replay` 的
+返回类型是 `FlightTrackStore.TrackPoint`（含这些字段）——要么填 0 冒充实测、要么现场推算，
+两者都比这次改动的收益小。所以本轮只把文案改准，历史深度由日轨迹端点提供。
+跨多日回放同样未做（端点本身按单日）。
+
+**边界**：验证到的是"前端能拿到当天库内轨迹并与实时段正确合并"这一层；
+`flight_log` 的实际写入频率、保留策略（`FlightLogRetentionJob`）决定了能回看多久，
+那部分不在本条的断言范围内。
+
+---
+
 ## [Unreleased] — 数据链 failsafe：「从未收到过 GCS 包」不再被静默豁免
 
 ### 洞
@@ -66,6 +99,7 @@ Java 4784 → **4786**（`drone-sim` 1424 → **1426**，净 +2；其余模块�
 
 
 ## [Unreleased] — SPI 豁免账清零：最后 3 条适配器各自落契约测试（2026-10-13）
+
 
 > SPI 可验证性门禁（`scripts/check-spi-coverage.py`）2026-10-12 上线时登记了 9 条"编译、启动、
 > 日志里看起来在工作，但没有任何断言钉过它"的生产适配器。前两批清偿 6 条（`UomReportSink` +
