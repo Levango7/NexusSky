@@ -24,25 +24,44 @@ final class FailsafeController {
     private final int batteryCritPct;
     /** Config: failsafe features can be disabled for A/B comparisons. */
     private final boolean enabled;
+    /**
+     * Epoch ms this controller came up (the autopilot boot instant).
+     * <p>
+     * Used as the datalink silence baseline when <b>no</b> GCS packet has ever
+     * been received. Before this existed, {@code lastGcsRxMs == 0} was coerced to
+     * {@code silence = 0}, so a drone that got airborne without ever hearing from
+     * the GCS could <b>never</b> raise the datalink failsafe. That is the worse of
+     * the two link-loss shapes: "connected then dropped" was handled, "never
+     * connected at all" was silently exempt.
+     */
+    private final long bootMs;
 
     // edge detectors so each failsafe announces exactly once per trigger
     private boolean linkFailActive = false;
     private boolean battFailActive = false;
     private boolean gpsFailActive = false;
 
-    FailsafeController(boolean enabled, long linkLossAfterMs, int batteryCritPct) {
+    /**
+     * 数据链沉默时长必须有个基线，所以刻意<b>不提供</b>省略 bootMs 的构造器与
+     * {@code defaults()}：bootMs=0 会让 {@code silence = nowMs - 0} 恒为 epoch 毫秒数，
+     * 立刻满足 {@code silence > linkLossAfterMs}，等于一开机就 RTL。
+     * 编译期强制每个构造点都显式面对这个基线。
+     */
+    FailsafeController(boolean enabled, long linkLossAfterMs, int batteryCritPct, long bootMs) {
         this.enabled = enabled;
         this.linkLossAfterMs = linkLossAfterMs;
         this.batteryCritPct = batteryCritPct;
+        this.bootMs = bootMs;
     }
 
-    static FailsafeController defaults() {
+    static FailsafeController defaults(long bootMs) {
         // 阈值来自 FailsafeThresholds（唯一真相源）。
         // link grace 15s > cloud's 10s offline timeout, so the drone reacts
         // slightly after the GCS has already flagged it offline - PX4-like.
         return new FailsafeController(true,
                 FailsafeThresholds.LINK_LOSS_AFTER_MS,
-                FailsafeThresholds.BATTERY_CRIT_PCT);
+                FailsafeThresholds.BATTERY_CRIT_PCT,
+                bootMs);
     }
 
     /** Verdict handed back to the tick loop. */
@@ -72,7 +91,9 @@ final class FailsafeController {
      * Evaluate all triggers once per tick.
      *
      * @param state       current flight state
-     * @param lastGcsRxMs epoch ms of the last received GCS packet (0 = never)
+     * @param lastGcsRxMs epoch ms of the last received GCS packet; {@code <= 0}
+     *                     means "never" and the silence baseline falls back to
+     *                     this controller's boot instant
      * @param nowMs       current epoch ms
      * @param batteryPct  current battery percentage
      * @param gpsLost     scenario GPS-loss flag
@@ -97,7 +118,11 @@ final class FailsafeController {
         }
 
         // ---- datalink loss: RTL after grace (only while armed) ----
-        long silence = lastGcsRxMs > 0 ? nowMs - lastGcsRxMs : 0;
+        // 没收到过任何 GCS 包（lastGcsRxMs <= 0）时，沉默时长从开机时刻起算，
+        // 而不是当成 0 —— 后者会让"从未连上过 GCS 就起飞"这条链路永远免疫
+        // 数据链 failsafe，比"连上后中断"更危险的那种失联反而没人管。
+        long baseline = lastGcsRxMs > 0 ? lastGcsRxMs : bootMs;
+        long silence = nowMs - baseline;
         boolean linkNow = airborne && silence > linkLossAfterMs;
         if (linkNow && !linkFailActive) {
             linkFailActive = true;

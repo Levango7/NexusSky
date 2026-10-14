@@ -298,7 +298,8 @@ public final class VirtualDrone implements AutoCloseable {
         this.physics = new DronePhysics(config.lat, config.lon, 0.0, config.speed);
         this.scenario = new ScenarioController(config.scenario);
         this.failsafe = config.failsafe
-                ? FailsafeController.defaults() : new FailsafeController(false, 0, 0);
+                ? FailsafeController.defaults(bootUnixMs)
+                : new FailsafeController(false, 0, 0, bootUnixMs);
         this.terrain = TerrainModel.parse(config.terrain);
         this.fence = GeoFence.parse(config.fence);
         // RF link geometry (E1): GCS mast at home, 1.5 m antenna. RSSI is

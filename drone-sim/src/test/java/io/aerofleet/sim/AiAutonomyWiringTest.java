@@ -58,7 +58,7 @@ class AiAutonomyWiringTest {
     @Test
     @DisplayName("FailsafeController 的默认阈值取自 FailsafeThresholds，不再就地写死")
     void failsafeUsesSharedThresholds() {
-        FailsafeController fs = FailsafeController.defaults();
+        FailsafeController fs = FailsafeController.defaults(1_700_000_000_000L);
         assertEquals(FailsafeThresholds.BATTERY_CRIT_PCT, batteryCritOf(fs),
                 "batteryCritPct 应等于 FailsafeThresholds.BATTERY_CRIT_PCT");
         assertEquals(FailsafeThresholds.LINK_LOSS_AFTER_MS, linkLossOf(fs),
