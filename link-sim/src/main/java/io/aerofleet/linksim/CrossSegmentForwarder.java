@@ -11,6 +11,16 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 跨网段转发器（FR-19 跨网段 NAT 穿透）。
+ *
+ * <p><b>状态：未接入生产路径。</b>{@link LinkSimMain}（本模块唯一 {@code main()} 入口）
+ * 从不实例化本类，所以下面 {@link #forwardToSegment} 的结果——包括
+ * {@code reachable} 恒为构造期硬编码的 {@code true}、{@code extraDelayMs} 恒为 0、
+ * 全程没有任何 socket 调用——在产品里一次都不会发生。对应测试
+ * {@code CrossSegmentForwarderTest} 全绿，但验证的代码路径不存在。
+ *
+ * <p>本类的存在只说明 FR-19 有设计稿，没有实现。接线时须同步 README 的能力宣称，
+ * 并把本类移出 {@code LinkSimWiringTest.UNWIRED_CLASSES}。
+ *
  * <p>
  * 当 mesh 节点分布在不同网段时，通过桥接节点实现跨网段通信——
  * 桥接节点同时监听多个网段，在网段间转发帧，实现 NAT 穿透。

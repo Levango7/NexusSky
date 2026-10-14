@@ -13,6 +13,18 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 链路桥接节点（FR-01 异构链路桥接）。
+ *
+ * <p><b>状态：未接入生产路径。</b>本类只被 {@link HeterogeneousLinkManager} 构造，
+ * 而后者同样未被 {@link LinkSimMain}（本模块唯一 {@code main()} 入口）装配，
+ * 所以本类在产品里一次都不会被建立。
+ *
+ * <p>另注：本类的 {@link #bridgeFrame} 只把帧放进 {@code forwardQueue} 加计数，
+ * <b>不产生任何 I/O</b>；{@code pollBridgedFrame()} 没有生产调用方。
+ * 对应测试 {@code LinkBridgeNodeTest} 全绿，但验证的代码路径不存在。
+ *
+ * <p>接线时须同步 README 的能力宣称，并把本类移出
+ * {@code LinkSimWiringTest.UNWIRED_CLASSES}。
+ *
  * <p>
  * 同时监听多个通信介质（WiFi/LTE/LoRa/Satellite），在不同介质间转发 MAVLink 帧。
  * 桥接节点是异构链路互通的关键枢纽——使用不同通信介质的节点通过桥接节点实现跨介质可达。
