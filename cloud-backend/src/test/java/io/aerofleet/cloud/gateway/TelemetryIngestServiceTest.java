@@ -49,10 +49,12 @@ class TelemetryIngestServiceTest {
     }
 
     @Test
-    @DisplayName("handle(null frame) 抛出 NPE：catch 块访问 frame.getMessageId() 二次抛异常（源码限制）")
-    void handle_nullFrame_throwsNpeDueToCatchBlockAccessingFrame() {
-        assertThatCode(() -> service.handle(null))
-                .isInstanceOf(NullPointerException.class);
+    @DisplayName("handle(null frame) 不抛异常：catch 块自身不解引用 frame（Javadoc 承诺 Never throws）")
+    void handle_nullFrame_doesNotThrow() {
+        // 此前这条断言的是 NPE —— 把 catch 块里的二次 NPE 钉成了期望行为。
+        // 那是个真缺陷：handle() 的 Javadoc 写着 "Never throws"，而 catch 块里
+        // frame.getMessageId() 在 frame 为 null 时会再炸一次，catch 成了抛出点。
+        assertThatCode(() -> service.handle(null)).doesNotThrowAnyException();
     }
 
     @Test
@@ -85,6 +87,16 @@ class TelemetryIngestServiceTest {
     @Test
     @DisplayName("未知 msgId：decode 返回 null，不发布事件，不抛异常")
     void handle_unknownMsgId_noEventNoException() {
+        // 断言本身是有效的：把 handle() 里的 `if (msg == null) return;` 去掉，
+        // 本条会以 NeverWantedButInvoked 转红（已变异验证）。
+        //
+        // 但要如实说明**可达性**：msgId 99 未在 MavlinkMessageInfo 登记，
+        // crcExtraOf(99) 会抛 MavlinkException，帧在 MavlinkParser 的 CRC 阶段就被丢掉，
+        // 因此**生产路径到不了 handle()**。本条覆盖的是"绕过解析器直接调用 handle"
+        // 这一情形下 msg==null 守卫的行为 —— 与 LoRaRelay 那条防御分支同类。
+        //
+        // 生产里真正可达的解码失败是「已登记 msgId + 截短 payload」，
+        // 由 handle_corruptedFrame 那条覆盖。
         MavlinkFrame frame = MavlinkFrame.of(SYSID, COMPID, SEQ, 99, 0, new byte[0]);
         assertThatCode(() -> service.handle(frame)).doesNotThrowAnyException();
         verify(eventPublisher, never()).publishEvent(any());
@@ -134,10 +146,22 @@ class TelemetryIngestServiceTest {
     }
 
     @Test
-    @DisplayName("决策监控未注入（ai 模块缺席）：解码照样不抛")
-    void handle_decisionEvent_monitorAbsent_noException() {
+    @DisplayName("决策监控未注入（ai 模块缺席）：决策事件仍照常发布到事件总线，不打断收包线程")
+    void handle_decisionEvent_monitorAbsent_stillPublishesEvent() {
+        // 注意：本条**杀不掉**"去掉 decisionMonitor null 检查"这个变异（T4，0 杀）。
+        // 原因是 handle() 外层的 catch (RuntimeException) 把两种行为从外部观察上抹平了：
+        //   有 null 检查 -> 跳过决策落库，publishEvent 已执行
+        //   无 null 检查 -> 决策落库处 NPE，但 publishEvent 也已执行，NPE 又被 catch 吞掉
+        // 从调用方（UdpGateway 的收包线程）看，两者完全一样。
+        // 所以这里断言的是**降级契约本身**：监控缺席不影响事件转发与收包线程存活，
+        // 而不是断言某个内部实现点。要让 null 检查变得可测，得先去掉那个大 catch ——
+        // 那会把"解码失败"和"下游抛异常"两类语义混在一起，是更大的改动。
         DecisionEventMsg msg = new DecisionEventMsg(0f, 0.5f, 1L, SYSID, 0, 0);
+
         assertThatCode(() -> service.handle(msg.toFrame(SYSID, COMPID, SEQ)))
                 .doesNotThrowAnyException();
+
+        // 降级仍要保证事件进总线 —— 这条断言在"整个决策分支被关掉"时也会红（T5）
+        verify(eventPublisher).publishEvent(any(MavlinkMessageEvent.class));
     }
 }

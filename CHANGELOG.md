@@ -3,6 +3,101 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — 声明与行为不一致的三处补齐：holdTime 漏检、catch 二次 NPE、uploadMission 五个校验零覆盖（2026-10-15）
+
+### 一、先纠正两份"扫描结论"，它们都是错的
+
+上一轮扫描报告说：
+- 「`MissionApi.Waypoint` 三条校验零覆盖」→ **错**。`DroneControllerTest` 里
+  已有 lat>90 / lon<-180 / alt<0 三条，逐条变异确认各杀 1 条。
+- 「`TelemetryIngestServiceTest` 4 处恒真」→ **错**。实测 6 个变异里 5 个被杀，
+  只有 `handle_decisionEvent_monitorAbsent` 确实恒真（详见下）。
+
+所以这轮的起点不是"补零覆盖"，而是**把每个怀疑都变异一遍，用结果代替印象**。
+
+### 二、`holdTime`：record 声明 `@Min(0)`，解析侧唯独漏检（真缺陷）
+
+`MissionItemRequest` 上 `lat @Min(-90)@Max(90)`、`lon @Min(-180)@Max(180)`、
+`holdTime @Min(0)` 声明得整整齐齐。但 `DroneController.uploadMission` 收的是
+`@RequestBody JsonNode`，再由 `parseMissionItems()` **手工 `new`** 出这个 record ——
+不走 Spring 绑定，JSR-303 注解**一条都不会触发**（代码里原有注释已点明这点）。
+
+于是范围检查全靠手写，而手写时**漏了 `holdTime`**：lat/lon/alt 三条都在，
+`holdTime` 只有 `n.path("holdTime").asDouble(0)`，负值一路走到 MISSION_ITEM_INT
+编码出去。**record 契约与实际解析行为不一致** —— 这是"声明≠行为"的第一处。
+
+修：`parseMissionItems()` 补上 `holdTime < 0` 检查；
+`MissionItemRequest` 的 Javadoc 明确写出「这些注解在 mission 上传路径上不会自动
+触发，实际生效的五条检查全在 `parseMissionItems()` 里」，免得后人再当成装饰。
+
+### 三、`TelemetryIngestService.handle(null)`：Javadoc 承诺 Never throws，实际抛 NPE
+
+```java
+} catch (RuntimeException e) {
+    log.debug("... msgId={} ...", frame.getMessageId(), ...);   // frame 为 null 时这里二次抛
+}
+```
+
+`handle(null)` → `decode` 抛 NPE → 被 catch 捕获 → **catch 块自己再去解引用
+`frame`** → 二次 NPE 逃出方法。而方法 Javadoc 明写 "Never throws"。
+
+旧用例 `handle_nullFrame_throwsNpeDueToCatchBlockAccessingFrame` 把这个缺陷
+**钉成了期望行为**（DisplayName 直接写「源码限制」）。修法是一行：catch 里
+判 `frame != null` 再取字段。测试同步改成断言"不抛异常"，并把 DisplayName 改成
+陈述契约而不是陈述缺陷。
+
+### 四、`uploadMission`：五个校验点零覆盖（变异 0 杀确认）
+
+| 校验 | 加测试前 | 变异结果 |
+|---|---|---|
+| `lat` / `lon` / `alt` 范围 | 已有，各杀 1 | 有效 |
+| `cmd` 空串检查 | **0 条** | 0 杀 → 补 |
+| `items` 缺失 / 空数组 / 非数组 | **0 条** | 0 杀 → 补 |
+| 1000 条上限 | **0 条** | 0 杀 → 补 |
+| `holdTime >= 0` | **0 条，且代码也没检** | — → 修 + 补 |
+
+新增 8 条：`negativeHoldTime` / `missingItems` / `emptyItems` / `itemsNotArray` /
+`itemWithoutCmd` / `itemWithBlankCmd`（专测 `isBlank` 而非 `isEmpty`）/
+`tooManyItems` / `exactly1000Items`（边界闭合，防上限被改成 `>=`）。
+
+### 五、一个诚实的例外：恒真测试摊开写，不假装能测
+
+`handle_decisionEvent_monitorAbsent_noException` 原断言只是
+`assertThatCode(...).doesNotThrowAnyException()`。实测**去掉
+`decisionMonitor` 的 null 检查，这条仍全绿（T4，0 杀）** —— 因为
+`handle()` 外层的 `catch (RuntimeException)` 把两种行为从外部观察上抹平了：
+
+- 有 null 检查 → 跳过决策落库，`publishEvent` 已执行
+- 无 null 检查 → 决策落库处 NPE，`publishEvent` 也已执行，NPE 又被 catch 吞掉
+
+从调用方（UdpGateway 的收包线程）看两者完全一样。**这不是测试写错了，是那个
+大 catch 让这个实现点变得不可观测。**
+
+处理：不删（删了就丢掉降级路径的回归锁），改成断言**降级契约本身** ——
+「监控缺席不影响事件转发与收包线程存活」，并在注释里写明它杀不掉 T4 以及原因。
+要让 null 检查变得可测，得先拆掉那个大 catch，那会把「解码失败」和「下游抛异常」
+两类语义混在一起，是更大的改动。
+
+### 六、变异验证结果
+
+| 变异 | 目标用例 | 结果 |
+|---|---|---|
+| 拆掉 `holdTime` 检查 | `uploadMission_negativeHoldTime_throwsBadRequest` | 转红 |
+| 拆掉 `cmd` 空串检查 | `uploadMission_itemWithBlankCmd_throwsBadRequest` | 转红 |
+| 拆掉 1000 条上限 | `uploadMission_tooManyItems_throwsBadRequest` | 转红 |
+| 回退 catch 的 null 判断 | `handle_nullFrame_doesNotThrow` | 转红 `NullPointerException` |
+| 拆掉**两处** empty 检查 | `uploadMission_emptyItems_throwsBadRequest` | 转红 |
+
+最后一条要说明：**"items 非空"这条校验在外层 `uploadMission` 和内层
+`parseMissionItems` 里重复存在**，所以单独移除任意一处都被另一处掩盖，两个单点
+变异都存活；同时移除才杀死。这是重复校验的真实代价 —— 它让这个防护点无法用
+单点变异证明。测试是有覆盖的，只是需要组合变异。
+
+### 计数
+
+4817 → **4825**（+8）。仅以 `mvn clean package` 实测为准。
+
+---
 ## [Unreleased] — RID 畸形帧不再静默丢弃：解码/解包异常兜住并记 WARN（2026-10-15）
 
 ### 缺陷

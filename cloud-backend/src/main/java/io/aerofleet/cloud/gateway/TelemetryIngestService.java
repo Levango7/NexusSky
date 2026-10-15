@@ -87,9 +87,18 @@ public class TelemetryIngestService {
                         de.confidence);
             }
         } catch (RuntimeException e) {
-            // Decode errors must never kill the UDP receive loop
-            log.debug("Failed to process frame msgId={} from sysid={}: {}",
-                    frame.getMessageId(), frame.getSystemId(), e.getMessage());
+            // Decode errors must never kill the UDP receive loop.
+            //
+            // 这里刻意不解引用 frame：frame 为 null 时（decode 抛的 NPE 会被这里捕获）
+            // 再去取 frame.getMessageId() 会二次抛 NPE，把 catch 块自己变成抛出点 ——
+            // 而本方法 Javadoc 承诺 "Never throws"。frame 为 null 时这段日志直接省掉：
+            // 那本来就不是"某一帧解码失败"，是调用方传了 null，日志里不重复制造噪声。
+            if (frame != null) {
+                log.debug("Failed to process frame msgId={} from sysid={}: {}",
+                        frame.getMessageId(), frame.getSystemId(), e.getMessage());
+            } else {
+                log.debug("Failed to process null frame: {}", e.getMessage());
+            }
         }
     }
 
