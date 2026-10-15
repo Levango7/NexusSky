@@ -193,6 +193,17 @@ export const api = {
     return jsonFetch(`${BASE}/flightlog${qs ? '?' + qs : ''}`)
   },
 
+  // 当日**库内**历史轨迹（重启安全）：GET /api/v1/flightlog/track?sysid=&day=
+  // 与 getTrack / getFlightTrack 的区别：那两条吃 FlightTrackStore 的有界内存窗口
+  // （默认 3600 点，且后端重启后只剩 loadLastKnownPositions 塞的 1 个点）；
+  // 这条吃 flight_log，按操作员本地日返回 {lat,lon,alt,ts}，不受重启影响。
+  // day 省略时由后端按当天解释，所以这里不能拼成 day=undefined。
+  getDayTrack: (sysid, day) => {
+    const qs = new URLSearchParams({ sysid })
+    if (day != null) qs.set('day', day)
+    return jsonFetch(`${BASE}/flightlog/track?${qs}`)
+  },
+
   // ---- Formation (编队表演 M1) ----
   // 创建编队：members=sysid 数组 + 队形参数 + 参考点经纬高
   createFormation: (payload) =>

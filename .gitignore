@@ -43,3 +43,6 @@ gcs-web/shots/
 
 # vite 依赖预构建缓存（dev server 产物，勿入库；本机曾从仓库根误起 vite）
 .vite/
+
+# crew-kernel 运行时状态（agent 注册表/租约/任务板/KV），不入库
+.crew/
