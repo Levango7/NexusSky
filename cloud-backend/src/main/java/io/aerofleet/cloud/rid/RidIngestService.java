@@ -7,6 +7,7 @@ import io.aerofleet.cloud.rid.model.RidSnapshot;
 import io.aerofleet.cloud.rid.model.SelfIdData;
 import io.aerofleet.cloud.rid.model.SystemData;
 import io.aerofleet.mavlink.MavlinkFrame;
+import io.aerofleet.mavlink.MavlinkMessageInfo;
 import io.aerofleet.mavlink.messages.MavlinkMessage;
 import io.aerofleet.mavlink.messages.OpenDroneIdBasicId;
 import io.aerofleet.mavlink.messages.OpenDroneIdLocation;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Remote ID 消息接入服务。
@@ -39,6 +41,11 @@ import java.util.List;
  * <p>
  * 位置一致性校验：RID Location 与遥测数据对比，误差 &gt; 0.01° 时 WARN 日志。
  * 操作者信息脱敏：推送 WebSocket 前对 operatorId 脱敏。
+ * <p>
+ * 畸形帧处理：payload 短于 dialect 声明的 LEN 时解码器会读越界。这类帧的
+ * msgId 是已登记的，能过 {@code MavlinkParser} 的 CRC 校验，因此<strong>真的能从
+ * 网络到达这里</strong>。{@link #onFrame} 兜住这类异常并记 WARN，不让它冒到
+ * 传输层那个 {@code catch (RuntimeException ignore)} 里被完全静默吞掉。
  *
  * @see RidStateManager
  * @see RidWebSocketHandler
@@ -81,6 +88,13 @@ public class RidIngestService {
      * <p>
      * 过滤非 RID 消息，解码后分发到 {@link #processRidMessage}。
      * MessagePack 消息先 unpack 再逐条处理。
+     * <p>
+     * 解码与解包都在 {@link #decodeRidMessages} 里兜住 {@link RuntimeException}：
+     * 一帧的 payload 长度由发送方决定，短于 dialect 声明的 LEN 时解码器会读越界
+     * （{@link java.nio.BufferUnderflowException}）。不兜住的话异常会一路抛到
+     * {@code UdpMavlinkTransport} 的 {@code catch (RuntimeException ignore)} ——
+     * 收包循环死不了，但连一行日志都没有，截短的 RID 帧被完全静默丢弃、
+     * 运维无从发现。兜住之后至少留下一条带 msgId/payloadLen 的 WARN。
      *
      * @param frame MAVLink 帧
      */
@@ -90,24 +104,58 @@ public class RidIngestService {
             return;
         }
 
-        MavlinkMessage msg = MavlinkMessage.decode(frame);
-        if (msg == null) {
-            log.warn("RID 消息解码失败: msgId={}, sysid={}", msgId, frame.getSystemId());
+        List<MavlinkMessage> messages = decodeRidMessages(frame, msgId);
+        if (messages == null) {
+            // 失败原因已由 decodeRidMessages 记入 WARN 日志
             return;
         }
 
         int sysid = frame.getSystemId();
+        for (MavlinkMessage message : messages) {
+            processRidMessage(sysid, message);
+        }
+    }
+
+    /**
+     * 解码一帧 RID 消息，必要时把 MessagePack 拆开。
+     * <p>
+     * 返回空列表表示这一帧没有任何可处理的消息（解包结果全为 null）；
+     * 返回 {@code null} 表示解码失败（已记 WARN）。
+     *
+     * @param frame  MAVLink 帧，msgId 已确认落在 RID 区间内
+     * @param msgId  帧的 msgId，仅用于日志
+     * @return 待处理的 RID 消息列表；解码失败时返回 {@code null}
+     */
+    private List<MavlinkMessage> decodeRidMessages(MavlinkFrame frame, int msgId) {
+        MavlinkMessage msg;
+        try {
+            msg = MavlinkMessage.decode(frame);
+        } catch (RuntimeException e) {
+            log.warn("RID 消息解码异常，该帧已丢弃: msgId={}, sysid={}, payloadLen={}（dialect 期望 {} 字节）, cause={}",
+                    msgId, frame.getSystemId(), frame.getPayloadLength(),
+                    MavlinkMessageInfo.lengthOf(msgId), e.toString());
+            return null;
+        }
+
+        if (msg == null) {
+            // 防御分支：RID 区间内未在 MavlinkMessageInfo 登记的 msgId，会在 CRC 阶段
+            // 就被 MavlinkParser 丢弃（crcExtraOf 抛 MavlinkException），生产路径到不了这里。
+            // 保留它是为了有人绕过解析器直接调用 onFrame 时不至于 NPE。
+            log.warn("RID 消息解码失败（无对应解码器）: msgId={}, sysid={}", msgId, frame.getSystemId());
+            return null;
+        }
 
         if (msg instanceof OpenDroneIdMessagePack pack) {
-            List<MavlinkMessage> subMessages = pack.unpack();
-            for (MavlinkMessage subMsg : subMessages) {
-                if (subMsg != null) {
-                    processRidMessage(sysid, subMsg);
-                }
+            try {
+                List<MavlinkMessage> subMessages = pack.unpack();
+                return subMessages.stream().filter(Objects::nonNull).toList();
+            } catch (RuntimeException e) {
+                log.warn("RID MessagePack 解包异常，该帧已丢弃: msgId={}, sysid={}, cause={}",
+                        msgId, frame.getSystemId(), e.toString());
+                return null;
             }
-        } else {
-            processRidMessage(sysid, msg);
         }
+        return List.of(msg);
     }
 
     /**
