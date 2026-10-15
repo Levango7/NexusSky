@@ -3,6 +3,69 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — CI：runner 镜像钉到 ubuntu-24.04 + setup-java v4→v5（2026-10-16）
+
+### 触发原因：一个三天后到期的时间炸弹
+
+从 CI 注解（`GCS Web` / `Warm Maven Cache` 等 job 上都挂着）读到的 notice：
+
+```
+[notice] .github:1
+"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026."
+```
+
+`ci.yml` 里 **21 个 job 全是 `runs-on: ubuntu-latest`**。10 月 19 日之后会**整批**
+被切到 Ubuntu 26 —— 换 glibc / JDK / Node 默认版本，Docker 构建、Java 编译、
+Playwright E2E 会一起翻，而且是 21 个 job 同时翻，没有任何缓冲。
+
+同批还有：`[warning] setup-java v4 is deprecated and will no longer receive updates.
+Please migrate to actions/setup-java@v5`
+
+### 为什么钉 24.04 而不是钉 26.04
+
+从 #89 的 master run 日志（"Set up job" 步骤）读到了硬证据：
+
+```
+Included Software:
+  https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/
+  images/ubuntu/Ubuntu2404-Readme.md
+```
+
+即 `ubuntu-latest` **当前就是 Ubuntu 24.04**。所以：
+
+- 钉 `ubuntu-24.04` = **环境零变化**，只是不再跟标签漂
+- 钉 `ubuntu-26.04` = 把一个**没有任何 job 验证过**的环境一次性铺到 21 个 job
+
+后者把风险从"三天后集体翻"换成"现在就集体翻"，方向错了。要升 26 应当单独一个 PR
+全量验证后再动，注释里也这么写了。
+
+### 改动
+
+| 项 | 前 | 后 |
+|---|---|---|
+| 21 个 job 的 runner | `ubuntu-latest` | `ubuntu-24.04` |
+| 12 处 `actions/setup-java` | `@v4` | `@v5` |
+
+`setup-java@v5` 要求 runner ≥ 2.327.1，实测本仓 runner 为 `2.337.0`，满足；
+它同时把 action 自身从 Node 20 搬到 Node 24，与注解里"已被强制跑在 Node 24"一致。
+
+**未动**：`actions/checkout@v4`、`cache@v4`、`setup-node@v4`、
+`upload-artifact@v4`、`download-artifact@v4` —— 都是当前大版本，
+注解里没有 deprecated 告警。Node 20 那条只是信息性通知（已强制 Node 24），
+不需要动作。
+
+### 验证
+
+- `pyyaml` 解析通过：`name: CI`、**21 个 job**、`runs-on` 分布 `{ubuntu-24.04: 21}`
+- `runs-on: ubuntu-latest` 残留 **0**；`setup-java@v4` 残留 **0**
+- 文件 CRLF 保持不变（用 Python 按字节写，没用 PowerShell）
+
+### 说明这次是「继承来的」问题
+
+这不是本文案里任何 PR 引入的 —— #90/#91 都只是继承了 master 的风险。
+所以它落在一个**独立分支**上，不和那两个混。
+
+---
 ## [Unreleased] — JSR-303 约束契约：把「注解存在」变成「注解被证明会生效」（2026-10-16）
 
 ### 动机
