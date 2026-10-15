@@ -199,13 +199,29 @@ public class FormationService {
     /**
      * 创建编队：参数校验 → 选举 Leader → 几何计算 → 队形分配 → 入表（FR-14）。
      *
-     * @throws BadRequestException 参数非法（members < 2、spacing < 2、经纬高非法）
+     * <p><strong>为什么这里要手写校验而不靠 Bean Validation</strong>：
+     * {@link FormationCreateRequest} 上带了 JSR-303 注解，但入口
+     * {@code FormationController.create} 没有 {@code @Valid}，注解不会触发。
+     * 成员数上限因此必须在这里执行 —— 上下界都取自
+     * {@link FormationCreateRequest#MAX_MEMBERS}，与注解同源。
+     *
+     * @throws BadRequestException 参数非法（members 越界、shape 缺省、spacing &lt; 2、经纬高非法）
      */
     @Transactional
     public FormationCreateResult create(FormationCreateRequest req) {
         // FR-02 参数校验
         if (req.members == null || req.members.size() < 2) {
             throw new BadRequestException("formation requires >= 2 members");
+        }
+        if (req.members.size() > FormationCreateRequest.MAX_MEMBERS) {
+            // 上界与 @Size(max = ...) 同源；缺了这条，超员编队会被静默接受
+            throw new BadRequestException("formation member count must be <= "
+                    + FormationCreateRequest.MAX_MEMBERS + " (got " + req.members.size() + ")");
+        }
+        if (req.shape == null) {
+            // 不拦的话会一路 NPE 到 FormationGeometry.compute 的 switch(shape)，
+            // 对外表现为 500 而不是 400
+            throw new BadRequestException("shape is required");
         }
         for (int sysid : req.members) {
             if (sysid < 1 || sysid > 254) {

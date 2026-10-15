@@ -100,6 +100,55 @@ class FormationServiceTest {
         assertEquals(1, r.leaderSysid(), "lowest online sysid is leader");
     }
 
+    // ============================================================
+    // create() 的入参校验：DTO 上声明了 @Size(max=32) / @NotNull，
+    // 但 FormationController.create 没有 @Valid（4 个 mission DTO 里唯一一个），
+    // 于是这两条约束必须由 FormationService.create() 自己兜住。
+    // ============================================================
+
+    @Test
+    void memberCountAboveDeclaredMaxRejected() {
+        // FormationCreateRequest.members 声明 @Size(min = 2, max = 32)。
+        // 入口没有 @Valid，服务层的 size() < 2 只管下限 —— 上限曾经无人执行。
+        Set<Integer> tooMany = new java.util.HashSet<>();
+        for (int i = 1; i <= 33; i++) {   // 33 > 32
+            online(i);
+            tooMany.add(i);
+        }
+        FormationCreateRequest req = new FormationCreateRequest(
+                tooMany, FormationGeometry.Shape.LINE, 5.0, 0,
+                HOME_LAT, HOME_LON, HOME_ALT, 0);
+
+        BadRequestException e = assertThrows(BadRequestException.class,
+                () -> service.create(req), "33 名成员超出 @Size(max = 32)，应被拒");
+        assertTrue(e.getMessage().contains("32"), "错误信息应点明上限，实际: " + e.getMessage());
+    }
+
+    @Test
+    void memberCountExactlyAtMaxAccepted() {
+        // 边界：正好 32 名必须放行（上限不是 "< 32"）
+        FormationService.FormationCreateResult r = createLine(
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+                11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+                31, 32);
+        assertEquals(32, r.assignments().size(), "32 名成员（= 上限）应被接受");
+    }
+
+    @Test
+    void nullShapeRejectedWithBadRequest() {
+        // shape 声明 @NotNull。入口无 @Valid 时若不显式校验，
+        // FormationGeometry.compute 里的 switch(shape) 会抛 NPE → HTTP 500，
+        // 而 create() 的 Javadoc 承诺的是 BadRequestException。
+        FormationCreateRequest req = new FormationCreateRequest(
+                Set.of(1, 2), null, 5.0, 0, HOME_LAT, HOME_LON, HOME_ALT, 0);
+        online(1);
+        online(2);
+
+        assertThrows(BadRequestException.class, () -> service.create(req),
+                "shape=null 应抛 BadRequestException，而不是 NPE");
+    }
+
     @Test
     void assignBySysidAscending() {
         // 创建 [3,1,2] → sysid=1 分配 slot 0、sysid=2 slot 1、sysid=3 slot 2（FR-03）
