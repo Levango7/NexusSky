@@ -3,6 +3,76 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — RID 畸形帧不再静默丢弃：解码/解包异常兜住并记 WARN（2026-10-15）
+
+### 缺陷
+
+`RidIngestService.onFrame` 假定 `MavlinkMessage.decode()` 不会抛，直接把结果
+喂给 `processRidMessage`。但 RID 帧的 payload 长度由发送方决定，而解析器
+（`MavlinkParser`）只校验 CRC、**不按 dialect 的 LEN 补齐也不拒绝**，于是两类帧
+能真的从网络走到这里并把解码器打挂：
+
+| 畸形帧 | 现象 |
+|---|---|
+| 已登记 msgId（12900 `OPEN_DRONE_ID_BASIC_ID`，LEN=22）+ 截短 payload | `BufferUnderflowException`（`b.get(uasId)` 读越界） |
+| 已登记 msgId（12915 `OPEN_DRONE_ID_MESSAGE_PACK`）+ payload 头两字节声明 255 条子消息 | `unpack()` 以 25 字节步长读出 250 字节字段 → `ArrayIndexOutOfBoundsException`（`MAX_MSG_PACK_SIZE=10` 只在 `pack()` 侧校验，`decode()`/`unpack()` 侧没有） |
+
+`onFrame` 没有 try/catch，异常一路冒到 `UdpMavlinkTransport` 的
+`catch (RuntimeException ignore)` —— **收包循环死不了，但连一行日志都没有**。
+结果是截短的 RID 帧被完全静默丢弃，运维在日志里看不到任何痕迹；
+而 `onFrame` 自己想打的那句 `log.warn("RID 消息解码失败")` 对这条路径永远不执行
+（异常在到达它之前就没了）。
+
+### 修改
+
+- `onFrame` 的解码与解包收进新的私有方法 `decodeRidMessages`，两处各兜一层
+  `RuntimeException` 并记 WARN（带 msgId / sysid / payloadLen / dialect 期望长度 /
+  异常原因），不再冒到传输层被静默吞掉。
+- MessagePack 分支顺带把 `unpack()` 结果里的 null 过滤掉（原逻辑在调用点过滤，
+  移进方法内）。
+
+### 测试
+
+`RidIngestServiceTest` 的解码失败用例重做。原来那条叫
+「解码失败时 WARN 日志且不更新状态」，用的是 msgId=12950 —— 它未在
+`MavlinkMessageInfo` 登记，`crcExtraOf` 抛 `MavlinkException`，**帧在 CRC 阶段就被
+丢了，生产路径到不了 `onFrame`**。真正可达的两条当时零覆盖。
+
+- 新增 `onFrame_truncatedPayload_doesNotThrow`：用 `MavlinkFrame.of` + `encodeV2`
+  + `MavlinkParser` 造一帧**真的能过 CRC** 的截短帧，再喂给 `onFrame`。
+  先断言它能通过解析器 —— 若哪天解析器开始补齐/拒绝短帧，用例会先红提醒前提变了。
+- 新增 `onFrame_messagePackClaimingTooManySubMessages_doesNotThrow`：上面那张表第二行。
+- 原用例改名为 `onFrame_unregisteredMsgIdInRange_returnsWithoutUpdating`，
+  DisplayName 与 Javadoc 标明「防御分支，生产不可达」。
+- `createFrame` 辅助方法的 Javadoc 点明它不经过 CRC、生产到不了 `onFrame`，
+  凡验证生产行为的用例必须改用新的 `crcValidFrame`。
+
+三条逐个变异验证（目标用例是否转红 + 失败原因）：
+
+| 变异 | 目标用例 | 结果 |
+|---|---|---|
+| 拆掉 `decode` 的 try/catch | `onFrame_truncatedPayload_doesNotThrow` | 转红 `BufferUnderflowException` |
+| 拆掉 `unpack` 的 try/catch | `onFrame_messagePackClaimingTooManySubMessages_doesNotThrow` | 转红 `ArrayIndexOutOfBoundsException: Index 250 out of bounds for length 250` |
+| 删掉 `msg==null` 守卫 | `onFrame_unregisteredMsgIdInRange_returnsWithoutUpdating` | 转红 `NullPointerException: Cannot invoke "Object.getClass()"` |
+
+### 顺带修正一个测量工具
+
+验证过程中发现上一轮"删掉 `msg==null` 守卫后 10 条仍全绿"的结论是**错的**，
+错因在测量工具而非被测代码：扫 surefire `.txt` 报告的正则写成
+`^([\w.]+)\.(\w+)\s*-- Time elapsed.*<<< (FAILURE|ERROR)`，而 `@Nested` 类的行是
+`...RidIngestServiceTest$DecodeFailure.onFrame_xxx -- ...` —— `$` 不在 `[\w.]` 里、
+`^` 又要求行首匹配，**这条正则一行都匹配不上**，于是把"读不出结果"报成了"全绿"。
+换成解析 `TEST-*.xml` 后重测：旧用例其实**是**覆盖那条守卫的。
+
+教训与之前那三个工具坑同源：**尺子坏了和被测物没动，在"全绿"这个输出上无法区分**。
+空变异、正则锚点、写 BOM 之外，这是第四个 —— 而且危险方向相反，它会让人去改
+本来没问题的测试。
+
+### 计数
+
+4815 → **4817**（+2）。仅以 `mvn clean package` 实测为准。
+
+---
 ## [Unreleased] — C4 收尾：当日历史轨迹接进前端，重启后折线不再只剩一个点（2026-10-14）
 
 > 先说清**缺的是什么**：不是"历史没落库"。`GET /api/v1/flightlog/track?day=&sysid=`
