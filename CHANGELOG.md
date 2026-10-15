@@ -3,6 +3,86 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+
+## [Unreleased] — 复检闭环不是闭环：两条「声明了却没人执行」的事务注解（2026-10-16）
+
+### 怎么找到的
+
+把「声明≠行为」这条线从 DTO 注解（`@Size` / `@Min` / `@Valid`）扩展到 **Spring 代理注解**：
+`@Transactional` / `@Async` / `@Cacheable` 挂在方法上，但**同类自调用会绕过代理**、
+注解静默失效 —— 不报错、不告警，只是那个声明在运行时根本不存在。
+
+扫描全仓 897 个 main 源码文件，自调用命中 2 处，逐条落到源码核实。
+
+### 缺陷一（真缺陷）：`WorkOrderService.verify` —— 复检闭环被拆成两次提交
+
+| 项 | 事实 |
+|---|---|
+| `verify(Long, int)` | **没有** `@Transactional`（入口 `DefectController` L158 走代理，因此全程无事务） |
+| `transition(Long, …)` | 有 `@Transactional`，但它在 `verify` 内部被**自调用**（`verify` L169）→ 代理被绕过，注解不生效 |
+| 后果 | 「改状态」与「记 verifiedAt / verifiedDetail」变成两次各自提交的写 |
+
+两次写之间的任何失败，都会留下**状态已改成 VERIFIED / REOPENED、却没有任何复检记录**的工单
+—— 一条自称复检过、却拿不出依据的记录。
+
+**实测证据**（真 Spring 代理 + 真 H2，新增 `WorkOrderVerifyTransactionTest`）：
+
+```
+verifyFailureLeavesWorkOrderUntouched:123 [状态不得被单独提交]
+    expected: "RESOLVED"
+     but was: "VERIFIED"
+```
+
+### 修法：把事务边界挂在**真正被代理**的那个方法上
+
+`verify()` 加 `@Transactional`；`transition` 的注解**保留**（它的外部调用方仍然需要它），
+`verify` 内自调用时加入外层事务。
+
+代价如实记录（写进 Javadoc，不掩饰）：本事务持有连接期间包含拍照那段真机 I/O
+（`awaitNewShot` 最长 5s），单次复检最长占住一条数据库连接约 5-7s。这与
+`FormationService.command()` 的既有形状一致（同样在事务内做 MAVLink 下发），
+且复检是操作员触发的低频动作，故接受。若将来复检并发上升，应改为只把末尾两次写包进事务。
+
+### 缺陷二（死注解，无功能后果）：`FormationService.dissolve`
+
+`private` **且**只被 `command()` 自调用 —— proxy-based AOP 两条都拦不住，注解永远不会生效。
+它不造成实际后果（外层 `command()` 本身就是 `@Transactional`，落库写在该事务内），
+但会让读者误以为该方法自带事务。按「让声明与行为一致」移除注解，并写明事务实际来自哪里。
+
+### 变异测试：3 个变异体全杀
+
+| 变异体 | 期望 | 实际 |
+|---|---|---|
+| 删掉 `verify` 的 `@Transactional` | 第 1 条用例红 | 红（`verifyFailureLeavesWorkOrderUntouched`） |
+| 不再写 `verifiedDetail` | 第 2 条用例红 | 红（`verifySuccessPersistsWholeRecord`） |
+| `verified_detail` 列宽改 2000（让注入点失效） | 第 1 条用例**仍红** | 红 —— 证明「注入没生效」不会被误报成绿 |
+
+**被排除的无效变异体**（自查出来的）：删掉 `verify` 末尾那次 `orders.save(updated)`。
+修复后 `verify` 已有事务、实体在持久化上下文中，Hibernate 脏检查会在提交时把字段一并 flush
+—— 删掉那次显式 save 不改变可观测行为，实测**存活**，而这个存活是**正确的**，不能拿来当判据。
+
+### 一个结构性发现：现有单测不可能发现这类缺陷
+
+`WorkOrderServiceTest` 是纯单元测试（`new WorkOrderService(mocks...)`）—— **没有 Spring 上下文、
+没有代理**。在那样的测试里 `@Transactional` 本来就不生效：无论注解在不在、生效不生效，
+用例**结构上**都是绿的。这类缺陷必须用 `@SpringBootTest` 拿真代理才具备观测能力。
+
+### 本轮自我纠正
+
+扫描器把 `GeofenceStore` 报成「类级 `@Transactional`」是**假阳性** —— 命中的是 Javadoc 里的
+`{@code @Transactional}` 文字，不是真注解（真实注解在 L123/158/184/240/326，那 5 个方法均无自调用）。
+与之前几轮同一个规律：**扫描产出假设，打开源码+变异测试才产出结论**。
+
+### 验证
+
+- `mvn clean package` 全量 **BUILD SUCCESS**（7 分钟，0 失败）
+- 计数：**4858 → 4860 用例**（重放到四条修复合完之后：#90 编队、#91 写队列、JSR-303 契约、runner 钉版均已进 master，本分支基线为 master `d0fbb6f`；cloud-backend 2762 → 2764，测试类 561 → 562）
+- 重放说明：本提交最初独立分叉自 master `a6315c7`（4825 → 4827）。四条修复依次 squash 合并后，
+  计数行必然冲突（同一行被两边改成不同值），故按 master 的值解冲突，
+  再由门禁自身输出的行号清单重同步到 4860；重放未改动任何测试代码。
+- 文档口径按计数门禁自身输出的 22 处 `文件:行号` 同步（门禁报告显示"跳过 21 行追述旧值"，
+  历史台账未被改动）；门禁 + `--self-test` 双绿
+
 ## [Unreleased] — CI：runner 镜像钉到 ubuntu-24.04 + setup-java v4→v5（2026-10-16）
 
 ### 触发原因：一个三天后到期的时间炸弹

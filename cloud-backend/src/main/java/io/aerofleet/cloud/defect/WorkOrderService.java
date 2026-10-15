@@ -109,9 +109,21 @@ public class WorkOrderService {
 
     /**
      * 复检：真拍一张 + 逐缺陷比对。
+     * <p>
+     * <b>事务边界必须挂在本方法上。</b>复检是一条闭环（改状态 + 记 verifiedAt/verifiedDetail），
+     * 但它内部的 {@code transition(id, t, null)} 是**同类自调用** —— Spring AOP 的代理在此被
+     * 绕过，{@code transition} 自己那个 {@code @Transactional} 并不生效。若本方法也不带事务，
+     * 这条闭环会被拆成两次各自提交的写，中途失败就留下「状态已改、无复检记录」的工单。
+     * 回归证明见 {@code WorkOrderVerifyTransactionTest}。
+     * <p>
+     * 代价（如实记录，不掩饰）：本事务持有连接期间包含 {@link CaptureService#captureAndLocate}
+     * 那段真机 I/O（{@code awaitNewShot} 最长 5s），因此单次复检最长可能占住一条数据库连接约
+     * 5-7s。这与 {@code FormationService.command()} 的既有形状一致（同样在事务内做 MAVLink 下发），
+     * 且复检是操作员触发的低频动作，故接受。若将来复检并发上升，应改为只把末尾两次写包进事务。
      *
      * @return 复检结果（命中缺陷 id 列表可为空）
      */
+    @Transactional
     public Map<String, Object> verify(Long id, int sysid) {
         WorkOrderEntity wo = get(id);
         if (machine.isTerminal(wo.status)) {

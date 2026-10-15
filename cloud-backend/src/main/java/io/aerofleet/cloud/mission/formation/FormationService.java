@@ -665,8 +665,14 @@ public class FormationService {
     // 编队解散（FR-16）
     // =====================================================================
 
-    /** 编队解散：在飞成员 RTL → state=DISSOLVED（异常 5.4.3-3）。 */
-    @Transactional
+    /**
+     * 编队解散：在飞成员 RTL → state=DISSOLVED（异常 5.4.3-3）。
+     * <p>
+     * 此处**不标注** {@code @Transactional}：本方法既是 {@code private}，又只被
+     * {@link #command(int, FormationCommand)} 自调用，Spring AOP 的代理两条都拦不住 ——
+     * 写上去也只是一个不生效的声明（2026-10-16 移除）。事务实际由 public 的
+     * {@code command()} 提供，本方法的落库写操作在该事务内完成。
+     */
     private Map<Integer, AckResult> dissolve(Formation f) {
         Map<Integer, AckResult> results = new ConcurrentHashMap<>();
         for (int sysid : f.sortedMembers()) {
