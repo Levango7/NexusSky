@@ -266,9 +266,16 @@ public class DroneController {
             if (alt < 0) {
                 throw new BadRequestException("mission item alt must be >= 0, got " + alt);
             }
+            double holdTime = n.path("holdTime").asDouble(0);
+            // holdTime 同理：record 上声明了 @Min(0)，但这里是手工构造（不走 Spring 绑定），
+            // 注解不会触发。此前漏了这一条 —— record 契约与实际解析行为不一致，
+            // 负 holdTime 能一路走到 MAVLink ITEM_INT 编码出去。
+            if (holdTime < 0) {
+                throw new BadRequestException(
+                        "mission item holdTime must be >= 0, got " + holdTime);
+            }
             out.add(new MissionItemRequest(
-                    n.path("cmd").asText(), lat, lon, alt,
-                    n.path("holdTime").asDouble(0)));
+                    n.path("cmd").asText(), lat, lon, alt, holdTime));
         }
         return out;
     }
