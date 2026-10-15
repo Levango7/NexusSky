@@ -11,6 +11,19 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * LoRa 回传通道（布控球 → 无人机 LoRa 基站载荷）。
+ *
+ * <p><b>状态：未接入生产路径。</b>{@link LinkSimMain}（本模块唯一 {@code main()} 入口）
+ * 从不实例化本类，所以布控球告警经 LoRa 回传至无人机这条链路在模拟器里不会发生。
+ * 对应测试 {@code LoRaRelayChannelTest} 全绿，但验证的代码路径不存在。
+ *
+ * <p>另注两个易被绿灯掩盖的边界（详见
+ * {@code LoRaRelayChannelTest.alarmPayloadCompactRoundtrip*}）：
+ * 压缩告警体的时间戳走 {@code writeInt((int) timestamp)}，真实时间戳
+ * （约 1.7e12）超过 32 位后会被截断；现有测试特意挑了小于 {@code 2^31} 的值让往返无损。
+ *
+ * <p>接线时须同步 README 的能力宣称，并把本类移出
+ * {@code LinkSimWiringTest.UNWIRED_CLASSES}。
+ *
  * <p>
  * 模拟布控球（安防设备）通过 LoRa 433MHz 模块将报警事件回传至最近的无人机 LoRa 基站载荷，
  * 再经无人机 mesh 网络路由至指挥中心。

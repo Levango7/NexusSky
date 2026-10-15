@@ -14,6 +14,15 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 异构链路管理器（FR-01 异构链路桥接）。
+ *
+ * <p><b>状态：未接入生产路径。</b>{@link LinkSimMain}（本模块唯一 {@code main()} 入口）
+ * 从不实例化本类，因此本类管理的桥接节点集群、以及它创建的 {@link LinkBridgeNode}，
+ * 在产品里一次都不会被建立。对应测试 {@code HeterogeneousLinkManagerTest} 全绿，
+ * 但验证的代码路径不存在。
+ *
+ * <p>本类的存在只说明 FR-01 有设计稿，没有实现。接线时须同步 README 的能力宣称，
+ * 并把本类移出 {@code LinkSimWiringTest.UNWIRED_CLASSES}。
+ *
  * <p>
  * 管理网络中所有桥接节点的注册与跨链路路由决策。当源节点与目标节点使用不同通信介质时，
  * 通过桥接节点实现跨介质帧转发，保证异构链路节点间可达。

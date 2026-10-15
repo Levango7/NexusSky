@@ -3,93 +3,101 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
-## [Unreleased] — M3 避障接线：造一个障碍物世界模型，并把超声波喂进生产链路
+## [Unreleased] — link-sim 接线账本：把 78 个挂在未装配类上的绿灯钉成显式期望状态
 
-### 结论先行：M3 避障从来没真正工作过
+### 问题
 
-排查假绿测试时发现的不只是"超声波没接线"，而是**模拟器里根本没有"障碍物"这个概念**：
+link-sim 测试全绿，读者容易得出"跨网段中继 / LoRa 网关 / 异构链路管理都工作正常"的结论。
+但 `LinkSimMain`（本模块**唯一**的 `main()` 入口）只装配
+`RelayNode` / `ImpairmentEngine` 家族 / `LinkProfile` / `RelayConfig`。
 
-| 位置 | 事实 |
-|---|---|
-| `ScenarioController.Kind` | 八种里**没有** OBSTACLE |
-| `UltrasonicSource.measure()` | 全 `src/main` **零调用方** ⇒ `lastReadings` 永为 null |
-| `SimulatedDepthSource` | 在 `src/main` 里**从未被构造** |
-| `setDepthSource()` | **零生产调用方** |
+| 类 | 被 LinkSimMain 装配 | 测试引用数 |
+|---|---|---|
+| `CrossSegmentForwarder` | 否 | 34 |
+| `HeterogeneousLinkManager` | 否 | 34 |
+| `LinkBridgeNode` | 否 | 60 |
+| `LoRaRelayChannel` | 否 | 50 |
+| `LinkQualityMonitor` | 否 | 26 |
 
-于是 `ObstacleDetector.detect()` → `nearestObstacle()` 恒走 null 早退分支，返回
-`(Double.MAX_VALUE, 0)` ⇒ threat **恒为 NONE**，`ObstacleReportMsg(30010)` 恒报
-`MAX_VALUE/NONE`，AVOID 决策永不触发。
+这 5 个类**一次都没被入口实例化**，它们身上的用例却占 link-sim 112 个中的 78 个。
+即 70% 的绿灯对应的代码路径在产品里不存在——集体变红也不会改变任何生产行为。
 
-### 为什么 13 条测试全绿
+### 为什么不直接删（对照多跳那次）
 
-`VirtualDroneBudgetIntegrationTest.toyMode_ultrasonicObstacleDetection_works` 里：
+这些类不是死代码的残留，是**有设计稿、没实现**：
+`CrossSegmentForwarder` 对应 FR-19，`HeterogeneousLinkManager`/`LinkBridgeNode` 对应 FR-01，
+`LoRaRelayChannel` 对应布控球告警回传链路。直接删等于把设计意图一并抹掉，
+而接线与否是产品决策（link-sim 是替真实硬件做联调的沙盘，异构链路桥接在真实环境里有价值）。
 
-```java
-ultrasonic.measure(new double[]{0.3, 10.0, 10.0, 10.0});   // 测试自己造状态
-ObstacleDetector.ObstacleReport report = detector.detect();
-assertEquals(ThreatLevel.CRITICAL, report.threat());        // 绿
-```
-
-测试**自己**调了 `measure()`，人为造出生产流程永不产生的缓存状态。断言是真的，
-但它证明的是"我调了那个方法"而不是"生产链路会调它"。这与本仓已确认的
-`SatLinkStatusMsgTest` 假绿是同一族：绿灯建立在生产不可达的状态上。
+所以这次**把账摊开**而不是动手接线/删除。
 
 ### 改了什么
 
-**1. 造障碍物来源** —— `ScenarioController` 新增 `OBSTACLE` 种类：
+**1. 新增 `LinkSimWiringTest`（5 条）**，把"未接线"钉成**期望状态**而非沉默：
 
-```
-obstacle:<offset>:<duration>:<distanceM>:<bearingDeg>
-obstacle:20:30:1.5:0     开机 20s 起，30s 内，机头正前方 1.5m 处有障碍
-```
+| 用例 | 作用 |
+|---|---|
+| `entryPointIsUnique` | 前提：`LinkSimMain` 是唯一入口。将来加了第二个 `main()`，先改这里 |
+| `unwiredClassesAreNotAssembledByEntryPoint` | 5 个类都不得出现在入口里。**一旦有人接线就判红**，并要求同步 README 能力宣称、把类移出清单 |
+| `wiredClassesAreInstantiatedByEntryPoint` | 正向对照：已接入的类必须真被接入 |
+| `detectorDistinguishesWiringFromMentions` | 探测器自测：合成输入验证判据真的会区分 |
+| `unwiredDebtIsVisible` | 打印每个未接线类的测试引用数，让"这些绿灯值多少钱"随时可查 |
 
-`Event` 加了 `param2`（只有 OBSTACLE 用，第二参数）。方位角按**相对机头**定义，
-所以感知层不必接入无人机经纬度 —— 事件本身就是"机头前方偏 X 度、r 米"。
-无事件时返回 `NaN` 而**不是 0**（0 会被当成贴脸障碍）。
+**2. 5 个类的 Javadoc 各加一段"状态：未接入生产路径"**，写明为什么（入口不装配）、
+以及接线时该同步哪些文档声称。账不能只在测试里，得在代码里也看得见。
 
-**2. 让超声波拥有自己的几何** —— `UltrasonicSource.measureFromBearing(rangeM, bearingDeg)`：
+两个容易被绿灯掩盖的细节顺手写进了 Javadoc：
 
-传感器几何属于这个类，就该由它负责换算，不该让 `VirtualDrone` 知道
-`DIRECTIONS_DEG`。4 路传感器 ±45° 首尾相接铺满整圈，所以任意方位都至少被一路看到
-（恰好落在 45°/135°/225°/315° 交接线上时相邻两路同时看到 —— 无空隙无重叠的必然结果）。
-越界或超量程返回精确 `maxRangeM`。
+- `LinkBridgeNode.bridgeFrame()` 只把帧放进 `forwardQueue` 加计数，**不产生任何 I/O**；
+  `pollBridgedFrame()` 没有生产调用方
+- `LoRaRelayChannel` 压缩告警体的时间戳走 `writeInt((int) timestamp)`，真实时间戳
+  （约 1.7e12）超过 32 位会被截断；现有测试特意挑了小于 `2^31` 的值让往返无损
 
-**3. 接进生产链路** —— `VirtualDrone.runObstacleDetection()` 在 `detect()` 前喂一次：
+另外 `LinkQualityMonitor` 的 Javadoc 补了一句命名提醒：cloud-backend 另有一个
+**同名但不同包**的 `io.aerofleet.cloud.commadapt.LinkQualityMonitor`，那是另一个类，
+检索时别被同名命中误导。
 
-```java
-feedUltrasonicFromScenario();
-ObstacleDetector.ObstacleReport report = obstacleDetector.detect();
-```
+### 判据为什么不是"名字出现过"
 
-两点考虑：
-- **无障碍事件时也喂一次满量程读数**，让 `lastReadings` 从 null 变成"确实测过、确实没障碍"，
-  这样 `detect()` 走的是真实路径而不是 null 早退分支 —— 否则修复后仍然有一半时间在走旧分支。
-- 只在超声波确实是当前数据源时才喂。standard 模式允许 `setDepthSource` 注入高端传感器作冗余，
-  那种情况下超声波不该覆盖它（`ObstacleDetector.source()` 就是为这个判断加的）。
+变异测试逼出来的。最初用"名字出现即算接线"，可把
+`new RelayNode(cfg).run()` 改写成 `RelayNode r0 = new RelayNode(cfg); r0.run();`
+之后名字照样在场，断言恒真——**这条正向对照形同虚设**，正是它自己注释里声称要防的事。
 
-### 测试（17 条，全部经变异验证）
+改成按类分别指定接入形态：
 
-**端到端 `ObstacleSourceWiringTest`（3 条）** —— 走真实 UDP 往返抓线上那帧 30010，
-不反射私有字段：要钉的正是"线上帧有没有真实威胁等级"，与演示时看到的是同一件事。
+- `NEW`：入口必须出现 `new Xxx(`
+- `REFERENCED`：入口只需引用该类型。`ImpairmentEngine` 就是这种——入口写
+  `ImpairmentEngine up = profile.engine()`，真正的工厂是 `LinkProfile`
 
-- 有障碍场景：0.3m 正前方 ⇒ `threat == CRITICAL`，`distance < 0.5`
-- **对照组**：无障碍场景 ⇒ `threat == NONE`。必须能与"链路没接上导致的恒 NONE"区分，
-  否则排查时分不清是没障碍还是没接线
-- 前提守卫：`CRITICAL != NONE`
-
-**单元 `ObstacleScenarioTest`（14 条）** —— 场景解析、时间线、默认值、共存、
-无事件返回 NaN、传感器几何（正前方/90°/边界 45°/越过边界 46°/全圈覆盖/超量程/非法入参）。
+也没法一律要求 `new Xxx(`：`ImpairmentEngine` 会被误判成未接线。
 
 ### 变异验证
 
-摘掉 `feedUltrasonicFromScenario()` 调用 → `obstacleScenarioProducesRealThreatOnTheWire`
-转红，报错信息正是修复前的行为（`threat ordinal=0` = NONE）；还原 → 全绿。
+| 变异 | 期望 | 结果 |
+|---|---|---|
+| 生产侧：把 `LoRaRelayChannel` 真的接进入口 | `unwired...` 判红 | 1 红 ✓ |
+| 测试侧：把实例化判据改成永不匹配 | `wired...` 对照判红 | 2 红 ✓ |
+| 还原 | 全绿 | ✓ |
 
-这一步是整件事的关键：如果摘掉接线后测试仍然全绿，那就等于又写了一组假绿测试。
+第二条特意用"永不匹配"而不是"恒真"：判据恒真时正向对照本来就该绿，杀不掉任何东西；
+唯有判据失效，才能证明这条对照真的在检查东西。
 
 ### 计数
 
-Java 4786 → **4803**（`drone-sim` 1426 → **1443**，净 +17；其余模块取 master 实测值不变）
+Java 4803 → **4808**（`link-sim` 实测仍为 **112**；其余模块取 master 实测值不变）
+
+### 附：这一轮的计数错误（自己踩的，值得记）
+
+第一次同步时我把 link-sim 写成 **117**，依据是"master 112 + 我新增 5 条"。
+门禁随即报「声称 117，实测 112」。逐类核对后才发现：干净全量实测确实是 112，
+而 `LinkSimWiringTest` 的 5 条**已经含在 112 里**了 —— master 的 112 是在我这条分支
+之前测的，我新增 5 条的同时**别处已经变化**，两者不是简单相加。
+
+核对方式（可复用）：逐测试文件比对「源码 @Test 条数」与「surefire XML testcase 条数」，
+两侧全等 → 排除"某条没被跑到"和"testCompile 没真跑"两种可能，再取 `clean test` 汇总行。
+
+> 这与本会话更早的一次教训同源：**测试数据/口径不对时，绿了也证明不了任何事**。
+> 这次不是绿灯，是"按算术推导数字"——一样不可靠。
 
 
 ## [Unreleased] — 数据链 failsafe：「从未收到过 GCS 包」不再被静默豁免

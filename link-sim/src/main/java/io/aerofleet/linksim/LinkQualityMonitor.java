@@ -7,6 +7,18 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 链路质量监控器（FR-01 异构链路桥接辅助）。
+ *
+ * <p><b>状态：未接入生产路径。</b>{@link LinkSimMain}（本模块唯一 {@code main()} 入口）
+ * 从不实例化本类，所以链路质量评分与介质切换推荐在 link-sim 里不会发生。
+ * 对应测试全绿，但验证的代码路径不存在。
+ *
+ * <p>命名注意：cloud-backend 另有一个<b>同名但不同包</b>的
+ * {@code io.aerofleet.cloud.commadapt.LinkQualityMonitor}，那是另一个类，
+ * 与本类无继承或调用关系。检索时别被同名命中误导。
+ *
+ * <p>接线时须同步 README 的能力宣称，并把本类移出
+ * {@code LinkSimWiringTest.UNWIRED_CLASSES}。
+ *
  * <p>
  * 监控各通信介质的链路质量指标（RSSI、丢包率、延迟），在链路质量降级时
  * 自动推荐切换到备用介质，保障通信连续性。
