@@ -25,14 +25,24 @@ import java.util.concurrent.atomic.AtomicLong;
  * <ol>
  *   <li>接收 LoRaAlarmDto（从无人机 mesh 网络路由而来）</li>
  *   <li>转换为标准 AlarmEvent 格式</li>
- *   <li>若 AlarmEventStore 可用，存储报警事件</li>
- *   <li>若 AlarmLinkageEngine 可用，执行联动处理（规则匹配+动作执行）</li>
+ *   <li>若 AlarmEventStore 非 null，存储报警事件（null 则跳过，见"降级模式"）</li>
+ *   <li>若 AlarmLinkageEngine 非 null，执行联动处理（规则匹配+动作执行，null 则跳过）</li>
  *   <li>记录回传通道统计信息（成功率、延迟等）</li>
  * </ol>
  *
  * <h3>降级模式</h3>
- * AlarmEventStore 和 AlarmLinkageEngine 使用 {@code @Autowired(required=false)} 注入，
- * 当依赖不可用时自动降级为仅记录日志，不影响 LoRa 回传通道的基本功能。
+ * 两个依赖用 {@code @Autowired(required=false)} 注入，字段为 null 时跳过对应环节：
+ * 缺 {@link AlarmEventStore} 只记日志不落库，缺 {@link AlarmLinkageEngine} 只记日志不联动，
+ * 但事件转换与回传通道统计照常完成。
+ * <p>
+ * <strong>当前生产不可达</strong>：{@link AlarmEventStore} 是裸 {@code @Component}、
+ * {@link AlarmLinkageEngine} 是裸 {@code @Service}，全仓没有 {@code @ConditionalOn*}
+ * 或 {@code @Profile} 命中它们，因此 Spring 必然注入成功，两个字段永远非 null。
+ * 这段代码是防御性的，同时给"将来真把它们做成可选装配"留好回归网
+ * （{@code LoRaRelayServiceTest} 的三条降级用例各自锁住一种组合）。
+ * <p>
+ * 换句话说：<strong>不要把这里当成"存储挂了 LoRa 仍能收报警"的能力</strong> ——
+ * 存储真挂了会抛异常，由 {@code catch (Exception)} 计入 {@code totalFailed} 并返回 FAILED。
  */
 @Service
 public class LoRaRelayService {

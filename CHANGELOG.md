@@ -3,6 +3,76 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — LoRa 降级路径：三条用例从"断言不足"改成"各守各的"（2026-10-15）
+
+### 问题
+
+`LoRaRelayServiceTest` 的三条降级用例，断言集**全都是正常路径那条的真子集**，
+而且第 1 条（缺 store）与第 3 条（都缺）的断言集**完全相同** —— 都只有
+`status == "SUCCESS"`：
+
+| 用例 | 加固前断言数 | 是正常路径断言集的子集 |
+|---|---|---|
+| `receiveLoRaAlarmConvertsToAlarmEvent`（正常） | 3 | — |
+| 缺 `AlarmEventStore` | **1** | 是 |
+| 缺 `AlarmLinkageEngine` | 2 | 是 |
+| 两个都缺 | **1** | 是 |
+
+读起来像在测降级，实际分辨不出谁是谁 —— 第 1 条和第 3 条换个名字都成立。
+
+### 修改：每条只断言属于自己那个组合的可观测差异
+
+| 用例 | 只属于它的断言 |
+|---|---|
+| 缺 store | `Mockito.verify(mockEngine).processEvent(...)` —— 联动**仍被调用**；`eventStore.size()==0`；统计四项自增 |
+| 缺 linkage | store 仍收到**完整事件**：类型 FIRE / 设备 `LoRa-101` / 严重度 WARN / 返回的 eventId 与落库 id 一致 |
+| 都缺 | 事件仍产出 `eventId`、`message` 正确、`successRate==1.0` |
+
+按"不做功能减法"的要求：**降级代码一行未删、一行未改**，只加固测试 + 改文档口径。
+
+### Javadoc 如实化（`LoRaRelayService`）
+
+原 Javadoc 把"降级模式"写成一条 feature：**"当依赖不可用时自动降级，不影响 LoRa
+回传通道的基本功能"**。实测这在生产里**不可能发生**：
+
+- `AlarmEventStore` 是裸 `@Component`、`AlarmLinkageEngine` 是裸 `@Service`
+- 全仓无 `@ConditionalOn*` / `@Profile` 命中它们
+- 所以 `@Autowired(required=false)` **必然注入成功**，两个字段永远非 null
+
+改成如实描述，并明确写下一句以免误读：
+
+> **不要把这里当成"存储挂了 LoRa 仍能收报警"的能力** —— 存储真挂了会抛异常，
+> 由 `catch (Exception)` 计入 `totalFailed` 并返回 `FAILED`。
+
+降级代码保留的理由也写清楚了：防御性 + 给"将来真做成可选装配"留回归网。
+
+### 变异验证
+
+| 变异 | 目标用例 | 结果 |
+|---|---|---|
+| 删掉 store 的 null 检查 | `alarmEventStoreUnavailable_stillRunsLinkageAndReturnsEventId` | 转红 |
+| 删掉 linkage 的 null 检查 | `alarmLinkageEngineUnavailable_stillStoresEvent` | 转红 |
+| 事件不返回 eventId | `bothDependenciesUnavailable_stillProducesEventAndCounts` | 转红 |
+| 降级路径不记 `totalSuccess` | `alarmEventStoreUnavailable_stillRunsLinkageAndReturnsEventId` | 转红 |
+| 删掉 store 的 `else`（只剩 `log.debug`） | 同上 | **存活** |
+| 删掉 linkage 的 `else` | `alarmLinkageEngineUnavailable_stillStoresEvent` | **存活** |
+
+最后两条**存活是应该的**：那俩 `else` 分支里只剩一句 `log.debug`，通过公开 API
+没有任何可观测差异 —— **没有行为测试能杀它**。这是代码的性质，不是测试的弱。
+
+### 过程中的一次自我纠正
+
+写第一版时我用 `Mockito.mock(AlarmLinkageEngine.class)` 且不 stub 返回值，结果
+新用例红了（`status` 是 FAILED 不是 SUCCESS）。我一度判定"联动引擎返回 null 会把
+成功的回传变成 FAILED"是生产缺陷 —— **这个判断是错的**：`processEvent()` 只有
+一个 return（L199）、无提前返回，**恒返回非 null**，NPE 纯粹是 mock 的产物。
+已改为 stub 非 null 返回，并在测试里注释说明原因，免得后人再踩。
+
+### 计数
+
+**4825 → 4825**（用例数不变，只加固断言 + 改文档）。以 `mvn clean package` 实测为准。
+
+---
 ## [Unreleased] — 声明与行为不一致的三处补齐：holdTime 漏检、catch 二次 NPE、uploadMission 五个校验零覆盖（2026-10-15）
 
 ### 一、先纠正两份"扫描结论"，它们都是错的

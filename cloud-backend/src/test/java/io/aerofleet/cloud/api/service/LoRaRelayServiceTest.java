@@ -123,58 +123,118 @@ class LoRaRelayServiceTest {
         assertThat(eventStore.size()).isEqualTo(1);
     }
 
-    @Test
-    @DisplayName("AlarmEventStore 不可用时降级处理")
-    void alarmEventStoreUnavailableDegrade() {
-        // 创建无 AlarmEventStore 的服务实例
-        LoRaRelayService degradedService = new LoRaRelayService();
+    // =====================================================================
+    // 降级路径
+    // =====================================================================
+    //
+    // 三个依赖组合此前只断言 status=="SUCCESS" —— 而正常路径那条也断言同样的东西，
+    // 于是三条的断言集是正常路径的真子集，读起来像在测降级，实际分辨不出谁是谁。
+    // 现在每条断言**只属于自己那个组合**的可观测差异：
+    //   缺 store   → 联动引擎仍应被调用（这才是"缺 store 不影响联动"的证据）
+    //   缺 linkage → store 仍应收到事件（这才是"缺联动不影响落库"的证据）
+    //   都缺       → 事件仍生成并返回 eventId、统计仍自增（通道本身不依赖任一方）
+    //
+    // 注意：AlarmEventStore 是裸 @Component、AlarmLinkageEngine 是裸 @Service，
+    // 全仓无 @Conditional*/@Profile 命中它们，所以生产里这两个字段**永远非 null**，
+    // 降级分支在生产不可达。它是防御代码 + 给"将来真做成可选装配"留的安全网。
+    // 类 Javadoc 里"降级模式"那段已同步改成如实描述（见 LoRaRelayService）。
+
+    /**
+     * 构造一个只注入指定依赖的服务；{@code useMockEngine} 为 true 时联动引擎用 mock，
+     * 以便验证"缺 store 时联动仍被调用"。
+     */
+    private LoRaRelayService serviceWith(boolean withStore, boolean withEngine,
+                                         boolean useMockEngine) {
+        LoRaRelayService svc = new LoRaRelayService();
         try {
+            if (withStore) {
+                java.lang.reflect.Field f = LoRaRelayService.class.getDeclaredField("alarmEventStore");
+                f.setAccessible(true);
+                f.set(svc, eventStore);
+            }
+            if (withEngine) {
+                java.lang.reflect.Field f = LoRaRelayService.class.getDeclaredField("alarmLinkageEngine");
+                f.setAccessible(true);
+                f.set(svc, useMockEngine ? Mockito.mock(AlarmLinkageEngine.class) : linkageEngine);
+            }
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new RuntimeException("注入依赖失败", e);
+        }
+        return svc;
+    }
+
+    @Test
+    @DisplayName("降级①AlarmEventStore 缺席：联动引擎仍被调用，事件仍返回 eventId")
+    void alarmEventStoreUnavailable_stillRunsLinkageAndReturnsEventId() {
+        AlarmLinkageEngine mockEngine = Mockito.mock(AlarmLinkageEngine.class);
+        // 必须给非 null 返回值：processEvent 只有一个 return、恒返回非 null，
+        // 而 receiveLoRaAlarm 会直接 result.getMatchedCount() —— mock 默认返回 null 会 NPE，
+        // 被 catch 成 FAILED，那是 mock 的产物不是生产行为。
+        Mockito.when(mockEngine.processEvent(Mockito.any()))
+                .thenReturn(new AlarmLinkageEngine.ProcessResult("evt-1", 0, List.of()));
+
+        LoRaRelayService degraded = new LoRaRelayService();
+        try {
+            // 只注入联动引擎，不注入 store
             java.lang.reflect.Field f = LoRaRelayService.class.getDeclaredField("alarmLinkageEngine");
             f.setAccessible(true);
-            f.set(degradedService, linkageEngine);
+            f.set(degraded, mockEngine);
         } catch (NoSuchFieldException | IllegalAccessException e) {
             throw new RuntimeException(e);
         }
 
-        LoRaAlarmDto dto = createDto(101, "FIRE", 39.9, 116.3, 3);
-
-        Map<String, Object> result = degradedService.receiveLoRaAlarm(dto);
+        Map<String, Object> result = degraded.receiveLoRaAlarm(createDto(101, "FIRE", 39.9, 116.3, 3));
 
         assertThat(result.get("status")).isEqualTo("SUCCESS");
-        // eventStore 为 null，不应抛异常
+        // 缺 store 不该影响 eventId 的生成与回传
+        assertThat(result.get("eventId")).as("缺 store 时仍应生成并返回 eventId").isNotNull();
+        // 核心断言：联动照常发生 —— 这条断言只属于"缺 store"这个组合
+        Mockito.verify(mockEngine, Mockito.times(1)).processEvent(Mockito.any());
+        // 事件确实没落库（store 缺席）
+        assertThat(eventStore.size()).isZero();
+        // 通道自身统计不受影响
+        Map<String, Object> stats = degraded.getRelayStats();
+        assertThat(stats.get("totalReceived")).isEqualTo(1L);
+        assertThat(stats.get("totalSuccess")).isEqualTo(1L);
+        assertThat(stats.get("totalFailed")).isEqualTo(0L);
     }
 
     @Test
-    @DisplayName("AlarmLinkageEngine 不可用时降级处理")
-    void alarmLinkageEngineUnavailableDegrade() {
-        // 创建无 AlarmLinkageEngine 的服务实例
-        LoRaRelayService degradedService = new LoRaRelayService();
-        try {
-            java.lang.reflect.Field f = LoRaRelayService.class.getDeclaredField("alarmEventStore");
-            f.setAccessible(true);
-            f.set(degradedService, eventStore);
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-            throw new RuntimeException(e);
-        }
+    @DisplayName("降级②AlarmLinkageEngine 缺席：store 仍收到完整事件")
+    void alarmLinkageEngineUnavailable_stillStoresEvent() {
+        LoRaRelayService degraded = serviceWith(true, false, false);
 
-        LoRaAlarmDto dto = createDto(101, "FIRE", 39.9, 116.3, 3);
-
-        Map<String, Object> result = degradedService.receiveLoRaAlarm(dto);
+        Map<String, Object> result = degraded.receiveLoRaAlarm(createDto(101, "FIRE", 39.9, 116.3, 3));
 
         assertThat(result.get("status")).isEqualTo("SUCCESS");
+        // 核心断言：联动缺席但落库照旧，且落的是完整事件 —— 只属于"缺 linkage"这个组合
         assertThat(eventStore.size()).isEqualTo(1);
+        AlarmEventStore.PageResult page = eventStore.query(0, 10, null, null);
+        assertThat(page.getItems()).hasSize(1);
+        AlarmEvent stored = page.getItems().get(0);
+        assertThat(stored.getEventType()).isEqualTo(AlarmEvent.EventType.FIRE);
+        assertThat(stored.getSourceDeviceId()).isEqualTo("LoRa-101");
+        assertThat(stored.getSeverity()).isEqualTo(AlarmEvent.Severity.WARN);
+        assertThat(result.get("eventId")).isEqualTo(stored.getId());
     }
 
     @Test
-    @DisplayName("AlarmEventStore 和 AlarmLinkageEngine 都不可用时仍可处理")
-    void bothDependenciesUnavailableDegrade() {
-        LoRaRelayService degradedService = new LoRaRelayService();
+    @DisplayName("降级③两个依赖都缺席：通道仍生成事件、返回 eventId、统计自增")
+    void bothDependenciesUnavailable_stillProducesEventAndCounts() {
+        LoRaRelayService degraded = serviceWith(false, false, false);
 
-        LoRaAlarmDto dto = createDto(101, "FIRE", 39.9, 116.3, 3);
+        Map<String, Object> result = degraded.receiveLoRaAlarm(createDto(101, "FIRE", 39.9, 116.3, 3));
 
-        Map<String, Object> result = degradedService.receiveLoRaAlarm(dto);
-
+        // 核心断言：没有任一依赖，事件对象本身仍然被构造出来并回传 id
         assertThat(result.get("status")).isEqualTo("SUCCESS");
+        assertThat(result.get("eventId")).as("两依赖皆缺席时仍应产出 eventId").isNotNull();
+        assertThat(result.get("message")).isEqualTo("LoRa回传报警处理成功");
+        assertThat(eventStore.size()).isZero();
+        Map<String, Object> stats = degraded.getRelayStats();
+        assertThat(stats.get("totalReceived")).isEqualTo(1L);
+        assertThat(stats.get("totalSuccess")).isEqualTo(1L);
+        assertThat(stats.get("totalFailed")).isEqualTo(0L);
+        assertThat((double) stats.get("successRate")).isEqualTo(1.0);
     }
 
     @Test
