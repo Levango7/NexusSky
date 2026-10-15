@@ -3,6 +3,92 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — 写队列：兜底回调自己抛异常会把写线程整个带走（2026-10-15）
+
+### 问题
+
+`BatchedWriteQueue.flush()` 的结构是这样的：
+
+```java
+} catch (Exception e) {
+    ...
+    onFailure.accept(batch, e);   // ← 兜底回调在 catch 块「内部」
+} finally {
+    inFlight.decrementAndGet();
+}
+```
+
+**catch 块不会捕获自己函数体里抛出的异常。** 所以 `onFailure.accept` 一旦抛出，
+就会冲出 `flush()` → 冲出 `runLoop()`（`flush(batch)` 没有任何 try 包裹）→
+**写线程直接死亡**，而且没有任何日志。
+
+后果比看上去严重：线程死后，所有 `offer()` 在队列填满之前都返回 `true`，
+却没有任何消费者。队列**静默停写** —— 不报错、不记日志、计数器只涨 `offered`。
+
+这与类 Javadoc 的承诺直接冲突：
+
+> 落库抛异常时整批交给 `onFailure` 回调，同样由调用方兜底——
+> 保留"DB 不可用不影响记账"的原有语义。
+
+而现实中 DB 挂了的时候兜底目标（文件追加）很可能一起挂（磁盘也满）——
+这条路径不是理论边界，是 DB 故障时最容易同时发生的场景。
+
+`close()` 有同样的问题：残余条目的 `onFailure.accept(rest, ...)` 会把异常
+**甩给调用方**（Spring 的 `destroy()` 里抛异常会打乱关闭流程）。
+
+### 取证（修前，两条新用例都红）
+
+| 用例 | 实际失败信息 |
+|---|---|
+| `throwingFailureCallbackDoesNotKillWriter` | `AssertionError: 条件未在 2000ms 内成立` —— 写线程已死，第 7 条永远没落地 |
+| `closeWithPendingItemsAndThrowingCallbackDoesNotPropagate` | `RuntimeException: fallback target also unavailable` 从 `close()` 外抛 |
+
+### 修法
+
+新增 `notifyFailure(List<T>, Exception)`，把两处 `onFailure.accept` 都换过去，
+**单独包一层 try**：
+
+- `flush()` 里落库失败的批次
+- `close()` 里残余条目的批次
+
+只捕获 `Exception`，**不捕获 `Error`**（OOM / StackOverflow 仍向上抛 ——
+那种状态下进程已不可信，让它炸出来比吞掉更诚实）。兜底失败的批次记 `ERROR`，
+日志里带原始原因与批次大小。
+
+类 Javadoc 新增「兜底失败也不能拖垮队列」一段，把这条契约写死。
+
+### 测试
+
+新增 2 条（先按期望行为写、确认红，再修）。原来唯一覆盖"落库失败"的
+`failureHandsWholeBatchToCallback` 用的兜底回调是 `failed.add(...)`，
+**永远不会抛** —— 所以"兜底自己也失败"这条路径此前零覆盖。
+
+### 变异验证：3 杀 0 活
+
+| 变异 | 目标用例 | 结果 |
+|---|---|---|
+| 去掉 `notifyFailure` 的 catch | `throwingFailureCallbackDoesNotKillWriter` | 转红 |
+| `close()` 里改回直调 `onFailure` | `closeWithPendingItemsAndThrowingCallbackDoesNotPropagate` | 转红 |
+| `notifyFailure` 根本不调 `onFailure` | `failureHandsWholeBatchToCallback`（既有用例） | 转红 |
+
+第三条是刻意加的回归网：防止"修兜底失败"的时候把正常兜底也一起吞掉。
+
+### 顺手得到的一个可信负结果
+
+把"哪个入口消费了带 JSR-303 约束的 DTO 却没加 `@Valid`"这条扫描重写了三遍才做对
+（前两遍都因为注解顺序、以及 `annos + before` 拼接导致 `\b` 失配而误报）。修好之后的结论：
+
+> 全仓 **116** 个 `@RequestBody` 入口，其中 **8** 个消费带约束注解的 DTO，
+> **8 个全部有 `@Valid`**；唯一的例外就是 `FormationController.create`
+> —— 也就是上一条 CHANGELOG 里刚修的那个。
+
+所以「入口漏 `@Valid`」在当前代码里是**孤例**，不是模式，不用再查这一类。
+
+### 计数
+
+**4828 → 4830**（+2）。以 `mvn clean package` 实测为准。
+
+---
 ## [Unreleased] — 编队创建：成员数上限与队形缺省两条「声明了却没人执行」（2026-10-15）
 
 ### 问题

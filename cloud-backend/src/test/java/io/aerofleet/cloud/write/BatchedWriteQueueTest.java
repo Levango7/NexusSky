@@ -156,6 +156,92 @@ class BatchedWriteQueueTest {
         assertThat(queue.pendingCount()).isZero();
     }
 
+    // ============================================================
+    // 兜底回调（onFailure）自己抛异常的场景。
+    //
+    // 原来只有 failureHandsWholeBatchToCallback 覆盖「落库失败」，
+    // 而它的 onFailure 是 failed.add(...)，永远不会抛 ——
+    // 于是「兜底自己也失败」这条路径零覆盖。
+    //
+    // 这条路径的危险在于：onFailure.accept() 写在 flush() 的 catch 块**内部**，
+    // 而 catch 块不捕获自己函数体抛出的异常，所以它会一路冲出 flush()、
+    // 冲出 runLoop()，把写线程整个带走。之后所有 offer() 在队列满之前都返回 true，
+    // 却没有任何消费者 —— 队列静默停写，且不会有任何日志。
+    // ============================================================
+
+    private static final RuntimeException FALLBACK_UNAVAILABLE =
+            new RuntimeException("fallback target also unavailable");
+
+    @Test
+    @DisplayName("兜底回调自己抛异常时写线程不能死——DB 与兜底同时不可用不该让队列静默停写")
+    void throwingFailureCallbackDoesNotKillWriter() throws InterruptedException {
+        List<Integer> landed = Collections.synchronizedList(new ArrayList<>());
+        List<List<Integer>> fallbackSeen = Collections.synchronizedList(new ArrayList<>());
+        BatchedWriteQueue<Integer> queue = new BatchedWriteQueue<>(
+                "t-cbthrow", 1000, 5, 10,
+                batch -> {
+                    if (batch.contains(99)) {
+                        throw new IllegalStateException("db down");
+                    }
+                    landed.addAll(batch);
+                },
+                (batch, err) -> {
+                    fallbackSeen.add(new ArrayList<>(batch));
+                    // 兜底目标是文件追加。磁盘同时满了的话，这里一样会抛。
+                    throw FALLBACK_UNAVAILABLE;
+                });
+
+        queue.offer(99);
+        // 先确认兜底确实被调到了
+        awaitUntil(() -> !fallbackSeen.isEmpty(), 2000);
+
+        // 关键一步：兜底回调已经抛过一次，队列必须还能继续写。
+        // 若写线程已被带走，这里会一直等到 awaitUntil 抛 AssertionError。
+        queue.offer(7);
+        awaitUntil(() -> landed.contains(7), 2000);
+
+        queue.close();
+
+        assertThat(fallbackSeen.get(0)).as("落库失败的批次仍要交给兜底").containsExactly(99);
+        assertThat(landed).as("兜底回调抛异常不应影响后续写入").contains(7);
+    }
+
+    @Test
+    @DisplayName("close 时队列仍有残余且兜底回调会抛，close 不能把异常甩给调用方")
+    void closeWithPendingItemsAndThrowingCallbackDoesNotPropagate() throws InterruptedException {
+        CountDownLatch sinkEntered = new CountDownLatch(1);
+        CountDownLatch releaseSink = new CountDownLatch(1);
+        List<List<Integer>> fallbackSeen = Collections.synchronizedList(new ArrayList<>());
+        BatchedWriteQueue<Integer> queue = new BatchedWriteQueue<>(
+                "t-closecb", 100, 1, 20,
+                batch -> {
+                    sinkEntered.countDown();
+                    // 卡住写线程，让第 2 条留在队列里 —— close 必然走「残余条目」分支
+                    try {
+                        releaseSink.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                },
+                (batch, err) -> {
+                    fallbackSeen.add(new ArrayList<>(batch));
+                    throw FALLBACK_UNAVAILABLE;
+                });
+
+        queue.offer(1);
+        assertThat(sinkEntered.await(2, TimeUnit.SECONDS))
+                .as("写线程应已取走第 1 条并阻塞在 sink 里").isTrue();
+        queue.offer(2);
+
+        // sink 仍被 latch 卡住 → close 里的 join 会超时 → 走「残余条目」分支 → 调用 onFailure
+        assertThatCode(queue::close)
+                .as("close 的兜底回调抛异常也不该传播给调用方").doesNotThrowAnyException();
+
+        releaseSink.countDown();
+        assertThat(fallbackSeen).as("残余条目仍要交给兜底，不能静默丢弃")
+                .anySatisfy(b -> assertThat(b).contains(2));
+    }
+
     @Test
     @DisplayName("关闭后再 offer 不抛错、不吞线程，只拒绝")
     void offerAfterCloseIsRejectedNotThrown() {
