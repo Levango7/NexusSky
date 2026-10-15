@@ -107,4 +107,68 @@ class SchedulingControllerTest {
                 .andExpect(jsonPath("$.taskId").value("not-exist"))
                 .andExpect(jsonPath("$.failed").value(false));
     }
+
+    // ============================================================
+    // Bean Validation 链路（真正锁住 @RequestBody 上的 @Valid）
+    //
+    // TaskRequestValidationTest 直接调 validator.validate()，绕过了 Spring，
+    // 所以那边全绿也挡不住「把 createTask 的 @Valid 删掉」。这里走真实链路：
+    // @Valid 一旦掉了，下面的 400 会变成 200。
+    //
+    // 这几条约束是**唯一防线**：TaskAssignmentService 的 capabilityMatch() 对未知
+    // taskType 走 default 分支，priorityToProtocol() 对越界 priority 也只落到某一档，
+    // 都不拒绝；targetLat/targetLon 更是没有任何服务层检查。
+    // ============================================================
+
+    /** 合法任务体。 */
+    private static String taskBody(String taskType, int priority, double lat, double lon, double alt) {
+        return String.format(java.util.Locale.ROOT,
+                "{\"taskId\":\"val-guard-%d\",\"taskType\":\"%s\",\"priority\":%d,"
+                        + "\"targetLat\":%.6f,\"targetLon\":%.6f,\"targetAlt\":%.2f}",
+                System.nanoTime(), taskType, priority, lat, lon, alt);
+    }
+
+    @Test
+    void createTask_outOfRangeCoordinatesRejectedByBeanValidation() throws Exception {
+        mockMvc.perform(post("/api/v1/scheduling/tasks")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(taskBody("SURVEY", 5, 200.0, 116.0, 50.0)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createTask_priorityOutOfRangeRejectedByBeanValidation() throws Exception {
+        mockMvc.perform(post("/api/v1/scheduling/tasks")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(taskBody("SURVEY", 11, 22.59, 113.93, 50.0)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createTask_taskTypeNotInWhitelistRejectedByBeanValidation() throws Exception {
+        mockMvc.perform(post("/api/v1/scheduling/tasks")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(taskBody("NOT_A_TYPE", 5, 22.59, 113.93, 50.0)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createTask_blankTaskIdRejectedByBeanValidation() throws Exception {
+        mockMvc.perform(post("/api/v1/scheduling/tasks")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"taskId\":\"   \",\"taskType\":\"SURVEY\",\"priority\":5,"
+                                + "\"targetLat\":22.59,\"targetLon\":113.93,\"targetAlt\":50.0}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createTask_validBodyIsNotRejectedByValidation() throws Exception {
+        // 反向对照：全部合法时不能被校验层拦。不关心返回体（无在线无人机时也可能是别的码），
+        // 只关心「不是 400」——否则上面四条可能是别的 400 路径在起作用。
+        mockMvc.perform(post("/api/v1/scheduling/tasks")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(taskBody("SURVEY", 5, 22.59, 113.93, 50.0)))
+                .andExpect(status().is(org.hamcrest.Matchers.not(
+                        org.springframework.http.HttpStatus.BAD_REQUEST.value())));
+    }
 }
