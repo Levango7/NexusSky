@@ -4,6 +4,49 @@
 
 ---
 
+---
+
+## [Unreleased] — ci：发布 tag 从不触发任何门禁，v1.0.2~v1.0.5 指向的代码从未被验证（2026-10-17）
+
+**现象**：`on.push` 只有 `branches: [ main, master ]`，**没有 `tags:` 过滤**，
+所以打 tag 不产生任何 run。
+
+**实测（不是推断）**：四个发布 tag 指向的 commit 在最近 100 条 run 里**一条都没有**：
+
+| tag | commit | 指向 |
+|---|---|---|
+| v1.0.2 | `afb5902` | fix: 添加 jitpack.yml 指定 Java 17 |
+| v1.0.3 | `1e6095c` | fix: 修复 jitpack.yml BOM 字符问题 |
+| v1.0.4 | `cd66696` | docs(sdk-java): 补 JDK 8 实测边界 |
+| v1.0.5 | `973db62` | Merge PR #48 feat/empty-states |
+
+也就是说这些 tag 的质量信号只来自"**之前某次 master 或 PR push 恰好碰到同一段代码**"，
+tag 自己那次提交（以及它可能引入的新问题）没有任何结论。这是典型的
+**信号存在但来源错位**：看板上 master 是绿的，于是人默认 tag 也是绿的。
+
+**改法**：加 `tags: [ 'v*' ]`。只认 `v*` 前缀 —— 非版本 tag 不该拖起 20+ 个 job。
+
+**tag 上会发生什么，逐条核过（不是"应该没事"）**：
+
+- 4 个 tag 都是**附注 tag**（`git cat-file -t` == `tag`）⇒ push 事件的 `github.ref`
+  是 `refs/tags/vX.Y.Z`，不是 `refs/heads/*`。
+- `pr-lint` 的 job 级 `if` 是 `github.event_name == 'pull_request'` ⇒ tag push 上跳过，
+  不会拿发布 tag 去判 PR 标题格式。
+- docker-build **job 本身照常跑**（保留"能否构建"这一层价值），但它的 Login 与 Push
+  两**步**各带 `github.ref == 'refs/heads/master'` 守卫 ⇒ tag 引用下跳过，
+  **不会**往注册表写任何东西；`metadata` 的 `latest` 标签同样被守卫住。
+- 其余 job 的 `if` 只依赖 `always()` / `failure()` / 缓存命中，与 ref 无关，照跑。
+
+**验证**：改动后的 `ci.yml` 用 **PyYAML 与 js-yaml 两个独立解析器**都解析通过，
+`on.push` 读出 `{branches: [main, master], tags: ['v*']}`，21 个 job 定义不变。
+
+**边界**：这一步只保证**将来的** tag 会被验证。四个存量 tag 我**没有重跑**——
+重跑需要改 tag 指向（tag 一旦发布就不该移动），或对每个 commit 手动 `workflow_dispatch`。
+当前 workflow 没有 `workflow_dispatch` 触发器，所以**存量四个 tag 的验证状态仍然是空白**。
+要不要补一个 `workflow_dispatch` 入口来补跑历史提交，是另一个待决项。
+
+---
+
 ## [Unreleased] — gcs-web：健康管理面板读的是不存在的字段名，核心功能整块空白且不报错（2026-10-17）
 
 **现象**：`HealthPanel` 的机队健康总览、单机总评分、7 个部件评分三处一直显示 `--`。
