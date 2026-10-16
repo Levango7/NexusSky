@@ -49,7 +49,8 @@ const EMPTY_LIST = () => Promise.resolve([])
 // **别再放宽或直接删掉这个参数**：那会让"面板渲染卡住"从"变红"退化成"CI 变慢"。
 const RENDER_TIMEOUT_MS = 20_000
 
-vi.mock('../src/api.js', () => {
+vi.mock('../src/api.js', async (importOriginal) => {
+  const actual = await importOriginal()
   const makeNamespace = () => new Proxy(function ns() {
     return Promise.resolve([])
   }, {
@@ -61,7 +62,25 @@ vi.mock('../src/api.js', () => {
     apply: () => Promise.resolve([]),
   })
 
-  const mock = {
+  // 覆盖面**由构造保证**，不再手写枚举导出名。
+  //
+  // 原先这里逐个手写了 23 个名字。api.js 后来新增的导出（voice-cmd 那 8 个：
+  // parseVoiceCommand / executeVoiceCommand / confirmVoiceCommand /
+  // broadcastVoiceMessage / getVoiceStatus / broadcastVoiceAlert /
+  // getVoiceHistory / getVoicePending）不在其中，于是面板 import 到它们时 vitest
+  // 会在**访问属性那一刻同步抛错**（No "xxx" export is defined on the mock）。
+  //
+  // 那个错此前被 VoiceCmdPanel 轮询里的 try/catch 吃掉，所以这个 mock 缺口一直没暴露 ——
+  // 典型的「异常被吞 → 假绿」：测试全绿，而缺口在那儿。
+  // 现在按真实模块的导出名逐个给空桩，这类缺口不可能再悄悄存在。
+  // （api.js 的 import 期行为只有 try/catch 里的 sessionStorage 读取，jsdom 下安全。）
+  const mock = {}
+  for (const name of Object.keys(actual)) {
+    mock[name] = NAMESPACES.includes(name) ? makeNamespace() : EMPTY_LIST
+  }
+
+  // 返回值不是"空数组"的那几个必须显式覆盖 —— 否则面板拿到 Promise 会走错分支。
+  Object.assign(mock, {
     getWsUrl: () => 'ws://localhost:1/ws/telemetry',
     wsUrl: () => 'ws://localhost:1/ws/telemetry',
     isAuthenticated: () => false,
@@ -85,8 +104,7 @@ vi.mock('../src/api.js', () => {
     fetchStreamToken: () => Promise.resolve('tok'),
     alarmStreamUrl: () => '/api/v1/alarm/stream?streamToken=tok',
     surveillanceStreamUrl: () => '/api/v1/surveillance/stream?streamToken=tok',
-  }
-  for (const ns of NAMESPACES) mock[ns] = makeNamespace()
+  })
   return mock
 })
 
