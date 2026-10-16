@@ -80,9 +80,8 @@ export default function HealthPanel() {
   // ---- 选中的无人机 ----
   const [selectedSysid, setSelectedSysid] = useState(null)
   const [droneDetail, setDroneDetail] = useState(null)
-  // 【接线缺口】setDroneHistory 有 2 处调用（清空 + 写入真实历史），但 droneHistory 没人读 —— 历史拉了存了，不显示
-  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
-  // eslint-disable-next-line no-unused-vars
+  // 单机健康历史（后端 GET /api/v1/health/{sysid}/history → List<HealthScore>）。
+  // 取回后此前一直没有渲染点，已接在单机详情的「历史评分」区。
   const [droneHistory, setDroneHistory] = useState([])
   const [detailLoading, setDetailLoading] = useState(false)
   const detailAbortRef = useRef(null)
@@ -199,7 +198,7 @@ export default function HealthPanel() {
 
   // ---- 派生：机队平均分 ----
   const fleetAvg = fleetHealth.length > 0
-    ? fleetHealth.reduce((sum, d) => sum + (Number(pick(d, 'score', 'healthScore')) || 0), 0) / fleetHealth.length
+    ? fleetHealth.reduce((sum, d) => sum + (Number(pick(d, 'overallScore', 'score', 'healthScore')) || 0), 0) / fleetHealth.length
     : 0
 
   return (
@@ -230,7 +229,7 @@ export default function HealthPanel() {
               ) : (
                 fleetHealth.map((d, i) => {
                   const sysid = pick(d, 'sysid', 'id') ?? i
-                  const score = pick(d, 'score', 'healthScore')
+                  const score = pick(d, 'overallScore', 'score', 'healthScore')
                   const sc = scoreColor(score)
                   const isSel = sysid === selectedSysid
                   return (
@@ -316,14 +315,19 @@ export default function HealthPanel() {
                   {/* 总分 */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, padding: '4px 6px', background: 'var(--bg-1)', borderRadius: 3 }}>
                     <span style={{ fontSize: 10, color: 'var(--dim-2)' }}>总评分</span>
-                    <span style={{ fontSize: 16, fontWeight: 'bold', color: scoreColor(pick(droneDetail, 'score', 'healthScore')), fontFamily: 'var(--mono)' }}>
-                      {fmtScore(pick(droneDetail, 'score', 'healthScore'))}<span style={{ fontSize: 10, color: 'var(--dim-2)' }}>/100</span>
+                    <span style={{ fontSize: 16, fontWeight: 'bold', color: scoreColor(pick(droneDetail, 'overallScore', 'score', 'healthScore')), fontFamily: 'var(--mono)' }}>
+                      {fmtScore(pick(droneDetail, 'overallScore', 'score', 'healthScore'))}<span style={{ fontSize: 10, color: 'var(--dim-2)' }}>/100</span>
                     </span>
                   </div>
                   {/* 7 部件评分 */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     {COMPONENTS.map((c) => {
-                      const compData = pick(droneDetail, 'components', 'componentHealth') || {}
+                      // key 必须先试 componentScores —— 后端 HealthScore 的字段就叫这个名字
+                      // （private final Map<ComponentType, ComponentScore> componentScores，
+                      //  普通 getter、无 @JsonProperty，所以 JSON 键是 componentScores）。
+                      // 原先这里只找 'components' / 'componentHealth'，两个都对不上，
+                      // 于是单机详情的「7 部件评分」永远是空的。
+                      const compData = pick(droneDetail, 'componentScores', 'components', 'componentHealth') || {}
                       const compScore = typeof compData === 'object' ? pick(compData[c.key.toLowerCase()], 'score', 'value') ?? pick(compData[c.key], 'score', 'value') : null
                       const sc = scoreColor(compScore)
                       return (
@@ -339,6 +343,34 @@ export default function HealthPanel() {
                         </div>
                       )
                     })}
+                  </div>
+                  {/* 历史评分：setDroneHistory 取回了真实数据，此前却没有任何渲染点 */}
+                  <div style={{ marginTop: 8, borderTop: '1px solid var(--line-2)', paddingTop: 6 }}>
+                    <div style={{ fontSize: 10, color: 'var(--dim-2)', marginBottom: 4 }}>
+                      历史评分（{droneHistory.length}）
+                    </div>
+                    {droneHistory.length === 0 ? (
+                      <div className="empty-hint">暂无历史评分</div>
+                    ) : (
+                      droneHistory.slice(-10).reverse().map((h, i) => {
+                        const hs = pick(h, 'overallScore', 'score', 'healthScore')
+                        const grade = pick(h, 'grade')
+                        const ts = pick(h, 'timestamp', 'recordedAt', 'ts')
+                        return (
+                          <div
+                            key={`h-${ts != null ? ts : i}`}
+                            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 10, padding: '2px 0', borderBottom: '1px solid var(--line-2)' }}
+                          >
+                            <span style={{ color: 'var(--dim-2)', fontFamily: 'var(--mono)' }}>
+                              {ts != null ? fmtTime(ts) : '--'}
+                            </span>
+                            <span style={{ color: scoreColor(hs), fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
+                              {fmtScore(hs)}{grade ? ` (${grade})` : ''}
+                            </span>
+                          </div>
+                        )
+                      })
+                    )}
                   </div>
                 </div>
               ) : (
