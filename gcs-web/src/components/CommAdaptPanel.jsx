@@ -16,8 +16,6 @@ import { POLL_MS, fmtTime, pick, cardStyle, labelStyle, miniBtnStyle, modalInput
 // 轮询间隔 5s；AbortController 竞态守卫
 
 
-// 链路类型
-const LINK_TYPES = ['MESH', 'SATELLITE', 'CELLULAR']
 
 // 链路类型 → 中文标签 / 颜色
 const LINK_META = {
@@ -67,6 +65,9 @@ export default function CommAdaptPanel() {
   const [failoverResult, setFailoverResult] = useState(null)
 
   // ---- 自适应配置 ----
+  // 【接线缺口】setConfig 有 2 处调用（保存自适应配置），但 config 从头到尾没人读 —— 保存结果没有回显
+  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
+  // eslint-disable-next-line no-unused-vars
   const [config, setConfig] = useState(null)
   const [configLoading, setConfigLoading] = useState(false)
   const [configSaving, setConfigSaving] = useState(false)

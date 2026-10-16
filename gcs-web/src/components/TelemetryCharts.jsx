@@ -77,8 +77,6 @@ function buildAreaPath(points, width, height, min, max, padY = 4) {
   const line = buildPath(points, width, height, min, max, padY)
   const last = points[points.length - 1]
   const first = points[0]
-  const range = max - min || 1
-  const usableH = height - padY * 2
   const xFirst = first.t * width
   const xLast = last.t * width
   // 闭合到底部

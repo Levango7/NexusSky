@@ -26,7 +26,7 @@ const QUALITY_LABELS = {
 
 // 圆形布局：见 utils/geo
 
-export default function MeshTopologyPanel({ meshTopology, onSelectNode, onSelectRoute }) {
+export default function MeshTopologyPanel({ meshTopology, onSelectNode }) {
   const [topology, setTopology] = useState(meshTopology || null)
   const [links, setLinks] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)

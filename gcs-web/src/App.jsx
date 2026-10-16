@@ -108,7 +108,7 @@ function PanelWrapper({ children }) {
 
 export default function App() {
   // 认证状态
-  const { authed, setAuthed, authError, handleLoginSuccess, handleLogout } = useAuth()
+  const { authed, authError, handleLoginSuccess, handleLogout } = useAuth()
 
   // 无人机数据（含指数退避轮询、遥测加载）
   const {

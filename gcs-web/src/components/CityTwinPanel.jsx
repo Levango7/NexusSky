@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  createCityModel,
   listCityModels,
-  getCityModel,
   getCitySituation,
   createCitySimulation,
   getCitySimulation,
@@ -58,7 +56,7 @@ export default function CityTwinPanel({ twinStates }) {
   // ---- M13 每机孪生同步（WS "twin-state-sync" 帧，App 注入）----
   // twinStates 形状 { [sysid]: rawFrameData }，此处只做归一化 + 排序展示。
   const twinRows = Object.entries(twinStates || {})
-    .map(([sysid, raw]) => normalizeTwinState(raw, raw.receivedAt))
+    .map(([, raw]) => normalizeTwinState(raw, raw.receivedAt))
     .filter(Boolean)
     .sort((a, b) => (a.sysid ?? 0) - (b.sysid ?? 0))
   const twinNow = Date.now()
@@ -72,7 +70,6 @@ export default function CityTwinPanel({ twinStates }) {
 
 
   // ---- 灾害模拟 ----
-  const [simulations, setSimulations] = useState([])
   const [selectedSimId, setSelectedSimId] = useState(null)
   const [simDetail, setSimDetail] = useState(null)
   const [simLoading, setSimLoading] = useState(false)

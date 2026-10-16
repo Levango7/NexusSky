@@ -27,7 +27,7 @@ const PATTERN_ICON = {
   RAINBOW: '◍',
 }
 
-export default function FormationPanel({ formations = [], drones = [] }) {
+export default function FormationPanel({ formations = [] }) {
   const [selectedId, setSelectedId] = useState(null)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)

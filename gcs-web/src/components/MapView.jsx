@@ -159,8 +159,6 @@ function createDroneMarkerSVG(color, heading, isSelected, isOnline) {
   const eFillColor = escapeHtml(fillColor)
   const eStrokeWidth = escapeHtml(isSelected ? 2.5 : 1.5)
   const eHeading = escapeHtml(heading || 0)
-  const eArrowLen = escapeHtml(arrowLen)
-  const eArrowWidthHalf = escapeHtml(arrowWidth / 2)
   const eArrowLenHalf = escapeHtml(arrowLen / 2)
   const eColor = escapeHtml(color)
   const eCxPlus3 = escapeHtml(cx + 3)

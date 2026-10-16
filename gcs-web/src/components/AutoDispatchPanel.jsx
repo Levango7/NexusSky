@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
   triggerAutoDispatch,
   getAutoDispatchHistory,
@@ -41,6 +41,9 @@ function statusMeta(s) {
 
 export default function AutoDispatchPanel() {
   // ---- 出警配置 ----
+  // 【接线缺口】setConfig 有 2 处调用（保存出警配置），但 config 从头到尾没人读 —— 保存结果没有任何回显
+  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
+  // eslint-disable-next-line no-unused-vars
   const [config, setConfig] = useState(null)
   const [configEditing, setConfigEditing] = useState(null)
   const [configSaving, setConfigSaving] = useState(false)

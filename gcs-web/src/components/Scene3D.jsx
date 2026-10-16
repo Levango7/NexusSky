@@ -1,9 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
-  REF,
-  SCALE,
-  M_PER_DEG_LAT,
-  M_PER_DEG_LON,
   COLOR,
   geoTo3D,
   loadThree,
@@ -37,7 +33,6 @@ export default function Scene3D({
   track = [],
   formations = [],
   selected = null,
-  terrainData = null,
 }) {
   const containerRef = useRef(null)
   const [status, setStatus] = useState('loading') // loading | ready | error
@@ -167,8 +162,7 @@ export default function Scene3D({
         ro.observe(el)
 
         // ---- 渲染循环 ----
-        let t0 = 0
-        const animate = (t) => {
+        const animate = () => {
           animationId = requestAnimationFrame(animate)
           // 旋翼旋转动画
           droneModels.forEach((m) => {

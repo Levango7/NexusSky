@@ -7,7 +7,6 @@ import {
   getActiveScenarioLaunches,
   getScenarioLaunchHistory,
   abortScenarioLaunch,
-  getScenarioLaunchStatus,
   startScenarioDrill,
   getScenarioDrillResult,
   getScenarioDrillHistory,

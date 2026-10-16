@@ -81,7 +81,7 @@ export default function SatLinkPanel({ satLinkData }) {
   // 策略切换
   const handleStrategyChange = async (newStrategy) => {
     try {
-      const res = await api.setSatLinkStrategy(newStrategy)
+      await api.setSatLinkStrategy(newStrategy)
       setStrategyMsg(`策略已切换为 ${STRATEGY_LABELS[newStrategy] || newStrategy}`)
       if (strategyTimerRef.current) clearTimeout(strategyTimerRef.current)
       strategyTimerRef.current = setTimeout(() => setStrategyMsg(null), 3000)

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   createShowFormation,
   listShowFormations,
-  getShowFormation,
   calculateShowPositions,
   createShowTask,
   listShowTasks,
@@ -12,7 +11,7 @@ import {
   getShowActions,
   configureShowMusicSync,
 } from '../api.js'
-import { POLL_MS, fmtTime, pick, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
+import { POLL_MS, pick, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
 
 // P4 编队表演面板
 // 队形定义管理 + 队形位置计算 + 表演任务管理 + 动作序列 + 音乐同步

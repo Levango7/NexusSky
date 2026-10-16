@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { isAuthenticated, getCurrentUser, logout } from '../api.js'
+import { isAuthenticated, logout } from '../api.js'
 
 /**
  * 认证状态管理 hook
@@ -32,5 +32,5 @@ export default function useAuth() {
     return () => window.removeEventListener('nexus-auth-expired', onAuthExpired)
   }, [])
 
-  return { authed, setAuthed, authError, handleLoginSuccess, handleLogout }
+  return { authed, authError, handleLoginSuccess, handleLogout }
 }

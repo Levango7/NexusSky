@@ -6,7 +6,6 @@ import {
   getHealthWarnings,
   listMaintenanceRecords,
   createMaintenanceRecord,
-  updateMaintenanceRecord,
   getMaintenancePredictions,
   getMaintenanceSchedule,
 } from '../api.js'
@@ -76,12 +75,14 @@ export default function HealthPanel() {
   // ---- 维护计划 ----
   const [schedule, setSchedule] = useState([])
 
-  const [error, setError] = useState(null)
   const [formError, setFormError] = useState(null)
 
   // ---- 选中的无人机 ----
   const [selectedSysid, setSelectedSysid] = useState(null)
   const [droneDetail, setDroneDetail] = useState(null)
+  // 【接线缺口】setDroneHistory 有 2 处调用（清空 + 写入真实历史），但 droneHistory 没人读 —— 历史拉了存了，不显示
+  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
+  // eslint-disable-next-line no-unused-vars
   const [droneHistory, setDroneHistory] = useState([])
   const [detailLoading, setDetailLoading] = useState(false)
   const detailAbortRef = useRef(null)
@@ -210,11 +211,6 @@ export default function HealthPanel() {
         </span>
       </h2>
 
-      {error && (
-        <div className="notice crit" style={{ fontSize: 11 }}>
-          ⚠ {error}
-        </div>
-      )}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         {/* ===== 左列：机队总览 + 健康告警 ===== */}
