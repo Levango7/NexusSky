@@ -3,6 +3,102 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — JSR-303 约束契约：把「注解存在」变成「注解被证明会生效」（2026-10-16）
+
+### 动机
+
+上一条（formation）修的是「入口漏 `@Valid`，注解成了装饰品」。修完之后自然有个问题：
+**怎么防止它再发生？** 空口说"以后要检查"没有用，得让回归测试能发现。
+
+但这里有个容易踩的坑，先说清楚：
+
+> **直接调 `validator.validate()` 的测试，挡不住"删掉入口的 `@Valid`"。**
+> 因为它绕过了 Spring，`@Valid` 在不在 controller 上与它无关。
+> 要锁入口，必须走 MockMvc 走完 Spring 的校验链路。
+
+这一版两类都做了，并且**把边界用变异测试证明了一遍**。
+
+### 5 个 DTO 的约束契约测试（直接调 validator）
+
+| 测试类 | 断言内容 |
+|---|---|
+| `DeliveryRequestValidationTest` | sysid 0/256 越界、sites null/空/129 条、lat=200 / lon=400 / 四个 `@Min(0)` 字段取负 |
+| `SprayTaskRequestValidationTest` | sysid -1/256、waypoints null/空/1025 条、三个物理量负值与 0 |
+| `TaskRequestValidationTest` | taskId null/空/全白/65 字符、taskType 白名单四项+`SURVEYX`/小写、priority -1/11、targetLat/Lon 两侧越界 |
+| `LoRaAlarmDtoValidationTest` | deviceId 0/-1、alarmType null/全白、lat/lon 两侧越界、severity 0/6 |
+| `FormationCreateRequestValidationTest` | **只验良构性** —— 见下 |
+
+断言粒度到**字段路径 + 具体约束注解**，不满足于"有违规"。每个类都有一条
+「全部合法时零违规」的反向对照，防止上面的断言只是"有违规就算过"。
+
+`FormationCreateRequest` 那个类不同：它的入口**没有 `@Valid`**（全仓唯一），
+注解**根本不执行**。所以它的测试**只回答"注解本身良构吗"**，并明确注释指向
+`FormationServiceTest` 那三条才是真正锁入口的。
+
+### SchedulingControllerTest 新增 4 条 MockMvc 守卫（真正锁住 `@Valid`）
+
+走 `/api/v1/scheduling/tasks` 真实链路，断言 400：
+
+- `createTask_outOfRangeCoordinatesRejectedByBeanValidation`（targetLat=200）
+- `createTask_priorityOutOfRangeRejectedByBeanValidation`（priority=11）
+- `createTask_taskTypeNotInWhitelistRejectedByBeanValidation`（taskType=NOT_A_TYPE）
+- `createTask_blankTaskIdRejectedByBeanValidation`（taskId 全空白）
+- 加一条反向对照 `createTask_validBodyIsNotRejectedByValidation`（合法体不能是 400）
+
+**为什么这 4 条必须有**：`TaskAssignmentService` 对未知 taskType 走 `default` 分支、
+`priorityToProtocol()` 对越界 priority 也只落到某一档，**都不拒绝**；
+targetLat/targetLon 更是**没有任何服务层检查**。这几条约束是唯一防线。
+
+### 变异验证：证明守卫真的锁住了入口
+
+把 `SchedulingController.createTask` 的 `@Valid` 删掉，重跑：
+
+| 类别 | 结果 |
+|---|---|
+| 4 条 `*RejectedByBeanValidation` | **全部转红** ✓ |
+| `createTask_validBodyIsNotRejectedByValidation` | 保持绿 ✓（反向对照没被打破） |
+| 4 条直接调 validator 的用例 | **保持绿** ✓ —— 这正是已知边界的实证 |
+
+也就是说：`@Valid` 一掉，只有 MockMvc 那 4 条会拉警报。这个区别必须写下来，
+否则下一个人以为"契约测试绿=入口有 `@Valid`"。
+
+### 顺带修掉一处真实的「两层讲两套话」
+
+`SprayTaskRequest` 的 targetRate / capacityMl / sprayWidth 原先是 `@Min(0)`
+（宣称 0 合法），而 `SprayTaskService.create()` 要求 `> 0`（`sprayWidth=0` 会让
+`SprayTask.totalArea` 恒为 0，`capacityMl=0` 会让余量百分比走 0 分支）。
+
+改成 `@Positive`，与服务层同口径。**被拒绝的输入集合完全不变** ——
+原本 `targetRate=0` 也是先过 `@Min(0)`、再被服务层拒成 400；现在由校验层直接 400。
+变的只是哪一层先拒、错误信息谁给。服务层那三条 `<= 0` 检查**保留**作为冗余防线
+（`@Valid` 万一被去掉仍拦得住）。DTO 的 Javadoc 把"为什么用 `@Positive` 不用 `@Min(0)`"
+写进去了，免得后人以为写错又改回去。
+
+### 一次自我纠正：`@Min`/`@Max` 到底支不支持 double
+
+我一度判定"D = `MIN`/`@Max` 用在 `double` 字段上是无效声明，Hibernate Validator
+会抛 `UnexpectedTypeException`"，并据此怀疑 4 个 DTO 的坐标约束全都失效。
+
+**实测推翻了这个判断**：本仓依赖是 Hibernate Validator **8.0.3**，
+`@Min`/`@Max` **支持 `double`**，违规能正常报告（已打印确认）：
+
+```
+[sites[0].lat] 最大不能超过 90   descriptor=Max
+[sites[0].payloadWeightKg] 最小不能小于 0  descriptor=Min
+全部合法时违规数: 0
+```
+
+我记的是 Bean Validation 1.1 时代的老限制。（`LoRaAlarmDto` 用
+`@DecimalMin`/`@DecimalMax` 只是另一种写法，不是"唯一正确写法"。）
+
+教训同前几轮：**凭记忆下的规范结论，和凭扫描下的结论一样不可靠。**
+
+### 计数
+
+**4830 → 4858**（+28）：5 个新契约测试类 + `SchedulingControllerTest` 的 4 条守卫与 1 条反向对照。
+以 `mvn clean package` 实测为准。
+
+---
 ## [Unreleased] — 写队列：兜底回调自己抛异常会把写线程整个带走（2026-10-15）
 
 ### 问题
