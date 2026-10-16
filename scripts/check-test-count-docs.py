@@ -521,13 +521,20 @@ def self_test():
     def run(tmp, reports, fe=None):
         # 夹具**故意**造红，stderr 会刷屏。静默掉，让自检结论一眼可读；
         # 只留每个用例自己的 ok/失败说明。
+        rc, _out = run_loud(tmp, reports, fe)
+        return rc
+
+    def run_loud(tmp, reports, fe=None):
+        # 与 run() 同一条路径，但把 stdout 留着——有些结论（"一处声称只点名一次"）
+        # 光看退出码判不出来，必须数报告行数。
         saved_out, saved_err = sys.stdout, sys.stderr
-        sys.stdout, sys.stderr = io.StringIO(), io.StringIO()
+        cap = io.StringIO()
+        sys.stdout, sys.stderr = cap, io.StringIO()
         try:
             rc = _run(tmp, reports, fe)
         finally:
             sys.stdout, sys.stderr = saved_out, saved_err
-        return rc
+        return rc, cap.getvalue()
 
     def clean_table(rows_total):
         body = ['# Demo', '', '| 模块 | 单测数 |', '|---|---|']
@@ -637,6 +644,41 @@ def self_test():
             ok = False
         else:
             print('  ✓ 混合行里的 Java 声称偏低也判红')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # 前端声称去重（2026-10-16 实测缺陷）：`前端已有 300 例 vitest` 这一处声称会被
+    # 「前端…N 例」和「N 例 vitest」两条文法各命中一次（区间重叠），旧版逐 pattern 追加
+    # ⇒ 同一行点名 2 次、"不一致 N 处"虚高一倍，且按报告逐行替换的工具第二次必然失配。
+    fe_overlap = '# Demo\n\n前端已有 300 例 vitest\n'
+    tmp, reports = build(fe_overlap)
+    try:
+        rc, out = run_loud(tmp, reports, os.path.join(tmp, 'vitest.json'))
+        n = out.count('[前端] 声称')
+        if rc == 0:
+            print('自检失败：前端声称与实测不符却被放过')
+            ok = False
+        elif n != 1:
+            print('自检失败：一处前端声称被点名 %d 次（应为 1）——'
+                  '重叠区间的两条文法没去重，"不一致 N 处"会虚高' % n)
+            ok = False
+        else:
+            print('  ✓ 重叠命中的前端声称只点名一次')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # 反向：去重绝不能把**两处独立声称**并成一处，否则其中一处漂移就永久逃检。
+    fe_two = '# Demo\n\n前端已有 300 例，另有 400 例 vitest\n'
+    tmp, reports = build(fe_two)
+    try:
+        rc, out = run_loud(tmp, reports, os.path.join(tmp, 'vitest.json'))
+        n = out.count('[前端] 声称')
+        if n != 2:
+            print('自检失败：同行两处独立前端声称只报出 %d 处（应为 2）——'
+                  '去重过头，会把第二处声称永久藏掉' % n)
+            ok = False
+        else:
+            print('  ✓ 两处独立前端声称各报一次（去重没有过头）')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -784,12 +826,22 @@ def _run(root, reports_root=None, frontend_json=None, print_actual=False):
             scan = line
             if fe_total is not None:
                 spans = []
+                matched = []      # 本行已被文法覆盖过的区间，用来判"是不是同一处声称"
                 for pat in FRONTEND_CLAIM_PATTERNS:
                     for m in pat.finditer(line):
                         claimed = _parse_count(m.group(1))
                         if 1 <= claimed <= 200_000:
-                            fe_hits.append((lineno, claimed, line.strip()))
-                            spans.append(m.span())
+                            a, b = m.span()
+                            # 两条前端文法常命中**同一个数**：`前端已有 292 例 vitest` 会被
+                            # 「前端…N 例」和「N 例 vitest」各匹配一次，区间重叠。
+                            # 那是一处声称，只能点名一次——否则「不一致 N 处」虚高一倍，
+                            # 而任何"按报告逐行替换"的工具第二次替换必然找不到锚点。
+                            # 刻意按**区间重叠**而不是按数值去重：同一行里两处不同位置的
+                            # 独立声称（哪怕数值相同）仍是两处，不能被误并成一处。
+                            if not any(a < mb and ma < b for ma, mb in matched):
+                                fe_hits.append((lineno, claimed, line.strip()))
+                            matched.append((a, b))
+                            spans.append((a, b))
                 if spans:
                     chars = list(line)
                     for a, b in spans:
