@@ -29,6 +29,13 @@ import java.util.function.Consumer;
  * 落库抛异常时整批交给 {@code onFailure} 回调，同样由调用方兜底——
  * 保留"DB 不可用不影响记账"的原有语义。
  * <p>
+ * <b>兜底失败也不能拖垮队列</b>：{@code onFailure} 自己抛异常时（DB 挂了、文件追加也失败，
+ * 磁盘同时满），这一批既没落库也没兜住，但<b>写线程必须活着继续服务后面的 offer</b>。
+ * 这一点靠 {@link #notifyFailure} 单独包一层 try 保证 —— 兜底回调位于 {@link #flush(Object)}
+ * 的 catch 块内部，而 catch 块不捕获自己函数体抛出的异常，直接写 {@code onFailure.accept(...)}
+ * 会让异常冲出 {@code flush} 与 {@link #runLoop()}，写线程一死队列就静默停写且无任何日志。
+ * 兜底失败的批次会记 ERROR（含原始原因），但绝不阻塞生产者、也绝不影响后续批次。
+ * <p>
  * <b>线程是 daemon</b>：测试里每个用例都会 new 一个持有本队列的服务而不显式关闭，
  * 非守护线程会把 JVM 挂住。正常运行期的排空靠 {@link #close()}。
  *
@@ -106,7 +113,7 @@ public final class BatchedWriteQueue<T> {
             log.warn("{} 写队列关闭时仍有 {} 条未落地，交给兜底回调", name, queue.size());
             List<T> rest = new ArrayList<>();
             queue.drainTo(rest);
-            onFailure.accept(rest, new IllegalStateException("queue closed before flush"));
+            notifyFailure(rest, new IllegalStateException("queue closed before flush"));
         }
     }
 
@@ -168,9 +175,30 @@ public final class BatchedWriteQueue<T> {
             } else {
                 log.debug("{} 批量落库失败（第 {} 批，{} 条）：{}", name, n, batch.size(), e.toString());
             }
-            onFailure.accept(batch, e);
+            notifyFailure(batch, e);
         } finally {
             inFlight.decrementAndGet();
+        }
+    }
+
+    /**
+     * 通知兜底回调，并保证<b>回调自己抛异常也不会出事</b>。
+     * <p>
+     * 这里必须单独 try 一层，原因见类 Javadoc「兜底失败」段：兜底回调写在
+     * {@link #flush(Object)} 的 catch 块<b>内部</b>，而 catch 块不捕获自己函数体抛出的
+     * 异常，所以它一旦抛出就会冲出 flush、冲出 {@link #runLoop()}，把写线程整个带走。
+     * 之后所有 {@link #offer(Object)} 在队列满之前都返回 true 却无人消费 ——
+     * 队列静默停写，而且不会有任何日志。
+     * <p>
+     * 这里只捕获 {@code Exception}。{@code Error}（OOM / StackOverflow）仍然向上抛：
+     * 那种状态下进程本身已不可信，让它炸出来比吞掉更诚实。
+     */
+    private void notifyFailure(List<T> batch, Exception cause) {
+        try {
+            onFailure.accept(batch, cause);
+        } catch (Exception cbFailure) {
+            log.error("{} 兜底回调本身失败，这批 {} 条既未落库也未兜住（原始原因：{}）：{}",
+                    name, batch.size(), cause.toString(), cbFailure.toString());
         }
     }
 
