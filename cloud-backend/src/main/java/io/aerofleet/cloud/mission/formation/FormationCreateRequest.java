@@ -14,16 +14,33 @@ import java.util.Set;
  * 承载编队创建参数：成员列表、队形类型、机间距、方向、参考点经纬高、可选 Leader。
  * 由 REST 端点反序列化，委托 {@code FormationService.create()} 校验后创建编队。
  * <p>
- * 字段约束（JSR303）：成员 >= 2，机间距 >= 2m，方向 0~359°，纬度 -90~90，经度 -180~180。
+ * 字段约束（JSR303）：成员 2~{@value #MAX_MEMBERS}，队形类型非空，机间距 &gt;= 2m，
+ * 方向 0~359°，纬度 -90~90，经度 -180~180。
+ * <p>
+ * <strong>这些注解在本入口不触发</strong>：{@code FormationController.create} 的
+ * {@code @RequestBody} 上没有 {@code @Valid}。实际生效的是
+ * {@code FormationService.create()} 里逐条手写的检查，二者内容一致 ——
+ * 改这里注解时必须同步改那里（或反过来给入口加上 {@code @Valid}）。
  */
 public final class FormationCreateRequest {
 
-    /** 成员 sysid 集合（>= 2）。 */
+    /**
+     * 单个编队的成员数上限（{@link #members} 的上界）。
+     * <p>
+     * <strong>刻意与 {@code @Size(max = ...)} 共用同一个常量</strong>：入口
+     * {@code FormationController.create} 没有 {@code @Valid}（四个 mission DTO 里
+     * 唯一一个），所以这个上界不会被 Bean Validation 拦下，只能由
+     * {@code FormationService.create()} 自己执行。两边引用同一个常量，才不会
+     * 出现「注解写 32、代码不查」这种声明与行为脱节。
+     */
+    public static final int MAX_MEMBERS = 32;
+
+    /** 成员 sysid 集合（{@value #MAX_MEMBERS} 以内）。 */
     @NotNull
-    @Size(min = 2, max = 32)
+    @Size(min = 2, max = MAX_MEMBERS)
     public Set<Integer> members;
 
-    /** 队形类型。 */
+    /** 队形类型（不可为 null —— 缺省会一路 NPE 到 {@code FormationGeometry.compute} 的 switch）。 */
     @NotNull
     public FormationGeometry.Shape shape;
 

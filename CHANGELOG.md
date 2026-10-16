@@ -3,6 +3,82 @@
 > 本文件记录 NexusSky（天枢）项目的重大变更，按版本倒序排列。
 
 ---
+## [Unreleased] — 编队创建：成员数上限与队形缺省两条「声明了却没人执行」（2026-10-15）
+
+### 问题
+
+`FormationCreateRequest` 是四个 mission DTO 里**唯一**入口没加 `@Valid` 的
+（`DeliveryController.create`、`SprayController.create`、
+`LoRaRelayController.receiveLoRaAlarm`、`SchedulingController.createTask` 都有）。
+所以它的 JSR-303 注解不会触发，得靠 `FormationService.create()` 手写校验兜 ——
+而那里的 6 条检查里有 2 条漏了：
+
+| DTO 上的声明 | 实际 | 后果 |
+|---|---|---|
+| `members` `@Size(min = 2, max = 32)` | 只查下限 `size() < 2`，**全仓无任何上限检查** | 33 名及以上成员被静默接受 |
+| `shape` `@NotNull` | 无任何检查 | `FormationGeometry.compute` 里 `switch (shape)` → **NPE** |
+
+NPE 那条尤其值得记：`create()` 的 Javadoc 承诺 `@throws BadRequestException`，
+但缺省 `shape` 实际抛的是 `NullPointerException`，对外表现为 **HTTP 500 而不是 400**。
+取证原文：
+
+```
+Cannot invoke "io.aerofleet.cloud.mission.formation.FormationGeometry$Shape.ordinal()"
+because "shape" is null
+```
+
+### 修改
+
+1. **把上界提成共用常量** —— `FormationCreateRequest.MAX_MEMBERS = 32`，
+   `@Size(max = MAX_MEMBERS)` 与服务层的 `size() > MAX_MEMBERS` **引用同一个常量**。
+   这样"注解写 32、代码不查"从结构上不可能再发生（注解参数接受编译期常量）。
+2. **`FormationService.create()` 补两条检查**，与相邻 6 条同风格：
+   - `members.size() > MAX_MEMBERS` → `BadRequestException`，错误信息带实际上限与实际值
+   - `shape == null` → `BadRequestException("shape is required")`
+3. **DTO 的类 Javadoc 改为如实描述**：明确写出"这些注解在本入口不触发"，
+   并指明改注解必须同步改 `FormationService.create()`（或反过来给入口加 `@Valid`）。
+
+### 测试
+
+新增 3 条（先按期望行为写、确认红，再修）：
+
+| 用例 | 修前 | 修后 |
+|---|---|---|
+| `memberCountAboveDeclaredMaxRejected` | 红（33 人**什么都没抛**） | 绿 |
+| `nullShapeRejectedWithBadRequest` | 红（抛 **NPE** 而非 BadRequest） | 绿 |
+| `memberCountExactlyAtMaxAccepted` | 绿（边界本来就对，留作回归网） | 绿 |
+
+### 变异验证：4 杀 0 活
+
+| 变异 | 目标用例 | 结果 |
+|---|---|---|
+| 删掉成员上限检查 | `memberCountAboveDeclaredMaxRejected` | 转红 |
+| 上限 `>` 改成 `>=` | `memberCountExactlyAtMaxAccepted` | 转红（唯一能杀它的一条） |
+| 删掉 `shape` 缺省检查 | `nullShapeRejectedWithBadRequest` | 转红 |
+| 把共用常量 32 改成 2 | `memberCountAboveDeclaredMaxRejected` | 转红（连带 12 条，证明共享常量有效） |
+
+### 这一轮的两次自我纠正（扫描报告又错了）
+
+这轮我写扫描器找"声明≠行为"，**结论错了两次**，都记下来：
+
+1. **第一版 `@Valid` 判定只往 `@RequestBody` 之前看 400 字符**，
+   而 `SchedulingController.createTask` 写的是 `@RequestBody @Valid TaskRequest req`
+   —— `@Valid` 在**之后**，于是这个真正有校验的入口被误报成"无 @Valid"。
+2. 据此我又断言"`DeliveryRequest` 9 条约束里 8 条无人执行" —— **也是错的**，
+   因为我只读了 service 层，没看到 `DeliveryController.create` 上的 `@Valid`。
+
+修正扫描逻辑后，4 个 DTO 的入口**全都有 `@Valid`**，"47 个注解是装饰品"不成立。
+真正剩下的只有 `FormationController.create` 这一个缺口，也就是本 PR 修的这些。
+
+**这是本项目扫描报告第 5 次出错**（前四次：MissionApi 三条校验、TelemetryIngest 4 处恒真、
+surefire 正则匹配不到 `@Nested`、LoRa 降级断言集重复）。规律没变：
+**扫描产出的是假设，变异测试产出的是结论。**
+
+### 计数
+
+**4825 → 4828**（+3）。以 `mvn clean package` 实测为准，22 处口径文档由门禁输出驱动同步。
+
+---
 ## [Unreleased] — LoRa 降级路径：三条用例从"断言不足"改成"各守各的"（2026-10-15）
 
 ### 问题
