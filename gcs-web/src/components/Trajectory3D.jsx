@@ -25,21 +25,13 @@ export default function Trajectory3D({
   track = [],
   predictedTrack = null,
   missionDraft = [],
-  telemetry = null,
-  selected = null,
 }) {
   const containerRef = useRef(null)
   const [status, setStatus] = useState('loading')
   const [hint, setHint] = useState('')
   const [progress, setProgress] = useState(1) // 0..1 时间轴位置
   const sceneObj = useRef(null)
-  const playheadRef = useRef(null) // { mesh, points, tsArr }
-
-  // 时间戳数组（用于回放定位）
-  const tsArr = useMemo(() => {
-    if (!track || track.length === 0) return []
-    return track.map((p) => p.ts || 0)
-  }, [track])
+  const playheadRef = useRef(null) // { mesh, points }
 
   // 当前回放点信息
   const playheadInfo = useMemo(() => {
@@ -274,7 +266,7 @@ export default function Trajectory3D({
     // 航点标记球体（mission 航点优先，否则取轨迹采样点）
     const waypoints = missionDraft && missionDraft.length > 0 ? missionDraft : []
     const sphereGeo = new THREE.SphereGeometry(1.2, 14, 14)
-    waypoints.forEach((w, i) => {
+      waypoints.forEach((w) => {
       if (w.lat == null) return
       const v = geoTo3D(w.lat, w.lon, w.alt || 0)
       const mat = new THREE.MeshStandardMaterial({

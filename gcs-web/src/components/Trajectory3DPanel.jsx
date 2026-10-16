@@ -1,6 +1,5 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { loadThree, geoTo3D, COLOR, createOrbitState, applyOrbit, buildTerrain } from './Scene3DUtils.js'
-import { api } from '../api.js'
 
 export default function Trajectory3DPanel({
   track = [],

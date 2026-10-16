@@ -6,10 +6,8 @@ import {
   emergencyOrch,
   disaster,
   listSurveillanceDevices,
-  getDeviceStream,
   ptzControl,
   listSurveillanceEvents,
-  listAlarmEvents,
   acknowledgeAlarm,
   listAlarmRules,
   triggerEmergencyResponse,
@@ -96,14 +94,6 @@ const PTZ_ZOOM = [
   { cmd: 'zoomOut', label: '－', title: '缩小' },
 ]
 
-// 链路类型
-const LINK_TYPES = {
-  WiFi: { label: 'WiFi', color: '#3498DB' },
-  LTE: { label: 'LTE', color: '#2ECC71' },
-  LoRa: { label: 'LoRa', color: '#F39C12' },
-  Sat: { label: '卫星', color: '#9B59B6' },
-}
-
 // 圆环仪表盘组件
 function Gauge({ value, label, color, size = 72 }) {
   const pct = Math.max(0, Math.min(100, Number(value) || 0))
@@ -153,6 +143,9 @@ export default function UnifiedCommandPanel() {
   const [survDevices, setSurvDevices] = useState([])
   const [survDevicesLoading, setSurvDevicesLoading] = useState(true)
   const [selectedSurvDeviceId, setSelectedSurvDeviceId] = useState(null)
+  // 【接线缺口】setSurvEvents 有 1 处调用，监控事件确实拉回来了，但 survEvents 没人读 —— 事件列表未渲染
+  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
+  // eslint-disable-next-line no-unused-vars
   const [survEvents, setSurvEvents] = useState([])
   const [ptzBusy, setPtzBusy] = useState(false)
 
@@ -168,6 +161,9 @@ export default function UnifiedCommandPanel() {
   const dedupCounterRef = useRef(0)
 
   // ===== 应急编排状态 =====
+  // 【接线缺口】setScenarios 有 1 处调用，应急编排场景列表拉回来了，但 scenarios 没人读 —— 列表未渲染
+  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
+  // eslint-disable-next-line no-unused-vars
   const [scenarios, setScenarios] = useState([])
   const [selectedScenarioType, setSelectedScenarioType] = useState('earthquake')
   const [centerLat, setCenterLat] = useState(30.0)
@@ -176,12 +172,18 @@ export default function UnifiedCommandPanel() {
   const [activePlan, setActivePlan] = useState(null)
   const [coverage, setCoverage] = useState(null)
   const [priorityQueue, setPriorityQueue] = useState(null)
+  // 【接线缺口】setOrchEvents 有 2 处调用，编排事件确实在写，但 orchEvents 没人读 —— 事件流未渲染
+  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
+  // eslint-disable-next-line no-unused-vars
   const [orchEvents, setOrchEvents] = useState([])
   const [starting, setStarting] = useState(false)
   const [aborting, setAborting] = useState(false)
 
   // ===== 灾害通信状态 =====
   const [disasterStatus, setDisasterStatus] = useState(null)
+  // 【接线缺口】setDisasterClusters 有 1 处调用，灾害聚簇确实在写，但 disasterClusters 没人读 —— 聚簇未渲染
+  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
+  // eslint-disable-next-line no-unused-vars
   const [disasterClusters, setDisasterClusters] = useState(null)
   const [disasterLinks, setDisasterLinks] = useState(null)
 
@@ -582,7 +584,6 @@ export default function UnifiedCommandPanel() {
   const planStatus = String((activePlan && activePlan.status) || '').toUpperCase()
   const isRunning = !!planId && !TERMINAL_STATUS.has(planStatus)
   const phases = (activePlan && activePlan.phases) || (activePlan && activePlan.phaseProgress) || []
-  const orchDrones = (activePlan && activePlan.drones) || (activePlan && activePlan.fleet) || []
   const coveragePct = (coverage && (coverage.coveragePct ?? coverage.coverage)) ?? null
   const connectivityPct = (coverage && (coverage.connectivityPct ?? coverage.connectivity)) ?? null
   const queueTasks =

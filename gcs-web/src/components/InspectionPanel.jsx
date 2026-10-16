@@ -69,7 +69,6 @@ export default function InspectionPanel() {
   const [report, setReport] = useState(null)
   const [anomalies, setAnomalies] = useState([])
   const [photos, setPhotos] = useState([])
-  const [reportLoading, setReportLoading] = useState(false)
 
   const [error, setError] = useState(null)
   const [formError, setFormError] = useState(null)

@@ -9,7 +9,7 @@ import {
   getVoiceHistory,
   getVoicePending,
 } from '../api.js'
-import { POLL_MS, fmtTime, pick, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
+import { POLL_MS, pick, cardStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
 
 // P3 语音指挥面板
 // 语音指令解析 + 执行 + 待确认 + 播报 + 告警 + 历史
@@ -48,6 +48,9 @@ export default function VoiceCmdPanel() {
 
   // ---- 待确认指令 ----
   const [pending, setPending] = useState([])
+  // 【接线缺口】setPendingError 有 3 处调用（其中一处写的是「确认失败：…」），但 pendingError 没人读 —— 语音确认失败时用户看不到任何提示
+  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
+  // eslint-disable-next-line no-unused-vars
   const [pendingError, setPendingError] = useState(null)
 
   // ---- 播报 ----
@@ -68,6 +71,9 @@ export default function VoiceCmdPanel() {
 
   // ---- 指令历史 ----
   const [history, setHistory] = useState([])
+  // 【接线缺口】setHistoryError 有 1 处调用（清空），但 historyError 没人读 —— 历史查询失败没有提示
+  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
+  // eslint-disable-next-line no-unused-vars
   const [historyError, setHistoryError] = useState(null)
 
   // ---- 轮询待确认指令 + 历史 ----

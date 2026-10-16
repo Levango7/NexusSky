@@ -4,6 +4,87 @@
 
 ---
 
+## [Unreleased] — gcs-web：55 处「声明了却没人用」清干净，其中 9 处接线缺口立台账（2026-10-16）
+
+`npm run lint` 长期停在 **55 warnings / 0 errors**（因为规则是 `warn`，CI 不会红），
+于是这批"声明了却没人用"从来没有被要求处理。逐条查完之后分成两类分别处置。
+
+### 定性方法：先剥注释与字符串，再在纯代码上数
+
+不能靠"ESLint 报了就是没人用"这种间接推断。第一版统计脚本本身有噪声，已修正：
+
+| 噪声来源 | 后果 |
+|---|---|
+| 按词边界数单字母标识符（`t` / `i`） | 把**别的作用域**里同名变量算成"多处使用" |
+| 没剥注释 | `// twinStates 形状 { [sysid]: ... }` 里的 `sysid` 被当成一次真实使用 |
+| "计算属性访问"规则把**数组解构** `const [config, setConfig] =` 里的 `[config` 误判 | 13 条全是误报 |
+
+修正后（剥掉注释与字符串字面量，行号保持不变）：**55 条里有 47 条在纯代码里只出现 1 次**
+（只有声明处），**8 条"出现多次"逐条看上下文后确认全是误报**（`a.sysid` 成员访问、
+另一作用域的同名变量、另一函数里的重复声明），**0 条藏在 `obj[name]` 形式里**。
+
+setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调用点，
+结果是 **9 组有活着的写入方**、**3 组纯死**。
+
+### 处置一：46 处纯死代码，直接删
+
+未使用的导入 12 处、未使用的纯计算 6 处（`TelemetryCharts` 的 `range`/`usableH`、
+`MapView` 的 `eArrowLen`/`eArrowWidthHalf`、`Scene3D` 的 `t0`、`Trajectory3D` 的 `tsArr`）、
+未使用的参数 4 处、未使用的 props 4 处、变量与 setter 都无人使用的纯死 state 2 处、
+死函数 1 处（`TrackingPanel.msToDatetimeLocal`）、多余的赋值 1 处
+（`SatLinkPanel` 的 `const res = await ...` → 去掉 `const`，`await` 保留）、
+多导出的 API 面 2 处（`App.jsx` 与 `useAuth` 里的 `setAuthed` —— 该 hook 全仓只有
+`App.jsx` 一个消费者，hook 内部三处使用全部保留）。
+
+顺带删掉一处**恒为 null 的渲染块**：`HealthPanel` 的 `{error && (<div className="notice crit">…)}`
+—— `error` 的 setter 从来没被调用过，所以这块从未渲染出任何东西。删掉后界面逐像素不变，
+只是移除了那条死的错误通路。
+
+### 处置二：9 处只写不读，保留 + 显式标注 + 记台账
+
+### 接线缺口台账（这 9 处「写了但没人读」）
+
+下表逐条对应代码里带 `eslint-disable-next-line no-unused-vars` 的位置。
+它们的写入方都是活的（setter 确有调用点），删掉 state 会连带删掉写入动作，
+所以本次**一行都没删**，只把缺口写成人能读的文字 —— 避免将来某次
+「顺手清掉 warning」把这些未完成的功能连同证据一起抹掉。
+
+| 位置 | state | setter 调用点 | 缺的是什么 |
+|---|---|---|---|
+| `gcs-web/src/components/AutoDispatchPanel.jsx` | `config` | `setConfig` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+| `gcs-web/src/components/CommAdaptPanel.jsx` | `config` | `setConfig` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+| `gcs-web/src/components/HealthPanel.jsx` | `droneHistory` | `setDroneHistory` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `disasterClusters` | `setDisasterClusters` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `orchEvents` | `setOrchEvents` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `scenarios` | `setScenarios` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+| `gcs-web/src/components/VoiceCmdPanel.jsx` | `historyError` | `setHistoryError` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+| `gcs-web/src/components/VoiceCmdPanel.jsx` | `pendingError` | `setPendingError` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+
+其中两条值得单独点名：
+
+- **`VoiceCmdPanel` 的 `pendingError`**：`setPendingError` 有 3 处调用，
+  其中一处写的是 `"确认失败：" + 错误信息` —— 但这个错**从来没有被显示过**。
+  即「语音指令确认失败」时操作员拿不到任何反馈。
+- **`UnifiedCommandPanel`**：`survEvents` / `scenarios` / `orchEvents` /
+  `disasterClusters` 四类数据都真的拉回来存着了，**一类都没渲染**。
+
+### 验收
+
+| 项 | 结果 |
+|---|---|
+| `npm run lint` | **exit=0，0 problems / 0 warnings**（改前 55 warnings） |
+| `npm run test:ci` | **exit=0，310 / 310 通过，86 / 86 测试文件** |
+| 界面行为 | 零变化（B 类一行未删；A 类删的都是纯代码里从未被读的东西） |
+
+每一处编辑都带"该行必须包含某段文字"的断言。这条断言当场挡下一次错误编辑：
+`VideoFusionPanel` 的 `import React, { useState, useEffect, useRef, useCallback, useMemo }`
+里，若按预设文本删 `useRef` 会连带删掉 `useCallback`/`useMemo` —— 断言失败、整文件未写盘。
+
+### 计数
+
+**未变**：Java 4860、前端 310（本次只删未使用的变量，不增删任何用例）。
+
 ## [Unreleased] — 两条「门禁自己会误伤」的 flake，按实测根因修而非加等待（2026-10-16）
 
 今天 CI 里 `GCS Web` 与 `E2E core scripts (formation / mesh / rid) — observe`

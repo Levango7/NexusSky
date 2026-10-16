@@ -51,14 +51,6 @@ function normTrackPoint(p) {
 }
 
 
-// epoch ms → datetime-local 输入框值（本地时区）
-function msToDatetimeLocal(ms) {
-  if (ms == null || isNaN(ms)) return ''
-  const d = new Date(ms)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
 // datetime-local 输入框值 → epoch ms（浏览器按本地时区解析）
 function datetimeLocalToMs(str) {
   if (!str) return null

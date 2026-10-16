@@ -220,11 +220,6 @@ export default function AlarmPanel() {
   }, [events, filterSeverity, filterSource, filterUnack])
 
   const unackCount = useMemo(() => events.filter((e) => !e.acknowledged).length, [events])
-  const selectedEvent = useMemo(
-    () => events.find((e) => (e.id || e.eventId) === selectedEventId),
-    [events, selectedEventId]
-  )
-
   // ---- 确认报警 ----
   const handleAck = useCallback(async (eventId) => {
     try {
