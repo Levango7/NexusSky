@@ -226,19 +226,50 @@ function Run-Simplified {
     $droneSock.Send($telemetryBytes, $telemetryBytes.Length, $relayEP) | Out-Null
     Start-Sleep 1
 
-    # 步骤2：GCS 向中继 gcsPort 发命令 → 中继学习 gcsAddr + 转发到 drone
+    # 步骤2/3：GCS 向中继 gcsPort 发命令 → 中继学习 gcsAddr + 转发到 drone
+    #
+    # 【为什么从"发一次等一次"改成"有界重发"】
+    # 上行画像是 lte-edge，Gilbert-Elliott 两状态：好态丢 3%、坏态丢 55%，
+    # 每包 8% 好→坏 / 30% 坏→好 → 稳态坏态占比 21%，长期丢包率 ≈ 14%。
+    # 而中继是哑转发，链路上**没有任何重传**：帧被丢了就是丢了。
+    # 原写法"发一次 + 单次 Receive 等 5s"等于要求这条链路零丢包才能通过 ——
+    # 把"中继有没有转发"和"链路有没有丢包"绑成同一个断言，后者不是本用例要验的东西。
+    #
+    # 实测证据（不是推断）：
+    #   · CI 上行统计 `fwd=0 drop=1(100.0%)`、`fwd=4 drop=2(33.3%)`，
+    #     而 FR-22/FR-24(命令) 在最近三次 run 里红两次；
+    #   · 本机连跑三次，上行丢包实测 16.7% / 0% / 33.3%（命令帧只是其中 1 个包，
+    #     所以那三次 FR-22 都还绿）；
+    #   · FR-24 写作 `$cmdBytesMatch = $cmdArrived -and (...)`，所以它跟着 FR-22 一起红
+    #     —— 这两条**不是两份独立证据**，一次链路丢包同时打掉两条断言。
+    #
+    # 重发是链路上真实存在的补偿手段（真实系统里 GCS/操作员会重发），放进测试
+    # 才与"验证中继转发语义"这个意图一致。**有界是关键**：最多 5 次，
+    # 5 次全丢的概率 = 0.14^5 ≈ 5e-5；真坏了（中继不转发）仍然会红，不会变成永久绿。
+    #
+    # 下行（FR-23）不改：它走 wifi5（丢包 0.1%），比上行稳 140 倍，
+    # 且历史上从未因丢包红过。改动只落在有实测失败证据的那一侧。
     Info '步骤2: GCS 向中继 gcsPort 发命令（中继学习 gcsAddr 并转发到 drone）'
-    $gcsSock.Send($cmdBytes, $cmdBytes.Length, $gcsEP) | Out-Null
-    Start-Sleep 1
-
-    # 步骤3：drone 收到经中继转发的命令（FR-22 命令经中继到达）
+    $maxCmdAttempts = 5
     $droneRecvEP = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Any, 0)
     $cmdReceived = $null
-    try {
-        $cmdReceived = $droneSock.Receive([ref]$droneRecvEP)
-    } catch {
-        Info "drone 接收超时: $_"
+    $cmdAttempts = 0
+    while ($cmdAttempts -lt $maxCmdAttempts -and $null -eq $cmdReceived) {
+        $cmdAttempts++
+        $gcsSock.Send($cmdBytes, $cmdBytes.Length, $gcsEP) | Out-Null
+        Start-Sleep -Milliseconds 400
+        try {
+            $cmdReceived = $droneSock.Receive([ref]$droneRecvEP)
+        } catch {
+            # 收不到有两种可能：① 上行把它丢了（GE 损伤，14%）② 中继没转发（真缺陷）。
+            # 有界重发把 ① 吸收掉；② 重发到上限仍然收不到 → 下面判红。
+            Info "  第 $cmdAttempts/$maxCmdAttempts 次未收到命令帧（上行丢包或中继未转发），重发"
+        }
     }
+    if ($null -eq $cmdReceived) {
+        Info "drone 接收超时: $maxCmdAttempts 次重发后仍未收到"
+    }
+    Info "命令帧实际重发尝试次数: $cmdAttempts"
 
     $cmdArrived = $null -ne $cmdReceived -and $cmdReceived.Length -gt 0
     Check 'FR-22: 命令经中继到达远端飞机' $cmdArrived
