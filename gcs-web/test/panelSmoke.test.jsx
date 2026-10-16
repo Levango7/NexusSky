@@ -34,6 +34,21 @@ import { fileURLToPath } from 'node:url'
 const NAMESPACES = ['api', 'docks', 'defects', 'emergencyOrch', 'disaster']
 const EMPTY_LIST = () => Promise.resolve([])
 
+// 单面板渲染的超时预算。**刻意不用 vitest 默认的 5000ms**，理由是实测而非猜测：
+//
+// ① 逐条耗时（38 条，verbose reporter）：p50=289ms / p90=639ms / max=962ms。
+//    没有一条接近 5s —— 5s 不是"渲染要这么久"的上界。
+// ② 偶发红时报的却是 `Test timed out in 5000ms`，而同一档的总时长在
+//    红时是 25~55s、绿时只有 3~7s（慢 4~8 倍）。失败形态是"整档被抢占、
+//    事件循环被卡住"，不是"某个面板渲染不完"。
+// ③ 本机连跑 8 次红 1 次，且每次红的**面板都不同**（一次 Alarm/Geofence/Mapping，
+//    另一次 WeatherLayerPanel）—— 单条用例与失败之间没有稳定对应关系。
+//
+// 结论：5s 在这里是"测机器速度"的绊线，不是渲染耗时上界，故放宽到 20s，
+// 让这条用例继续只抓它该抓的东西（白屏 / 抛异常 / 真挂死）。
+// **别再放宽或直接删掉这个参数**：那会让"面板渲染卡住"从"变红"退化成"CI 变慢"。
+const RENDER_TIMEOUT_MS = 20_000
+
 vi.mock('../src/api.js', () => {
   const makeNamespace = () => new Proxy(function ns() {
     return Promise.resolve([])
@@ -166,6 +181,6 @@ describe('页面级面板渲染冒烟（37 个）', () => {
       const { container } = render(<Panel {...PROPS} />)
       // 至少渲染出 DOM（白屏 = container 里没有元素）
       expect(container.childElementCount).toBeGreaterThan(0)
-    })
+    }, RENDER_TIMEOUT_MS)
   }
 })
