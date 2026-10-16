@@ -48,10 +48,10 @@ export default function VoiceCmdPanel() {
 
   // ---- 待确认指令 ----
   const [pending, setPending] = useState([])
-  // 【接线缺口】setPendingError 有 3 处调用（其中一处写的是「确认失败：…」），但 pendingError 没人读 —— 语音确认失败时用户看不到任何提示
-  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
-  // eslint-disable-next-line no-unused-vars
+  // pendingError / historyError 归轮询刷新管：各自请求成功才清空，失败则写入原因。
+  // confirmError 归"确认执行"这个动作管，不被轮询覆盖（见 handleConfirm 的注释）。
   const [pendingError, setPendingError] = useState(null)
+  const [confirmError, setConfirmError] = useState(null)
 
   // ---- 播报 ----
   const [broadcastText, setBroadcastText] = useState('')
@@ -71,9 +71,8 @@ export default function VoiceCmdPanel() {
 
   // ---- 指令历史 ----
   const [history, setHistory] = useState([])
-  // 【接线缺口】setHistoryError 有 1 处调用（清空），但 historyError 没人读 —— 历史查询失败没有提示
-  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
-  // eslint-disable-next-line no-unused-vars
+  // 【接线缺口已补】setHistoryError 此前只有清空调用、且没有任何渲染点，
+  // 历史查询失败同样没有提示。现接在「指令历史」卡片头部下方。
   const [historyError, setHistoryError] = useState(null)
 
   // ---- 轮询待确认指令 + 历史 ----
@@ -83,21 +82,41 @@ export default function VoiceCmdPanel() {
     let stopped = false
 
     const load = async () => {
-      try {
-        const [pendingData, historyData] = await Promise.all([
-          getVoicePending().catch(() => []),
-          getVoiceHistory().catch(() => []),
-        ])
-        if (controller.signal.aborted || stopped) return
-        const pendingList = Array.isArray(pendingData) ? pendingData : (pendingData && pendingData.pending) || []
+      if (controller.signal.aborted || stopped) return
+
+      // 两个请求各自判定成败，不用 Promise.all 上层的 catch。
+      //
+      // 原写法是 `getVoicePending().catch(() => [])` + `getVoiceHistory().catch(() => [])`
+      // 再套一个 try/catch —— 但两个 Promise 都已各自 catch，Promise.all 永远不会 reject，
+      // 于是外层那个 `catch (e) { setPendingError(e.message) }` 是**进不去的死代码**，
+      // pendingError 因此从来拿不到任何真实消息（它只被赋过 null）。
+      // 现在把成败显式带出来：谁成功谁清自己的错，谁失败谁写自己的错。
+      const [pr, hr] = await Promise.all([
+        getVoicePending().then(
+          (d) => ({ ok: true, data: d }),
+          (e) => ({ ok: false, err: e })
+        ),
+        getVoiceHistory().then(
+          (d) => ({ ok: true, data: d }),
+          (e) => ({ ok: false, err: e })
+        ),
+      ])
+      if (controller.signal.aborted || stopped) return
+
+      if (pr.ok) {
+        const pendingList = Array.isArray(pr.data) ? pr.data : (pr.data && pr.data.pending) || []
         setPending(pendingList)
         setPendingError(null)
-        const historyList = Array.isArray(historyData) ? historyData : (historyData && historyData.history) || []
+      } else {
+        setPendingError(pr.err && pr.err.message ? pr.err.message : String(pr.err))
+      }
+
+      if (hr.ok) {
+        const historyList = Array.isArray(hr.data) ? hr.data : (hr.data && hr.data.history) || []
         setHistory(historyList)
         setHistoryError(null)
-      } catch (e) {
-        if (controller.signal.aborted || stopped) return
-        setPendingError(e && e.message ? e.message : String(e))
+      } else {
+        setHistoryError(hr.err && hr.err.message ? hr.err.message : String(hr.err))
       }
     }
 
@@ -158,12 +177,19 @@ export default function VoiceCmdPanel() {
   }, [parsed])
 
   // ---- 确认执行 ----
+  //
+  // 为什么确认失败要一个独立的 confirmError，而不是复用 pendingError：
+  // pendingError 归轮询刷新管（取待确认列表成功时清空），而 POLL_MS=5000。
+  // 原实现把"确认失败：…"写进 pendingError，下一轮轮询就把它抹掉 ——
+  // 加上当时还没有任何渲染点，这条信息等于从未存在过。
+  // 两个语义（刷新失败 / 操作失败）必须分槽，否则谁都会被对方清掉。
   const handleConfirm = useCallback(async (pendingId) => {
     try {
+      setConfirmError(null)
       await confirmVoiceCommand(pendingId)
       setPending((prev) => prev.filter((p) => pick(p, 'pendingId', 'id') !== pendingId))
     } catch (e) {
-      setPendingError('确认失败：' + (e && e.message ? e.message : String(e)))
+      setConfirmError('确认失败：' + (e && e.message ? e.message : String(e)))
     }
   }, [])
 
@@ -294,6 +320,19 @@ export default function VoiceCmdPanel() {
             <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)' }}>
               <span style={{ fontSize: 11, color: 'var(--text)' }}>待确认指令（{pending.length}）</span>
             </div>
+            {/* 两种错误语义分槽显示：pendingError = 轮询取待确认列表失败（下轮成功即清）；
+                confirmError = 点「确认执行」失败（不被轮询覆盖，见 handleConfirm 注释）。
+                样式沿用本文件 parseError/execError 的 ⚠ 约定。 */}
+            {pendingError && (
+              <div style={{ fontSize: 10, color: 'var(--crit)', padding: '4px 10px', borderBottom: '1px solid var(--line-2)' }}>
+                ⚠ 待确认列表刷新失败：{pendingError}
+              </div>
+            )}
+            {confirmError && (
+              <div style={{ fontSize: 10, color: 'var(--crit)', padding: '4px 10px', borderBottom: '1px solid var(--line-2)' }}>
+                ⚠ {confirmError}
+              </div>
+            )}
             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
               {pending.length === 0 ? (
                 <div className="empty-hint">暂无待确认指令</div>
@@ -430,6 +469,11 @@ export default function VoiceCmdPanel() {
             <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--line-2)' }}>
               <span style={{ fontSize: 11, color: 'var(--text)' }}>指令历史（{history.length}）</span>
             </div>
+            {historyError && (
+              <div style={{ fontSize: 10, color: 'var(--crit)', padding: '4px 10px', borderBottom: '1px solid var(--line-2)' }}>
+                ⚠ {historyError}
+              </div>
+            )}
             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
               {history.length === 0 ? (
                 <div className="empty-hint">暂无指令历史</div>

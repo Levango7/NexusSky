@@ -4,6 +4,84 @@
 
 ---
 
+## [Unreleased] — gcs-web：语音面板的错误通路在三层同时是死的，顺带挖出一个被异常掩盖的 mock 缺口（2026-10-16）
+
+### 一、VoiceCmdPanel 的错误通路：写入被吞 + 消息被覆盖 + 没有渲染点
+
+上一条把 `pendingError` / `historyError` 归进「接线缺口台账」时，我只看到"存了没人读"。
+真正去读代码才发现**三层同时是死的**，任何单看一层都发现不了：
+
+1. **写入被吞**：轮询里给每个请求挂了 `.catch(() => [])`，异常在到达 `Promise.all`
+   外层 catch 之前就没了 —— 于是那个 `catch (e) { setPendingError(e.message) }`
+   是**进不去的死代码**，`pendingError` 从未拿到过任何真实消息（它只被赋过 null）。
+2. **唯一的真实消息被覆盖**：`pendingError` 拿到真实内容只有 `handleConfirm` 失败时
+   那一处（`'确认失败：' + …`），而**每轮轮询（POLL_MS=5000）无条件 `setPendingError(null)`**，
+   5 秒内被抹掉。
+3. **没有渲染点**：即使状态有值，界面也不显示。
+
+叠加结果：**语音指令确认失败时，操作员拿不到任何提示** ——
+而 `setPendingError('确认失败：' + ...)` 的存在让代码看起来"已经处理了"。
+
+改法（三处都动，缺一不可，少任何一处都还是坏的）：
+
+- 轮询把成败显式带出来（`{ok, data}` / `{ok, err}`），谁成功谁清自己的错、谁失败谁写
+  自己的错；外层那个死 catch 随之删除（它唯一的作用是掩盖下面的第二节）。
+- 新增独立的 `confirmError` 承载"确认执行"失败，**不被轮询覆盖** ——
+  两个语义必须分槽，否则谁都会被对方清掉。
+- 补两处渲染点：`pendingError` + `confirmError` 在「待确认指令」卡片，
+  `historyError` 在「指令历史」卡片，样式沿用本文件既有的 `⚠ / var(--crit)` 约定。
+
+### 二、面板冒烟测试暴露了一个被异常掩盖的 mock 缺口
+
+改完上面之后，全量 vitest 出现 **「317 通过 / 0 失败 但 exit=1」** ——
+典型的信号与事实不符，必须查。查下去是一个 unhandled rejection：
+
+    No "getVoicePending" export is defined on the "../src/api.js" mock
+
+`test/panelSmoke.test.jsx` 的 api mock 是**手写枚举 23 个导出名**的，api.js 后来新增的
+voice-cmd 那 8 个（`parseVoiceCommand` / `executeVoiceCommand` / `confirmVoiceCommand` /
+`broadcastVoiceMessage` / `getVoiceStatus` / `broadcastVoiceAlert` / `getVoiceHistory` /
+`getVoicePending`）不在其中 → 面板 import 到它们时，vitest 在**访问属性那一刻同步抛错**。
+而那个错此前被 VoiceCmdPanel 轮询里那个 try/catch 吃掉 ——
+所以这个 mock 缺口**一直是绿的**。
+
+这是"声明 ≠ 行为"的另一面：**异常被吞 → 缺口不可见**。
+注意我一开始把"api.js 里没有这些函数"判成了缺失 —— 那是错的，它们定义在
+`export const voiceCmd = { ... }` 的对象属性里、再由文件末尾 `export const { ... } = api`
+解构再导出，我的两条正则都没覆盖这种写法。**差点据此得出"整个面板的 API 层不存在"的结论。**
+
+改法：mock 的覆盖面改为**由构造保证** —— 用 `importOriginal()` 取真实模块的导出名，
+逐个给空桩（命名空间仍走 Proxy），只对"返回值不是空数组"的少数几个显式覆盖。
+这样 api.js 以后新增导出时不可能再悄悄漏掉。
+（`api.js` 的 import 期行为只有 try/catch 里的 sessionStorage 读取，jsdom 下安全。）
+
+### 三、工具缺口：`sync_count_gate.py` 同步不了前端口径
+
+用它同步时它"第 1 轮就通过"了 —— 因为它调门禁时**没带 `--frontend-json`**，
+前端口径被整体跳过，它压根没看见那 3 处不一致（一次静默的空转）。
+本次改用门禁自己报的 `文件:行号` 手工同步（`README.md:894`、`ROADMAP.md:25`），
+并对门禁同一行重复上报做了去重（同一行只能改一次，否则第二次必然断言失败）。
+
+### 变异验证（3 杀 0 活）
+
+| 变异体 | 转红的用例 | 判定 |
+|---|---|---|
+| 吞异常（复现原 `.catch(() => [])`） | `取待确认列表失败` + `下一次轮询成功：错误提示随之消失` | 被杀 ✓ |
+| 缺渲染（`{false && ...}`） | `点「确认执行」失败：显示「确认失败：原因」` + 跨轮询那条 | 被杀 ✓ |
+| **轮询抹除**（状态分了槽但仍被清） | **只有** `跨过一次轮询周期（POLL_MS=5000）后仍然在` | 被杀 ✓ |
+
+第三条是关键：它**只让那一条转红**，而"显示 确认失败"那条仍然绿 ——
+说明那条决定性断言真能区分"只是加了个渲染"和"真修好了轮询覆盖"。
+（若测试没有判别力，M3 会被前一条杀死或存活。）
+
+### 计数
+
+**前端 310 → 317**（新增 `test/voiceCmdError.test.jsx` 7 例）；Java **4860 未变**。
+`npm run lint` **0 problems**；`npm run test:ci` **exit=0 / 317 通过 / 90 测试文件 / 0 unhandled**；
+计数门禁带 `--frontend-json` **exit=0**。
+
+---
+
 ## [Unreleased] — gcs-web：55 处「声明了却没人用」清干净，其中 9 处接线缺口立台账（2026-10-16）
 
 `npm run lint` 长期停在 **55 warnings / 0 errors**（因为规则是 `warn`，CI 不会红），
