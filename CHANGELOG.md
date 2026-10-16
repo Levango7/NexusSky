@@ -4,6 +4,60 @@
 
 ---
 
+## [Unreleased] — gcs-web：健康管理面板读的是不存在的字段名，核心功能整块空白且不报错（2026-10-17）
+
+**现象**：`HealthPanel` 的机队健康总览、单机总评分、7 个部件评分三处一直显示 `--`。
+不抛异常、不打日志、CI 全绿 —— 因为 `fmtScore(undefined)` 按设计就是返回 `'--'`，
+"读不到"和"真的是空"在界面上长得一模一样。
+
+**根因（对着后端 DTO 逐字段核出来的，不是猜的）**：
+
+| 面板读的 key | `HealthScore` 的真实字段 | 结果 |
+|---|---|---|
+| `pick(d, 'score', 'healthScore')`（机队行 L233、机队平均分 L202） | `private final int overallScore` | 读不到 |
+| `pick(droneDetail, 'score', 'healthScore')`（单机总评分 L319/320） | 同上 | 读不到 |
+| `pick(droneDetail, 'components', 'componentHealth')`（7 部件 L326） | `private final Map<ComponentType, ComponentScore> componentScores` | 读不到 |
+
+`HealthScore` 是普通 getter、无 `@JsonProperty`，所以 JSON 键就是字段名。
+**三个候选名一个都对不上**，而每个 `pick()` 都配了三个别名 —— 三个全错，所以整块空白。
+
+佐证它不是"后端改了字段"：同仓库 `CommAdaptPanel` 读的就是
+`pick(score, 'overallScore', 'score', 'totalScore')`，**正确名字前端本来是知道的**。
+
+**改法**：`overallScore` / `componentScores` 提到候选**第一位**，旧名保留作降级别名
+（不删能力：如果将来有别的后端实现用旧名，仍能读）。
+另把 #96 台账里的 `droneHistory` 一并接上渲染（历史评分列表，`slice(-10)` 取最近十条、
+新的在前），并摘掉那条 `eslint-disable`。
+
+**验证（4 个变异体全被杀，逐个对应）**：
+
+| 变异 | 转红的用例 |
+|---|---|
+| 回退 `pick(d, 'overallScore', …)` | 机队行分数 + 机队平均分 |
+| 回退 `pick(droneDetail, 'overallScore', …)` | 单机总评分 |
+| 回退 `pick(droneDetail, 'componentScores', …)` | 7 部件评分 |
+| 摘掉历史评分整块 | 历史列表两条（含空态提示） |
+
+7/7 绿 → 4/4 杀 → 还原后复跑 7/7 绿。
+夹具**照抄后端 DTO 的逐字段形状**（`ComponentType` 七个取值、`ComponentScore.Status`
+三个取值都取自枚举定义），不是随手编字段名 —— 这正是 link-sim「多跳中继」那 11 个
+假绿测试栽的跟头（合成 `new byte[13]` 让断言在错误字段上也能绿）。
+
+**顺带修掉测试自己的一个错**：第一版断言"机队行不应出现 `--`"是错的 ——
+缺 `status` 字段时状态行本来就渲染 `--`。已改成精确取到分数那一格
+（`head.children[1].children[0].textContent`）再判等值。**这是断言写错，不是代码错**。
+
+**边界（未证明的部分）**：
+- 只在 mock 数据上验证。真实 drone-sim 发出的健康帧我没跑过；
+  但 DTO 侧是读源码逐字段确认的，且 `GET /api/v1/health` 与 `/fleet`、
+  `/{sysid}/history` 三处返回的都是同一个 `HealthScore`，形状一致。
+- `droneHistory` 列表固定取最近 10 条、新的在前，没做分页/滚动。
+  真实历史有多长我**没有实测**，若超过 10 条需要考虑加"查看更多"。
+- 前端口径 317 → **324**，已按门禁输出同步 `README.md:894` 与 `ROADMAP.md:25`
+  （只改门禁指出的那两行，未做全仓正则替换）。
+
+---
+
 ## [Unreleased] — 计数门禁：同一处前端声称被点名两次，"不一致 N 处"虚高（2026-10-16）
 
 **现象（2026-10-14 实测复现）**：`ROADMAP.md:25` 那行里只有**一个** `292`，门禁却报
@@ -147,24 +201,24 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 
 ### 处置二：9 处只写不读，保留 + 显式标注 + 记台账
 
-### 接线缺口台账（这 9 处「写了但没人读」）
+### 接线缺口台账（9 处「写了但没人读」；已修 3 处，**仍缺 6 处**）
 
 下表逐条对应代码里带 `eslint-disable-next-line no-unused-vars` 的位置。
 它们的写入方都是活的（setter 确有调用点），删掉 state 会连带删掉写入动作，
 所以本次**一行都没删**，只把缺口写成人能读的文字 —— 避免将来某次
 「顺手清掉 warning」把这些未完成的功能连同证据一起抹掉。
 
-| 位置 | state | setter 调用点 | 缺的是什么 |
-|---|---|---|---|
-| `gcs-web/src/components/AutoDispatchPanel.jsx` | `config` | `setConfig` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
-| `gcs-web/src/components/CommAdaptPanel.jsx` | `config` | `setConfig` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
-| `gcs-web/src/components/HealthPanel.jsx` | `droneHistory` | `setDroneHistory` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `disasterClusters` | `setDisasterClusters` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `orchEvents` | `setOrchEvents` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `scenarios` | `setScenarios` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
-| `gcs-web/src/components/VoiceCmdPanel.jsx` | `historyError` | `setHistoryError` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
-| `gcs-web/src/components/VoiceCmdPanel.jsx` | `pendingError` | `setPendingError` |   // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。 |
+| 位置 | state | setter 调用点 | 状态 | 缺的是什么 |
+|---|---|---|---|---|
+| `gcs-web/src/components/AutoDispatchPanel.jsx` | `config` | `setConfig` | **仍缺** | 保存成功无回显：只有失败路径有 `setError`，用户看不出保存是否生效 |
+| `gcs-web/src/components/CommAdaptPanel.jsx` | `config` | `setConfig` | **仍缺** | 生效配置不可见（`configSuccess` 已在渲染，但服务端真值没显示） |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `disasterClusters` | `setDisasterClusters` | **仍缺** | 灾害聚类真拉回了但一类不渲染 —— 应急场景下信息不可见 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `orchEvents` | `setOrchEvents` | **仍缺** | 编排事件流不渲染 —— 执行中看不到进度 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `scenarios` | `setScenarios` | **仍缺** | 场景列表不渲染，而 `selectedScenarioType` 依赖它 ⇒ **选择器选不成就选不了** |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` | **仍缺** |  surveillance 事件不渲染 |
+| `gcs-web/src/components/HealthPanel.jsx` | `droneHistory` | `setDroneHistory` | ✅ 已修（#99） | 已接「历史评分」列表渲染，并摘掉 `eslint-disable` |
+| `gcs-web/src/components/VoiceCmdPanel.jsx` | `historyError` | `setHistoryError` | ✅ 已修（#97） | 同上，见 #97 的 CHANGELOG 条目 |
+| `gcs-web/src/components/VoiceCmdPanel.jsx` | `pendingError` | `setPendingError` | ✅ 已修（#97） | 同上，见 #97 的 CHANGELOG 条目 |
 
 其中两条值得单独点名：
 
