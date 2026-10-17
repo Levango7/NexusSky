@@ -42,7 +42,7 @@ class DisasterCommControllerTest {
     @Test
     @DisplayName("POST /activate 激活灾害模式返回 active")
     void activateReturnsActive() {
-        ResponseEntity<Map<String, Object>> resp = controller.activate();
+        ResponseEntity<Map<String, Object>> resp = controller.activate(null);
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         Map<String, Object> body = resp.getBody();
         assertThat(body).isNotNull();
@@ -55,7 +55,7 @@ class DisasterCommControllerTest {
     @DisplayName("POST /deactivate 退出灾害模式返回 inactive")
     void deactivateReturnsInactive() {
         // 先激活
-        controller.activate();
+        controller.activate(null);
         // 再退出
         ResponseEntity<Map<String, Object>> resp = controller.deactivate();
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
@@ -68,7 +68,7 @@ class DisasterCommControllerTest {
     @Test
     @DisplayName("GET /status 激活后返回 active 与 manual 原因")
     void getStatusAfterActivate() {
-        controller.activate();
+        controller.activate(null);
         ResponseEntity<Map<String, Object>> resp = controller.getStatus();
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         assertThat(resp.getBody().get("mode")).isEqualTo("active");
@@ -106,14 +106,14 @@ class DisasterCommControllerTest {
     @DisplayName("激活→退出→再激活 状态正确切换")
     void activateDeactivateReactivate() {
         // 激活
-        controller.activate();
+        controller.activate(null);
         assertThat(controller.getStatus().getBody().get("mode")).isEqualTo("active");
         // 退出
         controller.deactivate();
         assertThat(controller.getStatus().getBody().get("mode")).isEqualTo("inactive");
         assertThat(controller.getStatus().getBody().get("recoveryRate")).isEqualTo(100);
         // 再激活
-        controller.activate();
+        controller.activate(null);
         assertThat(controller.getStatus().getBody().get("mode")).isEqualTo("active");
     }
 }
