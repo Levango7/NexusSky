@@ -41,9 +41,8 @@ function statusMeta(s) {
 
 export default function AutoDispatchPanel() {
   // ---- 出警配置 ----
-  // 【接线缺口】setConfig 有 2 处调用（保存出警配置），但 config 从头到尾没人读 —— 保存结果没有任何回显
-  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
-  // eslint-disable-next-line no-unused-vars
+  // config = 服务端回填的真值（L120 加载、L140 保存成功后），configEditing 只是表单编辑缓冲。
+  // 键名取自后端 AutoDispatchController.configToMap 的权威清单（6 个）。
   const [config, setConfig] = useState(null)
   const [configEditing, setConfigEditing] = useState(null)
   const [configSaving, setConfigSaving] = useState(false)
@@ -288,6 +287,16 @@ export default function AutoDispatchPanel() {
             <div style={{ fontSize: 11, color: 'var(--text)', marginBottom: 8, borderBottom: '1px solid var(--line-2)', paddingBottom: 4 }}>
               出警配置
             </div>
+            {/* 服务端当前生效的出警配置。原先 config 没有任何渲染点，于是「保存成功」零反馈
+                （失败路径才有 setError），用户看不出保存到底生不生效、可能重复点击。
+                这里显示后端回填的真值，保存成功时它会跟着变，回显是持久的而不是一次性 toast。 */}
+            {config && (
+              <div style={{ fontSize: 10, color: 'var(--dim-2)', marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div>当前生效（服务端回填）：{pick(config, 'enabled') === true ? '已启用' : pick(config, 'enabled') === false ? '未启用' : '--'}</div>
+                <div>最低电量 {pick(config, 'minBatteryPct') ?? '--'}% · 最大距离 {pick(config, 'maxDispatchDistanceM') ?? '--'}m · 默认机数 {pick(config, 'defaultDroneCount') ?? '--'}</div>
+                <div>悬停高度 {pick(config, 'hoverAltitudeM') ?? '--'}m · 悬停时长 {pick(config, 'hoverDurationSec') ?? '--'}s</div>
+              </div>
+            )}
             {configEditing ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <label style={labelStyle}>

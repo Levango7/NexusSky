@@ -6,6 +6,59 @@
 
 ---
 
+## [Unreleased] — gcs-web：两个配置面板存回了服务端真值却从不显示，保存后看不出服务端认了什么（2026-10-17）
+
+**先纠正一处台账本身的错误**：`AutoDispatchPanel.config` 与 `CommAdaptPanel.config`
+两条都被记成"保存结果没有回显"，但两者的缺失程度**不一样**，照单全收会做错：
+
+| 面板 | 台账描述 | 实际情况 |
+|---|---|---|
+| `AutoDispatchPanel` | 没有回显 | **准确**：失败路径有 `setError`，成功路径**零反馈** |
+| `CommAdaptPanel` | 没有回显 | **不准确**：`configSuccess`（"配置保存成功"）本来就在 L430 渲染。它缺的不是"成没成功"，而是"**服务端认了什么**" |
+
+所以后者若照台账只加一句 toast，等于什么都没修。
+
+**根因**：两个 `config` 都是**服务端回填的真值**（`AutoDispatchPanel` L120 加载 / L140
+保存后；`CommAdaptPanel` L131 / L224），此前从头到尾没人读。表单显示的是编辑缓冲
+（`configEditing` / `configForm`），而后端是否采纳、采纳成什么，只能靠猜。
+
+**改法**：两处都显示服务端回填的真值。这是**持久回显**而不是一次性 toast ——
+所以判据不只是"点完保存有提示"，而是"生效值必须跟着后端返回值变"。
+
+键名全部取自后端 `configToMap` 的权威清单，不照前端表单猜：
+
+- `AutoDispatchController.configToMap` → `enabled` `minBatteryPct` `maxDispatchDistanceM` `defaultDroneCount` `hoverAltitudeM` `hoverDurationSec`
+- `CommSituationController.configToMap` → `switchThreshold` `failoverThreshold` `detectionIntervalMs` `autoSwitchEnabled` `minStableTimeMs`
+
+**验证：4 个变异体全被杀**，其中两个专门验"假修复"：
+
+| 变异 | 转红的用例 |
+|---|---|
+| 删掉 AutoDispatchPanel 的生效行 | 加载显示 + 保存跟随（2 条） |
+| 删掉 CommAdaptPanel 的生效行 | 加载显示 + 保存跟随（2 条） |
+| **生效行改读 `configEditing`（表单缓冲）** | 保存跟随 + 未加载时不显示（2 条） |
+| **生效行改读 `configForm`（表单缓冲）** | 保存跟随（1 条） |
+
+后两个是这次特意加的：只显示"生效值"但读的是用户刚敲进去的缓冲，界面上**看着完全
+正常**，普通断言抓不住它 —— 只有"生效值必须等于后端保存后的返回值"才能抓住。
+
+6/6 绿 → 4/4 杀 → 还原后复跑 6/6 绿。
+
+**顺带修掉测试自己一个设计缺陷**：M2 首次运行时把「原有的 configSuccess 仍在」
+也一起杀了 —— 那条用例以 `getByText(/当前生效/)` 作为等待前提，等于依赖了新渲染块
+存在，做不成独立回归守卫。已改为等 `getByLabelText('切换阈值')`（加载态就有的既有
+元素）。改完 M2 只杀 2 条，正是它该杀的 2 条。
+
+**边界**：
+- 只在 mock 数据上验证。两个真实端点（`GET/PUT /api/v1/autodispatch/config`、
+  `GET/PUT /api/v1/comm-adapt/config`）我没跑过；键名是从后端 `configToMap`
+  读源码确认的，且它们与前端提交体用的键一一对应。
+- 只显示当前生效值，**没有**加"最近一次保存时间"或变更历史 —— 后端没返回这个信息，
+  造它需要改后端，不在本次范围内。
+
+前端口径 324 → **330**，按门禁输出的 `README.md:894` 与 `ROADMAP.md:25` 两行同步
+（只改门禁指出的行，未做全仓正则替换）。台账已更新：**9 处修掉 5 处，仍缺 4 处**。
+
 ## [Unreleased] — ci：发布 tag 从不触发任何门禁，v1.0.2~v1.0.5 指向的代码从未被验证（2026-10-17）
 
 **现象**：`on.push` 只有 `branches: [ main, master ]`，**没有 `tags:` 过滤**，
@@ -244,7 +297,7 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 
 ### 处置二：9 处只写不读，保留 + 显式标注 + 记台账
 
-### 接线缺口台账（9 处「写了但没人读」；已修 3 处，**仍缺 6 处**）
+### 接线缺口台账（9 处「写了但没人读」；已修 5 处，**仍缺 4 处**）
 
 下表逐条对应代码里带 `eslint-disable-next-line no-unused-vars` 的位置。
 它们的写入方都是活的（setter 确有调用点），删掉 state 会连带删掉写入动作，
@@ -253,8 +306,8 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 
 | 位置 | state | setter 调用点 | 状态 | 缺的是什么 |
 |---|---|---|---|---|
-| `gcs-web/src/components/AutoDispatchPanel.jsx` | `config` | `setConfig` | **仍缺** | 保存成功无回显：只有失败路径有 `setError`，用户看不出保存是否生效 |
-| `gcs-web/src/components/CommAdaptPanel.jsx` | `config` | `setConfig` | **仍缺** | 生效配置不可见（`configSuccess` 已在渲染，但服务端真值没显示） |
+| `gcs-web/src/components/AutoDispatchPanel.jsx` | `config` | `setConfig` | ✅ 已修（#101） | 改成显示服务端回填的生效配置（持久回显，不是 toast） |
+| `gcs-web/src/components/CommAdaptPanel.jsx` | `config` | `setConfig` | ✅ 已修（#101） | 同上；`configSuccess` 成功提示本来就保留未动 |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `disasterClusters` | `setDisasterClusters` | **仍缺** | 灾害聚类真拉回了但一类不渲染 —— 应急场景下信息不可见 |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `orchEvents` | `setOrchEvents` | **仍缺** | 编排事件流不渲染 —— 执行中看不到进度 |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `scenarios` | `setScenarios` | **仍缺** | 场景列表不渲染，而 `selectedScenarioType` 依赖它 ⇒ **选择器选不成就选不了** |
