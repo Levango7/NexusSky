@@ -19,6 +19,110 @@
 
 ---
 
+## [Unreleased] — 后端安防事件空桩结清：不是缺 Store，是**同一件事写了两遍，其中一遍是死的**（#106，2026-10-17）
+
+上一轮（#104）把 `survEvents` 的键名修对了，面板能读 `items` 了，但列表**仍然是空的**，
+因为后端 `GET /api/v1/surveillance/events` 是永久空桩。当时按方案 A 记为待办：这轮结清。
+
+### 根因：不是"缺一个 SurveillanceEventStore"
+
+先按字面意思去实现 `SurveillanceEventStore` 前，查了一遍谁往里写 —— 结果是
+**没有任何事件源**，光造一个 Store 会得到另一个空桩（代码更多而已）。三条实测：
+
+```
+HikAdapter.subscribeEvents      : // TODO: 接入 ISAPI alertStream —— 只塞进 map，永不调用 callback
+Gb28181Adapter.subscribeEvents  : 日志明写 "callback will not fire in PoC"
+EventCallback                   : javadoc 写「替代 Consumer<String>」，接口签名还是 Consumer<String>，从没被实现过
+```
+
+### 真正的问题：同一件事的两个模型
+
+```
+AlarmEvent.EventType        : MOTION, INTRUSION, FIRE, DOOR, CUSTOM
+SurveillanceEvent.EventType : MOTION, INTRUSION, FIRE, DOOR, CUSTOM   ← 逐字相同
+两者 Severity                : INFO / WARN / CRITICAL
+AlarmEvent 的 javadoc        : 「描述安防设备（海康/大华/宇视）触发的一次报警」
+```
+
+而且 `AlarmEventStore` + `POST/GET /api/v1/alarms/events` 是**端到端可用**的管线
+（POST 收事件 → `AlarmLinkageEngine.processEvent` → `store.store()` → 分页查询），
+返回的 `{items,total,page,size}` 与安防那个空桩**契约完全一致**。
+
+⇒ `/surveillance/events` 是同一件事的第二个、永远空的重复桩。
+
+### 改法
+
+1. **`AlarmEventStore` 加 `deviceId` 过滤**（`sourceDeviceId`）。此前该端点**声明了**
+   `deviceId` 参数却从不过滤 —— 那个参数在它被"声明"的那段时间里从未生效过一次。
+2. **`SurveillanceController.listEvents` 委托给 `AlarmEventStore`**，响应结构不变
+   （前端取数路径不用改），但开始返回真实数据。
+3. **删掉 `SurveillanceEvent` 和 `EventCallback`**（两个零引用类）。
+   `SurveillanceEvent` 只被 `EventCallback` 引用，而 `EventCallback` 全仓零引用。
+   保留它们只会让下一个人以为摄像头事件这条线已经通了。
+4. **字段投影复用 `AlarmController.eventToMap`**（放宽为 public），保证两个端点
+   返回**逐字段一致**的事件形状 —— 否则同一批数据在两个 API 下长得不一样，
+   是另一种形式的"声明与行为不一致"。
+
+### 前端：两个面板分工，不重复
+
+按讨论结论，两个面板都保留但职责分开：
+
+- **安防事件面板**：按**当前选中设备**过滤（`deviceId`），回答「这台设备发生过什么」。
+- **报警事件面板**：全局视图，带确认 / 应急响应 / 侦察操作。
+
+所以安防事件面板加了 `deviceId` 依赖（设备切换要重新拉取），并把空态拆成**三种说法**：
+未选中设备 / 该设备无事件（并明说「不等于全局无事件」）/ 有事件。
+顺带修了一直被忽略的小问题：轮询传的是 `limit`，后端参数名是 `size` —— `limit` 被忽略，
+恒取默认 20。
+
+### 钉死 bug 的假绿测试（本轮重点）
+
+`SurveillanceControllerTest` 里三条测试**钉的是 bug 本身**：
+
+```java
+listEvents_returnsEmptyListWithPagination : total == 0   // 空桩也返回 0 —— 端点是委托还是空桩它都绿
+listEvents_customPagination             : total == 0   // 分页无从验证
+listEvents_withDeviceIdFilter           : total == 0   // 压根没验过滤
+```
+
+改写为必须先 seed 真实事件才能区分两种实现：返回真事件 + 字段形状、空 store 仍返回空数组、
+分页真的翻页（`total=3 / size=2` 时两页内容不同）、`deviceId` 过滤真正生效
+（含不存在的设备返回 0 条 = 过滤生效的**表现**而非"参数被忽略"）、大小写敏感。
+`SurveillanceControllerTest` 30 → 32 例。
+
+### 变异验证（判据：改了实现，目标用例会不会红）
+
+| 范围 | 变异 | 结果 |
+|---|---|---|
+| 后端 | 控制器退回空列表 | ✅ 杀（3 例红） |
+| 后端 | Store 忽略 `deviceIdFilter` | ✅ 杀（2 例红） |
+| 后端 | 控制器丢掉 `deviceId` 实参 | ✅ 杀（2 例红） |
+| 后端 | `eventToMap` 少一个字段 | ✅ 杀（形状用例红） |
+| 后端 | 分页 `from` 恒取 0 | ✅ 杀（分页用例红） |
+| 前端 | 轮询不带 `deviceId` | ✅ 杀 |
+| 前端 | 依赖数组退回 `[]` | ✅ 杀 |
+| 前端 | `size` 改回 `limit` | ✅ 杀 |
+| 前端 | 空态塌缩成统一「暂无」 | ✅ 杀（2 例红） |
+| 前端 | 事件行去掉类型 / 去掉来源设备 | ✅ 杀 / ✅ 杀 |
+
+后端 5/5、前端 6/6 全杀，逐条核对了死掉的用例名是不是预期的那个
+（FM4 起初是被我改坏的 JSX 语法错误"杀"的 —— 坏构建不算有效变异，已收紧锚点重验）。
+
+### 口径
+
+后端 4870 → **4872**，前端 358 → **359**。**按门禁报出的 24 处 `文件:行号` 同步**
+（未做全仓正则替换）；`docs/sales-pitch-deck.md:263` 里的 `358 API 端点`是**另一个指标**，
+未被误改。
+
+### 未做（明确记下，不含糊）
+
+**厂商适配器的真实事件订阅没做**（ISAPI alertStream / DHSDK / UNIVIEW SDK / ONVIF
+WS-BaseNotification）。那是需要对着真实摄像头硬件做的协议对接，不在本次范围。
+当前状态是：`AlarmEventStore` 有生产者（`POST /api/v1/alarms/events` 收事件），
+查询链路端到端通；**摄像头直连事件源仍不存在**。
+
+---
+
 ## [Unreleased] — gcs-web：接线缺口台账最后 3 处。3 处都叫"写了没人读"，但**失效机制各不相同**（2026-10-17）
 
 台账上一视同仁记成"没有渲染"是不准的。三处分别是：纯渲染缺口、去重逻辑把数据毁掉、
@@ -64,7 +168,7 @@
 | # | 原因 | 状态 |
 |---|---|---|
 | a | 前端读 `data.events`，后端返回的是 `{ items, … }` | **已修**：改读 `items`（`events` 保留为兼容键） |
-| b | 后端 `SurveillanceController` 的 `/events` 是**永久空桩**，注释自述"当前没有全局 SurveillanceEventStore"，固定返回 `{items: []}` | **未修**：属于后端功能缺失，不是接线缺陷 |
+| b | 后端 `SurveillanceController` 的 `/events` 是**永久空桩**，注释自述"当前没有全局 SurveillanceEventStore"，固定返回 `{items: []}` | **已修**（#106）：改为委托 `AlarmEventStore`，真返回数据，`deviceId` 过滤也真正生效 |
 
 所以修完 (a) 列表**仍然是空的**。此处刻意**不用空白列表**表示空 ——
 监控面板显示空列表会被读成"没有发生过事"，那是**假阴性**，正是这批 PR 在治的病。
@@ -580,7 +684,7 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 
 ### 处置二：9 处只写不读，保留 + 显式标注 + 记台账
 
-### 接线缺口台账（9 处「写了但没人读」；已修 9 处，**仍缺 0 处**）
+### 接线缺口台账（9 处「写了但没人读」；已修 9 处，**仍缺 0 处**；含 #106 结清最后一项后端空桩）
 
 下表逐条对应代码里带 `eslint-disable-next-line no-unused-vars` 的位置。
 它们的写入方都是活的（setter 确有调用点），删掉 state 会连带删掉写入动作，
@@ -594,7 +698,7 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `disasterClusters` | `setDisasterClusters` | ✅ 已修（#104） | 真数据（`{clusterCount, clusters:[…]}`），已按簇ID / 簇头 / 节点数 / 半径渲染 |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `orchEvents` | `setOrchEvents` | ✅ 已修（#104） | 已渲染；同时结修去重逻辑（后端 events 是 List<String>，旧键恒为 `|` 把所有事件并成一条） |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `scenarios` | `setScenarios` | ✅ 已修（#102） | 选择器改由它驱动，并顺带修好了「一键应急响应」按钮 400 的缺陷 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` | ✅ 已修（#104） | 键名改正为 `items`；但后端 `/events` 仍是**永久空桩**（无全局 SurveillanceEventStore），因此空态改为显式说明后端未实现，而非空白列表 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` | ✅ 已修（#104 + #106） | 键名改正为 `items`（#104）；后端空桩已修（#106）——`/events` 改委托 `AlarmEventStore` 返回真实事件，本面板按**选中设备**过滤 |改为显式说明后端未实现，而非空白列表 |
 | `gcs-web/src/components/HealthPanel.jsx` | `droneHistory` | `setDroneHistory` | ✅ 已修（#99） | 已接「历史评分」列表渲染，并摘掉 `eslint-disable` |
 | `gcs-web/src/components/VoiceCmdPanel.jsx` | `historyError` | `setHistoryError` | ✅ 已修（#97） | 同上，见 #97 的 CHANGELOG 条目 |
 | `gcs-web/src/components/VoiceCmdPanel.jsx` | `pendingError` | `setPendingError` | ✅ 已修（#97） | 同上，见 #97 的 CHANGELOG 条目 |

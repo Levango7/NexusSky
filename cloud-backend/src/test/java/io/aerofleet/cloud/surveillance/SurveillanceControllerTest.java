@@ -2,6 +2,9 @@ package io.aerofleet.cloud.surveillance;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aerofleet.cloud.alarm.AlarmEvent;
+import io.aerofleet.cloud.alarm.AlarmEventRepository;
+import io.aerofleet.cloud.alarm.AlarmEventStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,6 +39,7 @@ class SurveillanceControllerTest {
     private OnvifClient onvifClient;
     private RapidDeployService rapidDeployService;
     private VendorAdapterRegistry vendorAdapterRegistry;
+    private AlarmEventStore alarmEventStore;
     private SurveillanceController controller;
     private MockMvc mockMvc;
 
@@ -50,8 +54,50 @@ class SurveillanceControllerTest {
         vendorAdapterRegistry = new VendorAdapterRegistry(List.of(
                 new OnvifVendorAdapter(onvifClient),
                 new Gb28181Adapter(new Gb28181CatalogParser(), "00000000000000000001", "127.0.0.1:5060")));
-        controller = new SurveillanceController(registry, onvifClient, rapidDeployService, vendorAdapterRegistry);
+        // GET /events 现在委托给 AlarmEventStore（此前是固定返回 items:[] 的空桩）
+        alarmEventStore = newInMemoryAlarmEventStore();
+        controller = new SurveillanceController(registry, onvifClient, rapidDeployService,
+                vendorAdapterRegistry, alarmEventStore);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+    }
+
+    /**
+     * 造一个带内存仓储的 {@link AlarmEventStore}（与 {@code AlarmEventStoreTest} 同形：
+     * Mockito 打桩 + 反射注入 private 字段）。
+     */
+    private static AlarmEventStore newInMemoryAlarmEventStore() {
+        AlarmEventStore store = new AlarmEventStore(AlarmEventStore.DEFAULT_CAPACITY);
+        AlarmEventRepository mockRepo = org.mockito.Mockito.mock(AlarmEventRepository.class);
+        java.util.Map<String, AlarmEvent> eventMap = new java.util.concurrent.ConcurrentHashMap<>();
+        org.mockito.Mockito.when(mockRepo.save(org.mockito.Mockito.any(AlarmEvent.class)))
+                .thenAnswer(inv -> {
+                    AlarmEvent e = inv.getArgument(0);
+                    eventMap.put(e.getId(), e);
+                    return e;
+                });
+        org.mockito.Mockito.when(mockRepo.findAll(org.mockito.Mockito.any(
+                        org.springframework.data.domain.Pageable.class)))
+                .thenAnswer(inv -> {
+                    org.springframework.data.domain.Pageable pageable = inv.getArgument(0);
+                    java.util.List<AlarmEvent> all = new java.util.ArrayList<>(eventMap.values());
+                    all.sort(java.util.Comparator.comparingLong(AlarmEvent::getTimestampMs).reversed());
+                    int start = (int) pageable.getOffset();
+                    int end = Math.min(start + pageable.getPageSize(), all.size());
+                    java.util.List<AlarmEvent> sub = start < all.size()
+                            ? new java.util.ArrayList<>(all.subList(start, end))
+                            : new java.util.ArrayList<>();
+                    return new org.springframework.data.domain.PageImpl<>(sub, pageable, all.size());
+                });
+        org.mockito.Mockito.when(mockRepo.count())
+                .thenAnswer(inv -> (long) eventMap.size());
+        try {
+            java.lang.reflect.Field f = AlarmEventStore.class.getDeclaredField("repository");
+            f.setAccessible(true);
+            f.set(store, mockRepo);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("inject repository", e);
+        }
+        return store;
     }
 
     private static String json(Map<String, Object> body) throws Exception {
@@ -442,36 +488,131 @@ class SurveillanceControllerTest {
 
     // ===== GET /events 全局安防事件查询 =====
 
+    /** 塞一条事件进 store（走 store.store()，与 POST /api/v1/alarms/events 同一条路）。 */
+    private void seed(String id, String deviceId, AlarmEvent.EventType type,
+                      AlarmEvent.Severity sev, long ts) {
+        alarmEventStore.store(new AlarmEvent(id, deviceId, deviceId + "-name",
+                type, sev, "desc-" + id, 39.9, 116.3, 0, ts, false));
+    }
+
+    /**
+     * GET /events 真的返回事件（此前是固定 {@code items: []} 的空桩）。
+     * <p>
+     * <b>为什么必须先 seed 再断言</b>：旧版这条测试断言 {@code total == 0}，
+     * 而空桩也返回 {@code total == 0} —— 端点是委托还是空桩，它都绿。
+     * 只有先放进真实事件，才能区分这两种实现。
+     */
     @Test
-    @DisplayName("GET /events 返回 200 + 空列表 + 分页信息")
-    void listEvents_returnsEmptyListWithPagination() throws Exception {
+    @DisplayName("GET /events 返回真实事件（不是空桩），且事件形状与 /alarms/events 一致")
+    void listEvents_returnsRealEventsNotStub() throws Exception {
+        seed("e-1", "cam-1", AlarmEvent.EventType.MOTION, AlarmEvent.Severity.INFO, 1000L);
+        seed("e-2", "cam-2", AlarmEvent.EventType.INTRUSION, AlarmEvent.Severity.CRITICAL, 2000L);
+
         mockMvc.perform(get("/api/v1/surveillance/events"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items").isArray())
-                .andExpect(jsonPath("$.total").value(0))
+                .andExpect(jsonPath("$.total").value(2))
                 .andExpect(jsonPath("$.page").value(0))
-                .andExpect(jsonPath("$.size").value(20));
+                .andExpect(jsonPath("$.size").value(20))
+                // 最新在前
+                .andExpect(jsonPath("$.items[0].id").value("e-2"))
+                // 字段投影必须与 /api/v1/alarms/events 逐字段一致
+                .andExpect(jsonPath("$.items[0].sourceDeviceId").value("cam-2"))
+                .andExpect(jsonPath("$.items[0].eventType").value("INTRUSION"))
+                .andExpect(jsonPath("$.items[0].severity").value("CRITICAL"))
+                .andExpect(jsonPath("$.items[0].description").value("desc-e-2"))
+                .andExpect(jsonPath("$.items[0].timestampMs").value(2000))
+                .andExpect(jsonPath("$.items[0].acknowledged").value(false));
     }
 
     @Test
-    @DisplayName("GET /events 自定义分页参数")
-    void listEvents_customPagination() throws Exception {
-        mockMvc.perform(get("/api/v1/surveillance/events")
-                        .param("page", "2")
-                        .param("size", "50"))
+    @DisplayName("GET /events 空 store 时返回空列表（真正无数据，而不是桩）")
+    void listEvents_emptyStoreStillReturnsEmptyArray() throws Exception {
+        mockMvc.perform(get("/api/v1/surveillance/events"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.page").value(2))
-                .andExpect(jsonPath("$.size").value(50))
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.items").isEmpty())
                 .andExpect(jsonPath("$.total").value(0));
     }
 
     @Test
-    @DisplayName("GET /events 带 deviceId 过滤参数")
-    void listEvents_withDeviceIdFilter() throws Exception {
+    @DisplayName("GET /events 分页真的生效（旧版 total=0 让分页无从验证）")
+    void listEvents_customPagination() throws Exception {
+        seed("e-1", "cam-1", AlarmEvent.EventType.MOTION, AlarmEvent.Severity.INFO, 1000L);
+        seed("e-2", "cam-1", AlarmEvent.EventType.MOTION, AlarmEvent.Severity.INFO, 2000L);
+        seed("e-3", "cam-1", AlarmEvent.EventType.MOTION, AlarmEvent.Severity.INFO, 3000L);
+
+        mockMvc.perform(get("/api/v1/surveillance/events")
+                        .param("page", "0")
+                        .param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(3))
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].id").value("e-3"))
+                .andExpect(jsonPath("$.items[1].id").value("e-2"));
+
+        // 第 2 页只剩 1 条 —— 旧版 total=0 时这一条无从判断
+        mockMvc.perform(get("/api/v1/surveillance/events")
+                        .param("page", "1")
+                        .param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.total").value(3))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value("e-1"));
+    }
+
+    /**
+     * deviceId 过滤**真正生效**。
+     * <p>
+     * 旧版这条测试同样只断言 {@code total == 0}，而空桩对任何 deviceId 都返回 0
+     * —— 也就是说这个参数在它被"声明"的那段时间里**从未被验证过一次**。
+     */
+    @Test
+    @DisplayName("GET /events 的 deviceId 过滤真正生效（此前声明了但恒返回空）")
+    void listEvents_deviceIdFilterActuallyFilters() throws Exception {
+        seed("e-1", "cam-1", AlarmEvent.EventType.MOTION, AlarmEvent.Severity.INFO, 1000L);
+        seed("e-2", "cam-2", AlarmEvent.EventType.FIRE, AlarmEvent.Severity.CRITICAL, 2000L);
+        seed("e-3", "cam-1", AlarmEvent.EventType.DOOR, AlarmEvent.Severity.WARN, 3000L);
+
         mockMvc.perform(get("/api/v1/surveillance/events")
                         .param("deviceId", "cam-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.deviceId").value("cam-1"))
+                .andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].id").value("e-3"))
+                .andExpect(jsonPath("$.items[1].id").value("e-1"));
+
+        mockMvc.perform(get("/api/v1/surveillance/events")
+                        .param("deviceId", "cam-2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].id").value("e-2"));
+
+        // 不存在的设备 => 0 条（过滤生效的表现，而不是"参数被忽略"）
+        mockMvc.perform(get("/api/v1/surveillance/events")
+                        .param("deviceId", "cam-nope"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(0))
+                .andExpect(jsonPath("$.items").isEmpty());
+
+        // 不过滤时应看全部 3 条
+        mockMvc.perform(get("/api/v1/surveillance/events"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(3));
+    }
+
+    /** 设备 ID 大小写敏感：CAM-1 不能匹配 cam-1。 */
+    @Test
+    @DisplayName("deviceId 过滤大小写敏感，不做隐式忽略")
+    void listEvents_deviceIdFilterIsCaseSensitive() throws Exception {
+        seed("e-1", "cam-1", AlarmEvent.EventType.MOTION, AlarmEvent.Severity.INFO, 1000L);
+
+        mockMvc.perform(get("/api/v1/surveillance/events")
+                        .param("deviceId", "CAM-1"))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(0));
     }
 

@@ -1,6 +1,9 @@
 package io.aerofleet.cloud.surveillance;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.aerofleet.cloud.alarm.AlarmController;
+import io.aerofleet.cloud.alarm.AlarmEvent;
+import io.aerofleet.cloud.alarm.AlarmEventStore;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -65,6 +68,28 @@ public class SurveillanceController {
     private final RapidDeployService rapidDeployService;
     /** 按设备厂商路由（E5 后 GB28181 设备可注册：PTZ/流地址必须走对应适配器）。 */
     private final VendorAdapterRegistry vendorAdapterRegistry;
+    /**
+     * 安防事件存储。
+     * <p>
+     * 本端点此前返回的是永久空桩（固定 {@code items: [] / total: 0}），注释写着
+     * 「全局 SurveillanceEventStore 尚未实现」。但真正的原因不是缺 Store，而是：
+     * <ol>
+     *   <li>本包原有的 {@code SurveillanceEvent} 模型（已删除）的 EventType 枚举与
+     *       {@code AlarmEvent} <b>逐字相同</b>
+     *       （MOTION/INTRUSION/FIRE/DOOR/CUSTOM）、Severity 也相同，{@code AlarmEvent}
+     *       的 javadoc 自己写着「描述<em>安防设备（海康/大华/宇视）</em>触发的一次报警」
+     *       —— 它们是同一件事的两个模型；</li>
+     *   <li>{@code AlarmEventStore} + {@code POST/GET /api/v1/alarms/events} 已经是
+     *       <b>端到端可用</b>的管线（POST 收事件 → 存储 → 分页查询）；</li>
+     *   <li>三个厂商适配器的 {@code subscribeEvents} 全是桩，从不触发 callback
+     *       （GB28181 适配器日志里明写「callback will not fire in PoC」），
+     *       所以不存在「摄像头直连事件」这条源。</li>
+     * </ol>
+     * 结论：再造一个 {@code SurveillanceEventStore} 只会得到另一个空桩。故本端点改为
+     * 委托给真实存在的 {@link AlarmEventStore}，顺带让此前形同虚设的 {@code deviceId}
+     * 过滤参数真正生效。
+     */
+    private final AlarmEventStore alarmEventStore;
     /** SSE 心跳调度器：单线程足够，多个 emitter 共享。 */
     private final ScheduledExecutorService sseScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -76,11 +101,13 @@ public class SurveillanceController {
     public SurveillanceController(SurveillanceDeviceRegistry registry,
                                   OnvifClient onvifClient,
                                   RapidDeployService rapidDeployService,
-                                  VendorAdapterRegistry vendorAdapterRegistry) {
+                                  VendorAdapterRegistry vendorAdapterRegistry,
+                                  AlarmEventStore alarmEventStore) {
         this.registry = registry;
         this.onvifClient = onvifClient;
         this.rapidDeployService = rapidDeployService;
         this.vendorAdapterRegistry = vendorAdapterRegistry;
+        this.alarmEventStore = alarmEventStore;
     }
 
     /**
@@ -536,12 +563,20 @@ public class SurveillanceController {
     /**
      * 查询全局安防事件列表（分页）。
      * <p>
-     * 当前实现返回空列表 + 分页信息（全局 SurveillanceEventStore 尚未实现）。
-     * 后续可接入各设备的事件订阅缓存或独立事件存储。
+     * 数据源是 {@link AlarmEventStore} —— 即报警联动那套**已在用**的事件管线，
+     * 而不是另建一个 Store。理由见 {@link #alarmEventStore} 字段注释：厂商适配器的
+     * {@code subscribeEvents} 全是桩（GB28181 适配器明写 callback 在 PoC 阶段不会触发），
+     * 没有「摄像头直连事件」这条源；而 {@code AlarmEvent} 与被删除的
+     * 本包原有的 {@code SurveillanceEvent}（已删除）枚举与它逐字相同、描述的是同一批设备。
+     * <p>
+     * 字段投影复用 {@link AlarmController#eventToMap}，保证与
+     * {@code GET /api/v1/alarms/events} 逐字段一致。
+     * <p>
+     * {@code deviceId} 此前声明了却从不过滤（返回空桩时无所谓），现在真正生效。
      *
-     * @param page 页码（0-based，默认 0）
-     * @param size 每页大小（默认 20）
-     * @param deviceId 设备 ID 过滤（可选）
+     * @param page     页码（0-based，默认 0）
+     * @param size     每页大小（默认 20）
+     * @param deviceId 设备 ID 过滤（可选，对应 {@code sourceDeviceId}）
      */
     @Operation(summary = "查询全局安防事件列表（分页）", description = "支持 page/size/deviceId 过滤")
     @ApiResponses({
@@ -560,16 +595,24 @@ public class SurveillanceController {
             return badRequest("size must be in [1, 1000]");
         }
 
-        // 当前没有全局 SurveillanceEventStore，返回空列表 + 分页信息
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("items", new ArrayList<>());
-        result.put("total", 0);
-        result.put("page", page);
-        result.put("size", size);
-        if (deviceId != null && !deviceId.isBlank()) {
-            result.put("deviceId", deviceId);
+        // 6 参显式传：租户域留 null（走 ThreadContext），deviceId 才过滤
+        AlarmEventStore.PageResult result =
+                alarmEventStore.query(page, size, null, null, deviceId, null);
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (AlarmEvent e : result.getItems()) {
+            items.add(AlarmController.eventToMap(e));
         }
-        return ResponseEntity.ok(result);
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("items", items);
+        resp.put("total", result.getTotal());
+        resp.put("page", result.getPage());
+        resp.put("size", result.getSize());
+        if (deviceId != null && !deviceId.isBlank()) {
+            resp.put("deviceId", deviceId);
+        }
+        return ResponseEntity.ok(resp);
     }
 
     // ------------------------------------------------------------------
