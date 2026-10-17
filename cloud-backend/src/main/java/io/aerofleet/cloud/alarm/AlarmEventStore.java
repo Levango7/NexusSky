@@ -162,7 +162,7 @@ public class AlarmEventStore {
      * @return 分页结果（含 items/total/page/size）
      */
     public PageResult query(int page, int size, String severityFilter, String typeFilter) {
-        return query(page, size, severityFilter, typeFilter, TenantContext.getEffectiveTenantId());
+        return query(page, size, severityFilter, typeFilter, null, TenantContext.getEffectiveTenantId());
     }
 
     /**
@@ -177,6 +177,30 @@ public class AlarmEventStore {
      */
     public PageResult query(int page, int size, String severityFilter, String typeFilter,
                             Integer tenantScope) {
+        return query(page, size, severityFilter, typeFilter, null, tenantScope);
+    }
+
+    /**
+     * 分页查询事件（来源设备过滤 + 显式租户域）。
+     * <p>
+     * 本类的完整实现；其余重载最终都收敛到这里。{@code deviceIdFilter} 与
+     * {@code tenantScope} 都允许为 null（分别表示「不过滤」与「全局管理员视角」）。
+     * <p>
+     * 供 {@code GET /api/v1/surveillance/events} 使用 —— 该端点此前声明了
+     * {@code deviceId} 参数却从不过滤（返回的是永久空桩，参数形同虚设），
+     * 现在这个声明才真正生效。调用方须显式传两个参数：
+     * {@code query(page, size, null, null, deviceId, null)}。
+     * <p>
+     * <b>为什么没有 5 参的 {@code (…, String deviceIdFilter)} 便捷重载</b>：
+     * 它与既有的 {@code (…, Integer tenantScope)} 在实参为 {@code null} 时
+     * 无法重载解析（编译期「对 query 的引用不明确」，已实际踩到）。
+     * 用 6 参显式传 {@code null} 是这里唯一不会歧义的写法。
+     *
+     * @param deviceIdFilter 来源设备 ID 过滤（对应 {@link AlarmEvent#getSourceDeviceId()}），
+     *                       null/空白表示不过滤
+     */
+    public PageResult query(int page, int size, String severityFilter, String typeFilter,
+                            String deviceIdFilter, Integer tenantScope) {
         if (page < 0) {
             page = 0;
         }
@@ -193,7 +217,7 @@ public class AlarmEventStore {
             if (!isVisibleTo(e, tenantScope)) {
                 continue;
             }
-            if (!matchesFilter(e, severityFilter, typeFilter)) {
+            if (!matchesFilter(e, severityFilter, typeFilter, deviceIdFilter)) {
                 continue;
             }
             filtered.add(e);
@@ -238,7 +262,8 @@ public class AlarmEventStore {
         return capacity;
     }
 
-    private static boolean matchesFilter(AlarmEvent e, String severityFilter, String typeFilter) {
+    private static boolean matchesFilter(AlarmEvent e, String severityFilter, String typeFilter,
+                                            String deviceIdFilter) {
         if (severityFilter != null && !severityFilter.isEmpty()) {
             if (!e.getSeverity().name().equalsIgnoreCase(severityFilter)) {
                 return false;
@@ -246,6 +271,13 @@ public class AlarmEventStore {
         }
         if (typeFilter != null && !typeFilter.isEmpty()) {
             if (!e.getEventType().name().equalsIgnoreCase(typeFilter)) {
+                return false;
+            }
+        }
+        if (deviceIdFilter != null && !deviceIdFilter.isBlank()) {
+            // 用 equals 而不是 equalsIgnoreCase：设备 ID 大小写敏感，
+            // 否则 "CAM-1" 会漏掉 "cam-1" 的事件
+            if (!deviceIdFilter.equals(e.getSourceDeviceId())) {
                 return false;
             }
         }

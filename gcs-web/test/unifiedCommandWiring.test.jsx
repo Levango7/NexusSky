@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import UnifiedCommandPanel from '../src/components/UnifiedCommandPanel.jsx'
-import { emergencyOrch, disaster, listSurveillanceEvents } from '../src/api.js'
+import { emergencyOrch, disaster, listSurveillanceEvents, listSurveillanceDevices } from '../src/api.js'
 
 /**
  * 接线缺口 #104 的三处（2026-10-17）。三处性质**不同**，台账上一视同仁记成
@@ -210,33 +210,76 @@ describe('#104 disasterClusters：真数据必须渲染出来', () => {
   })
 })
 
-describe('#104 survEvents：键名是 items，且空态必须诚实', () => {
-  it('读 items 键并渲染事件（此前读 data.events ⇒ 恒空）', async () => {
-    listSurveillanceEvents.mockResolvedValue({
-      total: 1,
-      items: [{ id: 'evt-1', message: '门禁异常闯入', timestamp: Date.now() }],
-    })
+describe('#104/#106 survEvents：读 items 键；#106 起按选中设备过滤并显示真实事件', () => {
+  // 一条形状与后端 AlarmController.eventToMap 逐字段一致的事件
+  const EVENT = (over = {}) => ({
+    id: 'evt-1',
+    sourceDeviceId: 'cam-9',
+    sourceDeviceName: '西门口球机',
+    eventType: 'INTRUSION',
+    severity: 'CRITICAL',
+    description: '周界入侵',
+    lat: 39.9, lon: 116.3, alt: 0,
+    timestampMs: 1758000000000,
+    acknowledged: false,
+    ...over,
+  });
+
+  it('读 items 键并渲染真实事件（含严重度 / 类型 / 来源设备）', async () => {
+    listSurveillanceEvents.mockResolvedValue({ total: 1, items: [EVENT()] })
     await renderPanel()
-    await waitFor(() => expect(screen.getByText(/安防事件（1）/)).toBeTruthy())
-    expect(screen.getByText('门禁异常闯入')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(/安防事件（/)).toBeTruthy())
+    // 表头里的条数（作用域前缀之后）
+    expect(screen.getByText(/·\s*1）/)).toBeTruthy()
+    // 严重度按 SEVERITY_META 上色且带标签
+    expect(screen.getByText(/\[CRITICAL|严重/)).toBeTruthy()
+    expect(screen.getByText(/INTRUSION/)).toBeTruthy()
+    expect(screen.getByText(/周界入侵/)).toBeTruthy()
+    expect(screen.getByText(/@西门口球机/)).toBeTruthy()
   })
 
-  it('空态必须说明后端未实现，不能让空列表被读成「没有发生过事」', async () => {
+  it('#106：选中设备后按 deviceId 过滤地拉取', async () => {
+    listSurveillanceEvents.mockResolvedValue({ total: 0, items: [] })
+    listSurveillanceDevices.mockResolvedValue([
+      { id: 'cam-9', name: '西门口球机', vendor: 'HIKVISION', online: true },
+      { id: 'cam-12', name: '东门枪机', vendor: 'HIKVISION', online: true },
+    ])
     await renderPanel()
-    await waitFor(() => expect(screen.getByText(/安防事件（0）/)).toBeTruthy())
-    const hint = screen.getByText(/尚未实现全局安防事件存储/)
-    expect(hint).toBeTruthy()
-    // 并且明说这不是"无事件"
-    expect(hint.textContent).toMatch(/不代表/)
+    // 默认自动选中第一台（组件既有行为）
+    await waitFor(() => expect(listSurveillanceEvents).toHaveBeenCalled())
+    const firstCall = listSurveillanceEvents.mock.calls.at(-1)[0]
+    expect(firstCall.deviceId, '选中设备后必须带 deviceId').toBe('cam-9')
+    // 参数名是 size 不是 limit（此前传 limit 被后端忽略）
+    expect(firstCall.size).toBe(20)
+    expect(firstCall.limit).toBeUndefined()
+
+    // 切到第二台 ⇒ 重新拉取，且 deviceId 跟着变
+    fireEvent.click(screen.getAllByText(/cam-12|东门枪机/)[0])
+    await waitFor(() => {
+      const last = listSurveillanceEvents.mock.calls.at(-1)[0]
+      expect(last.deviceId).toBe('cam-12')
+    })
   })
 
-  it('真拿到事件时不再显示"后端未实现"的提示', async () => {
-    listSurveillanceEvents.mockResolvedValue({
-      total: 1,
-      items: [{ id: 'evt-2', message: '周界入侵', timestamp: Date.now() }],
-    })
+  it('#106：空态按作用域分三种说法，不能一律写「暂无」', async () => {
+    listSurveillanceEvents.mockResolvedValue({ total: 0, items: [] })
+    listSurveillanceDevices.mockResolvedValue([])
     await renderPanel()
-    await waitFor(() => expect(screen.getByText('周界入侵')).toBeTruthy())
+    // 没有设备 ⇒ 提示去选设备，而不是宣称「没有事件」
+    await waitFor(() => expect(screen.getByText(/未选中设备/)).toBeTruthy())
+    expect(screen.queryByText(/暂无安防事件/)).toBeNull()
+  })
+
+  it('#106：选中但该设备无事件时，明说「不等于全局无事件」', async () => {
+    listSurveillanceEvents.mockResolvedValue({ total: 0, items: [] })
+    listSurveillanceDevices.mockResolvedValue([
+      { id: 'cam-9', name: '西门口球机', vendor: 'HIKVISION', online: true },
+    ])
+    await renderPanel()
+    await waitFor(() => expect(screen.getByText(/暂无安防事件/)).toBeTruthy())
+    const hint = screen.getByText(/暂无安防事件/)
+    expect(hint.textContent).toMatch(/不等于全局无事件/)
+    // 且不再出现 #104 那句已过时的「后端尚未实现」
     expect(screen.queryByText(/尚未实现全局安防事件存储/)).toBeNull()
   })
 })

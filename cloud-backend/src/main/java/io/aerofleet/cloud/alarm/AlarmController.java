@@ -589,7 +589,14 @@ public class AlarmController {
     }
 
     /** 事件 → map。 */
-    static Map<String, Object> eventToMap(AlarmEvent e) {
+    /**
+     * 事件 → map（视图投影）。
+     * <p>
+     * public：{@code SurveillanceController} 的 {@code GET /api/v1/surveillance/events}
+     * 也复用本方法，保证两个端点返回**逐字段一致**的事件形状 —— 否则同一批数据
+     * 在两个 API 下长得不一样，是另一种形式的「声明与行为不一致」。
+     */
+    public static Map<String, Object> eventToMap(AlarmEvent e) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", e.getId());
         m.put("sourceDeviceId", e.getSourceDeviceId());

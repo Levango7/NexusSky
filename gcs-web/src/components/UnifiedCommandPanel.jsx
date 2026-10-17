@@ -309,16 +309,22 @@ export default function UnifiedCommandPanel() {
     return () => { cancelled = true; clearInterval(timer) }
   }, [])
 
-  // ===== 轮询安防事件 =====
+  // ===== 轮询安防事件（#106：按当前选中设备过滤）=====
+  // 后端 GET /api/v1/surveillance/events 现已委托给 AlarmEventStore，真正返回数据，
+  // 且 deviceId 过滤**真正生效**（此前该参数声明了却恒返回空）。
+  // 本面板按「当前选中设备」过滤，与右栏「报警事件」（全局 + 确认/应急/侦察操作）分工：
+  // 这里回答「这台设备发生过什么」，那里回答「全局有哪些报警需要处置」。
   useEffect(() => {
     let cancelled = false
     const load = async () => {
       try {
-        const data = await listSurveillanceEvents({ limit: 20 })
+        // 参数名是 size 不是 limit —— 此前传 limit 被后端忽略，恒取默认 20。
+        // URLSearchParams 会跳过 undefined，设备列表还没加载完时等于不过滤。
+        const data = await listSurveillanceEvents({
+          size: 20,
+          ...(selectedSurvDeviceId ? { deviceId: selectedSurvDeviceId } : {}),
+        })
         if (cancelled) return
-        // 键名：后端 SurveillanceController 的 /events 返回的是 { items, ... }，
-        // 此前这里只读 data.events ⇒ 恒为 undefined ⇒ 列表恒空。events 作为
-        // 兼容键保留（万一将来后端改了键名）。
         const list = Array.isArray(data)
           ? data
           : (data && (data.items || data.events)) || []
@@ -330,7 +336,8 @@ export default function UnifiedCommandPanel() {
     load()
     const timer = setInterval(load, POLL_MS)
     return () => { cancelled = true; clearInterval(timer) }
-  }, [])
+    // 设备切换要重新拉取 —— 否则面板会一直显示上一台设备的事件
+  }, [selectedSurvDeviceId])
 
   // ===== 轮询报警规则 + 联动日志 =====
   useEffect(() => {
@@ -700,10 +707,12 @@ export default function UnifiedCommandPanel() {
     [orchEvents]
   )
 
-  // 安防事件是否处于「后端未实现」的已知空桩状态（#104）
-  // SurveillanceController 的 /events 目前固定返回 { items: [] }，注释自述
-  // 「当前没有全局 SurveillanceEventStore」。空列表因此不能读作「没有发生过事」。
-  const survEventsStubbed = survEvents.length === 0
+  // 安防事件面板的作用域（#106）：有选中设备就只看该设备，否则看全部。
+  // 空态因此要分三种说法，不能一律写「暂无」——「还没选设备」和「这台设备确实
+  // 没出过事」对使用者是完全不同的信息。
+  const survEventScope = selectedSurvDeviceId
+    ? (selectedSurvDevice && (selectedSurvDevice.name || selectedSurvDevice.id)) || selectedSurvDeviceId
+    : null
 
   // Mesh 节点列表
   const meshNodes = useMemo(() => {
@@ -1148,24 +1157,27 @@ export default function UnifiedCommandPanel() {
               )}
             </div>
           </div>
-        {/* ===== #104：安防事件（此前 survEvents 无人读） ===== */}
+        {/* ===== #104 接通渲染 / #106 改为按选中设备过滤 ===== */}
           <div style={{ ...cardStyle, padding: 6, flex: '0 0 auto' }}>
-            <div style={labelStyle}>安防事件（{survEvents.length}）</div>
+            <div style={labelStyle}>
+              安防事件（{survEventScope ? `${survEventScope} · ` : '全部 · '}{survEvents.length}）
+            </div>
             <div style={{ maxHeight: 80, overflowY: 'auto' }}>
               {survEvents.length === 0 ? (
-                // 诚实空态：后端 /events 是永久空桩，空白列表会被读成「没发生过事」
                 <div className="empty-hint">
-                  {survEventsStubbed
-                    ? '后端尚未实现全局安防事件存储（GET /api/v1/surveillance/events 目前固定返回空 items）—— 这不代表「没有发生过事」'
-                    : '暂无安防事件'}
+                  {!survEventScope
+                    ? '未选中设备 —— 左侧点选一台设备即可只看它的安防事件'
+                    : `设备 ${survEventScope} 暂无安防事件（不等于全局无事件，右栏「报警事件」是全局视图）`}
                 </div>
               ) : (
                 survEvents.slice(0, 20).map((e, i) => {
-                  const ev = typeof e === 'string' ? { message: e } : (e || {})
+                  const ev = typeof e === 'string' ? { description: e } : (e || {})
                   const eid = ev.id ?? ev.eventId ?? i
-                  const time = ev.timestamp || ev.ts
-                    ? new Date(Number(ev.timestamp || ev.ts)).toLocaleTimeString()
-                    : ''
+                  const sev = normSeverity(ev.severity)
+                  const meta = SEVERITY_META[sev] || SEVERITY_META.INFO
+                  const ts = ev.timestampMs ?? ev.timestamp ?? ev.ts
+                  const time = ts ? new Date(Number(ts)).toLocaleTimeString() : ''
+                  const dev = ev.sourceDeviceName || ev.sourceDeviceId || ''
                   return (
                     <div key={eid} style={{
                       padding: '2px 4px', fontSize: 9, color: 'var(--dim)',
@@ -1175,7 +1187,13 @@ export default function UnifiedCommandPanel() {
                       <span style={{
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>
-                        {ev.message || ev.description || ev.title || ev.type || '--'}
+                        <span style={{ color: meta.color, fontWeight: 'bold' }}>
+                          [{meta.label}]
+                        </span>
+                        {' '}
+                        {ev.eventType ? `${ev.eventType} ` : ''}
+                        {ev.description || ev.message || ev.title || '--'}
+                        {dev ? ` @${dev}` : ''}
                       </span>
                       {time && (
                         <span style={{ color: 'var(--dim-2)', flexShrink: 0, fontFamily: 'var(--mono)' }}>
