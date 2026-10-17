@@ -28,6 +28,9 @@ param([switch]$SkipBuild)
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+# 跨平台公共库（B1 批次接 CI 时引入）：java 探测 / jar 路径 / 临时目录 / 按标记清残留
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
+$TempDir = Get-E2eTempDir   # Linux runner 上 $env:TEMP 常未设置，不能直接用
 $Fail = 0
 $script:CleanupActions = @()
 
@@ -165,14 +168,15 @@ trap { Invoke-Cleanup; break }
 # ============================================================
 # 清理旧实验进程（避免端口占用）
 # ============================================================
+# B1-CI 批次改造：原实现用 Get-CimInstance Win32_Process 枚举（Windows-only，
+# Linux 上该 cmdlet 不存在且被 SilentlyContinue 吞掉——清理静默失效，端口被占，
+# 表现为莫名的超时，与 e2e-signing 踩过的坑同源）。改为 e2e-common 的
+# Stop-E2eStaleProcesses（Windows CIM / Linux /proc），按命令行留痕标记
+# -Dregulator-e2e=true 精确杀（见下方各 Start-Process：该参数在 -jar 之前，
+# 由 JVM 消费为系统属性，不会进 main 的 args，对 sim 的手写参数解析零影响）。
+# 注：改版之前启动的旧残留（命令行无此标记）不再被清——新一轮进程全部带标记。
 function Cleanup-OldProcesses {
-    Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.CommandLine -match 'regulator-sim' `
-            -or $_.CommandLine -match 'cloud-backend.*aerofleet\.regulator\.' `
-            -or $_.CommandLine -match 'drone-sim.*AF-REG') {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    }
+    $null = Stop-E2eStaleProcesses -Marker 'regulator-e2e'
     Start-Sleep 1
 }
 
@@ -194,7 +198,7 @@ function Build-Jars {
 
     Step '构建缺失的 jar（JDK17）'
     foreach ($module in @('regulator-sim', 'cloud-backend', 'drone-sim')) {
-        $jarPath = Join-Path $Root "$module\target\*$module*.jar"
+        $jarPath = Join-Path $Root "$module/target/*$module*.jar"   # 正斜杠：Linux 上反斜杠不是分隔符
         if (-not (Get-ChildItem $jarPath -ErrorAction SilentlyContinue)) {
             Info "构建 $module ..."
             & $mavenCmd -pl $module -am package -DskipTests -q
@@ -214,18 +218,16 @@ function Build-Jars {
 # ============================================================
 
 # ---- Java 探测 + 版本自检 ----
-if ($env:AF_JAVA) { $java = $env:AF_JAVA }
-elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" }
-else { $java = "java.exe" }
+$java = Get-E2eJava   # 跨平台探测（Linux 叫 java 不是 java.exe）
 Assert-Java17 $java
 Info "Java: $java"
 
 # ---- 前置检查：jar 存在 ----
 Step '前置检查（jar 存在、端口可用）'
 
-$regulatorJar = Get-ChildItem (Join-Path $Root 'regulator-sim\target\*regulator-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-$backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend\target\*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-$droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim\target\*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$regulatorJar = Get-ChildItem (Join-Path $Root 'regulator-sim/target/*regulator-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend/target/*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim/target/*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
 
 $regulatorOk = $null -ne $regulatorJar
 $backendOk = $null -ne $backendJar
@@ -244,9 +246,9 @@ if (-not ($regulatorOk -and $backendOk -and $droneSimOk)) {
     Info '部分 jar 缺失，自动构建...'
     Build-Jars
     # 重新检测
-    $regulatorJar = Get-ChildItem (Join-Path $Root 'regulator-sim\target\*regulator-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-    $backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend\target\*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
-    $droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim\target\*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $regulatorJar = Get-ChildItem (Join-Path $Root 'regulator-sim/target/*regulator-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend/target/*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim/target/*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
     $regulatorOk = $null -ne $regulatorJar
     $backendOk = $null -ne $backendJar
     $droneSimOk = $null -ne $droneSimJar
@@ -292,13 +294,14 @@ Cleanup-OldProcesses
 # ============================================================
 Step "启动 regulator-sim（--port $RegulatorPort）"
 
-$regulatorLog = Join-Path $env:TEMP "regulator-e2e-sim.log"
+$regulatorLog = Join-Path $TempDir "regulator-e2e-sim.log"
 if (Test-Path $regulatorLog) { Remove-Item $regulatorLog -Force }
 
 $regulatorProc = Start-Process -FilePath $java -ArgumentList @(
+    '-Dregulator-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
     '-jar', $regulatorJar.FullName,
     '--port', $RegulatorPort
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $regulatorLog
+) -PassThru -RedirectStandardOutput $regulatorLog
 Register-Cleanup { Stop-Process -Id $regulatorProc.Id -Force -ErrorAction SilentlyContinue }
 Info "regulator-sim PID=$($regulatorProc.Id), log=$regulatorLog"
 
@@ -325,10 +328,11 @@ if (-not $regulatorUp) {
 # ============================================================
 Step '启动 cloud-backend（sink-type=sim, dev profile）'
 
-$backendLog = Join-Path $env:TEMP "regulator-e2e-backend.log"
+$backendLog = Join-Path $TempDir "regulator-e2e-backend.log"
 if (Test-Path $backendLog) { Remove-Item $backendLog -Force }
 
 $backendProc = Start-Process -FilePath $java -ArgumentList @(
+    '-Dregulator-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
     '-jar', $backendJar.FullName,
     "--server.port=$BackendPort",
     '--spring.profiles.active=dev',
@@ -338,7 +342,7 @@ $backendProc = Start-Process -FilePath $java -ArgumentList @(
     "--aerofleet.drone-port=$DronePort",
     "--aerofleet.security.rbac-enabled=false",
     '--aerofleet.security.dev-mode=true'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
+) -PassThru -RedirectStandardOutput $backendLog
 Register-Cleanup { Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue }
 Info "cloud-backend PID=$($backendProc.Id), log=$backendLog"
 
@@ -368,15 +372,16 @@ if (-not $backendUp) {
 # ============================================================
 Step "启动 drone-sim（sysid=$DroneSysid, port=$DronePort）"
 
-$droneLog = Join-Path $env:TEMP "regulator-e2e-drone.log"
+$droneLog = Join-Path $TempDir "regulator-e2e-drone.log"
 if (Test-Path $droneLog) { Remove-Item $droneLog -Force }
 
 $droneProc = Start-Process -FilePath $java -ArgumentList @(
+    '-Dregulator-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
     '-jar', $droneSimJar.FullName,
     '--port', $DronePort,
     '--sysid', $DroneSysid,
     '--name', 'AF-REG-02'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog
+) -PassThru -RedirectStandardOutput $droneLog
 Register-Cleanup { Stop-Process -Id $droneProc.Id -Force -ErrorAction SilentlyContinue }
 Info "drone-sim PID=$($droneProc.Id), log=$droneLog"
 Start-Sleep 2
@@ -709,11 +714,12 @@ try {
     Stop-Process -Id $regulatorProc.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep 2
     $regulatorProc = Start-Process -FilePath $java -ArgumentList @(
+        '-Dregulator-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
         '-jar', $regulatorJar.FullName,
         '--port', $RegulatorPort,
         '--error-rate', '1.0',
         '--error-status', '403'
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $regulatorLog
+    ) -PassThru -RedirectStandardOutput $regulatorLog
     Register-Cleanup { Stop-Process -Id $regulatorProc.Id -Force -ErrorAction SilentlyContinue }
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep 1
@@ -745,11 +751,12 @@ try {
     Stop-Process -Id $regulatorProc.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep 2
     $regulatorProc = Start-Process -FilePath $java -ArgumentList @(
+        '-Dregulator-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
         '-jar', $regulatorJar.FullName,
         '--port', $RegulatorPort,
         '--error-rate', '1.0',
         '--error-status', '500'
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $regulatorLog
+    ) -PassThru -RedirectStandardOutput $regulatorLog
     Register-Cleanup { Stop-Process -Id $regulatorProc.Id -Force -ErrorAction SilentlyContinue }
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep 1
@@ -777,14 +784,8 @@ try {
 Step '清理：停止所有进程'
 Invoke-Cleanup
 
-# 确保所有 java 进程已清理
-Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($_.CommandLine -match 'regulator-sim' `
-        -or $_.CommandLine -match 'cloud-backend.*aerofleet\.regulator\.' `
-        -or $_.CommandLine -match 'drone-sim.*AF-REG') {
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-}
+# 确保所有 java 进程已清理（跨平台按标记杀，见 Cleanup-OldProcesses 注释）
+$null = Stop-E2eStaleProcesses -Marker 'regulator-e2e'
 
 # ============================================================
 # 结果
