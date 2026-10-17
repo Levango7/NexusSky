@@ -6,6 +6,91 @@
 
 ---
 
+## [Unreleased] — gcs-web：灾害模式的「触发原因」下拉框是装饰性的，面板上显示的永远是 `manual`（2026-10-17）
+
+`DisasterCommPanel` L383 有一个下拉框，让用户从 5 个选项里选触发原因；L240 把选中值
+发给 `disaster.activate()`；`api.js` L1141 也确实把它 JSON 化成 `{ reason }` 发出去了。
+**但后端从来没读过它。**
+
+### 实测证据（MockMvc，不是读代码推断）
+
+新增 `DisasterCommActivateReasonTest`，用 `MockMvcBuilders.standaloneSetup`
+（不需 Spring 上下文、不需数据库，但走完整的 `@RequestBody` 绑定）：
+
+```
+POST /api/v1/disaster/activate  {"reason":"earthquake"}   ->  triggerReason 回显 "earthquake"
+POST /api/v1/disaster/activate  （不带 body）             ->  "manual"（向后兼容）
+POST /api/v1/disaster/activate  {"reason":"bogus"}        ->  400 + allowed 取值列表
+POST /api/v1/disaster/activate  {"reason":5}              ->  400（不做隐式强转）
+```
+
+### 为什么已有测试没抓到
+
+`DisasterCommControllerTest` 调的是 `controller.activate()` —— **直接 Java 调用**，
+`@RequestBody` 这一层结构上从未被执行过；而 `DisasterCommServiceTest` 看到的又永远是
+服务里硬编码的值。两边都绿，缺陷照样存在。这与 #102 的 `EmergencyOrchControllerTest`
+是同一类盲区。
+
+### 三处修法
+
+1. **控制器**：`activate()` 加 `@RequestBody(required = false)`，读出 `reason`。
+2. **服务**：新增 `activateDisasterMode(String reason)`；无参重载保留并委托给
+   `activateDisasterMode("manual")`，既有 4 处调用点与断言一字未改。
+3. **取值域**：新增 `DisasterCommService.ALLOWED_TRIGGER_REASONS`。
+
+### 顺带查出一处词汇表冲突
+
+前端下拉框给的 5 个值是 `manual` / `heartbeat_timeout` / `terrain_change` /
+**`earthquake`** / **`mudslide`**；而后端自己的 MAVLink 序数映射
+（`triggerReasonName(int)`）只有 `manual`(0) / `heartbeat_timeout`(1) /
+`terrain_change`(2) / **`auto`**(3)。**两边没有一个是对方的子集。**
+
+允许集取的是**并集**：MAVLink 序数词汇 ∪ 界面灾害类型。理由是入向消息只能表达序数
+0..3，而 REST 手动激活是人在界面上选、选到的是灾害类型 —— 砍掉任一边都是功能做减法。
+另加一条测试断言「前端提供的 5 个选项必须是允许集的子集」，否则界面里会出现点了就 400
+的选项。
+
+### 顺带查出一处错误响应契约
+
+`api.js` 的 `jsonFetch` 在 `!res.ok` 时只读 `body.error`（`throw new Error(body.error || 'HTTP ' + res.status)`），
+而项目里既有控制器一律用 `Map.of("error", ...)`。我第一版的 400 返回 `{message, allowed}`，
+**界面会退化成显示「HTTP 400」并把「未知哪个原因」丢掉**。已补上 `error` 键并加断言。
+
+### 验证：前端 5/5、后端 7/7 绿 -> **8 个变异体全被杀** -> 还原后复跑全绿
+
+| 变异 | 结果 |
+|---|---|
+| 服务忽略 reason 硬编码 `"manual"` | 被杀 |
+| 控制器不读请求体 | 被杀 |
+| 控制器去掉取值校验（什么都收） | 被杀 |
+| 服务不再归一化空白 reason | 被杀 |
+| 无参重载改成自递归 | 被杀（范围修正后 —— 见下） |
+| `api.js` 请求体丢掉 reason | 被杀 |
+| 组件发硬编码 `'manual'` | 被杀 |
+| 面板显示本地选择而非服务端回填 | 被杀 |
+
+**变异工具本身出过一次错，记录在此**：第一版 harness 有两个 bug ——
+(a) 多行锚点用裸 `\n` 而 Java 源码是 CRLF，于是 3 个变异静默「跳过」；
+把跳过当通过是错的，脚本改成锚点未命中即判为 harness 失败并拒绝碰文件。
+(b) 变异范围只圈了 `DisasterCommActivateReasonTest`，而「无参重载」的覆盖在
+`DisasterCommServiceTest` 里，于是它假存活；扩大范围后它杀掉 4 个用例。
+
+### 边界
+
+- 我**没有**改前端任何一行。缺陷完全在后端（丢弃 body + 硬编码），前端此前的行为是对的。
+- 后端我**改了生产代码**（这与 #99~#102 那几个 PR 不同 —— 那几个只加测试）。
+  改动限于：加 `@RequestBody`、加一个带参重载、加一个常量集合，没有改任何既有行为。
+- 我**没有**给下拉框补 `auto` 选项。它在允许集里（因为 MAVLink 会产生它），
+  但「手动激活、自动触发」语义上自相矛盾，留给产品决定，不在本次扩范围。
+- 真实链路（真浏览器 → 真后端 → PostgreSQL）我没跑端到端；MockMvc 覆盖的是
+  body 绑定与状态落库这一层。
+
+**口径**：后端 4863 → **4870**（新增 `DisasterCommActivateReasonTest` 7 例）、
+前端 344 → **349**（新增 `disasterActivateReason.test.jsx` 5 例）。
+按门禁报出的 23 行逐行同步，未做全仓正则替换。
+
+---
+
 ## [Unreleased] — gcs-web：「一键应急响应」按钮从来没有成功过 —— 四处契约不符（2026-10-17）
 
 **这是本轮查到最严重的一个**，而且它是应急面板上最显眼的那个按钮。

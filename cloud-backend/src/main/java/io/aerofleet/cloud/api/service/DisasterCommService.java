@@ -11,10 +11,13 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -30,6 +33,24 @@ import java.util.concurrent.atomic.AtomicLong;
 public class DisasterCommService {
 
     private static final Logger log = LoggerFactory.getLogger(DisasterCommService.class);
+
+    /**
+     * 允许的触发原因集合（手动激活接口 {@code POST /api/v1/disaster/activate} 的取值域）。
+     * <p>
+     * = {@link #triggerReasonName(int)} 的 MAVLink 序数词汇（manual / heartbeat_timeout /
+     * terrain_change / auto）∪ 前端下拉框提供的灾害类型（earthquake / mudslide）。
+     * <p>
+     * 取值域不能只取其一：MAVLink 入向消息（{@code DisasterModeStatusMsg}）只能表达序数
+     * 0..3，而 REST 手动激活由人在界面上选，选到的是灾害类型。两边都认，才能让下拉框
+     * 的声明与后端行为一致（此前该下拉框是装饰性的——值被静默丢弃）。
+     */
+    public static final Set<String> ALLOWED_TRIGGER_REASONS = Collections.unmodifiableSet(
+            new LinkedHashSet<>(Arrays.asList(
+                    "manual", "heartbeat_timeout", "terrain_change", "auto",
+                    "earthquake", "mudslide")));
+
+    /** 默认触发原因（未指定 reason 时）。 */
+    public static final String DEFAULT_TRIGGER_REASON = "manual";
 
     /** 灾害模式状态：active / inactive。 */
     private volatile boolean disasterModeActive = false;
@@ -79,17 +100,35 @@ public class DisasterCommService {
     }
 
     /**
-     * 手动激活灾害模式。
+     * 手动激活灾害模式（未指定触发原因，等价于 {@code activateDisasterMode("manual")}）。
      *
      * @return 更新后的状态 map
      */
     public Map<String, Object> activateDisasterMode() {
+        return activateDisasterMode(DEFAULT_TRIGGER_REASON);
+    }
+
+    /**
+     * 手动激活灾害模式，并记录调用方声明的触发原因。
+     * <p>
+     * 此前本方法把 {@code triggerReason} 硬编码成 {@code "manual"}，而前端下拉框让用户从
+     * 5 个选项里选、控制器又没有 {@code @RequestBody} 所以把请求体整个丢弃 —— 面板上显示的
+     * 「触发原因」因此永远是 {@code manual}，下拉框是装饰性的。
+     *
+     * @param reason 触发原因；{@code null} / 空白按 {@link #DEFAULT_TRIGGER_REASON} 处理。
+     *               非法取值由调用方（控制器，API 边界）先行校验，本方法只做空白归一化，
+     *               不做静默改写 —— 否则界面会显示一个调用方并未声明过的原因。
+     * @return 更新后的状态 map
+     */
+    public Map<String, Object> activateDisasterMode(String reason) {
         boolean wasActive = disasterModeActive;
         disasterModeActive = true;
-        triggerReason = "manual";
+        triggerReason = (reason == null || reason.isBlank())
+                ? DEFAULT_TRIGGER_REASON
+                : reason.trim();
         disasterModeTimestamp = System.currentTimeMillis();
         version.incrementAndGet();
-        log.info("灾害模式手动激活 (wasActive={})", wasActive);
+        log.info("灾害模式手动激活 (wasActive={}, reason={})", wasActive, triggerReason);
         Map<String, Object> status = getDisasterStatus();
         pushDisasterStatus(status);
         return status;
