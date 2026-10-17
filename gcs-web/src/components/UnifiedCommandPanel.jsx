@@ -147,9 +147,7 @@ export default function UnifiedCommandPanel() {
   const [survDevices, setSurvDevices] = useState([])
   const [survDevicesLoading, setSurvDevicesLoading] = useState(true)
   const [selectedSurvDeviceId, setSelectedSurvDeviceId] = useState(null)
-  // 【接线缺口】setSurvEvents 有 1 处调用，监控事件确实拉回来了，但 survEvents 没人读 —— 事件列表未渲染
-  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
-  // eslint-disable-next-line no-unused-vars
+  // 【接线缺口 · 已修 #104】监控事件列表。键名此前读 data.events，而后端返回 {items}
   const [survEvents, setSurvEvents] = useState([])
   const [ptzBusy, setPtzBusy] = useState(false)
 
@@ -182,18 +180,19 @@ export default function UnifiedCommandPanel() {
   const [activePlan, setActivePlan] = useState(null)
   const [coverage, setCoverage] = useState(null)
   const [priorityQueue, setPriorityQueue] = useState(null)
-  // 【接线缺口】setOrchEvents 有 2 处调用，编排事件确实在写，但 orchEvents 没人读 —— 事件流未渲染
-  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
-  // eslint-disable-next-line no-unused-vars
+  // 【接线缺口 · 已修 #104】编排事件流。原先的写入是真的，但去重逻辑按对象读
+  // e.ts / e.message，而后端 events 是 List<String> ⇒ 键恒为 '|' ⇒ 所有事件并成一条
   const [orchEvents, setOrchEvents] = useState([])
+  // 事件只追加，所以身份是位置；这个 ref 记录「已消费到第几条」以及属于哪个 planId，
+  // 换计划时用它整体替换，避免拿旧计划的长度去切新计划。
+  const orchEventsRef = useRef({ planId: null, count: 0 })
   const [starting, setStarting] = useState(false)
   const [aborting, setAborting] = useState(false)
 
   // ===== 灾害通信状态 =====
   const [disasterStatus, setDisasterStatus] = useState(null)
-  // 【接线缺口】setDisasterClusters 有 1 处调用，灾害聚簇确实在写，但 disasterClusters 没人读 —— 聚簇未渲染
-  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
-  // eslint-disable-next-line no-unused-vars
+  // 【接线缺口 · 已修 #104】灾害聚簇。后端 getClusterTopology() 返回
+  // { clusterCount, clusters:[{clusterId, clusterHead, members, memberCount, clusterRadius, timestamp}] }
   const [disasterClusters, setDisasterClusters] = useState(null)
   const [disasterLinks, setDisasterLinks] = useState(null)
 
@@ -317,7 +316,12 @@ export default function UnifiedCommandPanel() {
       try {
         const data = await listSurveillanceEvents({ limit: 20 })
         if (cancelled) return
-        const list = Array.isArray(data) ? data : (data && data.events) || []
+        // 键名：后端 SurveillanceController 的 /events 返回的是 { items, ... }，
+        // 此前这里只读 data.events ⇒ 恒为 undefined ⇒ 列表恒空。events 作为
+        // 兼容键保留（万一将来后端改了键名）。
+        const list = Array.isArray(data)
+          ? data
+          : (data && (data.items || data.events)) || []
         setSurvEvents(list)
       } catch (e) {
         // 静默失败
@@ -445,18 +449,30 @@ export default function UnifiedCommandPanel() {
         if (cancelled) return
         if (plan) {
           setActivePlan((prev) => ({ ...(plan || {}), planId: plan.planId || (prev && prev.planId) }))
-          const newEvents = plan.events || plan.recentEvents || plan.eventLog || []
-          if (Array.isArray(newEvents) && newEvents.length > 0) {
-            setOrchEvents((prev) => {
-              const seen = new Set(prev.map((e) => (e.ts || e.timestamp || '') + '|' + (e.message || e.msg || '')))
-              const fresh = newEvents.filter((e) => {
-                const key = (e.ts || e.timestamp || '') + '|' + (e.message || e.msg || '')
-                if (seen.has(key)) return false
-                seen.add(key)
-                return true
-              })
-              return [...prev, ...fresh].slice(-100)
-            })
+          const newEvents = Array.isArray(plan.events) ? plan.events
+            : Array.isArray(plan.recentEvents) ? plan.recentEvents
+            : Array.isArray(plan.eventLog) ? plan.eventLog : []
+          const pid = plan.planId || planId
+          const cur = orchEventsRef.current
+          if (cur.planId !== pid) {
+            // 换计划了：整体替换，别拿旧计划的长度去切新计划
+            orchEventsRef.current = { planId: pid, count: newEvents.length }
+            setOrchEvents(newEvents.slice(-100))
+          } else if (newEvents.length > cur.count) {
+            // 事件列表是**只追加**的（后端只在建计划时 plan.put("events", …) 一次，
+            // 之后只有 addEvent 的 .add()），所以事件的身份是**位置**而不是内容。
+            //
+            // 此前的去重键是 (e.ts||e.timestamp) + '|' + (e.message||e.msg)，
+            // 而后端 events 是 List<String>（EmergencyOrchService:572 直接
+            // ((List<String>) plan.get("events")).add(event)）⇒ 每条都是字符串，
+            // e.ts / e.message 全是 undefined ⇒ 键恒为 '|' ⇒ seen 集合最多一个元素
+            // ⇒ 除第一条外全部被判为重复 ⇒ 所有事件并成一条。
+            //
+            // 也不能改用"内容=字符串"做键：事件串可以重复（"phase 0->1 status=RUNNING"、
+            // "priority adjust: task=5 EMERGENCY->COMMAND"），那会把真事件吞掉。
+            const fresh = newEvents.slice(cur.count)
+            orchEventsRef.current = { planId: pid, count: newEvents.length }
+            setOrchEvents((prev) => [...prev, ...fresh].slice(-100))
           }
           const status = String(plan.status || '').toUpperCase()
           if (TERMINAL_STATUS.has(status)) {
@@ -666,6 +682,28 @@ export default function UnifiedCommandPanel() {
   // 灾害模式是否激活
   const isDisasterActive = disasterStatus?.mode === 'active' || disasterStatus?.active === true
   const recoveryRate = disasterStatus?.recoveryRate ?? disasterStatus?.recovery ?? 0
+
+  // 灾害聚簇列表（#104：此前 setDisasterClusters 有写入但全组件无人读）
+  const disasterClusterList = useMemo(() => {
+    if (!disasterClusters) return []
+    return Array.isArray(disasterClusters) ? disasterClusters
+      : (disasterClusters.clusters || [])
+  }, [disasterClusters])
+
+  // 编排事件文案（#104：后端 events 是 List<String>，但也兼容对象形态）
+  const orchEventRows = useMemo(
+    () => orchEvents.map((e) => (
+      typeof e === 'string' || typeof e === 'number'
+        ? String(e)
+        : (e.message || e.msg || e.description || e.title || e.type || '--')
+    )),
+    [orchEvents]
+  )
+
+  // 安防事件是否处于「后端未实现」的已知空桩状态（#104）
+  // SurveillanceController 的 /events 目前固定返回 { items: [] }，注释自述
+  // 「当前没有全局 SurveillanceEventStore」。空列表因此不能读作「没有发生过事」。
+  const survEventsStubbed = survEvents.length === 0
 
   // Mesh 节点列表
   const meshNodes = useMemo(() => {
@@ -1105,6 +1143,98 @@ export default function UnifiedCommandPanel() {
                   }}>
                     <span>{r.name || r.alarmType || '--'}</span>
                     <span style={{ color: 'var(--cyan)' }}>{r.actionType || r.action || '--'}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        {/* ===== #104：安防事件（此前 survEvents 无人读） ===== */}
+          <div style={{ ...cardStyle, padding: 6, flex: '0 0 auto' }}>
+            <div style={labelStyle}>安防事件（{survEvents.length}）</div>
+            <div style={{ maxHeight: 80, overflowY: 'auto' }}>
+              {survEvents.length === 0 ? (
+                // 诚实空态：后端 /events 是永久空桩，空白列表会被读成「没发生过事」
+                <div className="empty-hint">
+                  {survEventsStubbed
+                    ? '后端尚未实现全局安防事件存储（GET /api/v1/surveillance/events 目前固定返回空 items）—— 这不代表「没有发生过事」'
+                    : '暂无安防事件'}
+                </div>
+              ) : (
+                survEvents.slice(0, 20).map((e, i) => {
+                  const ev = typeof e === 'string' ? { message: e } : (e || {})
+                  const eid = ev.id ?? ev.eventId ?? i
+                  const time = ev.timestamp || ev.ts
+                    ? new Date(Number(ev.timestamp || ev.ts)).toLocaleTimeString()
+                    : ''
+                  return (
+                    <div key={eid} style={{
+                      padding: '2px 4px', fontSize: 9, color: 'var(--dim)',
+                      borderBottom: '1px solid var(--line-2)',
+                      display: 'flex', justifyContent: 'space-between', gap: 4,
+                    }}>
+                      <span style={{
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {ev.message || ev.description || ev.title || ev.type || '--'}
+                      </span>
+                      {time && (
+                        <span style={{ color: 'var(--dim-2)', flexShrink: 0, fontFamily: 'var(--mono)' }}>
+                          {time}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+
+          {/* ===== #104：灾害聚簇（此前 disasterClusters 无人读） ===== */}
+          <div style={{ ...cardStyle, padding: 6, flex: '0 0 auto' }}>
+            <div style={labelStyle}>
+              灾害聚簇（{disasterClusters?.clusterCount ?? disasterClusterList.length}）
+            </div>
+            <div style={{ maxHeight: 80, overflowY: 'auto' }}>
+              {disasterClusterList.length === 0 ? (
+                <div className="empty-hint">暂无分簇（后端 clusterCount = 0）</div>
+              ) : (
+                disasterClusterList.slice(0, 8).map((c, i) => {
+                  const cid = c.clusterId ?? i
+                  const count = c.memberCount ?? (Array.isArray(c.members) ? c.members.length : null)
+                  return (
+                    <div key={cid} style={{
+                      padding: '2px 4px', fontSize: 9, color: 'var(--dim)',
+                      borderBottom: '1px solid var(--line-2)',
+                      display: 'flex', justifyContent: 'space-between', gap: 4,
+                    }}>
+                      <span style={{ fontFamily: 'var(--mono)', color: 'var(--text)' }}>
+                        簇{cid} · 头 {c.clusterHead ?? '--'}
+                      </span>
+                      <span>{count != null ? `${count} 节点` : '--'}</span>
+                      <span style={{ color: 'var(--dim-2)' }}>
+                        {c.clusterRadius != null ? `R=${c.clusterRadius}m` : ''}
+                      </span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+
+          {/* ===== #104：编排事件流（此前 orchEvents 无人读，且去重逻辑把事件并成一条） ===== */}
+          <div style={{ ...cardStyle, padding: 6, flex: '0 0 auto' }}>
+            <div style={labelStyle}>编排事件（{orchEvents.length}）</div>
+            <div style={{ maxHeight: 80, overflowY: 'auto' }}>
+              {orchEventRows.length === 0 ? (
+                <div className="empty-hint">暂无编排事件</div>
+              ) : (
+                orchEventRows.slice(-20).reverse().map((text, i) => (
+                  <div key={`${orchEventRows.length - i}`} style={{
+                    padding: '2px 4px', fontSize: 9, color: 'var(--dim)',
+                    borderBottom: '1px solid var(--line-2)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {text}
                   </div>
                 ))
               )}

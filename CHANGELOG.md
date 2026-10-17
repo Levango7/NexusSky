@@ -6,6 +6,93 @@
 
 ---
 
+## [Unreleased] — gcs-web：接线缺口台账最后 3 处。3 处都叫"写了没人读"，但**失效机制各不相同**（2026-10-17）
+
+台账上一视同仁记成"没有渲染"是不准的。三处分别是：纯渲染缺口、去重逻辑把数据毁掉、
+键名不符**叠加**后端空桩。逐处说：
+
+### 1. `disasterClusters` —— 纯渲染缺口
+
+后端 `getClusterTopology()` 返回的是真数据：
+
+```
+{ clusterCount, clusters: [{ clusterId, clusterHead, members, memberCount, clusterRadius, timestamp }] }
+```
+
+`setDisasterClusters(dClusters)` 确实在写，但全组件无人读。已按簇ID / 簇头 / 节点数 /
+半径渲染，空拓扑时如实显示 0。
+
+### 2. `orchEvents` —— 数据是真的，但去重逻辑把它毁了
+
+后端 `EmergencyOrchService` 的 events 是 **`List<String>`**（L572 直接
+`((List<String>) plan.get("events")).add(event)`），而前端去重键是：
+
+```js
+(e.ts || e.timestamp || '') + '|' + (e.message || e.msg || '')
+```
+
+对字符串 `e` 而言 `e.ts` / `e.message` **全是 undefined** ⇒ 键恒为 `'|'`
+⇒ `seen` 集合最多一个元素 ⇒ **除第一条外全部被判为重复** ⇒ 所有事件并成一条。
+
+改成按**位置**去重，而不是按内容：后端的事件列表是**只追加**的
+（只在建计划时 `plan.put("events", …)` 一次，之后只有 `.add()`），
+所以事件的身份就是它在列表里的位置。
+
+**没有改用"内容=字符串"做键**——事件串可以重复
+（`phase 0->1 status=RUNNING`、`priority adjust: task=5 EMERGENCY->COMMAND`），
+那会把真事件吞掉。加了一条专门钉这个边界的用例：两条一模一样的 `'dup-event'`
+必须显示成 2 条。
+
+同时用 `orchEventsRef` 记 `{planId, count}`：换计划时整体替换，
+不拿旧计划的长度去切新计划。
+
+### 3. `survEvents` —— 两个独立原因叠加
+
+| # | 原因 | 状态 |
+|---|---|---|
+| a | 前端读 `data.events`，后端返回的是 `{ items, … }` | **已修**：改读 `items`（`events` 保留为兼容键） |
+| b | 后端 `SurveillanceController` 的 `/events` 是**永久空桩**，注释自述"当前没有全局 SurveillanceEventStore"，固定返回 `{items: []}` | **未修**：属于后端功能缺失，不是接线缺陷 |
+
+所以修完 (a) 列表**仍然是空的**。此处刻意**不用空白列表**表示空 ——
+监控面板显示空列表会被读成"没有发生过事"，那是**假阴性**，正是这批 PR 在治的病。
+空态改为显式说明后端未实现，并明说这不代表无事件。
+
+后端空桩按方案 A 记为待办，不在本次范围内实现。
+
+## 验证：9/9 绿 → **5 个变异体全被杀** → 还原后复跑全绿
+
+| 变异 | 结果 |
+|---|---|
+| `survEvents` 退回读 `data.events` | 被杀 |
+| 编排事件每次轮询都追加整份列表（重复累积） | 被杀 |
+| 聚簇渲染切成 `slice(0, 0)`（渲染但读不到数据） | 被杀 |
+| 诚实空态退回普通"暂无" | 被杀 |
+| 去掉 planId 锚点（新计划被旧长度切掉） | 被杀 |
+
+### 变异过程中测试自己暴露的一个假覆盖
+
+第一版"换 planId"用例是 `unmount()` 旧面板再渲染新面板 —— 而新面板的
+`orchEventsRef` 本来就是全新的 `{planId:null, count:0}`，**根本走不到锚点分支**，
+于是去掉锚点它照样绿。改成**同一面板内**切换（第一个计划走到 `COMPLETED` 终态 →
+按钮重新可点 → 再启一个事件更少的计划）之后，去掉锚点立刻被杀。
+
+另有一处 harness 缺陷：文件按 latin-1 读取时，脚本里 UTF-8 的中文锚点永远匹配不上
+（M4 因此被静默跳过）。锚点改成纯 ASCII（用 `[\s\S]*?` 匹配中文载荷）。
+
+## 边界
+
+- **全部是前端改动**，未动任何后端代码（后端 `events` 是 `List<String>` 这件事
+  我保留原样：改成对象会牵动所有既有消费者，而按位置去重已经能完整呈现事件流）。
+- `disasterClusters` / `orchEvents` 两处数据本来就真，修完立即可见。
+- `survEvents` 修完**仍然不会有事件**，因为后端是空桩 —— 这一点在界面上明说了，
+  台账那一行也写明了，避免后人以为接线修完就等于功能可用。
+- 未跑真实链路端到端。
+
+**口径**：前端 349 → **358**（新增 `unifiedCommandWiring.test.jsx` 9 例），
+后端不变 4870。按门禁报出的 2 行同步。台账：9 处**全部修完**（已修 9 / 仍缺 0）。
+
+---
+
 ## [Unreleased] — gcs-web：灾害模式的「触发原因」下拉框是装饰性的，面板上显示的永远是 `manual`（2026-10-17）
 
 `DisasterCommPanel` L383 有一个下拉框，让用户从 5 个选项里选触发原因；L240 把选中值
@@ -480,7 +567,7 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 
 ### 处置二：9 处只写不读，保留 + 显式标注 + 记台账
 
-### 接线缺口台账（9 处「写了但没人读」；已修 6 处，**仍缺 3 处**）
+### 接线缺口台账（9 处「写了但没人读」；已修 9 处，**仍缺 0 处**）
 
 下表逐条对应代码里带 `eslint-disable-next-line no-unused-vars` 的位置。
 它们的写入方都是活的（setter 确有调用点），删掉 state 会连带删掉写入动作，
@@ -491,10 +578,10 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 |---|---|---|---|---|
 | `gcs-web/src/components/AutoDispatchPanel.jsx` | `config` | `setConfig` | ✅ 已修（#101） | 改成显示服务端回填的生效配置（持久回显，不是 toast） |
 | `gcs-web/src/components/CommAdaptPanel.jsx` | `config` | `setConfig` | ✅ 已修（#101） | 同上；`configSuccess` 成功提示本来就保留未动 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `disasterClusters` | `setDisasterClusters` | **仍缺** | 灾害聚类真拉回了但一类不渲染 —— 应急场景下信息不可见 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `orchEvents` | `setOrchEvents` | **仍缺** | 编排事件流不渲染 —— 执行中看不到进度 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `disasterClusters` | `setDisasterClusters` | ✅ 已修（#104） | 真数据（`{clusterCount, clusters:[…]}`），已按簇ID / 簇头 / 节点数 / 半径渲染 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `orchEvents` | `setOrchEvents` | ✅ 已修（#104） | 已渲染；同时结修去重逻辑（后端 events 是 List<String>，旧键恒为 `|` 把所有事件并成一条） |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `scenarios` | `setScenarios` | ✅ 已修（#102） | 选择器改由它驱动，并顺带修好了「一键应急响应」按钮 400 的缺陷 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` | **仍缺** |  surveillance 事件不渲染 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` | ✅ 已修（#104） | 键名改正为 `items`；但后端 `/events` 仍是**永久空桩**（无全局 SurveillanceEventStore），因此空态改为显式说明后端未实现，而非空白列表 |
 | `gcs-web/src/components/HealthPanel.jsx` | `droneHistory` | `setDroneHistory` | ✅ 已修（#99） | 已接「历史评分」列表渲染，并摘掉 `eslint-disable` |
 | `gcs-web/src/components/VoiceCmdPanel.jsx` | `historyError` | `setHistoryError` | ✅ 已修（#97） | 同上，见 #97 的 CHANGELOG 条目 |
 | `gcs-web/src/components/VoiceCmdPanel.jsx` | `pendingError` | `setPendingError` | ✅ 已修（#97） | 同上，见 #97 的 CHANGELOG 条目 |
