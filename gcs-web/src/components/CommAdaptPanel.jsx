@@ -65,9 +65,8 @@ export default function CommAdaptPanel() {
   const [failoverResult, setFailoverResult] = useState(null)
 
   // ---- 自适应配置 ----
-  // 【接线缺口】setConfig 有 2 处调用（保存自适应配置），但 config 从头到尾没人读 —— 保存结果没有回显
-  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
-  // eslint-disable-next-line no-unused-vars
+  // config = 服务端回填的真值（L131 加载、L224 保存成功后），configForm 只是表单编辑缓冲。
+  // 键名取自后端 CommSituationController.configToMap 的权威清单（5 个）。
   const [config, setConfig] = useState(null)
   const [configLoading, setConfigLoading] = useState(false)
   const [configSaving, setConfigSaving] = useState(false)
@@ -429,6 +428,15 @@ export default function CommAdaptPanel() {
             )}
             {configSuccess && (
               <div style={{ color: 'var(--ok)', fontSize: 10, marginBottom: 6, padding: '3px 6px', background: 'var(--bg-1)', borderRadius: 3, border: '1px solid var(--ok)' }}>✓ {configSuccess}</div>
+            )}
+            {/* 服务端当前生效的自适应配置。这个面板的「保存成功」本来就有 configSuccess 提示，
+                所以缺口不是"零反馈"，而是**看不到服务端认了什么**——表单显示的是编辑缓冲，
+                后端是否真的采纳、采纳成什么，只能靠猜。这里显示后端回填的真值。 */}
+            {config && (
+              <div style={{ fontSize: 10, color: 'var(--dim-2)', marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div>当前生效（服务端回填）：切换阈值 {pick(config, 'switchThreshold') ?? '--'} · 故障切换阈值 {pick(config, 'failoverThreshold') ?? '--'}</div>
+                <div>检测间隔 {pick(config, 'detectionIntervalMs') ?? '--'}ms · 最小稳定时间 {pick(config, 'minStableTimeMs') ?? '--'}ms · 自动切换 {pick(config, 'autoSwitchEnabled') === true ? '开' : pick(config, 'autoSwitchEnabled') === false ? '关' : '--'}</div>
+              </div>
             )}
             {configLoading ? (
               <div style={{ fontSize: 10, color: 'var(--cyan)' }}>加载中…</div>
