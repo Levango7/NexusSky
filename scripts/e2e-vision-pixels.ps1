@@ -3,11 +3,15 @@
 #         --spring.profiles.active=dev
 #         --aerofleet.vision.source=pixels
 #         --aerofleet.sim-truth-base=http://127.0.0.1:18082
+#         --aerofleet.drone-extra-ports=14544
 #       JAVA_HOME 指向 JDK17。
-#       两个后端参数缺一不可：source=pixels 才会走"真 JPEG → 斑块检测"管道；
+#       三个后端参数缺一不可：source=pixels 才会走"真 JPEG → 斑块检测"管道；
 #       sim-truth-base 默认指向 18080，而本脚本的模拟器挂在 18082，指错了后端
-#       拉不到 JPEG（ConnectException），整条像素链无从验证。8080 被占用时用
-#       AF_BACKEND_REST_PORT 指定 REST 口（后端 --server.port 要一致）。
+#       拉不到 JPEG（ConnectException），整条像素链无从验证；drone-extra-ports
+#       缺不得是因为 drone-sim 被动监听 14544 等 GCS 来探，而后端默认只探
+#       14550 + 14541-14543 —— 不把 14544 加进来，模拟器永远注册不上
+#       （首断言"模拟器上线"必 FAIL，与后端/模拟器本身无关）。
+#       8080 被占用时用 AF_BACKEND_REST_PORT 指定 REST 口（后端 --server.port 要一致）。
 # 场景：模拟器带静态目标 -> 起飞到目标上空 -> 单拍。后端以 pixels 模式
 #       （拉真实 JPEG -> BlobDetector 检出斑块 -> 解算地理坐标）走全链，
 #       真值只用于打分。证明「渲染->检测->解算」像素链路自洽，不靠元数据神谕。
@@ -71,6 +75,11 @@ for ($i = 0; $i -lt 15; $i++) {
 Check '模拟器上线 (sysid=12)' $registered
 if (-not $registered) {
     Stop-Process -Id $sim.Id -Force -ErrorAction SilentlyContinue
+    # 指向性诊断：drone-sim 被动监听 14544 等探测，后端默认只探 14550/14541-14543。
+    # 缺 --aerofleet.drone-extra-ports=14544 时模拟器永远学不到对端地址，注册必超时。
+    Write-Host '   最可能原因：后端启动参数缺 --aerofleet.drone-extra-ports=14544' -ForegroundColor Red
+    Write-Host '   （drone-sim 被动监听 14544 等 GCS 来探，后端默认只探 14550/14541-14543）' -ForegroundColor Red
+    Write-Host '   完整启动参数见文件头注释' -ForegroundColor Red
     Write-Host 'PIXELS E2E FAILED' -ForegroundColor Red; exit 1
 }
 
