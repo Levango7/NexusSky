@@ -951,6 +951,109 @@ jobs:
             -exec cp {} signing-logs/ \; 2>/dev/null || true
           ls -la signing-logs/ || echo "(no logs captured)"
 
+  # e2e 救活计划第二批（2026-10-17）：regulator / dock / route-templates / defect
+  # 四个脚本接进门禁（观察模式）。
+  #
+  # 背景：与第一批（上方 e2e-core-scripts）同一条脉络——16 个 e2e 脚本从未进过 CI，
+  # 本批 4 个已在本机 Windows 串行全绿（2026-10-17 深夜验证，master 035a338，
+  # 合计 94/94 断言：regulator 37 / dock 23 / route-templates 16 / defect 18）。
+  #
+  # 跨平台改造（本批全部复用 e2e-common.ps1 既有抽象，与第一批同源）：
+  #   - jar 路径反斜杠 → Get-E2eJar（Linux 上反斜杠不是分隔符，Test-Path 恒 false，
+  #     会误判 jar 缺失进构建分支——该分支此前还硬编码 Windows 的 JDK 路径）；
+  #   - java.exe 探测 → Get-E2eJava；
+  #   - $env:TEMP → Get-E2eTempDir（Linux runner 常未设置）；
+  #   - -WindowStyle Hidden 全部删除（只在 Windows 的 Start-Process 上存在）；
+  #   - regulator 的 Get-CimInstance Win32_Process 清理 ×2 → Stop-E2eStaleProcesses：
+  #     原按命令行模式（regulator-sim / aerofleet.regulator / AF-REG）匹配，
+  #     Windows-only 且静默失效（清理变空转，端口被占表现为超时）。改为给 5 处
+  #     java 启动命令行加 -Dregulator-e2e=true 留痕（-jar 之前，由 JVM 消费，
+  #     不进 main args，对 sim 手写解析零影响），按标记精确杀。
+  #
+  # 串行原因：cloud-backend 默认监听 UDP 14550（aerofleet.udp-port），4 个脚本均
+  # 未覆盖该端口 → 同一 runner 上不能并行（多会话并发撞 14550 的坑 COORDINATION.md
+  # 有记载）。单 job 内串行，脚本间夹按标记的清理兜底（与第一批三脚本同款安排）。
+  # 中间清理的 marker 额外覆盖 sim 残留：route/defect 的 drone-sim 命令行不含
+  # backend 那个 h2:mem 标记，补 AF-ROUTE-01 / AF-DEFECT-01（dock 的 DOCK-E2E-001
+  # 已被 dock-e2e 大小写不敏感匹配覆盖）。
+  #
+  # AF_BACKEND_PORT 统一 18099：regulator 默认 8080（本机被常驻容器占用，CI 环境
+  # 默认段也不保险），与其余三个脚本的默认 18099 对齐；每个脚本退出时自停
+  # backend，中间清理按 marker 兜底，18099 串行复用无冲突。
+  #
+  # 为什么带 continue-on-error：与 e2e-capability / e2e-signing / e2e-core-scripts
+  # 同款观察模式。4 个脚本已在本机 Windows 全绿（94/94），但未在 Linux 上连续复跑，
+  # runner 上的进程/端口/时序行为可能不同。先收集 flaky 数据，若干次 run 全绿后
+  # 删掉这行转为硬门禁。删标记 = 把"跑过"升级为"必须通过"，不涉及任何脚本改动。
+  e2e-b1-scripts:
+    name: E2E B1 scripts (regulator / dock / route-templates / defect) — observe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: [ java ]
+    continue-on-error: true
+    services:
+      redis:
+        image: mirror.gcr.io/library/redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      - name: Build all
+        run: mvn -B -DskipTests package
+      # 每轮开头主动清一次残留（runner 是干净容器，通常命中 0；命中非 0 说明
+      # 上个场景没退干净，日志里能看到线索）
+      - name: Clean leftovers before start
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'regulator-e2e','dock-e2e','route-templates-e2e','AF-ROUTE-01','defect-e2e','AF-DEFECT-01' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-regulator (FR-31~40 监管合规全链路)
+        run: pwsh -NoProfile -File scripts/e2e-regulator.ps1 -SkipBuild
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'regulator-e2e','dock-e2e','route-templates-e2e','AF-ROUTE-01','defect-e2e','AF-DEFECT-01' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-dock (R1~R5 机巢管控)
+        run: pwsh -NoProfile -File scripts/e2e-dock.ps1 -SkipBuild
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'regulator-e2e','dock-e2e','route-templates-e2e','AF-ROUTE-01','defect-e2e','AF-DEFECT-01' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-route-templates (G1~G4+E1 行业航线库)
+        run: pwsh -NoProfile -File scripts/e2e-route-templates.ps1 -SkipBuild
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'regulator-e2e','dock-e2e','route-templates-e2e','AF-ROUTE-01','defect-e2e','AF-DEFECT-01' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-defect (A1~A5 缺陷闭环)
+        run: pwsh -NoProfile -File scripts/e2e-defect.ps1 -SkipBuild
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Upload b1 e2e logs on failure
+        if: failure()
+        run: |
+          mkdir -p b1-e2e-logs
+          find "${{ runner.temp }}" -maxdepth 1 \
+            \( -name 'regulator-e2e-*.log' -o -name 'af-dock-*.log' -o -name 'af-route-*.log' -o -name 'af-defect-*.log' \) \
+            -exec cp {} b1-e2e-logs/ \; 2>/dev/null || true
+          ls -la b1-e2e-logs || echo "(no logs captured)"
+
   security-scan:
     name: Security Scan
     runs-on: ubuntu-24.04
