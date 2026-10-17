@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.mission.emergency;
 
+import io.aerofleet.cloud.surveillance.DeviceCapability;
 import io.aerofleet.cloud.alarm.AlarmEvent;
 import io.aerofleet.cloud.alarm.AlarmEventStore;
 import io.aerofleet.cloud.alarm.AlarmLinkageEngine;
@@ -163,6 +164,100 @@ class AirGroundCoordinationServiceTest {
     @DisplayName("triggerPtzTracking null 目标返回 FAILED")
     void triggerPtzTrackingNull() {
         assertThat(service.triggerPtzTracking(null)).isEqualTo("FAILED");
+    }
+
+    /**
+     * 自动选设备是<b>保守</b>口径：没声明任何能力的设备不能当 PTZ 候选。
+     *
+     * <p>这与 {@code SurveillanceController} 的 PTZ 端点<b>故意相反</b> ——
+     * 那边是运维手动操作，未声明放行；这边是自动挑选，未声明排除。
+     * 把未知当成"可以"，就可能把一台根本不能转的摄像头送去执行 PTZ 任务。
+     *
+     * <p>断言必须落在<b>哪一台设备收到了 PTZ 指令</b>上。返回值只有
+     * {@code "TRACKING"}，两个口径下都返回它 —— 只断言返回值的话，
+     * 保守改成宽松这条用例照样绿（已实测：对应变异存活）。这里用 mock 的
+     * {@link OnvifClient} 捕获 IP。
+     */
+    @Test
+    @DisplayName("triggerPtzTracking：能力未声明的设备不会被选中（保守口径）")
+    void triggerPtzTrackingUndeclaredCapabilitiesNotSelected() throws Exception {
+        // 完全不设置 capabilities —— 空集是「未知」，不是「支持」
+        SurveillanceDevice silent = new SurveillanceDevice(
+                "cam-silent", "未声明能力的摄像头", SurveillanceDevice.Vendor.HIKVISION,
+                "192.168.1.150", 80, "admin", "hik12345");
+        silent.setCapabilities(new LinkedHashSet<>());
+        deviceRegistry.register(silent);
+
+        // 对照：一台明确声明 PTZ 的设备
+        SurveillanceDevice ptzCapable = new SurveillanceDevice(
+                "cam-yes", "明确支持 PTZ", SurveillanceDevice.Vendor.HIKVISION,
+                "192.168.1.151", 80, "admin", "hik12345");
+        Set<String> caps = new LinkedHashSet<>();
+        caps.add("PTZ");
+        ptzCapable.setCapabilities(caps);
+        deviceRegistry.register(ptzCapable);
+
+        OnvifClient spyClient = org.mockito.Mockito.mock(OnvifClient.class);
+        org.mockito.Mockito.when(spyClient.ptzControl(
+                        org.mockito.Mockito.anyString(), org.mockito.Mockito.anyInt(),
+                        org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(),
+                        org.mockito.Mockito.anyString()))
+                .thenReturn("ok");
+
+        AirGroundCoordinationService svc = new AirGroundCoordinationService(
+                orchService, deviceRegistry, spyClient, linkageEngine,
+                null, null, null, null);
+
+        GeoTarget target = new GeoTarget(39.9, 116.3, 50.0,
+                GeoTarget.TargetType.VEHICLE, 0.9, 2);
+
+        String result = svc.triggerPtzTracking(target);
+
+        assertThat(result).isEqualTo("TRACKING");
+        // 保守口径 ⇒ 必须是 cam-yes 那台拿到指令，绝不能是未声明的 cam-silent
+        org.mockito.Mockito.verify(spyClient).ptzControl(
+                org.mockito.Mockito.eq("192.168.1.151"), org.mockito.Mockito.anyInt(),
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(),
+                org.mockito.Mockito.anyString());
+        org.mockito.Mockito.verify(spyClient, org.mockito.Mockito.never()).ptzControl(
+                org.mockito.Mockito.eq("192.168.1.150"), org.mockito.Mockito.anyInt(),
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(),
+                org.mockito.Mockito.anyString());
+    }
+
+    /**
+     * 反向对照：只有一台<b>未声明</b>能力的设备时，保守口径应当判"无设备"，
+     * 而不是随便挑一台转过去。这条让上一条的"不是碰巧"更可信。
+     */
+    @Test
+    @DisplayName("只有未声明能力的设备时返回 NO_DEVICE（不猜）")
+    void triggerPtzTrackingOnlyUndeclaredDevices_returnsNoDevice() throws Exception {
+        SurveillanceDevice silent = new SurveillanceDevice(
+                "cam-silent-only", "唯一一台且未声明能力", SurveillanceDevice.Vendor.HIKVISION,
+                "192.168.1.160", 80, "admin", "hik12345");
+        silent.setCapabilities(new LinkedHashSet<>());
+        deviceRegistry.register(silent);
+
+        GeoTarget target = new GeoTarget(39.9, 116.3, 50.0,
+                GeoTarget.TargetType.VEHICLE, 0.9, 2);
+
+        assertThat(service.triggerPtzTracking(target)).isEqualTo("NO_DEVICE");
+    }
+
+    /**
+     * 同一台「未声明能力」的设备，在控制器 PTZ 端点应当<b>放行</b>，
+     * 在自动选设备处应当<b>排除</b>。这条把两个口径的差异钉死，
+     * 防止有人后来把它们悄悄统一成一个。
+     */
+    @Test
+    @DisplayName("两处口径对 UNKNOWN 的处理相反，是设计而非疏漏")
+    void manualAndAutomaticPoliciesDifferOnUndeclared() {
+        Set<String> undeclared = new LinkedHashSet<>();
+
+        assertThat(DeviceCapability.explicitlySupported(undeclared, DeviceCapability.PTZ))
+                .isFalse();
+        assertThat(DeviceCapability.notExplicitlyUnsupported(undeclared, DeviceCapability.PTZ))
+                .isTrue();
     }
 
     @Test
