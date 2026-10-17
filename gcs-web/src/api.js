@@ -1095,7 +1095,11 @@ export const emergencyOrch = {
   // 获取场景预设列表
   getScenarios: () => jsonFetch(`${EMERGENCY_BASE}/scenarios`),
 
-  // 启动编排：type=earthquake|mudslide|fire|custom，body={ centerLat, centerLon, radiusKm }
+  // 启动编排：type 是**后端 int 0..3**（就是 GET /scenarios 返回的 type 字段），body={ centerLat, centerLon, radius }
+  //   centerLat/centerLon 单位是 1E7 度，radius 单位是米（后端 EmergencyOrchController/Javadoc 明写）。
+  //   原注释写的 type=earthquake|mudslide|fire|custom 与 radiusKm 是错的 —— 后端 @PathVariable 是 int，
+  //   且后端读的是 "radius" 不是 "radiusKm"（radiusKm 在后端出现 0 次）。那个错误注释是前端
+  //   两个面板「一键启动」长期 400 / 半径被静默忽略的直接来源。
   startScenario: (type, body) =>
     jsonFetch(`${EMERGENCY_BASE}/scenarios/${type}/start`, {
       method: 'POST',

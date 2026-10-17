@@ -29,11 +29,15 @@ import {
 const POLL_MS = 3000
 
 // 场景预设类型
-const SCENARIO_TYPES = [
-  { type: 'earthquake', label: '地震' },
-  { type: 'mudslide', label: '泥石流' },
-  { type: 'fire', label: '火灾' },
-  { type: 'custom', label: '自定义' },
+// 场景类型兜底清单：只在 GET /scenarios 拉取失败时用。
+// type 必须是**后端的 int**（0..3）—— POST /scenarios/{type}/start 的
+// @PathVariable("type") 是 int，传字符串会被 Spring 判为类型不匹配直接 400。
+// 正常路径下这个常量不参与：选择器由 scenarios（后端真值）驱动。
+const SCENARIO_TYPE_FALLBACK = [
+  { type: 0, name: '地震' },
+  { type: 1, name: '泥石流' },
+  { type: 2, name: '火灾' },
+  { type: 3, name: '自定义' },
 ]
 
 // 编排阶段（六阶段流程）
@@ -161,11 +165,17 @@ export default function UnifiedCommandPanel() {
   const dedupCounterRef = useRef(0)
 
   // ===== 应急编排状态 =====
-  // 【接线缺口】setScenarios 有 1 处调用，应急编排场景列表拉回来了，但 scenarios 没人读 —— 列表未渲染
-  // 详见 CHANGELOG「接线缺口台账」。此处的写入是真的，只是还没有人读它。
-  // eslint-disable-next-line no-unused-vars
+  // scenarios = 后端 GET /api/v1/emergency/scenarios 的真值，字段为
+  // {type:int, name, description, defaults:{radius,droneCount,priority}}。
+  // 【原先的缺陷】这里拉回来的列表没人读，选择器用的是另一份硬编码 SCENARIO_TYPES
+  // （type 是字符串），而 POST /scenarios/{type}/start 的 @PathVariable 是 int
+  // ⇒ 字符串直接 400，「一键应急响应」按钮从来没有成功过。
+  // 现在选择器改由本列表驱动（拉取失败时才退到 SCENARIO_TYPE_FALLBACK）。
   const [scenarios, setScenarios] = useState([])
-  const [selectedScenarioType, setSelectedScenarioType] = useState('earthquake')
+  // 起步为 null：后端的 type 是 int，在列表到位之前不该猜。到位后自动选中第一项。
+  const [selectedScenarioType, setSelectedScenarioType] = useState(null)
+  // centerLat/centerLon 是**度**（PTZ 追踪那边也用同一份，见 handleTriggerPtzTracking），
+  // 启动编排时在调用点换算成后端契约要求的 1E7 度；radiusKm 是 km，后端要米。
   const [centerLat, setCenterLat] = useState(30.0)
   const [centerLon, setCenterLon] = useState(104.0)
   const [radiusKm, setRadiusKm] = useState(5)
@@ -471,12 +481,25 @@ export default function UnifiedCommandPanel() {
   // ===== 一键启动编排 =====
   const handleStartOrch = useCallback(async () => {
     setError(null)
+    // 后端 type 是 int；列表还没到位时不猜，直接不让发。
+    if (selectedScenarioType == null) {
+      setError('请先选择应急场景')
+      return
+    }
     setStarting(true)
     try {
+      // 后端契约（EmergencyOrchController.startScenario 与 EmergencyOrchService.start 的
+      // Javadoc 明写）：centerLat/centerLon 是 **1E7 度**，radius 是 **米**。
+      // 原先这里发的是 centerLat(度) / centerLon(度) / radiusKm(km)，两处都错：
+      //   * `radiusKm` 这个键后端**根本没读**（它 numInt(body, "radius", 0)）
+      //     ⇒ 半径被静默忽略，service 回退到预设默认值；
+      //   * 单位也没换算 ⇒ 即使键名修对，5 也会被当成 5 米。
+      // 状态本身保持「度 / km」不动，因为 handleTriggerPtzTracking 用的是同一份
+      // centerLat/centerLon，换算只做在这一处调用点。
       const body = {
-        centerLat: Number(centerLat),
-        centerLon: Number(centerLon),
-        radiusKm: Number(radiusKm),
+        centerLat: Math.round(Number(centerLat) * 1e7),
+        centerLon: Math.round(Number(centerLon) * 1e7),
+        radius: Math.round(Number(radiusKm) * 1000),
       }
       const res = await emergencyOrch.startScenario(selectedScenarioType, body)
       const newPlanId = res && res.planId
@@ -583,6 +606,24 @@ export default function UnifiedCommandPanel() {
 
   const planStatus = String((activePlan && activePlan.status) || '').toUpperCase()
   const isRunning = !!planId && !TERMINAL_STATUS.has(planStatus)
+  // 场景选项：后端真值优先，拉取失败才退到兜底清单。
+  // label 兼容两种键名：后端是 name，旧硬编码是 label。
+  const scenarioOptions = useMemo(() => {
+    const list = scenarios.length > 0 ? scenarios : SCENARIO_TYPE_FALLBACK
+    return list.map((s) => ({ type: s.type, label: s.name || s.label || '--', defaults: s.defaults || null }))
+  }, [scenarios])
+  const selectedScenario = useMemo(
+    () => scenarioOptions.find((s) => s.type === selectedScenarioType) || null,
+    [scenarioOptions, selectedScenarioType]
+  )
+  const scenarioDefaults = selectedScenario && selectedScenario.defaults
+  // 列表到位后自动选中第一项，让按钮在数据到达后立刻可用；
+  // 在此之前 selectedScenarioType 为 null ⇒ 按钮禁用，不猜后端的 int。
+  useEffect(() => {
+    if (selectedScenarioType == null && scenarioOptions.length > 0) {
+      setSelectedScenarioType(scenarioOptions[0].type)
+    }
+  }, [scenarioOptions, selectedScenarioType])
   const phases = (activePlan && activePlan.phases) || (activePlan && activePlan.phaseProgress) || []
   const coveragePct = (coverage && (coverage.coveragePct ?? coverage.coverage)) ?? null
   const connectivityPct = (coverage && (coverage.connectivityPct ?? coverage.connectivity)) ?? null
@@ -1076,7 +1117,7 @@ export default function UnifiedCommandPanel() {
       <div style={{ ...cardStyle, padding: 8, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div style={labelStyle}>一键应急响应</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {SCENARIO_TYPES.map((s) => (
+          {scenarioOptions.map((s) => (
             <button
               key={s.type}
               onClick={() => setSelectedScenarioType(s.type)}
@@ -1091,6 +1132,13 @@ export default function UnifiedCommandPanel() {
             </button>
           ))}
         </div>
+        {/* 选中场景的预设参数：这组 defaults 之前随 scenarios 一起被拉回来却没人读，
+            用户看不到"这个场景默认带几架机、半径多大"。 */}
+        {scenarioDefaults && (
+          <span style={{ fontSize: 9, color: 'var(--dim-2)', alignSelf: 'center' }}>
+            预设：半径 {scenarioDefaults.radius ?? '--'}m · 机数 {scenarioDefaults.droneCount ?? '--'} · 优先级 {scenarioDefaults.priority ?? '--'}
+          </span>
+        )}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span style={{ fontSize: 9, color: 'var(--dim-2)' }}>中心纬度</span>
           <input
@@ -1117,7 +1165,7 @@ export default function UnifiedCommandPanel() {
         </label>
         <button
           onClick={handleStartOrch}
-          disabled={starting || isRunning}
+          disabled={starting || isRunning || selectedScenarioType == null}
           style={{
             padding: '5px 16px', fontSize: 11, cursor: starting || isRunning ? 'not-allowed' : 'pointer',
             border: '1px solid var(--cyan)',

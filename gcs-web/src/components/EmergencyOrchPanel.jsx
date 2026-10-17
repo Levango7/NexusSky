@@ -11,12 +11,15 @@ import { emergencyOrch } from '../api.js'
 
 const POLL_MS = 2000
 
-// 场景预设类型（与后端 scenario type 对应）
-const SCENARIO_TYPES = [
-  { type: 'earthquake', label: '地震' },
-  { type: 'mudslide', label: '泥石流' },
-  { type: 'fire', label: '火灾' },
-  { type: 'custom', label: '自定义' },
+// 场景类型兜底清单：只在 GET /scenarios 拉取失败时用。
+// type 必须是**后端的 int**（0..3）—— POST /scenarios/{type}/start 的
+// @PathVariable("type") 是 int，传字符串会被 Spring 判类型不匹配直接 400。
+// 正常路径由 scenarios（后端真值）驱动，这份不参与。
+const SCENARIO_TYPE_FALLBACK = [
+  { type: 0, name: '地震' },
+  { type: 1, name: '泥石流' },
+  { type: 2, name: '火灾' },
+  { type: 3, name: '自定义' },
 ]
 
 // 编排 5 阶段（测绘→规划→部署→服务→自愈）
@@ -87,7 +90,8 @@ export default function EmergencyOrchPanel() {
   // ---- 状态 ----
   const [scenarios, setScenarios] = useState([])
   const [scenariosLoading, setScenariosLoading] = useState(true)
-  const [selectedType, setSelectedType] = useState('earthquake')
+  // 后端 type 是 int，在列表到位之前不猜。到位后自动选中第一项。
+  const [selectedType, setSelectedType] = useState(null)
   const [centerLat, setCenterLat] = useState(30.0)
   const [centerLon, setCenterLon] = useState(104.0)
   const [radiusKm, setRadiusKm] = useState(5)
@@ -188,12 +192,22 @@ export default function EmergencyOrchPanel() {
   // ---- 一键启动编排 ----
   const handleStart = useCallback(async () => {
     setError(null)
+    // 后端 type 是 int；列表还没到位时不猜，直接不让发。
+    if (selectedType == null) {
+      setError('请先选择应急场景')
+      return
+    }
     setStarting(true)
     try {
+      // 后端契约（EmergencyOrchController.startScenario 与 EmergencyOrchService.start 的
+      // Javadoc 明写）：centerLat/centerLon 是 **1E7 度**，radius 是 **米**。
+      // 原先发的是 centerLat(度)/centerLon(度)/radiusKm(km)：`radiusKm` 这个键后端
+      // 根本没读（它 numInt(body, "radius", 0)）⇒ 半径被静默忽略、退回预设默认；
+      // 单位也没换算 ⇒ 即使键名修对，5 也会被当成 5 米。
       const body = {
-        centerLat: Number(centerLat),
-        centerLon: Number(centerLon),
-        radiusKm: Number(radiusKm),
+        centerLat: Math.round(Number(centerLat) * 1e7),
+        centerLon: Math.round(Number(centerLon) * 1e7),
+        radius: Math.round(Number(radiusKm) * 1000),
       }
       const res = await emergencyOrch.startScenario(selectedType, body)
       const newPlanId = res && res.planId
@@ -248,6 +262,22 @@ export default function EmergencyOrchPanel() {
   // ===== 派生数据 =====
   const planStatus = String((activePlan && activePlan.status) || '').toUpperCase()
   const isRunning = !!planId && !TERMINAL_STATUS.has(planStatus)
+  // 场景选项：后端真值优先，拉取失败才退到兜底清单。label 兼容 name / 旧 key label。
+  const scenarioOptions = useMemo(() => {
+    const list = scenarios.length > 0 ? scenarios : SCENARIO_TYPE_FALLBACK
+    return list.map((s) => ({ type: s.type, label: s.name || s.label || '--', defaults: s.defaults || null }))
+  }, [scenarios])
+  const selectedScenario = useMemo(
+    () => scenarioOptions.find((s) => s.type === selectedType) || null,
+    [scenarioOptions, selectedType]
+  )
+  const scenarioDefaults = selectedScenario && selectedScenario.defaults
+  // 列表到位后自动选中第一项，让按钮在数据到达后立刻可用；在此之前 selectedType 为 null。
+  useEffect(() => {
+    if (selectedType == null && scenarioOptions.length > 0) {
+      setSelectedType(scenarioOptions[0].type)
+    }
+  }, [scenarioOptions, selectedType])
   const phases = (activePlan && activePlan.phases) || (activePlan && activePlan.phaseProgress) || []
   const drones = (activePlan && activePlan.drones) || (activePlan && activePlan.fleet) || []
   const coveragePct = (coverage && (coverage.coveragePct ?? coverage.coverage)) ?? null
@@ -311,7 +341,7 @@ export default function EmergencyOrchPanel() {
       <div style={{ marginBottom: 12 }}>
         <div style={labelStyle}>场景预设</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {SCENARIO_TYPES.map((s) => (
+          {scenarioOptions.map((s) => (
             <button
               key={s.type}
               onClick={() => setSelectedType(s.type)}
@@ -333,7 +363,15 @@ export default function EmergencyOrchPanel() {
         {/* 后端返回的场景详情（如有）*/}
         {scenarios.length > 0 && (
           <div style={{ fontSize: 10, color: 'var(--dim-2)', marginTop: 4 }}>
-            可用预设：{scenarios.map((s) => s.type || s.name || s.id).filter(Boolean).join(' / ')}
+            {/* 原来是 s.type || s.name —— type=0 在 JS 里是 falsy，会短路到 s.name，
+                而 type 1/2/3 是 truthy 直接显示数字 ⇒ 这行渲染成「地震 / 1 / 2 / 3」。 */}
+            可用预设：{scenarios.map((s) => s.name ?? s.type).filter((v) => v !== null && v !== undefined && v !== '').join(' / ')}
+          </div>
+        )}
+        {/* 选中场景的预设参数（defaults 之前随 scenarios 一起被拉回来却没人读） */}
+        {scenarioDefaults && (
+          <div style={{ fontSize: 10, color: 'var(--dim-2)', marginTop: 4 }}>
+            预设：半径 {scenarioDefaults.radius ?? '--'}m · 机数 {scenarioDefaults.droneCount ?? '--'} · 优先级 {scenarioDefaults.priority ?? '--'}
           </div>
         )}
       </div>
@@ -368,7 +406,7 @@ export default function EmergencyOrchPanel() {
           </label>
           <button
             onClick={handleStart}
-            disabled={starting || isRunning}
+            disabled={starting || isRunning || selectedType == null}
             style={{
               padding: '6px 18px',
               fontSize: 11,
