@@ -306,6 +306,12 @@ public class SurveillanceController {
         if (channel < 1) {
             return badRequest("channel must be >= 1");
         }
+        // 能力门控：设备声明了能力集、但其中没有 MEDIA 时明确拒绝。
+        // 口径见 DeviceCapability —— 这里用"不明确不支持即放行"：这是运维的
+        // 手动操作，未声明能力的早期设备不该平白失去取流（那会是功能减法）。
+        if (!DeviceCapability.notExplicitlyUnsupported(d.getCapabilities(), DeviceCapability.MEDIA)) {
+            return unsupported(d, DeviceCapability.MEDIA);
+        }
         try {
             // 按设备厂商路由（ONVIF 适配器内部复用 OnvifClient；GB28181 返回
             // gb28181-invite:// 描述性标识——E5 口径：不假扮可播地址）
@@ -345,6 +351,11 @@ public class SurveillanceController {
         if (!OnvifClient.PTZ_COMMANDS.contains(cmd)) {
             return badRequest("unsupported cmd: " + cmd
                     + ", supported: " + OnvifClient.PTZ_COMMANDS);
+        }
+        // 能力门控：此前完全不看能力——同一台设备，AirGroundCoordinationService
+        // 会因为缺 PTZ 跳过它，这里却照单全收。口径同上（手动操作，未声明不阻断）。
+        if (!DeviceCapability.notExplicitlyUnsupported(d.getCapabilities(), DeviceCapability.PTZ)) {
+            return unsupported(d, DeviceCapability.PTZ);
         }
         try {
             // 按设备厂商路由：此前直连 ONVIF，GB28181 设备必然失败——
@@ -630,10 +641,31 @@ public class SurveillanceController {
         v.put("status", d.status.name());
         v.put("totalCameras", d.totalCameras);
         v.put("onlineCameras", d.onlineCameras);
-        v.put("capabilities", d.getCapabilities());
+        v.put("capabilities", DeviceCapability.normalize(d.getCapabilities()));
+        v.put("rawCapabilities", d.getCapabilities());
+        // 三态能力位：前端据此禁用按钮，而不是让运维点了之后收一个 400。
+        // null = 未声明（未知），true = 明确支持，false = 明确不支持。
+        v.put("ptzSupport", capFlag(d, DeviceCapability.PTZ));
+        v.put("mediaSupport", capFlag(d, DeviceCapability.MEDIA));
+        v.put("eventsSupport", capFlag(d, DeviceCapability.EVENTS));
         v.put("rtspUrl", maskRtspCredentials(d.rtspUrl));
         v.put("lastHeartbeatMs", d.lastHeartbeatMs);
         return v;
+    }
+
+    /**
+     * 能力三态 → 可 JSON 序列化的三态：{@code null} 表示未声明。
+     *
+     * <p>用 null 而不是编一个布尔值：把「不知道」压成 {@code false} 会让前端
+     * 灰掉一台其实能转的设备（功能减法），压成 {@code true} 则会让前端放行一台
+     * 明确不能转的设备。这两种失真都会回到"声明≠行为"。
+     */
+    private static Boolean capFlag(SurveillanceDevice d, String canonical) {
+        return switch (DeviceCapability.supportOf(d.getCapabilities(), canonical)) {
+            case YES -> Boolean.TRUE;
+            case NO -> Boolean.FALSE;
+            case UNKNOWN -> null;
+        };
     }
 
     /**
@@ -674,5 +706,27 @@ public class SurveillanceController {
 
     private static ResponseEntity<Map<String, Object>> notFound(String message) {
         return ResponseEntity.status(404).body(Map.of("error", message));
+    }
+
+    /**
+     * 设备明确声明「不支持某能力」时的统一响应。
+     *
+     * <p>用 400 而不是 501：501 说的是「这个服务器没实现这个方法」，
+     * 而这里说的是「这台设备不具备这个能力」—— 后者是请求与设备状态不匹配。
+     *
+     * <p>响应里带上设备实际声明的能力集（含归一前后的名字），让调用方能看出
+     * 是「不支持」而不是「拼错了参数」—— 否则前端只能显示一句无信息量的失败。
+     *
+     * @param d         目标设备
+     * @param canonical 缺失的规范能力名
+     */
+    private static ResponseEntity<Map<String, Object>> unsupported(SurveillanceDevice d, String canonical) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "device " + d.id + " does not support capability " + canonical);
+        body.put("deviceId", d.id);
+        body.put("capability", canonical);
+        body.put("declared", DeviceCapability.normalize(d.getCapabilities()));
+        body.put("rawCapabilities", d.getCapabilities());
+        return ResponseEntity.status(400).body(body);
     }
 }
