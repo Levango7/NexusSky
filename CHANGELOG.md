@@ -6,6 +6,104 @@
 
 ---
 
+## [Unreleased] — gcs-web：「一键应急响应」按钮从来没有成功过 —— 四处契约不符（2026-10-17）
+
+**这是本轮查到最严重的一个**，而且它是应急面板上最显眼的那个按钮。
+
+**实测证据（后端 MockMvc，不是读代码推断）**：新增
+`EmergencyOrchPathVariableTest`，用 `MockMvcBuilders.standaloneSetup`（不需要 Spring 上下文、
+不需要数据库，但会走完整的 `@PathVariable` 绑定）：
+
+| 请求 | 结果 |
+|---|---|
+| `POST /api/v1/emergency/scenarios/0/start` | **200** + planId + RUNNING |
+| `POST /api/v1/emergency/scenarios/earthquake/start` | **400** |
+| `POST /scenarios/{earthquake,mudslide,fire,custom}/start` | **全部 400** |
+
+**根因**：后端是 `@PathVariable("type") **int** type`，而前端选择器用的是另一份硬编码
+`SCENARIO_TYPES`，type 是字符串 `'earthquake'|'mudslide'|'fire'|'custom'` ⇒ URL 里带字符串 ⇒
+Spring 类型转换失败 ⇒ 400。**失败发生在路径变量解析阶段，连业务分支都进不去**，
+所以也不是"后端返回了错误"——请求根本没到业务代码。
+
+**同一个调用里另外三处契约不符**（全藏在第 1 条后面，因为按钮从未成功过，从未被触发）：
+
+| # | 前端发的 | 后端期望 | 后果 |
+|---|---|---|---|
+| 1 | URL 里 `'earthquake'` | `@PathVariable int` | **400，按钮从未成功** |
+| 2 | `radiusKm` | `radius`（后端源码里 `radiusKm` 出现 **0** 次） | 半径被静默忽略，`effectiveRadius` 回退到预设默认 |
+| 3 | 值 5，标签「半径(km)」 | 米（`@param radius 灾区半径（米）`） | 键名修对也会变成 5 米 |
+| 4 | `centerLat=30.0`（度） | `1E7 度`（`@param centerLat … 1E7 度`） | 会被当成 0.000003 度 |
+
+**为什么已有的测试没抓到**：`EmergencyOrchControllerTest` 的头注释自己写着
+「**直接实例化 Controller + Service（无 MockMvc / Spring 上下文）**」，它调的是
+`controller.startScenario(0, body)` —— 直接 Java 调用 + **int 字面量**。
+于是 `@PathVariable int` 这一层转换在结构上从未被执行过。
+已新增 MockMvc 测试补上这一层；**没有**改动那个既有测试文件的风格。
+
+**顺手接上一处接线缺口**：选择器改由 `scenarios`（后端真值）驱动，删掉重复的硬编码清单
+—— 一个数据源同时修好了"按钮 400"和"后端那 4 条预设没人读"两件事。选中场景的
+`defaults`（半径/机数/优先级）现在也显示出来。`scenarios` 拉取失败时退到一份**int 型**
+兜底清单，保证按钮不会因为列表拉不到就永久不可用。
+`selectedScenarioType` 起步为 `null`（后端 type 是 int，列表到位前不猜），到位后自动选中第一项，
+启动按钮在选中之前是禁用的。
+
+**坐标换算只做在启动这一处调用点**：`centerLat/centerLon` 的 state 仍是**度**，
+因为 `handleTriggerPtzTracking` 用的是同一份 state（PTZ 追踪按度）。改 state 的单位会连带
+打断那个功能。
+
+**同一个缺陷在第二个面板上也有一份**：`EmergencyOrchPanel`（独立的应急编排面板）
+的 `handleStart` 与选择器是照着 `UnifiedCommandPanel` 抄的，于是
+`useState('earthquake')` + 字符串清单 + `radiusKm` **三处一模一样**。同一个后端端点、
+同一份契约，拆成两个 PR 只会留下一个坏的，所以合在一起修。
+
+它还多一处别的面板没有的 bug：`可用预设：{scenarios.map((s) => s.type || s.name || s.id)}` ——
+`type=0` 在 JS 里是 **falsy**，会短路到 `s.name`，而 `type` 1/2/3 是 truthy 直接显示数字。
+**这一行实际渲染成 `地震 / 1 / 2 / 3`**。已改成 `s.name ?? s.type`。
+
+**顺带修一处测试环境缺口**：`EmergencyOrchPanel` 在事件列表增长后调
+`eventsEndRef.current.scrollIntoView(...)`，jsdom 未实现它。而这个 TypeError 抛在
+`useEffect` 的**被动阶段** ⇒ 落在测试之外，vitest 只记成 unhandled error 并警告
+"可能造成假阳性测试" —— **它不会让任何用例变红**，是静默污染信号。
+已在 `test/setup.js` 统一补桩（与既有的 Pointer Capture 桩并列），
+而不是让每个碰它的测试各自打补丁（漏一个就又多一条看不见的信号）。
+
+**错误的契约还写在 api.js 的注释里**，一并订正 —— 这是前端误解的直接来源：
+
+```
+- // 启动编排：type=earthquake|mudslide|fire|custom，body={ centerLat, centerLon, radiusKm }
++ // 启动编排：type 是后端 int 0..3（GET /scenarios 的 type 字段），body={ centerLat, centerLon, radius }
++ //   centerLat/centerLon 单位是 1E7 度，radius 单位是米（后端 Javadoc 明写）
+```
+
+**验证**：前端 14/14 绿 → **9 个变异体全被杀** → 还原后复跑 14/14 绿
+
+| 变异 | 转红 |
+|---|---|
+| `radius` 改回 `radiusKm` | 半径那条 |
+| 键名对但不乘 1000 | 半径那条 |
+| `centerLat` 不乘 1e7 | 坐标那条 |
+| `centerLon` 不乘 1e7 | 坐标那条 |
+| **忽略后端列表、还原字符串 type**（完整复现原缺陷） | **6 条**，含全部 4 个「场景发 int N」用例 |
+
+最后一个变异体是特意加的：它把按钮文案渲染得**和修好时一模一样**（四个中文场景名都在），
+只看界面或只断言文案的测试全都会绿 —— 判据必须是「发出去的 type 是 number 且等于后端的 int」。
+
+**边界**：
+- 后端侧我只加了测试，**没有改后端代码**。后端契约（int type / radius 米 / 1E7 度）
+  是从它的 Javadoc 与源码读出来的，且既有测试 `startScenarioReturnsPlanId` 用的就是
+  `centerLat=399000000`（= 39.9° × 1e7），与契约一致。
+- 真实链路（真浏览器 → 真后端）我没跑过端到端；MockMvc 覆盖的是路径变量与 body 绑定这一层。
+- `radius` 的单位换算是按 UI 标签「半径(km)」与后端「米」推出来的。默认 5 km = 5000 m
+  恰好等于地震预设，**看起来**是作者的原意，但我没有找到设计文档能证明这是刻意的，
+  记在这里以免后人以为是既定需求。
+
+**口径**：后端 4860 → **4863**、cloud-backend 2764 → **2767**（新增 `EmergencyOrchPathVariableTest` 3 例）、
+前端 330 → **344**（新增 `emergencyStartContract.test.jsx` 14 例）。全部按门禁报出的 `文件:行号`
+逐行同步（`ROADMAP.md:25` 被两个 scope 各报一次，按行合并为一处两替换），**未做全仓正则替换**。
+
+本分支是从 #101 合并后的 `ceb5e68` 重建的，不是 rebase 旧的 `c301417` —— 后者会让
+CHANGELOG 顶部的 `[Unreleased]` 段冲突，且节内计数会停在过期基线。
+
 ## [Unreleased] — gcs-web：两个配置面板存回了服务端真值却从不显示，保存后看不出服务端认了什么（2026-10-17）
 
 **先纠正一处台账本身的错误**：`AutoDispatchPanel.config` 与 `CommAdaptPanel.config`
@@ -297,7 +395,7 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 
 ### 处置二：9 处只写不读，保留 + 显式标注 + 记台账
 
-### 接线缺口台账（9 处「写了但没人读」；已修 5 处，**仍缺 4 处**）
+### 接线缺口台账（9 处「写了但没人读」；已修 6 处，**仍缺 3 处**）
 
 下表逐条对应代码里带 `eslint-disable-next-line no-unused-vars` 的位置。
 它们的写入方都是活的（setter 确有调用点），删掉 state 会连带删掉写入动作，
@@ -310,7 +408,7 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 | `gcs-web/src/components/CommAdaptPanel.jsx` | `config` | `setConfig` | ✅ 已修（#101） | 同上；`configSuccess` 成功提示本来就保留未动 |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `disasterClusters` | `setDisasterClusters` | **仍缺** | 灾害聚类真拉回了但一类不渲染 —— 应急场景下信息不可见 |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `orchEvents` | `setOrchEvents` | **仍缺** | 编排事件流不渲染 —— 执行中看不到进度 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `scenarios` | `setScenarios` | **仍缺** | 场景列表不渲染，而 `selectedScenarioType` 依赖它 ⇒ **选择器选不成就选不了** |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `scenarios` | `setScenarios` | ✅ 已修（#102） | 选择器改由它驱动，并顺带修好了「一键应急响应」按钮 400 的缺陷 |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` | **仍缺** |  surveillance 事件不渲染 |
 | `gcs-web/src/components/HealthPanel.jsx` | `droneHistory` | `setDroneHistory` | ✅ 已修（#99） | 已接「历史评分」列表渲染，并摘掉 `eslint-disable` |
 | `gcs-web/src/components/VoiceCmdPanel.jsx` | `historyError` | `setHistoryError` | ✅ 已修（#97） | 同上，见 #97 的 CHANGELOG 条目 |
