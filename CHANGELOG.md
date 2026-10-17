@@ -19,7 +19,7 @@
 
 ---
 
-## [Unreleased] — 后端安防事件空桩结清：不是缺 Store，是**同一件事写了两遍，其中一遍是死的**（#106，2026-10-17）
+## [Unreleased] — 后端安防事件空桩结清：不是缺 Store，是**同一件事写了两遍，其中一遍是死的**（#105，2026-10-17）
 
 上一轮（#104）把 `survEvents` 的键名修对了，面板能读 `items` 了，但列表**仍然是空的**，
 因为后端 `GET /api/v1/surveillance/events` 是永久空桩。当时按方案 A 记为待办：这轮结清。
@@ -168,7 +168,7 @@ WS-BaseNotification）。那是需要对着真实摄像头硬件做的协议对�
 | # | 原因 | 状态 |
 |---|---|---|
 | a | 前端读 `data.events`，后端返回的是 `{ items, … }` | **已修**：改读 `items`（`events` 保留为兼容键） |
-| b | 后端 `SurveillanceController` 的 `/events` 是**永久空桩**，注释自述"当前没有全局 SurveillanceEventStore"，固定返回 `{items: []}` | **已修**（#106）：改为委托 `AlarmEventStore`，真返回数据，`deviceId` 过滤也真正生效 |
+| b | 后端 `SurveillanceController` 的 `/events` 是**永久空桩**，注释自述"当前没有全局 SurveillanceEventStore"，固定返回 `{items: []}` | **已修**（#105）：改为委托 `AlarmEventStore`，真返回数据，`deviceId` 过滤也真正生效 |
 
 所以修完 (a) 列表**仍然是空的**。此处刻意**不用空白列表**表示空 ——
 监控面板显示空列表会被读成"没有发生过事"，那是**假阴性**，正是这批 PR 在治的病。
@@ -684,7 +684,7 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 
 ### 处置二：9 处只写不读，保留 + 显式标注 + 记台账
 
-### 接线缺口台账（9 处「写了但没人读」；已修 9 处，**仍缺 0 处**；含 #106 结清最后一项后端空桩）
+### 接线缺口台账（9 处「写了但没人读」；已修 9 处，**仍缺 0 处**；含 #105 结清最后一项后端空桩）
 
 下表逐条对应代码里带 `eslint-disable-next-line no-unused-vars` 的位置。
 它们的写入方都是活的（setter 确有调用点），删掉 state 会连带删掉写入动作，
@@ -698,7 +698,7 @@ setter 侧同样逐条确认：把 12 组 `value` / `setValue` 分别统计调�
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `disasterClusters` | `setDisasterClusters` | ✅ 已修（#104） | 真数据（`{clusterCount, clusters:[…]}`），已按簇ID / 簇头 / 节点数 / 半径渲染 |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `orchEvents` | `setOrchEvents` | ✅ 已修（#104） | 已渲染；同时结修去重逻辑（后端 events 是 List<String>，旧键恒为 `|` 把所有事件并成一条） |
 | `gcs-web/src/components/UnifiedCommandPanel.jsx` | `scenarios` | `setScenarios` | ✅ 已修（#102） | 选择器改由它驱动，并顺带修好了「一键应急响应」按钮 400 的缺陷 |
-| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` | ✅ 已修（#104 + #106） | 键名改正为 `items`（#104）；后端空桩已修（#106）——`/events` 改委托 `AlarmEventStore` 返回真实事件，本面板按**选中设备**过滤 |改为显式说明后端未实现，而非空白列表 |
+| `gcs-web/src/components/UnifiedCommandPanel.jsx` | `survEvents` | `setSurvEvents` | ✅ 已修（#104 + #105） | 键名改正为 `items`（#104）；后端空桩已修（#105）——`/events` 改委托 `AlarmEventStore` 返回真实事件，本面板按**选中设备**过滤 |改为显式说明后端未实现，而非空白列表 |
 | `gcs-web/src/components/HealthPanel.jsx` | `droneHistory` | `setDroneHistory` | ✅ 已修（#99） | 已接「历史评分」列表渲染，并摘掉 `eslint-disable` |
 | `gcs-web/src/components/VoiceCmdPanel.jsx` | `historyError` | `setHistoryError` | ✅ 已修（#97） | 同上，见 #97 的 CHANGELOG 条目 |
 | `gcs-web/src/components/VoiceCmdPanel.jsx` | `pendingError` | `setPendingError` | ✅ 已修（#97） | 同上，见 #97 的 CHANGELOG 条目 |
