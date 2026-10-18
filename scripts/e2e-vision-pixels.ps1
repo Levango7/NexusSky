@@ -20,6 +20,10 @@
 #   2. 定位误差 < 3m（最近真值目标）
 #   3. 单拍返回 sizeBytes > 0（图像字节真实存在）
 $ErrorActionPreference = 'Stop'
+# 跨平台公共库（B2 批次接 CI 时引入）：java 探测 / jar 路径 / 临时目录。
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
+$Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+$TempDir = Get-E2eTempDir   # Linux runner 上 $env:TEMP 常未设置，不能直接用
 # 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_REST_PORT 覆盖。
 # 覆盖时必须连带改后端的 MAVLink 口（默认 14550），否则 sim 发现不了本脚本要找的 sysid。
 $BackendRestPort = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }
@@ -56,14 +60,18 @@ catch { Write-Host '后端未运行，中止' -ForegroundColor Red; exit 1 }
 
 # ---- 1. 启动模拟器 ----
 Step '启动模拟器 (sysid=12, mavlink=14544, truth=18082, 静态目标)'
-$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
-if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
+# jar 路径走 Get-E2eJar（反斜杠字面量在 Linux 上不是分隔符，Test-Path 恒 false）；
+# Java 探测走 Get-E2eJava（Linux 上叫 java 不是 java.exe）。
+$jar = Get-E2eJar -Root $Root -Module 'drone-sim' -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
+$java = Get-E2eJava
 Assert-Java17 $java
+# marker (-Dpixels-e2e=true) 放 -jar 前：JVM 消费为系统属性，并作为 CI 兜底清理凭据。
 $sim = Start-Process -FilePath $java -ArgumentList @(
+    '-Dpixels-e2e=true',
     '-jar', $jar, '--port', '14544', '--sysid', '12', '--name', 'AF-PIXELS-01',
     '--http-port', '18082',
     '--targets', 'static:22.5916,113.9345;static:22.5916,113.93479'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-pixels-sim.log') -RedirectStandardError (Join-Path $env:TEMP 'af-pixels-sim.err')
+) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-pixels-sim.log') -RedirectStandardError (Join-Path $TempDir 'af-pixels-sim.err')
 Start-Sleep 2
 
 $registered = $false

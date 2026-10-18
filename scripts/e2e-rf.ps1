@@ -8,6 +8,10 @@
 #   2. 飞远后 RSSI 衰减（< -80 dBm，FSPL@~800m）
 #   3. REST rssiDbm 可查且 = 衰减值
 $ErrorActionPreference = 'Stop'
+# 跨平台公共库（B2 批次接 CI 时引入）：java 探测 / jar 路径 / 临时目录。
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
+$Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+$TempDir = Get-E2eTempDir   # Linux runner 上 $env:TEMP 常未设置，不能直接用
 # 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_REST_PORT 覆盖。
 # 覆盖时必须连带改后端的 MAVLink 口（默认 14550），否则 sim 发现不了本脚本要找的 sysid。
 $BackendRestPort = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }
@@ -39,13 +43,17 @@ catch { Write-Host '后端未运行，中止' -ForegroundColor Red; exit 1 }
 
 # ---- 1. 启动无障碍模拟器 ----
 Step '启动 RF 模拟器 (sysid=11, mavlink=14543, truth=18081, 无障碍)'
-$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
-if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
+# jar 路径走 Get-E2eJar（反斜杠字面量在 Linux 上不是分隔符，Test-Path 恒 false）；
+# Java 探测走 Get-E2eJava（Linux 上叫 java 不是 java.exe）。
+$jar = Get-E2eJar -Root $Root -Module 'drone-sim' -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
+$java = Get-E2eJava
 Assert-Java17 $java
+# marker (-Drf-e2e=true) 放 -jar 前：JVM 消费为系统属性，并作为 CI 兜底清理凭据。
 $sim = Start-Process -FilePath $java -ArgumentList @(
+    '-Drf-e2e=true',
     '-jar', $jar, '--port', '14543', '--sysid', '11', '--name', 'AF-RF-01',
     '--http-port', '18081'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-rf-sim.log') -RedirectStandardError (Join-Path $env:TEMP 'af-rf-sim.err')
+) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-rf-sim.log') -RedirectStandardError (Join-Path $TempDir 'af-rf-sim.err')
 Start-Sleep 2
 
 $registered = $false

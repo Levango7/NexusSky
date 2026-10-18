@@ -17,13 +17,17 @@ param([switch]$SkipBuild)
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+# 跨平台公共库（B2 批次接 CI 时引入）：java 探测 / jar 路径 / 临时目录 / 按标记清残留
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
+$TempDir = Get-E2eTempDir   # Linux runner 上 $env:TEMP 常未设置，不能直接用
 $Fail = 0
 $script:CleanupActions = @()
 
 $BackendPort = if ($env:AF_BACKEND_PORT) { [int]$env:AF_BACKEND_PORT } else { 18099 }
 $Base = "http://localhost:$BackendPort/api/v1"
-$SimJar = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
-$BackendJar = Join-Path $Root 'cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
+# jar 路径走 Get-E2eJar：反斜杠字面量在 Linux 上不是分隔符，Test-Path 恒 false
+$SimJar = Get-E2eJar -Root $Root -Module 'drone-sim' -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
+$BackendJar = Get-E2eJar -Root $Root -Module 'cloud-backend' -Jar 'aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
 
 function Assert-True($cond, $msg) {
     if ($cond) { Write-Host "  [PASS] $msg" -ForegroundColor Green }
@@ -41,31 +45,39 @@ function Stop-Proc($p) {
 try {
     if (-not $SkipBuild -or -not (Test-Path $BackendJar) -or -not (Test-Path $SimJar)) {
         Write-Host '[1/3] 构建...'
-        $env:JAVA_HOME = 'E:\dev-tools\jdk17.0.20_8'
-        $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+        # 本机 Windows 的 JDK17 固定位置；不存在（如 Linux CI）则沿用外部环境已配好的 JDK
+        if (Test-Path 'E:\dev-tools\jdk17.0.20_8') {
+            $env:JAVA_HOME = 'E:\dev-tools\jdk17.0.20_8'
+            $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+        }
         Push-Location $Root; mvn -q package -DskipTests; Pop-Location
     } else { Write-Host '[1/3] 使用既有 jar（-SkipBuild）' }
 
-    if ($env:AF_JAVA) { $java = $env:AF_JAVA }
-    elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME 'bin\java.exe'))) { $java = Join-Path $env:JAVA_HOME 'bin\java.exe' }
-    else { $java = 'java.exe' }
+    $java = Get-E2eJava   # 跨平台探测（Linux 叫 java 不是 java.exe）
 
     # ---- 起 3 台 sim（fixed / float / 缺省）+ 后端 ----
     Write-Host '[2/3] 启动 3 台模拟器（fixed/float/缺省）+ 后端...'
-    $p1 = Start-Process -FilePath $java -ArgumentList @('-jar', $SimJar,
+    $p1 = Start-Process -FilePath $java -ArgumentList @(
+        '-Drtk-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
+        '-jar', $SimJar,
         '--port','14560','--sysid','61','--name','AF-RTK-FIXED','--rtk','fixed') `
-        -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-rtk-sim1.log')
+        -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-rtk-sim1.log')
     Stop-Proc $p1
-    $p2 = Start-Process -FilePath $java -ArgumentList @('-jar', $SimJar,
+    $p2 = Start-Process -FilePath $java -ArgumentList @(
+        '-Drtk-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
+        '-jar', $SimJar,
         '--port','14561','--sysid','62','--name','AF-RTK-FLOAT','--rtk','float') `
-        -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-rtk-sim2.log')
+        -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-rtk-sim2.log')
     Stop-Proc $p2
-    $p3 = Start-Process -FilePath $java -ArgumentList @('-jar', $SimJar,
+    $p3 = Start-Process -FilePath $java -ArgumentList @(
+        '-Drtk-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
+        '-jar', $SimJar,
         '--port','14562','--sysid','63','--name','AF-RTK-STD') `
-        -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-rtk-sim3.log')
+        -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-rtk-sim3.log')
     Stop-Proc $p3
 
     $backend = Start-Process -FilePath $java -ArgumentList @(
+        '-Drtk-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
         '-jar', $BackendJar, "--server.port=$BackendPort",
         '--spring.profiles.active=dev',
         # 自带内存库：dev profile 默认落 ./data/aerofleet 文件库，上一轮 e2e 残留的
@@ -74,7 +86,7 @@ try {
         '--aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef',
         '--aerofleet.drone-port=14560',
         '--aerofleet.drone-extra-ports=14561,14562'
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-rtk-backend.log')
+    ) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-rtk-backend.log')
     Stop-Proc $backend
 
     # ---- 等 3 机上线 + 断言 ----

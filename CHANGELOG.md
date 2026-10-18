@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 140 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 141 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -16,6 +16,73 @@
 | **[Unreleased]** | 累积中 | — | 当前 134 个小节自 v1.0.5 起持续累积，最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
+
+---
+
+## [Unreleased] — e2e 救活第三批（B2）：9 个脚本跨平台适配并以观察模式接进 CI（2026-10-19）
+
+> 与前两批（formation/mesh/rid 的 `e2e-core-scripts` job、regulator/dock/
+> route-templates/defect 的 `e2e-b1-scripts` job）同一条脉络。B2 共十脚本：
+> **9 个接入**，px4-sitl 判定**不接入**（ubuntu runner 无 PX4 SITL、脚本宿主
+> 导向，接了必红——预研 D1 拍板）。脚本侧改造（跨平台适配 + marker + spray
+> 端口参数化）已在 worktree 阶段完成并独立核验（9/9 语法解析通过、代码级
+> Windows-only 残留为零、marker 全部就位），本条记录的是接线：ci.yml 两个
+> 新 job + CHANGELOG + 本 commit。
+
+### 跨平台适配（9 脚本，全部 dot-source `scripts/e2e-common.ps1` 公共库）
+
+| 问题 | 处理 |
+|---|---|
+| java 探测硬编码 `java.exe` | `Get-E2eJava`（AF_JAVA → JAVA_HOME → AF_JDK17_HOME → PATH） |
+| `$env:TEMP` 直接引用 | `Get-E2eTempDir`（Linux runner 常未设置 TEMP/TMP） |
+| `-WindowStyle Hidden`（Windows-only 参数） | 删除 |
+| jar 路径反斜杠字面量 | `Get-E2eJar`（Linux 上反斜杠不是分隔符，`Test-Path` 恒 false） |
+| `Get-CimInstance Win32_Process` 清理（spray / network） | `Stop-E2eStaleProcesses`（Win CIM / Linux `/proc` 双实现） |
+| 硬编码 `E:\dev-tools\...` JDK 路径 | `Test-Path` 保护（CI 走 `-SkipBuild` 不进构建分支，纯防御） |
+| 8 个脚本进程命令行无清理凭据 | 补 `-D<name>-e2e=true` marker（放 `-jar` 前由 JVM 消费；spray 原有） |
+| spray 端口硬编码 8080/14550/14551 | 参数化：`AF_BACKEND_PORT` / `AF_SPRAY_DRONE_PORT` / `AF_SPRAY_SIM_PORT`（默认值不变） |
+
+### CI 接入（`e2e-b2-a-type` / `e2e-b2-b-type` 两 job，观察模式）
+
+- **拆两个 job 的原因**：cloud-backend 恒绑 UDP 14550（`aerofleet.udp-port`，
+  所有脚本均不覆盖）→ 同一 runner 内任意两个 backend 不能共存、脚本必须
+  串行；A/B 两型分到独立 runner 上可安全并行（与 `e2e-b1-scripts` 也互不依赖）。
+- **A 型 job**（6 脚本自启 backend）：cv-eval → operations → rtk → sensing →
+  uspace → spray 串行；每步 `AF_BACKEND_PORT=18099` 统一 REST 口（spray
+  参数化后并入同一变量）；spray 的 drone/sim 端口用默认 14550/14551；
+  每步间按 marker 兜底清理（B1 同款安排）。
+- **B 型 job**（3 脚本不自启 backend，保持外部启动契约）：network → rf →
+  vision-pixels 串行；每步是自包含 bash step——CI 起 backend（统一
+  `jdbc:h2:mem:<name>-e2e` + dev profile + jwt-secret + REST 18099）→ 等就绪
+  （`/api/v1/drones` 业务探针；`/actuator/health` 在 Redis 未通时恒 503，
+  不可用作探针）→ 跑脚本 → 记 PID 杀 backend + marker 兜底。各步专属参数：
+  network `--aerofleet.drone-port=14600`（指向链路代理）；rf 保持默认
+  drone-port 14550 + 默认 extra 14541-14543（sim 挂 14543 恰在扫描段内）；
+  vision-pixels `--aerofleet.vision.source=pixels
+  --aerofleet.sim-truth-base=http://127.0.0.1:18082
+  --aerofleet.drone-extra-ports=14544`（三参数缺一不可，脚本文件头有完整
+  说明）。注意 B 型脚本读的端口变量是 `AF_BACKEND_REST_PORT`（与 A 型的
+  `AF_BACKEND_PORT` 不同名，默认 8080，CI 统一覆盖为 18099）。
+- **断言聚合步骤（防观察模式信号丢失）**：continue-on-error 会把红压成绿，
+  每个 job 末尾统计两族断言格式（`[PASS]` 族：cv-eval/operations/rtk/
+  sensing/uspace；`PASS:` 族：spray/network/rf/pixels——正则 `(\[PASS\]|PASS:)`
+  两族通吃），汇总各脚本通过数，有失败时 `::warning::` 注解留痕；失败时
+  收集进程日志与 step 日志上传 artifact。脚本步骤本身 `tee` 留档 + pipefail
+  保退出码，聚合步骤从留档重新统计。
+- **观察模式理由与 B1 相同**：本机 Windows 全绿 ≠ Linux CI 连续复跑稳定
+  （sensing/network/rf/pixels 对时序敏感），若干次 run 全绿后删
+  continue-on-error 转硬门禁。
+
+### 验证
+
+- 9 个脚本 PowerShell 语法解析零错误（worktree 阶段独立核验，本条未改脚本行为）；
+- ci.yml YAML 语法校验通过（25 个 job，其余 job 结构未受影响）；
+- marker 拼写与脚本内 `-D<name>-e2e=true` 注入逐一比对一致（A 型 6 + B 型 3）；
+  A/B 两型端口变量名（`AF_BACKEND_PORT` / `AF_BACKEND_REST_PORT`）读回核对无混淆。
+
+### 计数
+
+**未变**：e2e 脚本不产生 surefire 报告，Java / 前端计数均不受影响。
 
 ---
 

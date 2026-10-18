@@ -32,14 +32,17 @@ param([switch]$SkipBuild)
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+# 跨平台公共库（B2 批次接 CI 时引入）：java 探测 / jar 路径 / 临时目录 / 按标记清残留
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
+$TempDir = Get-E2eTempDir   # Linux runner 上 $env:TEMP 常未设置，不能直接用
 $Fail = 0
 $Script:CleanupActions = @()
 $Script:StartedProcesses = @()
 
-# ---- 端口配置（参照 e2e-formation.ps1）----
-$BackendRestPort  = 8080
-$BackendDronePort = 14550
-$DroneSimPort     = 14551               # 单台 drone-sim 端口（喷洒场景只需 1 架）
+# ---- 端口配置（参照 e2e-formation.ps1；D2 参数化：REST/drone/sim 三端口均可经环境变量覆盖）----
+$BackendRestPort  = if ($env:AF_BACKEND_PORT)     { [int]$env:AF_BACKEND_PORT }     else { 18099 }
+$BackendDronePort = if ($env:AF_SPRAY_DRONE_PORT) { [int]$env:AF_SPRAY_DRONE_PORT } else { 14550 }
+$DroneSimPort     = if ($env:AF_SPRAY_SIM_PORT)   { [int]$env:AF_SPRAY_SIM_PORT }   else { 14551 }   # 单台 drone-sim 端口（喷洒场景只需 1 架）
 $DroneSysid       = 1
 
 # ---- 超时配置 ----
@@ -69,11 +72,9 @@ function Info($m) { Write-Host "   $m" -ForegroundColor DarkGray }
 # Java 版本自检（参照 e2e-formation.ps1）
 # =====================================================================
 function Assert-Java17 {
-    $javaExe = 'java'
-    if ($env:AF_JAVA -and (Test-Path $env:AF_JAVA)) { return $env:AF_JAVA }
-    if ($env:JAVA_HOME -and (Test-Path "$env:JAVA_HOME\bin\java.exe")) {
-        $javaExe = "$env:JAVA_HOME\bin\java.exe"
-    }
+    # java 探测走公共库 Get-E2eJava（跨平台：Linux 叫 java 不是 java.exe；
+    # AF_JAVA → JAVA_HOME → AF_JDK17_HOME → PATH），替换原先只认 java.exe 的内联探测
+    $javaExe = Get-E2eJava
     # 两个坑（formation/pixels 的同名函数各自防住了，本脚本原先都没防）：
     # 1) `java -version` 的输出走 stderr。脚本级 $ErrorActionPreference='Stop' 下，
     #    `2>&1` 会把 stderr 行提升成 terminating error（本机实测：JAVA_TOOL_OPTIONS
@@ -137,12 +138,12 @@ trap { Invoke-Cleanup; break }
 # 清理旧实验进程（参照 e2e-formation.ps1）
 # =====================================================================
 function Cleanup-OldProcesses {
-    Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.CommandLine -match 'drone-sim.*spray-e2e' -or
-            $_.CommandLine -match 'cloud-backend.*spray-e2e') {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    }
+    # B2-CI 批次改造：原实现用 Get-CimInstance Win32_Process 枚举（Windows-only，
+    # Linux 上该 cmdlet 不存在且被 SilentlyContinue 吞掉——清理静默失效，端口被占，
+    # 表现为莫名超时，与 e2e-signing 踩过的坑同源）。改为 e2e-common 的
+    # Stop-E2eStaleProcesses（Windows CIM / Linux /proc），按命令行留痕标记
+    # -Dspray-e2e=true 精确杀（下方脚本启动的 backend / drone-sim 均带该标记）。
+    $null = Stop-E2eStaleProcesses -Marker 'spray-e2e'
     Start-Sleep 1
 }
 
@@ -199,8 +200,9 @@ function Wait-DroneOnline($expectedSysid, $timeoutSec) {
 # ============================================================
 Step '前置检查（jar 存在、端口可用、Java>=17）'
 
-$backendJar  = Join-Path $Root 'cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
-$droneSimJar = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
+# jar 路径走 Get-E2eJar：反斜杠字面量在 Linux 上不是分隔符，Test-Path 恒 false
+$backendJar  = Get-E2eJar -Root $Root -Module 'cloud-backend' -Jar 'aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
+$droneSimJar = Get-E2eJar -Root $Root -Module 'drone-sim' -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 
 $backendOk  = Test-Path $backendJar
 $droneSimOk = Test-Path $droneSimJar
@@ -280,7 +282,7 @@ Step '1. 启动阶段：cloud-backend + drone-sim'
 $backendStartedByScript = $false
 if (-not $backendAlreadyRunning) {
     Info '启动 cloud-backend...'
-    $backendLog = Join-Path $env:TEMP "spray-backend.log"
+    $backendLog = Join-Path $TempDir "spray-backend.log"
     if (Test-Path $backendLog) { Remove-Item $backendLog -Force }
 
     $backendArgs = @(
@@ -301,7 +303,7 @@ if (-not $backendAlreadyRunning) {
     )
 
     $backend = Start-Process -FilePath $java -ArgumentList $backendArgs `
-        -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
+        -PassThru -RedirectStandardOutput $backendLog
     Register-Cleanup { Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue }
     Info "backend PID=$($backend.Id), log=$backendLog"
     $backendStartedByScript = $true
@@ -336,7 +338,7 @@ if ($backendAlreadyRunning) {
 
 if ($droneNeedsStart) {
     Info "启动 drone-sim（sysid=$DroneSysid, port=$DroneSimPort）..."
-    $droneLog = Join-Path $env:TEMP "spray-drone-$DroneSysid.log"
+    $droneLog = Join-Path $TempDir "spray-drone-$DroneSysid.log"
     if (Test-Path $droneLog) { Remove-Item $droneLog -Force }
 
     $droneArgs = @(
@@ -352,7 +354,7 @@ if ($droneNeedsStart) {
     )
 
     $drone = Start-Process -FilePath $java -ArgumentList $droneArgs `
-        -PassThru -WindowStyle Hidden -RedirectStandardOutput $droneLog
+        -PassThru -RedirectStandardOutput $droneLog
     Register-Cleanup { Stop-Process -Id $drone.Id -Force -ErrorAction SilentlyContinue }
     Info "drone-sim PID=$($drone.Id), sysid=$DroneSysid, port=$DroneSimPort"
     $droneStartedByScript = $true
