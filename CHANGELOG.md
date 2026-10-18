@@ -6651,3 +6651,93 @@ SCALED_PRESSURE3=143），`RADIO_STATUS(109)` 的 CRC_EXTRA 是 88 而官方为 
 - 450–467：M5–M9 应急组网消息
 - 468–476：M10–M13 集群智能消息
 - 477–479：4a 安防报警消息
+
+---
+
+## [Unreleased] — e2e harness 在 pwsh 上读不到错误响应体，于是 4xx 断言一直在对 `$null` 做（#110，2026-10-18）
+
+PR #107 唯一失败的那一项，是两行相邻的输出：
+
+```
+[PASS] OPEN 态重复开门 → 409（实际 409）      ← 状态码对
+[FAIL] 409 响应点名当前状态（）               ← 括号是空的
+```
+
+### 后端是清白的（实测，不是推断）
+
+直接打活后端拿响应：
+
+```json
+{"status":"error","result":"command door_open rejected: dock state=OFFLINE"}
+```
+
+409 的响应体**确实点名了当前状态**。CI 那次状态是 OPEN，消息会是
+`dock state=OPEN`，`-match 'OPEN'` 本该通过。
+
+### 根因：两代 PowerShell 的 Response 是不同类型
+
+我第一版的假设**恰好是反的** —— 我以为是 5.1 的 `GetResponseStream()` 坏了、
+`ErrorDetails.Message` 才是正解。在本机把两种读法都实测了一遍，结果相反：
+5.1 的 `GetResponseStream()` 读到 76 字节好好的，`ErrorDetails.Message` 才是空的。
+
+真正原因是类型不同：
+
+| PowerShell | `$_.Exception.Response` | 读法 |
+|---|---|---|
+| 5.1 | `HttpWebResponse` | 有 `GetResponseStream()` |
+| **7+**（Linux runner 的 `pwsh`） | `HttpResponseMessage` | **没有这个方法** |
+
+调用不存在的���法抛 `MethodNotFound`，被 ubiquitous 的 `catch {}` 吞掉，
+响应体变成 `$null`。于是**一个断言对着 `$null` 做，却以产品失败的形态呈现**。
+
+### 同一个契约被复制了 9 份
+
+`Try-Json` 在 e2e 脚本里有 **9 份 / 4 个变体**：
+
+- 1 份（dock）用 5.1 专有读法 —— 在 pwsh 上必然读不到，如上
+- **6 份根本没有读错误体的分支** —— 那些脚本里所有 4xx 响应体断言都在对 `$null` 做
+
+形态与 #109 的 `rtspUrl` 键名一模一样：**一份契约多处复制，各自漂移**。修法是
+收进 `e2e-common.ps1` —— 那个**本来就是为平台差异而建**的公共库。
+
+### 改法
+
+- `e2e-common.ps1` 新增 `Read-E2eErrorBody`（按方法名分派，两种 Response 都能读）
+  与 `Invoke-E2eJson`
+- `e2e-dock.ps1` 删掉私有副本，改调公共库
+- 新增 `e2e-common-selftest.ps1`：把两种对象形状直接喂给读取器。没有它，
+  pwsh-7 那条分支**在 5.1 主机上永远测不到** —— 7+ 读取器写错了本地也一直是绿的
+- 新增 CI job `e2e-common-selftest`，**且不带 `continue-on-error`**。本仓库已有多批
+  e2e 是"观察模式"，这一条若也那样，就等于没有任何东西在守 `e2e-common.ps1`
+  —— 而所有 e2e 脚本都依赖它
+
+### 自检立刻抓到一个真 bug
+
+新自检第一次跑：7+ 形状读不出。原因是读取器用
+`$resp.PSObject.Methods.Name -contains 'get_Content'` 分派 —— 这只在对象是
+**真实 .NET 类型**时成立（属性 getter 才叫 `get_*`）。Response 一旦被包装或替换
+就漏判，然后静默返回 `$null`。**同一类静默失败，只是下沉了一层。** 改为直接在
+`$resp.Content` 上找方法。6/6 通过。
+
+### 验证
+
+本地实跑 `scripts/e2e-dock.ps1` 端到端：
+
+```
+[PASS] 409 响应点名当前状态（command door_open rejected: dock state=OPEN）
+=== e2e-dock: ALL PASS ===
+```
+
+变异验证用了**两个判据**，因为两条分支在同一台主机上的可观测性不同：
+
+| 变异 | 判据 | 结果 |
+|---|---|---|
+| M1 5.1 分支停用 | dock e2e | ✅ 杀，且**逐字复现 CI 症状**：`[FAIL] 409 响应点名当前状态（）` |
+| M2 pwsh 7+ 分支停用 | 自检 | ✅ 杀：`[FAIL] 7+ 形状能读出响应体` |
+| M3 ErrorDetails 兜底移除 | 无 | **本机不可判定，明确说明而非冒充通过** —— 它只在两条类型分支都失败后才走到，而本机 5.1 上第一条必然成功 |
+
+### 明确没做
+
+另外 8 份 `Try-Json` 没动。其中 6 份读不到错误响应体，是真实的覆盖缺口，但
+批量改写在本机**无法验证**（多数需要 PostgreSQL / link-sim / SDK harness），
+我不盲改自己跑不了的代码。`Invoke-E2eJson` 已在公共库里就绪，供后续批次接入。

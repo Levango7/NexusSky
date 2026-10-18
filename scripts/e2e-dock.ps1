@@ -24,6 +24,14 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $Fail = 0
 $script:CleanupActions = @()
 
+# 公共库（含跨平台错误响应体读取器 Read-E2eErrorBody）。
+# 本脚本此前自带一份 Try-Json，用的是 PowerShell 5.1 专有的
+# `$_.Exception.Response.GetResponseStream()` —— pwsh（Linux runner）上
+# Response 是 HttpResponseMessage，没有该方法，调用抛 MethodNotFound 并被
+# catch {} 静默吞掉，于是 4xx 响应体恒为 $null，CI 上表现为
+# 「409 响应点名当前状态（）」括号为空。
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
+
 # ---- 端口配置（本机 8080 常被常驻容器占用，用环境变量覆盖）----
 $BackendPort = if ($env:AF_BACKEND_PORT) { [int]$env:AF_BACKEND_PORT } else { 18099 }
 $DronePort = 14544
@@ -52,24 +60,10 @@ function Stop-Proc($p) {
 
 function Try-Json($method, $uri, $body) {
     # 返回 @{ code; body }：4xx 也要能读到响应体做断言（Invoke-RestMethod 对非 2xx 抛异常）
-    try {
-        $req = @{ Method = $method; Uri = $uri; TimeoutSec = 15; ContentType = 'application/json' }
-        if ($body) { $req['Body'] = $body }
-        $r = Invoke-WebRequest @req -UseBasicParsing
-        $parsed = $null
-        try { $parsed = $r.Content | ConvertFrom-Json } catch {}
-        return @{ code = [int]$r.StatusCode; body = $parsed }
-    } catch {
-        $status = $null
-        try { $status = [int]$_.Exception.Response.StatusCode } catch {}
-        $text = $null
-        try {
-            $stream = $_.Exception.Response.GetResponseStream()
-            $reader = New-Object System.IO.StreamReader($stream)
-            $text = $reader.ReadToEnd() | ConvertFrom-Json
-        } catch {}
-        return @{ code = if ($status) { $status } else { 0 }; body = $text }
-    }
+    # 委托给公共库的实现 —— 错误响应体的读取跨 PowerShell 版本不同
+    # （5.1 是 GetResponseStream，7+ 是 HttpResponseMessage.Content），
+    # 单一实现见 e2e-common.ps1 的 Read-E2eErrorBody / Invoke-E2eJson。
+    Invoke-E2eJson -Method $method -Uri $uri -Body $body
 }
 
 try {
