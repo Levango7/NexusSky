@@ -19,6 +19,194 @@
 
 ---
 
+
+## [Unreleased] — 取流面板**从未真正播放过**：读的是后端不返回的键；诚实信号被前端静默吞掉（#109，2026-10-18）
+
+接着 #108 往下查剩下的"声明≠行为"。上一轮我以为剩余项只是"适配器还在拼一个
+看起来能用的 RTSP 地址"，量下来发现那只是表层 —— **下面这层更严重**。
+
+### 1. 取流面板读了一个后端从不返回的键
+
+```
+后端 GET /devices/{id}/stream 返回：  { deviceId, channel, rtspUrl, ... }
+面板两处各读一次：                    data.url / stream.url     ← 恒为 undefined
+```
+
+后果不是"某个功能不好用"，而是**整条取流路径从未执行过**：
+
+- 挂载路径：`if (!url) return` 每次提前返回
+- 渲染路径：`isImg` / `isHls` / `isRtsp` 三个分支永远全假 ⇒ 格子一直空着
+
+这是同类缺陷的**第三个实例**（#104 的 `data.events`、#105 的 `deviceId`、
+这次的 `rtspUrl`）。三处根因相同：**同一份契约在前后端各写一遍，改了一边忘了另一边。**
+
+**为什么一直没被发现**：`panelSmoke.test.jsx` 把 `SurveillancePanel` 整个跳过，
+理由写的是"依赖 window.Hls 与真实 video 播放，jsdom 无法播放"。但这个缺陷
+**与播放无关** —— 读错键名是纯数据分支，jsdom 完全测得着。**跳过理由掩盖了可测的部分。**
+
+### 2. 后端"不可播"的诚实声明被前端静默吞掉
+
+`Gb28181Adapter` 早就确立了诚实约定，日志里写得很清楚：
+
+```java
+log.warn("... INVITE constructed ({} bytes), but RTP/PS media plane is "
+ + "production-stage (no fake playable URL returned)");
+return "gb28181-invite://" + id.value() + "?channel=" + channel;
+```
+
+`Gb28181ShapeTest` 还有一条守卫：`assertThat(url).doesNotStartWith("rtsp://")`，
+注释是"绝不假扮可播的 rtsp://"。**约定成文、有测试守卫。**
+
+而前端的 `guessProtocol` 对认不出的 scheme **一律返回 `'hls'`** —— 于是
+`gb28181-invite://` 被当成 HLS 去播，用者只看到一个语焉不详的播放失败。
+**"我不知道这是什么协议"被讲成了"它是 HLS"。**
+
+### 3. 顺带修掉 #108 放大出来的一个真实功能损失
+
+`OnvifClient.getDeviceCapabilities` 写的是"PTZ / Imaging 仅在 `port == 80` 时有"
+—— 端口号和云台能力之间没有任何真实关联。能力门控接通前它只影响空地协同；
+#108 之后它会**拦真实的用户操作**：注册在非 80 端口的真摄像头被判成不支持云台。
+已改为统一声明标准能力集，并把"没有向设备确认"记在别处。大华此前独缺
+`Imaging`，一并对齐 —— 同样没有任何测试会发现。
+
+### 4. 取流地址的来源如实自述（新增 `StreamUrlOrigin`）
+
+这里我上一轮的判断是**不完整**的。`rtsp://user:pass@ip:554/Streaming/Channels/1`
+**确实是海康真实的 RTSP 格式**，对真摄像头**可能真的能播** —— 所以不能照抄
+GB28181 改成"不可用"（那是错杀）。三类地址性质不同：
+
+| 来源 | 可播性 | 设备是否校验过 |
+|---|---|---|
+| `VENDOR_STANDARD_FORMAT`（三个私有协议 + ONVIF） | 可能可播 | **否** |
+| `ONVIF_GETSTREAM_URI`（接入真实 SOAP 后） | 可播 | 是 |
+| `DESCRIPTIVE_ONLY`（GB28181 媒体面未接入） | **不可播** | 否 |
+
+`/stream` 响应因此带上 `streamUrlOrigin` / `playable` / `deviceVerified` ——
+把"也许能用"讲成"能用"是失真，讲成"不能用"是错杀，两个都要说。前端对
+`playable=false` 与认不出的协议都**如实说明**而不是挂播放器；对
+`deviceVerified=false` 的地址额外标注"未向设备校验"。
+
+### 5. 键名解析收敛到单一函数
+
+修的时候先在两处各写了一遍 `data.rtspUrl || data.url` —— 结果三个变异存活，
+因为**契约知识被复制成两份，可以各自漂移**。收敛成 `resolveStreamUrl()` 一处解析后
+重验，7/7 全杀。这正是本缺陷的成因，不该在修复它的时候再犯一次。
+
+### 变异验证
+
+后端 7/7、前端 7/7。其中两处是靠补测才杀得掉的：
+
+- **M7（大华去掉 `Imaging`）第一轮存活** —— 没有任何测试钉住三个私有适配器的
+  能力集。补了"三者声明一致"与"ONVIF 能力与端口无关"两条后杀掉。
+- **前端 FM1/FM3/FM7 第一轮存活**，根因就是上面第 5 点（解析点重复）。
+
+### 口径
+
+后端 4892 → **4897**，前端 363 → **368**。按门禁报出的 24 处 `文件:行号` 同步。
+
+### 仍然明确没做
+
+三个私有协议适配器的**真实媒体面**（HCNetSDK / DHSDK / UNIVIEW SDK / ONVIF
+GetStreamUri）仍然没有 —— 那是对着真实摄像头硬件做协议对接，不在本次范围。
+现在它们的地址被明确标注为"按厂商规范推导、未向设备校验"，至少不再假装是实测值。
+
+---
+
+## [Unreleased] — 设备能力声明此前**基本没人读**：门控缺失、词汇表不统一、能力模型是死类（#108，2026-10-18）
+
+上一轮讨论"要不要给本机摄像头加适配器"时去量代价，发现的能力机制问题比那更值钱。
+摄像头只是缺一个源；**能力声明本身是空的**。
+
+### 三个实测出来的问题
+
+**1. 门控基本不存在，而且唯一存在的那处和不管的那些互相矛盾。**
+
+严格数过（排除定义 / equals / hashCode / toString）：
+
+```
+把 ptzSupported 等字段当条件读：0 处
+前端引用这些字段：            0 处
+前端消费 capabilities：       0 处
+```
+
+活的那一处是 `AirGroundCoordinationService` 里的 `contains("PTZ")`。也就是说
+**同一台设备，空地协同服务认为它不能转，`SurveillanceController` 的 PTZ 端点却
+照单全收**。端点从不看能力。
+
+**2. 各适配器声明的词汇表并不一致**，直接按字面名写门控会制造假阴性：
+
+| 适配器 | Device | Media | Events | PTZ | Imaging | STREAM | RECORD | ALARM |
+|---|---|---|---|---|---|---|---|---|
+| 海康 | ✓ | ✓ | ✓ | ✓ | ✓ | | | |
+| 大华 | ✓ | ✓ | ✓ | ✓ | **✗** | | | |
+| 宇视 | ✓ | ✓ | ✓ | ✓ | ✓ | | | |
+| ONVIF(port80) | ✓ | ✓ | ✓ | ✓ | ✓ | | | |
+| ONVIF(port≠80) | ✓ | ✓ | ✓ | **✗** | **✗** | | | |
+| GB28181 相机 | ✗ | **✗** | ✗ | ✓ | ✗ | **✓** | ✓ | |
+| GB28181 报警设备 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+
+GB28181 写的是 `STREAM` 而不是 `Media` —— 按 `Media` 门控会把它的取流误判成
+不支持。（另外 ONVIF 的能力取决于端口号、大华比海康少 `Imaging`，看着像随手写的，
+本轮不改，只是不再让它们影响行为。）
+
+**3. `VendorCapabilities` 是死类** —— 208 行，只有它自己内部 `new`，
+全仓没有任何字段或返回值用它。真正在用的是 `Set<String>`。这是
+`SurveillanceEvent` / `AlarmEvent` 那组重复模型的又一次重演。
+
+### 改法
+
+- **新增 `DeviceCapability`**：唯一口径，负责归一（`STREAM→MEDIA`、
+  `RECORD→RECORDING`、大小写/空白无关，未知名字保留而不静默丢弃）。
+- **PTZ / 取流端点真的按能力门控**：设备声明了能力集但缺该项时，返回 400，
+  并在响应里回带它声明了什么 —— 否则前端只能显示一句无信息量的失败。
+- **设备视图输出三态能力位** `ptzSupport` / `mediaSupport` / `eventsSupport`。
+- **前端据此禁用 PTZ 按钮并说明原因**，不再让运维点了之后收一个 400。
+- **删掉死类 `VendorCapabilities`**。
+
+### 为什么是三态而不是布尔
+
+「设备没声明任何能力」是**未知**，不是不支持。两种策略各有正当场景，
+所以**由调用点显式声明**，而不是把某个默认值偷偷固化进判定：
+
+| 场景 | 口径 | 理由 |
+|---|---|---|
+| 运维手动按 PTZ（控制器端点） | 不明确不支持即放行 | 未声明就拒绝，会让早期设备平白失去功能 —— 那是**功能减法** |
+| 自动挑选最近的 PTZ 设备（空地协同） | 必须明确声明才认 | 把未知当"可以"，可能派一台根本不能转的摄像头去执行任务 |
+
+两条用例把这个差异钉死（`policiesDifferOnUnknownByDesign` /
+`manualAndAutomaticPoliciesDifferOnUndeclared`），防止有人后来把它们"统一"成一个。
+
+三态在前端也是三态：**未声明传 `null` 而不是 `false`** —— 压成 false 会让前端
+灰掉其实能用的设备，压成 true 则会放行明确不能转的设备。两种失真都是新的
+"声明≠行为"。
+
+### 变异验证
+
+后端 9/9、前端 5/5。过程中两件事记在这里：
+
+- **M9 第一版存活**：我最初那条"未声明设备不会被选中"只断言了返回值不是
+  `NO_DEVICE`，而两个口径下返回值都是 `TRACKING` —— **我自己的假绿测试**。
+  改成用 mock 的 `OnvifClient` 捕获 IP，断言**哪一台**拿到了 PTZ 指令。
+- **FM3 被判定为退化变异并移除**：`ptzSupport === false` 是唯一消费者，
+  所以 `null` 和 `true` 渲染完全相同，`?? true` 行为等价 —— 它既不可能让任何
+  用例变红，也不是有效变异。记为"存活"是对测试的误报，留着它是对变异的撒谎。
+- 前端 FM6 第一版把应用**渲染搞崩**（`ReferenceError`）导致 14 条全红，
+  那不是有效击杀；改成真正的"取第一台设备的能力"并把渲染崩溃纳入守卫。
+
+### 口径
+
+后端 4872 → **4892**，前端 359 → **363**。按门禁报出的 24 处 `文件:行号` 同步。
+
+### 明确没做
+
+三个私有协议适配器的 `getStreamUrl` **仍在拼接一个看起来能用的 RTSP 地址**
+（`rtsp://user:pass@ip:554/...`，旁边挂着 TODO）。本轮没动它：要改就得决定
+"返回占位符"还是"返回 null"，那是产品决策，不该顺手带过。能力机制接通之后，
+至少"设备明确不支持取流"这条路已经是诚实的了。
+
+---
+
+
 ## [Unreleased] — e2e 救活第二批：regulator/dock/route-templates/defect 以观察模式接进 CI（2026-10-17）
 
 > 与第一批（formation / mesh / rid，`e2e-core-scripts` job）同一条脉络。
@@ -76,6 +264,7 @@ Windows 上有效，Linux 上是 `Get-CimInstance`（静默失效，见上表）
 ### 计数
 
 **未变**：e2e 脚本不产生 surefire 报告，Java / 前端计数均不受影响。
+
 
 ---
 
@@ -6525,3 +6714,93 @@ SCALED_PRESSURE3=143），`RADIO_STATUS(109)` 的 CRC_EXTRA 是 88 而官方为 
 - 450–467：M5–M9 应急组网消息
 - 468–476：M10–M13 集群智能消息
 - 477–479：4a 安防报警消息
+
+---
+
+## [Unreleased] — e2e harness 在 pwsh 上读不到错误响应体，于是 4xx 断言一直在对 `$null` 做（#110，2026-10-18）
+
+PR #107 唯一失败的那一项，是两行相邻的输出：
+
+```
+[PASS] OPEN 态重复开门 → 409（实际 409）      ← 状态码对
+[FAIL] 409 响应点名当前状态（）               ← 括号是空的
+```
+
+### 后端是清白的（实测，不是推断）
+
+直接打活后端拿响应：
+
+```json
+{"status":"error","result":"command door_open rejected: dock state=OFFLINE"}
+```
+
+409 的响应体**确实点名了当前状态**。CI 那次状态是 OPEN，消息会是
+`dock state=OPEN`，`-match 'OPEN'` 本该通过。
+
+### 根因：两代 PowerShell 的 Response 是不同类型
+
+我第一版的假设**恰好是反的** —— 我以为是 5.1 的 `GetResponseStream()` 坏了、
+`ErrorDetails.Message` 才是正解。在本机把两种读法都实测了一遍，结果相反：
+5.1 的 `GetResponseStream()` 读到 76 字节好好的，`ErrorDetails.Message` 才是空的。
+
+真正原因是类型不同：
+
+| PowerShell | `$_.Exception.Response` | 读法 |
+|---|---|---|
+| 5.1 | `HttpWebResponse` | 有 `GetResponseStream()` |
+| **7+**（Linux runner 的 `pwsh`） | `HttpResponseMessage` | **没有这个方法** |
+
+调用不存在的方法抛 `MethodNotFound`，被 ubiquitous 的 `catch {}` 吞掉，
+响应体变成 `$null`。于是**一个断言对着 `$null` 做，却以产品失败的形态呈现**。
+
+### 同一个契约被复制了 9 份
+
+`Try-Json` 在 e2e 脚本里有 **9 份 / 4 个变体**：
+
+- 1 份（dock）用 5.1 专有读法 —— 在 pwsh 上必然读不到，如上
+- **6 份根本没有读错误体的分支** —— 那些脚本里所有 4xx 响应体断言都在对 `$null` 做
+
+形态与 #109 的 `rtspUrl` 键名一模一样：**一份契约多处复制，各自漂移**。修法是
+收进 `e2e-common.ps1` —— 那个**本来就是为平台差异而建**的公共库。
+
+### 改法
+
+- `e2e-common.ps1` 新增 `Read-E2eErrorBody`（按方法名分派，两种 Response 都能读）
+  与 `Invoke-E2eJson`
+- `e2e-dock.ps1` 删掉私有副本，改调公共库
+- 新增 `e2e-common-selftest.ps1`：把两种对象形状直接喂给读取器。没有它，
+  pwsh-7 那条分支**在 5.1 主机上永远测不到** —— 7+ 读取器写错了本地也一直是绿的
+- 新增 CI job `e2e-common-selftest`，**且不带 `continue-on-error`**。本仓库已有多批
+  e2e 是"观察模式"，这一条若也那样，就等于没有任何东西在守 `e2e-common.ps1`
+  —— 而所有 e2e 脚本都依赖它
+
+### 自检立刻抓到一个真 bug
+
+新自检第一次跑：7+ 形状读不出。原因是读取器用
+`$resp.PSObject.Methods.Name -contains 'get_Content'` 分派 —— 这只在对象是
+**真实 .NET 类型**时成立（属性 getter 才叫 `get_*`）。Response 一旦被包装或替换
+就漏判，然后静默返回 `$null`。**同一类静默失败，只是下沉了一层。** 改为直接在
+`$resp.Content` 上找方法。6/6 通过。
+
+### 验证
+
+本地实跑 `scripts/e2e-dock.ps1` 端到端：
+
+```
+[PASS] 409 响应点名当前状态（command door_open rejected: dock state=OPEN）
+=== e2e-dock: ALL PASS ===
+```
+
+变异验证用了**两个判据**，因为两条分支在同一台主机上的可观测性不同：
+
+| 变异 | 判据 | 结果 |
+|---|---|---|
+| M1 5.1 分支停用 | dock e2e | ✅ 杀，且**逐字复现 CI 症状**：`[FAIL] 409 响应点名当前状态（）` |
+| M2 pwsh 7+ 分支停用 | 自检 | ✅ 杀：`[FAIL] 7+ 形状能读出响应体` |
+| M3 ErrorDetails 兜底移除 | 无 | **本机不可判定，明确说明而非冒充通过** —— 它只在两条类型分支都失败后才走到，而本机 5.1 上第一条必然成功 |
+
+### 明确没做
+
+另外 8 份 `Try-Json` 没动。其中 6 份读不到错误响应体，是真实的覆盖缺口，但
+批量改写在本机**无法验证**（多数需要 PostgreSQL / link-sim / SDK harness），
+我不盲改自己跑不了的代码。`Invoke-E2eJson` 已在公共库里就绪，供后续批次接入。

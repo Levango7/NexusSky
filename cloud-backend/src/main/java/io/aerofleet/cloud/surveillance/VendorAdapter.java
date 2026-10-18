@@ -80,6 +80,21 @@ public interface VendorAdapter {
     void unsubscribeEvents(String handle);
 
     /**
+     * 本适配器返回的流地址是**怎么来的**。
+     *
+     * <p>默认 {@link StreamUrlOrigin#VENDOR_STANDARD_FORMAT}：即"按厂商公开规范
+     * 推导、未向设备校验"。这是当前四个适配器的真实状态，也恰好是最需要被如实
+     * 标注的那一种 —— 格式可能对真设备正确，但谁也没问过设备。
+     *
+     * <p>媒体面未实现、只能给出描述性标识的适配器必须覆写为
+     * {@link StreamUrlOrigin#DESCRIPTIVE_ONLY}，否则前端会拿一个必然连不上的
+     * 地址当可播流去播。
+     */
+    default StreamUrlOrigin streamUrlOrigin() {
+        return StreamUrlOrigin.VENDOR_STANDARD_FORMAT;
+    }
+
+    /**
      * 获取设备能力集合。
      * <p>
      * 返回设备支持的服务类型，如 "Device"、"Media"、"PTZ"、"Events"、"Imaging" 等。

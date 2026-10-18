@@ -5,6 +5,7 @@ import io.aerofleet.cloud.alarm.AlarmEventStore;
 import io.aerofleet.cloud.alarm.AlarmLinkageEngine;
 
 import io.aerofleet.cloud.api.service.EmergencyOrchService;
+import io.aerofleet.cloud.surveillance.DeviceCapability;
 import io.aerofleet.cloud.surveillance.OnvifClient;
 import io.aerofleet.cloud.surveillance.RapidDeployService;
 import io.aerofleet.cloud.surveillance.SurveillanceDevice;
@@ -843,7 +844,13 @@ public class AirGroundCoordinationService {
             if (device.status != SurveillanceDevice.Status.ONLINE) {
                 continue;
             }
-            if (!device.getCapabilities().contains("PTZ")) {
+            // 自动选设备 ⇒ 保守：必须**明确声明**支持 PTZ 才算候选。
+            // 走 DeviceCapability 共享口径而不是字面量 contains("PTZ")：
+            // GB28181 相机声明的是 PTZ（同名，OK），但各适配器词汇表不一致
+            // （见 DeviceCapability 类注释），字面量匹配迟早漏掉某类设备。
+            // 注意与 SurveillanceController 的 PTZ 端点语义**故意不同**：
+            // 那边是运维手动操作，未声明即放行；这边是自动挑选，未声明即排除。
+            if (!DeviceCapability.explicitlySupported(device.getCapabilities(), DeviceCapability.PTZ)) {
                 continue;
             }
             // 安防设备位置未知时跳过（无经纬度信息）

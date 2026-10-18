@@ -951,6 +951,7 @@ jobs:
             -exec cp {} signing-logs/ \; 2>/dev/null || true
           ls -la signing-logs/ || echo "(no logs captured)"
 
+
   # e2e 救活计划第二批（2026-10-17）：regulator / dock / route-templates / defect
   # 四个脚本接进门禁（观察模式）。
   #
@@ -1053,6 +1054,27 @@ jobs:
             \( -name 'regulator-e2e-*.log' -o -name 'af-dock-*.log' -o -name 'af-route-*.log' -o -name 'af-defect-*.log' \) \
             -exec cp {} b1-e2e-logs/ \; 2>/dev/null || true
           ls -la b1-e2e-logs || echo "(no logs captured)"
+
+  # e2e 公共库自检。**硬门禁**（没有 continue-on-error）——
+  # 它不跑任何被测系统，只花几秒换掉一整类"跑了但不算数"。
+  e2e-common-selftest:
+    name: E2E common library self-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # 为什么在 Linux runner 上跑：Read-E2eErrorBody 的两条分支分别对应
+      # PowerShell 5.1 的 HttpWebResponse 与 7+ 的 HttpResponseMessage。
+      # 本机只有 5.1 时 7+ 那条**永远测不到**，而 Linux runner 跑的正是 pwsh。
+      # 自检把两种对象形状都直接喂给读取器，因此在这里能同时验两条。
+      #
+      # 不加 continue-on-error 的理由：本仓库已有多批 e2e 是"观察模式"
+      # （continue-on-error），若这一条也那样，就等于没有任何东西在守
+      # e2e-common.ps1 —— 而各 e2e 脚本都依赖它。
+      - name: e2e-common library self-test
+        shell: pwsh
+        run: ./scripts/e2e-common-selftest.ps1
+
 
   security-scan:
     name: Security Scan

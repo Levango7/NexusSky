@@ -17,6 +17,10 @@ flight-logs-retention-test/
 # 上面的 /data/ 是根锚定的，盖不到 cloud-backend/data/，所以按扩展名再兜一层。
 *.mv.db
 *.trace.db
+# 同上，但 lock.db 不是 .db 扩展名收不住——它是 H2 写的文件锁，内容形如
+# "#FileLock..<时间戳>..server=<ip>:<端口>.."，**每次启动都会变**，入库即制造
+# 永久脏工作区（曾在一次 merge 里被带进主干）。
+*.lock.db
 # maven-shade-plugin 每次 package 都会重写，属构建产物而非源
 dependency-reduced-pom.xml
 __pycache__/

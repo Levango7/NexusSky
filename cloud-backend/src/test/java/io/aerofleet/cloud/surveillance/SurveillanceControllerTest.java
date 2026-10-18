@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -638,5 +639,187 @@ class SurveillanceControllerTest {
         mockMvc.perform(get("/api/v1/surveillance/events")
                         .param("size", "1001"))
                 .andExpect(status().isBadRequest());
+    }
+
+    // ===== #107 能力门控：声明了能力集但缺该项时，端点必须明确拒绝 =====
+
+    /** 注册一台设备并覆盖它的能力声明（直接测门控本身，不测适配器）。 */
+    private void registerWithCaps(String id, String vendor, Set<String> caps) throws Exception {
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody(id, vendor))))
+                .andExpect(status().isOk());
+        registry.getDevice(id).setCapabilities(caps);
+    }
+
+    /**
+     * PTZ 门控。此前该端点<b>完全不看能力</b>：一台只声明 ALARM 的设备照样能
+     * 收 PTZ 指令，而 AirGroundCoordinationService 同时因为缺 PTZ 跳过它 ——
+     * 同一台设备，两处结论相反。
+     */
+    @Test
+    @DisplayName("PTZ：设备明确声明能力集但缺 PTZ 时返回 400（并说明缺哪项）")
+    void ptzControl_deviceWithoutPtzCapability_returns400() throws Exception {
+        registerWithCaps("cam-alarm", "HIKVISION", Set.of("ALARM", "DEVICE"));
+
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-alarm/ptz")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("cmd", "up"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(
+                        org.hamcrest.Matchers.containsString("does not support capability PTZ")))
+                .andExpect(jsonPath("$.capability").value("PTZ"))
+                .andExpect(jsonPath("$.deviceId").value("cam-alarm"))
+                // 必须回带它声明了什么，否则前端只能显示一句无信息量的失败
+                .andExpect(jsonPath("$.declared").isArray())
+                .andExpect(jsonPath("$.declared").value(org.hamcrest.Matchers.hasItem("ALARM")));
+    }
+
+    @Test
+    @DisplayName("取流：设备明确声明能力集但缺 MEDIA 时返回 400")
+    void getStreamUrl_deviceWithoutMediaCapability_returns400() throws Exception {
+        registerWithCaps("cam-alarm2", "HIKVISION", Set.of("DEVICE", "ALARM"));
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-alarm2/stream"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.capability").value("MEDIA"));
+    }
+
+    /**
+     * 未声明能力 ≠ 不支持。这条钉住「不明确不支持即放行」的口径：
+     * 早期注册、没写能力的设备若被拒，就是功能减法而不是诚实。
+     */
+    @Test
+    @DisplayName("能力未声明时放行（未知不等于不支持），PTZ 与取流都不拦")
+    void undeclaredCapabilities_doNotBlock() throws Exception {
+        registerWithCaps("cam-unknown", "HIKVISION", Set.of());
+
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-unknown/ptz")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("cmd", "left"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-unknown/stream"))
+                .andExpect(status().isOk());
+    }
+
+    /**
+     * GB28181 相机声明的是 {@code STREAM} 而不是 {@code MEDIA}。
+     * 若门控按字面名匹配，它的取流会被误判成「不支持」—— 那正是本类
+     * 要消灭的假阴性。
+     */
+    @Test
+    @DisplayName("GB28181 的 STREAM 别名能通过 MEDIA 门控（别名折叠生效）")
+    void getStreamUrl_gb28181StreamAliasPassesMediaGate() throws Exception {
+        String gbId = "34020000001321320001";
+        registerWithCaps(gbId, "GB28181", Set.of("PTZ", "STREAM", "RECORD"));
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/stream"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("GB28181 报警设备只有 ALARM，取流被明确拒绝")
+    void getStreamUrl_gb28181AlarmDevice_rejected() throws Exception {
+        String gbId = "34020000001321320099";
+        registerWithCaps(gbId, "GB28181", Set.of("ALARM"));
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/stream"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.capability").value("MEDIA"));
+    }
+
+    /** 设备视图必须把三态能力位交给前端，否则前端无从禁用按钮。 */
+    @Test
+    @DisplayName("设备视图暴露归一后的能力与三态能力位")
+    void deviceView_exposesNormalizedCapabilitiesAndTriStateFlags() throws Exception {
+        registerWithCaps("cam-mixed", "HIKVISION", Set.of("PTZ", "STREAM", "Device"));
+        registerWithCaps("cam-blank", "HIKVISION", Set.of());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-mixed"))
+                .andExpect(status().isOk())
+                // STREAM 已折叠成 MEDIA，Device 已大写成 DEVICE
+                .andExpect(jsonPath("$.capabilities").value(org.hamcrest.Matchers.hasItem("MEDIA")))
+                .andExpect(jsonPath("$.capabilities").value(org.hamcrest.Matchers.hasItem("DEVICE")))
+                .andExpect(jsonPath("$.capabilities").value(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("STREAM"))))
+                // 归一前的原样保留，便于排查
+                .andExpect(jsonPath("$.rawCapabilities").value(
+                        org.hamcrest.Matchers.hasItem("STREAM")))
+                .andExpect(jsonPath("$.ptzSupport").value(true))
+                .andExpect(jsonPath("$.mediaSupport").value(true))
+                // 没声明 Events ⇒ 明确不支持 ⇒ false
+                .andExpect(jsonPath("$.eventsSupport").value(false));
+
+        // 未声明 ⇒ null（不是 false：压成 false 会让前端灰掉其实能用的设备）
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-blank"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ptzSupport").doesNotExist())
+                .andExpect(jsonPath("$.mediaSupport").doesNotExist());
+    }
+
+    // ===== #109 流地址来源必须自述 =====
+
+    /**
+     * 私有协议适配器按厂商公开格式推导 {@code rtsp://}。这个格式对真实设备
+     * <b>可能正确</b>，所以不能改成"不可用"（那是错杀）；但代码从未向设备确认过，
+     * 所以也<b>不能只给一个 rtsp 地址就完事</b> —— 那等于把"也许能用"讲成了
+     * "能用"。响应必须说清来源与是否经设备校验。
+     */
+    @Test
+    @DisplayName("私有协议设备：rtsp 地址按厂商规范推导，playable=true 但 deviceVerified=false")
+    void streamUrl_vendorStandardFormat_isPlayableButUnverified() throws Exception {
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody("cam-hik", "HIKVISION"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-hik/stream"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rtspUrl").value(
+                        org.hamcrest.Matchers.startsWith("rtsp://")))
+                .andExpect(jsonPath("$.streamUrlOrigin").value("VENDOR_STANDARD_FORMAT"))
+                .andExpect(jsonPath("$.playable").value(true))
+                // 关键：从来没有向设备取过
+                .andExpect(jsonPath("$.deviceVerified").value(false));
+    }
+
+    /**
+     * GB28181 媒体面未实现，只能给描述性标识。它必须明确标记为不可播 ——
+     * 否则前端会拿一个必然连不上的地址去挂播放器。
+     */
+    @Test
+    @DisplayName("GB28181：返回描述性标识且 playable=false")
+    void streamUrl_gb28181_isDescriptiveOnlyAndNotPlayable() throws Exception {
+        String gbId = "34020000001321320001";
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody(gbId, "GB28181"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/stream"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rtspUrl").value(
+                        org.hamcrest.Matchers.startsWith("gb28181-invite://")))
+                // 已有守卫要求它绝不假扮可播的 rtsp://（Gb28181ShapeTest），
+                // 这里再加一条：REST 契约本身也必须说清它不可播
+                .andExpect(jsonPath("$.streamUrlOrigin").value("DESCRIPTIVE_ONLY"))
+                .andExpect(jsonPath("$.playable").value(false))
+                .andExpect(jsonPath("$.deviceVerified").value(false));
+    }
+
+    /** 凭据仍要脱敏，且脱敏不能破坏来源字段。 */
+    @Test
+    @DisplayName("来源字段与凭据脱敏互不影响")
+    void streamUrl_originSurvivesCredentialMasking() throws Exception {
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody("cam-hik2", "HIKVISION"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-hik2/stream"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.streamUrlOrigin").value("VENDOR_STANDARD_FORMAT"))
+                .andExpect(jsonPath("$.playable").value(true));
     }
 }

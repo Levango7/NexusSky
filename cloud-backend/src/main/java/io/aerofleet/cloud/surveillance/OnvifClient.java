@@ -91,15 +91,24 @@ public class OnvifClient {
     public Set<String> getDeviceCapabilities(String ip, int port, String user, String pass) {
         validateConnectionArgs(ip, port, user, pass);
         log.info("GetCapabilities {}:{} (simulated)", ip, port);
-        // 模拟实现：所有设备都支持 Device + Media + Events，PTZ 仅在端口非 80 时缺失
+        // 模拟实现：统一返回标准能力集合。
+        //
+        // 此前这里写的是"PTZ / Imaging 仅在 port==80 时才有"—— 端口号和云台能力
+        // 之间没有任何真实关联，那是随手写的开关。但它有实际后果：能力位现在真的会
+        // 门控操作（见 SurveillanceController 的 PTZ / 取流端点），于是**注册在
+        // 非 80 端口的真实摄像头会被判成"不支持云台"并拒绝操作** —— 一个编造的
+        // 规则变成了真实的功能损失。
+        //
+        // 正确的做法是：模拟实现就声明它正在模拟的那套能力（PTZ 控制确实有模拟
+        // 路径），把"没有向设备确认"这件事记在别处（流地址那边已经用
+        // StreamUrlOrigin 如实标注了 deviceVerified=false），而不是让一个假的
+        // 否定项去拦真实用户操作。
         Set<String> caps = new LinkedHashSet<>();
         caps.add("Device");
         caps.add("Media");
         caps.add("Events");
-        if (port == DEFAULT_PORT) {
-            caps.add("PTZ");
-            caps.add("Imaging");
-        }
+        caps.add("PTZ");
+        caps.add("Imaging");
         return Collections.unmodifiableSet(caps);
     }
 

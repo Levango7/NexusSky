@@ -283,3 +283,77 @@ describe('#104/#106 survEvents：读 items 键；#106 起按选中设备过滤�
     expect(screen.queryByText(/尚未实现全局安防事件存储/)).toBeNull()
   })
 })
+
+describe('#107 能力门控：前端按后端的能力位禁用 PTZ', () => {
+  const DEV = (over = {}) => ({
+    id: 'cam-ptz',
+    name: 'PTZ 测试机',
+    vendor: 'HIKVISION',
+    online: true,
+    capabilities: ['DEVICE', 'MEDIA', 'PTZ'],
+    ptzSupport: true,
+    mediaSupport: true,
+    eventsSupport: true,
+    ...over,
+  })
+
+  it('设备明确声明不支持 PTZ 时，按钮禁用并说明原因', async () => {
+    listSurveillanceDevices.mockResolvedValue([
+      DEV({ ptzSupport: false, capabilities: ['DEVICE', 'ALARM'], eventsSupport: false }),
+    ])
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText(/没有 PTZ/)).toBeTruthy())
+    // 说明里要带上它声明了什么，否则等于没解释
+    expect(screen.getByText(/没有 PTZ/).textContent).toMatch(/ALARM/)
+    // 方向键必须是禁用的
+    const up = screen.getAllByTitle('设备不支持云台控制')[0]
+    expect(up.disabled).toBe(true)
+  })
+
+  /**
+   * 未声明（ptzSupport 为 null/undefined）是**未知**不是不支持 ——
+   * 与后端口径一致。把未知当不支持会让大量早期设备平白失去 PTZ，
+   * 那是功能减法而不是诚实。
+   */
+  it('能力未声明（null）时按钮保持可用 —— 未知 ≠ 不支持', async () => {
+    listSurveillanceDevices.mockResolvedValue([
+      DEV({ ptzSupport: null, capabilities: [], mediaSupport: null }),
+    ])
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText(/PTZ · /)).toBeTruthy())
+    expect(screen.queryByText(/没有 PTZ/)).toBeNull()
+    // 不该出现任何 disabled 的 PTZ 按钮
+    const up = screen.getByTitle('上')
+    expect(up.disabled).toBe(false)
+  })
+
+  it('明确支持 PTZ 时按钮可用，且没有「不支持」的提示', async () => {
+    listSurveillanceDevices.mockResolvedValue([DEV()])
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText(/PTZ · /)).toBeTruthy())
+    expect(screen.queryByText(/没有 PTZ/)).toBeNull()
+    expect(screen.getByTitle('上').disabled).toBe(false)
+  })
+
+  /** 切换设备后能力位必须跟着换，不能沿用上一台。 */
+  it('切到不支持 PTZ 的设备后按钮转为禁用', async () => {
+    listSurveillanceDevices.mockResolvedValue([
+      DEV(),
+      DEV({
+        id: 'cam-alarm',
+        name: '报警设备',
+        ptzSupport: false,
+        capabilities: ['ALARM'],
+      }),
+    ])
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByTitle('上').disabled).toBe(false))
+    fireEvent.click(screen.getAllByText(/cam-alarm|报警设备/)[0])
+    await waitFor(() => expect(screen.getByText(/没有 PTZ/)).toBeTruthy())
+    expect(screen.getAllByTitle('设备不支持云台控制')[0].disabled).toBe(true)
+  })
+})

@@ -714,6 +714,15 @@ export default function UnifiedCommandPanel() {
     ? (selectedSurvDevice && (selectedSurvDevice.name || selectedSurvDevice.id)) || selectedSurvDeviceId
     : null
 
+  // #107：选中设备的能力三态。ptzSupport === false 表示设备**明确声明**不支持，
+  // 这时才禁用；undefined/null 表示未声明（未知），保持可用 —— 与后端
+  // SurveillanceController 的「不明确不支持即放行」口径一致。
+  const ptzSupport = selectedSurvDevice ? selectedSurvDevice.ptzSupport : undefined
+  // 声明的能力（已归一）拼成可读文本，用于"为什么按钮不可用"的说明
+  const declaredCapsText = Array.isArray(selectedSurvDevice?.capabilities)
+    ? selectedSurvDevice.capabilities.join(' / ')
+    : ''
+
   // Mesh 节点列表
   const meshNodes = useMemo(() => {
     if (!meshTopology) return []
@@ -857,18 +866,28 @@ export default function UnifiedCommandPanel() {
               <div style={{ ...labelStyle, marginBottom: 4 }}>
                 PTZ · {selectedSurvDevice.name || selectedSurvDevice.id}
               </div>
+              {/* #107：设备明确声明「不支持 PTZ」时禁用按钮并说明原因，
+                  而不是让运维点了之后收一个无信息量的 400。
+                  ptzSupport 为 null = 设备未声明（未知）⇒ 保持可用 —— 
+                  后端口径同样是「不明确不支持即放行」，两边一致。 */}
+              {ptzSupport === false && (
+                <div className="empty-hint" style={{ marginBottom: 4 }}>
+                  该设备声明的能力里没有 PTZ（{declaredCapsText || '未声明任何能力'}），云台按钮不可用
+                </div>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 28px)', gap: 3, justifyContent: 'center' }}>
                 {PTZ_BUTTONS.map((b) => (
                   <button
                     key={b.cmd}
                     onClick={() => handlePtz(b.cmd)}
-                    disabled={ptzBusy}
-                    title={b.title}
+                    disabled={ptzBusy || ptzSupport === false}
+                    title={ptzSupport === false ? '设备不支持云台控制' : b.title}
                     style={{
-                      width: 28, height: 24, fontSize: 11, cursor: ptzBusy ? 'not-allowed' : 'pointer',
+                      width: 28, height: 24, fontSize: 11,
+                      cursor: (ptzBusy || ptzSupport === false) ? 'not-allowed' : 'pointer',
                       border: '1px solid var(--line-2)', background: 'var(--bg-3)',
                       color: 'var(--text)', borderRadius: 3,
-                      opacity: ptzBusy ? 0.5 : 1,
+                      opacity: (ptzBusy || ptzSupport === false) ? 0.5 : 1,
                     }}
                   >
                     {b.label}
@@ -880,13 +899,14 @@ export default function UnifiedCommandPanel() {
                   <button
                     key={b.cmd}
                     onClick={() => handlePtz(b.cmd)}
-                    disabled={ptzBusy}
-                    title={b.title}
+                    disabled={ptzBusy || ptzSupport === false}
+                    title={ptzSupport === false ? '设备不支持云台控制' : b.title}
                     style={{
-                      width: 44, height: 22, fontSize: 11, cursor: ptzBusy ? 'not-allowed' : 'pointer',
+                      width: 44, height: 22, fontSize: 11,
+                      cursor: (ptzBusy || ptzSupport === false) ? 'not-allowed' : 'pointer',
                       border: '1px solid var(--line-2)', background: 'var(--bg-3)',
                       color: 'var(--text)', borderRadius: 3,
-                      opacity: ptzBusy ? 0.5 : 1,
+                      opacity: (ptzBusy || ptzSupport === false) ? 0.5 : 1,
                     }}
                   >
                     {b.label}
