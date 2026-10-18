@@ -18,6 +18,9 @@ param([switch]$SkipBuild)
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+# 跨平台公共库（B1 批次接 CI 时引入）：java 探测 / jar 路径 / 临时目录
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
+$TempDir = Get-E2eTempDir   # Linux runner 上 $env:TEMP 常未设置，不能直接用
 $Fail = 0
 $script:CleanupActions = @()
 
@@ -58,12 +61,17 @@ function Try-Json($method, $uri, $body) {
 
 try {
     # ---- 0. 构建 ----
-    $backendJar = Join-Path $Root 'cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
-    $simJar = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
+    # jar 路径走 Get-E2eJar：反斜杠字面量在 Linux 上不是分隔符，Test-Path 恒 false，
+    # 会误判"jar 缺失"进构建分支（该分支此前还无条件硬编码 Windows 的 JDK 路径）
+    $backendJar = Get-E2eJar -Root $Root -Module 'cloud-backend' -Jar 'aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
+    $simJar = Get-E2eJar -Root $Root -Module 'drone-sim' -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
     if (-not $SkipBuild -or -not (Test-Path $backendJar) -or -not (Test-Path $simJar)) {
         Write-Host '[1/5] 构建后端 + 模拟器...'
-        $env:JAVA_HOME = 'E:\dev-tools\jdk17.0.20_8'
-        $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+        # 本机 Windows 的 JDK17 固定位置；不存在（如 Linux CI）则沿用外部环境已配好的 JDK
+        if (Test-Path 'E:\dev-tools\jdk17.0.20_8') {
+            $env:JAVA_HOME = 'E:\dev-tools\jdk17.0.20_8'
+            $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+        }
         Push-Location $Root
         mvn -q package -DskipTests
         Pop-Location
@@ -71,9 +79,7 @@ try {
         Write-Host '[1/5] 使用既有 jar（-SkipBuild）'
     }
 
-    if ($env:AF_JAVA) { $java = $env:AF_JAVA }
-    elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME 'bin\java.exe'))) { $java = Join-Path $env:JAVA_HOME 'bin\java.exe' }
-    else { $java = 'java.exe' }
+    $java = Get-E2eJava   # 跨平台探测（Linux 叫 java 不是 java.exe）
 
     # ---- 1. 起服务（与 e2e-cv-eval 同款飞行前置：拍照仅接受 armed）----
     Write-Host '[2/5] 启动 cloud-backend + drone-sim...'
@@ -81,8 +87,8 @@ try {
         '-jar', $simJar, '--port', "$DronePort", '--sysid', "$DroneSysid", '--name', 'AF-DEFECT-01',
         '--http-port', "$TruthPort",
         '--targets', 'static:22.5916,113.9345;static:22.5916,113.93479'
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-defect-sim.log') `
-        -RedirectStandardError (Join-Path $env:TEMP 'af-defect-sim.err')
+    ) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-defect-sim.log') `
+        -RedirectStandardError (Join-Path $TempDir 'af-defect-sim.err')
     Stop-Proc $sim
 
     $backend = Start-Process -FilePath $java -ArgumentList @(
@@ -93,7 +99,7 @@ try {
         '--spring.datasource.url=jdbc:h2:mem:defect-e2e;DB_CLOSE_DELAY=-1',
         '--aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef',
         "--aerofleet.drone-port=$DronePort"
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-defect-backend.log')
+    ) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-defect-backend.log')
     Stop-Proc $backend
 
     $online = $false

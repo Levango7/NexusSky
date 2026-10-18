@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
-> **结构说明（2026-10-18 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-18 共有 138 个 `[Unreleased]` 小节，自 v1.0.5
+> **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 140 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -13,7 +13,7 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 当前 133 个小节自 v1.0.5 起持续累积，最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 当前 134 个小节自 v1.0.5 起持续累积，最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
 
@@ -358,6 +358,68 @@ GB28181 写的是 `STREAM` 而不是 `Media` —— 按 `Media` 门控会把它�
 （`rtsp://user:pass@ip:554/...`，旁边挂着 TODO）。本轮没动它：要改就得决定
 "返回占位符"还是"返回 null"，那是产品决策，不该顺手带过。能力机制接通之后，
 至少"设备明确不支持取流"这条路已经是诚实的了。
+
+---
+
+
+## [Unreleased] — e2e 救活第二批：regulator/dock/route-templates/defect 以观察模式接进 CI（2026-10-17）
+
+> 与第一批（formation / mesh / rid，`e2e-core-scripts` job）同一条脉络。
+> 本批 4 个脚本此前从未进过 CI，2026-10-17 深夜在本机 Windows 串行跑绿
+> （master `035a338`，合计 **94/94 断言**：regulator 37 / dock 23 /
+> route-templates 16 / defect 18）。本条只做"接线"——跨平台适配 + CI 接入，
+> 不改任何被测行为（阶段 A 验证已确认无需修复）。
+
+### 跨平台改造（照 e2e-signing / e2e-core-scripts 两批先例，全部复用 e2e-common.ps1）
+
+| 问题 | 位置 | 处理 |
+|---|---|---|
+| jar 路径反斜杠（`'cloud-backend\target\x.jar'`） | dock / route-templates / defect ×2 处、regulator 的 glob ×2 处 | Linux 上反斜杠不是分隔符，`Test-Path` 恒 false → 误判"jar 缺失"进构建分支（该分支还硬编码 Windows JDK 路径）。dock 系换 `Get-E2eJar`；regulator 的 `Get-ChildItem` glob 改正斜杠 |
+| java 可执行 `java.exe` | 4 个脚本各 1 处 | Linux 叫 java → `Get-E2eJava` |
+| `$env:TEMP` | 4 个脚本共 9 处 | Linux runner 常未设置，`Join-Path` 退化 → `Get-E2eTempDir` |
+| `-WindowStyle Hidden` | 4 个脚本共 8 处 | 只在 Windows 的 `Start-Process` 上存在，Linux 直接"找不到参数" → 删除 |
+| `Get-CimInstance Win32_Process` 清理 ×2 | regulator | Windows-only；**静默失败比报错更糟**——清理退化为空转，端口被残留占住，表现为莫名超时 → 换 `Stop-E2eStaleProcesses`（见下节） |
+| 构建分支硬编码 `E:\dev-tools\...` JDK 路径 | dock / route-templates / defect | 加 `Test-Path` 保护（jar 路径修正后 CI 走 `-SkipBuild` 不进此分支，纯防御） |
+
+### regulator 的清理标记缺陷（本批新发现并修掉）
+
+其余三个脚本的 backend 命令行天然带标记（`jdbc:h2:mem:dock-e2e` / `route-templates-e2e` /
+`defect-e2e`），`Stop-E2eStaleProcesses` 按 marker 能精确清掉；但 regulator 启动的
+3 类 java 进程命令行**不含任何可匹配 `regulator-e2e` 的字样**——原脚本自带的
+`Cleanup-OldProcesses` 按 `regulator-sim` / `aerofleet.regulator` / `AF-REG` 模式匹配，
+Windows 上有效，Linux 上是 `Get-CimInstance`（静默失效，见上表）。
+
+修法：5 处 java 启动命令行统一加 `-Dregulator-e2e=true`（放在 `-jar` 之前，由 JVM
+消费为系统属性，**不会进 main 的 args**——实测 regulator-sim / drone-sim 的手写解析
+对非 `--` 参数也只是警告不退出，Spring Boot 侧同样无感），`Cleanup-OldProcesses`
+与结尾兜底清理都改为按标记杀。代价：改版之前启动的旧残留（命令行无标记）不再被清。
+
+### CI 接入（`e2e-b1-scripts` job，观察模式）
+
+- **串行原因**：cloud-backend 默认监听 UDP 14550（`aerofleet.udp-port`），4 个脚本
+  均未覆盖该端口 → 同一 runner 上不能并行（多会话并发撞 14550 的坑 COORDINATION.md
+  有记载）。单 job 串行跑 4 个脚本，脚本间夹按标记的清理步骤兜底
+  （与第一批三脚本同款安排）。
+- **`AF_BACKEND_PORT` 统一 18099**：regulator 默认 8080（本机被常驻容器占用，
+  CI 默认段也不保险），与其余三个脚本的默认对齐；每脚本退出自停 backend，
+  中间清理按 marker 兜底，端口串行复用无冲突。
+- 中间清理的 marker 额外覆盖 sim 残留：route / defect 的 drone-sim 命令行不含
+  backend 那个 h2 标记，补 `AF-ROUTE-01` / `AF-DEFECT-01` 两个标记
+  （dock 的 sim 名 `DOCK-E2E-001` 已被 `dock-e2e` 大小写不敏感匹配覆盖）。
+- **观察模式（continue-on-error）**：与 e2e-capability / e2e-signing / e2e-core-scripts
+  同款——本机 Windows 全绿 ≠ Linux CI 连续复跑稳定，runner 上的进程/端口/时序行为
+  可能不同。若干次 run 全绿后删掉这行转硬门禁，删标记 = 把"跑过"升级为"必须通过"。
+
+### 验证
+
+- 4 个改后脚本 PowerShell 语法解析（`Parser::ParseFile`）零错误；
+- ci.yml YAML 语法校验通过（22 个 job，其余 job 结构未受影响）；
+- 本机冒烟（JDK17 + 18099，`-SkipBuild`）：改后 e2e-defect 全绿（18/18，A1~A5）。
+
+### 计数
+
+**未变**：e2e 脚本不产生 surefire 报告，Java / 前端计数均不受影响。
+
 
 ---
 
