@@ -173,3 +173,38 @@ describe('SSE 流令牌（alarmStreamUrl / fetchStreamToken / surveillanceStream
     expect(typeof api2.fetchStreamToken).toBe('function')
   })
 })
+
+/**
+ * MJPEG 预览 URL（<img src> 用）。
+ *
+ * <p>这条 URL 的口径是一条**安全**决定：`?` 里只放短命单次令牌，绝不放长效 JWT。
+ * 断言必须钉住参数名 —— 只断言"能生成一个 URL"的话，把 `streamToken` 改成 `jwt`
+ * 也能全绿，而那等于把 bearer 暴露给所有能看到访问日志/Referer 的人。
+ * 这也是它与 SSE 两条流共用 StreamTokenService 的原因，不是各写一套。
+ */
+describe('mjpegPreviewUrl（<img> 预览，凭据口径）', () => {
+  it('凭据走 ?streamToken=，不带长效 JWT 参数名', async () => {
+    const api2 = await import('./api')
+    const url = api2.mjpegPreviewUrl('cam 1', 's_tok_1', 5)
+    expect(url).toBe('https://test.local/api/v1/surveillance/devices/cam%201/mjpeg'
+      + '?streamToken=s_tok_1&fps=5')
+    expect(url).not.toMatch(/[?&]token=/)
+    expect(url).not.toMatch(/[?&]jwt=/)
+    expect(url).not.toMatch(/[?&]authorization=/i)
+  })
+
+  it('token 与 deviceId 都做 URL 编码（token 常含 + / = 等字符）', async () => {
+    const api2 = await import('./api')
+    const url = api2.mjpegPreviewUrl('cam-1', 'a+b/c=d', 0)
+    expect(url).toContain('streamToken=a%2Bb%2Fc%3Dd')
+    // fps<=0 时不带 fps 参数（后端有默认值）
+    expect(url).not.toContain('fps=')
+  })
+
+  it('无令牌时仍返回可用地址（dev 模式链上全放行）', async () => {
+    const api2 = await import('./api')
+    const url = api2.mjpegPreviewUrl('cam-1', '', 5)
+    expect(url).toBe('https://test.local/api/v1/surveillance/devices/cam-1/mjpeg?fps=5')
+    expect(url).not.toContain('streamToken')
+  })
+})

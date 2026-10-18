@@ -1290,6 +1290,25 @@ export function surveillanceStreamUrl(deviceId, streamToken) {
   return streamToken ? `${base}?streamToken=${encodeURIComponent(streamToken)}` : base
 }
 
+// 浏览器可播实时画面（MJPEG）的 <img src>。
+//
+// <img> 标签不会也不能携带 Authorization 头，所以生产链上开流前必须先用正常
+// 认证换一枚短命单次用令牌，经 ?streamToken= 传入 —— 与 SSE 两条流完全同机制。
+// **不把长效 JWT 放进 URL**：该 URL 会长期躺在访问日志与 Referer 里，等于把 bearer
+// 公开给所有能看到日志的人（StreamTokenService 存在的理由就是这个）。
+//
+// fps 只是帧率提示；帧源掉线时后端结束响应，此时这里拿到的地址需要重新换令牌重挂，
+// 调用方负责在需要时重新生成（每次生成都会换一枚新令牌）。
+export function mjpegPreviewUrl(deviceId, streamToken, fps) {
+  const base = `${location.protocol === 'https:' ? 'https' : 'http'}://${
+    location.host
+  }${SURVEILLANCE_BASE}/devices/${encodeURIComponent(deviceId)}/mjpeg`
+  const qs = []
+  if (streamToken) qs.push(`streamToken=${encodeURIComponent(streamToken)}`)
+  if (fps && fps > 0) qs.push(`fps=${encodeURIComponent(fps)}`)
+  return qs.length ? `${base}?${qs.join('&')}` : base
+}
+
 // ---- Alarms (报警联动 M11) ----
 // 报警事件管理 API 挂载在 /api/v1/alarms 下（未复用通用 BASE 常量）
 // 支持 SSE 实时推送、联动规则管理、一键应急响应触发无人机侦察任务

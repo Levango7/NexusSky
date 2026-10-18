@@ -11,7 +11,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -90,6 +93,12 @@ public class SurveillanceController {
      * 过滤参数真正生效。
      */
     private final AlarmEventStore alarmEventStore;
+    /**
+     * 浏览器可播的 MJPEG 输出（见 {@code /devices/{id}/mjpeg}）。
+     * <p>本平台唯一让浏览器看到安防画面的通道 —— 浏览器不能播 RTSP，而这里没有
+     * RTSP 解码器。独立成 service 而不是塞进控制器，是为了能单独测"取帧"这件事。
+     */
+    private final MjpegStreamService mjpegService;
     /** SSE 心跳调度器：单线程足够，多个 emitter 共享。 */
     private final ScheduledExecutorService sseScheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -102,12 +111,14 @@ public class SurveillanceController {
                                   OnvifClient onvifClient,
                                   RapidDeployService rapidDeployService,
                                   VendorAdapterRegistry vendorAdapterRegistry,
-                                  AlarmEventStore alarmEventStore) {
+                                  AlarmEventStore alarmEventStore,
+                                  MjpegStreamService mjpegService) {
         this.registry = registry;
         this.onvifClient = onvifClient;
         this.rapidDeployService = rapidDeployService;
         this.vendorAdapterRegistry = vendorAdapterRegistry;
         this.alarmEventStore = alarmEventStore;
+        this.mjpegService = mjpegService;
     }
 
     /**
@@ -146,6 +157,9 @@ public class SurveillanceController {
         int channels = body.path("channels").asInt(1);
         String username = body.path("username").asText("");
         String password = body.path("password").asText("");
+        // 浏览器可播的帧源：**显式配置**，不按厂商规范推导 —— 理由见
+        // SurveillanceDevice#snapshotUrl（推导出来的地址会再一次变成"看着对但没验证过"）
+        String snapshotUrl = body.path("snapshotUrl").asText("");
 
         if (id.isBlank()) {
             return badRequest("device id is required");
@@ -171,6 +185,9 @@ public class SurveillanceController {
                 username, password);
         device.totalCameras = channels;
         device.onlineCameras = channels; // 注册时默认全在线
+        if (!snapshotUrl.isBlank()) {
+            device.snapshotUrl = snapshotUrl.trim();
+        }
         // 注册时同步获取设备能力（模拟实现）
         try {
             device.setCapabilities(onvifClient.getDeviceCapabilities(ip, port, username, password));
@@ -335,6 +352,107 @@ public class SurveillanceController {
             return ResponseEntity.status(502).body(
                     Map.of("error", "failed to get rtsp url: " + e.getMessage()));
         }
+    }
+
+    /**
+     * 浏览器可播的实时画面（MJPEG）。
+     *
+     * <p>这是本平台目前<b>唯一</b>让浏览器真正看到安防画面的通道：浏览器不能原生播
+     * RTSP，而本平台没有 RTSP 解码器（不引入 ffmpeg / javacv）。所以这里从设备
+     * <b>显式配置</b>的 HTTP 快照源（{@link SurveillanceDevice#snapshotUrl}）按帧率取帧，
+     * 发出 {@code multipart/x-mixed-replace}，前端用 {@code <img src>} 即可渲染。
+     *
+     * <p><b>开流之前先探一帧</b>：帧源不可达时返回明确的 502，而不是先回 200 再让浏览器
+     * 干等 —— 后者表现为"一直转圈"，使用者会以为是网络慢。
+     *
+     * <p>没配置帧源的设备返回 400 并说明原因，不返回空流：没有画面就是没有画面。
+     */
+    @Operation(summary = "浏览器可播实时画面（MJPEG multipart）",
+            description = "从设备配置的 HTTP 快照源取帧，multipart/x-mixed-replace。需先配置 snapshotUrl。")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "MJPEG 流"),
+        @ApiResponse(responseCode = "400", description = "设备未配置帧源"),
+        @ApiResponse(responseCode = "404", description = "设备不存在"),
+        @ApiResponse(responseCode = "502", description = "帧源不可达或返回的不是 JPEG")
+    })
+    @GetMapping("/devices/{id}/mjpeg")
+    public StreamingResponseBody mjpegStream(
+            @PathVariable("id") String id,
+            @RequestParam(value = "fps", defaultValue = "5") int fps,
+            HttpServletResponse response) throws java.io.IOException {
+        // 必须**裸返回** StreamingResponseBody，不能包 ResponseEntity：
+        // 包了之后返回类型变成 ResponseEntity<StreamingResponseBody>，命中的是
+        // ResponseEntityReturnValueHandler → HttpEntityMethodProcessor，它会把
+        // 这个 lambda 当普通消息体去找转换器，直接抛
+        // "No converter for StreamingResponseBody with preset Content-Type
+        // multipart/x-mixed-replace"（500）。响应头因此只能靠 HttpServletResponse 设。
+        //
+        // 失败路径也返回 StreamingResponseBody，但写的是一个定长 JSON 体并设好状态码，
+        // 所以调用方拿到的仍是普通的 4xx/5xx JSON —— "为什么看不到画面"恰恰是这里
+        // 最需要说清的事，不能退化成"一个 200 然后永远等不到第一帧"。
+        //
+        // 鉴权不在这里：生产链上 {@code .anyRequest().authenticated()} 照常把守，
+        // 而 <img> 带不了 Authorization 头，所以凭据经 ?streamToken= 短令牌进入 ——
+        // 由 StreamTokenFilter 建立 SecurityContext（已含本路径）。
+        // 这里**不要**再加一条"长效 JWT 进 query"的后门：那样等于把 bearer 暴露给
+        // 所有能看到访问日志的人，与 StreamTokenService 存在的理由相反。
+        SurveillanceDevice d = registry.getDevice(id);
+        if (d == null) {
+            return error(response, 404, "device " + id + " not found");
+        }
+        String frameSource = d.snapshotUrl;
+        if (frameSource == null || frameSource.isBlank()) {
+            return error(response, 400,
+                    "device " + id + " has no browser-playable frame source: snapshotUrl is not"
+                    + " configured (browsers cannot play the rtsp:// url, and this platform has"
+                    + " no RTSP decoder)");
+        }
+        // 先探一帧再决定要不要开流：探不过就不给 200。
+        byte[] first = mjpegService.fetchFrame(frameSource);
+        if (first == null || first.length == 0) {
+            return error(response, 502,
+                    "frame source unreachable or not JPEG: " + frameSource);
+        }
+        log.info("MJPEG stream opened for device {} at {} fps (frame source {})",
+                id, fps, frameSource);
+        response.setContentType(MjpegStreamService.contentType());
+        response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        response.setHeader("Pragma", "no-cache");
+        // 帧循环只有 service 一份实现：这里不再内联第二份 —— 之前内联过一次，
+        // 那是"同一份逻辑两处写"的典型，两边会各自漂移。
+        return out -> {
+            try {
+                mjpegService.pump(frameSource, fps, first, out);
+            } catch (java.io.IOException e) {
+                // 客户端断开是常态（关标签页/切视图），不是错误
+                log.debug("MJPEG stream for {} closed by client: {}", id, e.toString());
+            }
+            log.info("MJPEG stream for {} ended", id);
+        };
+    }
+
+    /**
+     * 回一个定长 JSON 错误体。
+     *
+     * <p>必须设 {@code Content-Length}：不定长的话响应会走 chunked，客户端与
+     * 中间件对"这个错误响应到底完没完"的判断会不一致。
+     */
+    private static StreamingResponseBody error(
+            HttpServletResponse response, int status, String message) {
+        byte[] body;
+        try {
+            body = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .writeValueAsBytes(Map.of("error", message));
+        } catch (Exception e) {
+            body = ("{\"error\":\"internal error\"}").getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8);
+        }
+        final byte[] payload = body;
+        response.setStatus(status);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setContentLength(payload.length);
+        response.setHeader("Cache-Control", "no-store");
+        return out -> out.write(payload);
     }
 
     @Operation(summary = "PTZ 控制", description = "body: {\"cmd\": \"up\"/\"down\"/\"left\"/\"right\"/\"zoomIn\"/\"zoomOut\"/\"stop\"}")
@@ -656,6 +774,13 @@ public class SurveillanceController {
         v.put("ptzSupport", capFlag(d, DeviceCapability.PTZ));
         v.put("mediaSupport", capFlag(d, DeviceCapability.MEDIA));
         v.put("eventsSupport", capFlag(d, DeviceCapability.EVENTS));
+        // 浏览器能不能真的看到画面。**由是否配置了帧源决定，不猜**：
+        // 浏览器不能播 RTSP，本平台也没有 RTSP 解码器，所以"可播"只能等于
+        // "有一个显式配置、且真能连上的 HTTP 帧源"。前端据此决定挂 <img> 还是
+        // 如实说明看不到画面。
+        boolean hasFrameSource = d.snapshotUrl != null && !d.snapshotUrl.isBlank();
+        v.put("browserPlayable", hasFrameSource);
+        v.put("snapshotUrl", hasFrameSource ? d.snapshotUrl : null);
         v.put("rtspUrl", maskRtspCredentials(d.rtspUrl));
         v.put("lastHeartbeatMs", d.lastHeartbeatMs);
         return v;
