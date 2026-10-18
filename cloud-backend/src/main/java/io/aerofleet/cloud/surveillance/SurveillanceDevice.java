@@ -81,6 +81,24 @@ public class SurveillanceDevice {
     private volatile Set<String> capabilities = Collections.emptySet();
     /** RTSP 流地址（由 OnvifClient 解析得到）。 */
     public volatile String rtspUrl;
+    /**
+     * 单帧快照地址（HTTP，返回 {@code image/jpeg}），<b>由调用方显式给出</b>。
+     *
+     * <p>为什么是"显式给出"而不是按厂商规范推导：{@link #rtspUrl} 是推导出来的
+     * （{@code rtsp://user:pass@ip:554/…}），格式对真实设备可能正确，但代码从未
+     * 向设备确认过（见 {@code StreamUrlOrigin.deviceVerified}）。若快照地址也照
+     * 厂商惯例拼一个（海康 {@code /ISAPI/Streaming/channels/N/httppreview} 之类），
+     * 就会再造一个"看着对但没验证过"的地址 —— 这正是本轮一直在清的东西。
+     *
+     * <p>所以这里是<b>配置</b>而非<b>推导</b>：注册时给一个真实可达的 HTTP 端点，
+     * 它要么连得上（画面真的出来），要么连不上（{@code /mjpeg} 明确报错）。
+     * 没有这一项的设备，界面如实显示"无浏览器可播的信号源"，而不是挂一个空格子。
+     *
+     * <p>它同时是<b>唯一</b>让浏览器能真正看到画面的通道：浏览器不能原生播 RTSP，
+     * 而本平台没有 RTSP 解码器（无 ffmpeg/javacv 依赖），所以"浏览器可播"只能走
+     * HTTP 上的帧序列。
+     */
+    public volatile String snapshotUrl;
     /** 最近一次心跳时间戳（System.currentTimeMillis()）。 */
     public volatile long lastHeartbeatMs;
     /**

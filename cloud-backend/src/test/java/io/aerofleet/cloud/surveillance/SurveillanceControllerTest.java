@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.alarm.AlarmEvent;
 import io.aerofleet.cloud.alarm.AlarmEventRepository;
 import io.aerofleet.cloud.alarm.AlarmEventStore;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -41,6 +42,11 @@ class SurveillanceControllerTest {
     private RapidDeployService rapidDeployService;
     private VendorAdapterRegistry vendorAdapterRegistry;
     private AlarmEventStore alarmEventStore;
+    /** 真实 MJPEG 服务（非 mock）：/mjpeg 的"能不能真取到帧"正是要验的行为。 */
+    private MjpegStreamService mjpegStreamService;
+    /** 测试期间起在本机的真帧源，@AfterEach 统一关掉。 */
+    private final java.util.List<com.sun.net.httpserver.HttpServer> frameSources =
+            new java.util.ArrayList<>();
     private SurveillanceController controller;
     private MockMvc mockMvc;
 
@@ -57,8 +63,9 @@ class SurveillanceControllerTest {
                 new Gb28181Adapter(new Gb28181CatalogParser(), "00000000000000000001", "127.0.0.1:5060")));
         // GET /events 现在委托给 AlarmEventStore（此前是固定返回 items:[] 的空桩）
         alarmEventStore = newInMemoryAlarmEventStore();
+        mjpegStreamService = new MjpegStreamService();
         controller = new SurveillanceController(registry, onvifClient, rapidDeployService,
-                vendorAdapterRegistry, alarmEventStore);
+                vendorAdapterRegistry, alarmEventStore, mjpegStreamService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -104,6 +111,7 @@ class SurveillanceControllerTest {
     private static String json(Map<String, Object> body) throws Exception {
         return MAPPER.writeValueAsString(body);
     }
+
 
     private static Map<String, Object> deviceBody(String id, String vendor) {
         Map<String, Object> b = new LinkedHashMap<>();
@@ -821,5 +829,256 @@ class SurveillanceControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.streamUrlOrigin").value("VENDOR_STANDARD_FORMAT"))
                 .andExpect(jsonPath("$.playable").value(true));
+    }
+
+    // ===== 浏览器可播画面：/mjpeg =====
+
+    /**
+     * 起一个真 HTTP 帧源，产出真 JPEG 字节（不是 mock HTTP 客户端 ——
+     * 要验的恰恰是"能不能从设备真的取到帧"）。
+     */
+    private com.sun.net.httpserver.HttpServer startFrameSource(byte[] jpegBytes, int maxFrames)
+            throws Exception {
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        java.util.concurrent.atomic.AtomicInteger served = new java.util.concurrent.atomic.AtomicInteger();
+        srv.createContext("/snapshot", ex -> {
+            if (served.incrementAndGet() > maxFrames) {
+                // 帧源掉线：pump 应当就此结束响应。MockMvc 的 asyncDispatch 需要流真的
+                // 结束才能返回，所以测试里的帧源不能永续 —— 顺带把"掉线即结束"这条
+                // 行为也验了（若实现改成发占位帧撑住，这里会超时或帧数对不上）。
+                ex.sendResponseHeaders(500, -1);
+                ex.close();
+                return;
+            }
+            ex.getResponseHeaders().add("Content-Type", "image/jpeg");
+            ex.sendResponseHeaders(200, jpegBytes.length);
+            try (java.io.OutputStream os = ex.getResponseBody()) {
+                os.write(jpegBytes);
+            }
+            ex.close();
+        });
+        srv.start();
+        frameSources.add(srv);
+        return srv;
+    }
+
+    private String startLimitedFrameSource(byte[] jpegBytes, int maxFrames) throws Exception {
+        return "http://127.0.0.1:"
+                + startFrameSource(jpegBytes, maxFrames).getAddress().getPort() + "/snapshot";
+    }
+
+    /**
+     * {@code /mjpeg} 的每个分支都返回 {@code StreamingResponseBody}，MockMvc 可能
+     * 走同步也可能走异步。两种都接住，但**断言不放松**。
+     */
+    private MvcResult performMjpeg(
+            org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder rb)
+            throws Exception {
+        MvcResult r = mockMvc.perform(rb).andReturn();
+        if (r.getResolvedException() != null) {
+            throw new IllegalStateException("/mjpeg threw: ", r.getResolvedException());
+        }
+        if (r.getRequest().isAsyncStarted()) {
+            r = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .asyncDispatch(r)).andReturn();
+        }
+        return r;
+    }
+
+    private static byte[] realJpegBytes() throws Exception {
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(64, 48,
+                java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = img.createGraphics();
+        try {
+            g.setColor(java.awt.Color.DARK_GRAY);
+            g.fillRect(0, 0, 64, 48);
+            g.setColor(java.awt.Color.WHITE);
+            g.drawString("cam", 6, 26);
+        } finally {
+            g.dispose();
+        }
+        java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(img, "jpg", bo);
+        return bo.toByteArray();
+    }
+
+    private static Map<String, Object> deviceBodyWithSnapshot(String id, String snapshotUrl) {
+        Map<String, Object> b = deviceBody(id, "HIKVISION");
+        b.put("snapshotUrl", snapshotUrl);
+        return b;
+    }
+
+    /**
+     * 主线：配了真帧源的设备，{@code /mjpeg} 真的吐 multipart 且第一帧是真 JPEG。
+     * 这是"安防视频看不了"变成"能看"的那一步的判定。
+     */
+    @Test
+    @DisplayName("配了帧源：/mjpeg 发 multipart 且首帧是设备返回的真 JPEG")
+    void mjpeg_realFrameSource_streamsRealJpeg() throws Exception {
+        byte[] jpegBytes = realJpegBytes();
+        // 帧源供 3 帧后掉线：流会自然结束，asyncDispatch 才能返回
+        String snapshotUrl = startLimitedFrameSource(jpegBytes, 3);
+
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBodyWithSnapshot("cam-live", snapshotUrl))))
+                .andExpect(status().isOk());
+
+        MvcResult res = performMjpeg(get("/api/v1/surveillance/devices/cam-live/mjpeg")
+                .param("fps", "50"));
+
+        assertThat(res.getResponse().getStatus()).isEqualTo(200);
+        assertThat(res.getResponse().getHeader("Cache-Control")).contains("no-store");
+        assertThat(res.getResponse().getContentType()).startsWith("multipart/x-mixed-replace");
+
+        byte[] body = res.getResponse().getContentAsByteArray();
+        String text = new String(body, java.nio.charset.StandardCharsets.ISO_8859_1);
+        assertThat(text).contains("--" + MjpegStreamService.boundary());
+        assertThat(text).contains("Content-Type: image/jpeg");
+        // 帧源供 3 帧（含探帧那次），pump 写首帧 + 后续帧，然后因掉线收尾。
+        // 关键不是帧数，而是**流里确实出现了设备那张图本身**：
+        // 第一段 part 的数据区必须逐字节等于帧源返回的 JPEG。
+        assertThat(text).contains("X-Frame-Seq: 1");
+        int jpegStart = text.indexOf("X-Frame-Seq: 1");
+        jpegStart = text.indexOf("\r\n\r\n", jpegStart) + 4;
+        byte[] emitted = java.util.Arrays.copyOfRange(body, jpegStart,
+                jpegStart + jpegBytes.length);
+        assertThat(emitted).isEqualTo(jpegBytes);
+    }
+
+    /**
+     * 没配帧源必须明确拒绝，<b>不能</b>返回空流或占位帧。
+     * 若返回 200 空体，前端会挂一个永远不更新的 {@code <img>} ——
+     * 看上去"在播"，实际是死的，正是本轮要消灭的假象。
+     */
+    @Test
+    @DisplayName("未配帧源：/mjpeg 返回 400 并说明原因（不是空流）")
+    void mjpeg_noFrameSource_is400WithReason() throws Exception {
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody("cam-nosrc", "HIKVISION"))))
+                .andExpect(status().isOk());
+
+        MvcResult r = performMjpeg(get("/api/v1/surveillance/devices/cam-nosrc/mjpeg"));
+
+        assertThat(r.getResponse().getStatus()).isEqualTo(400);
+        assertThat(r.getResponse().getContentType()).startsWith("application/json");
+        assertThat(r.getResponse().getContentAsString())
+                .contains("no browser-playable frame source")
+                .contains("snapshotUrl");
+        // 关键：错误响应里不能出现帧流分隔符 —— 有 body 却没画面，
+        // 前端挂上去就是一个"在播"的死 <img>
+        assertThat(r.getResponse().getContentAsString())
+                .doesNotContain("--" + MjpegStreamService.boundary());
+    }
+
+    /**
+     * 帧源不可达时必须在<b>开流前</b>就报错。若先回 200 再等帧，
+     * 浏览器会拿到一个 200 却永远等不到第一帧，界面上表现为"一直转圈"。
+     */
+    @Test
+    @DisplayName("帧源不可达：/mjpeg 返回 502（不是 200 后干等）")
+    void mjpeg_frameSourceUnreachable_is502NotHanging200() throws Exception {
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBodyWithSnapshot("cam-dead", "http://127.0.0.1:1/snapshot"))))
+                .andExpect(status().isOk());
+
+        MvcResult r = performMjpeg(get("/api/v1/surveillance/devices/cam-dead/mjpeg"));
+
+        assertThat(r.getResponse().getStatus()).isEqualTo(502);
+        assertThat(r.getResponse().getContentAsString())
+                .contains("frame source unreachable")
+                .contains("http://127.0.0.1:1/snapshot");
+        // 不可达时绝不能先回 200 再干等
+        assertThat(r.getResponse().getContentType()).startsWith("application/json");
+    }
+
+    /**
+     * 帧源回 HTML 错误页时也必须判失败。否则界面会显示"一张画得出的图"，
+     * 而设备其实没在推流。
+     */
+    @Test
+    @DisplayName("帧源返回的不是 JPEG：/mjpeg 返回 502（不当帧发）")
+    void mjpeg_frameSourceNotJpeg_is502() throws Exception {
+        com.sun.net.httpserver.HttpServer srv = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        srv.createContext("/snapshot", ex -> {
+            byte[] html = "<html>404</html>".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            ex.getResponseHeaders().add("Content-Type", "text/html");
+            ex.sendResponseHeaders(404, html.length);
+            try (java.io.OutputStream os = ex.getResponseBody()) {
+                os.write(html);
+            }
+            ex.close();
+        });
+        srv.start();
+        frameSources.add(srv);
+
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBodyWithSnapshot("cam-html",
+                        "http://127.0.0.1:" + srv.getAddress().getPort() + "/snapshot"))))
+                .andExpect(status().isOk());
+
+        MvcResult r = performMjpeg(get("/api/v1/surveillance/devices/cam-html/mjpeg"));
+
+        assertThat(r.getResponse().getStatus()).isEqualTo(502);
+        assertThat(r.getResponse().getContentAsString()).contains("not JPEG");
+    }
+
+    @Test
+    @DisplayName("未知设备：/mjpeg 返回 404")
+    void mjpeg_unknownDevice_is404() throws Exception {
+        MvcResult r = performMjpeg(get("/api/v1/surveillance/devices/ghost/mjpeg"));
+
+        assertThat(r.getResponse().getStatus()).isEqualTo(404);
+        assertThat(r.getResponse().getContentAsString()).contains("ghost");
+    }
+
+    /**
+     * 设备视图里的可播标志必须由"是否真的配了帧源"决定，而不是由厂商或端口推出来。
+     */
+    @Test
+    @DisplayName("设备视图：配了帧源 browserPlayable=true 且回显 snapshotUrl")
+    void deviceView_frameSourceConfigured_isPlayable() throws Exception {
+        String snapshotUrl = startLimitedFrameSource(realJpegBytes(), 3);
+
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBodyWithSnapshot("cam-play", snapshotUrl))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.devices[0].id").value("cam-play"))
+                .andExpect(jsonPath("$.devices[0].browserPlayable").value(true))
+                .andExpect(jsonPath("$.devices[0].snapshotUrl").value(snapshotUrl));
+    }
+
+    @Test
+    @DisplayName("设备视图：没配帧源 browserPlayable=false 且 snapshotUrl=null")
+    void deviceView_noFrameSource_isNotPlayable() throws Exception {
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody("cam-nop", "HIKVISION"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.devices[0].id").value("cam-nop"))
+                .andExpect(jsonPath("$.devices[0].browserPlayable").value(false))
+                .andExpect(jsonPath("$.devices[0].snapshotUrl").value(org.hamcrest.Matchers.nullValue()))
+                // 关键：没配帧源时不能凭空造一个可播地址出来
+                .andExpect(jsonPath("$.devices[0].rtspUrl").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @AfterEach
+    void stopFrameSources() {
+        for (com.sun.net.httpserver.HttpServer s : frameSources) {
+            s.stop(0);
+        }
+        frameSources.clear();
     }
 }
