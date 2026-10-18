@@ -6687,7 +6687,7 @@ PR #107 唯一失败的那一项，是两行相邻的输出：
 | 5.1 | `HttpWebResponse` | 有 `GetResponseStream()` |
 | **7+**（Linux runner 的 `pwsh`） | `HttpResponseMessage` | **没有这个方法** |
 
-调用不存在的���法抛 `MethodNotFound`，被 ubiquitous 的 `catch {}` 吞掉，
+调用不存在的方法抛 `MethodNotFound`，被 ubiquitous 的 `catch {}` 吞掉，
 响应体变成 `$null`。于是**一个断言对着 `$null` 做，却以产品失败的形态呈现**。
 
 ### 同一个契约被复制了 9 份
