@@ -4,8 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -86,10 +84,10 @@ public final class HikAdapter implements VendorAdapter {
         log.info("海康获取流 URL device={} channel={} (模拟实现)", device.id, channel);
         // TODO: 接入 HCNetSDK NET_DVR_RealPlay_V40 实现真实流媒体获取
         // 海康 RTSP URL 格式: rtsp://user:pass@ip:554/Streaming/Channels/channel
-        String encodedUser = URLEncoder.encode(device.username, StandardCharsets.UTF_8);
-        String encodedPass = URLEncoder.encode(device.password, StandardCharsets.UTF_8);
-        return String.format("rtsp://%s:%s@%s:%d/Streaming/Channels/%d",
-                encodedUser, encodedPass, device.ip, RTSP_PORT, channel);
+        // 凭据编码与 authority 拼装收敛在 VendorRtspUrl（此前四个适配器各抄一份，
+        // 于是同一个 form-vs-URL 编码缺陷也复制了四份）
+        return VendorRtspUrl.format(device.username, device.password, device.ip,
+                RTSP_PORT, "/Streaming/Channels/" + channel);
     }
 
     @Override

@@ -19,6 +19,97 @@
 
 ---
 
+## [Unreleased] — 把"下载超时"当成了"拿不到"：ffmpeg 本机就有；顺带查出一个真实凭据编码缺陷（#111，2026-10-19）
+
+这一轮先把**几个被写成"阻塞"的事**逐个试了一遍，结论是其中大部分不是"不能"，是
+"我没试够"。
+
+### 1. 阻塞①"ffmpeg 拿不到" —— 本机早就有一个完整 ffmpeg
+
+前几轮的记录是："BtbN 与 gyan 下载均超时/连接重置，20 分钟 0 字节，这条路暂时不通"。
+这一轮先查本机，结果：
+
+```
+C:\Users\winge\AppData\Local\Programs\icat\resources\bin\ffmpeg\ffmpeg.exe
+ffmpeg version N-109970-g7dc0944ce2 （2023 年构建，配全套 DLL）
+```
+
+**它一直在磁盘上，我一次都没找过。** 而且它带 `h264_nvenc`（GPU 编码）、
+`h264` 解码器、`mpeg4`/`mjpeg` 原生编码器、RTSP 复用器、HLS。
+"cv2 无 H.264 编码器"这个限制也随之绕过（用 ffmpeg 而不是 cv2 编）。
+
+同批还纠正了两处：
+- **"下载超时"其实是"下载慢"**：mediamtx（27 MB，GitHub releases）实测下了
+  **878 秒**才完成。之前给的超时不够就断言"不通"。
+- **"自写 RTSP 服务端这条路不通"** —— 根本不用自写，ffmpeg 自带 RTSP，
+  mediamtx 也能下。**问题从来不是没有工具，是我把"麻烦"记成了"不能"。**
+
+### 2. 用解锁的工具验了一件此前验不了的事：RTSP URL 形状
+
+厂商适配器按公开规范「推导」RTSP URL（`VENDOR_STANDARD_FORMAT`，`deviceVerified=false`）。
+现在可以拿**真 RTSP 服务器**验它的形状：
+
+- mediamtx v1.21.2 + ffmpeg 把本机 UVC 摄像头编成 H.264 推上去
+  （mediamtx 日志：`[path Streaming/Channels/1] 1 track (H264)`）
+- 用我们代码拼出的形状去读：`rtsp://admin:pass@127.0.0.1:8554/Streaming/Channels/1`
+  → **`h264,640,480,15/1`，3 秒读到 35 帧**（活流）
+- **反向对照**（没有对照的成功不算证据）：密码错一位 → **401**；
+  路径改成 `Channels/9` → **404**。说明鉴权与路径都真的被服务器用了。
+
+结论要说得准：**URL 的"形状"验证过了**（scheme/userinfo/authority/path 都对），
+但"海康设备是否真用这个路径"仍未向真设备确认，`deviceVerified=false` 不变。
+
+### 3. 由此查出一个真实缺陷：凭据编码用了 form 语义
+
+四个适配器各自拼 URL，都用了：
+
+```java
+URLEncoder.encode(device.password, StandardCharsets.UTF_8)
+```
+
+`URLEncoder` 实现的是 `application/x-www-form-urlencoded`（HTML 表单）语义，
+不是 URL 语义。两者只在**空格**上分歧：
+
+```
+form：空格 → "+"        URL：空格 → "%20"（"+" 是字面加号）
+```
+
+密码 `"p w"` 于是变成 `"p+w"` 发到设备上 —— 鉴权失败，而现象只是"连不上"。
+而这几行上方的注释**恰好声明了相反的事**：
+"凭据需 URL 编码，避免密码含 `@ : / # ?` 等特殊字符破坏 URL 结构"
+（`@ : / # ?` 确实处理对了，唯独空格没有）—— 又一处"声明≠行为"。
+
+**线上证据（不是推理）**：起一个只做 Basic 挑战的 RTSP 服务端，读客户端重试时
+发出的 `Authorization` 头并解码：
+
+| URL 里的编码 | Authorization | 设备实际看到的凭据 |
+|---|---|---|
+| `admin:p%20w` | `Basic YWRtaW46cCB3` | `admin:p w` ✓ |
+| `admin:p+w` | `Basic YWRtaW46cCt3` | `admin:p+w` ✗ |
+
+**修复**：新增 `VendorRtspUrl` 作为**单一构造点**（此前四个适配器各抄一份，
+同一个缺陷也复制了四份），用 `UriUtils.encodeUserInfo`（RFC 3986 语义）。
+路径部分仍由各适配器给（那是厂商差异）。
+
+**变异 5/5 被杀**：退回 form 编码 / 完全不编码 / 只把 `+` 换成 `%20`（看似等价实则不是）
+/ user-pass 互换 / 海康绕开单一构造点。
+
+### 4. 新增验证脚本（都能独立跑）
+
+- `scripts/e2e-rtsp-credentials.py` —— 线上凭据编码验证（含**鉴别力自检**：
+  两种编码必须产生不同结果，否则脚本没有资格判定）
+- 本机实跑 **6/6 PASS**
+
+### 5. 顺带排除的一个假警报
+
+全量 `mvn test` 一度报 21 个错误（`BindException: Address already in use`）。
+根因是**我自己留着跑的 prod 后端**占着 `UdpGateway` 要绑的端口 —— 停掉后
+**2826 / 0 失败 / 0 错误 / BUILD SUCCESS**。不是代码回归。
+
+### 6. 仍未解决的一项：DJI Pocket 3
+
+设备列表里只有内置 `HD Webcam`，**需要用户插上硬件**，我这边无法代替。
+
 ## [Unreleased] — 安防视频**终于能看了**：补上唯一一条浏览器真能播的出口（#110，2026-10-18）
 接着 #109。#109 把"不能播"这件事**说准了**（`streamUrlOrigin` 三态 + 前端不再谎称
 HLS），但结论停在"看不了"。这一条把那个结论**推翻**：能看，而且现在真的能看。

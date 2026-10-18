@@ -4,8 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -86,10 +84,8 @@ public final class UniviewAdapter implements VendorAdapter {
         log.info("宇视获取流 URL device={} channel={} (模拟实现)", device.id, channel);
         // TODO: 接入 UNIVIEW SDK UV_RealPlay 实现真实流媒体获取
         // 宇视 RTSP URL 格式: rtsp://user:pass@ip:554/media/video1
-        String encodedUser = URLEncoder.encode(device.username, StandardCharsets.UTF_8);
-        String encodedPass = URLEncoder.encode(device.password, StandardCharsets.UTF_8);
-        return String.format("rtsp://%s:%s@%s:%d/media/video%d",
-                encodedUser, encodedPass, device.ip, RTSP_PORT, channel);
+        return VendorRtspUrl.format(device.username, device.password, device.ip,
+                RTSP_PORT, "/media/video" + channel);
     }
 
     @Override
