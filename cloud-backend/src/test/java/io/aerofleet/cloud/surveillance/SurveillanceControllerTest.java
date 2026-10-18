@@ -757,4 +757,69 @@ class SurveillanceControllerTest {
                 .andExpect(jsonPath("$.ptzSupport").doesNotExist())
                 .andExpect(jsonPath("$.mediaSupport").doesNotExist());
     }
+
+    // ===== #109 流地址来源必须自述 =====
+
+    /**
+     * 私有协议适配器按厂商公开格式推导 {@code rtsp://}。这个格式对真实设备
+     * <b>可能正确</b>，所以不能改成"不可用"（那是错杀）；但代码从未向设备确认过，
+     * 所以也<b>不能只给一个 rtsp 地址就完事</b> —— 那等于把"也许能用"讲成了
+     * "能用"。响应必须说清来源与是否经设备校验。
+     */
+    @Test
+    @DisplayName("私有协议设备：rtsp 地址按厂商规范推导，playable=true 但 deviceVerified=false")
+    void streamUrl_vendorStandardFormat_isPlayableButUnverified() throws Exception {
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody("cam-hik", "HIKVISION"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-hik/stream"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rtspUrl").value(
+                        org.hamcrest.Matchers.startsWith("rtsp://")))
+                .andExpect(jsonPath("$.streamUrlOrigin").value("VENDOR_STANDARD_FORMAT"))
+                .andExpect(jsonPath("$.playable").value(true))
+                // 关键：从来没有向设备取过
+                .andExpect(jsonPath("$.deviceVerified").value(false));
+    }
+
+    /**
+     * GB28181 媒体面未实现，只能给描述性标识。它必须明确标记为不可播 ——
+     * 否则前端会拿一个必然连不上的地址去挂播放器。
+     */
+    @Test
+    @DisplayName("GB28181：返回描述性标识且 playable=false")
+    void streamUrl_gb28181_isDescriptiveOnlyAndNotPlayable() throws Exception {
+        String gbId = "34020000001321320001";
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody(gbId, "GB28181"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/stream"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rtspUrl").value(
+                        org.hamcrest.Matchers.startsWith("gb28181-invite://")))
+                // 已有守卫要求它绝不假扮可播的 rtsp://（Gb28181ShapeTest），
+                // 这里再加一条：REST 契约本身也必须说清它不可播
+                .andExpect(jsonPath("$.streamUrlOrigin").value("DESCRIPTIVE_ONLY"))
+                .andExpect(jsonPath("$.playable").value(false))
+                .andExpect(jsonPath("$.deviceVerified").value(false));
+    }
+
+    /** 凭据仍要脱敏，且脱敏不能破坏来源字段。 */
+    @Test
+    @DisplayName("来源字段与凭据脱敏互不影响")
+    void streamUrl_originSurvivesCredentialMasking() throws Exception {
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(deviceBody("cam-hik2", "HIKVISION"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-hik2/stream"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.streamUrlOrigin").value("VENDOR_STANDARD_FORMAT"))
+                .andExpect(jsonPath("$.playable").value(true));
+    }
 }

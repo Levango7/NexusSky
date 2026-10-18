@@ -315,12 +315,20 @@ public class SurveillanceController {
         try {
             // 按设备厂商路由（ONVIF 适配器内部复用 OnvifClient；GB28181 返回
             // gb28181-invite:// 描述性标识——E5 口径：不假扮可播地址）
-            String url = vendorAdapterRegistry.getAdapter(d).getStreamUrl(d, channel);
+            VendorAdapter adapter = vendorAdapterRegistry.getAdapter(d);
+            String url = adapter.getStreamUrl(d, channel);
             d.rtspUrl = url;
+            StreamUrlOrigin origin = adapter.streamUrlOrigin();
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("deviceId", id);
             result.put("channel", channel);
             result.put("rtspUrl", maskRtspCredentials(url));
+            // 如实说明这个地址是怎么来的：按厂商规范推导（可能可播但未向设备校验），
+            // 还是仅供描述（不可播）。前端据此决定是挂播放器还是说明放不出画面，
+            // 而不是靠猜 URL 长得像不像 rtsp://。
+            result.put("streamUrlOrigin", origin.name());
+            result.put("playable", origin.playable());
+            result.put("deviceVerified", origin.deviceVerified());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.warn("GetStreamUri failed for {}: {}", id, e.getMessage());

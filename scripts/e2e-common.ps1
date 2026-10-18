@@ -133,3 +133,117 @@ function Assert-E2eJava17 {
         throw "需要 Java >= 17，当前: $v（设 AF_JAVA 或 JAVA_HOME 指向 JDK17）"
     }
 }
+
+<#
+.SYNOPSIS
+    从 HTTP 调用的异常里取出错误响应体（跨 PowerShell 版本）。
+
+.DESCRIPTION
+    为什么需要：e2e 要断言 4xx 的**响应体**（例如 409 必须在 result 里点名当前
+    状态），但 `Invoke-WebRequest` 遇非 2xx 会抛异常，响应体只能从异常里捞。
+
+    而"怎么捞"在两个 PowerShell 版本上**类型不同**，这是实测踩到的：
+      - **PowerShell 5.1**：`$_.Exception.Response` 是 `System.Net.WebException`
+        包的 `HttpWebResponse`，有 `GetResponseStream()`，读得到。
+      - **PowerShell 7+**（pwsh，Linux runner 用的就是它）：`$_.Exception.Response`
+        是 `System.Net.Http.HttpResponseMessage`，**根本没有 GetResponseStream 方法**
+        ——调用会抛 MethodNotFound。而 pwsh 里 `$_.ErrorDetails.Message` 才是可读的。
+
+    也就是说照着 5.1 写的读法在 pwsh 上必然失败，且被常见的 `catch {}` 静默吞掉
+    → 响应体变成 `$null` → 断言"响应体说明了 X"时括号里是空的，表现为断言失败
+    而不是可诊断的报错。e2e-dock 的 CI 失败正是这一条（实测：后端 409 体里确实有
+    `dock state=OFFLINE`，是 harness 读不到）。
+
+.PARAMETER ErrorRecord
+    `try { Invoke-WebRequest ... } catch { $_ }` 捕获到的错误记录。
+
+.OUTPUTS
+    响应体字符串；任何一步失败都返回 `$null`（不 throw，让调用方自己决定怎么断言）。
+#>
+function Read-E2eErrorBody {
+    param([Parameter(Mandatory = $false)]$ErrorRecord)
+
+    if ($null -eq $ErrorRecord) { return $null }
+
+    # 1) PowerShell 5.1：WebResponse.GetResponseStream()
+    try {
+        $resp = $ErrorRecord.Exception.Response
+        if ($null -ne $resp) {
+            if ($null -ne $resp.PSObject.Methods['GetResponseStream']) {
+                $stream = $resp.GetResponseStream()
+                if ($null -ne $stream) {
+                    $reader = New-Object System.IO.StreamReader($stream)
+                    $text = $reader.ReadToEnd()
+                    if ($text) { return $text }
+                }
+            }
+            # 2) PowerShell 7+：HttpResponseMessage.Content.ReadAsStringAsync()
+            #    在 **Content 上**找方法，而不是在 Response 上找 'get_Content'：
+            #    后者依赖对象是真实 .NET 类型（属性 getter 才叫 get_Content），
+            #    Response 一旦被包装/替换就漏判并静默返回 null。
+            #    （自检 scripts/e2e-common-selftest.ps1 正是靠这条抓到的）
+            $content = $resp.Content
+            if ($null -ne $content -and $null -ne $content.PSObject.Methods['ReadAsStringAsync']) {
+                $task = $content.ReadAsStringAsync()
+                $text = $task.GetAwaiter().GetResult()
+                if ($text) { return $text }
+            }
+        }
+    } catch {
+        # 落到下面的 ErrorDetails 兜底
+    }
+
+    # 3) 兜底：ErrorDetails.Message（pwsh 上通常可读）
+    try {
+        $details = $ErrorRecord.ErrorDetails.Message
+        if ($details) { return $details }
+    } catch {
+        # 确实读不到，返回 $null
+    }
+
+    return $null
+}
+
+<#
+.SYNOPSIS
+    跨平台 JSON 请求助手：返回 @{ code; body }，4xx 也能读到响应体。
+
+.DESCRIPTION
+    此前每个 e2e 脚本各自复制一份 `Try-Json`，全仓共 9 份 / 4 个变体：
+      - 1 份用 5.1 专有的 GetResponseStream（pwsh 上必然读不到，见上）
+      - **6 份根本没有读错误体的分支** —— 那些脚本里所有 4xx 响应体断言都在对
+        `$null` 做，属于"看起来测了其实没测"。
+    把能力收进公共库一次，各脚本只调用，才能保证只有一份需要维护。
+
+.PARAMETER Method  HTTP 方法（GET/POST/...）。
+.PARAMETER Uri     完整 URL。
+.PARAMETER Body    请求体字符串（可选）。
+.PARAMETER Token   Bearer 令牌（可选）。
+#>
+function Invoke-E2eJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $false)][AllowNull()]$Body,
+        [Parameter(Mandatory = $false)][AllowNull()][string]$Token,
+        [int]$TimeoutSec = 15
+    )
+
+    $req = @{ Method = $Method; Uri = $Uri; TimeoutSec = $TimeoutSec; ContentType = 'application/json' }
+    if ($PSBoundParameters.ContainsKey('Body') -and $null -ne $Body) { $req['Body'] = $Body }
+    if ($Token) { $req['Headers'] = @{ Authorization = "Bearer $Token" } }
+
+    try {
+        $r = Invoke-WebRequest @req -UseBasicParsing
+        $parsed = $null
+        try { $parsed = $r.Content | ConvertFrom-Json } catch {}
+        return @{ code = [int]$r.StatusCode; body = $parsed }
+    } catch {
+        $status = $null
+        try { $status = [int]$_.Exception.Response.StatusCode } catch {}
+        $text = Read-E2eErrorBody $_
+        $parsed = $null
+        if ($text) { try { $parsed = $text | ConvertFrom-Json } catch { $parsed = $text } }
+        return @{ code = if ($status) { $status } else { 0 }; body = $parsed }
+    }
+}

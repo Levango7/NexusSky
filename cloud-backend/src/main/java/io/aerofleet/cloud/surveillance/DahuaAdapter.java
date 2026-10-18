@@ -130,11 +130,14 @@ public final class DahuaAdapter implements VendorAdapter {
         validateDevice(device);
         log.info("大华能力查询 device={} (模拟实现)", device.id);
         // TODO: 接入 DHSDK CLIENT_GetDevConfig 实现真实能力查询
+        // Imaging 与海康/宇视对齐：此前只有大华缺这一项，而"能不能调图像参数"
+        // 与厂商无关，缺它只会在按能力分流时把大华设备误判成不支持。
         Set<String> caps = new LinkedHashSet<>();
         caps.add("Device");
         caps.add("Media");
         caps.add("Events");
         caps.add("PTZ");
+        caps.add("Imaging");
         return Collections.unmodifiableSet(caps);
     }
 
