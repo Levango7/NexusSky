@@ -19,6 +19,71 @@
 
 ---
 
+## [Unreleased] — 安防视频**终于能看了**：补上唯一一条浏览器真能播的出口（#110，2026-10-18）
+接着 #109。#109 把"不能播"这件事**说准了**（`streamUrlOrigin` 三态 + 前端不再谎称
+HLS），但结论停在"看不了"。这一条把那个结论**推翻**：能看，而且现在真的能看。
+
+### 1. 为什么此前一定看不了（不是配置问题，是结构性的）
+浏览器不能原生播 `rtsp://`；本平台**没有 RTSP 解码器**（不引入 ffmpeg / javacv）。
+于是 `/stream` 给出的地址对浏览器毫无用处，格子上只能写"RTSP 流需后端转码"——
+而"转码"这件事并不存在。**取不到源解决不了这个问题**，必须换一个浏览器能播的载体。
+
+### 2. 选 MJPEG，以及为什么帧源是"显式配置"而不是"推导"
+- **RTSP**：浏览器不能播，平台也解不了。
+- **HLS**：要切片转封装 + 前端为它加载 hls.js，单设备预览不值得这份复杂度。
+- **MJPEG**：`multipart/x-mixed-replace` 一帧一个 JPEG，浏览器 `<img src>` 直接
+  渲染，零插件零依赖，首帧即可见。
+
+帧源**不按厂商规范推导**。`rtspUrl` 是推导出来的（`rtsp://user:pass@ip:554/…`），
+格式对真实设备可能正确，但代码从未向设备确认过（#109 的 `deviceVerified=false`）。
+若快照地址也照厂商惯例拼一个（海康 `/ISAPI/Streaming/channels/N/httppreview` 之类），
+就又造出一个"看着对但没验证过"的地址——正是 #105–#109 一路在清的东西。
+所以新增的 `snapshotUrl` 是**配置**：填了就必须真连得上，连不上就明确报错；
+不填则界面如实显示放不出画面，而不是挂一个空格子。
+
+### 3. 开流之前先探一帧
+帧源不可达时返回 **502**，而不是先回 200 再让浏览器干等——后者表现为"一直转圈"，
+使用者会以为是网络慢。帧源中途掉线则**结束响应**让浏览器自行重连，**不发占位帧**：
+占位帧会让"有画面"和"画面是死的"看起来一模一样。
+
+### 4. 鉴权走既有短令牌机制，没有另开一条更弱的路
+`<img>` 带不了 Authorization 头。第一版我给这个路径加了 `permitAll` +
+自己写的 `?token=<长效 JWT>` 校验——这是**更弱**的路径：长效 JWT 进 URL 等于把
+bearer 暴露给所有能看到访问日志的人，与 `StreamTokenService` 存在的理由相反。
+已全部删除，改为把 MJPEG 路径纳入既有 `StreamTokenFilter`
+（60s 单次用 opaque 令牌，与两条 SSE 流同机制），链上仍是 `anyRequest().authenticated()`。
+**"链上放行"从未发生；放行的是短令牌这条既有通道。**
+
+### 5. 一个被测试当场抓出来的真 bug（不是 MockMvc 的锅）
+第一版把方法签名写成 `ResponseEntity<StreamingResponseBody>`。返回类型一变，
+命中的是 `ResponseEntityReturnValueHandler` → `HttpEntityMethodProcessor`，它把这个
+lambda 当普通消息体去找转换器，直接抛
+`No converter for StreamingResponseBody with preset Content-Type multipart/x-mixed-replace`。
+**生产环境同样是 500**——这不是测试框架的局限。改为裸返回 `StreamingResponseBody`，
+响应头改由 `HttpServletResponse` 设置。
+
+### 6. 验证：真实摄像头 → 真帧源 → 真后端 → 真字节
+新增 `scripts/camera-snapshot-source.py`（UVC 摄像头 → 真实 HTTP JPEG 快照端点，
+模拟网络摄像头普遍具备的 HTTP 取图能力）与 `scripts/e2e-mjpeg-preview.py`
+（22 项断言，全落在实测字节上）。本机实跑：
+- 帧源 200 / `image/jpeg` / SOI=`ffd8ff`，两次取帧内容不同（排除缓存的静止画面）
+- `browserPlayable=true` 且 `snapshotUrl` 原样回显（由真帧源决定，非推导）
+- **匿名 → 401 且一帧未漏**（防"链上放行"退化成"不鉴权"）
+- 开流 → 200 / `multipart/x-mixed-replace` / `no-store`；实收 5 帧，
+  帧号 `[1,2,3,4,5]`，每帧 SOI 合法、声明长度与实际字节一致、帧内容在变
+- 注销 → 404 + JSON，不留挂着的空格子
+
+变异测试 14/14 被杀（后端 7 + 前端 7），0 存活 0 无效。
+其中后端 B3/B6/B7 直接盯着"不许先回 200 再干等"，B5 盯着短令牌路径不被摘掉。
+
+### 7. 顺带记下的两处登记缺口（如实记录，未修）
+- 厂商枚举没有 `GENERIC`/`OTHER`，非厂商设备只能登记为 `ONVIF`
+  （枚举自述的通用 fallback）。**与 /mjpeg 无关**（帧源由 `snapshotUrl` 决定）。
+- `registerDevice` 强制 `username` 非空，而本地非厂商设备本就没有凭据，
+  只能用占位值。**与 /mjpeg 无关**，但对真实非厂商设备是登记口径需要放宽的地方。
+
+---
+
 ## [Unreleased] — 取流面板**从未真正播放过**：读的是后端不返回的键；诚实信号被前端静默吞掉（#109，2026-10-18）
 
 接着 #108 往下查剩下的"声明≠行为"。上一轮我以为剩余项只是"适配器还在拼一个

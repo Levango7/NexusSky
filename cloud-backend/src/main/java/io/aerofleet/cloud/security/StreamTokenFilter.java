@@ -57,6 +57,13 @@ public class StreamTokenFilter extends OncePerRequestFilter {
     private static final String ALARM_STREAM_PATH = "/api/v1/alarms/stream";
     private static final Pattern SURVEILLANCE_EVENTS_PATH =
             Pattern.compile("^/api/v1/surveillance/devices/[^/]+/events$");
+    /**
+     * MJPEG 预览流。同样受 {@code <img>} 带不了认证头的限制，同样在生产链上，
+     * 所以走同一套短令牌 —— 而不是另开一条"长效 JWT 进 URL"的路子：
+     * 那会把 bearer 暴露给所有能看到访问日志的人，是本类存在的理由的反面。
+     */
+    private static final Pattern SURVEILLANCE_MJPEG_PATH =
+            Pattern.compile("^/api/v1/surveillance/devices/[^/]+/mjpeg$");
 
     private final boolean devMode;
     private final StreamTokenService streamTokenService;
@@ -117,6 +124,8 @@ public class StreamTokenFilter extends OncePerRequestFilter {
     }
 
     private static boolean isStreamPath(String uri) {
-        return ALARM_STREAM_PATH.equals(uri) || SURVEILLANCE_EVENTS_PATH.matcher(uri).matches();
+        return ALARM_STREAM_PATH.equals(uri)
+                || SURVEILLANCE_EVENTS_PATH.matcher(uri).matches()
+                || SURVEILLANCE_MJPEG_PATH.matcher(uri).matches();
     }
 }

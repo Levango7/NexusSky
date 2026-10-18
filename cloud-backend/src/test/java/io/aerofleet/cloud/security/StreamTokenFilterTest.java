@@ -185,6 +185,44 @@ class StreamTokenFilterTest {
         assertThat(snapshot.authenticated).isTrue();
     }
 
+    /**
+     * MJPEG 预览流同样受短令牌保护。
+     *
+     * <p>它由 {@code <img src>} 渲染，浏览器不会（也不能）给它挂 Authorization 头，
+     * 而生产链上是 {@code .anyRequest().authenticated()}。若这个路径没进
+     * {@code isStreamPath}，结果是**匿名可看监控画面** —— 画面本身就在响应体里，
+     * 授权层拦不住"从来没人认证过"的请求。
+     */
+    @Test
+    @DisplayName("MJPEG 预览路径同样受短令牌保护（<img> 带不了认证头）")
+    void handlesMjpegPath() throws ServletException, IOException {
+        String token = service.issue("op-1", "OPERATOR", null);
+        MockHttpServletRequest request =
+                request("GET", "/api/v1/surveillance/devices/cam-9/mjpeg");
+        request.setParameter("streamToken", token);
+
+        runFilter(request);
+
+        assertThat(snapshot.chainReached).isTrue();
+        assertThat(snapshot.authenticated).isTrue();
+        assertThat(snapshot.principal).isEqualTo("op-1");
+    }
+
+    /** 反向：路径匹配不能宽到把别的端点也放进流令牌通道。 */
+    @Test
+    @DisplayName("MJPEG 路径模板不误伤：/devices/{id}/mjpeg/extra 不参与")
+    void mjpegPathPatternIsExact() throws ServletException, IOException {
+        String token = service.issue("op-1", "OPERATOR", null);
+        MockHttpServletRequest request =
+                request("GET", "/api/v1/surveillance/devices/cam-9/mjpeg/extra");
+        request.setParameter("streamToken", token);
+
+        runFilter(request);
+
+        assertThat(snapshot.chainReached).isTrue();
+        assertThat(snapshot.authenticated).isFalse();
+    }
+
     @Test
     @DisplayName("头凭证在场时流令牌不参与：Authorization / X-API-Key 优先（一请求一凭证）")
     void headerCredentialsTakePrecedence() throws ServletException, IOException {

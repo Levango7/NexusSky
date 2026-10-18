@@ -7,6 +7,8 @@ import {
   ptzControl,
   discoverDevices,
   listSurveillanceEvents,
+  fetchStreamToken,
+  mjpegPreviewUrl,
 } from '../api.js'
 
 // M10 安防视频监控面板
@@ -90,6 +92,9 @@ function VideoTile({ device, channel, selected, onSelect }) {
   const [stream, setStream] = useState(null)       // { url, protocol }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // MJPEG 预览地址（含一次性短令牌）。令牌是单次用的，所以它是**状态**而不是
+  // 每次渲染现算的常量：帧源掉线后需要换新令牌重挂，渲染期现算会把令牌算没。
+  const [mjpegUrl, setMjpegUrl] = useState(null)
 
   // 拉取流地址并渲染
   useEffect(() => {
@@ -100,6 +105,7 @@ function VideoTile({ device, channel, selected, onSelect }) {
     const load = async () => {
       setLoading(true)
       setError(null)
+      setMjpegUrl(null)
       try {
         // 注意：getDeviceStream 内部用 jsonFetch，不直接接受 signal；
         // 此处用 controller 作为竞态守卫，避免卸载后 setState
@@ -107,6 +113,24 @@ function VideoTile({ device, channel, selected, onSelect }) {
         if (controller.signal.aborted) return // 经验：abort 后不更新 state
         setStream(data)
         setLoading(false)
+
+        // 浏览器可播画面：设备视图里的 browserPlayable 由后端按"是否真配了帧源"
+        // 如实给出，不由前端猜。这里额外换一枚短令牌 —— <img> 带不了认证头。
+        //
+        // 顺序有意：这一支**先于** RTSP 支路返回，因为它是唯一真能出画面的路径。
+        // 此前这里直接 return，导致配了帧源的设备仍然只显示"RTSP 流需后端转码"。
+        if (device.browserPlayable) {
+          try {
+            const streamToken = await fetchStreamToken()
+            if (controller.signal.aborted) return
+            setMjpegUrl(mjpegPreviewUrl(device.id, streamToken, 5))
+          } catch (e) {
+            // 换不到令牌就说清楚，别把一个永远 401 的地址挂上去
+            if (!controller.signal.aborted) {
+              setError('无法获取预览令牌：' + (e && e.message))
+            }
+          }
+        }
 
         // 按协议挂载流
         //
@@ -186,6 +210,9 @@ function VideoTile({ device, channel, selected, onSelect }) {
   // 认不出的协议不再被当成 HLS
   const unknownProtocol =
     !loading && !error && stream && streamUrl && !protocol && !notPlayable
+  // 有 MJPEG 预览地址时，RTSP 说明就不该再盖在画面上 —— 那句话描述的是"没有别的办法时"，
+  // 现在有办法了，同时显示就是自己打自己的脸。
+  const hasPreview = !loading && !error && !!mjpegUrl
 
   const name = device
     ? `${device.name || device.id}${channel != null ? ` · 通道${channel}` : ''}`
@@ -232,7 +259,7 @@ function VideoTile({ device, channel, selected, onSelect }) {
         {!loading && !error && !device && (
           <div style={tileOverlayStyle}>空闲</div>
         )}
-        {!loading && !error && device && isRtsp && (
+        {!loading && !error && device && isRtsp && !hasPreview && (
           <div style={tileOverlayStyle}>
             RTSP 流需后端转码
             {stream && stream.deviceVerified === false && (
@@ -259,6 +286,15 @@ function VideoTile({ device, channel, selected, onSelect }) {
           <img
             src={streamUrl}
             alt={name}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+          />
+        )}
+        {/* MJPEG 实时预览：这是本平台唯一真能让浏览器看到安防画面的路径 */}
+        {hasPreview && (
+          <img
+            src={mjpegUrl}
+            alt={name}
+            data-testid="mjpeg-preview"
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
           />
         )}
@@ -323,6 +359,7 @@ export default function SurveillancePanel() {
   const [regForm, setRegForm] = useState({
     name: '', ip: '', port: 80, vendor: 'hikvision',
     username: 'admin', password: '', channels: 1,
+    snapshotUrl: '',
   })
   const [registering, setRegistering] = useState(false)
 
@@ -730,6 +767,17 @@ export default function SurveillancePanel() {
             <Field label="通道数">
               <input type="number" min="1" value={regForm.channels} onChange={(e) => setRegForm({ ...regForm, channels: e.target.value })} style={modalInputStyle} />
             </Field>
+            {/* 浏览器可播的帧源。留空 = 该设备看不到画面（会如实显示"无浏览器可播的信号源"）。
+                这里刻意不按厂商规范自动推导：推导出来的地址"看着对但没验证过"，
+                挂上去就是一个永远转圈的格子。填了就必须真能连上。 */}
+            <Field label="HTTP 快照地址（浏览器可播画面，可选）">
+              <input
+                value={regForm.snapshotUrl || ''}
+                onChange={(e) => setRegForm({ ...regForm, snapshotUrl: e.target.value })}
+                style={modalInputStyle}
+                placeholder="http://192.168.1.100:8080/snapshot"
+              />
+            </Field>
             <button
               onClick={handleRegister}
               disabled={registering || !regForm.ip}
@@ -778,6 +826,7 @@ export default function SurveillancePanel() {
                           ip: d.ip || '', port: d.port || 80,
                           vendor: d.vendor || 'other',
                           username: 'admin', password: '', channels: 1,
+                          snapshotUrl: '',
                         })
                         setShowDiscover(false)
                         setShowRegister(true)
