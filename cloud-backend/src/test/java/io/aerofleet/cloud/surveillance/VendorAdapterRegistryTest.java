@@ -165,6 +165,52 @@ class VendorAdapterRegistryTest {
         assertThat(caps).contains("Device", "Media", "Events", "PTZ", "Imaging");
     }
 
+    /**
+     * 三个私有协议适配器声明的能力必须一致。
+     *
+     * <p>此前只有海康被测，且大华少一个 {@code Imaging} —— 没有任何用例会发现。
+     * 能力位现在真的会门控操作（PTZ / 取流端点），于是这种不一致不再是文档瑕疵：
+     * 一台大华摄像头会因为少一项而被判成不支持。
+     */
+    @Test
+    @DisplayName("三个私有协议适配器声明一致的标准能力集（无遗漏项）")
+    void privateVendorAdapters_declareConsistentCapabilities() {
+        Set<String> expected =
+                Set.of("Device", "Media", "Events", "PTZ", "Imaging");
+
+        Set<String> hik = new HikAdapter()
+                .getCapabilities(newDevice(SurveillanceDevice.Vendor.HIKVISION));
+        Set<String> dahua = new DahuaAdapter()
+                .getCapabilities(newDevice(SurveillanceDevice.Vendor.DAHUA));
+        Set<String> uniview = new UniviewAdapter()
+                .getCapabilities(newDevice(SurveillanceDevice.Vendor.UNIVIEW));
+
+        assertThat(hik).isEqualTo(expected);
+        assertThat(dahua).isEqualTo(expected);
+        assertThat(uniview).isEqualTo(expected);
+    }
+
+    /**
+     * ONVIF 的能力与端口<b>无关</b>。
+     *
+     * <p>它此前写的是"PTZ/Imaging 仅在 port==80 时有"，并被一条用例钉成契约。
+     * 能力门控接通后，这条编造规则会把注册在非 80 端口的真实摄像头判成
+     * 不支持云台并拒绝操作。端口号与云台能力之间没有真实关联。
+     */
+    @Test
+    @DisplayName("ONVIF 能力不随端口变化（编造的端口规则已除）")
+    void onvifCapabilities_doNotDependOnPort() {
+        OnvifClient client = new OnvifClient();
+
+        Set<String> on80 = client.getDeviceCapabilities("192.168.1.64", 80, "admin", "pw");
+        Set<String> on8080 = client.getDeviceCapabilities("192.168.1.64", 8080, "admin", "pw");
+        Set<String> on554 = client.getDeviceCapabilities("192.168.1.64", 554, "admin", "pw");
+
+        assertThat(on8080).isEqualTo(on80);
+        assertThat(on554).isEqualTo(on80);
+        assertThat(on80).contains("PTZ", "Imaging");
+    }
+
     @Test
     @DisplayName("HikAdapter subscribeEvents 返回非空句柄")
     void hikAdapter_subscribeEvents_returnsHandle() {

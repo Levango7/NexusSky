@@ -79,15 +79,31 @@ class OnvifClientTest {
         assertThat(caps).contains("Device", "Media", "Events", "PTZ", "Imaging");
     }
 
+    /**
+     * 端口号<b>不</b>决定云台能力。
+     *
+     * <p>此前这条用例反过来断言"非默认端口不含 PTZ"，把一个随手写的开关
+     * 钉成了契约。后果是真实的：能力位现在真的会门控操作（见
+     * {@code SurveillanceController} 的 PTZ / 取流端点），于是**注册在 8080
+     * 这类端口的真摄像头会被判成不支持云台并被拒绝**。
+     *
+     * <p>这里反转为：换端口不应改变能力声明。"没有向设备确认"这件事由
+     * {@link io.aerofleet.cloud.surveillance.StreamUrlOrigin#deviceVerified()}
+     * 如实记录，不该由一个假的否定项去拦真实用户操作。
+     */
     @Test
-    @DisplayName("getDeviceCapabilities 非默认端口不包含 PTZ")
-    void getDeviceCapabilities_nonDefaultPort_excludesPtz() {
+    @DisplayName("getDeviceCapabilities 端口不同不改变能力（能力与端口无关）")
+    void getDeviceCapabilities_portDoesNotChangeCapabilities() {
         OnvifClient client = new OnvifClient();
 
-        Set<String> caps = client.getDeviceCapabilities(IP, 8080, USER, PASS);
+        Set<String> onDefault = client.getDeviceCapabilities(IP, PORT, USER, PASS);
+        Set<String> onOther = client.getDeviceCapabilities(IP, 8080, USER, PASS);
+        Set<String> onHighPort = client.getDeviceCapabilities(IP, 554, USER, PASS);
 
-        assertThat(caps).contains("Device", "Media", "Events");
-        assertThat(caps).doesNotContain("PTZ");
+        assertThat(onOther).isEqualTo(onDefault);
+        assertThat(onHighPort).isEqualTo(onDefault);
+        // 明确钉住：非默认端口仍然声明 PTZ 与 Imaging
+        assertThat(onOther).contains("Device", "Media", "Events", "PTZ", "Imaging");
     }
 
     @Test

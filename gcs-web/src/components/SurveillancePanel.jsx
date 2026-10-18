@@ -109,9 +109,18 @@ function VideoTile({ device, channel, selected, onSelect }) {
         setLoading(false)
 
         // 按协议挂载流
-        const protocol = (data && data.protocol) || guessProtocol(data && data.url)
-        const url = data && data.url
+        //
+        // 键名解析见 resolveStreamUrl（单一解析点）。
+        // `playable` 由后端如实给出（StreamUrlOrigin.playable()）：媒体面未实现
+        // 的设备（GB28181）返回描述性标识而非可播地址，**不要**去挂播放器 ——
+        // 挂一个必然连不上的地址只会得到一个语焉不详的播放失败。
+        // 这里不设 error："放不出画面"是设备的已知状态，不是取流出错；
+        // 状态提示交给渲染路径的 notPlayable 区块统一表达，避免两套说法。
+        const url = resolveStreamUrl(data)
         if (!url) return
+        const protocol = data.protocol || guessProtocol(url)
+        // 认不出的协议不挂播放器（null 不是 'hls'）
+        if (!protocol) return
 
         if (protocol === 'hls') {
           const video = videoRef.current
@@ -166,10 +175,17 @@ function VideoTile({ device, channel, selected, onSelect }) {
   }, [device && device.id, channel])
 
   // 根据流数据渲染
-  const protocol = (stream && stream.protocol) || guessProtocol(stream && stream.url)
+  // 键名解析复用 resolveStreamUrl（与挂载路径同一个解析点）
+  const streamUrl = resolveStreamUrl(stream)
+  const protocol = (stream && stream.protocol) || guessProtocol(streamUrl)
   const isImg = protocol === 'mjpeg' || protocol === 'image'
   const isHls = protocol === 'hls'
   const isRtsp = protocol === 'rtsp'
+  // 后端声明不可播（GB28181 媒体面未接入）时如实说明，而不是挂一个空格子
+  const notPlayable = !loading && !error && stream && stream.playable === false
+  // 认不出的协议不再被当成 HLS
+  const unknownProtocol =
+    !loading && !error && stream && streamUrl && !protocol && !notPlayable
 
   const name = device
     ? `${device.name || device.id}${channel != null ? ` · 通道${channel}` : ''}`
@@ -219,11 +235,29 @@ function VideoTile({ device, channel, selected, onSelect }) {
         {!loading && !error && device && isRtsp && (
           <div style={tileOverlayStyle}>
             RTSP 流需后端转码
+            {stream && stream.deviceVerified === false && (
+              <div style={{ fontSize: 9, marginTop: 4, opacity: 0.8 }}>
+                该地址按厂商规范推导，未向设备校验
+              </div>
+            )}
           </div>
         )}
-        {!loading && !error && device && isImg && stream && stream.url && (
+        {/* #109：后端声明不可播（媒体面未接入，返回描述性标识）—— 如实说明，
+            而不是拿一个必然连不上的地址去挂播放器。 */}
+        {device && notPlayable && (
+          <div style={{ ...tileOverlayStyle, color: 'var(--dim)' }}>
+            该通道当前放不出画面（媒体面未接入，返回描述性标识而非可播地址）
+          </div>
+        )}
+        {/* 协议认不出：说明"不认得"，不再谎称是 HLS 后静默失败 */}
+        {device && unknownProtocol && (
+          <div style={{ ...tileOverlayStyle, color: 'var(--dim)' }}>
+            无法识别的流地址协议，未能播放
+          </div>
+        )}
+        {!loading && !error && device && isImg && streamUrl && (
           <img
-            src={stream.url}
+            src={streamUrl}
             alt={name}
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
           />
@@ -243,13 +277,33 @@ function VideoTile({ device, channel, selected, onSelect }) {
 }
 
 // 根据 URL 猜测协议
+//
+// 认不出的 scheme 返回 **null**，不再一律猜 'hls'。此前把未知协议当成 HLS，
+// 于是后端"这个地址不可播"的诚实声明（例如 GB28181 的 gb28181-invite://）
+// 会被当成 HLS 去播 —— 用者只看到一个语焉不详的播放失败，
+// 而前端把"我不知道这是什么协议"讲成了"它是 HLS"。
 function guessProtocol(url) {
   if (!url) return null
   if (url.endsWith('.m3u8')) return 'hls'
   if (url.startsWith('rtsp://')) return 'rtsp'
   if (url.endsWith('.mjpeg') || url.includes('mjpeg')) return 'mjpeg'
   if (url.match(/\.(jpg|jpeg|png|gif)/i) || url.includes('snapshot')) return 'image'
-  return 'hls'
+  return null
+}
+
+/**
+ * 从后端响应里取出流地址。
+ *
+ * <p>键名是 `rtspUrl`（见 `SurveillanceController.getStreamUrl`）—— 组件此前在
+ * 两处各读一次 `url`，而该键后端从不返回：挂载路径因此每次 `if (!url) return`
+ * 提前返回，渲染路径的 isImg/isHls/isRtsp 三个分支也永远全假，格子一直空着。
+ *
+ * <p>**解析只在这里做一次**：两处各读一遍键名，就等于把契约复制成两份，
+ * 迟早只有一份被改（这正是本缺陷能长期存活的原因）。`url` 作为兼容键保留。
+ */
+function resolveStreamUrl(data) {
+  if (!data) return null
+  return data.rtspUrl || data.url || null
 }
 
 export default function SurveillancePanel() {

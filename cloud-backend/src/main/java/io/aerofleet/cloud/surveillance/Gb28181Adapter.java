@@ -86,6 +86,19 @@ public class Gb28181Adapter implements VendorAdapter {
     }
 
     /**
+     * {@inheritDoc}
+     *
+     * <p>国标媒体面（RTP/PS）尚未实现，{@code getStreamUrl} 只能给出
+     * {@code gb28181-invite://} 描述性标识 —— 必须覆写成
+     * {@link StreamUrlOrigin#DESCRIPTIVE_ONLY}，否则 REST 层会把它当成可播流，
+     * 前端就会去播一个必然连不上的地址。
+     */
+    @Override
+    public StreamUrlOrigin streamUrlOrigin() {
+        return StreamUrlOrigin.DESCRIPTIVE_ONLY;
+    }
+
+    /**
      * REST 契约口径 → 国标内部口径的翻译表。
      * <p>
      * 对外 API 用 camelCase（{@code zoomIn}/{@code zoomOut}，与 {@code OnvifClient.PTZ_COMMANDS}
