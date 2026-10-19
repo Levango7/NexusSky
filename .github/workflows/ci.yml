@@ -842,12 +842,20 @@ jobs:
   # 这三个脚本已在本机 Windows 全绿，但**未在 Linux 上连续复跑**，runner 上的
   # 进程/端口/时序行为可能不同。先收集 flaky 数据，若干次 run 全绿后删掉这行
   # 转为硬门禁。删标记 = 把"跑过"升级为"必须通过"，不涉及任何脚本改动。
+      # 上面五个 e2e job 原本带 continue-on-error（观察模式），用于先收集 flaky 数据。
+      # 并列上过的历史（各自近十不两次 run）：
+      #   E2E core scripts    绿 11 / skipped 1 / 红 0
+      #   E2E MAVLink signing 绿 11 / skipped 1 / 红 0
+      #   E2E B1 scripts      绿  9 / skipped 1 / 红 0
+      #   E2E B2 A-type      绿  2 / skipped 0 / 红 0
+      #   E2E B2 B-type      绿  2 / skipped 0 / 红 0
+      # 全部零红，所以现在去掉 continue-on-error 转为硬门禁；
+      # job 名里的「— observe」也一并去掉（否则名字会和行为对不上）。
   e2e-core-scripts:
-    name: E2E core scripts (formation / mesh / rid) — observe
+    name: E2E core scripts (formation / mesh / rid)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     needs: [ java ]
-    continue-on-error: true
     services:
       redis:
         image: mirror.gcr.io/library/redis:7-alpine
@@ -909,7 +917,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     needs: [ java, frontend ]
-    continue-on-error: true
     services:
       redis:
         image: mirror.gcr.io/library/redis:7-alpine
@@ -987,11 +994,10 @@ jobs:
   # runner 上的进程/端口/时序行为可能不同。先收集 flaky 数据，若干次 run 全绿后
   # 删掉这行转为硬门禁。删标记 = 把"跑过"升级为"必须通过"，不涉及任何脚本改动。
   e2e-b1-scripts:
-    name: E2E B1 scripts (regulator / dock / route-templates / defect) — observe
+    name: E2E B1 scripts (regulator / dock / route-templates / defect)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [ java ]
-    continue-on-error: true
     services:
       redis:
         image: mirror.gcr.io/library/redis:7-alpine
@@ -1068,11 +1074,10 @@ jobs:
   # 行为可能不同（sensing/network/rf/pixels 对时序敏感）。先收集 flaky 数据，
   # 若干次 run 全绿后删掉这行转硬门禁——删标记 = 把"跑过"升级为"必须通过"。
   e2e-b2-a-type:
-    name: E2E B2 A-type scripts (cv-eval / operations / rtk / sensing / uspace / spray) — observe
+    name: E2E B2 A-type scripts (cv-eval / operations / rtk / sensing / uspace / spray)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [ java ]
-    continue-on-error: true
     services:
       redis:
         image: mirror.gcr.io/library/redis:7-alpine
@@ -1217,11 +1222,10 @@ jobs:
   # java 会端口冲突而探针却命中旧进程——所以步间清理是正确性问题，不只是
   # 卫生问题。
   e2e-b2-b-type:
-    name: E2E B2 B-type scripts (network / rf / vision-pixels) — observe
+    name: E2E B2 B-type scripts (network / rf / vision-pixels)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [ java ]
-    continue-on-error: true
     services:
       redis:
         image: mirror.gcr.io/library/redis:7-alpine
