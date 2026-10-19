@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 143 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 144 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,9 +14,95 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 143 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 144 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
+
+---
+
+## [Unreleased] — 配置声明 `jwt.algorithm=RS256`，实际签发的是 HS256；算法选择逻辑**一条测试都没有**（#116，2026-10-19）
+
+Next Move 里有一条自己写的「未核实」：
+
+> `application.properties` 声明 `jwt.algorithm=RS256`，但登录 token 头是 `alg: HS256`。
+
+这次把它查实了。结论分两句：行为不是 bug，但**声明确实是毛的**；更重要的是——
+**决定签发算法的那段代码，一条测试都没有**。
+
+### 1. 先分清“行为”和“声明”
+
+`JwtTokenProvider` 的 Spring 主构造函数里有四路分支（Javadoc 写得很清楚）：
+
+```
+RS256 + 已配置 RSA 密钥对   -> RS256
+RS256 + jwt.generate-keys=true  -> 自动生成（prod 禁止）
+RS256 + 无 RSA 密钥      -> 回退 HS256
+HS256                         -> HS256
+```
+
+`application-prod.properties` / `-staging.properties` 只设 `aerofleet.security.jwt-secret`，
+从不配密钥对、也不开 `generate-keys`（而且 prod 明确禁止开）。所以**第三条就是
+prod 实际跑的那条** —— 这是旧版本只能对称签名留下的有意回退，也有启动 warn，
+不能算作 bug。真问题在另一头：
+
+- `application.properties` 的小节写着「P2-2 RS256 非对称签名升级」，prod 读它、签的却是 HS256。
+- **而判定到哪个分支的那段代码，全仓零测试**。
+
+### 2. 为什么旧测试看不到：它们绕开了选择逻辑
+
+`JwtTokenProviderTest` 是有的，4 项 + 11 项，以及一条“HS256 不能被 RS256 provider 验证”的交叉
+验证。但它用的是**编程式构造函数**：
+
+```java
+new JwtTokenProvider(secret)              // 直接跳到 HS256 分支
+new JwtTokenProvider(privKey, pubKey)     // 直接跳到 RS256 分支
+```
+
+两个都**不进选择逻辑**。所以它们证的是“HS256 模式能不能工作”、“RS256
+模式能不能工作”，而不是“给一份配置，它会选哪个”。
+
+全仓搜 `jwt.generate-keys` / `generateKeys`：**零命中**。
+
+### 3. 新增 `JwtAlgorithmSelectionTest`（14 条）直接打 7 参构造函数
+
+断言强调一点：`validateToken == true` **对算法没有鉴别力** —— 回退成 HS256 的
+provider 同样会返回 true。所以每一条都把签出的 token 拆开，用 Nimbus `JWSObject` 精确取 JOSE
+头的 `alg`（不用子串匹配）。
+
+覆盖的里程弯里，有两条是写测试时才发现的漂移：
+
+- **只配私钥不算配置完整**。判据是 `isNotEmpty(priv) && isNotEmpty(pub)`，只给一半就掉进
+  回退分支 —— 有人意外只填了 `jwt.private-key`，结果整个服务悄悄换成对称签名，
+  唯一线索就是启动时的 warn。
+- **多 profile 串**。`spring.profiles.active=prod,observability` 是合法写法，守卫若写成
+  `equals("prod")` 就会被绕过——而多实例部署恰好常这么配。
+
+### 4. 变异 5/5，其中一条是补测试才能杀的
+
+| 变异 | 结果 |
+|---|---|
+| S1 prod 守卫整体删除 | KILLED |
+| S2 半套密钥对当成配置完整（`&&`→`||`） | KILLED |
+| S3 `resolveSecret` 优先级倒置 | KILLED |
+| S4 `contains("prod")` 收窄成 `equals("prod")` | KILLED（**补了多 profile 测试之后**） |
+| S5 最小密钥长度检查删除 | KILLED |
+
+S4 值得单记：**在我原先的 12 条测试下它是存活的**，只有补上
+`prod,observability` 那条才能杀掉它。直接说明第一版测试集有漏。
+
+S3 也一度是补的：第一版只断言了“两种组合都签 HS256”，对优先级**没有鉴别力**
+，改掉优先级也不会红。现在改成跨 provider 互验证：A 配了两个键、B 只配 legacy，
+A 签的 token 必须让 B 验不过。
+
+### 5. 声明向行为对齐
+
+在 prod / staging 两个 profile 的 JWT 段前各补一段说明：基线写的 RS256 在本 profile
+下**不成立**（不配密钥对 + 禁止自动生成），实际签发的是 HS256，这是有意回退，
+要真切到 RS256 需在这里补密钥对。行为不动，只让人不再被 `RS256` 字样引向错误假设。
+
+### 6. 计数
+
+Java 4935 → **4949**（cloud-backend 2829 → 2843），前端 381 不变。门禁绿。
 
 ---
 
