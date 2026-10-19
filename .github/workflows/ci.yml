@@ -1248,7 +1248,7 @@ jobs:
       - name: Build all
         run: mvn -B -DskipTests package
       - name: Clean leftovers before start
-        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','rf-e2e','pixels-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','network-backend-e2e','rf-e2e','rf-backend-e2e','pixels-e2e','pixels-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
       # network：backend 的 drone-port 指向链路代理 14600（link-sim 在其上
       # 施加 LTE/Starlink 损伤画像）。
       - name: e2e-network (LTE/Starlink 损伤链路任务流)
@@ -1257,7 +1257,14 @@ jobs:
           AF_BACKEND_REST_PORT: 18099
         run: |
           set -o pipefail
-          java -Dnetwork-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+          # 后端的 marker 与脚本自己的 sim marker **必须分开**：
+          # e2e-network.ps1 开头会调 Stop-E2eStaleProcesses 清理上一轮遗留的
+          # sim（marker = network-e2e），若后端也用同一个 marker，它会把脚本脚下的
+          # 后端一并杀掉 —— 后端一死，脚本第一个前置检查
+          # (后端可达) 就会失败，而失败原因被 catch { } 吞掉，零诊断信息。
+          # 那次 CI 就是这样：后端日志里 /api/v1/drones 只有 CI 自己那一次，
+          # 脚本的请求根本没到达。
+          java -Dnetwork-backend-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
             --server.port=18099 \
             --spring.profiles.active=dev \
             --spring.datasource.url='jdbc:h2:mem:network-e2e;DB_CLOSE_DELAY=-1' \
@@ -1280,11 +1287,11 @@ jobs:
           pwsh -NoProfile -File scripts/e2e-network.ps1 2>&1 | tee "$RUNNER_TEMP/e2e-network-step.log" || rc=$?
           kill "$backend_pid" 2>/dev/null || true
           wait "$backend_pid" 2>/dev/null || true
-          pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+          pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','network-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
           exit $rc
       - name: Clean leftovers between scripts
         if: always()
-        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','rf-e2e','pixels-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','network-backend-e2e','rf-e2e','rf-backend-e2e','pixels-e2e','pixels-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
       # rf：backend 保持默认 drone-port 14550 + 默认 extra 14541-14543——
       # sim 挂 14543，恰在默认扫描段内，无需额外参数。
       - name: e2e-rf (E1 RF 链路几何回归)
@@ -1293,7 +1300,7 @@ jobs:
           AF_BACKEND_REST_PORT: 18099
         run: |
           set -o pipefail
-          java -Drf-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+          java -Drf-backend-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
             --server.port=18099 \
             --spring.profiles.active=dev \
             --spring.datasource.url='jdbc:h2:mem:rf-e2e;DB_CLOSE_DELAY=-1' \
@@ -1315,11 +1322,11 @@ jobs:
           pwsh -NoProfile -File scripts/e2e-rf.ps1 2>&1 | tee "$RUNNER_TEMP/e2e-rf-step.log" || rc=$?
           kill "$backend_pid" 2>/dev/null || true
           wait "$backend_pid" 2>/dev/null || true
-          pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'rf-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+          pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'rf-e2e','rf-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
           exit $rc
       - name: Clean leftovers between scripts
         if: always()
-        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','rf-e2e','pixels-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','network-backend-e2e','rf-e2e','rf-backend-e2e','pixels-e2e','pixels-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
       # vision-pixels：后端三参数缺一不可（脚本文件头有完整说明）——
       # source=pixels 才走真 JPEG 检测管道；sim-truth-base 指向本脚本 sim 的
       # 18082（默认 18080 会 ConnectException）；drone-extra-ports=14544 让
@@ -1330,7 +1337,7 @@ jobs:
           AF_BACKEND_REST_PORT: 18099
         run: |
           set -o pipefail
-          java -Dpixels-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+          java -Dpixels-backend-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
             --server.port=18099 \
             --spring.profiles.active=dev \
             --spring.datasource.url='jdbc:h2:mem:pixels-e2e;DB_CLOSE_DELAY=-1' \
@@ -1355,7 +1362,7 @@ jobs:
           pwsh -NoProfile -File scripts/e2e-vision-pixels.ps1 2>&1 | tee "$RUNNER_TEMP/e2e-vision-pixels-step.log" || rc=$?
           kill "$backend_pid" 2>/dev/null || true
           wait "$backend_pid" 2>/dev/null || true
-          pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'pixels-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+          pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'pixels-e2e','pixels-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
           exit $rc
       # D8 断言聚合：B 型 3 脚本全部是 PASS:/FAIL: 族，正则与 A 型共用
       # （\[PASS\]|PASS: 两族通吃）。

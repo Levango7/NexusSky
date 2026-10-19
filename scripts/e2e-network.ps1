@@ -75,13 +75,18 @@ Stop-E2eStaleProcesses -Marker $E2eMarker | Out-Null
 Start-Sleep 2
 
 # ---- 前置：后端必须已在跑（本脚本不启动后端，drone-port=14600 指向链路代理）----
+$backendErr = $null
 $backendOk = $false
 try {
     $null = Invoke-RestMethod "$Base/drones" -TimeoutSec 5
     $backendOk = $true
-} catch { }
+} catch { $backendErr = $_.Exception.Message }
 if (-not $backendOk) {
     Write-Host ("后端未运行（$Base 不可达），中止。先起后端：mvn -pl cloud-backend -am package 后以 --spring.profiles.active=dev --aerofleet.drone-port=14600 启动") -ForegroundColor Red
+    # 异常本身要打出来：曾经写成 `catch { }` 把原因吞掉，结果「后端不可达」这句话
+    # 既可能是真没起、也可能是被本脚本开头的清理误杀（后端与 sim 共用 marker 时就会这样），
+    # 两种情况的排查方向完全相反，吞掉异常等于让排查靠猜。
+    if ($backendErr) { Write-Host ("  原因：$backendErr") }
     exit 1
 }
 

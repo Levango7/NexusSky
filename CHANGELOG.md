@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 146 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 147 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,7 +14,7 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 146 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 147 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
 
@@ -417,6 +417,92 @@ p50=12ms，就写成"多出恒定的约 +10ms"。复测三轮后发现空载时�
 延迟计算**之前**就 return，于是黑洞期每次调用更便宜、循环更快、落进去的调用
 次数更多。改成按 1ms 时间桶取多数状态后实测 **49.8%** —— 引擎本身没问题。
 
+
+## [Unreleased] — 推上去让 CI 验之后：B 型脚本在 Linux 上被自己杀了后端（#114，2026-10-19）
+
+这条不是新功能，是**把本地做的那批 B2 脚本推上去让 CI 验之**的结果。
+CI 第一个跑就红了 —— 且红的不是脚本自己，是**两个真问题**。
+
+### 1. 一个后端被脚本开头的清理误杀
+
+CI 的 `E2E B2 B-type scripts` 中，`e2e-network` 这一步失败，报错是：
+
+```
+Stop-E2eStaleProcesses: scripts/e2e-network.ps1:74
+  Cannot bind parameter 'Id'. Cannot convert value "[int]/proc/2977.Name" to type "System.Int32".
+```
+
+这个错误本身是 master 上 `e2e-common.ps1` 的硬缺陷（已由 #117 修掉）：
+实参位置的 `[int]$x.Name` 不是类型转换。
+
+**修完之后下一轮 CI 又红了，但错变了**，变成“后端不可达”。这一次有确确的证据：
+
+```
+后端日志里 /api/v1/drones 只有 1 次命中（CI 自己那次 curl，200 OK），
+日志到这里就结束了 —— 脚本的请求根本没到达。
+```
+
+真因：**marker 命名空间碰了**。
+
+| 进程 | marker | 谁启动的 |
+|---|---|---|
+| B 型的 network 后端 | `network-e2e` | **CI（ci.yml）** |
+| `e2e-network.ps1` 自己的 link-sim / drone-sim | `network-e2e` | 脚本 |
+
+脚本开头的 `Stop-E2eStaleProcesses -Marker 'network-e2e'` 要清上一轮遗留的 sim，
+但后端也带同一个 marker —— **脚本把脚下的后端一并杀了**。
+后端一死，脚本第一个前置检查（后端可达）就会失败。
+
+而失败原因被脚本的 `catch { }` 吞掉了 —— 所以那一次的信息量为零，
+完全靠猜。
+
+**修法**：把“验收方起的后端”与“脚本自己的 sim”拆到两个 marker 命名空间：
+
+- CI 起的后端：`-Dnetwork-backend-e2e=true` / `-Drf-backend-e2e=true` / `-Dpixels-backend-e2e=true`
+- 脚本自己的 sim：`-Dnetwork-e2e=true` / `-Drf-e2e=true` / `-Dpixels-e2e=true`（不变）
+- 各 cleanup 步骤的 marker 列表同时列两空间
+
+子串安全性核对过：`network-backend-e2e` 不包含 `network-e2e`，`network-e2e` 也不包含 `network-backend-e2e`。
+
+### 2. 本机行为级验证（不只靠 CI）
+
+在本机 Windows 上起两个带不同 marker 的 java 进程，再用公共库的清理去对它们：
+
+```
+Stop-E2eStaleProcesses -Marker 'network-e2e'        -> killed=1  （只杀 sim），后端 alive=True
+Stop-E2eStaleProcesses -Marker 'network-backend-e2e' -> killed=1  （杀后端），alive=False
+```
+
+顺带也证明了 #117 的 pid 转换修正真的能杀进程（两次 killed=1）。
+
+### 3. 日志收不到：脚本写 /tmp，CI 只扫 runner.temp
+
+`Get-E2eTempDir` 在 Linux 上回退到 `/tmp`（pwsh 常未设 `TEMP/TMP`），
+而 CI 的「收集日志」步骤只扫 `${RUNNER_TEMP}` 一层 —— 所以后端、sim 的日志
+**一个也收不到**，失败时只能看到 sim 的 stdout。
+
+修法：`Get-E2eTempDir` 优先用 `$env:RUNNER_TEMP`（CI 提供），这样既有的收集步骤就能找到日志。
+
+### 4. 失败原因不再被吞掉
+
+`e2e-network.ps1` 的 `catch { }` 改成提取 `$_.Exception.Message` 并在退出前打出。
+“后端不可达”这句话既可能是真没起、也可能是被清理误杀 ——
+两者排查方向完全相反，吞掉异常等于让排查靠猜。
+
+### 5. 还没查出的：e2e-rtk 是平台差异（本机过、Linux 不过）
+
+A 型的 `e2e-rtk` 也红，但根因不同：3 台 sim 都启动了（日志里能看到），
+却没有一台上线。**本机实跑 `scripts/e2e-rtk.ps1 -SkipBuild` 是通过的（exit=0）** ——
+所以是 **Windows 上通、Linux 不通**的平台差异，而不是脚本逻辑写错。
+
+正确的诊断路径已打通（上面第 3 条）：下一轮 CI 就能给出后端日志，
+再按日志定位是端口、绑定还是网络层的问题。在那之前不形成结论。
+
+### 6. 计数
+
+Java 4949 不变（本轮不动 Java 测试），前端 381 不变。门禁绿。
+
+---
 
 ## [Unreleased] — e2e 救活第三批（B2）：9 个脚本跨平台适配并以观察模式接进 CI（2026-10-19）
 
