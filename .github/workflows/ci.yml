@@ -1055,6 +1055,356 @@ jobs:
             -exec cp {} b1-e2e-logs/ \; 2>/dev/null || true
           ls -la b1-e2e-logs || echo "(no logs captured)"
 
+  # ── B2 第三批 e2e（观察模式）────────────────────────────────────────────
+  # 与 e2e-b1-scripts 平行、互不依赖。十脚本里 9 个接入；px4-sitl 不接入
+  # （ubuntu runner 无 PX4 SITL、脚本宿主导向，接了必红）。
+  #
+  # 拆两个 job 的原因（与 B1 单 job 不同）：cloud-backend 恒绑 UDP 14550
+  # （aerofleet.udp-port，所有脚本均不覆盖）→ 同一 runner 内任意两个 backend
+  # 不能共存、脚本必须串行；A/B 两型分到两个独立 runner 上可安全并行。
+  #
+  # 为什么带 continue-on-error：与 e2e-b1-scripts 同款观察模式。9 个脚本已
+  # 在本机 Windows 全绿，但未在 Linux 上连续复跑，runner 上的进程/端口/时序
+  # 行为可能不同（sensing/network/rf/pixels 对时序敏感）。先收集 flaky 数据，
+  # 若干次 run 全绿后删掉这行转硬门禁——删标记 = 把"跑过"升级为"必须通过"。
+  e2e-b2-a-type:
+    name: E2E B2 A-type scripts (cv-eval / operations / rtk / sensing / uspace / spray) — observe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: [ java ]
+    continue-on-error: true
+    services:
+      redis:
+        image: mirror.gcr.io/library/redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      - name: Build all
+        run: mvn -B -DskipTests package
+      # 每轮开头主动清一次残留（runner 是干净容器，通常命中 0；命中非 0 说明
+      # 上个场景没退干净，日志里能看到线索）。A 型 6 脚本的 backend 与 sim
+      # 命令行统一带 -D<name>-e2e=true，一个 marker 清两类进程。
+      - name: Clean leftovers before start
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      # 6 步串行（backend 恒绑 UDP 14550，同 runner 不能并行）。每步 tee 留档
+      # step 日志：观察模式的断言信号靠 job 末尾的聚合步骤重新统计——
+      # continue-on-error 会把红压成绿，不能只看 job 结论。pipefail 防 tee
+      # 管道吞掉脚本退出码。
+      - name: e2e-cv-eval (F1 CV 评测三指标链路)
+        shell: bash
+        run: |
+          set -o pipefail
+          pwsh -NoProfile -File scripts/e2e-cv-eval.ps1 -SkipBuild 2>&1 | tee "$RUNNER_TEMP/e2e-cv-eval-step.log"
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-operations (E6 运营报表聚合)
+        shell: bash
+        run: |
+          set -o pipefail
+          pwsh -NoProfile -File scripts/e2e-operations.ps1 -SkipBuild 2>&1 | tee "$RUNNER_TEMP/e2e-operations-step.log"
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-rtk (F6 RTK 高精度链路三机对照)
+        shell: bash
+        run: |
+          set -o pipefail
+          pwsh -NoProfile -File scripts/e2e-rtk.ps1 -SkipBuild 2>&1 | tee "$RUNNER_TEMP/e2e-rtk-step.log"
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-sensing (E2+E4 侦测态势双源)
+        shell: bash
+        run: |
+          set -o pipefail
+          pwsh -NoProfile -File scripts/e2e-sensing.ps1 -SkipBuild 2>&1 | tee "$RUNNER_TEMP/e2e-sensing-step.log"
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      - name: e2e-uspace (E3 U-space 四服务)
+        shell: bash
+        run: |
+          set -o pipefail
+          pwsh -NoProfile -File scripts/e2e-uspace.ps1 -SkipBuild 2>&1 | tee "$RUNNER_TEMP/e2e-uspace-step.log"
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      # spray 端口已参数化并入统一变量：AF_BACKEND_PORT=18099（REST）；drone/sim
+      # 端口保持默认 14550/14551（drone-port 与 udp-port 的重叠语义本机已验，
+      # CI 首跑继续观察）。
+      - name: e2e-spray (喷洒+配送机载链路)
+        shell: bash
+        run: |
+          set -o pipefail
+          pwsh -NoProfile -File scripts/e2e-spray.ps1 -SkipBuild 2>&1 | tee "$RUNNER_TEMP/e2e-spray-step.log"
+        env:
+          AF_BACKEND_PORT: 18099
+      # D8 断言聚合：观察模式把红压成绿，断言结果必须从 step 日志重新捞一遍。
+      # 两族格式一个正则通吃：[PASS]/[FAIL]（cv-eval/operations/rtk/sensing/
+      # uspace）与 PASS:/FAIL:（spray）。有失败时 ::warning:: 注解——job 仍绿，
+      # 但信号必须在这里留痕，不许被 continue-on-error 静默吞掉。
+      - name: Summarize e2e assertions (b2 a-type)
+        if: always()
+        shell: bash
+        run: |
+          total_pass=0
+          total_fail=0
+          for f in "$RUNNER_TEMP"/e2e-*-step.log; do
+            [ -f "$f" ] || continue
+            p=$(grep -cE '\[PASS\]|PASS:' "$f" || true)
+            fl=$(grep -cE '\[FAIL\]|FAIL:' "$f" || true)
+            echo "$(basename "$f"): PASS=$p FAIL=$fl"
+            total_pass=$((total_pass + p))
+            total_fail=$((total_fail + fl))
+          done
+          echo "B2 A-type assertions total: PASS=$total_pass FAIL=$total_fail"
+          if [ "$total_fail" -gt 0 ]; then
+            echo "::warning::B2 A-type e2e ${total_fail} 条断言失败（观察模式不阻断，信号在此保留）"
+          fi
+      - name: Collect b2 a-type e2e logs on failure
+        if: failure()
+        run: |
+          mkdir -p b2a-e2e-logs
+          find "${{ runner.temp }}" -maxdepth 1 \
+            \( -name 'af-cveval-*' -o -name 'af-ops-*' -o -name 'af-rtk-*' \
+               -o -name 'af-sensing-*' -o -name 'af-uspace-*' -o -name 'spray-*' \
+               -o -name 'e2e-*-step.log' \) \
+            -exec cp {} b2a-e2e-logs/ \; 2>/dev/null || true
+          ls -la b2a-e2e-logs || echo "(no logs captured)"
+      - name: Upload b2 a-type e2e logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: warn
+          name: b2a-e2e-logs
+          path: b2a-e2e-logs/
+          retention-days: 14
+
+  # B2 B 型 3 脚本：**不自启 backend**（保持外部启动契约），每步由 CI 起一个
+  # 带定制参数的 backend：统一 h2:mem + dev profile + jwt-secret + REST 18099
+  # （注意变量名与 A 型不同：B 型脚本读 AF_BACKEND_REST_PORT），等业务端点
+  # 就绪后跑脚本，再按记录的 PID 杀 backend、按 marker 兜底。就绪探针用
+  # /api/v1/drones——/actuator/health 在 Redis 未就绪时恒 503，会把"起得来"
+  # 误判成"起不来"。三步共用 REST 18099：若上一步 backend 残留，本步新起的
+  # java 会端口冲突而探针却命中旧进程——所以步间清理是正确性问题，不只是
+  # 卫生问题。
+  e2e-b2-b-type:
+    name: E2E B2 B-type scripts (network / rf / vision-pixels) — observe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: [ java ]
+    continue-on-error: true
+    services:
+      redis:
+        image: mirror.gcr.io/library/redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      - name: Build all
+        run: mvn -B -DskipTests package
+      - name: Clean leftovers before start
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','network-backend-e2e','rf-e2e','rf-backend-e2e','pixels-e2e','pixels-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      # network：backend 的 drone-port 指向链路代理 14600（link-sim 在其上
+      # 施加 LTE/Starlink 损伤画像）。
+      - name: e2e-network (LTE/Starlink 损伤链路任务流)
+        shell: bash
+        env:
+          AF_BACKEND_REST_PORT: 18099
+        run: |
+          set -o pipefail
+          # 后端的 marker 与脚本自己的 sim marker **必须分开**：
+          # 注意：不只是 -D 标记，**h2:mem 库名也在后端的命令行里**，
+          # 而匹配是松散子串，所以库名也得避开 sim 的 marker。
+          # 否则脚本开头的清理依旧会杀掉脚下的后端（上一轮 CI 就是这样）。
+          # e2e-network.ps1 开头会调 Stop-E2eStaleProcesses 清理上一轮遗留的
+          # sim（marker = network-e2e），若后端也用同一个 marker，它会把脚本脚下的
+          # 后端一并杀掉 —— 后端一死，脚本第一个前置检查
+          # (后端可达) 就会失败，而失败原因被 catch { } 吞掉，零诊断信息。
+          # 那次 CI 就是这样：后端日志里 /api/v1/drones 只有 CI 自己那一次，
+          # 脚本的请求根本没到达。
+          java -Dnetwork-backend-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+            --server.port=18099 \
+            --spring.profiles.active=dev \
+            --spring.datasource.url='jdbc:h2:mem:network-backend-e2e;DB_CLOSE_DELAY=-1' \
+            --aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef \
+            --aerofleet.drone-port=14600 \
+            > "$RUNNER_TEMP/network-backend.log" 2>&1 &
+          backend_pid=$!
+          ready=0
+          for i in $(seq 1 90); do
+            if curl -sf --max-time 3 http://localhost:18099/api/v1/drones > /dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::network backend 90s 内未就绪，backend 末尾日志："
+            tail -n 50 "$RUNNER_TEMP/network-backend.log" || true
+            kill "$backend_pid" 2>/dev/null || true
+            exit 1
+          fi
+          rc=0
+          pwsh -NoProfile -File scripts/e2e-network.ps1 2>&1 | tee "$RUNNER_TEMP/e2e-network-step.log" || rc=$?
+          kill "$backend_pid" 2>/dev/null || true
+          wait "$backend_pid" 2>/dev/null || true
+          pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','network-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+          exit $rc
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','network-backend-e2e','rf-e2e','rf-backend-e2e','pixels-e2e','pixels-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      # rf：backend 保持默认 drone-port 14550 + 默认 extra 14541-14543——
+      # sim 挂 14543，恰在默认扫描段内，无需额外参数。
+      - name: e2e-rf (E1 RF 链路几何回归)
+        shell: bash
+        env:
+          AF_BACKEND_REST_PORT: 18099
+        run: |
+          set -o pipefail
+          java -Drf-backend-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+            --server.port=18099 \
+            --spring.profiles.active=dev \
+            --spring.datasource.url='jdbc:h2:mem:rf-backend-e2e;DB_CLOSE_DELAY=-1' \
+            --aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef \
+            > "$RUNNER_TEMP/rf-backend.log" 2>&1 &
+          backend_pid=$!
+          ready=0
+          for i in $(seq 1 90); do
+            if curl -sf --max-time 3 http://localhost:18099/api/v1/drones > /dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::rf backend 90s 内未就绪，backend 末尾日志："
+            tail -n 50 "$RUNNER_TEMP/rf-backend.log" || true
+            kill "$backend_pid" 2>/dev/null || true
+            exit 1
+          fi
+          rc=0
+          pwsh -NoProfile -File scripts/e2e-rf.ps1 2>&1 | tee "$RUNNER_TEMP/e2e-rf-step.log" || rc=$?
+          kill "$backend_pid" 2>/dev/null || true
+          wait "$backend_pid" 2>/dev/null || true
+          pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'rf-e2e','rf-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+          exit $rc
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'network-e2e','network-backend-e2e','rf-e2e','rf-backend-e2e','pixels-e2e','pixels-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      # vision-pixels：后端三参数缺一不可（脚本文件头有完整说明）——
+      # source=pixels 才走真 JPEG 检测管道；sim-truth-base 指向本脚本 sim 的
+      # 18082（默认 18080 会 ConnectException）；drone-extra-ports=14544 让
+      # 被动监听的 sim 能被后端发现。
+      - name: e2e-vision-pixels (E2 像素域视觉链路)
+        shell: bash
+        env:
+          AF_BACKEND_REST_PORT: 18099
+        run: |
+          set -o pipefail
+          java -Dpixels-backend-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
+            --server.port=18099 \
+            --spring.profiles.active=dev \
+            --spring.datasource.url='jdbc:h2:mem:pixels-backend-e2e;DB_CLOSE_DELAY=-1' \
+            --aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef \
+            --aerofleet.vision.source=pixels \
+            --aerofleet.sim-truth-base=http://127.0.0.1:18082 \
+            --aerofleet.drone-extra-ports=14544 \
+            > "$RUNNER_TEMP/pixels-backend.log" 2>&1 &
+          backend_pid=$!
+          ready=0
+          for i in $(seq 1 90); do
+            if curl -sf --max-time 3 http://localhost:18099/api/v1/drones > /dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::pixels backend 90s 内未就绪，backend 末尾日志："
+            tail -n 50 "$RUNNER_TEMP/pixels-backend.log" || true
+            kill "$backend_pid" 2>/dev/null || true
+            exit 1
+          fi
+          rc=0
+          pwsh -NoProfile -File scripts/e2e-vision-pixels.ps1 2>&1 | tee "$RUNNER_TEMP/e2e-vision-pixels-step.log" || rc=$?
+          kill "$backend_pid" 2>/dev/null || true
+          wait "$backend_pid" 2>/dev/null || true
+          pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'pixels-e2e','pixels-backend-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+          exit $rc
+      # D8 断言聚合：B 型 3 脚本全部是 PASS:/FAIL: 族，正则与 A 型共用
+      # （\[PASS\]|PASS: 两族通吃）。
+      - name: Summarize e2e assertions (b2 b-type)
+        if: always()
+        shell: bash
+        run: |
+          total_pass=0
+          total_fail=0
+          for f in "$RUNNER_TEMP"/e2e-*-step.log; do
+            [ -f "$f" ] || continue
+            p=$(grep -cE '\[PASS\]|PASS:' "$f" || true)
+            fl=$(grep -cE '\[FAIL\]|FAIL:' "$f" || true)
+            echo "$(basename "$f"): PASS=$p FAIL=$fl"
+            total_pass=$((total_pass + p))
+            total_fail=$((total_fail + fl))
+          done
+          echo "B2 B-type assertions total: PASS=$total_pass FAIL=$total_fail"
+          if [ "$total_fail" -gt 0 ]; then
+            echo "::warning::B2 B-type e2e ${total_fail} 条断言失败（观察模式不阻断，信号在此保留）"
+          fi
+      - name: Collect b2 b-type e2e logs on failure
+        if: failure()
+        run: |
+          mkdir -p b2b-e2e-logs
+          find "${{ runner.temp }}" -maxdepth 1 \
+            \( -name 'af-rf-*' -o -name 'af-pixels-*' -o -name '*-backend.log' \
+               -o -name 'e2e-*-step.log' \) \
+            -exec cp {} b2b-e2e-logs/ \; 2>/dev/null || true
+          ls -la b2b-e2e-logs || echo "(no logs captured)"
+      - name: Upload b2 b-type e2e logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: warn
+          name: b2b-e2e-logs
+          path: b2b-e2e-logs/
+          retention-days: 14
+
   # e2e 公共库自检。**硬门禁**（没有 continue-on-error）——
   # 它不跑任何被测系统，只花几秒换掉一整类"跑了但不算数"。
   e2e-common-selftest:

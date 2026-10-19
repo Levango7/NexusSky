@@ -3,11 +3,15 @@
 #         --spring.profiles.active=dev
 #         --aerofleet.vision.source=pixels
 #         --aerofleet.sim-truth-base=http://127.0.0.1:18082
+#         --aerofleet.drone-extra-ports=14544
 #       JAVA_HOME 指向 JDK17。
-#       两个后端参数缺一不可：source=pixels 才会走"真 JPEG → 斑块检测"管道；
+#       三个后端参数缺一不可：source=pixels 才会走"真 JPEG → 斑块检测"管道；
 #       sim-truth-base 默认指向 18080，而本脚本的模拟器挂在 18082，指错了后端
-#       拉不到 JPEG（ConnectException），整条像素链无从验证。8080 被占用时用
-#       AF_BACKEND_REST_PORT 指定 REST 口（后端 --server.port 要一致）。
+#       拉不到 JPEG（ConnectException），整条像素链无从验证；drone-extra-ports
+#       缺不得是因为 drone-sim 被动监听 14544 等 GCS 来探，而后端默认只探
+#       14550 + 14541-14543 —— 不把 14544 加进来，模拟器永远注册不上
+#       （首断言"模拟器上线"必 FAIL，与后端/模拟器本身无关）。
+#       8080 被占用时用 AF_BACKEND_REST_PORT 指定 REST 口（后端 --server.port 要一致）。
 # 场景：模拟器带静态目标 -> 起飞到目标上空 -> 单拍。后端以 pixels 模式
 #       （拉真实 JPEG -> BlobDetector 检出斑块 -> 解算地理坐标）走全链，
 #       真值只用于打分。证明「渲染->检测->解算」像素链路自洽，不靠元数据神谕。
@@ -16,6 +20,10 @@
 #   2. 定位误差 < 3m（最近真值目标）
 #   3. 单拍返回 sizeBytes > 0（图像字节真实存在）
 $ErrorActionPreference = 'Stop'
+# 跨平台公共库（B2 批次接 CI 时引入）：java 探测 / jar 路径 / 临时目录。
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
+$Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+$TempDir = Get-E2eTempDir   # Linux runner 上 $env:TEMP 常未设置，不能直接用
 # 本机 8080 可能被常驻服务（Docker 容器等）占用：AF_BACKEND_REST_PORT 覆盖。
 # 覆盖时必须连带改后端的 MAVLink 口（默认 14550），否则 sim 发现不了本脚本要找的 sysid。
 $BackendRestPort = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }
@@ -52,14 +60,18 @@ catch { Write-Host '后端未运行，中止' -ForegroundColor Red; exit 1 }
 
 # ---- 1. 启动模拟器 ----
 Step '启动模拟器 (sysid=12, mavlink=14544, truth=18082, 静态目标)'
-$jar = Join-Path $PSScriptRoot '..\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
-if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
+# jar 路径走 Get-E2eJar（反斜杠字面量在 Linux 上不是分隔符，Test-Path 恒 false）；
+# Java 探测走 Get-E2eJava（Linux 上叫 java 不是 java.exe）。
+$jar = Get-E2eJar -Root $Root -Module 'drone-sim' -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
+$java = Get-E2eJava
 Assert-Java17 $java
+# marker (-Dpixels-e2e=true) 放 -jar 前：JVM 消费为系统属性，并作为 CI 兜底清理凭据。
 $sim = Start-Process -FilePath $java -ArgumentList @(
+    '-Dpixels-e2e=true',
     '-jar', $jar, '--port', '14544', '--sysid', '12', '--name', 'AF-PIXELS-01',
     '--http-port', '18082',
     '--targets', 'static:22.5916,113.9345;static:22.5916,113.93479'
-) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-pixels-sim.log') -RedirectStandardError (Join-Path $env:TEMP 'af-pixels-sim.err')
+) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-pixels-sim.log') -RedirectStandardError (Join-Path $TempDir 'af-pixels-sim.err')
 Start-Sleep 2
 
 $registered = $false
@@ -71,6 +83,11 @@ for ($i = 0; $i -lt 15; $i++) {
 Check '模拟器上线 (sysid=12)' $registered
 if (-not $registered) {
     Stop-Process -Id $sim.Id -Force -ErrorAction SilentlyContinue
+    # 指向性诊断：drone-sim 被动监听 14544 等探测，后端默认只探 14550/14541-14543。
+    # 缺 --aerofleet.drone-extra-ports=14544 时模拟器永远学不到对端地址，注册必超时。
+    Write-Host '   最可能原因：后端启动参数缺 --aerofleet.drone-extra-ports=14544' -ForegroundColor Red
+    Write-Host '   （drone-sim 被动监听 14544 等 GCS 来探，后端默认只探 14550/14541-14543）' -ForegroundColor Red
+    Write-Host '   完整启动参数见文件头注释' -ForegroundColor Red
     Write-Host 'PIXELS E2E FAILED' -ForegroundColor Red; exit 1
 }
 

@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 146 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 150 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,7 +14,7 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 146 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 150 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
 
@@ -95,6 +95,51 @@ function Get-E2eSysidKey {
 Java 4949 不变（本 PR 不动 Java 测试），前端 381 不变。门禁绿。
 
 ---
+
+## [Unreleased] — rtk「没上线」的真相：Hashtable key 类型不统一（JSON 整数在 5.1 是 Int32、在 pwsh 7 是 Int64）让查找恒 null（2026-10-19）
+
+`60ac648` 的诊断在 CI run 39279718213 拿到首条输出，根因当场锁定：
+
+```
+[DIAG] 轮询 8 次，后端可达=True，已收集 3 个 online 的交机
+[DIAG] 缺失 sysid: 61,62,63（期望 61,62,63 全上线且 rtkStatus 正确）
+[DIAG] 最后一次响应：sysid=61 online=True rtk=RTK...
+[DIAG] 最后一次响应：sysid=62 online=True rtk=RTK...
+[DIAG] 最后一次响应：sysid=63 online=True rtk=STA...
+```
+
+三机**全在响应里、online=True、seen 收了 3 个**，但 `ContainsKey(61)` 报缺失、
+断言 `$seen[$sysid]` 拿 null。
+
+**机制（此处更正一版更早的判断）**：不是"反序列化成了字符串"，而是 **JSON 整数在两种
+shell 里解成不同类型** —— Windows PowerShell 5.1 的 `Invoke-RestMethod` 内部用
+JavaScriptSerializer，解成 **Int32**；PowerShell 7+ 用 System.Text.Json，解成 **Int64**。
+而 PowerShell 的 hashtable 对键**类型敏感**（本机实测）：
+
+```
+$h = @{}; $h[[int64]61] = 'x'
+$h.ContainsKey(61)   # False
+$h[61]                # 空
+$h[[int64]61]         # x
+```
+
+所以"插入用 JSON 解出的类型、查找用字面量 Int32"必然查不到 —— 本机 5.1 两边都是 Int32
+所以通过，CI 的 pwsh 7 两边类型不同所以失败。这也解释了此前三轮 CI 为何都是同一个 FAIL：
+旧诊断条件（seen<3）永远看不见它。
+
+修法：收集、查找、比较三处 key 全部归一化（`[string]`，两边用同一种形式）。
+API 端的类型不由脚本控制，统一归一化是唯一自洽解。
+
+## [Unreleased] — rtk 诊断盲区：`seen.Count -lt 3` 覆盖不到「sysid 不对」那种没上线（2026-10-19）
+
+PR #114 的 CI run 39273582273 实测：e2e-rtk 的 FAIL 走「上线」分支（`$null -eq $d`），
+但 `16243b6` 加的 `[DIAG]` 输出**零出现**。按断言代码反推：`$seen.Count` ≥ 3，
+而 61/62/63 不在集合里——正是 `16243b6` 自己列出的**第三种**「没上线」
+（响应里的 sysid 不是期望的那些），而 DIAG 的触发条件只认第一种（总数不足）。
+
+改法：触发条件从「总数 < 3」改为「任一期望 sysid 缺失即打」，并补三样信息——
+seen 的 sysid 集合、缺失清单、后端可达但从未拿到响应体的边界。
+下一轮 CI 即可拿到 rtk 的真实失败形状，不必再猜。
 
 ## [Unreleased] — `Stop-Process -Id [int]$x.Name` 在实参位置不成立；公共库的 Linux 分支一调就崩（#117，2026-10-19）
 
@@ -493,6 +538,196 @@ p50=12ms，就写成"多出恒定的约 +10ms"。复测三轮后发现空载时�
 延迟计算**之前**就 return，于是黑洞期每次调用更便宜、循环更快、落进去的调用
 次数更多。改成按 1ms 时间桶取多数状态后实测 **49.8%** —— 引擎本身没问题。
 
+
+## [Unreleased] — 推上去让 CI 验之后：B 型脚本在 Linux 上被自己杀了后端（#114，2026-10-19）
+
+这条不是新功能，是**把本地做的那批 B2 脚本推上去让 CI 验之**的结果。
+CI 第一个跑就红了 —— 且红的不是脚本自己，是**两个真问题**。
+
+### 1. 一个后端被脚本开头的清理误杀
+
+CI 的 `E2E B2 B-type scripts` 中，`e2e-network` 这一步失败，报错是：
+
+```
+Stop-E2eStaleProcesses: scripts/e2e-network.ps1:74
+  Cannot bind parameter 'Id'. Cannot convert value "[int]/proc/2977.Name" to type "System.Int32".
+```
+
+这个错误本身是 master 上 `e2e-common.ps1` 的硬缺陷（已由 #117 修掉）：
+实参位置的 `[int]$x.Name` 不是类型转换。
+
+**修完之后下一轮 CI 又红了，但错变了**，变成“后端不可达”。这一次有确确的证据：
+
+```
+后端日志里 /api/v1/drones 只有 1 次命中（CI 自己那次 curl，200 OK），
+日志到这里就结束了 —— 脚本的请求根本没到达。
+```
+
+真因：**marker 命名空间碰了**。
+
+| 进程 | marker | 谁启动的 |
+|---|---|---|
+| B 型的 network 后端 | `network-e2e` | **CI（ci.yml）** |
+| `e2e-network.ps1` 自己的 link-sim / drone-sim | `network-e2e` | 脚本 |
+
+脚本开头的 `Stop-E2eStaleProcesses -Marker 'network-e2e'` 要清上一轮遗留的 sim，
+但后端也带同一个 marker —— **脚本把脚下的后端一并杀了**。
+后端一死，脚本第一个前置检查（后端可达）就会失败。
+
+而失败原因被脚本的 `catch { }` 吞掉了 —— 所以那一次的信息量为零，
+完全靠猜。
+
+**修法**：把“验收方起的后端”与“脚本自己的 sim”拆到两个 marker 命名空间：
+
+### 1b. 但修完第一版还是不够 —— 真正的命中点是 **H2 库名**
+
+推送后的下一轮 CI 又红，错误不变：仍然是“后端不可达”，且后端日志里
+`/api/v1/drones` 仍然只有 CI 自己那一次。为什么？因为**后端的命令行里不只有 `-D` 标记**，
+还有数据库连接串：
+
+```
+--spring.datasource.url='jdbc:h2:mem:network-e2e;DB_CLOSE_DELAY=-1'
+                                ^^^^^^^^^^^^
+                                库名里就是 'network-e2e'
+```
+
+匹配是**松散子串**，所以库名也被当成 marker 命中了 —— 后端的命令行里
+无论如何改 `-D` 标记，都会被这个库名拉下来。
+
+**为何不能把匹配改成锚定在 `-D<marker>=`**：因为那会打断现有三个 marker。全仓查过：
+
+| marker | 承载形式 |
+|---|---|
+| `formation-e2e` / `mesh-e2e` / `regulator-e2e` / `spray-e2e` / `network-e2e` / `cv-eval-e2e` … | `-D<marker>=true` |
+| **`dock-e2e` / `route-templates-e2e` / `defect-e2e`** | **只有 `jdbc:h2:mem:<marker>` 这一处** |
+
+那三个的唯一承载点就是 H2 库名（如 `scripts/e2e-route-templates.ps1:96`）。锚定到 `-D` 会让它们**永远清不掉**，
+而它们的清理正是靠库名匹配才生效的 —— **松散子串匹配是承重的，不能改**。
+
+所以正解只有一条：**让后端命令行里不出现 sim 的 marker**。除了拆 `-D` 命名空间，
+H2 库名也要一并改名（`network-backend-e2e` / `rf-backend-e2e` / `pixels-backend-e2e`）。子串安全性核对：
+`network-backend-e2e` 不包含 `network-e2e`，反向也不包含。
+
+- CI 起的后端：`-Dnetwork-backend-e2e=true` / `-Drf-backend-e2e=true` / `-Dpixels-backend-e2e=true`
+- 脚本自己的 sim：`-Dnetwork-e2e=true` / `-Drf-e2e=true` / `-Dpixels-e2e=true`（不变）
+- 各 cleanup 步骤的 marker 列表同时列两空间
+
+子串安全性核对过：`network-backend-e2e` 不包含 `network-e2e`，`network-e2e` 也不包含 `network-backend-e2e`。
+
+### 2. 本机行为级验证（不只靠 CI）
+
+在本机 Windows 上起两个带不同 marker 的 java 进程，再用公共库的清理去对它们：
+
+```
+Stop-E2eStaleProcesses -Marker 'network-e2e'        -> killed=1  （只杀 sim），后端 alive=True
+Stop-E2eStaleProcesses -Marker 'network-backend-e2e' -> killed=1  （杀后端），alive=False
+```
+
+H2 库名这一层也同样回归本机实测（两个进程的命令行里都带 `-Dnetwork-backend-e2e=true`，
+区别只在 h2:mem 库名）：
+
+```
+A（改名后，h2:mem:network-backend-e2e） -> 清理后 alive=True   期望值：不被误杀
+B（改名前，h2:mem:network-e2e）        -> 清理后 alive=False  期望值：复现原错（库名被当成 marker 命中）
+```
+
+顺带也证明了 #117 的 pid 转换修正真的能杀进程（两次 killed=1）。
+
+### 3. 日志收不到：脚本写 /tmp，CI 只扫 runner.temp
+
+`Get-E2eTempDir` 在 Linux 上回退到 `/tmp`（pwsh 常未设 `TEMP/TMP`），
+而 CI 的「收集日志」步骤只扫 `${RUNNER_TEMP}` 一层 —— 所以后端、sim 的日志
+**一个也收不到**，失败时只能看到 sim 的 stdout。
+
+修法：`Get-E2eTempDir` 优先用 `$env:RUNNER_TEMP`（CI 提供），这样既有的收集步骤就能找到日志。
+
+### 4. 失败原因不再被吞掉
+
+`e2e-network.ps1` 的 `catch { }` 改成提取 `$_.Exception.Message` 并在退出前打出。
+“后端不可达”这句话既可能是真没起、也可能是被清理误杀 ——
+两者排查方向完全相反，吞掉异常等于让排查靠猜。
+
+### 5. 还没查出的：e2e-rtk 是平台差异（本机过、Linux 不过）
+
+A 型的 `e2e-rtk` 也红，但根因不同：3 台 sim 都启动了（日志里能看到），
+却没有一台上线。**本机实跑 `scripts/e2e-rtk.ps1 -SkipBuild` 是通过的（exit=0）** ——
+所以是 **Windows 上通、Linux 不通**的平台差异，而不是脚本逻辑写错。
+
+正确的诊断路径已打通（上面第 3 条）：下一轮 CI 就能给出后端日志，
+再按日志定位是端口、绑定还是网络层的问题。在那之前不形成结论。
+
+### 6. 计数
+
+Java 4949 不变（本轮不动 Java 测试），前端 381 不变。门禁绿。
+
+---
+
+## [Unreleased] — e2e 救活第三批（B2）：9 个脚本跨平台适配并以观察模式接进 CI（2026-10-19）
+
+> 与前两批（formation/mesh/rid 的 `e2e-core-scripts` job、regulator/dock/
+> route-templates/defect 的 `e2e-b1-scripts` job）同一条脉络。B2 共十脚本：
+> **9 个接入**，px4-sitl 判定**不接入**（ubuntu runner 无 PX4 SITL、脚本宿主
+> 导向，接了必红——预研 D1 拍板）。脚本侧改造（跨平台适配 + marker + spray
+> 端口参数化）已在 worktree 阶段完成并独立核验（9/9 语法解析通过、代码级
+> Windows-only 残留为零、marker 全部就位），本条记录的是接线：ci.yml 两个
+> 新 job + CHANGELOG + 本 commit。
+
+### 跨平台适配（9 脚本，全部 dot-source `scripts/e2e-common.ps1` 公共库）
+
+| 问题 | 处理 |
+|---|---|
+| java 探测硬编码 `java.exe` | `Get-E2eJava`（AF_JAVA → JAVA_HOME → AF_JDK17_HOME → PATH） |
+| `$env:TEMP` 直接引用 | `Get-E2eTempDir`（Linux runner 常未设置 TEMP/TMP） |
+| `-WindowStyle Hidden`（Windows-only 参数） | 删除 |
+| jar 路径反斜杠字面量 | `Get-E2eJar`（Linux 上反斜杠不是分隔符，`Test-Path` 恒 false） |
+| `Get-CimInstance Win32_Process` 清理（spray / network） | `Stop-E2eStaleProcesses`（Win CIM / Linux `/proc` 双实现） |
+| 硬编码 `E:\dev-tools\...` JDK 路径 | `Test-Path` 保护（CI 走 `-SkipBuild` 不进构建分支，纯防御） |
+| 8 个脚本进程命令行无清理凭据 | 补 `-D<name>-e2e=true` marker（放 `-jar` 前由 JVM 消费；spray 原有） |
+| spray 端口硬编码 8080/14550/14551 | 参数化：`AF_BACKEND_PORT` / `AF_SPRAY_DRONE_PORT` / `AF_SPRAY_SIM_PORT`（默认值不变） |
+
+### CI 接入（`e2e-b2-a-type` / `e2e-b2-b-type` 两 job，观察模式）
+
+- **拆两个 job 的原因**：cloud-backend 恒绑 UDP 14550（`aerofleet.udp-port`，
+  所有脚本均不覆盖）→ 同一 runner 内任意两个 backend 不能共存、脚本必须
+  串行；A/B 两型分到独立 runner 上可安全并行（与 `e2e-b1-scripts` 也互不依赖）。
+- **A 型 job**（6 脚本自启 backend）：cv-eval → operations → rtk → sensing →
+  uspace → spray 串行；每步 `AF_BACKEND_PORT=18099` 统一 REST 口（spray
+  参数化后并入同一变量）；spray 的 drone/sim 端口用默认 14550/14551；
+  每步间按 marker 兜底清理（B1 同款安排）。
+- **B 型 job**（3 脚本不自启 backend，保持外部启动契约）：network → rf →
+  vision-pixels 串行；每步是自包含 bash step——CI 起 backend（统一
+  `jdbc:h2:mem:<name>-e2e` + dev profile + jwt-secret + REST 18099）→ 等就绪
+  （`/api/v1/drones` 业务探针；`/actuator/health` 在 Redis 未通时恒 503，
+  不可用作探针）→ 跑脚本 → 记 PID 杀 backend + marker 兜底。各步专属参数：
+  network `--aerofleet.drone-port=14600`（指向链路代理）；rf 保持默认
+  drone-port 14550 + 默认 extra 14541-14543（sim 挂 14543 恰在扫描段内）；
+  vision-pixels `--aerofleet.vision.source=pixels
+  --aerofleet.sim-truth-base=http://127.0.0.1:18082
+  --aerofleet.drone-extra-ports=14544`（三参数缺一不可，脚本文件头有完整
+  说明）。注意 B 型脚本读的端口变量是 `AF_BACKEND_REST_PORT`（与 A 型的
+  `AF_BACKEND_PORT` 不同名，默认 8080，CI 统一覆盖为 18099）。
+- **断言聚合步骤（防观察模式信号丢失）**：continue-on-error 会把红压成绿，
+  每个 job 末尾统计两族断言格式（`[PASS]` 族：cv-eval/operations/rtk/
+  sensing/uspace；`PASS:` 族：spray/network/rf/pixels——正则 `(\[PASS\]|PASS:)`
+  两族通吃），汇总各脚本通过数，有失败时 `::warning::` 注解留痕；失败时
+  收集进程日志与 step 日志上传 artifact。脚本步骤本身 `tee` 留档 + pipefail
+  保退出码，聚合步骤从留档重新统计。
+- **观察模式理由与 B1 相同**：本机 Windows 全绿 ≠ Linux CI 连续复跑稳定
+  （sensing/network/rf/pixels 对时序敏感），若干次 run 全绿后删
+  continue-on-error 转硬门禁。
+
+### 验证
+
+- 9 个脚本 PowerShell 语法解析零错误（worktree 阶段独立核验，本条未改脚本行为）；
+- ci.yml YAML 语法校验通过（25 个 job，其余 job 结构未受影响）；
+- marker 拼写与脚本内 `-D<name>-e2e=true` 注入逐一比对一致（A 型 6 + B 型 3）；
+  A/B 两型端口变量名（`AF_BACKEND_PORT` / `AF_BACKEND_REST_PORT`）读回核对无混淆。
+
+### 计数
+
+**未变**：e2e 脚本不产生 surefire 报告，Java / 前端计数均不受影响。
+
+---
 
 ## [Unreleased] — 把"下载超时"当成了"拿不到"：ffmpeg 本机就有；顺带查出一个真实凭据编码缺陷（#111，2026-10-19）
 这一轮先把**几个被写成"阻塞"的事**逐个试了一遍，结论是其中大部分不是"不能"，是

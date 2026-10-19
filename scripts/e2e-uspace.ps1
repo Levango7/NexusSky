@@ -17,6 +17,9 @@ param([switch]$SkipBuild)
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+# 跨平台公共库（B2 批次接 CI 时引入）：java 探测 / jar 路径 / 临时目录 / 按标记清残留
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
+$TempDir = Get-E2eTempDir   # Linux runner 上 $env:TEMP 常未设置，不能直接用
 $Fail = 0
 $script:CleanupActions = @()
 
@@ -54,22 +57,26 @@ function Try-Json($method, $uri, $body) {
 }
 
 try {
-    $backendJar = Join-Path $Root 'cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
-    $simJar = Join-Path $Root 'drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
+    # jar 路径走 Get-E2eJar：反斜杠字面量在 Linux 上不是分隔符，Test-Path 恒 false
+    $backendJar = Get-E2eJar -Root $Root -Module 'cloud-backend' -Jar 'aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
+    $simJar = Get-E2eJar -Root $Root -Module 'drone-sim' -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
     if (-not $SkipBuild -or -not (Test-Path $backendJar) -or -not (Test-Path $simJar)) {
         Write-Host '[1/3] 构建...'
-        $env:JAVA_HOME = 'E:\dev-tools\jdk17.0.20_8'
-        $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+        # 本机 Windows 的 JDK17 固定位置；不存在（如 Linux CI）则沿用外部环境已配好的 JDK
+        if (Test-Path 'E:\dev-tools\jdk17.0.20_8') {
+            $env:JAVA_HOME = 'E:\dev-tools\jdk17.0.20_8'
+            $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+        }
         Push-Location $Root; mvn -q package -DskipTests; Pop-Location
     } else { Write-Host '[1/3] 使用既有 jar（-SkipBuild）' }
 
-    if ($env:AF_JAVA) { $java = $env:AF_JAVA }
-    elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME 'bin\java.exe'))) { $java = Join-Path $env:JAVA_HOME 'bin\java.exe' }
-    else { $java = 'java.exe' }
+    $java = Get-E2eJava   # 跨平台探测（Linux 叫 java 不是 java.exe）
 
     Write-Host '[2/3] 启动后端（带测试限飞区）+ RID 模拟器...'
     # 测试限飞区文件（跑道坐标系附近一个 5km 圆）
-    $restrictionFile = Join-Path $env:TEMP 'af-uspace-restrictions.json'
+    # 临时目录走 Get-E2eTempDir：该路径会回传给后端读取（--aerofleet.geofence.restriction-file），
+    # Linux 上 $env:TEMP 常未设置且反斜杠路径后端读不到，必须是 POSIX 语义的路径
+    $restrictionFile = Join-Path $TempDir 'af-uspace-restrictions.json'
     @'
 [
   {
@@ -83,14 +90,17 @@ try {
 ]
 '@ | Set-Content -Path $restrictionFile -Encoding UTF8
 
-    $sim = Start-Process -FilePath $java -ArgumentList @('-jar', $simJar,
+    $sim = Start-Process -FilePath $java -ArgumentList @(
+        '-Duspace-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
+        '-jar', $simJar,
         '--port', "$DronePort", '--sysid', "$DroneSysid", '--name', 'AF-USPACE-91',
         '--lat', '22.5910', '--lon', '113.9340', '--rid') `
-        -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-uspace-sim.log') `
-        -RedirectStandardError (Join-Path $env:TEMP 'af-uspace-sim.err')
+        -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-uspace-sim.log') `
+        -RedirectStandardError (Join-Path $TempDir 'af-uspace-sim.err')
     Stop-Proc $sim
 
     $backend = Start-Process -FilePath $java -ArgumentList @(
+        '-Duspace-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
         '-jar', $backendJar, "--server.port=$BackendPort",
         '--spring.profiles.active=dev',
         # 自带内存库：dev profile 默认落 ./data/aerofleet 文件库，上一轮 e2e 残留的
@@ -103,7 +113,7 @@ try {
         # （source-path 是 config 键——数据源实现实际读前者，e2e 踩过）
         "--aerofleet.geofence.restriction-file=$restrictionFile",
         '--aerofleet.geofence.restriction.enabled=true'
-    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $env:TEMP 'af-uspace-backend.log')
+    ) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-uspace-backend.log')
     Stop-Proc $backend
 
     $up = $false

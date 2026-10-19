@@ -9,10 +9,16 @@
 param([string]$Profile = 'lte')
 
 $ErrorActionPreference = 'Stop'
+# 跨平台公共库（B2 批次接 CI 时引入）：java 探测 / jar 路径 / 残留进程清理。
+# 注意本脚本不自启 backend（保持外部启动契约）：只负责起 link-sim + drone-sim。
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
 $script:CleanupActions = @()
 $BackendRestPort = if ($env:AF_BACKEND_REST_PORT) { [int]$env:AF_BACKEND_REST_PORT } else { 8080 }
 $Base = "http://localhost:$BackendRestPort/api/v1"
 $Root = Join-Path $PSScriptRoot '..'
+# marker：本脚本启动的 link-sim / drone-sim 命令行统一带 -Dnetwork-e2e=true，
+# 脚本内起进程前先按它清上一轮残留；CI 每步前后也用同一个 marker 兜底清理。
+$E2eMarker = 'network-e2e'
 $Fail = 0
 
 # ---- 清理注册 ----
@@ -62,42 +68,50 @@ function Send-Cmd($sysid, $type) {
 }
 
 # ---- 清理旧实验进程 ----
-# 只按本脚本专属端口认领（link-sim 14600 / drone-sim 14540+bind-ip），不要匹配
-# 裸 'link-sim'：那会把别的 e2e（如 e2e-mesh 的中继）或他人正在跑的进程一起杀掉。
-Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-    $cl = $_.CommandLine
-    if (($cl -match 'link-sim' -and $cl -match '14600') -or
-        ($cl -match 'drone-sim' -and $cl -match '14540' -and $cl -match 'bind-ip')) {
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-}
+# 只杀本脚本自己留痕的进程：启动时统一带 -Dnetwork-e2e=true（marker），交给公共库
+# Stop-E2eStaleProcesses 按命令行标记跨平台回收（Windows CIM / Linux /proc），
+# 不会把别的 e2e（如 e2e-mesh 的中继）或他人进程一起杀掉。
+Stop-E2eStaleProcesses -Marker $E2eMarker | Out-Null
 Start-Sleep 2
 
 # ---- 前置：后端必须已在跑（本脚本不启动后端，drone-port=14600 指向链路代理）----
+$backendErr = $null
 $backendOk = $false
 try {
     $null = Invoke-RestMethod "$Base/drones" -TimeoutSec 5
     $backendOk = $true
-} catch { }
+} catch { $backendErr = $_.Exception.Message }
 if (-not $backendOk) {
     Write-Host ("后端未运行（$Base 不可达），中止。先起后端：mvn -pl cloud-backend -am package 后以 --spring.profiles.active=dev --aerofleet.drone-port=14600 启动") -ForegroundColor Red
+    # 异常本身要打出来：曾经写成 `catch { }` 把原因吞掉，结果「后端不可达」这句话
+    # 既可能是真没起、也可能是被本脚本开头的清理误杀（后端与 sim 共用 marker 时就会这样），
+    # 两种情况的排查方向完全相反，吞掉异常等于让排查靠猜。
+    if ($backendErr) { Write-Host ("  原因：$backendErr") }
     exit 1
 }
 
-# Java 探测 + 版本自检（JDK8 会静默杀掉 sim：class 61 vs 52）
-if ($env:AF_JAVA) { $java = $env:AF_JAVA } elseif ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) { $java = Join-Path $env:JAVA_HOME "bin\java.exe" } else { $java = "java.exe" }
+# Java 探测（跨平台：Linux 上叫 java 不是 java.exe）+ 版本自检
+# （JDK8 会静默杀掉 sim：class 61 vs 52）
+$java = Get-E2eJava
 Assert-Java17 $java
 
 # ---- 1. 损伤链路 + 段内飞机 ----
 Step "启动 link-sim ($Profile) + 段内模拟器 (127.0.0.2)"
+# jar 路径走 Get-E2eJar：反斜杠字面量在 Linux 上不是分隔符，会拼出不存在的路径。
+# marker（-Dnetwork-e2e=true）必须放 -jar 前，JVM 才消费为系统属性；
+# 它同时是 Stop-E2eStaleProcesses 的兜底清理凭据。
+$linkSimJar = Get-E2eJar -Root $Root -Module 'link-sim' -Jar 'aerofleet-link-sim-0.1.0-SNAPSHOT.jar'
+$simJar = Get-E2eJar -Root $Root -Module 'drone-sim' -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
 $ls = Start-Process -FilePath $java -ArgumentList @(
-    '-jar', "$Root\link-sim\target\aerofleet-link-sim-0.1.0-SNAPSHOT.jar",
+    '-Dnetwork-e2e=true',
+    '-jar', $linkSimJar,
     '--profile', $Profile, '--port', '14600', '--drone-ip', '127.0.0.2', '--drone-port', '14540'
-) -PassThru -WindowStyle Hidden
+) -PassThru
 $sim = Start-Process -FilePath $java -ArgumentList @(
-    '-jar', "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar",
+    '-Dnetwork-e2e=true',
+    '-jar', $simJar,
     '--port', '14540', '--bind-ip', '127.0.0.2', '--sysid', '1', '--name', 'AF-NET-01'
-) -PassThru -WindowStyle Hidden
+) -PassThru
 Register-E2eProcess $ls
 Register-E2eProcess $sim
 
@@ -156,13 +170,15 @@ foreach ($p in @($ls, $sim)) {
 }
 Start-Sleep 2
 $ls2 = Start-Process -FilePath $java -ArgumentList @(
-    '-jar', "$Root\link-sim\target\aerofleet-link-sim-0.1.0-SNAPSHOT.jar",
+    '-Dnetwork-e2e=true',
+    '-jar', $linkSimJar,
     '--profile', 'starlink', '--port', '14600', '--drone-ip', '127.0.0.2', '--drone-port', '14540'
-) -PassThru -WindowStyle Hidden
+) -PassThru
 $sim2 = Start-Process -FilePath $java -ArgumentList @(
-    '-jar', "$Root\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar",
+    '-Dnetwork-e2e=true',
+    '-jar', $simJar,
     '--port', '14540', '--bind-ip', '127.0.0.2', '--sysid', '1', '--name', 'AF-SL-01'
-) -PassThru -WindowStyle Hidden
+) -PassThru
 Register-E2eProcess $ls2
 Register-E2eProcess $sim2
 

@@ -67,6 +67,11 @@ function Get-E2eJar {
 
 # 临时目录：Windows 用 $env:TEMP，Linux 上它常未设置，回退 /tmp。
 function Get-E2eTempDir {
+    # CI 上优先用 RUNNER_TEMP：CI 的「收集日志」步骤只扫 runner.temp，
+    # 而 Linux runner 上 pwsh 常未设 TEMP/TMP（否则回退 /tmp）——
+    # 回退到 /tmp 就意味着后端、sim 的日志永远收不到，
+    # 失败时只能看到一个空白的日志。
+    if ($env:RUNNER_TEMP) { return $env:RUNNER_TEMP }
     if ($env:TEMP) { return $env:TEMP }
     if ($env:TMP) { return $env:TMP }
     return '/tmp'
