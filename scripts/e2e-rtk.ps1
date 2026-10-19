@@ -17,6 +17,10 @@ param([switch]$SkipBuild)
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
+# 公共库：这里只用其中的 Get-E2eSysidKey（sysid 作为 hashtable 键的归一化，
+# 见其注释：JSON 整数在 5.1 是 Int32、在 pwsh 7 是 Int64，而 hashtable 的键类型敏感）。
+# 公共库全是函数定义，dot-source 不会引入任何副作用。
+. (Join-Path $PSScriptRoot 'e2e-common.ps1')
 $Fail = 0
 $script:CleanupActions = @()
 
@@ -84,14 +88,14 @@ try {
         Start-Sleep -Milliseconds 1000
         try {
             $drones = Invoke-RestMethod -Uri "$Base/drones" -TimeoutSec 3
-            foreach ($d in $drones) { if ($d.online) { $seen[$d.sysid] = $d } }
+            foreach ($d in $drones) { if ($d.online) { $seen[(Get-E2eSysidKey $d.sysid)] = $d } }
             if ($seen.Count -ge 3) { break }
         } catch {}
     }
 
     foreach ($pair in @(@(61, 'RTK_FIXED', 'R1'), @(62, 'RTK_FLOAT', 'R2'), @(63, 'STANDALONE', 'R3'))) {
         $sysid = $pair[0]; $expect = $pair[1]; $tag = $pair[2]
-        $d = $seen[$sysid]
+        $d = $seen[(Get-E2eSysidKey $sysid)]
         if ($null -eq $d) {
             Assert-True $false "$tag sysid=$sysid 上线"
             continue

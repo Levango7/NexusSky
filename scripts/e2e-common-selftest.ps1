@@ -138,6 +138,40 @@ $helperUses = [regex]::Matches($codeOnly, 'Stop-E2eProcByDir').Count
 Assert-True ($helperUses -ge 2) `
     "剥注释后 Stop-E2eProcByDir 至少出现 2 次（定义 + 调用），实际 $helperUses 次 —— 调用点被删/注释掉会让 Linux 分支不再清理残留"
 
+# ---- sysid 作为 hashtable 键：JSON 整数的类型不能直接当键用 ------------
+#
+# 背景：JSON 里的整数，Windows PowerShell 5.1 的 Invoke-RestMethod 解成 Int32，
+# PowerShell 7+ 的解成 Int64；而 PowerShell 的 hashtable 对键是类型敏感的：
+#     @{ [int64]61 = 'x' }[61]  ->  空（ContainsKey(61) 也是 False）
+#
+# 实际案例：e2e-rtk.ps1 在 Windows 5.1 上通过、在 Linux runner 的 pwsh 7 上失败；
+# 后端日志里三台机器全部注册成功、online=true、rtkStatus 也全对，
+# 只是查不到键。所以键必须归一化成字符串，两边用同一种形式。
+Write-Host ''
+Write-Host '=== sysid 作为 hashtable 键（类型无关）==='
+
+$h64 = @{}
+$h64[(Get-E2eSysidKey ([int64]61))] = 'from-int64'
+Assert-True ($h64.ContainsKey((Get-E2eSysidKey 61))) 'Int64 存的键能用 Int32 查到（归一化后）'
+Assert-True ($h64.ContainsKey('61')) '归一化后的键就是字符串 "61"'
+Assert-True ($h64[(Get-E2eSysidKey ([int64]61))] -eq 'from-int64') '归一化后取值不丢'
+
+# 两边必须用同一个函数；只归一化插入端、查询端直接用原值仍然会查不到。
+$mixed = @{}
+$mixed[(Get-E2eSysidKey ([int64]62))] = 'x'
+Assert-True ($mixed[(Get-E2eSysidKey 62)] -eq 'x') '插入与查询都走同一个归一化函数就能对上'
+
+# 静态检查：e2e-rtk.ps1 里的插入/查询两处都必须走 helper ——
+# 只做行为测试覆盖不了调用点（把查询端改回裸值不会被上面的用例发现）。
+$rtkPath = Join-Path $PSScriptRoot 'e2e-rtk.ps1'
+$rtkSrc = [System.IO.File]::ReadAllText($rtkPath)
+$rtkCode = [regex]::Replace($rtkSrc, '(?s)<#.*?#>', '')
+$rtkCode = [regex]::Replace($rtkCode, '(?m)#.*$', '')
+$rawSeen = [regex]::Matches($rtkCode, '\$seen\[\s*\$[A-Za-z_.]*sysid\s*\]')
+Assert-True ($rawSeen.Count -eq 0) `
+    "e2e-rtk.ps1 里没有裸的 `$seen[...sysid...] 查询（发现 $($rawSeen.Count) 处；它必须走 Get-E2eSysidKey）"
+Assert-True ($rtkCode -match 'Get-E2eSysidKey') 'e2e-rtk.ps1 确实用了 Get-E2eSysidKey'
+
 Write-Host ''
 if ($script:Fail -eq 0) {
     Write-Host '=== e2e-common-selftest: ALL PASS ==='

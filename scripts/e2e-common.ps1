@@ -115,6 +115,39 @@ function Stop-E2eProcByDir {
     Stop-Process -Id ([int]$ProcDir.Name) -Force -ErrorAction SilentlyContinue
 }
 
+<#
+.SYNOPSIS
+    把 sysid 归一化成可作为 hashtable 键的字符串。
+
+.DESCRIPTION
+    为什么需要这个：JSON 里的整数在两种 shell 里解析成的类型不同：
+
+    * Windows PowerShell 5.1（Invoke-RestMethod 内部用 JavaScriptSerializer）-> Int32
+    * PowerShell 7+（用 System.Text.Json）                        -> Int64
+
+    而 PowerShell 的 hashtable 对键是**类型敏感**的（本机实测）：
+
+        $h = @{}; $h[[int64]61] = 'x'
+        $h.ContainsKey(61)   # False
+        $h[61]                # 空
+        $h[[int64]61]         # x
+
+    所以“插入时用 JSON 解出的类型、查询时用字面量 Int32”一定查不到，
+    表现就是“数据都在、就是去不到”。
+
+    实际案例：`scripts/e2e-rtk.ps1` 在 Windows 5.1 上通过、在 Linux runner 的 pwsh 7 上失败，
+    而后端日志里三台机器全部注册成功、online=true、rtkStatus 也全对 —— 只是查不到键。
+
+    归一化成字符串，两边用同一种形式，就与 shell 版本无关。
+#>
+function Get-E2eSysidKey {
+    param([Parameter(Mandatory = $true)]$Sysid)
+
+    # 归一化成字符串：两边（插入与查询）都必须走这一个函数，
+    # 否则一边是 Int32、另一边是 Int64 时就会查不到。
+    return [string]$Sysid
+}
+
 function Stop-E2eStaleProcesses {
     param([Parameter(Mandatory = $true)][string]$Marker)
 
