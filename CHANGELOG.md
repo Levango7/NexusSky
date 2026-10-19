@@ -9,11 +9,12 @@
 
 | 版本 | 发布日期 | commit 数 | 关键交付 | 代码差异 |
 |---|---|---|---|---|
+| **v1.0.6** | 2026-10-19 | 115 | 安防取流六连救活（/events 真实事件、能力声明门控、取流面板播放、MJPEG 出口、RTSP 凭据编码、HLS 断流）+ gcs-web 前端诚实性清算（55 处「声明了却没人用」系列）；C5 签名 posture 变代码门禁；0 破坏性变更；CI 30 success + 1 skipped（run 39228507697，tag run 39231095908） | [compare v1.0.5...v1.0.6](https://github.com/Levango7/NexusSky/compare/v1.0.5...v1.0.6) |
 | **v1.0.5** | 2026-10-12 | 139 | 安防 B1–B5 全线（PTZ 厂商路由、GB28181 事件订阅、设备四态+多通道、FAILED 态+失败重试、空域预约闭环）；C5 签名改逐帧单调时间戳，修高帧率遥测被误判重放；2 项破坏性变更（license 模块 5→7、AlarmTrigger.alarmId）；CI 18 job 全绿（run 38152795212） | [compare v1.0.4...v1.0.5](https://github.com/Levango7/NexusSky/compare/v1.0.4...v1.0.5) |
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 当前 134 个小节自 v1.0.5 起持续累积，最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 142 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
 
