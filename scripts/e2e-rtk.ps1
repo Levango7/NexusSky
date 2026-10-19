@@ -92,13 +92,34 @@ try {
     # ---- 等 3 机上线 + 断言 ----
     Write-Host '[3/3] 等待上线并断言 RTK 状态...'
     $seen = @{}
+    $lastRaw = $null
+    $polls = 0
+    $backendAlive = $false
+    $lastErr = $null
     for ($i = 0; $i -lt 120; $i++) {
         Start-Sleep -Milliseconds 1000
+        $polls++
         try {
             $drones = Invoke-RestMethod -Uri "$Base/drones" -TimeoutSec 3
+            $backendAlive = $true
+            # 保留最后一次响应的原始形状：失败时要能看到 API 到底返回了什么，
+            # 而不是只知道「没上线」。下面断言依赖的就是这个形状。
+            $lastRaw = @($drones | ForEach-Object { "sysid=$($_.sysid) online=$($_.online) rtk=$($_.rtkStatus)" })
             foreach ($d in $drones) { if ($d.online) { $seen[$d.sysid] = $d } }
             if ($seen.Count -ge 3) { break }
-        } catch {}
+        } catch {
+            # 连不上了：保留上一次成功的响应，并把错误记下来（下面报「后端不可达」而不是「不上线」）
+            $lastErr = $_.Exception.Message
+        }
+    }
+
+    # 失败时把诊断信息打出来：原本这里只会说「没上线」，
+    # 而「没上线」可能是后端死了、可能是后端活着但 online 为 false、
+    # 也可能是响应里的 sysid 不是期望的那些 ——三种排查方向完全不同。
+    if ($seen.Count -lt 3) {
+        Write-Host ("  [DIAG] 轮询 $polls 次，后端可达=$backendAlive，已收集 $($seen.Count) 个 online 的交机")
+        if ($lastRaw) { foreach ($l in $lastRaw) { Write-Host ("  [DIAG] 最后一次响应：$l") } }
+        if (-not $backendAlive -and $lastErr) { Write-Host ("  [DIAG] 后端不可达：$lastErr") }
     }
 
     foreach ($pair in @(@(61, 'RTK_FIXED', 'R1'), @(62, 'RTK_FLOAT', 'R2'), @(63, 'STANDALONE', 'R3'))) {
