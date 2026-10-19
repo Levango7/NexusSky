@@ -116,10 +116,18 @@ try {
     # 失败时把诊断信息打出来：原本这里只会说「没上线」，
     # 而「没上线」可能是后端死了、可能是后端活着但 online 为 false、
     # 也可能是响应里的 sysid 不是期望的那些 ——三种排查方向完全不同。
-    if ($seen.Count -lt 3) {
-        Write-Host ("  [DIAG] 轮询 $polls 次，后端可达=$backendAlive，已收集 $($seen.Count) 个 online 的交机")
+    #
+    # 触发条件是「任一期望 sysid 缺失」而不是「总数不足」——CI run 39273582273 实测：
+    # FAIL 走「上线」分支但 DIAG 零输出，反推 seen.Count>=3 却缺 61/62/63 中的某些，
+    # 即上面三种里的最后一种；旧条件对它完全盲飞。
+    $expected = @(61, 62, 63)
+    $missing = @($expected | Where-Object { -not $seen.ContainsKey($_) })
+    if ($missing.Count -gt 0) {
+        Write-Host ("  [DIAG] 轮询 $polls 次，后端可达=$backendAlive，已收集 $($seen.Count) 个 online 的交机（sysid: $($seen.Keys -join ',')）")
+        Write-Host ("  [DIAG] 缺失 sysid: $($missing -join ',')（期望 61,62,63 全上线且 rtkStatus 正确）")
         if ($lastRaw) { foreach ($l in $lastRaw) { Write-Host ("  [DIAG] 最后一次响应：$l") } }
         if (-not $backendAlive -and $lastErr) { Write-Host ("  [DIAG] 后端不可达：$lastErr") }
+        if ($backendAlive -and -not $lastRaw) { Write-Host "  [DIAG] 后端可达但从未拿到响应体（Invoke-RestMethod 每次调用都失败）" }
     }
 
     foreach ($pair in @(@(61, 'RTK_FIXED', 'R1'), @(62, 'RTK_FLOAT', 'R2'), @(63, 'STANDALONE', 'R3'))) {

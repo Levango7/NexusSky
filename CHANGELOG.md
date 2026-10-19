@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 147 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 148 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,11 +14,22 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 147 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 148 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
 
 ---
+
+## [Unreleased] — rtk 诊断盲区：`seen.Count -lt 3` 覆盖不到「sysid 不对」那种没上线（2026-10-19）
+
+PR #114 的 CI run 39273582273 实测：e2e-rtk 的 FAIL 走「上线」分支（`$null -eq $d`），
+但 `16243b6` 加的 `[DIAG]` 输出**零出现**。按断言代码反推：`$seen.Count` ≥ 3，
+而 61/62/63 不在集合里——正是 `16243b6` 自己列出的**第三种**「没上线」
+（响应里的 sysid 不是期望的那些），而 DIAG 的触发条件只认第一种（总数不足）。
+
+改法：触发条件从「总数 < 3」改为「任一期望 sysid 缺失即打」，并补三样信息——
+seen 的 sysid 集合、缺失清单、后端可达但从未拿到响应体的边界。
+下一轮 CI 即可拿到 rtk 的真实失败形状，不必再猜。
 
 ## [Unreleased] — `Stop-Process -Id [int]$x.Name` 在实参位置不成立；公共库的 Linux 分支一调就崩（#117，2026-10-19）
 
