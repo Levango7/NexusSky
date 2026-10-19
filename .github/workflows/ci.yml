@@ -540,10 +540,10 @@ jobs:
   #   本 job 是**能力演示**（空地应急 / 喷洒物流 / 硬件抽象），红的原因往往是编排脆弱
   #   而非能力缺失。混在一起会连带把更有价值的安全回归一起拖红。
   #
-  # 为什么带 continue-on-error：这些脚本此前只在本机手工跑过，**从未在 Linux CI 上
-  # 连续复跑**，稳定性未知。先以观察模式接入收集 flaky 数据（步骤会显示为
-  # "failed but continued"，日志可见），待若干次 run 全绿后再去掉该标记转为硬门禁。
-  # 去掉标记 = 把"跑过"升级为"必须通过"，只需删一行，不涉及任何脚本改动。
+  # 关于 continue-on-error：本 job **从不带 job 级 continue-on-error**，它是硬门禁。
+  # 历史：能力腿原是 e2e-smoke 里的一个 **step**（带 step 级 continue-on-error，观察模式），
+  # 后来拆成独立 job 时继承了硬门禁，但这段注释留了下来 —— 它描述的
+  # 是已经不存在的状态，当时下一个看的人会找不到那个 continue-on-error。
   e2e-capability:
     name: E2E capability (emergency / spray / hardware)
     runs-on: ubuntu-24.04
@@ -813,10 +813,9 @@ jobs:
   #     （静默失败不可接受：那会让"清理上个场景残留"变成什么都不做，端口被占，
   #      表现为莫名其妙的超时）
   #
-  # 为什么带 continue-on-error：与 e2e-capability 同款——脚本此前只在本机 Windows
-  # PowerShell 跑过，从未在 Linux CI 上连续复跑，稳定性未知。先以观察模式收集 flaky
-  # 数据（步骤显示 "failed but continued"，日志可见），若干次 run 全绿后再删掉这行
-  # 转为硬门禁。删标记 = 把"跑过"升级为"必须通过"，不涉及脚本改动。
+  # 当初以观察模式接入（理由：脚本此前只在本机 Windows PowerShell 跑过，未在 Linux CI 上连续复跑，
+  # 稳定性未知）。2026-10-20 起已转**硬门禁**（连续多次 run 零红后删掉
+  # continue-on-error；删标记 = 把「跑过」升级为「必须通过」）。
   # e2e 救活计划第一批（2026-10-14）：formation / mesh / rid 三个脚本接进门禁。
   #
   # 背景：16 个 e2e 脚本从未进过 CI，其中 15 个已在本机逐个跑通（合计 186 项断言，
@@ -960,7 +959,7 @@ jobs:
 
 
   # e2e 救活计划第二批（2026-10-17）：regulator / dock / route-templates / defect
-  # 四个脚本接进门禁（观察模式）。
+  # 四个脚本接进门禁（当初为观察模式，2026-10-20 起转硬门禁）。
   #
   # 背景：与第一批（上方 e2e-core-scripts）同一条脉络——16 个 e2e 脚本从未进过 CI，
   # 本批 4 个已在本机 Windows 串行全绿（2026-10-17 深夜验证，master 035a338，
@@ -989,10 +988,10 @@ jobs:
   # 默认段也不保险），与其余三个脚本的默认 18099 对齐；每个脚本退出时自停
   # backend，中间清理按 marker 兜底，18099 串行复用无冲突。
   #
-  # 为什么带 continue-on-error：与 e2e-capability / e2e-signing / e2e-core-scripts
-  # 同款观察模式。4 个脚本已在本机 Windows 全绿（94/94），但未在 Linux 上连续复跑，
-  # runner 上的进程/端口/时序行为可能不同。先收集 flaky 数据，若干次 run 全绿后
-  # 删掉这行转为硬门禁。删标记 = 把"跑过"升级为"必须通过"，不涉及任何脚本改动。
+  # 当初以观察模式接入（理由：4 个脚本只在本机 Windows 全绿（94/94，但未在 Linux 上连续复跑，
+  # runner 上的进程/端口/时序行为可能不同）。
+  # 2026-10-20 起已转**硬门禁**：连续多次 run 零红后删掉 continue-on-error
+  # （删标记 = 把「跑过」升级为「必须通过」，不涉及任何脚本改动）。
   e2e-b1-scripts:
     name: E2E B1 scripts (regulator / dock / route-templates / defect)
     runs-on: ubuntu-24.04
@@ -1061,7 +1060,7 @@ jobs:
             -exec cp {} b1-e2e-logs/ \; 2>/dev/null || true
           ls -la b1-e2e-logs || echo "(no logs captured)"
 
-  # ── B2 第三批 e2e（观察模式）────────────────────────────────────────────
+  # ── B2 第三批 e2e（已转硬门禁）───────────────────────────────────────────
   # 与 e2e-b1-scripts 平行、互不依赖。十脚本里 9 个接入；px4-sitl 不接入
   # （ubuntu runner 无 PX4 SITL、脚本宿主导向，接了必红）。
   #
@@ -1069,10 +1068,10 @@ jobs:
   # （aerofleet.udp-port，所有脚本均不覆盖）→ 同一 runner 内任意两个 backend
   # 不能共存、脚本必须串行；A/B 两型分到两个独立 runner 上可安全并行。
   #
-  # 为什么带 continue-on-error：与 e2e-b1-scripts 同款观察模式。9 个脚本已
-  # 在本机 Windows 全绿，但未在 Linux 上连续复跑，runner 上的进程/端口/时序
-  # 行为可能不同（sensing/network/rf/pixels 对时序敏感）。先收集 flaky 数据，
-  # 若干次 run 全绿后删掉这行转硬门禁——删标记 = 把"跑过"升级为"必须通过"。
+  # 当初以观察模式接入（理由：9 个脚本只在本机 Windows 全绿，未在 Linux 连续复跑，
+  # runner 上的进程/端口/时序行为可能不同）。
+  # 2026-10-20 起已转**硬门禁**：连续多次 run 零红后删掉 continue-on-error
+  # （删标记 = 把「跑过」升级为「必须通过」）。
   e2e-b2-a-type:
     name: E2E B2 A-type scripts (cv-eval / operations / rtk / sensing / uspace / spray)
     runs-on: ubuntu-24.04
@@ -1109,9 +1108,8 @@ jobs:
       - name: Clean leftovers before start
         run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
       # 6 步串行（backend 恒绑 UDP 14550，同 runner 不能并行）。每步 tee 留档
-      # step 日志：观察模式的断言信号靠 job 末尾的聚合步骤重新统计——
-      # continue-on-error 会把红压成绿，不能只看 job 结论。pipefail 防 tee
-      # 管道吞掉脚本退出码。
+      # step 日志：job 已是硬门禁，脚本失败会因 pipefail 退非零；末尾的聚合步骤
+      # 再从 step 日志重新统计一遍作为兜底。
       - name: e2e-cv-eval (F1 CV 评测三指标链路)
         shell: bash
         run: |
@@ -1172,10 +1170,14 @@ jobs:
           pwsh -NoProfile -File scripts/e2e-spray.ps1 -SkipBuild 2>&1 | tee "$RUNNER_TEMP/e2e-spray-step.log"
         env:
           AF_BACKEND_PORT: 18099
-      # D8 断言聚合：观察模式把红压成绿，断言结果必须从 step 日志重新捞一遍。
-      # 两族格式一个正则通吃：[PASS]/[FAIL]（cv-eval/operations/rtk/sensing/
-      # uspace）与 PASS:/FAIL:（spray）。有失败时 ::warning:: 注解——job 仍绿，
-      # 但信号必须在这里留痕，不许被 continue-on-error 静默吞掉。
+      # D8 断言聚合：两族格式一个正则通吃：[PASS]/[FAIL]（cv-eval/operations/
+      # rtk/sensing/uspace）与 PASS:/FAIL:（spray）。
+      #
+      # 这一步是**兜底**：脚本本身失败会退非零（下面用 pipefail 防 tee 吞掉退出码），
+      # job 已是硬门禁。但万一某个脚本印了 [FAIL] 却忘了 exit 1，聚合步骤仍会把它判红
+      # —— 不让「印了红字但 job 绿」漏过去。
+      # 判红文案用 ::error::（不是 ::warning::）：观察模式早已转正，
+      # 「观察模式不阻断」那句话本身就是一处声明≠行为。
       - name: Summarize e2e assertions (b2 a-type)
         if: always()
         shell: bash
@@ -1192,7 +1194,8 @@ jobs:
           done
           echo "B2 A-type assertions total: PASS=$total_pass FAIL=$total_fail"
           if [ "$total_fail" -gt 0 ]; then
-            echo "::warning::B2 A-type e2e ${total_fail} 条断言失败（观察模式不阻断，信号在此保留）"
+            echo "::error::B2 A-type e2e ${total_fail} 条断言失败 —— 聚合步骤直接判红（脚本已退非零，这里是兜底）"
+            exit 1
           fi
       - name: Collect b2 a-type e2e logs on failure
         if: failure()
@@ -1373,6 +1376,12 @@ jobs:
           exit $rc
       # D8 断言聚合：B 型 3 脚本全部是 PASS:/FAIL: 族，正则与 A 型共用
       # （\[PASS\]|PASS: 两族通吃）。
+      #
+      # 这一步是**兜底**：脚本本身失败会退非零（下面用 `|| rc=$?` + `exit $rc` 把退出码
+      # 传出来，pipefail 防 tee 吞掉），job 已是硬门禁。但万一某个脚本印了 [FAIL] 却
+      # 忘了 exit 1，聚合步骤仍会把它判红 —— 不让「印了红字但 job 绿」溜过去。
+      # 判红文案用 ::error::（不是 ::warning::）：观察模式早已转正，
+      # 「观察模式不阻断」那句话本身就是一处声明≠行为。
       - name: Summarize e2e assertions (b2 b-type)
         if: always()
         shell: bash
@@ -1389,7 +1398,8 @@ jobs:
           done
           echo "B2 B-type assertions total: PASS=$total_pass FAIL=$total_fail"
           if [ "$total_fail" -gt 0 ]; then
-            echo "::warning::B2 B-type e2e ${total_fail} 条断言失败（观察模式不阻断，信号在此保留）"
+            echo "::error::B2 B-type e2e ${total_fail} 条断言失败 —— 聚合步骤直接判红（脚本已退非零，这里是兜底）"
+            exit 1
           fi
       - name: Collect b2 b-type e2e logs on failure
         if: failure()
