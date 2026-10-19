@@ -1258,6 +1258,9 @@ jobs:
         run: |
           set -o pipefail
           # 后端的 marker 与脚本自己的 sim marker **必须分开**：
+          # 注意：不只是 -D 标记，**h2:mem 库名也在后端的命令行里**，
+          # 而匹配是松散子串，所以库名也得避开 sim 的 marker。
+          # 否则脚本开头的清理依旧会杀掉脚下的后端（上一轮 CI 就是这样）。
           # e2e-network.ps1 开头会调 Stop-E2eStaleProcesses 清理上一轮遗留的
           # sim（marker = network-e2e），若后端也用同一个 marker，它会把脚本脚下的
           # 后端一并杀掉 —— 后端一死，脚本第一个前置检查
@@ -1267,7 +1270,7 @@ jobs:
           java -Dnetwork-backend-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
             --server.port=18099 \
             --spring.profiles.active=dev \
-            --spring.datasource.url='jdbc:h2:mem:network-e2e;DB_CLOSE_DELAY=-1' \
+            --spring.datasource.url='jdbc:h2:mem:network-backend-e2e;DB_CLOSE_DELAY=-1' \
             --aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef \
             --aerofleet.drone-port=14600 \
             > "$RUNNER_TEMP/network-backend.log" 2>&1 &
@@ -1303,7 +1306,7 @@ jobs:
           java -Drf-backend-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
             --server.port=18099 \
             --spring.profiles.active=dev \
-            --spring.datasource.url='jdbc:h2:mem:rf-e2e;DB_CLOSE_DELAY=-1' \
+            --spring.datasource.url='jdbc:h2:mem:rf-backend-e2e;DB_CLOSE_DELAY=-1' \
             --aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef \
             > "$RUNNER_TEMP/rf-backend.log" 2>&1 &
           backend_pid=$!
@@ -1340,7 +1343,7 @@ jobs:
           java -Dpixels-backend-e2e=true -jar cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
             --server.port=18099 \
             --spring.profiles.active=dev \
-            --spring.datasource.url='jdbc:h2:mem:pixels-e2e;DB_CLOSE_DELAY=-1' \
+            --spring.datasource.url='jdbc:h2:mem:pixels-backend-e2e;DB_CLOSE_DELAY=-1' \
             --aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef \
             --aerofleet.vision.source=pixels \
             --aerofleet.sim-truth-base=http://127.0.0.1:18082 \

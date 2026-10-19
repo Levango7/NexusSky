@@ -458,6 +458,35 @@ Stop-E2eStaleProcesses: scripts/e2e-network.ps1:74
 
 **修法**：把“验收方起的后端”与“脚本自己的 sim”拆到两个 marker 命名空间：
 
+### 1b. 但修完第一版还是不够 —— 真正的命中点是 **H2 库名**
+
+推送后的下一轮 CI 又红，错误不变：仍然是“后端不可达”，且后端日志里
+`/api/v1/drones` 仍然只有 CI 自己那一次。为什么？因为**后端的命令行里不只有 `-D` 标记**，
+还有数据库连接串：
+
+```
+--spring.datasource.url='jdbc:h2:mem:network-e2e;DB_CLOSE_DELAY=-1'
+                                ^^^^^^^^^^^^
+                                库名里就是 'network-e2e'
+```
+
+匹配是**松散子串**，所以库名也被当成 marker 命中了 —— 后端的命令行里
+无论如何改 `-D` 标记，都会被这个库名拉下来。
+
+**为何不能把匹配改成锚定在 `-D<marker>=`**：因为那会打断现有三个 marker。全仓查过：
+
+| marker | 承载形式 |
+|---|---|
+| `formation-e2e` / `mesh-e2e` / `regulator-e2e` / `spray-e2e` / `network-e2e` / `cv-eval-e2e` … | `-D<marker>=true` |
+| **`dock-e2e` / `route-templates-e2e` / `defect-e2e`** | **只有 `jdbc:h2:mem:<marker>` 这一处** |
+
+那三个的唯一承载点就是 H2 库名（如 `scripts/e2e-route-templates.ps1:96`）。锚定到 `-D` 会让它们**永远清不掉**，
+而它们的清理正是靠库名匹配才生效的 —— **松散子串匹配是承重的，不能改**。
+
+所以正解只有一条：**让后端命令行里不出现 sim 的 marker**。除了拆 `-D` 命名空间，
+H2 库名也要一并改名（`network-backend-e2e` / `rf-backend-e2e` / `pixels-backend-e2e`）。子串安全性核对：
+`network-backend-e2e` 不包含 `network-e2e`，反向也不包含。
+
 - CI 起的后端：`-Dnetwork-backend-e2e=true` / `-Drf-backend-e2e=true` / `-Dpixels-backend-e2e=true`
 - 脚本自己的 sim：`-Dnetwork-e2e=true` / `-Drf-e2e=true` / `-Dpixels-e2e=true`（不变）
 - 各 cleanup 步骤的 marker 列表同时列两空间
@@ -471,6 +500,14 @@ Stop-E2eStaleProcesses: scripts/e2e-network.ps1:74
 ```
 Stop-E2eStaleProcesses -Marker 'network-e2e'        -> killed=1  （只杀 sim），后端 alive=True
 Stop-E2eStaleProcesses -Marker 'network-backend-e2e' -> killed=1  （杀后端），alive=False
+```
+
+H2 库名这一层也同样回归本机实测（两个进程的命令行里都带 `-Dnetwork-backend-e2e=true`，
+区别只在 h2:mem 库名）：
+
+```
+A（改名后，h2:mem:network-backend-e2e） -> 清理后 alive=True   期望值：不被误杀
+B（改名前，h2:mem:network-e2e）        -> 清理后 alive=False  期望值：复现原错（库名被当成 marker 命中）
 ```
 
 顺带也证明了 #117 的 pid 转换修正真的能杀进程（两次 killed=1）。
