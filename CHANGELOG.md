@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 144 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 145 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,9 +14,112 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 144 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 145 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
+
+---
+
+## [Unreleased] — `Stop-Process -Id [int]$x.Name` 在实参位置不成立；公共库的 Linux 分支一调就崩（#117，2026-10-19）
+
+把那批本地做的 B2 脚本推上去让 CI 验之后，CI 第一个跑就红了。不是脚本自己不对，
+而是**公共库 `e2e-common.ps1` 里一个从未被发现的硬缺陷**，它在 master 上已经带着了一段时间。
+
+### 1. CI 报的错误原文
+
+```
+Stop-E2eStaleProcesses: /home/runner/work/NexusSky/NexusSky/scripts/e2e-network.ps1:74
+  74 |  Stop-E2eStaleProcesses -Marker $E2eMarker | Out-Null
+     |  Cannot bind parameter 'Id'. Cannot convert value "[int]/proc/2977.Name"
+     |  to type "System.Int32". Error: "The input string '[int]/proc/2977.Name' was not in a correct format."
+```
+
+看着像是个语法错误，但它的真面是**解析层**的：`[int]$procDir.Name` 里的 `[int]` 是字面量，
+而不是类型转换。
+
+### 2. 原因：PowerShell 在**实参位置**不做类型转换
+
+原行（`scripts/e2e-common.ps1`，`Stop-E2eStaleProcesses` 的 Linux `/proc` 分支）：
+
+```powershell
+Stop-Process -Id [int]$procDir.Name -Force -ErrorAction SilentlyContinue
+```
+
+它看着像是"转成 int 再传过去"，实际上 PowerShell 在实参位置把它解析成**字符串拼接**：
+`"[int]"` + 路径 + `".Name"`。所以 `-Id` 收到的是 `"'[int]/proc/2977.Name'"` 这个字符串，
+绑定到 `[int]` 参数直接失败。
+
+本机 Windows 上直接复现（这个坑与平台无关，是解析层行为）：
+
+```
+A) Show-Arg [int]$o.Name        -> ERROR: Cannot convert value "[int]@{Name=2977}.Name" to type "System.Int32"
+B) Show-Arg ([int]$o.Name)      -> 绑上 Id=2977
+C) 先存变量再传        -> 绑上 Id=2977
+```
+
+报错的形状与 CI 上完全一致（只是对象的字符串化不同：`PathInfo` → `/proc/2977`，
+`PSCustomObject` → `@{Name=2977}`）。
+
+**为什么之前没人拿到：**
+
+- 这个分支只在 Linux 上走（Windows 走 `Get-CimInstance` 分支，`$_.ProcessId` 本来就是 int），
+  本机 Windows 根本进不了这个分支。
+- 而且它**只在真的匹配到了带 marker 的 java 进程时才会执行到那一行** ——
+  所以它是**u9690性**的，而不是每次都点弹。
+- 参数绑定失败发生在 `-ErrorAction SilentlyContinue` 生效**之前**，所以**压不住** ——
+  这就是它把整个 e2e step 带崩的原因（不是被强忍的轻微失败）。
+
+### 3. 修法：抽出成函数 + 加括号
+
+```powershell
+function Stop-E2eProcByDir {
+    param([Parameter(Mandatory = $true)]$ProcDir)
+    # 括号不能省：去掉就是上面那个必然抛异常的写法。
+    Stop-Process -Id ([int]$ProcDir.Name) -Force -ErrorAction SilentlyContinue
+}
+```
+
+单纯加括号就能修好，但**“加了括号”这件事本身没有测试能守住**：
+原分支只在 Linux 上跑，Windows 本机根本进不来。所以把“按目录杀进程”这一步单独抽出来，
+让自检脚本能用假对象直接喂它。
+
+### 4. 自检补两类断言
+
+`scripts/e2e-common-selftest.ps1`（CI 里的 `E2E common library self-test` job，**不带** continue-on-error）：
+
+- **行为断言**：用假目录对象去调 `Stop-E2eProcByDir`，断言它**不抛**。
+  用一个不可能存在的 pid（`[int]::MaxValue`）：进程不存在时 `Stop-Process` 抛的是
+  `ProcessNotFoundException`（非终止错误，被 `-ErrorAction SilentlyContinue` 吞掉），而**绑定错误是终止错误**，
+  catch 得到 —— 两者可区分。
+- **源码级断言**：只测 helper 不够 —— 把**调用点**改回内联坏写法（helper 留着不用）时
+  行为用例仍然是绿的。所以额外断言：剥掉注释后的源码里**不得出现** `-Id [int]$` 这种裸实参写法，
+  且 `Stop-E2eProcByDir` 至少出现 2 次（定义 + 调用）。
+
+  剥注释是必要的：函数上方的说明里**恰好**写着那个坏写法作为反例，不剔会把自己人判红。
+
+### 5. 变异：3 杀 + 1 个显式记录的良性变异
+
+| 变异 | 结果 |
+|---|---|
+| M1 helper 去掉括号（复活原错） | KILLED |
+| M2 调用点改回内联坏写法 | KILLED |
+| M3 调用点被注释掉（Linux 分支不再清理残留） | KILLED |
+| M4 helper 里改成字符串拼接 | **存活 —— 预期良性** |
+
+M4 值得单记：`([int]$x.Name)` 改成 `(([int]$x.Name).ToString() + '')` 产生的是数字字符串，
+PowerShell 绑到 `[int]` 参数时照样会转回去 ——**运行行为完全相同**。
+它不能被杀不是测试的缺陷，而是这条断言本来就不能区分它。
+与其它存活不拿来充数，直接写在这里。
+
+### 6. 同一次 CI 还拿到的另一个问题（属于 B2 分支，本 PR 不能修）
+
+A-type 的 `e2e-rtk` 也红了，但根因**不同**：3 台 drone-sim 都启动了（日志里能看到），
+却没有一台上线（`R1/R2/R3 sysid=61/62/63 上线` 全红）。这是 B2 脚本自己的问题，
+与本 PR 的 pid 转换不是一个问题，也不属于公共库，留给 B2 分支自己处理。
+
+### 7. 计数
+
+Java 4949 不变（本 PR 不动 Java 测试），前端 381 不变。门禁绿。
 
 ---
 

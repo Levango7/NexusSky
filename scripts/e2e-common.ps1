@@ -84,6 +84,37 @@ function Get-E2eTempDir {
 
     参数 Marker：命令行里出现的唯一标记（各脚本启动 java 时带 -D<marker>=true）。
 #>
+<#
+.SYNOPSIS
+    按 /proc/<pid> 目录杀掉一个进程。
+
+.DESCRIPTION
+    这个函数**单独存在**，是因为原来的写法在 Linux 上必然抛异常：
+
+        Stop-Process -Id [int]$procDir.Name -Force
+
+    PowerShell 在**实参位置**不把 `[int]$x.Name` 当作类型转换 —— 它被解析成
+    字符串拼接（"[int]" + 路径 + ".Name"），于是 `-Id` 收到的是
+    "[int]/proc/2977.Name"，绑定到 [int] 参数直接失败：
+
+        Cannot bind parameter 'Id'. Cannot convert value
+        "[int]/proc/2977.Name" to type "System.Int32".
+
+    参数绑定失败发生在 `-ErrorAction SilentlyContinue` 生效之前，
+    **压不住**（这是它当时把整个 e2e step 带崩的原因）。
+
+    修法是加括号：`([int]$procDir.Name)`。但加括号这件事本身没有测试能守住
+    —— 原来的分支只在 Linux 上跑，Windows 本机根本进不来。
+    所以把"按目录杀进程"这一步单独抽出来，自检脚本用假对象直接喂它，
+    绑定错误一旦回来就会被钉住（见 e2e-common-selftest.ps1）。
+#>
+function Stop-E2eProcByDir {
+    param([Parameter(Mandatory = $true)]$ProcDir)
+
+    # 括号不能省：去掉就是上面注释里那个必然抛异常的写法。
+    Stop-Process -Id ([int]$ProcDir.Name) -Force -ErrorAction SilentlyContinue
+}
+
 function Stop-E2eStaleProcesses {
     param([Parameter(Mandatory = $true)][string]$Marker)
 
@@ -105,7 +136,7 @@ function Stop-E2eStaleProcesses {
             if (-not $raw) { continue }
             $cmd = $raw -replace "`0", ' '
             if ($cmd -match 'java' -and $cmd -match $Marker) {
-                Stop-Process -Id [int]$procDir.Name -Force -ErrorAction SilentlyContinue
+                Stop-E2eProcByDir -ProcDir $procDir
                 $hit++
             }
         }
