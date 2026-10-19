@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 148 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 149 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,11 +14,32 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 148 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 149 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
 
 ---
+
+## [Unreleased] — rtk「没上线」的真相：Hashtable key 类型不统一，`"61" != 61` 让查找恒 null（2026-10-19）
+
+`60ac648` 的诊断在 CI run 39279718213 拿到首条输出，根因当场锁定：
+
+```
+[DIAG] 轮询 8 次，后端可达=True，已收集 3 个 online 的交机
+[DIAG] 缺失 sysid: 61,62,63（期望 61,62,63 全上线且 rtkStatus 正确）
+[DIAG] 最后一次响应：sysid=61 online=True rtk=RTK...
+[DIAG] 最后一次响应：sysid=62 online=True rtk=RTK...
+[DIAG] 最后一次响应：sysid=63 online=True rtk=STA...
+```
+
+三机**全在响应里、online=True、seen 收了 3 个**，但 `ContainsKey(61)` 报缺失、
+断言 `$seen[$sysid]` 拿 null——`Invoke-RestMethod` 反序列化出的 sysid 是字符串，
+而 `$expected=@(61,62,63)`、断言查找用的是 int：PowerShell Hashtable 里
+`"61"` 和 `61` 是两个 key。这也解释了此前三轮 CI 为何都是同一个 FAIL——
+旧诊断条件（seen<3）永远看不见它。
+
+修法：收集、查找、比较三处 key 全部 `[string]` 化。API 端类型（JSON 数字 vs
+字符串）不由脚本控制，统一到字符串是唯一自洽解。
 
 ## [Unreleased] — rtk 诊断盲区：`seen.Count -lt 3` 覆盖不到「sysid 不对」那种没上线（2026-10-19）
 

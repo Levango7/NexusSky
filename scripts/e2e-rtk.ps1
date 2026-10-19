@@ -105,7 +105,11 @@ try {
             # 保留最后一次响应的原始形状：失败时要能看到 API 到底返回了什么，
             # 而不是只知道「没上线」。下面断言依赖的就是这个形状。
             $lastRaw = @($drones | ForEach-Object { "sysid=$($_.sysid) online=$($_.online) rtk=$($_.rtkStatus)" })
-            foreach ($d in $drones) { if ($d.online) { $seen[$d.sysid] = $d } }
+            # key 统一成 [string]：Invoke-RestMethod 反序列化的 sysid 是 JSON 数字还是
+            # 字符串随 API 而定，Hashtable 的 "61" != 61 —— key 类型不统一会让查找恒 null。
+            # CI run 39279718213 实测：响应里 61/62/63 online=True 全在，ContainsKey(61)
+            # 却报缺失，即此坑。收集/查找/比较三处全部走 [string] 才自洽。
+            foreach ($d in $drones) { if ($d.online) { $seen[[string]$d.sysid] = $d } }
             if ($seen.Count -ge 3) { break }
         } catch {
             # 连不上了：保留上一次成功的响应，并把错误记下来（下面报「后端不可达」而不是「不上线」）
@@ -121,7 +125,7 @@ try {
     # FAIL 走「上线」分支但 DIAG 零输出，反推 seen.Count>=3 却缺 61/62/63 中的某些，
     # 即上面三种里的最后一种；旧条件对它完全盲飞。
     $expected = @(61, 62, 63)
-    $missing = @($expected | Where-Object { -not $seen.ContainsKey($_) })
+    $missing = @($expected | Where-Object { -not $seen.ContainsKey([string]$_) })
     if ($missing.Count -gt 0) {
         Write-Host ("  [DIAG] 轮询 $polls 次，后端可达=$backendAlive，已收集 $($seen.Count) 个 online 的交机（sysid: $($seen.Keys -join ',')）")
         Write-Host ("  [DIAG] 缺失 sysid: $($missing -join ',')（期望 61,62,63 全上线且 rtkStatus 正确）")
@@ -132,7 +136,7 @@ try {
 
     foreach ($pair in @(@(61, 'RTK_FIXED', 'R1'), @(62, 'RTK_FLOAT', 'R2'), @(63, 'STANDALONE', 'R3'))) {
         $sysid = $pair[0]; $expect = $pair[1]; $tag = $pair[2]
-        $d = $seen[$sysid]
+        $d = $seen[[string]$sysid]
         if ($null -eq $d) {
             Assert-True $false "$tag sysid=$sysid 上线"
             continue
