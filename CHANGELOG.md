@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 142 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 143 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,9 +14,83 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 142 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 143 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
+
+---
+
+## [Unreleased] — dev profile 写着“禁用 Redis”，health 却因为 Redis 永远是 DOWN（#114，2026-10-19）
+
+先清 Next Move 里那条“SDK harness 本机实跑”（CI 上是绿的，我一次没跑过）。跑的过程中撞出
+一个与“声明≠行为”同源的缺陷。
+
+### 1. SDK harness 本机实跑：23 条全绿
+
+照 `SDK Integration E2E` 那个 job 的摆法（backend
+`--spring.profiles.active=dev` + drone-sim 带运行时生成的签名密钥）在本机跑
+`scripts/e2e-sdk-integration.ps1`：
+
+```
+机队列表非空 (sysid=1 Drone-1) / get / telemetry / arm / takeoff / rtl
+mission upload+download (items>=3) / flightlog / ApiResponse 格式
+404 不存在 sysid / 400 无效命令
+航点范围校验：lat>90、lon<-180、alt<0 三种非法均被拒
+```
+
+`PASS=23 FAIL=0 exit=0`，末尾 `ALL SDK INTEGRATION TESTS PASSED`。
+CI 跑的是 `.sh`；本机是 Windows，`.sh` 仍只有 CI 那一条路。
+
+### 2. 撞出的缺陷：dev 说不依赖 Redis，health 却硬依赖它
+
+`application-dev.properties` 注释写着「Redis：开发环境禁用」，`spring.cache.type=simple`。
+但本机没起 redis 时 `/actuator/health` 始终 DOWN，组件里 `redis=DOWN`。
+同一台机器、redis 容器全程停着的对照：
+
+```
+修复前：200s 未就绪（我手动放弃）   db UP / drone UP / redis DOWN
+修复后： 55s UP                      db UP / drone UP（redis 项消失）
+```
+
+原因不是配置写错，是 Spring Boot 只要存在 `RedisConnectionFactory` 就自动注册
+`RedisHealthIndicator`——**它不看缓存用不用 Redis**。于是任何以 `health == UP` 为门禁的
+本地流程（启动等待、e2e 脚本、CI 的 service 健康检查）都会卡住。这与“dev 不依赖
+redis”的声明直接矛盾：声明说能独立起来，行为说不能。
+
+修法是 dev 与 test 两个 profile 各加一行 `management.health.redis.enabled=false`。
+
+### 3. 钉测试写成“规则”而不是“某一行”，并带一条反向断言
+
+`ProfileHealthConsistencyTest`（3 条）不写死 dev，而是：凡是**继承或声明**了非 redis
+缓存类型的 profile，都必须禁用 redis 健康指标。这样未来新增 profile 会自动被
+检查到，而不是等人再卡一次 200 秒。
+
+反向的那一半同样重要：prod / staging 用的是真 Redis 缓存，**必须保留** redis 健康指标——
+Redis 真挂了却报 UP，比 redis 指标永远 DOWN 严重得多。这条断言专门防“顺手给 prod
+也加上 false”。
+
+### 4. 变异：4/4 全杀
+
+| 变异 | 结果 | 判红的用例 |
+|---|---|---|
+| P1 dev 重新不禁用 redis 健康指标 | KILLED | `nonRedisCacheProfileDisablesRedisHealth` |
+| P2 test 重新不禁用 redis 健康指标 | KILLED | `nonRedisCacheProfileDisablesRedisHealth` |
+| P3 prod 也关掉 redis 健康指标 | KILLED | `redisCacheProfileKeepsRedisHealth` |
+| P4 dev 悄悄改回 redis 缓存（注释不动） | KILLED | `devAndTestAreRedisIndependent` |
+
+P4 是“注释继续说禁用、配置已经改了”这种最难发现的漂移，规则能抓住。
+
+### 5. 顺带记一个会把人带沟里的 classpath 陷阱
+
+第一版测试用 `getResourceAsStream("/application.properties")` 读配置，结果
+`spring.cache.type` 读出来是 `null`——差点把“基线没配缓存类型”当成事实。实际是
+`src/test/resources/application.properties`（只含安全相关几个键的**测试覆盖文件**）在 classpath 上排在
+`target/classes` 之前。改成从 `src/main/resources` 源码树读，并把这个坑写进注释：
+配置一致性测试要读**人真正编辑的那一份**。
+
+### 6. 计数
+
+Java 4932 → **4935**（cloud-backend 2826 → 2829），前端 381 不变。门禁绿。
 
 ---
 
