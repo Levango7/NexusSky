@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Linux 专用编排（D4 修正版）：
 # - MAVLink UDP 发现/路由依赖同网段广播语义 -> 全员 host 网络（Windows/Mac
 #   Docker Desktop 的 host 支持不完整，直接跑 start-all.cmd / .sh 更简单）
