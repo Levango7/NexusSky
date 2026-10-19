@@ -272,3 +272,113 @@ describe('#110 SurveillancePanel MJPEG 预览', () => {
     expect(fetchStreamToken).toHaveBeenCalledTimes(2)
   })
 })
+
+
+// =============================================================================
+// #112：guessProtocol 的 hls / mjpeg / image 三个分支 —— 今天没有任何生产者
+//
+// 现状（实测核对过，不是凭记忆）：后端产出"流地址"的地方只有 rtspUrl 一处，
+// 值域是 `rtsp://…`（私有协议/ONVIF 推导）或 `gb28181-invite://…`（描述性标识）。
+// 全仓没有任何地方产 `.m3u8` 或图片地址，所以 guessProtocol 实际只会返回
+// 'rtsp' 或 null —— 这三个分支今天是死分支。
+//
+// 那为什么不删？因为它们是**已有能力**，不是错误的实现：接上 HLS 转封装或
+// 快照生产者时应当立刻可用。删了要重新写一遍，能力就真没了。所以按"不做减法"
+// 的口径用测试钉住它们 —— 下面的用例在当前后端下**全部通过**，一旦将来有生产者
+// 接上而分支已经腐坏（比如把 hls.js 加载删了、或者判断顺序被改动），它们会先红。
+//
+// 最后一条（顺序不变式）尤其重要：guessProtocol 先判 rtsp:// 再判 mjpeg，
+// 所以路径里带 "mjpeg" 的 RTSP 地址仍走 rtsp 分支。若顺序被调换，
+// RTSP 会被当成图片挂上 <img> —— 而浏览器根本播不了 rtsp://，结果是一张死图。
+// =============================================================================
+describe('#112 guessProtocol 的 hls / mjpeg / image 三个分支（当前无生产者，但必须保持可用）', () => {
+  let hlsLoadSource
+  let hlsDestroy
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    listSurveillanceEvents.mockResolvedValue({ items: [] })
+    fetchStreamToken.mockResolvedValue('st-abc')
+    mjpegPreviewUrl.mockImplementation(
+      (id, token, fps) => `https://gcs.test/api/v1/surveillance/devices/${id}/mjpeg?streamToken=${token}&fps=${fps}`,
+    )
+    hlsLoadSource = vi.fn()
+    hlsDestroy = vi.fn()
+    // 装一个 window.Hls，组件就不会去注入 <script>，而直接 new 它
+    window.Hls = class {
+      constructor() { this.Events = { MANIFEST_PARSED: 'manifestParsed', ERROR: 'error' } }
+      loadSource(u) { hlsLoadSource(u) }
+      attachMedia() {}
+      on() {}
+      destroy() { hlsDestroy() }
+    }
+  })
+
+  afterEach(() => {
+    delete window.Hls
+  })
+
+  const withStream = (rtspUrl, extra = {}) => {
+    listSurveillanceDevices.mockResolvedValue([{ ...DEVICE, browserPlayable: false }])
+    getDeviceStream.mockResolvedValue({
+      deviceId: 'cam-1',
+      channel: 1,
+      rtspUrl,
+      playable: true,
+      deviceVerified: false,
+      ...extra,
+    })
+  }
+
+  it('.m3u8 走 HLS 分支：交给 hls.js 加载，而不是当成未知协议', async () => {
+    withStream('https://cdn.test/live/cam1/index.m3u8')
+
+    render(<SurveillancePanel />)
+    await assignDevices()
+
+    await waitFor(() => expect(hlsLoadSource).toHaveBeenCalled())
+    expect(hlsLoadSource).toHaveBeenCalledWith('https://cdn.test/live/cam1/index.m3u8')
+    // 认出来了就不能再显示"无法识别"
+    expect(screen.queryByText(/无法识别的流地址协议/)).toBeNull()
+  })
+
+  it('.jpg 快照地址走 <img> 分支', async () => {
+    withStream('http://192.168.1.64/snapshot.jpg')
+
+    render(<SurveillancePanel />)
+    await assignDevices()
+
+    const img = await screen.findByAltText(/西门口球机/)
+    expect(img.tagName).toBe('IMG')
+    expect(img.getAttribute('src')).toBe('http://192.168.1.64/snapshot.jpg')
+    expect(screen.queryByText(/无法识别的流地址协议/)).toBeNull()
+  })
+
+  it('非 rtsp 且含 mjpeg 的地址走 <img> 分支', async () => {
+    withStream('http://192.168.1.64/mjpeg/stream')
+
+    render(<SurveillancePanel />)
+    await assignDevices()
+
+    const img = await screen.findByAltText(/西门口球机/)
+    expect(img.tagName).toBe('IMG')
+    expect(screen.queryByText(/无法识别的流地址协议/)).toBeNull()
+  })
+
+  /**
+   * 顺序不变式：rtsp:// 的判定必须**先于** mjpeg。
+   * 路径里带 "mjpeg" 的 RTSP 地址若被当成图片，会挂一个 <img src="rtsp://…"> ——
+   * 浏览器播不了 rtsp://，界面上就是一张永远不更新的死图。
+   */
+  it('RTSP 地址即使路径含 mjpeg 仍走 rtsp 分支（不得误判成图片）', async () => {
+    withStream('rtsp://admin:***@192.168.1.64:554/mjpeg/Streaming/Channels/1')
+
+    render(<SurveillancePanel />)
+    await assignDevices()
+
+    await waitFor(() => expect(screen.getByText(/RTSP 流需后端转码/)).toBeTruthy())
+    // 没有把 rtsp:// 挂到 <img> 上
+    expect(screen.queryByAltText(/西门口球机/)).toBeNull()
+    expect(hlsLoadSource).not.toHaveBeenCalled()
+  })
+})

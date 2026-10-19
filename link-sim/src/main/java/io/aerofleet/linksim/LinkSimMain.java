@@ -217,6 +217,21 @@ public final class LinkSimMain {
                 long wait = p.dueAtMs - System.currentTimeMillis();
                 if (wait > 0) {
                     // PriorityBlockingQueue 无延时轮询：睡到最早到期时间
+                    //
+                    // 注意精度：Thread.sleep 的下限是操作系统的线程唤醒粒度
+                    // （本机 tick 约 15.6ms），不是它请求的毫秒数。实际超出量 =
+                    // 到下一个 tick 边界的距离，取决于调用时刻的相位，所以**跑与
+                    // 跑之间天然不同**；负载重时更明显。
+                    //
+                    // 后果：真实投递延迟会超出画像声明的区间，低延迟画像受害最大。
+                    // 本机复测：wifi5 声明 [2,6]ms，空载 p50 5~6ms、有负载 p50 12ms
+                    // （此时只有 15% 的样本落在声明区间内）；starlink 声明 [35,55]，
+                    // 空载 p50 46~47ms。
+                    //
+                    // 所以声明区间**不是保证值**。Linux（CI 跑 e2e 的地方）粒度小得多，
+                    // 同一画像在开发机与 CI 上不是同一条链路。量化见
+                    // scripts/e2e-linksim-timing.py；引擎的判决语义由
+                    // ImpairmentEngineTest 单独钉住（那是另一个问题）。
                     Thread.sleep(Math.min(wait, 50));
                     if (p.dueAtMs - System.currentTimeMillis() > 0) {
                         wire.add(p); // 还没到点，放回

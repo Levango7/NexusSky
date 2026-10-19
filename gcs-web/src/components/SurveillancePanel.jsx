@@ -100,7 +100,6 @@ function VideoTile({ device, channel, selected, onSelect }) {
   useEffect(() => {
     if (!device || !device.id) return
     const controller = new AbortController()
-    let hls = null
 
     const load = async () => {
       setLoading(true)
@@ -146,34 +145,8 @@ function VideoTile({ device, channel, selected, onSelect }) {
         // 认不出的协议不挂播放器（null 不是 'hls'）
         if (!protocol) return
 
-        if (protocol === 'hls') {
-          const video = videoRef.current
-          if (!video) return
-          // 原生 HLS（Safari / iOS）
-          if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url
-            video.play().catch(() => {})
-          } else {
-            // 动态加载 hls.js
-            try {
-              const Hls = await loadHlsJs()
-              if (controller.signal.aborted) return
-              hls = new Hls({ enableWorker: true, lowLatencyMode: true })
-              hlsRef.current = hls
-              hls.loadSource(url)
-              hls.attachMedia(video)
-              hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                video.play().catch(() => {})
-              })
-              hls.on(Hls.Events.ERROR, (_evt, err) => {
-                if (err.fatal) setError('视频流错误：' + err.type)
-              })
-            } catch (e) {
-              setError('HLS 播放器加载失败')
-            }
-          }
-        }
-        // mjpeg / image：直接用 <img> 渲染，无需额外处理
+        // hls / mjpeg / image 的挂载都在**渲染层**完成，这里不碰 <video>。
+        // 原因见下面那个独立 effect 的注释：在此处读 videoRef 必为 null。
       } catch (e) {
         if (e && e.name === 'AbortError') return // 经验：AbortError 直接 return
         if (controller.signal.aborted) return
@@ -185,10 +158,6 @@ function VideoTile({ device, channel, selected, onSelect }) {
     load()
     return () => {
       controller.abort() // 经验：cleanup 中 abort
-      if (hls) {
-        hls.destroy()
-        hlsRef.current = null
-      }
       const video = videoRef.current
       if (video) {
         video.pause()
@@ -197,6 +166,7 @@ function VideoTile({ device, channel, selected, onSelect }) {
       }
     }
   }, [device && device.id, channel])
+
 
   // 根据流数据渲染
   // 键名解析复用 resolveStreamUrl（与挂载路径同一个解析点）
@@ -213,6 +183,66 @@ function VideoTile({ device, channel, selected, onSelect }) {
   // 有 MJPEG 预览地址时，RTSP 说明就不该再盖在画面上 —— 那句话描述的是"没有别的办法时"，
   // 现在有办法了，同时显示就是自己打自己的脸。
   const hasPreview = !loading && !error && !!mjpegUrl
+
+  /**
+   * HLS 挂载 —— **必须**是独立 effect，不能塞进取流那个 effect。
+   *
+   * <p>{@code <video>} 要等 stream 到手（isHls 为真）才渲染，而取流 effect 体内的
+   * {@code setStream} 之后 React 还没重渲染，所以那一刻 {@code videoRef.current}
+   * 必为 null。原先就写在那个 effect 里，于是"即使有生产者产出 .m3u8"也永远挂不上
+   * hls.js —— 分支看起来在，实际是断的。今天没有 .m3u8 生产者所以看不出来，
+   * 一旦有人接上就会静默失效。
+   *
+   * <p>拆出来之后，这个 effect 在 {@code <video>} 已经挂载的那次渲染之后才跑，
+   * ref 才有值。
+   */
+  useEffect(() => {
+    if (protocol !== 'hls' || !streamUrl) return undefined
+    const video = videoRef.current
+    if (!video) return undefined
+    let cancelled = false
+    let instance = null
+
+    // 原生 HLS（Safari / iOS）
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = streamUrl
+      video.play().catch(() => {})
+      return () => {
+        video.pause()
+        video.removeAttribute('src')
+        video.load()
+      }
+    }
+
+    loadHlsJs()
+      .then((Hls) => {
+        if (cancelled) return
+        instance = new Hls({ enableWorker: true, lowLatencyMode: true })
+        hlsRef.current = instance
+        instance.loadSource(streamUrl)
+        instance.attachMedia(video)
+        instance.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {})
+        })
+        instance.on(Hls.Events.ERROR, (_evt, err) => {
+          if (err.fatal) setError('视频流错误：' + err.type)
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setError('HLS 播放器加载失败')
+      })
+
+    return () => {
+      cancelled = true
+      if (instance) {
+        instance.destroy()
+        hlsRef.current = null
+      }
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+    }
+  }, [protocol, streamUrl])
 
   const name = device
     ? `${device.name || device.id}${channel != null ? ` · 通道${channel}` : ''}`
@@ -298,7 +328,10 @@ function VideoTile({ device, channel, selected, onSelect }) {
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
           />
         )}
-        {!loading && !error && device && isHls && (
+        {/* <video> 不再等 loading/error：挂载 HLS 的 effect 依赖这个 ref，
+            若它被 loading 挡住，ref 就永远填不上（此前 hls 分支断在这里）。
+            提示层是兄弟节点、绝对定位，盖在上面，不影响。 */}
+        {device && isHls && (
           <video
             ref={videoRef}
             style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
