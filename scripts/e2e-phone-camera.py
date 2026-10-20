@@ -68,8 +68,9 @@ CANDIDATE_PATHS = [
 CANDIDATE_PORTS = [8080, 8081, 8088]
 # 扫网段时的连接超时
 SCAN_TIMEOUT = 0.4
-# 合成夹具：一张真 JPEG（32x24，梯度图），用来自证"是不是真 JPEG"的判定
-FIXTURE_JPEG_B64 = os.path.join(HERE, "fixtures", "fake-camera-frame.jpg.b64")
+# 合成夹具：一张真 JPEG（32x24，梯度图），用来自证"是不是真 JPEG"的判定。
+# 与合成帧源（scripts/synthetic-frame-source.py）共用同一批夹具。
+FIXTURE_JPEG_B64 = os.path.join(HERE, "fixtures", "fake-camera-frame-1.jpg.b64")
 
 
 def log(msg):

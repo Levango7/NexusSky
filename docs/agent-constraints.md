@@ -116,6 +116,30 @@ CHANGELOG 里带进 3 处 `<<<<<<< HEAD` / `=======` / `>>>>>>> Stashed changes`
 - `python scripts/check-selftest-coverage.py`（自测覆盖）
 - `python scripts/check-spi-coverage.py --self-test`（SPI 可验证性）
 
+## 7. 切分支前没提交，`git reset --hard` 把活干抹了
+
+**错在哪**：一个 PR 合进 master 后，我要开下一个 PR。手上还改着三个文件
+（`e2e-mjpeg-preview.py` / `ci.yml` / `contributing-guide.md`，都没提交），
+我直接 `git checkout master` → 它**被 abort 了**（有未提交改动会挡住），
+我看到 "Aborting" 却没停，接着执行了 `git reset --hard origin/master` ——
+**那一行把三个文件里两个多小时的改动直接抹掉了**（未跟踪文件不受影响，所以夹具和脚本侥幸没丢）。
+
+**后果**：改动全丢，得重做一遍。更糟的是它**伪装成"已经切好了分支"**：
+`git reset --hard` 之后的每一步都成功，输出也正常，不核对就以为没事了。
+
+**硬约束**：
+1. 工作区有未提交改动时，**先 commit 或 stash，再切分支**；`git checkout` 报了
+   Aborting 就**停下来看**，不要把下一个命令接上去 —— 前一条命令失败时，
+   后一条命令的前提已经不成立了。
+2. `git reset --hard` 只在**确认工作区干净**（`git status` 空）时执行。
+   它是"明确丢弃"的命令，不是"同步"的命令。
+3. 批量改完多个文件后，**在切分支/合并之前先提交**（哪怕是 wip 提交），
+   让"工作成果"和"分支切换"解耦。
+
+**机械化**：暂无（软约束）。
+可考虑做成 `scripts/check-clean-tree-before-reset.sh`，但 git 自身已有
+`git reset --hard` 的确认提示，这里更值得做的是**流程**：切分支前先 `git status`。
+
 ## 附：一次作业的收尾清单
 
 ```bash

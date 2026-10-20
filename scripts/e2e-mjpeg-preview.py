@@ -82,6 +82,27 @@ def note(text):
     print("  [NOTE] %s" % text)
 
 
+def probe_auth_posture(base):
+    """探后端的鉴权姿态：匿名访问受保护端点会怎样。
+
+    为什么必须先探：`aerofleet.security.dev-mode=true` 时，Spring Security 链是
+    `anyRequest().permitAll()`，**且** `StreamTokenFilter` 会直接跳过 ——
+    于是匿名访问 /mjpeg 会拿到 200 和真实帧流。这不是漏洞，是 dev 模式的既定行为；
+    但它意味着 S3「匿名必须被拒」这条断言**在 dev 后端上不可能成立**。
+
+    不先探的后果有两个，都是实测踩到的：
+      1) 红在「匿名 -> 401」上，看不出真正原因是后端配置不对（红在错的原因上）；
+      2) 匿名那一探会把整段流读进内存（实测 7MB），又慢又可能撑爆内存。
+    返回 "strict"（匿名被拒）/ "open"（匿名放行）。
+    """
+    st, _h, _b = http("GET", base + "/api/v1/surveillance/devices", raw=True, timeout=15)
+    if st == 200:
+        return "open"
+    if st in (401, 403):
+        return "strict"
+    return "unknown(%s)" % st
+
+
 def http(method, url, body=None, token=None, raw=False, timeout=20):
     headers = {}
     data = None
@@ -163,6 +184,9 @@ def main():
                          "默认仍要求画面在动）")
     ap.add_argument("--spawn-frame-source", action="store_true",
                     help="自己拉起 scripts/camera-snapshot-source.py")
+    ap.add_argument("--allow-open-backend", action="store_true",
+                    help="允许对着不鉴权的后端跑（dev 模式）。此时 S3「匿名必须被拒」"
+                         "会按记录处理而不是断言失败 —— 只在只想验取流链路本身时用")
     args = ap.parse_args()
 
     snap = args.snapshot_url
@@ -216,6 +240,28 @@ def run_checks(args, snap):
         print("  [FAIL] 没给密码（--password / AF_E2E_PASSWORD）")
         raise SystemExit(2)
 
+    # 鉴权姿态先探：dev 模式下 S3 那条「匿名必须被拒」**不可能成立**，
+    # 与其红在错的原因上（而且顺手把整段流读进内存），不如在这里说清白。
+    step("0.5 后端鉴权姿态")
+    posture = probe_auth_posture(base)
+    if posture != "strict" and not args.allow_open_backend:
+        print("  [FAIL] 匿名访问受保护端点返回的不是 401/403（探测结果：%s）" % posture)
+        print("")
+        print("  这通常意味着后端跑在 dev 模式：")
+        print("    aerofleet.security.dev-mode=true 时，Spring Security 链是 anyRequest().permitAll()，")
+        print("    且 StreamTokenFilter 直接跳过 —— 匿名取流会拿到 200 和真实帧流。")
+        print("    这是 dev 模式的既定行为（不是漏洞），但它让本脚本的 S3 安全断言失去意义。")
+        print("")
+        print("  要跑本脚本，请用非 dev 配置启动后端：")
+        print("    --aerofleet.security.dev-mode=false --aerofleet.security.jwt-secret=<>=32 字节>")
+        print("  并确保库里有一个可登录用户（登录走数据库，内存用户配置在有库时会被忽略）。")
+        print("  确实要对着一个不鉴权的后端跑（只验取流链路本身），加 --allow-open-backend。")
+        raise SystemExit(2)
+    if posture != "strict":
+        note("后端不鉴权（%s）—— S3 匿名断言已按 --allow-open-backend 跳过" % posture)
+    else:
+        check("后端鉴权姿态：匿名被拒", True, "S3 断言有意义")
+
     step("1. 登录拿长效 JWT")
     st, body = http("POST", base + "/api/v1/auth/login",
                     {"username": args.username, "password": args.password})
@@ -231,10 +277,14 @@ def run_checks(args, snap):
     except Exception as e:
         print("  [FAIL] 帧源不可达 %s: %s" % (snap, e))
         raise SystemExit(2)
-    check("帧源 200 + image/jpeg",
-          st1 == 200 and h1.get("Content-Type") == "image/jpeg",
-          "HTTP %d %s" % (st1, h1.get("Content-Type")))
+    check("帧源 200", st1 == 200, "HTTP %d" % st1)
     check("字节是 JPEG（SOI=ffd8ff）", f1[:3] == b"\xff\xd8\xff", f1[:3].hex())
+    # Content-Type 只作记录，不作断言：真实网络摄像头常把它标错
+    # （有的把 JPEG 标成 application/octet-stream，有的把非 JPEG 标成 image/jpeg）。
+    # 我们和后端一样**按字节判定**成帧，所以帧源的头标得对不对，不影响这条链路是否成立。
+    if h1.get("Content-Type") != "image/jpeg":
+        note("帧源 Content-Type 是 %r（不是 image/jpeg）—— 按字节判定成帧，不影响链路"
+             % h1.get("Content-Type"))
     if args.allow_static_frames:
         note("两次取帧内容相同（已开 --allow-static-frames：静态场景下属正常）: %d vs %d bytes"
              % (len(f1), len(f2)))
@@ -266,10 +316,15 @@ def run_checks(args, snap):
               str(mine[0].get("snapshotUrl")))
 
     step("4. S3 匿名必须被拒（链上 permitAll ≠ 不鉴权）")
-    st, h, blob = http("GET", "%s/api/v1/surveillance/devices/%s/mjpeg?fps=%d"
-                       % (base, args.device_id, args.fps), raw=True, timeout=15)
-    check("匿名 -> 401", st == 401, "HTTP %d" % st)
-    check("匿名响应一帧都没漏", b"--aerofleetframe" not in blob, "%d bytes" % len(blob))
+    if posture != "strict":
+        # 后端不鉴权时，这一探会把整段流读进内存（实测 7MB）且注定失败 ——
+        # 上面 0.5 已经把原因说清楚了，这里不重复制造一次红。
+        note("后端不鉴权（%s），跳过匿名探测（无意义且会读进整段流）" % posture)
+    else:
+        st, h, blob = http("GET", "%s/api/v1/surveillance/devices/%s/mjpeg?fps=%d"
+                           % (base, args.device_id, args.fps), raw=True, timeout=15)
+        check("匿名 -> 401", st == 401, "HTTP %d" % st)
+        check("匿名响应一帧都没漏", b"--aerofleetframe" not in blob, "%d bytes" % len(blob))
 
     step("5. S4 换短令牌后开流")
     st, body = http("POST", base + "/api/v1/auth/stream-token", {}, token=jwt)
