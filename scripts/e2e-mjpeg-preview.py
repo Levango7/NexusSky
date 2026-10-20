@@ -158,6 +158,9 @@ def main():
     ap.add_argument("--fps", type=int, default=8)
     ap.add_argument("--frames", type=int, default=4,
                     help="至少收满几帧才算通过")
+    ap.add_argument("--allow-static-frames", action="store_true",
+                    help="允许每帧内容相同（手机对着静止场景时属正常；"
+                         "默认仍要求画面在动）")
     ap.add_argument("--spawn-frame-source", action="store_true",
                     help="自己拉起 scripts/camera-snapshot-source.py")
     args = ap.parse_args()
@@ -232,8 +235,12 @@ def run_checks(args, snap):
           st1 == 200 and h1.get("Content-Type") == "image/jpeg",
           "HTTP %d %s" % (st1, h1.get("Content-Type")))
     check("字节是 JPEG（SOI=ffd8ff）", f1[:3] == b"\xff\xd8\xff", f1[:3].hex())
-    check("两次取帧内容不同（不是缓存的静止画面）", f1 != f2,
-          "%d vs %d bytes" % (len(f1), len(f2)))
+    if args.allow_static_frames:
+        note("两次取帧内容相同（已开 --allow-static-frames：静态场景下属正常）: %d vs %d bytes"
+             % (len(f1), len(f2)))
+    else:
+        check("两次取帧内容不同（不是缓存的静止画面）", f1 != f2,
+              "%d vs %d bytes" % (len(f1), len(f2)))
 
     step("3. S2 注册设备（显式帧源），设备视图如实回显")
     # 两处登记缺口，如实记录而非掩盖：
@@ -314,8 +321,12 @@ def run_checks(args, snap):
           str(seqs[:6]))
     sizes = [p["declared"] for p in parts]
     print("  前 6 帧字节数: %s" % sizes[:6])
-    check("帧内容在变（同一张图重复发不算能看）", len(set(sizes)) > 1,
-          "distinct=%d" % len(set(sizes)))
+    if args.allow_static_frames:
+        note("帧内容未变（已开 --allow-static-frames：静态场景下属正常）: distinct=%d"
+             % len(set(sizes)))
+    else:
+        check("帧内容在变（同一张图重复发不算能看）", len(set(sizes)) > 1,
+              "distinct=%d" % len(set(sizes)))
 
     step("7. S7 注销后明确拒绝")
     st, _ = http("DELETE", base + "/api/v1/surveillance/devices/" + args.device_id, token=jwt)

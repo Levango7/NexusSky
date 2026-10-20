@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 156 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 157 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,9 +14,62 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 156 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 157 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
+
+---
+
+## [Unreleased] — 摄像头那条 TODO 变成「插上线跑一条命令」：新增 e2e-phone-camera.py（#124，2026-10-20）
+
+`.coord/GAPS.md` 里登记着一条搁置项：**手上只有 Android 手机，没有网络摄像头**。
+此前它只能干等硬件。现在这条 TODO 有了可执行的一步：手机接上（或在开发者选项里打开
+「IP 摄像头」），跑一条命令就能把"手机 → HTTP 帧源 → 真后端 /mjpeg → 浏览器可播"
+整条链验完。
+
+### 1. 新增 `scripts/e2e-phone-camera.py`
+
+三步：
+
+1. **找手机**：有 adb 就问 adb（`adb devices` + `adb shell` 读 wlan0 的 IP + 查 8080
+   是否在听）；没有 adb 就扫本机网段的 8080/8081/8088。
+2. **找取图端点**：对候选路径逐个探测，**以返回体是不是真 JPEG（SOI=ffd8ff）为准**。
+   不写死任何一条路径 —— 安卓侧的内置 IP Camera、IP Webcam、camera-streamer 之类
+   的路径各不相同（/snapshot、/snapshot.jpg、/shot.jpg、/now.jpg、/capture…），
+   **写死就是猜**。
+3. **跑完整链路**：把探测到的 URL 交给 `scripts/e2e-mjpeg-preview.py`（#110 那套断言：
+   帧源真出 JPEG、注册回显 browserPlayable、匿名 401、短令牌开流 200/multipart、
+   每帧都是真 JPEG、注销后 404）。
+
+### 2. 顺带发现并解决的一个真问题：「画面在动」对手机不成立
+
+`e2e-mjpeg-preview.py` 的 S1「两次取帧内容不同」与 S6「帧内容在变」是为**桌面 UVC 摄像头**
+定的。**手机摆在桌上对着静止场景时，每帧本来就一样** —— 那时失败与手机无关，却会让人
+以为链路坏了。已给两个脚本加 `--allow-static-frames`（手机脚本默认带上；`--require-motion`
+可关掉），把这两条从**判定**降级为**记录**。
+
+### 3. 验证：用假手机（只提供 /snapshot 的小 HTTP 服务）跑完整链路
+
+```
+== 1/3 找手机 ==
+== 2/3 找取图端点（以返回体是不是真 JPEG 判定，不写死路径）==
+找到: http://127.0.0.1:8099/snapshot  （JPEG 27 字节）
+== 3/3 跑完整链路（真后端 /mjpeg -> 浏览器可播）==
+  PASS=20  FAIL=0
+  == 手机摄像头链路全绿 ==
+```
+
+后端用 **prod profile** 跑（dev 的 permitAll 会让 S3「匿名必须 401」失去意义），
+并用 `--aerofleet.security.bootstrap-admin-password` 引导管理员 —— 因为 V20 迁移把
+V6 种子的那个 admin 置为 `enabled=FALSE`（那个哈希其实对任何常见口令都不匹配），
+库里没有可用账号时登录必然 401。
+
+**本轮没有真手机**（硬件不在手边），所以"真手机"这一段仍是待办；已验证的是**这条链路的
+全部机制**（找设备、探测端点、真后端、真 multipart 帧流、注销后 404）。
+
+### 4. 计数
+
+Java 4949 不变（不涉及代码），前端 381 不变。门禁绿。
 
 ---
 
