@@ -230,6 +230,31 @@ bash scripts/e2e-smoke.sh
 - 若本机脚本莫名报 `$'\r': command not found`，用
   `git config --local core.autocrlf false` 后重新检出该文件，而不是手改行尾。
 
+### 2.8 变异测试门禁（测"盯住了没有"，不只测"跑到过没有"）
+
+常规覆盖率（jacoco，阈值 0.65）回答的是「**这段代码被跑到过没有**」，
+回答不了「**这段代码的行为被钉住了没有**」——
+一段被调用一百次、却只断言「没抛异常」的代码，覆盖率是满的，
+但把它的行为改掉（返回 null、把 `>=` 改成 `>`、删掉一次加密调用），
+**没有任何测试会红**。这就是"假绿测试"的一种形态。
+
+**变异测试**换了个问法：把生产代码按规则改坏，看**有没有测试变红**。
+
+```bash
+# 跑变异测试（profile 默认不启用，只有显式 -Pmutation 才跑）
+mvn -B -pl cloud-backend -Pmutation test-compile pitest:mutationCoverage
+
+# 对基线判红（变异分数是棘轮，不许低于基线）
+python scripts/check-mutation-baseline.py \
+  --report cloud-backend/target/pit-reports/mutations.xml
+```
+
+CI 里对应 job `mutation-gate`（**硬门禁**）。基线在
+`scripts/mutation-baseline.json`；报告缺失/损坏/一个变异体都没有 ⇒ **判红**
+（跳过不等于通过）。
+
+细节与 2026-10-21 那轮审计的发现见 [`docs/mutation-testing.md`](mutation-testing.md)。
+
 ## 3. 代码提交规范
 
 ### 3.1 Conventional Commits 格式

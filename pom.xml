@@ -221,4 +221,57 @@
       </plugins>
     </pluginManagement>
   </build>
+  <profiles>
+    <!--
+      变异测试（PIT）。**默认不启用** —— 只有显式 `-Pmutation` 才会跑，
+      免得每次 mvn package 都多花几分钟。
+
+      为什么要有这个 profile：2026-10-21 用 PIT 审 security 包，发现 **106 个
+      "改了生产代码但没有任何测试变红"的变异体**，其中四处是真安全缺口
+      （登录限流阈值 / X-Forwarded-For 信任开关 / API Key 掩码 / 口令哈希）。
+      常规 jacoco 覆盖率**看不出**这些问题 —— 那几行代码被测试执行过，
+      只是断言不够狠；覆盖率数字照样是绿的。
+      换句话说：**覆盖率回答"跑到过没有"，变异分数回答"盯住了没有"**。
+
+      用法：
+        mvn -B -pl cloud-backend -Pmutation test-compile org.pitest:pitest-maven:mutationCoverage
+      报告落在 cloud-backend/target/pit-reports/mutations.xml，
+      由 scripts/check-mutation-baseline.py 对着基线判红/判绿。
+    -->
+    <profile>
+      <id>mutation</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest-maven</artifactId>
+            <version>1.15.0</version>
+            <dependencies>
+              <!-- JUnit 5 平台插件：缺了它 PIT 只会打一句
+                   "JUnit 5 is on the classpath but the pitest junit 5 plugin is not installed"，
+                   然后找不到任何测试、跑出一堆"未覆盖"。 -->
+              <dependency>
+                <groupId>org.pitest</groupId>
+                <artifactId>pitest-junit5-plugin</artifactId>
+                <version>1.2.2</version>
+              </dependency>
+            </dependencies>
+            <configuration>
+              <targetClasses>
+                <param>io.aerofleet.cloud.security.*</param>
+              </targetClasses>
+              <targetTests>
+                <param>io.aerofleet.cloud.security.*</param>
+              </targetTests>
+              <outputFormats>XML</outputFormats>
+              <timestampedReports>false</timestampedReports>
+              <!-- PIT 自己不判红：阈值由 scripts/check-mutation-baseline.py 对基线判，
+                   这样基线的口径只有一处（脚本里），不会两处口径打架。 -->
+              <mutationThreshold>0</mutationThreshold>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>
