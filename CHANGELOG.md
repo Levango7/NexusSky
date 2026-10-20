@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 158 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 160 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,9 +14,88 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 158 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 160 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
+
+---
+
+## [Unreleased] — 审计哈希链偶发断链：哈希用毫秒、落库用纳秒，数据库四舍五入会跨毫秒（#127，2026-10-20）
+
+一次 CI 偶发红（run 39445877202，`AuditPersistenceTest.consecutiveRecordsFormChain`），
+定位出根因 —— 不是测试问题，是**哈希与落库用的不是同一个时间戳**。
+
+### 1. 机制
+
+- `entry_hash` 的规范串用 `ts.toEpochMilli()`（**毫秒**）；
+- 但落库的 `Instant` 带着更高精度（纳秒/微秒）；
+- ���据库对 `TIMESTAMP` 列是**四舍五入**（H2 与 PostgreSQL 都如此）。本机实测：
+
+```
+写入 .639999000 -> 读回 .639999Z   toEpochMilli=...639   ✓
+写入 .639999500 -> 读回 .640000Z   toEpochMilli=...640   <- 跨到下一毫秒
+写入 .639999999 -> 读回 .640000Z   toEpochMilli=...640   <- 跨到下一毫秒
+```
+
+于是 `verifyChain()` 从库里重算时 `toEpochMilli()` 与写入时差了 1 → `entry_hash` 对不上 → **链判为断链**。
+
+**概率**：纳秒落在 [999999500, 999999999] 约 1/2000 每条记录；一条审计 3 条记录 ⇒
+约 **1/667 每次运行**。这解释了"CI 跑了这么多次才炸一次"。
+
+### 2. 修法
+
+`AuditService.record()` 里**先截断到毫秒**再拿去哈希、再落库 —— 两者必须是同一个值：
+
+```java
+Instant ts = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+```
+
+截断后落库值本身就是毫秒精度，数据库再怎么四舍五入都不动它，读回重算必然一致。
+
+### 3. 回归测试是**确定性**的，不靠 1/2000 的运气
+
+新增 `persistedTimestampIsMillisecondPrecision`：断言**落库后**的时间戳纳秒部分为 0。
+不截断就必红（H2 会把纳秒四舍五入到微秒 ⇒ 非零）。
+
+**变异验证**：去掉 `truncatedTo(MILLIS)` → 该测试被**确定性杀掉**（失败信息正是"毫秒精度"那条断言），
+还原后复跑绿。
+
+### 4. 计数
+
+Java 4949 → **4950**（cloud-backend 2843 → 2844）。前端 381 不变。门禁绿。
+
+---
+
+## [Unreleased] — 文档里对外声称的端点数有三个不同的值，实测 406；新增端点数声称门禁（#126，2026-10-20）
+
+### 1. 现场：同一件事，三个声称值，一个都不对
+
+| 文档 | 声称 |
+|---|---|
+| `README.md`、`docs/sales-pitch-deck.md` | REST API **358** 端点 |
+| `docs/contributing-guide.md`、`docs/customer-onboarding-guide.md`（2 处）、`docs/pricing-strategy.md` | REST API **345** 端点 |
+| **实测**（78 个 `@RestController` 类里的方法级映射注解，排除 actuator） | **406** |
+
+三个数彼此都不一样，也都对不上代码。这类「声明≠行为」此前只被门禁覆盖到**测试计数**，
+对外文档里的数字没人管。
+
+### 2. 修法：口径写死 + 门禁
+
+- 新增 `scripts/count-rest-endpoints.py`：端点数测量口径写死在代码里
+  （只数 `@RestController` 类、只数方法级映射注解、排除 actuator）——
+  **换个算法数出来不一样**是这类数字最常见的漂移原因。
+- 新增 `scripts/check-claimed-endpoint-count.py`：扫文档里的「N 端点」声称，
+  与实测对比，不一致即红。改端点时忘了改文档，它会拦住你。
+- 6 处声称已按门禁自己报的「文件:行号」改为 406。
+
+### 3. 门禁自己的自测
+
+用合成夹具跑两个方向：声称与实测不一致要能报出来、一致时不误报；
+外加「实测口径正确」一条（2 个端点 / 1 个类）。CI job `repo-gates` 的第一步就跑这些自测。
+
+### 4. 计数
+
+Java 4949 不变，前端 381 不变。门禁绿。
 
 ---
 

@@ -11,6 +11,8 @@
    `check-test-count-docs.py` 仍可能"核对了"（它按行号改数字，标记行不影响它读数），
    于是计数门禁看起来在工作，实际可能核的是错的行。
 2. **CHANGELOG 自相矛盾**：正文小节数与头部说明、版本索引表声称的数字不一致。
+   而且"写法"本身也要对 —— 曾经出现过「共有 159 158 个」这种（字符串手术插坏的），
+   老的宽松正则会**整个跳过检查**，反而放行。
 3. **疑似回退式改动**：把一大块已经修好的内容静撤回去（见
    `check-revert-looking-diff.py`）。这类改动不违反任何断言，门禁看不出来。
 
@@ -21,11 +23,14 @@
 * 2026-10-12：一份被 merge 冲突污染的 CHANGELOG 带着 42 处标记进了 master，
   当时只是靠人肉记得去 `git grep`。
 * 2026-10-20：某个工作树把 CHANGELOG 撤掉 559 行、并把已修好的脚本退回成有 bug 的版本。
+* 2026-10-20：同一天我自己的字符串手术把头部写成「共有 159 158 个」，
+  宽松的门禁**没抓住** —— 于是把解析口径改成"整段必须是单个整数"。
 
 检查项
 ------
 1. 被跟踪的文件里不得有 merge 冲突标记行（`<<<<<<< ` / `>>>>>>> ` / `=======`）。
-2. CHANGELOG 的 `[Unreleased]` 小节数必须与头部说明、版本索引表两处声称的一致。
+2. CHANGELOG 的 `[Unreleased]` 小节数必须与头部说明、版本索引表两处声称的一致，
+   且两处的声称必须是**单个整数**（写法坏了也要报）。
 3. 不得提交 `*.orig` / `*.rej` / `*.bak` 这类合并残留。
 4. 不得提交构建产物 / 依赖目录 / 本地报告（`target/`、`node_modules/`、`dist/`、
    `vitest-report.json`、`data/`、`.env`）。
@@ -60,6 +65,40 @@ def git(*args, root=None):
                           stderr=subprocess.DEVNULL).stdout.decode("utf-8", "replace")
 
 
+def _single_int(s):
+    """从一段文字里取"唯一的整数"；取不出或取出多个（如 '159 158'）就返回 None。"""
+    s = s.strip()
+    return int(s) if re.fullmatch(r"\d+", s) else None
+
+
+def check_changelog_claims(text, sections):
+    """核对 CHANGELOG 里两处小节数声称。返回问题列表。"""
+    problems = []
+    for line in text.replace("\r\n", "\n").split("\n"):
+        # 头部那一行：行首是 ">"、含"共有"、含"个"、含 "[Unreleased]" 段。
+        # 刻意**不**按"最新在最上方"这个精确前缀找 —— 换个措辞就整段跳过检查，
+        # 等于把门禁自己关掉（2026-10-20 踩过）。
+        if line.startswith(">") and "共有" in line and "个" in line and "[Unreleased]" in line:
+            seg = line.split("共有", 1)[1]
+            seg = seg.split("个", 1)[0]
+            claimed = _single_int(seg)
+            if claimed is None:
+                problems.append("CHANGELOG 头部的小节数写法不合法（应为单个整数）：共有 %s 个"
+                                % seg.strip()[:60])
+            elif claimed != sections:
+                problems.append("CHANGELOG 头部声称 %d 个小节，实际 %d 个" % (claimed, sections))
+        if line.startswith("| **[Unreleased]**"):
+            cells = line.split("|")
+            # 形如 | **[Unreleased]** | 累积中 | — | N 个小节持续累积（…） | — |
+            seg = cells[4] if len(cells) > 4 else ""
+            claimed = _single_int(seg.split("个", 1)[0])
+            if claimed is None:
+                problems.append("CHANGELOG 索引表的小节数写法不合法（应为单个整数）：%s" % seg.strip()[:60])
+            elif claimed != sections:
+                problems.append("CHANGELOG 索引表声称 %d 个小节，实际 %d 个" % (claimed, sections))
+    return problems
+
+
 def check_repo(root=None):
     """对指定目录做检查，返回问题列表。"""
     problems = []
@@ -86,21 +125,13 @@ def check_repo(root=None):
     cl = os.path.join(base, "CHANGELOG.md")
     if os.path.isfile(cl):
         with open(cl, encoding="utf-8", newline="") as f:
-            text = f.read().replace("\r\n", "\n")
+            text = f.read()
         sections = len(re.findall(r"(?m)^## \[Unreleased\]", text))
-        head = re.search(r"(?m)^> [^\n]*共有\s*(\d+)\s*个", text)
-        idx = re.search(r"(?m)^\| \*\*\[Unreleased\]\*\* \| [^|]*\| [^|]*\|\s*(\d+)\s*个小节", text)
-        if head and int(head.group(1)) != sections:
-            problems.append("CHANGELOG 头部声称 %d 个小节，实际 %d 个"
-                            % (int(head.group(1)), sections))
-        if idx and int(idx.group(1)) != sections:
-            problems.append("CHANGELOG 索引表声称 %d 个小节，实际 %d 个"
-                            % (int(idx.group(1)), sections))
+        problems += check_changelog_claims(text, sections)
 
     # --- 3/4. 合并残留 / 构建产物 ---
     for rel in [f for f in git("ls-files", root=base).split("\n") if f.strip()]:
-        low = rel.lower()
-        if low.endswith(RESIDUE_EXT):
+        if rel.lower().endswith(RESIDUE_EXT):
             problems.append("合并残留文件入库: %s" % rel)
         norm = rel.replace("\\", "/")
         if any(norm.startswith(d) or ("/" + d) in ("/" + norm) for d in FORBIDDEN_DIRS):
@@ -116,7 +147,8 @@ def check_revert(base):
         rr = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "check-revert-looking-diff.py"), base],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if rr.returncode != 0:
-            return ("疑似回退式改动：" + rr.stdout.decode("utf-8", "replace").strip().replace("\n", " | ")[:240])
+            return ("疑似回退式改动："
+                    + rr.stdout.decode("utf-8", "replace").strip().replace("\n", " | ")[:240])
     except Exception:
         pass
     return None
@@ -152,6 +184,13 @@ def self_test():
         run("add", "-A")
         pr = check_repo(tmp)
         ok["CHANGELOG 自相矛盾被拦"] = any("头部声称" in x for x in pr)
+
+        # 写法坏了（数字被插成两个）—— 老的宽松正则会整个跳过检查，反而放行
+        with open(cl, "w", encoding="utf-8", newline="") as f:
+            f.write(clean.replace("共有 1 个", "共有 1 5 个", 1))
+        run("add", "-A")
+        pr = check_repo(tmp)
+        ok["小节数写法不合法被拦"] = any("写法不合法" in x for x in pr)
 
         with open(cl, "w", encoding="utf-8", newline="") as f:
             f.write(clean)
