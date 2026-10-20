@@ -1479,6 +1479,60 @@ jobs:
           path: b2b-e2e-logs/
           retention-days: 14
 
+  # MJPEG 取流链路 e2e。**硬门禁**。
+  #
+  # 为什么单独立一个 job：这条链路（注册设备 -> 短令牌 -> 拉 HTTP 帧源 -> 吐
+  # multipart MJPEG -> 注销后 404）此前**从来没有在 CI 里跑过** —— 它需要一台
+  # 真摄像头，GitHub runner 没有。而它里面有一条硬断言「匿名取流必须被 401 拒掉」，
+  # 那条断言**只在非 dev 配置下成立**（dev 模式下 Spring Security 全放行、
+  # StreamTokenFilter 直接跳过），仓库里启动后端的标准姿势恰恰是 dev profile。
+  # 于是：要么没人跑，要么红在错的原因上。
+  #
+  # 本 job 用 scripts/e2e-mjpeg-ci.sh 把前置条件固化成配方：
+  # dev 起一次建 ADMIN 用户 -> 优雅停（让 H2 落盘）-> 以 dev-mode=false 重启
+  # -> 起合成帧源（scripts/synthetic-frame-source.py，CI 没有摄像头）-> 跑链路。
+  e2e-mjpeg:
+    name: E2E MJPEG stream (non-dev auth posture)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [ maven-warm ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      # 先自证合成帧源：它吐的必须是**真 JPEG** 且会轮换。
+      # 不然 CI 里那条「每帧都是真 JPEG」「帧内容在变」就是在测一个假帧源。
+      - name: Synthetic frame source self-test
+        run: python3 scripts/synthetic-frame-source.py --self-test
+      - name: MJPEG stream e2e (non-dev auth posture)
+        run: bash scripts/e2e-mjpeg-ci.sh --build
+      - name: Collect mjpeg e2e logs on failure
+        if: failure()
+        run: |
+          mkdir -p mjpeg-e2e-logs
+          cp -f /tmp/nexussky-mjpeg-e2e/*.log mjpeg-e2e-logs/ 2>/dev/null || true
+          ls -la mjpeg-e2e-logs || echo "(no logs captured)"
+      - name: Upload mjpeg e2e logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: warn
+          name: mjpeg-e2e-logs
+          path: mjpeg-e2e-logs/
+          retention-days: 14
+
   # e2e 公共库自检。**硬门禁**（没有 continue-on-error）——
   # 它不跑任何被测系统，只花几秒换掉一整类"跑了但不算数"。
   e2e-common-selftest:

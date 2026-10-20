@@ -126,10 +126,29 @@ Linux 版本：`scripts/e2e-smoke.sh`、`scripts/e2e-fault-linux.sh` 等。
 | `e2e-b1-scripts` | `e2e-regulator.ps1` / `e2e-dock.ps1` / `e2e-route-templates.ps1` / `e2e-defect.ps1` | 37 / 23 / 16 / 18 |
 | `e2e-b2-a-type` | `e2e-cv-eval.ps1` / `e2e-operations.ps1` / `e2e-rtk.ps1` / `e2e-sensing.ps1` / `e2e-uspace.ps1` / `e2e-roc.ps1` / `e2e-spray.ps1` | 12 / 9 / 3 / 10 / 13 / 14 / 30 |
 | `e2e-b2-b-type` | `e2e-network.ps1` / `e2e-rf.ps1` / `e2e-vision-pixels.ps1` | 9 / 4 / 6 |
+| `e2e-mjpeg` | `scripts/e2e-mjpeg-ci.sh` → `scripts/e2e-mjpeg-preview.py`（python） | 23 |
 
 另有 bash 版：`e2e-smoke.sh`、`e2e-fault-linux.sh`、`e2e-failsafe-linux.sh`、
 `e2e-vision-linux.sh`、`e2e-spray.sh`、`e2e-emergency.sh`、`e2e-hardware.sh`、
 `e2e-sdk-integration.sh`、`e2e-docker-compose.sh`。
+
+**`e2e-mjpeg` 为什么要单独立一个 job**（2026-10-21 新增，硬门禁）：
+MJPEG 取流链路此前**从来没在 CI 里跑过** —— 它需要一台真摄像头，GitHub runner 没有。
+而它里面有一条硬断言「匿名取流必须被 401 拒掉」，那条断言**只在非 dev 配置下成立**：
+
+- `aerofleet.security.dev-mode=true` 时，Spring Security 链是 `anyRequest().permitAll()`，
+  **且** `StreamTokenFilter` 直接跳过（见 `StreamTokenFilter` 第 82 行的 dev 分支）
+  ⇒ 匿名访问 `/mjpeg` 会拿到 **200 和真实帧流**；
+- 这是 dev 模式的**既定行为**（不是漏洞），但它让那条安全断言失去意义 ——
+  仓库里启动后端的标准姿势（CI 的 `sdk-integration` job、多数 e2e 脚本）恰恰是 dev profile。
+
+所以 `scripts/e2e-mjpeg-ci.sh` 把前置条件固化成可复现的配方：
+**dev 起一次建 ADMIN 用户 → 优雅停（让 H2 落盘）→ 以 `--aerofleet.security.dev-mode=false`
+重启 → 起合成帧源 → 跑链路**。合成帧源（`scripts/synthetic-frame-source.py`）吐的是
+仓库里 3 张**真 JPEG** 夹具并轮换，所以「每帧都是真 JPEG」「帧内容在变」在 CI 里仍有意义。
+
+> 登录那条路也有个坑：`aerofleet.security.users`（内存用户）**只在没有 UserRepository 时生效**，
+> 有数据库时登录只查库、查不到直接 401 —— 所以必须先在库里建号。
 
 **五个 e2e job 均为硬门禁**（2026-10-20 起）：2026-10-14 起它们先以
 `continue-on-error`（观察模式）接入收集 flaky 数据，零红若干次后删掉该标记转正。

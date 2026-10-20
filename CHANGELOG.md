@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-21 共有 162 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-21 共有 163 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,9 +14,70 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 162 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 163 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
+
+---
+
+## [Unreleased] — MJPEG 取流链路：此前从未在 CI 跑过；「匿名必须被拒」这条断言只在非 dev 配置下成立（2026-10-21）
+
+### 1. 现场：一条从没被验证过的链路，和一条"在标准姿势下必然红"的断言
+
+`scripts/e2e-mjpeg-preview.py` 里有一条硬断言：「匿名取流必须被 401 拒掉」，
+注释写着"链上 permitAll ≠ 不鉴权"。但两件事同时成立：
+
+1. 它**从来没在 CI 里跑过** —— 它需要一台真摄像头，GitHub runner 没有；
+2. 仓库里启动后端的标准姿势（CI 的 `sdk-integration` job、多数 e2e 脚本）都是
+   **dev profile**，而 `aerofleet.security.dev-mode=true` 时：
+   - Spring Security 链是 `anyRequest().permitAll()`；
+   - `StreamTokenFilter` 第 82 行直接 `return`（dev 分支跳过）。
+
+   ⇒ 匿名访问 `/mjpeg` 会拿到 **200 和真实帧流**（我本机实测读到 7MB）。
+
+于是这条断言在"标准姿势"下**必然失败**。我本机第一次跑：PASS=20 / FAIL=2，
+两条红正是「匿名 -> 401」和「匿名响应一帧都没漏」。
+**红在错的原因上**，比不跑还糟 —— 看不出是产品有问题还是配置不对。
+
+### 2. 实测：换成生产同款配置，23 条断言全绿
+
+| 配置 | 匿名取流 | 结果 |
+|---|---|---|
+| dev profile（`dev-mode=true`） | 200 + 真实帧流 | PASS=20 **FAIL=2**（红在错的原因上） |
+| 同库 + `--aerofleet.security.dev-mode=false` + ≥32 字节 jwt-secret | **401，0 字节泄漏** | **PASS=23 FAIL=0** |
+
+中间还踩到一个坑：登录**只查数据库** —— `aerofleet.security.users`（内存用户）
+只在**没有 UserRepository** 时生效，有库时查不到直接 401。
+所以必须先在库里建号（dev 模式下 `POST /api/v1/users` 建，再优雅停库让它落盘）。
+
+### 3. 改法
+
+- `scripts/e2e-mjpeg-preview.py`：
+  - **先探后端鉴权姿态**再决定怎么跑。dev 模式直接说清原因并退出（exit 2），
+    不再红在「匿名 -> 401」上，也不再顺手把整段流读进内存；
+  - 想对着不鉴权的后端跑，要显式 `--allow-open-backend`（此时 S3 断言按**记录**处理）；
+  - 帧源判定**只信字节不信 `Content-Type`**（真实摄像头常乱标：
+    有的把 JPEG 标成 `application/octet-stream`，有的把非 JPEG 标成 `image/jpeg`）。
+    硬断言仍是「200」+「SOI=ffd8ff」。
+- 新增 `scripts/synthetic-frame-source.py`：CI 没有摄像头时的合成帧源，
+  吐仓库里 **3 张真 JPEG 夹具并轮换**（所以「每帧都是真 JPEG」「帧内容在变」
+  在 CI 里仍然是在测产品，不是在测一个假帧源）。带 `--self-test`（已接进 CI）。
+- 新增 `scripts/e2e-mjpeg-ci.sh`：把前置条件固化成配方 ——
+  **dev 起一次建 ADMIN 用户 → 优雅停（让 H2 落盘）→ 以 dev-mode=false 重启
+  → 起合成帧源 → 跑链路**。
+- 新增 CI job `e2e-mjpeg`（**硬门禁**）。
+
+### 4. 自测也做了变异验证（顺手抓到一次"良性变异"）
+
+`synthetic-frame-source.py --self-test` 的三个变异体：不轮换 / 吐的不是 JPEG /
+stats 计数写死 —— 其中"吐的不是 JPEG"那个第一次跑**没被抓住**：我写的那个变异
+只关掉了夹具校验，而夹具本来就是真 JPEG ⇒ **行为等价的良性变异**。
+按 `docs/agent-constraints.md` 第 3 条的规矩换成真变异（响应字节魔数被换掉）后，
+三个变异全部被抓住。
+
+### 5. 计数
+
+Java **4950**、前端 **382**，均不变（本 PR 不动任何被测代码）。门禁绿。
 
 ---
 
