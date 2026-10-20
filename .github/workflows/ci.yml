@@ -1073,7 +1073,7 @@ jobs:
   # 2026-10-20 起已转**硬门禁**：连续多次 run 零红后删掉 continue-on-error
   # （删标记 = 把「跑过」升级为「必须通过」）。
   e2e-b2-a-type:
-    name: E2E B2 A-type scripts (cv-eval / operations / rtk / sensing / uspace / spray)
+    name: E2E B2 A-type scripts (cv-eval / operations / rtk / sensing / uspace / roc / spray)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [ java ]
@@ -1106,7 +1106,7 @@ jobs:
       # 上个场景没退干净，日志里能看到线索）。A 型 6 脚本的 backend 与 sim
       # 命令行统一带 -D<name>-e2e=true，一个 marker 清两类进程。
       - name: Clean leftovers before start
-        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','roc-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
       # 6 步串行（backend 恒绑 UDP 14550，同 runner 不能并行）。每步 tee 留档
       # step 日志：job 已是硬门禁，脚本失败会因 pipefail 退非零；末尾的聚合步骤
       # 再从 step 日志重新统计一遍作为兜底。
@@ -1119,7 +1119,7 @@ jobs:
           AF_BACKEND_PORT: 18099
       - name: Clean leftovers between scripts
         if: always()
-        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','roc-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
       - name: e2e-operations (E6 运营报表聚合)
         shell: bash
         run: |
@@ -1129,7 +1129,7 @@ jobs:
           AF_BACKEND_PORT: 18099
       - name: Clean leftovers between scripts
         if: always()
-        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','roc-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
       - name: e2e-rtk (F6 RTK 高精度链路三机对照)
         shell: bash
         run: |
@@ -1139,7 +1139,7 @@ jobs:
           AF_BACKEND_PORT: 18099
       - name: Clean leftovers between scripts
         if: always()
-        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','roc-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
       - name: e2e-sensing (E2+E4 侦测态势双源)
         shell: bash
         run: |
@@ -1149,7 +1149,7 @@ jobs:
           AF_BACKEND_PORT: 18099
       - name: Clean leftovers between scripts
         if: always()
-        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','roc-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
       - name: e2e-uspace (E3 U-space 四服务)
         shell: bash
         run: |
@@ -1159,7 +1159,21 @@ jobs:
           AF_BACKEND_PORT: 18099
       - name: Clean leftovers between scripts
         if: always()
-        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','roc-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+      # e2e-roc（E1 一控多机席位）：席位创建→机队绑定→批量指令→警情→确认派飞。
+      # 2026-10-20 接入：本脚本原先只在本机 Windows 跑过（跨平台改造见脚本头部说明），
+      # 改造后本机 14/14 全绿。sim 端口 14580/14581、sysid 71/72 与本 job 其余脚本不撞。
+      - name: e2e-roc (E1 一控多机席位)
+        shell: bash
+        run: |
+          set -o pipefail
+          pwsh -NoProfile -File scripts/e2e-roc.ps1 -SkipBuild 2>&1 | tee "$RUNNER_TEMP/e2e-roc-step.log"
+        env:
+          AF_BACKEND_PORT: 18099
+      - name: Clean leftovers between scripts
+        if: always()
+        run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'cv-eval-e2e','operations-e2e','rtk-e2e','sensing-e2e','uspace-e2e','roc-e2e','spray-e2e' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
+
       # spray 端口已参数化并入统一变量：AF_BACKEND_PORT=18099（REST）；drone/sim
       # 端口保持默认 14550/14551（drone-port 与 udp-port 的重叠语义本机已验，
       # CI 首跑继续观察）。
@@ -1170,7 +1184,7 @@ jobs:
           pwsh -NoProfile -File scripts/e2e-spray.ps1 -SkipBuild 2>&1 | tee "$RUNNER_TEMP/e2e-spray-step.log"
         env:
           AF_BACKEND_PORT: 18099
-      # D8 断言聚合：两族格式一个正则通吃：[PASS]/[FAIL]（cv-eval/operations/
+      # D8 断言聚合：两族格式一个正则通吃：[PASS]/[FAIL]（cv-eval/operations/roc/
       # rtk/sensing/uspace）与 PASS:/FAIL:（spray）。
       #
       # 这一步是**兜底**：脚本本身失败会退非零（下面用 pipefail 防 tee 吞掉退出码），
@@ -1203,7 +1217,8 @@ jobs:
           mkdir -p b2a-e2e-logs
           find "${{ runner.temp }}" -maxdepth 1 \
             \( -name 'af-cveval-*' -o -name 'af-ops-*' -o -name 'af-rtk-*' \
-               -o -name 'af-sensing-*' -o -name 'af-uspace-*' -o -name 'spray-*' \
+               -o -name 'af-sensing-*' -o -name 'af-uspace-*' -o -name 'af-roc-*' \
+               -o -name 'spray-*' \
                -o -name 'e2e-*-step.log' \) \
             -exec cp {} b2a-e2e-logs/ \; 2>/dev/null || true
           ls -la b2a-e2e-logs || echo "(no logs captured)"
