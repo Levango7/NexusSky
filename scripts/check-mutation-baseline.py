@@ -216,7 +216,9 @@ def main():
         print("  [FAIL] 变异报告不可用：%s" % e)
         print("")
         print("  这个门禁**不接受**'没跑变异测试就算过'。要跑：")
-        print("    mvn -B -pl cloud-backend -Pmutation test-compile pitest:mutationCoverage")
+        print("    mvn -B -pl cloud-backend -Pmutation test-compile pitest:mutationCoverage  # maven-incantations:ok")
+        print("    （刻意不加 -am：profile 的 targetClasses 指向 security 包，")
+        print("      带 -am 会让 PIT 在上游模块上各跑一遍，那里没有匹配的类 ⇒ 构建被打断）")
         return 1
 
     c = measured["counts"]

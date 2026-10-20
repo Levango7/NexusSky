@@ -242,7 +242,10 @@ bash scripts/e2e-smoke.sh
 
 ```bash
 # 跑变异测试（profile 默认不启用，只有显式 -Pmutation 才跑）
-mvn -B -pl cloud-backend -Pmutation test-compile pitest:mutationCoverage
+# 刻意**不加 -am**：profile 里的 targetClasses 指向 io.aerofleet.cloud.security.*，
+# 带 -am 会让 PIT 在上游模块（mavlink-core 等）上各跑一遍，而那边没有匹配的类
+# ⇒ 插件直接报"没找到变异体"把构建打断。
+mvn -B -pl cloud-backend -Pmutation test-compile pitest:mutationCoverage  # maven-incantations:ok 只跑 cloud-backend 一个模块，理由见上一行
 
 # 对基线判红（变异分数是棘轮，不许低于基线）
 python scripts/check-mutation-baseline.py \

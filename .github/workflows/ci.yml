@@ -1572,6 +1572,10 @@ jobs:
       - name: Compile cloud-backend (main + tests)
         run: mvn -B -pl cloud-backend -am test-compile -DskipTests
       - name: Mutation test (PIT, security package)
+        # 刻意**不加 -am**：profile 的 targetClasses 指向 io.aerofleet.cloud.security.*，
+        # 带 -am 会让 PIT 在上游模块（mavlink-core 等）上各跑一遍，而那边没有匹配的类
+        # ⇒ 插件报"没找到变异体"把构建打断。上一行的 test-compile 已经带 -am，
+        # 依赖模块在同一个 reactor 里编好了，这里不需要。
         run: mvn -B -pl cloud-backend -Pmutation pitest:mutationCoverage
       - name: Mutation baseline gate self-test
         run: python3 scripts/check-mutation-baseline.py --self-test
