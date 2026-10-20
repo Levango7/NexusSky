@@ -99,6 +99,14 @@ describe('normalizeAdaptivePath — ADAPTIVE_PATH(30052) 归一化', () => {
     expect(p.reasonLabel).toBe('码 99')
   })
 
+    it('wind direction in (180,360) keeps 0-360 normalization (270 stays 270)', () => {
+      // 为什么补这条：此前只有 90° 与 400° 两个输入，而 400 = 2×180 + 40 ⇒ 把归一
+      // 从 %360 改成 %180 结果完全一样，测试红不了 —— 「0-360 归一」这条声明在
+      // (180, 360) 区间无人看守。270° 在两种实现下分别是 270 与 90，能区分。
+      const p = normalizeAdaptivePath({ newLat: 0, newLon: 0, windDirection: 27000 }, 0)
+      expect(p.windDirDeg).toBeCloseTo(270, 6)
+    })
+
   it('字段缺失 → null；非对象输入 → null', () => {
     const p = normalizeAdaptivePath({}, 0)
     expect(p).not.toBeNull()
