@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 158 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 159 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,9 +14,42 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 158 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 159 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
+
+---
+
+## [Unreleased] — 文档里对外声称的端点数有三个不同的值，实测 406；新增端点数声称门禁（#126，2026-10-20）
+
+### 1. 现场：同一件事，三个声称值，一个都不对
+
+| 文档 | 声称 |
+|---|---|
+| `README.md`、`docs/sales-pitch-deck.md` | REST API **358** 端点 |
+| `docs/contributing-guide.md`、`docs/customer-onboarding-guide.md`（2 处）、`docs/pricing-strategy.md` | REST API **345** 端点 |
+| **实测**（78 个 `@RestController` 类里的方法级映射注解，排除 actuator） | **406** |
+
+三个数彼此都不一样，也都对不上代码。这类「声明≠行为」此前只被门禁覆盖到**测试计数**，
+对外文档里的数字没人管。
+
+### 2. 修法：口径写死 + 门禁
+
+- 新增 `scripts/count-rest-endpoints.py`：端点数测量口径写死在代码里
+  （只数 `@RestController` 类、只数方法级映射注解、排除 actuator）——
+  **换个算法数出来不一样**是这类数字最常见的漂移原因。
+- 新增 `scripts/check-claimed-endpoint-count.py`：扫文档里的「N 端点」声称，
+  与实测对比，不一致即红。改端点时忘了改文档，它会拦住你。
+- 6 处声称已按门禁自己报的「文件:行号」改为 406。
+
+### 3. 门禁自己的自测
+
+用合成夹具跑两个方向：声称与实测不一致要能报出来、一致时不误报；
+外加「实测口径正确」一条（2 个端点 / 1 个类）。CI job `repo-gates` 的第一步就跑这些自测。
+
+### 4. 计数
+
+Java 4949 不变，前端 381 不变。门禁绿。
 
 ---
 
