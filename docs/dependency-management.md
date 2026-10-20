@@ -43,6 +43,8 @@
 | `jacoco.version` | 0.8.12 | 覆盖率插件 |
 | `surefire.version` | 3.5.2 | 测试插件 |
 | `compiler-plugin.version` | 3.13.0 | 编译插件 |
+| `pitest.version` | 1.15.0 | 变异测试插件（PIT，默认不启用） |
+| `pitest-junit5-plugin.version` | 1.2.2 | PIT 的 JUnit 5 平台插件（缺了它 PIT 找不到任何测试） |
 | `tomcat.version` | 10.1.59 | 安全覆写（Servlet 容器） |
 | `netty.version` | 4.1.138.Final | 安全覆写（网络） |
 | `postgresql.version` | 42.7.13 | 安全覆写（数据库驱动） |
