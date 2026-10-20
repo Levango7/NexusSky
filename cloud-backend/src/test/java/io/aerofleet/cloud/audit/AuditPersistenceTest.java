@@ -94,6 +94,33 @@ class AuditPersistenceTest {
     }
 
     @Test
+    @DisplayName("落库时间戳是毫秒精度 —— 否则数据库四舍五入会让链校验偶发断链")
+    void persistedTimestampIsMillisecondPrecision() {
+        // 为什么要有这条：entry_hash 的规范串用 ts.toEpochMilli()（毫秒），而落库的
+        // Instant 若带更高精度，数据库对 TIMESTAMP 列是**四舍五入**（H2/PG 都如此），
+        // 纳秒落在 [999999500, 999999999] 时会进位到**下一毫秒**：
+        //     写入 .639999500 → 读回 .640000
+        // 于是 verifyChain() 从库里重算时与写入时差了 1，链被判为断链 ——
+        // 概率约 1/2000 每条记录，表现为「CI 偶发红一次」，极难定位
+        // （2026-10-20 在 CI run 39445877202 上真实炸过：AuditPersistenceTest.
+        //  consecutiveRecordsFormChain 失败于 assertThat(v.ok()).isTrue()）。
+        //
+        // 这条断言是**确定性**的：不截断就必红，不必等 1/2000 的运气。
+        auditService.record("alice", "POST", "/api/v1/drones/1/arm", null, "10.0.0.1");
+        auditService.record("bob", "DELETE", "/api/v1/geofences/3", "reason=test", "10.0.0.2");
+
+        List<AuditLogEntity> rows = auditLogRepository.findAllByOrderByIdAsc();
+        assertThat(rows).hasSize(2);
+        for (AuditLogEntity row : rows) {
+            assertThat(row.getTimestamp().getNano() % 1_000_000)
+                    .as("落库时间戳必须是毫秒精度（纳秒部分为 0），否则数据库四舍五入会让链校验断链")
+                    .isZero();
+        }
+        // 并且链必须校验通过（这条在旧实现下约 1/2000 概率会红）
+        assertThat(auditService.verifyChain().ok()).isTrue();
+    }
+
+    @Test
     @DisplayName("查询从数据库返回（最新在前），detail 不再被丢弃")
     void queryReturnsFromDbNewestFirstWithDetail() {
         auditService.record("alice", "POST", "/api/v1/a", null, "10.0.0.1");

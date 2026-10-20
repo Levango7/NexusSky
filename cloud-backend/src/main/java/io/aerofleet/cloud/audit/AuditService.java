@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
@@ -105,7 +106,18 @@ public class AuditService {
         if (!enabled) {
             return;
         }
-        Instant ts = Instant.now();
+        // 时间戳必须**先截断到毫秒**再拿去哈希、再落库 —— 两者必须是同一个值。
+        //
+        // 为什么：entry_hash 的规范串里用的是 ts.toEpochMilli()（毫秒），而落库的
+        // Instant 若带着更高精度，数据库对 TIMESTAMP 列是**四舍五入**（H2 与 PostgreSQL
+        // 都是），纳秒落在 [999999500, 999999999] 时会被进位到**下一毫秒**：
+        //     写入 .639999500 → 读回 .640000
+        // 于是 verifyChain() 从库里重算时 toEpochMilli() 与写入时差了 1，链被判为断链。
+        // 概率约 1/2000 每条记录 —— 表现为"CI 偶发红一次"，极难定位。
+        //
+        // 截断到毫秒后：落库值本身就是毫秒精度，数据库再怎么四舍五入都不动它，
+        // 读回重算必然一致。
+        Instant ts = Instant.now().truncatedTo(ChronoUnit.MILLIS);
         AuditLog entry;
         synchronized (chainLock) {
             String prevHash = currentChainHead();
