@@ -24,6 +24,11 @@
 # =============================================================================
 set -uo pipefail
 
+# 标记块的边界（必须在脚本头部定义：自测函数与 count_outside 都要用它，
+# 定义在主流程里就会让函数里取不到（set -u 下直接报 unbound variable）。
+BEGIN='<!-- coord-status:begin 由 scripts/coord-status.sh 生成，别手改这一段 -->'
+END='<!-- coord-status:end -->'
+
 MODE="print"
 case "${1:-}" in
   --write) MODE="write" ;;
@@ -93,6 +98,26 @@ EOF
   before="$(grep -c . "$status2")"
   COORD_STATUS_FILE="$status2" bash "$SELF" --write >/dev/null 2>&1; rc=$?
   [ "$rc" = "1" ] || fails="${fails}T4:并存场景期望 1 实得 $rc "
+
+    # T5 旧块比新块长（worktree 变少）时，写回必须**成功**——合法变短不是「写坏」。
+    # 这条是回归：守卫原先比整份文件的行数，块一变短就拒写，状态板自 2026-10-12 起
+    # 一直写不进去（各 agent 的声明发不出去），而自测当时没覆盖到「变短」这一情形。
+    status3="$tmp/STATUS3.md"
+    {
+      printf '# 板\n## 工程现状\n略\n'
+      printf '%s\n' "$BEGIN"
+      printf '%s\n' "$END"
+      printf '## 开工声明\n- x\n## 规则速记\n- y\n'
+    } > "$status3"
+    # 先塞一段很长的旧块进去（模拟「上一版内容更长」）
+    awk -v b="$BEGIN" '
+      index($0,b){print; for(i=0;i<40;i++) print "| 旧块多出来的第 " i " 行"; next}
+      {print}
+    ' "$status3" > "$status3.tmp" && mv "$status3.tmp" "$status3"
+    COORD_STATUS_FILE="$status3" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+    [ "$rc" = "0" ] || fails="${fails}T5:旧块更长时应仍写成功(exit0) 实得 $rc "
+    grep -qF 'coord-status:begin' "$status3" || fails="${fails}T5:写不进去标记块 "
+    grep -qF '规则速记' "$status3" || fails="${fails}T5:丢了手写段 "
   after="$(grep -c . "$status2")"
   [ "$before" = "$after" ] || fails="${fails}T4:拒绝写入却改了文件 "
   grep -qF 'coord-status:begin' "$status2" && fails="${fails}T4:被拒绝却仍插入了标记块 "
@@ -224,8 +249,6 @@ if [ "$MODE" = "json" ]; then
   [ "$DEGRADED" = "1" ] && exit 2 || exit 0
 fi
 
-BEGIN='<!-- coord-status:begin 由 scripts/coord-status.sh 生成，别手改这一段 -->'
-END='<!-- coord-status:end -->'
 BLOCK="${BEGIN}"$'\n'
 BLOCK="${BLOCK}## 在途与占用（$(date '+%Y-%m-%d %H:%M') 实测，origin/master = \`${MSHA}\`）"$'\n\n'
 BLOCK="${BLOCK}| worktree | 分支 @ sha | 相对 master | 未提交面 | 开工声明 |"$'\n'
@@ -240,6 +263,18 @@ if [ "$MODE" = "print" ]; then
   [ "$DEGRADED" = "1" ] && { warn "证据不全（见上），退出码 2。"; exit 2; }
   exit 0
 fi
+
+# 数「标记块之外」的非空行数。守卫要比的是这一部分：标记块内的内容由本脚本自己
+# 生成，长度本就该随实测变化（worktree 少了、PR 没了都会变短）——拿整份文件的行数
+# 去比，会把「合法变短」误判成「写坏」，于是 --write 被拒，状态板从此冻住。
+count_outside() {
+  awk -v mk_b="$BEGIN" -v mk_e="$END" '
+    index($0, mk_b) { inside=1; next }
+    index($0, mk_e) { inside=0; next }
+    !inside && NF { c++ }
+    END { print c+0 }
+  ' "$1"
+}
 
 # --- --write：只替换标记块内的内容；没有标记块就插在「开工声明」之前 ------------
 if [ ! -f "$STATUS_FILE" ]; then
@@ -284,11 +319,16 @@ if [ -n "$LOST" ]; then
 fi
 # 断言二：新块在位，且没把文件写短（防 awk 写半截）
 grep -qF "$BEGIN" "$TMP_STATUS" || { warn "失败：标记块没写进去。"; rm -f "$TMP_STATUS"; exit 1; }
-if [ "$(grep -c . "$TMP_STATUS")" -lt "$(grep -c . "$STATUS_FILE")" ]; then
-  warn "失败：新文件有效行数比原来少，疑似写坏。放弃，原文件未动。"
-  rm -f "$TMP_STATUS"
-  exit 1
-fi
+  # 只比标记块之外的内容（手写段必须一字不少）。比整份文件行数是错的：
+  # 自动段本就该随实测变长变短，一变短就把合法写入判成「写坏」——2026-10-20 实测
+  # 状态板自 2026-10-12 起就是这样冻住的（工作树减少后 --write 一直被拒）。
+  _outside_before="$(count_outside "$STATUS_FILE")"
+  _outside_after="$(count_outside "$TMP_STATUS")"
+  if [ "$_outside_after" -lt "$_outside_before" ]; then
+    warn "失败：标记块之外的内容变少了（$_outside_before -> $_outside_after 行），疑似写坏。放弃，原文件未动。"
+    rm -f "$TMP_STATUS"
+    exit 1
+  fi
 # 断言三：不许出现两个「在途与占用」段——手写段和生成段并存时，读板的人会挑到过期那份。
 # 触发条件：本文件还没有标记块，但已存在手写同名段。此时必须拒绝写入，让人先迁移。
 if [ "$(grep -c '^## 在途与占用' "$TMP_STATUS")" -gt 1 ] && ! grep -qF "$BEGIN" "$STATUS_FILE"; then
