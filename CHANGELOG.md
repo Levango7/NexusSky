@@ -1,7 +1,7 @@
 # NexusSky 变更日志
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-10-19 共有 153 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-19 共有 154 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -14,7 +14,7 @@
 | **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
 | **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-| **[Unreleased]** | 累积中 | — | 153 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 154 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 ---
 
@@ -90,6 +90,58 @@ A/B 两型各一遍，8/8 相符。
 没有"印了红字却 exit 0"的脚本。所以聚合步骤这层兜底确实是在补最后一道网，而不是重复劳动。
 
 ### 5. 计数
+
+Java 4949 不变（不涉及代码），前端 381 不变。门禁绿。
+
+---
+
+## [Unreleased] — e2e-roc 跨平台改造并接入 CI —— 最后一个"写了却没人跑"的脚本（#121，2026-10-20）
+
+`docs/contributing-guide.md` §2.5 登记着 12 个"本机实测全绿、尚未进 CI"的脚本。
+逐个核对 ci.yml 后发现：**其中 11 个早就接进去了**（#107/#114/#119），文档没跟着更新；
+真正还没进 CI 的只有 `e2e-roc.ps1` 一个 —— 登记在册、本机全绿、**CI 从来没跑过**。
+
+### 1. 缺口：`e2e-roc.ps1`（E1 一控多机席位，14 项断言）
+
+它比跨平台公共库（`e2e-common.ps1`，#107 才引入）还早半个月，埋了全套 Windows-only 依赖：
+jar 路径用反斜杠字面量（Linux 上 `Test-Path` 恒 false）、java 可执行写死 `java.exe`、
+`-WindowStyle Hidden`（Linux 上直接报"找不到参数"）、`$env:TEMP`（Linux runner 上常未设置），
+而且**没有 `-D<name>-e2e=true` marker**，CI 的步间清理按标记回收时根本认不出它的残留进程。
+
+改造按 B2 批次的 D1–D8 同款做法（不另发明）：dot-source 公共库、jar 路径走 `Get-E2eJar`、
+java 走 `Get-E2eJava`、临时目录走 `Get-E2eTempDir`、去掉 `-WindowStyle Hidden`、
+补 `-Droc-e2e=true` marker。
+
+顺带把脚本自己那份 `Try-Json` 换成一行委派给公共库的 `Invoke-E2eJson` ——
+后者带 5.1（`HttpWebResponse.GetResponseStream`）/ 7+（`HttpResponseMessage.Content`）
+双分支回退，而原实现取不到 5.1 之外的响应体（V1 那三条 409/400 的正文就丢了）。
+这正是 B1 在 pwsh 上踩过的坑（#107）。
+
+本机复跑：改造前后均 **14/14 全绿**（exit=0），sim 端口 14580/14581、sysid 71/72
+与同 job 其余脚本不撞。
+
+### 2. 接入 CI（B2 A 型 job）
+
+插在 `e2e-uspace` 与 `e2e-spray` 之间（A 型 job 内 6 步串行，backend 恒绑 UDP 14550）。
+同时把 `'roc-e2e'` 加进该 job 的 7 处步间清理 marker 列表，收集日志的 find 块加 `af-roc-*`。
+
+接入后 **18 个 PowerShell e2e 脚本全部在 CI 里跑**（此前 17 个）。
+
+### 3. 顺带把 §2.5 台账按 CI 实测刷新
+
+那一节的数字本身是对的（cv-eval 12 / operations 9 / rtk 3 / sensing 10 / uspace 13 /
+spray 30 / network 9 / rf 4 / vision-pixels 6 / dock 23 / route-templates 16 / defect 18 / roc 14
+—— 逐个与 CI 聚合步骤的实测输出核对过），但**两处状态是 stale 的**：
+
+- "尚未进 CI（12 个，合计 122 项断言）"——这 12 个**现在全部已进 CI**；
+  而它们的断言数合计是 **137**，不是 122（122 那个数把 B1/core 排除后也算错了）。
+- "`e2e-core-scripts` job（ubuntu + pwsh，**观察模式**）……`continue-on-error` 待连续若干次
+  全绿后摘掉转硬门禁"——2026-10-20（#119）已经转成硬门禁了。
+
+改成按 job 列出的实测表，并写明五个 e2e job 现均为硬门禁、断言聚合步骤在统计到任何
+`[FAIL]` 时**直接判红**（不是只警告）。
+
+### 4. 计数
 
 Java 4949 不变（不涉及代码），前端 381 不变。门禁绿。
 

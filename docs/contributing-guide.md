@@ -115,17 +115,31 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e-failsafe.ps1
 
 Linux 版本：`scripts/e2e-smoke.sh`、`scripts/e2e-fault-linux.sh` 等。
 
-### 2.5 e2e 脚本台账（2026-10-14 本机实测 + 首批已接 CI）
+### 2.5 e2e 脚本台账（2026-10-20 按 CI 实测刷新）
 
-**CI 已覆盖（13 个）**：`e2e-smoke.sh`、`e2e-fault-linux.sh`、`e2e-failsafe-linux.sh`、
+**全部 PowerShell 脚本（18 个）都已接入 CI**，分五个 job：
+
+| job | 脚本 | 断言（CI 实测） |
+|---|---|---|
+| `e2e-core-scripts` | `e2e-formation.ps1` / `e2e-mesh.ps1 -Mode simplified` / `e2e-rid.ps1` | 24 / 12 / 14 |
+| `e2e-signing` | `e2e-signing.ps1`（6 场景） | 6 场景 |
+| `e2e-b1-scripts` | `e2e-regulator.ps1` / `e2e-dock.ps1` / `e2e-route-templates.ps1` / `e2e-defect.ps1` | 37 / 23 / 16 / 18 |
+| `e2e-b2-a-type` | `e2e-cv-eval.ps1` / `e2e-operations.ps1` / `e2e-rtk.ps1` / `e2e-sensing.ps1` / `e2e-uspace.ps1` / `e2e-roc.ps1` / `e2e-spray.ps1` | 12 / 9 / 3 / 10 / 13 / 14 / 30 |
+| `e2e-b2-b-type` | `e2e-network.ps1` / `e2e-rf.ps1` / `e2e-vision-pixels.ps1` | 9 / 4 / 6 |
+
+另有 bash 版：`e2e-smoke.sh`、`e2e-fault-linux.sh`、`e2e-failsafe-linux.sh`、
 `e2e-vision-linux.sh`、`e2e-spray.sh`、`e2e-emergency.sh`、`e2e-hardware.sh`、
-`e2e-sdk-integration.sh`、`e2e-signing.ps1`、`e2e-docker-compose.sh`，
-外加 2026-10-14 新增的 `e2e-core-scripts` job（ubuntu + pwsh，观察模式）：
-`e2e-formation.ps1`、`e2e-mesh.ps1 -Mode simplified`、`e2e-rid.ps1`——三个脚本
-在 Linux runner 上首次跑即全绿（formation 24 项 / mesh 12 项 / rid 14 项），
-`continue-on-error` 待连续若干次全绿后摘掉转硬门禁。
+`e2e-sdk-integration.sh`、`e2e-docker-compose.sh`。
 
-**本机实测全绿、尚未进 CI（12 个，合计 122 项断言）**：
+**五个 e2e job 均为硬门禁**（2026-10-20 起）：2026-10-14 起它们先以
+`continue-on-error`（观察模式）接入收集 flaky 数据，零红若干次后删掉该标记转正。
+断言聚合步骤会在统计到任何 `[FAIL]` 时**直接判红**（不是只警告），
+以防"脚本印了红字却忘了 exit 1"时 job 绿着通过。
+
+**唯一未跑通**：`e2e-px4-sitl.ps1`——缺 PX4 SITL 环境（脚本现在会明确报"前置条件缺失"）。
+装好后照 `docs/sitl-integration.md`。
+
+**各脚本的跑法要点**（断言数以 CI 实测为准，本机跑法可能有差异）：
 
 | 脚本 | 断言 | 跑法要点 |
 |---|---|---|
@@ -133,7 +147,7 @@ Linux 版本：`scripts/e2e-smoke.sh`、`scripts/e2e-fault-linux.sh` 等。
 | `e2e-defect.ps1` | 18 | 自起后端 + drone-sim |
 | `e2e-dock.ps1` | 23 | 自起后端 + drone-sim + 机巢 sim |
 | `e2e-operations.ps1` | 9 | 自起后端 + drone-sim（报表对账） |
-| `e2e-roc.ps1` | 14 | 双机 |
+| `e2e-roc.ps1` | 14 | 自起后端 + **2 台** drone-sim（双机席位） |
 | `e2e-route-templates.ps1` | 16 | 航线模板真飞 |
 | `e2e-rtk.ps1` | 3 | 三机 RTK 三态 |
 | `e2e-sensing.ps1` | 10 | 感知聚合 |
@@ -141,9 +155,6 @@ Linux 版本：`scripts/e2e-smoke.sh`、`scripts/e2e-fault-linux.sh` 等。
 | `e2e-network.ps1` | 9 | **需先起后端且 `--aerofleet.drone-port=14600`**，再 `AF_BACKEND_PORT=<口>` 跑脚本 |
 | `e2e-rf.ps1` | 4 | 需先起后端（sim 在 14543，默认 extra-ports 覆盖） |
 | `e2e-vision-pixels.ps1` | 6 | 需先起后端带 `--aerofleet.vision.source=pixels` + `--aerofleet.sim-truth-base=http://127.0.0.1:18082` |
-
-**唯一未跑通**：`e2e-px4-sitl.ps1`——缺 PX4 SITL 环境（脚本现在会明确报"前置条件缺失"）。
-装好后照 `docs/sitl-integration.md`。
 
 **跨平台改造复用 `scripts/e2e-common.ps1`**（新脚本照抄，别再各改各的）：
 `Get-E2eJar`（Linux 上反斜杠不是分隔符，`Join-Path $Root 'x\target\y.jar'` 会拼出
