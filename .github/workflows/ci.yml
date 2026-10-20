@@ -96,6 +96,13 @@ jobs:
         run: python3 scripts/mavlink-compatibility-check.py --self-test
       - name: SITL compatibility offline self-test
         run: bash scripts/sitl-compatibility-test.sh --self-test-only
+      # 手机摄像头链路的「取图端点探测」也要有自测。
+      # 为什么：这条链路是"真机验证"硬件闭环的入口，探测逻辑一旦坏掉（或者退化成
+      # 只认某条写死的路径），后面所有断言都在核一个错的 URL，却照样能"跑通"。
+      # 这个自测用合成的假 IP 摄像头证明：能发现设备**自己首页里声明**的端点、
+      # 会跳过 multipart 视频流、会拒绝「头两字节像 JPEG」的假响应。
+      - name: Phone camera discovery self-test (offline)
+        run: python3 scripts/e2e-phone-camera.py --self-test
 
   dep-gate:
     name: Dependency Version Gate
