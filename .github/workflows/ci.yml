@@ -1455,6 +1455,26 @@ jobs:
         run: ./scripts/e2e-common-selftest.ps1
 
 
+  coord-status-selftest:
+    name: Coordination status board self-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      # 自测里的 T2/T3/T5 要真的跑一次 --write（那一步会调 gh pr list），
+      # 所以这里必须给 gh 一个可用的凭据；否则它们只能走 UNVERIFIED 降级分支。
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      # 为什么要有这个 job：生成器自己带着 --self-test，却从来没人在 CI 里跑它。
+      # 2026-10-20 实测：写回守卫比的是**整份文件**的行数，自动段一变短（工作树少了、
+      # 内容精简）就判成"写坏"而拒写 —— 状态板自 2026-10-12 起冻住，各 agent 的开工声明
+      # 再也发不出去（读板的人只能看到 8 天前的过期事实）。守卫已改成只比「标记块之外」的
+      # 内容，自测新增 T5 覆盖"旧块更长时仍须写成功"，并做过变异验证（T5 能杀掉旧写法）。
+      #
+      # 自测跑在临时夹具上（COORD_STATUS_FILE 指向 tmp），不会碰仓库里的 .coord/STATUS.md。
+      - name: Self-test the coordination status board generator
+        run: bash scripts/coord-status.sh --self-test
+
   security-scan:
     name: Security Scan
     runs-on: ubuntu-24.04
