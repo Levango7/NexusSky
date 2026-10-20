@@ -59,6 +59,39 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  repo-gates:
+    name: Repository gates (hygiene / self-test coverage)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 这两道门禁是把"别再犯"变成机械检查的产物：
+      #   ① 仓库卫生 —— 合并冲突标记 / CHANGELOG 自相矛盾 / 构建产物入库，
+      #      这三类静默损坏会让别的门禁"看着在工作、其实核的是错的行"；
+      #   ② 自测覆盖 —— 提供了 --self-test 的脚本必须真有 CI job 跑它。
+      #      真事：coord-status.sh 的自测就在仓库里，却没人跑，它的守卫坏了 8 天。
+      # 每个门禁先跑自己的 --self-test（用合成夹具证明它能拦真事故、不误拦干净态），
+      # 再跑真检查。先证明工具可信，再信它的结论——
+      # 2026-10-20 这一轮里，我的工具错了四次（每次都差点让我去「修」一段好代码）。
+      - name: Self-test the gates themselves
+        run: |
+          python3 scripts/check-repo-hygiene.py --self-test
+          python3 scripts/check-selftest-coverage.py --self-test
+          python3 scripts/check-revert-looking-diff.py --self-test
+      - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
+        run: python3 scripts/check-repo-hygiene.py
+      - name: Self-test coverage gate
+        run: python3 scripts/check-selftest-coverage.py
+      # 下面两个是 2026-10-20 被「自测覆盖门禁」当场抓出来的：它们的 --self-test
+      # 从来没在 CI 里跑过（mavlink 编解码一致性 / SITL 离线自检，都是离线的、很快）。
+      - name: MAVLink codec self-test (offline)
+        run: python3 scripts/mavlink-compatibility-check.py --self-test
+      - name: SITL compatibility offline self-test
+        run: bash scripts/sitl-compatibility-test.sh --self-test-only
+
   dep-gate:
     name: Dependency Version Gate
     runs-on: ubuntu-24.04
