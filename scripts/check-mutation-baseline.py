@@ -19,7 +19,8 @@
    - **变异分数** = killed / (总数 - 未覆盖)  ← 盯住了多少
    - **测试强度** = (killed + 未覆盖) / 总数  ← 有多少行为压根没被看见
 3. 与基线（`scripts/mutation-baseline.json`）比：**分数不许低于基线**（棘轮）。
-4. 报告缺失 / 损坏 / 一个变异体都没有 ⇒ **判红**（跳过不等于通过）。
+4. 报告缺失 / 损坏 / 一个变异体都没有 / **变异体数量比基线缩水 5% 以上**
+   ⇒ **判红**（跳过不等于通过；分母缩水时分数会虚高）。
 
 用法：
     python scripts/check-mutation-baseline.py --report cloud-backend/target/pit-reports/mutations.xml
@@ -57,7 +58,8 @@ def parse_report(path):
         root = ET.parse(path).getroot()
     except ET.ParseError as e:
         raise ValueError("报告不是合法 XML：%s" % e)
-    counts = {"KILLED": 0, "SURVIVED": 0, "NO_COVERAGE": 0, "TIMED_OUT": 0, "RUN_ERROR": 0}
+    counts = {"KILLED": 0, "SURVIVED": 0, "NO_COVERAGE": 0, "TIMED_OUT": 0,
+              "RUN_ERROR": 0, "MEMORY_ERROR": 0}
     survivors = []
     for m in root.findall("mutation"):
         st = m.get("status", "?")
@@ -90,6 +92,21 @@ def compare(measured, baseline):
     problems = []
     score = round(measured["mutationScore"], 4)
     strength = round(measured["testStrength"], 4)
+
+    # 报告完整性：变异体数量不该大幅缩水。
+    # 分数是 killed/(total-noCoverage)，**分母变小时分数反而更容易变高** ——
+    # 若 PIT 只覆盖了部分类（targetClasses 配错、类编译失败被跳过、提前中断），
+    # 剩下那一小撮全杀掉就能得到 1.0，门禁假绿。这正是"跳过不等于通过"的另一面。
+    # 阈值 95%：允许正常代码删减，但缩水超过 5% 必须显式更新基线（改动进 diff）。
+    base_total = baseline.get("total")
+    if base_total:
+        floor = int(base_total * 0.95)
+        if measured["total"] < floor:
+            problems.append(
+                "报告不完整：变异体总数 %d < 基线 %d 的 95%%（%d）—— "
+                "多半是 PIT 只覆盖了部分类或提前中断，此时的分数不可信"
+                % (measured["total"], base_total, floor))
+
     if score < round(baseline["mutationScore"], 4):
         problems.append("变异分数回退：实测 %.4f < 基线 %.4f（掉了 %.1f 个百分点）"
                         % (score, baseline["mutationScore"],
@@ -113,7 +130,7 @@ def self_test():
     ok = True
     tmp = tempfile.mkdtemp(prefix="mut-baseline-")
     try:
-        baseline = {"scope": "x", "mutationScore": 0.80, "testStrength": 0.80}
+        baseline = {"scope": "x", "total": 100, "mutationScore": 0.80, "testStrength": 0.80}
 
         def write_report(name, killed, survived, nocover, timedout=0):
             p = os.path.join(tmp, name)
@@ -128,8 +145,8 @@ def self_test():
             ET.ElementTree(root).write(p, encoding="utf-8", xml_declaration=True)
             return p
 
-        # ① 分数回退（8/10 killed over 10 covered = 0.8；回退档 6/10 = 0.6）
-        p_bad = write_report("bad.xml", 6, 4, 0)
+        # ① 分数回退（60/100 killed = 0.60；基线 0.80）
+        p_bad = write_report("bad.xml", 60, 40, 0)
         m = parse_report(p_bad)
         passed, problems = compare(m, baseline)
         if not passed and any("变异分数回退" in x for x in problems):
@@ -139,7 +156,7 @@ def self_test():
             ok = False
 
         # ② 与基线持平 => 绿
-        p_same = write_report("same.xml", 8, 2, 0)
+        p_same = write_report("same.xml", 80, 20, 0)
         passed, problems = compare(parse_report(p_same), baseline)
         if passed:
             print("  [PASS] 与基线持平不误报")
@@ -148,7 +165,7 @@ def self_test():
             ok = False
 
         # ③ 分数更高 => 绿
-        p_better = write_report("better.xml", 9, 1, 0)
+        p_better = write_report("better.xml", 90, 10, 0)
         passed, problems = compare(parse_report(p_better), baseline)
         if passed:
             print("  [PASS] 分数变好不误报")
@@ -182,6 +199,17 @@ def self_test():
             ok = False
         except ValueError:
             print("  [PASS] 空报告被拦（别把'没跑到东西'当成'通过'）")
+
+        # ⑦ 报告不完整（只覆盖一小部分类）=> 必须判红。
+        # 分数是 killed/(total-noCoverage)：分母缩水时，剩下几个全杀掉就能拿 1.0。
+        # 只比分数不看总数的话，PIT 漏跑一半类反而更容易"通过"。
+        p_partial = write_report("partial.xml", 5, 0, 0)
+        passed, problems = compare(parse_report(p_partial), baseline)
+        if not passed and any("报告不完整" in x for x in problems):
+            print("  [PASS] 残缺报告被拦（分母缩水不能算进步）")
+        else:
+            print("  [FAIL] 残缺报告竟然通过了：%s" % problems)
+            ok = False
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
@@ -269,8 +297,14 @@ def main():
         for p in problems:
             print("  [FAIL] %s" % p)
         print("")
-        print("  变异分数是**棘轮**：要么把新写的代码测得更狠（补断言），")
-        print("  要么显式更新基线（并在 PR 里说明为什么这次可以接受）。")
+        if any("报告不完整" in p for p in problems):
+            print("  报告不完整 ≠ 分数退步，别急着补断言。先查：")
+            print("    ① PIT 的 targetClasses 是否匹配到了全部类（看报告里的类清单）")
+            print("    ② 构建日志里有没有类被跳过 / 编译失败 ③ 测量中途有没有改源码")
+            print("  只有确认是**代码合法删减**导致变异体变少，才更新基线里的 total。")
+        else:
+            print("  变异分数是**棘轮**：要么把新写的代码测得更狠（补断言），")
+            print("  要么显式更新基线（并在 PR 里说明为什么这次可以接受）。")
         return 1
 
     print("  变异基线门禁：通过（分数未回退）")
