@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-21 共有 166 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-21 共有 167 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -30,7 +30,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 166 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 167 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -71,6 +71,65 @@ README 那一行**没跟着改**。
 ### 3. 计数
 
 Java **4970**、前端 vitest **382**、**Python SDK 27 个用例**（本 PR 新增一个门禁脚本，不动测试）。
+
+---
+
+## [Unreleased] — 185 行的 docker-compose e2e 从来没跑过：CI 里那个守卫恒假（2026-10-21）
+
+### 1. 现场：CI 显示"有这一步"，实际每轮都 skip
+
+`ci.yml` 的 sdk-integration job 里有个 step：
+
+    - name: Docker Compose E2E (if Docker available)
+      continue-on-error: true
+      run: |
+        if command -v docker-compose &>/dev/null; then ...
+
+master 的 run `39550447227` 日志里，这一步的真实输出是：
+
+    docker-compose not available, skipping
+
+ubuntu-24.04 runner 只带 compose v2 插件（`docker compose`），**v1 的
+`docker-compose` 命令不存在** ⇒ 条件恒假，`scripts/e2e-docker-compose.sh`
+（185 行，验完整链路）**一次都没在 CI 跑过**。再叠一个
+`continue-on-error: true`：哪天真跑了、真失败，也不阻塞。
+
+### 2. 根因不止一层：就算命令存在，这一步也必然失败
+
+`docker-compose.yml` 三个服务全是 `network_mode: host`：
+
+- cloud-backend 绑 **8080** —— 而本 job 前面**已经起了一个 backend** 在 8080
+- 脚本自己 `docker run --name nexussky-redis --network host redis` 绑 **6379**
+  —— 而本 job 的 services 里**已经有 redis** 占着 6379
+
+端口全撞。这才是当初加 `continue-on-error` 的真实原因：它被放在一个
+**不可能成功**的环境里。
+
+### 3. 修法：删掉假覆盖，换成真能跑的东西
+
+| 动作 | 说明 |
+|---|---|
+| 删掉那个 step | 留着它就是"CI 覆盖了 compose"的假象；注释保留原因，免得下一个人再踩 |
+| 新增 job `compose-artifacts`（**硬门禁**） | 纯静态：`docker compose config -q` + 新脚本 `check-compose-artifacts.py` |
+| 新脚本校验什么 | compose 里写死的 jar 名 vs pom 实际产物（`<artifactId>-<version>[-shaded].jar`） |
+| `e2e-docker-compose.sh` 兼容 v2 | 加 `$DC` 检测（v1 优先、回退 v2），5 处调用改用它；手工跑不再挑环境 |
+
+为什么新脚本值得单独写：改 pom 的 version / finalName / shade 配置时，
+compose 里硬编码的 jar 名**不会跟着变**，后果是容器秒退
+（`Unable to access jarfile`）——而 CI 此前对这类脱节一直是绿的。
+
+### 4. 验证
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| 新脚本自测（一致 / 版本漂移 / shade 后缀漏写 / 模块缺失） | 全 PASS | 4/4 |
+| 真实仓库 | 绿 | 2 个 java 服务名与 pom 一致 |
+| 破坏性验证（把 compose 改成 0.2.0） | 红 + 指出期望值 | EXIT=1，提示 `期望 aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar` |
+| `bash -n` 语法 | 通过 | 通过 |
+| `docker compose config -q` | 通过 | EXIT=0（3 服务） |
+
+全链路 up/down 仍属**手工验证**（需先 `mvn package` 出 jar，且 host 网络要求
+独占 8080/6379）——这一点写清楚，不再假装 CI 覆盖了它。
 
 ---
 
