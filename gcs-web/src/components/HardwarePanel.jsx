@@ -287,16 +287,23 @@ export default function HardwarePanel({ drones = [] }) {
           </div>
           <div className="panel-body">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+              {/* 物理模型切换：**后端没有这条通道**。
+                  概念只存在于模拟器（drone-sim 的 VirtualDrone.physicsModel），
+                  没有 MAVLink 下发路径 ⇒ 2026-10-21 实测 POST /api/v1/hardware/physics-model
+                  必然 404。这个按钮此前是"点了必报错"的假控件，
+                  现已显式禁用并写明原因（缺口登记在 scripts/check-frontend-endpoints.py 的 KNOWN_GAPS）。 */}
               <button
                 className={`btn ${physicsModel === 'kinematics' ? 'primary' : ''}`}
-                disabled={busy || sysid == null}
+                disabled
+                title="后端未实现物理模型下发通道（概念只在模拟器里），暂时无法切换"
                 onClick={() => handlePhysicsModel('kinematics')}
               >
                 运动学
               </button>
               <button
                 className={`btn ${physicsModel === 'aero' ? 'primary' : ''}`}
-                disabled={busy || sysid == null}
+                disabled
+                title="后端未实现物理模型下发通道（概念只在模拟器里），暂时无法切换"
                 onClick={() => handlePhysicsModel('aero')}
               >
                 气动

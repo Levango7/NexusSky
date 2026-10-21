@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-21 共有 168 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-21 共有 169 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -30,7 +30,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 168 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 169 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -41,6 +41,74 @@
 ---
 
 
+
+## [Unreleased] — 前端在调 12 个后端压根没有的端点；404 被 `.catch(() => null)` 吞掉，面板永远空却看不出异常。修掉 10 处、补后端 3 个口径、补上门禁
+
+### 1. 现场：404 是静默的，界面骗人
+
+2026-10-21 实测 `gcs-web/src/api.js` 里 238 处端点调用，有 **12 处后端压根没有**：
+
+| 前端调用的 | 后端真实有的 |
+|---|---|
+| `POST /api/v1/formation/create` | `POST /api/v1/formation` |
+| `POST /api/v1/spray/task` | `POST /api/v1/spray` |
+| `GET /api/v1/spray/status/{sysid}` | 只有 `GET /api/v1/spray/{id}`（**按任务 id**，前端手里没有任务 id） |
+| `POST /api/v1/spray/gripper` | 夹爪命令在**配送序列**的控制上（`START`=抓取 / `DROP`=释放） |
+| `GET /api/v1/delivery/sequence/{sysid}` | 只有 `GET /api/v1/delivery/{id}` |
+| `GET /api/v1/env/alerts` | `GET /api/v1/env-alerts` |
+| `POST /api/v1/air-ground/recon/alarm/{eventId}` | `POST /api/v1/air-ground/recon`（报警字段走 body） |
+| `POST /api/v1/air-ground/ptz-tracking/{deviceId}` | `POST /api/v1/air-ground/ptz-track`（`lat`/`lon`，不是 `targetLat`/`targetLon`） |
+| `POST /api/v1/hardware/physics-model` | **后端没有这个能力**（概念只在模拟器 `VirtualDrone.physicsModel` 里，没有 MAVLink 下发通道） |
+| `GET /api/v1/vision/thermal/sources` | 后端只有 `/api/v1/thermal/tasks`，没有"源"的概念 |
+| `GET /api/v1/env/status` | 后端只有 POST 覆盖写 + `/env-alerts`，没有机队级读口径 |
+| `GET /api/v1/link-sim/{profiles,status}` + `POST /api/v1/link-sim/damage` | 真实口径在 `/api/v1/comm-adapt/quality/*`（**返回形状也不同**，不是纯路径替换） |
+
+危害不是"点一下报错"这么轻：前端的轮询普遍写成 `.catch(() => null)`，
+**404 被静默吞掉** ⇒ 喷洒状态、配送序列、气象图层、链路质量面板**永远空**，
+界面上看不出任何异常 —— 只有对着代码才知道功能是假的。
+这正是本仓库主线一直在清的「声明≠行为」，只是这次声明在前端。
+
+### 2. 改法（前端 10 处 + 后端 3 个口径 + 2 处数据流）
+
+- **纯路径改对（6 处）**：formation / spray / env-alerts 等，前端改指后端真实端点。
+- **后端补 3 个"按 sysid 查/控"的口径**（前端按"当前选中的无人机"轮询，而后端只按任务 id 查）：
+  - `GET /api/v1/spray/by-sysid/{sysid}` —— 该机**最近一次**喷洒任务；
+  - `GET /api/v1/delivery/by-sysid/{sysid}` —— 该机最近一次配送序列；
+  - `POST /api/v1/delivery/by-sysid/{sysid}/control` —— **夹爪开/关走这里**
+    （后端的 `MAV_CMD_NEXUS_GRIPPER_CONTROL` 本来就有，只是只挂在"按序列 id"上；
+    "按 sysid 找到最新序列再控制"这一层交给服务端，前端不再自己猜 id）。
+  - 两个控制器的 `get(id)` 与 `by-sysid` **共用同一个 view 方法**，避免两处口径漂移。
+- **空地协同两条路径改对，并补上被吞掉的数据流**：
+  - `POST /air-ground/recon`：后端 `parseAlarmEvent` **优先用调用方给的 `eventId`**
+    （原来自己生成 UUID ⇒ "告警 → 侦察计划"对不上号，联动引擎按 id 关联）。
+  - 前端触发侦察时**必须带目标坐标**：告警没有坐标就**拒绝触发**并报错 ——
+    否则后端拿到 `lat/lon=0`，侦察计划落到 (0,0)，无人机飞往几内亚湾。
+  - `POST /air-ground/ptz-track`：后端 `GeoTarget.isReliable()` 要求 `confidence >= 0.6`，
+    前端原来不传 ⇒ 后端静默返回 `LOW_CONFIDENCE`（**看着像成功、其实没动**）。
+    现在按"手动触发即意图"下发 `confidence=1`，并在注释里写清依据。
+- **物理模型按钮显式禁用**：后端无下发通道 ⇒ 此前是"点了必 404"的假控件；
+  现在按钮禁用 + 标题写明原因，不再假装能用。
+
+### 3. 新增门禁：前端端点契约（`scripts/check-frontend-endpoints.py`）
+
+- 逐条比对前端 `jsonFetch` 的**方法 + 路径**与后端控制器里的映射（同一套口径，
+  端点数与 `count-rest-endpoints.py` 对齐：409）；
+- **已知缺口登记**（`KNOWN_GAPS`，逐条写明原因）：新增的未登记缺口 ⇒ 门禁红；
+  已登记的缺口被修好 ⇒ 门禁也红（提醒删登记，别让债务烂在清单里）。
+  当前登记 6 条（env/status、link-sim ×3、thermal/sources、hardware/physics-model）。
+- `--self-test` **9 个用例**（合成夹具）：一致时不误报 / 未登记缺口被报出 /
+  登记放行 / 登记过期被报出 / 方法对不上被报出 / 前后端提取口径 / 运行时变量路径不被静默放过 /
+  不带 `?` 的查询串能匹配到端点。
+- 已进 CI `repo-gates` job（自测 + 真检查各一步）。
+- 顺带修掉两个**量具便携性**问题：`count-rest-endpoints.py` 与 `sync-test-counts.py`
+  里硬编码了绝对仓库路径 ⇒ 换 worktree / 在 CI 上会**数出 0**；已改为从脚本位置推导。
+
+### 4. 计数
+
+Java **4970 → 4979**（新增 9 个用例），前端 vitest **382** 不变，
+REST 端点 **406 → 409**（新增 3 个 by-sysid 口径）。
+
+---
 
 ## [Unreleased] — 端点数门禁自己有盲区：8 处「358 个端点」活过了门禁，而门禁报的是「通过」（2026-10-21）
 

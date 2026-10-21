@@ -11,12 +11,15 @@ vitest-report.json 不给则只同步 Java 侧（前端口径不校验）。
 改完必须再跑一次 check-test-count-docs.py 确认"全部一致"。
 """
 import io
+import os
 import re
 import subprocess
 import sys
 
 FRONTEND_JSON = sys.argv[1] if len(sys.argv) > 1 else 'F:/tmp/vitest-report.json'
-REPO = 'F:/Nexus/nexussky-b1'
+# 从脚本位置推导仓库根：硬编码绝对路径会让这个同步脚本**只在一个 worktree 里能用**
+# （在别的 worktree 跑会去订正另一个仓库的文档）。
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 out = subprocess.run(
     [sys.executable, 'scripts/check-test-count-docs.py', '--frontend-json', FRONTEND_JSON],

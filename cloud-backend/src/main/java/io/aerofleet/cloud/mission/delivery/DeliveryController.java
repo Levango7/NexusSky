@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +77,64 @@ public class DeliveryController {
         if (seq == null) {
             throw new NotFoundException("delivery " + id + " not found");
         }
+        return view(seq);
+    }
+
+    /**
+     * 按 sysid 查该机**最近一次**配送序列。
+     *
+     * <p><b>为什么要有这个口径</b>：前端按"当前选中的无人机"轮询
+     * （{@code SprayPanel} 每秒一次），而原端点只按**序列 id** 查 ——
+     * 前端手里没有序列 id，于是去调并不存在的 {@code /delivery/sequence/{sysid}}，
+     * 404 又被 {@code .catch(() => null)} 静默吞掉（2026-10-21 实测：
+     * 前端 5 个面板共 12 处端点对不上后端，这是其中之一）。
+     */
+    @GetMapping("/by-sysid/{sysid}")
+    public ResponseEntity<Map<String, Object>> bySysid(@PathVariable("sysid") int sysid) {
+        DeliverySequence seq = latestFor(sysid);
+        if (seq == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "no delivery sequence for sysid " + sysid));
+        }
+        return ResponseEntity.ok(view(seq));
+    }
+
+    /**
+     * 按 sysid 控制该机最近一次配送序列。
+     *
+     * <p>前端要的是"夹爪开/关"（{@code SprayPanel} 的夹爪按钮）——
+     * 后端的夹爪命令本来就有（{@code DeliveryService} 里的
+     * {@code MAV_CMD_NEXUS_GRIPPER_CONTROL}：START=抓取、DROP=释放），
+     * 但只挂在**按序列 id** 的 {@code /delivery/{id}/control} 上，
+     * 而前端手里只有 sysid ⇒ 这一层"按 sysid 找到最新序列再控制"由服务端做。
+     */
+    @PostMapping("/by-sysid/{sysid}/control")
+    @RequireRole(Role.OPERATOR)
+    public ResponseEntity<Map<String, Object>> controlBySysid(@PathVariable("sysid") int sysid,
+                                                               @RequestBody ControlRequest body) {
+        DeliverySequence seq = latestFor(sysid);
+        if (seq == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "no delivery sequence for sysid " + sysid));
+        }
+        Map<Integer, DeliveryService.AckResult> results =
+                deliveryService.control(seq.deliveryId(), body.action);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("deliveryId", seq.deliveryId());
+        out.put("results", results);
+        return ResponseEntity.ok(out);
+    }
+
+    /** 该机最近一次配送序列（id 最大 = 最新）。 */
+    private DeliverySequence latestFor(int sysid) {
+        return deliveryService.sequencesByTenant().stream()
+                .filter(s -> s.targetSysid() == sysid)
+                .max(Comparator.comparingInt(DeliverySequence::deliveryId))
+                .orElse(null);
+    }
+
+    /** 配送序列视图（按 id 查与按 sysid 查共用，避免两处口径漂移）。 */
+    private Map<String, Object> view(DeliverySequence seq) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("deliveryId", seq.deliveryId());
         out.put("state", seq.state().name());

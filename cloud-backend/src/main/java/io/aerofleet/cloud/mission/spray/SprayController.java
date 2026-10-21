@@ -19,7 +19,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 
 import java.util.Map;
 
@@ -73,6 +75,33 @@ public class SprayController {
         if (task == null) {
             throw new NotFoundException("spray task " + id + " not found");
         }
+        return view(task);
+    }
+
+    /**
+     * 按 sysid 查该机**最近一次**喷洒任务状态。
+     *
+     * <p><b>为什么要有这个口径</b>：前端按"当前选中的无人机"轮询喷洒状态
+     * （{@code SprayPanel} 每秒一次），而原端点只按**任务 id** 查 ——
+     * 前端手里没有任务 id，于是去调并不存在的 {@code /spray/status/{sysid}}，
+     * 面板永远空、而且 404 被 {@code .catch(() => null)} 静默吞掉
+     * （2026-10-21 实测：前端 5 个面板共 12 处端点对不上后端，这是其中之一）。
+     */
+    @GetMapping("/by-sysid/{sysid}")
+    public ResponseEntity<Map<String, Object>> bySysid(@PathVariable("sysid") int sysid) {
+        List<SprayTask> tasks = sprayService.tasksByTenant().stream()
+                .filter(t -> t.targetSysid() == sysid)
+                .sorted(Comparator.comparingInt(SprayTask::taskId).reversed())
+                .toList();
+        if (tasks.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "no spray task for sysid " + sysid));
+        }
+        return ResponseEntity.ok(view(tasks.get(0)));
+    }
+
+    /** 喷洒任务视图（按 id 查与按 sysid 查共用，避免两处口径漂移）。 */
+    private Map<String, Object> view(SprayTask task) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("taskId", task.taskId());
         out.put("state", task.state().name());

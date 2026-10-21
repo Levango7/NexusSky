@@ -310,7 +310,13 @@ public class AirGroundCoordinationController {
 
     /** 从请求 body 解析 AlarmEvent。 */
     private static AlarmEvent parseAlarmEvent(Map<String, Object> body) {
-        String eventId = java.util.UUID.randomUUID().toString();
+        // 事件 id 优先用调用方给的：前端触发侦察时传的是**真实告警 id**，
+        // 自己生成 UUID 会让"告警 → 侦察计划"对不上号（联动引擎按 id 关联）。
+        // 没给（或给了空白）才自己生成。
+        String providedId = str(body, "eventId", "");
+        String eventId = (providedId == null || providedId.isBlank())
+                ? java.util.UUID.randomUUID().toString()
+                : providedId;
         String sourceDeviceId = str(body, "sourceDeviceId", "");
         String sourceDeviceName = str(body, "sourceDeviceName", "");
         AlarmEvent.EventType eventType = AlarmEvent.parseEventType(str(body, "eventType", "CUSTOM"));

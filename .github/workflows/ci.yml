@@ -82,6 +82,7 @@ jobs:
           python3 scripts/check-selftest-coverage.py --self-test
           python3 scripts/check-revert-looking-diff.py --self-test
           python3 scripts/check-claimed-endpoint-count.py --self-test
+          python3 scripts/check-frontend-endpoints.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
@@ -90,6 +91,12 @@ jobs:
       # 2026-10-20 实测：同一件事在文档里有三个不同的数（358 / 345 / 345），而实测是 406。
       - name: Claimed endpoint count gate
         run: python3 scripts/check-claimed-endpoint-count.py
+      # 前端调用的每个端点，后端都必须真的有。
+      # 2026-10-21 实测：前端 api.js 有 12 处调的后端压根没有的端点，而前端的轮询普遍
+      # 写成 .catch(() => null) ⇒ 404 被静默吞掉，界面上面板永远空、看不出任何异常。
+      # 这道门禁把「前端在调一个不存在的东西」变成会红的 CI 步骤。
+      - name: Frontend endpoint contract gate
+        run: python3 scripts/check-frontend-endpoints.py
       # 下面两个是 2026-10-20 被「自测覆盖门禁」当场抓出来的：它们的 --self-test
       # 从来没在 CI 里跑过（mavlink 编解码一致性 / SITL 离线自检，都是离线的、很快）。
       - name: MAVLink codec self-test (offline)
