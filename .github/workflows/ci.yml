@@ -1533,6 +1533,66 @@ jobs:
           path: mjpeg-e2e-logs/
           retention-days: 14
 
+  # 变异测试基线门禁。**硬门禁**。
+  #
+  # 为什么要有：常规 jacoco 覆盖率回答"这段代码被跑到过没有"，
+  # 回答不了"这段代码的行为被钉住了没有" —— 一段被调用了一百次、却只断言
+  # 「没抛异常」的代码，覆盖率是满的，行为却完全没被钉住。
+  #
+  # 2026-10-21 用 PIT 审 security 包就是这么翻车的：密钥掩码函数被变异成
+  # 「返回 null」之后**存活** —— 也就是「哪天掩码退化成返回明文密钥，
+  # 现有测试一条都不会红」。同批还翻出登录限流阈值、X-Forwarded-For 信任开关、
+  # 口令哈希落库三处真缺口。
+  #
+  # 本 job 跑 PIT（mvn -Pmutation，profile 默认不启用），
+  # 再由 scripts/check-mutation-baseline.py 对基线判红（变异分数是**棘轮**，
+  # 不许低于基线；报告缺失/损坏一律判红 —— 跳过不等于通过）。
+  mutation-gate:
+    name: Mutation baseline gate (security package)
+    runs-on: ubuntu-24.04
+    # 本机实测 15 分钟（共享 runner 更慢，留够余量）；超时是安全网，不是常态。
+    timeout-minutes: 45
+    needs: [ maven-warm ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      - name: Compile and install cloud-backend (install ⇒ 兄弟模块进本地 m2)
+        # 为什么要 install 而不是 package：下一步的 PIT 是**单独一次 mvn 调用**，
+        # reactor 里只有 cloud-backend，它要解析兄弟模块（aerofleet-mavlink-core /
+        # aerofleet-drone-sim）只能从**本地 m2** 找 —— 只 package 的话那些 jar 不在 m2，
+        # PIT 会在 "dependency: io.aerofleet:aerofleet-mavlink-core:jar:0.1.0-SNAPSHOT
+        # not found" 上直接失败（本机 m2 里恰好有旧 jar 才没暴露出来）。
+        run: mvn -B -pl cloud-backend -am install -DskipTests -Djacoco.skip=true
+      - name: Mutation test (PIT, security package)
+        # 刻意**不加 -am**：profile 的 targetClasses 指向 io.aerofleet.cloud.security.*，
+        # 带 -am 会让 PIT 在上游模块（mavlink-core 等）上各跑一遍，而那边没有匹配的类
+        # ⇒ 插件报"没找到变异体"把构建打断。上一行的 install 已经把依赖装进本地 m2。
+        run: mvn -B -pl cloud-backend -Pmutation pitest:mutationCoverage
+      - name: Mutation baseline gate self-test
+        run: python3 scripts/check-mutation-baseline.py --self-test
+      - name: Mutation baseline gate
+        run: |
+          if [ ! -f cloud-backend/target/pit-reports/mutations.xml ]; then
+            echo "::error::PIT 没有产出报告 —— 变异门禁本次无法判定，直接判红（跳过不等于通过）"
+            ls -la cloud-backend/target/pit-reports/ 2>/dev/null || true
+            exit 1
+          fi
+          python3 scripts/check-mutation-baseline.py \
+            --report cloud-backend/target/pit-reports/mutations.xml
+
   # e2e 公共库自检。**硬门禁**（没有 continue-on-error）——
   # 它不跑任何被测系统，只花几秒换掉一整类"跑了但不算数"。
   e2e-common-selftest:
