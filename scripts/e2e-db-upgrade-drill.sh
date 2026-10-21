@@ -50,7 +50,8 @@ PG_PASSWORD="${PG_PASSWORD:-nexus123}"
 PG_DB="${PG_DB:-nexussky_upgrade_drill}"
 REDIS_HOST="${REDIS_HOST:-localhost}"
 REDIS_PORT="${REDIS_PORT:-6379}"
-BACKEND_PORT="${BACKEND_PORT:-18094}"
+BACKEND_PORT="${BACKEND_PORT:-18095}"   # 阶段二（升到 HEAD）用的端口
+OLD_BACKEND_PORT="${OLD_BACKEND_PORT:-18094}"  # 阶段一（只迁到 V20）用的端口
 DRILL_PORT="${DRILL_PORT:-$BACKEND_PORT}"
 JAR="cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar"
 LOG_DIR="${LOG_DIR:-/tmp/nexussky-upgrade-drill}"
@@ -85,10 +86,11 @@ require() {
   command -v "$1" >/dev/null 2>&1 || { say "  [FAIL] 缺少命令：$1"; exit 2; }
 }
 
-launch_backend() {   # $1=额外参数；**只起进程不等就绪**
+launch_backend() {   # $1=额外参数  $2=端口；**只起进程不等就绪**
+  local port="$2"
   java -Duser.timezone=UTC -jar "$JAR" \
     --spring.profiles.active=prod \
-    --server.port="$DRILL_PORT" \
+    --server.port="$port" \
     --spring.datasource.url="$PG_URL/$PG_DB?options=-c%20TimeZone%3DUTC" \
     --spring.datasource.username="$PG_USER" \
     --spring.datasource.password="$PG_PASSWORD" \
@@ -106,12 +108,38 @@ launch_backend() {   # $1=额外参数；**只起进程不等就绪**
   BACKEND_PID=$!
 }
 
-start_backend() {   # $1=额外参数；等到 health 200 才返回
-  launch_backend "$1"
+# 等端口空出来（上一个进程没退干净时，会把下一次的启动挤掉）
+wait_port_free() {   # $1=端口
+  local port="$1"
+  local i=0
+  while [ "$i" -lt 60 ]; do
+    if ! (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+      return 0
+    fi
+    exec 3<&- 2>/dev/null || true
+    i=$((i+1)); sleep 1
+  done
+  return 1
+}
+
+start_backend() {   # $1=额外参数  $2=端口；等到 health 200 且**确认这个进程还活着**
+  local port="$2"
+  if ! wait_port_free "$port"; then
+    say "  端口 $port 被别的进程占着"
+    return 1
+  fi
+  launch_backend "$1" "$port"
   local i=0
   while [ "$i" -lt 90 ]; do
-    if curl -sf "http://localhost:$DRILL_PORT/actuator/health" >/dev/null 2>&1; then
-      return 0
+    if curl -sf "http://localhost:$port/actuator/health" >/dev/null 2>&1; then
+      # 健康检查通了，但必须确认**这个 200 是我起的进程回的**：
+      # 不确认就会把「旧进程的 200」当成「我起来了」（本演练首跑就被这个耳木正式上过当）。
+      if kill -0 "$BACKEND_PID" 2>/dev/null; then
+        return 0
+      fi
+      say "  健康检查有响应，但我起的进程已经死了（端口被别的进程回应的）"
+      tail -15 "$LOG_DIR/backend.log" | sed 's/^/    /'
+      return 1
     fi
     if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
       say "  后端进程退出了，日志尾部："
@@ -133,6 +161,8 @@ stop_backend() {
   kill -9 "$BACKEND_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
   BACKEND_PID=""
+  # 等端口释放：下一阶段启动的后端不能被旧进程抢住端口（否则会让后一阶段的判定失真）
+  wait_port_free "$DRILL_PORT" || true
 }
 
 # ---------------------------------------------------------------- 前置
@@ -172,7 +202,7 @@ step "1/7 只迁到 V$OLD_VERSION（模拟老版本部署）"
 # 下一阶段 flyway 会报 checksum mismatch 直接拒绝启动。
 #
 # 另：也不能用 psql 手工跑迁移来代替 —— 同上，checksum 得由 flyway 算。
-launch_backend "--spring.flyway.target=$OLD_VERSION --spring.jpa.hibernate.ddl-auto=none"
+launch_backend "--spring.flyway.target=$OLD_VERSION --spring.jpa.hibernate.ddl-auto=none" "$OLD_BACKEND_PORT"
 i=0
 while [ "$i" -lt 90 ]; do
   MIGRATED=$(psql_q "$PG_DB" "SELECT count(*) FROM flyway_schema_history;" 2>/dev/null || echo 0)
@@ -226,12 +256,20 @@ fi
 # （pgjdbc 默认把会话时区设成 **JVM 的时区** = 宿主 OS 时区）。DB 自己的会话时区是 UTC，
 # 直接拿它比较会凭空差一个时区偏移 ⇒ 比较时必须显式用宿主时区换算。
 psql_q "$PG_DB" "SELECT string_agg(to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS.US'), '|' ORDER BY id) FROM flight_log;" > "$LOG_DIR/before-ts.txt"
-pg_dump -Fc -h "${PG_HOST:-localhost}" -p "${PG_PORT:-5432}" -U "$PG_USER" "$PG_DB" > "$LOG_DIR/backup.dump" 2>/dev/null
+if ! pg_dump -Fc -h "${PG_HOST:-localhost}" -p "${PG_PORT:-5432}" -U "$PG_USER" "$PG_DB" > "$LOG_DIR/backup.dump" 2>"$LOG_DIR/dump.log"; then
+  bad "备份失败（pg_dump 退出码非 0）："
+  tail -5 "$LOG_DIR/dump.log" | sed 's/^/    /'
+  exit 1
+fi
+if [ ! -s "$LOG_DIR/backup.dump" ]; then
+  bad "备份产物为空（dump 失败）"
+  exit 1
+fi
 ok "已备份（回滚路径的实物）：$LOG_DIR/backup.dump"
 
 # ---------------------------------------------------------------- 阶段二：升到 HEAD
 step "3/7 升到 V$NEW_VERSION（不带 target = 生产口径，ddl-auto=validate）"
-if ! start_backend "--aerofleet.security.bootstrap-admin-password=$BOOTSTRAP_PASSWORD"; then
+if ! start_backend "--aerofleet.security.bootstrap-admin-password=$BOOTSTRAP_PASSWORD" "$DRILL_PORT"; then
   say "  [FAIL] 升级后起不来（迁移或 schema 校验没过）"; exit 1
 fi
 ok "应用带着升级后的 schema 起来了（JPA validate 过了）"
@@ -287,15 +325,31 @@ else
   bad "登录失败（引导管理员没建起来）"
 fi
 
-step "7/7 断言：回滚路径可跑通（pg_dump -> 改坏 -> pg_restore）"
-psql_x "$PG_DB" "UPDATE devices SET name='tampered' WHERE sysid=101;" >/dev/null 2>&1
-TAMPERED=$(psql_q "$PG_DB" "SELECT name FROM devices WHERE sysid=101;")
-PGPASSWORD="$PG_PASSWORD" pg_restore -h "${PG_HOST:-localhost}" -p "${PG_PORT:-5432}" -U "$PG_USER" -d "$PG_DB" --clean --if-exists < "$LOG_DIR/backup.dump" > "$LOG_DIR/restore.log" 2>&1
-RESTORED=$(psql_q "$PG_DB" "SELECT name FROM devices WHERE sysid=101;")
-if [ "$RESTORED" = "drone-101" ]; then
-  ok "回滚路径可跑通（改坏成 '$TAMPERED' 后 pg_restore 恢复成 '$RESTORED'）"
+step "7/7 断言：回滚（灾备）路径可跑通：备份恢复到一个干净库"
+# 灾备的真实场景是「恢复到一个干净实例」，而不是「在跑着的库上拆掉重建」 ——
+# 后者会被活连接/依赖拒径掉（CI 首跑就是这个）。
+# 因此：先停掉后端（灾备时应用本来就是停的），再恢复到新建的空库里，
+# 然后对比两边的演练数据。
+stop_backend
+RESTORE_DB="${PG_DB}_restore"
+psql_q postgres "DROP DATABASE IF EXISTS $RESTORE_DB WITH (FORCE);" >/dev/null 2>&1
+psql_q postgres "CREATE DATABASE $RESTORE_DB OWNER $PG_USER;" >/dev/null 2>&1
+if ! PGPASSWORD="$PG_PASSWORD" pg_restore -h "${PG_HOST:-localhost}" -p "${PG_PORT:-5432}" -U "$PG_USER" -d "$RESTORE_DB" < "$LOG_DIR/backup.dump" > "$LOG_DIR/restore.log" 2>&1; then
+  bad "恢复失败（pg_restore 退出码非 0），日志："
+  tail -10 "$LOG_DIR/restore.log" | sed 's/^/    /'
+  psql_q postgres "DROP DATABASE IF EXISTS $RESTORE_DB WITH (FORCE);" >/dev/null 2>&1
+  exit 1
+fi
+R_DEV=$(psql_q "$RESTORE_DB" "SELECT count(*) FROM devices WHERE name LIKE 'drone-%';")
+R_TS=$(psql_q "$RESTORE_DB" "SELECT string_agg(to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS.US'), '|' ORDER BY id) FROM flight_log;")
+R_LOG=$(psql_q "$RESTORE_DB" "SELECT count(*) FROM flight_log;")
+psql_q postgres "DROP DATABASE IF EXISTS $RESTORE_DB WITH (FORCE);" >/dev/null 2>&1
+if [ "$R_DEV" = "2" ] && [ "$R_LOG" = "3" ] && [ "$R_TS" = "$BEFORE_TS" ]; then
+  ok "回滚（灾备）路径可跑通：恢复到干净库后数据与亚秒精度都对得上"
 else
-  bad "回滚没成功：恢复后 = ${RESTORED:-?}（备份见 $LOG_DIR/backup.dump，restore.log）"
+  bad "恢复后对不上：devices=$R_DEV（期望 2）flight_log=$R_LOG（期望 3）时间戳=$R_TS"
+  bad "  期望的时间戳 = $BEFORE_TS"
+  tail -10 "$LOG_DIR/restore.log" | sed 's/^/    /'
 fi
 
 printf '\n================ 结论 ================\n'
