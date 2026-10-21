@@ -196,6 +196,69 @@ class FlightLogPersistenceTest {
         assertThat(p.alt).isEqualTo(200.0);
     }
 
+    /**
+     * 持久化路径的 {@code ts} 必须是**真实时刻**（epoch 毫秒），不能是常量 0。
+     *
+     * <p>为什么这条要单独钉：前端 {@code mergeTrack()} 用 {@code ts} 当**合并键**
+     * （同一 ts 只留一个点）并按它排序，{@code useDrones.js} 也用
+     * {@code prev[last].ts === point.ts} 去重。持久化路径以前把 ts 写成常量 0 ⇒
+     * <b>当天的历史轨迹被去重成一个点</b>，而且因为 0 最小还会排到折线最前面。
+     * API 声明了 {@code ts} 字段却永远不带时间戳 —— 典型的「声明≠行为」。
+     *
+     * <p>原 {@code trackForFromDb()} 只断言 lat/lon/alt（它自己知道的那几个字段），
+     * 正好漏掉 ts ⇒ 这类缺陷能一路溜到线上。
+     */
+    @Test
+    @DisplayName("trackFor() 的 ts 是真实时刻（epoch 毫秒），不是常量 0")
+    void trackForFromDb_carriesRealTimestamp() {
+        LocalDate today = LocalDate.now();
+        Instant dayStart = today.atStartOfDay(ZoneId.systemDefault()).toInstant();
+        Instant t1 = dayStart.plus(1, ChronoUnit.HOURS);
+        Instant t2 = dayStart.plus(2, ChronoUnit.HOURS);
+        saveTelemetryRow(20, t1, 1.0);
+        saveTelemetryRow(20, t2, 2.0);
+
+        List<TrackPoint> track = flightLogService.trackFor(today, 20);
+
+        assertThat(track).hasSize(2);
+        assertThat(track).extracting(p -> p.ts)
+                .as("ts 必须等于落库那一刻的真实时刻（前端靠它合并/排序）")
+                .containsExactly(t1.toEpochMilli(), t2.toEpochMilli());
+        assertThat(track).extracting(p -> p.ts)
+                .as("ts 不能是常量 0（那样历史轨迹会被去重成一个点）")
+                .doesNotContain(0L);
+    }
+
+    /** JSONL 回退路径同样不能把 ts 写成 0（它是 persistToDb=false 时的唯一读路径）。 */
+    @Test
+    @DisplayName("trackFor() 的 JSONL 路径 ts 也是真实时刻")
+    void trackForFromJsonl_carriesRealTimestamp() throws Exception {
+        setPersistToDb(false);
+
+        // 用**每次运行唯一的 sysid**：JSONL 文件按天累积、@BeforeEach 只清 DB 不清文件，
+        // 于是上一轮跑留下的行也会被 trackFor 读出来 —— 用固定 sysid 就会读到旧点、
+        // 让"ts 必须落在写入时刻附近"这条断言变 flaky（第一版就是这么翻车的）。
+        int sysid = 900_000 + (int) (System.currentTimeMillis() % 90_000);
+
+        DroneSnapshot snapshot = new DroneSnapshot(sysid);
+        snapshot.lat = 35.0;
+        snapshot.lon = 118.0;
+        snapshot.relativeAlt = 30.0;
+        snapshot.online = true;
+
+        long before = System.currentTimeMillis();
+        flightLogService.telemetry(snapshot);
+        long after = System.currentTimeMillis();
+
+        List<TrackPoint> track = flightLogService.trackFor(LocalDate.now(), sysid);
+        assertThat(track).isNotEmpty();
+        for (TrackPoint p : track) {
+            assertThat(p.ts)
+                    .as("JSONL 路径的 ts 也必须是真实时刻（写入侧的本地墙钟还原成 epoch 毫秒）")
+                    .isBetween(before - 1000L, after + 1000L);
+        }
+    }
+
     @Test
     @DisplayName("query()/trackFor() 的时间顺序由 SQL ORDER BY 保证，limit 取的是最新 N 条")
     void dbReadPathIsChronologicallyOrdered() {
