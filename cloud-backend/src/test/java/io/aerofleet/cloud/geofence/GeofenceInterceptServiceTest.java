@@ -183,15 +183,19 @@ class GeofenceInterceptServiceTest {
     // ------------------------------------------------------------------
 
     @Test
-    @DisplayName("testRestrictionZoneHit: 限飞区缓存中的限飞区命中 → DENY(IN_KEEP_OUT_ZONE)")
-    void testRestrictionZoneHit() {
-        // 模拟限飞区缓存中的限飞区被加载到 GeofenceStore 中作为 KEEP_OUT 围栏
-        // 场景：MockRestrictionSource 返回北京首都机场禁飞区，加载到 store 后拦截服务应拒绝
-        store.addZone(GeofenceZone.circleZone(30, "BJ-PEK-001 北京首都机场禁飞区",
+    @DisplayName("testUserKeepOutZone: 用户自建的 KEEP_OUT 围栏命中 → DENY(IN_KEEP_OUT_ZONE)")
+    void testUserKeepOutZone() {
+        // 2026-10-21 之前这个用例叫 "testRestrictionZoneHit"、DisplayName 写着
+        // "限飞区缓存中的限飞区命中"，但它把区域加进了**用户围栏表**（store.addZone）——
+        // **限飞区缓存从头到尾没被碰过**，测试名字在骗人。
+        // ⇒ 真正的限飞区缓存路径改由 GeofenceInterceptRestrictionTest 覆盖
+        //   （那里用打桩的 RestrictionCacheManager 走真正的那条路）。
+        // 本用例现在只负责"用户自建围栏"这条路径。
+        store.addZone(GeofenceZone.circleZone(30, "user-keepout",
                 40.0801, 116.5846, 5000.0,
                 GeofenceZone.Action.LOCK_RTH, FenceType.KEEP_OUT, 100));
 
-        // 无人机在禁飞区内
+        // 无人机在围栏内
         InterceptVerdict verdict = interceptService.check(1, "ARM", 40.0801, 116.5846);
 
         assertThat(verdict.isDenied()).isTrue();
