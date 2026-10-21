@@ -31,7 +31,7 @@
 | `link-sim` | 纯 Java 17 | MAVLink/UDP 链路损伤代理：延迟/Gilbert-Elliot 突发丢包/令牌桶带宽/周期分区四引擎 + 7 种链路画像 + 一跳静态中继 | 不需要换——损伤模型本身就是要保留的实验变量 |
 | `regulator-sim` | 纯 Java 17 + JDK HttpServer | 模拟 CAAC UOM 监管平台 HTTP API（`/api/verify\|activate\|cancel\|telemetry\|records\|reset` 六端点 + `--delay-ms`/`--error-rate` 故障注入），独立进程，供 regulator 包集成测试与本地开发 | 不需要换——对接端是真 UOM 平台 |
 | `sdk-java` | 纯 Java 11 | Java 客户端 SDK（drones / missions / flightLogs 三域 + 20 余便捷方法），12 单测 | 不需要换 |
-| `sdk-python` | Python 3 | Python 客户端 SDK（drones / missions / flightlog + exceptions），7 文件、**0 单测** | 不需要换 |
+| `sdk-python` | Python 3 | Python 客户端 SDK（drones / missions / flightlog + exceptions），7 文件、**27 个用例** | 不需要换 |
 
 > Maven reactor 含前 6 个 Java 模块（见根 `pom.xml` 的 `<modules>`）；`gcs-web` 与
 > `sdk-python` 不在 reactor 内（前者由 npm 构建，后者由 `setup.py` 打包）。

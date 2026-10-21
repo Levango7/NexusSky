@@ -376,6 +376,14 @@ jobs:
         # 覆盖率数字暂不设阈值（与 Java 侧不同：Python 侧还没有基线，
         # 先有信号再谈门槛，避免一个假数字门禁挡住后续提交）。
         run: python -m pytest tests/ -q
+      - name: Python test count vs docs claim
+        # 2026-10-21 实测发现 README 的模块表里写着 sdk-python「0 单测」，
+        # 而这个 SDK 早就有 27 个用例、CI 一直在跑 —— Java 侧和前端侧都有
+        # 「文档声称 == 实测」的门禁，**Python 侧没有**，所以这类腐烂没人拦。
+        # 本步把 Python 侧也纳入机械检查（门禁在装了 pytest 的环境里跑）。
+        run: python ../scripts/check-python-test-count.py
+      - name: Self-test the Python test count gate itself
+        run: python ../scripts/check-python-test-count.py --self-test
 
   frontend:
     name: GCS Web
