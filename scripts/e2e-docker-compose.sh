@@ -8,6 +8,21 @@ FAIL=0
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 
+# 兼容 compose v1（docker-compose）与 v2（docker compose 插件）。
+# 2026-10-21：ubuntu-24.04 runner 只带 v2 插件，v1 命令不存在 —— 原先写死
+# `docker-compose` 的写法在那种环境里必然"命令找不到"。CI 里那个
+# `command -v docker-compose` 的守卫正是因此恒假、185 行从未执行（已删，见 ci.yml）。
+# 这里优先 v1（老环境行为不变），没有就退到 v2。
+if command -v docker-compose >/dev/null 2>&1; then
+  DC="docker-compose"
+elif docker compose version >/dev/null 2>&1; then
+  DC="docker compose"
+else
+  echo "找不到 docker compose（v1 / v2 都没有），无法继续"
+  exit 1
+fi
+echo "使用 compose 命令：$DC"
+
 step() { echo "== $1"; }
 check() {
   if eval "$2"; then echo "   PASS: $1"; else echo "   FAIL: $1"; FAIL=1; fi
@@ -16,7 +31,7 @@ check() {
 # ── 清理函数：确保容器不会泄漏 ──
 cleanup_containers() {
   echo "== 清理容器..."
-  docker-compose -f "$COMPOSE_FILE" down --remove-orphans 2>/dev/null || true
+  $DC -f "$COMPOSE_FILE" down --remove-orphans 2>/dev/null || true
   docker rm -f nexussky-redis 2>/dev/null || true
 }
 
@@ -40,12 +55,12 @@ sleep 2
 # $? 取的是 sleep 的退出码（恒 0），所以这条断言永远 PASS，compose 起不来也看不见。
 # $? 必须紧跟被检查的命令取值。
 COMPOSE_UP_LOG=$(mktemp)
-docker-compose -f "$COMPOSE_FILE" up -d > "$COMPOSE_UP_LOG" 2>&1
+$DC -f "$COMPOSE_FILE" up -d > "$COMPOSE_UP_LOG" 2>&1
 COMPOSE_UP_STATUS=$?
 sleep 5
-check "docker-compose up -d 退出码为 0" "[ $COMPOSE_UP_STATUS -eq 0 ]"
+check "$DC up -d 退出码为 0" "[ $COMPOSE_UP_STATUS -eq 0 ]"
 if [ "$COMPOSE_UP_STATUS" -ne 0 ]; then
-  echo "   --- docker-compose up 输出（末尾 30 行）---"
+  echo "   --- $DC up 输出（末尾 30 行）---"
   tail -30 "$COMPOSE_UP_LOG"
 fi
 rm -f "$COMPOSE_UP_LOG"
@@ -155,10 +170,10 @@ cleanup_containers
 # cleanup_containers 内部用 `|| true` 吞掉 docker-compose down 的错误（teardown 要幂等，
 # 不该把清理错误盖过真实测试结果），所以这里改为断言**清理后的真实状态**。
 # 查询命令本身失败时不能当成"没有残留"，显式判失败。
-COMPOSE_PS_OUT=$(docker-compose -f "$COMPOSE_FILE" ps -q 2>/dev/null)
+COMPOSE_PS_OUT=$($DC -f "$COMPOSE_FILE" ps -q 2>/dev/null)
 COMPOSE_PS_STATUS=$?
 if [ $COMPOSE_PS_STATUS -ne 0 ]; then
-  echo "   ❌ docker-compose ps 查询失败（退出码 $COMPOSE_PS_STATUS），无法确认容器已清理"
+  echo "   ❌ $DC ps 查询失败（退出码 $COMPOSE_PS_STATUS），无法确认容器已清理"
   FAIL=1
 else
   COMPOSE_LEFTOVER=$(printf '%s' "$COMPOSE_PS_OUT" | grep -c .)

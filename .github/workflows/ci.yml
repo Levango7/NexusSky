@@ -840,15 +840,45 @@ jobs:
         run: |
           chmod +x scripts/e2e-sdk-integration.sh
           bash scripts/e2e-sdk-integration.sh
-      - name: Docker Compose E2E (if Docker available)
-        continue-on-error: true
-        run: |
-          if command -v docker-compose &>/dev/null; then
-            chmod +x scripts/e2e-docker-compose.sh
-            bash scripts/e2e-docker-compose.sh
-          else
-            echo "docker-compose not available, skipping"
-          fi
+
+      # 这里原来有一个 "Docker Compose E2E (if Docker available)" step，
+      # 2026-10-21 删掉。它是个**从来没跑过的假覆盖**：
+      #   · 条件是 `command -v docker-compose`，而 ubuntu-24.04 runner 只有
+      #     v2 的 `docker compose`（插件），v1 命令不存在 ⇒ 每轮都打印
+      #     "docker-compose not available, skipping"，185 行的 e2e 一次没跑过；
+      #   · 即便真跑也会**必然失败**：compose 三个服务全是 host 网络，
+      #     cloud-backend 绑 8080、脚本还自己 docker run 一个 redis 绑 6379，
+      #     而本 job 前面已经起了 backend（8080）和 redis service（6379）——
+      #     端口全撞，这是当初加 continue-on-error 的真实原因。
+      # 处理方式：删掉假覆盖，改为下面的 compose-artifacts job（静态校验，
+      # 真能跑且不会 flaky）；全链路 up/down 仍属手工验证，见 docs/mutation-testing.md
+      # 同级的说明与 CHANGELOG。
+
+  # compose 产物一致性。**硬门禁**（纯静态：只读 YAML + pom，不启动容器，秒级，零 flaky）。
+  #
+  # 为什么需要：docker-compose.yml 把 jar 名写死在 command 里
+  # （`java -jar aerofleet-...-SNAPSHOT.jar`），改 pom 的 version / finalName / shade
+  # 配置时 compose 不会跟着变 —— 后果不是构建失败，而是容器**秒退**
+  # （Unable to access jarfile），而 CI 对此一直是绿的（原因见上一段「假覆盖」说明）。
+  #
+  # 两件事，都不启动容器：
+  #   1) docker compose config -q    —— 编排文件语法/依赖有效
+  #   2) check-compose-artifacts.py  —— compose 里的 jar 名与 pom 实际产物一致
+  compose-artifacts:
+    name: Compose artifacts consistency
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Self-test the compose artifacts checker
+        run: python3 scripts/check-compose-artifacts.py --self-test
+      - name: Compose file is valid
+        run: docker compose -f docker-compose.yml config -q
+      - name: Compose jar names match pom outputs
+        run: python3 scripts/check-compose-artifacts.py
 
   # C5 签名 e2e 首次接进门禁。
   #
