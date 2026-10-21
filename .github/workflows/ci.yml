@@ -1569,13 +1569,17 @@ jobs:
           key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
           restore-keys: |
             mvn-${{ runner.os }}-
-      - name: Compile cloud-backend (main + tests)
-        run: mvn -B -pl cloud-backend -am test-compile -DskipTests
+      - name: Compile and install cloud-backend (install ⇒ 兄弟模块进本地 m2)
+        # 为什么要 install 而不是 package：下一步的 PIT 是**单独一次 mvn 调用**，
+        # reactor 里只有 cloud-backend，它要解析兄弟模块（aerofleet-mavlink-core /
+        # aerofleet-drone-sim）只能从**本地 m2** 找 —— 只 package 的话那些 jar 不在 m2，
+        # PIT 会在 "dependency: io.aerofleet:aerofleet-mavlink-core:jar:0.1.0-SNAPSHOT
+        # not found" 上直接失败（本机 m2 里恰好有旧 jar 才没暴露出来）。
+        run: mvn -B -pl cloud-backend -am install -DskipTests -Djacoco.skip=true
       - name: Mutation test (PIT, security package)
         # 刻意**不加 -am**：profile 的 targetClasses 指向 io.aerofleet.cloud.security.*，
         # 带 -am 会让 PIT 在上游模块（mavlink-core 等）上各跑一遍，而那边没有匹配的类
-        # ⇒ 插件报"没找到变异体"把构建打断。上一行的 test-compile 已经带 -am，
-        # 依赖模块在同一个 reactor 里编好了，这里不需要。
+        # ⇒ 插件报"没找到变异体"把构建打断。上一行的 install 已经把依赖装进本地 m2。
         run: mvn -B -pl cloud-backend -Pmutation pitest:mutationCoverage
       - name: Mutation baseline gate self-test
         run: python3 scripts/check-mutation-baseline.py --self-test
