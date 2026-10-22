@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-21 共有 172 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-23 共有 175 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,13 +31,195 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 172 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 175 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
 ---
 
 
+
+---
+## [Unreleased] — 离线自治子包零测试：36 个用例把"断网报警不丢"钉住（2026-10-23）
+
+### 1. 现场：卖点最硬的地方，一行断言都没有
+
+`surveillance.offline` 是"灾害断网后布控球仍能本地报警、联网补传"的落点，三个类 914 行、零测试。
+
+上一轮安防变异审计的 PIT 报告（809 个变异体）里，这个子包贡献 **121 个 NO_COVERAGE**，占全部未覆盖（279）的 43%：
+
+| 类 | 变异体 | 补测试前 |
+
+|---|---:|---|
+
+| `EdgeAiTrigger` | 35 | 全部 NO_COVERAGE |
+
+| `OfflineAlarmCache`（含内部类） | 38 | 全部 NO_COVERAGE |
+
+| `OfflineAlarmController` | 48 | 全部 NO_COVERAGE |
+
+这些是**覆盖缺口**（压根没测），不是行为等价。断网报警的容量驱逐、失败重试、上传降级一旦写错就直接丢报警，而 CI 里没有任何东西会红。
+
+### 2. 补了什么（36 例，直接调方法，不起 Spring 上下文）
+
+| 测试类 | 例数 | 钉住的契约 |
+
+|---|---:|---|
+
+| `EdgeAiTriggerTest` | 11 | 默认只开 PERSON+FIRE；火灾必须 CRITICAL；未启用类型不缓存；缓存缺失返回 false 而非 NPE；车辆/动物/火灾三条映射与默认描述；按类型计数 |
+
+| `OfflineAlarmCacheTest` | 13 | 超容量 FIFO 驱逐最旧；`getPendingAlarms()` 是快照；上传成功才清空；失败事件放回队列；连续失败 10 次停手；统计的最旧/最新时间戳 |
+
+| `OfflineAlarmControllerTest` | 12 | 依赖缺失一律 **503**（不是 500/NPE）；body 非数组 400；缺 deviceId 拒收并回报 rejected；flush 无 store 报 **503+degraded**；TRIGGERED/SKIPPED 语义；configure 生效 |
+
+写测试时确认的两条既有边界（不是 bug，但现在被钉住，改行为会红）：
+
+- 连续失败 **10** 次即停止本轮上传：12 条全失败时这一轮只尝试 10 条，剩余仍留在队列里等下次。
+
+- 缓存满（默认 **500**）时 FIFO 驱逐最旧事件：断网足够久时最早的报警会被丢，只留一行日志。这是设计取舍，但它现在是被测过的取舍。
+
+### 3. 实测
+
+- 三个测试类 **36 例全绿**（11 + 13 + 12）。
+
+- 全量 `mvn clean test`：**5033 用例 / cloud-backend 2927 / 0 失败**（585 个测试类）。
+
+- 变异复测（同一把尺子、同一个包，合并 #140 的 3 例后）：杀掉 **427 → 546**、未覆盖 **279 → 159**、存活 **98 → 97**；变异分数 **0.8057 → 0.8400**（+3.4pp），测试强度（PIT 口径）**0.8133 → 0.8491**。offline 子包 121 个变异体里 117 个被跑到、杀掉 112，只剩 3 个（已逐条复现定性为无害）。
+
+- `check-test-count-docs.py` 与卫生门禁（小节数）一致。
+
+- 覆盖率棘轮：新增 45 例把 cloud-backend 实测行覆盖率推到 **70.4%**，按「实测向下取整到 5%」的策略，pom 的 jacoco 声明从 0.65 抬到 **0.70**（`ci-coverage-threshold.sh --strict` 要求声明 == 策略值，否则构建判红）。
+
+- 插曲（也是这轮唯一的真事故）：给上面那条 pom 注释写了 `--strict`，而 **XML 注释不允许出现连续两个连字符**，整个 POM 变成 Non-parseable —— 缓存预热 / Java 26 编译 / Playwright / compose 四个 job 连锁红，2.5 小时队列末尾才暴露。修掉，并把「全部 pom 可解析 + 注释无 `--`」加进卫生门禁（检查项 2.5，自测 7/7），`docs/agent-constraints.md` 新增第 13 条。
+
+### 4. 顺带修了门禁自己的一处"声明≠行为"
+
+`scripts/check-mutation-baseline.py` 的 `testStrength` 一直算 `(KILLED+NO_COVERAGE)/total`，而同一次 PIT 汇总行打印的是 `Mutations with no coverage 159. Test strength 85%`（= `KILLED/(KILLED+SURVIVED)`）。两个数不是一个东西：旧口径把**没测到的变异体算成"强度"**，于是"给零覆盖子包补测试"会让这个指标下降 —— 本轮实测撞上：杀掉 +119、未覆盖 −120，变异分数 +3.4pp，旧口径的"强度"却从 0.8727 掉到 0.8714，门禁判红。
+
+修法：改成 PIT 口径；`--self-test` 加一条**能区分两种口径**的夹具（50 killed / 15 survived / 35 no-coverage：旧口径 0.85 假绿，新口径 0.769 必须红）。两份基线同步订正：security 0.86 → 0.84、surveillance 0.8727 → 0.83（按新口径重算并向下取整留抖动余量）；surveillance 的分数基线从 0.8057 **抬到** 0.82，不是降。
+
+### 5. 没做什么
+
+- 没改任何生产代码：本轮只补测试，行为零变更。
+
+- 厂商适配器（Onvif / GB28181 / Hikvision / Dahua）与 `SurveillanceDeviceRegistry` 的存活变异体不在本轮范围，见 `docs/todo.md` P1。
+
+## [Unreleased] — 安防包两条 P0：`flush()` 和“离线落库”删掉都没人发现（2026-10-23）
+
+### 1. 现场：不是“没测到”，是“测了没盯住”
+
+2026-10-22 的安防包变异审计（PR #139）里，有两条存活变异体特别扎眼 ——
+**把生产代码里的一个动作整行删掉，581 个测试类照样全绿**：
+
+| 生产代码里的动作 | 删掉之后 | 用户看到什么 |
+|---|---|---|
+| `MjpegStreamService.pump` 写完一段 multipart 后 `out.flush()` | PIT 变异体 “removed call to OutputStream::flush” **存活** | 浏览器可能一直收不到帧：面板在转圈，但接口是 200 |
+| `SurveillanceDeviceRegistry.pruneStaleDevices` 里的 `persistStaleStatus(stale)` | PIT 变异体 “removed call to persistStaleStatus” **存活** | 内存里设备已标 OFFLINE，数据库还是 ONLINE；重启后又“活”过来 |
+
+### 2. 修法：动作级契约（不是“多跑几行覆盖率”）
+
+新增 `SurveillanceStreamAndPruneContractTest`（3 例）：
+
+1. `pumpMustFlushAfterWritingPart` —— 用一个**会数 flush 次数**的 `OutputStream`，
+   断言写完首帧后 `flush()` 至少被调用一次；
+2. `pruneStaleDevicesMustPersistOfflineStatus` —— mock 仓库，断言超时设备被置 OFFLINE
+   **并且真的 `save` 了状态为 OFFLINE 的实体**；
+3. `pruneMustKeepFreshDevices` —— 守卫：心跳新鲜的设备不能被误杀、不能触发落库。
+
+### 3. 变异验证：改坏 ⇒ 红；还原 ⇒ 绿（脚本化）
+
+新增 `scripts/mutate-verify.py`（带 `--self-test`），把“改坏 / 跑 / 还原 / 再跑”做成一条命令：
+
+```
+python scripts/mutate-verify.py --file .../MjpegStreamService.java \
+  --old '<原文>' --new '<改坏>' --test 'SurveillanceStreamAndPruneContractTest#pumpMustFlushAfterWritingPart'
+```
+
+实测（本机，两条都跑完整一对）：
+
+- 删 `flush()` ⇒ `pumpMustFlushAfterWritingPart` **红**（退出码 1）；还原 ⇒ **绿**；
+- 删 `persistStaleStatus(stale)` ⇒ `pruneStaleDevicesMustPersistOfflineStatus` **红**；还原 ⇒ **绿**。
+
+### 4. 顺带纠正一个测量坑：还原源文件会把时间戳也还原
+
+手工 `Copy-Item` 还原源文件时，**LastWriteTime 回到旧值** ⇒ Maven 增量编译判定“源码没变”，
+继续用变异后的 `.class`。表现是“还原后用例仍然红”，差点被我误判成“用例不稳定”。
+已写进 `docs/agent-constraints.md` 第 12 条，并由 `mutate-verify.py` 在还原时 `os.utime` 机械避免。
+
+### 5. 计数
+
+Java **4988 → 4991**（新增 3 个用例），cloud-backend **2882 → 2885**；
+前端 vitest **382** 不变，REST 端点 **409** 不变。
+
+---
+
+## [Unreleased] — 安防包的变异审计：809 个变异体只杀掉一半，四个厂商适配器的校验没人盯（2026-10-22）
+
+### 1. 现场：同一套方法论搬到安防包，分数明显更低
+
+2026-10-21 审完 security 包（变异分数 0.84）后，同样的方法论搬到
+`io.aerofleet.cloud.surveillance.*`（34 个主类 / 14 个测试类）：
+
+| 指标 | security 包 | surveillance 包 |
+|---|---|---|
+| 变异体总数 | 767 | 809 |
+| 杀掉 | 566 | **427** |
+| 存活 | 102 | **98** |
+| 未覆盖 | 97 | **279** |
+| 变异分数 | 0.84 | **0.8057** |
+
+⇒ 这个包的**未覆盖面大得多**（279 个，集中在 `surveillance.offline.*`：
+`EdgeAiTrigger` / `OfflineAlarmCache` / `OfflineAlarmController` **一个测试都没有**）——
+那是**覆盖缺口**（压根没测到），与"测了但没盯住"是另一件事，两类要分开记账。
+
+### 2. 真缺口（逐条手动复现过：改坏生产代码 ⇒ 现有测试照样全绿）
+
+1. **四个厂商适配器的 `validateDevice` 调用被删掉，没有任何测试会红**
+   （Hik / Uniview / Dahua / Gb28181 的 `getStreamUrl` / `ptzControl` /
+   `subscribeEvents` / `getCapabilities`，合计 **14 个存活变异体**）
+   ⇒ 传 null 设备时从"抛 `IllegalArgumentException`"退化成 `NullPointerException`；
+   传空 IP 时直接拿空地址去拼流 URL。
+2. **`RapidDeployService.extractLastOctet`（设备 ID 里的 IP 末段）没被钉住**
+   （**11 个存活变异体**）⇒ 设备 ID 会变成 `cam-0-...`，同网段设备 ID 撞车、认不出设备。
+3. **GB28181 适配器的"只收 GB28181 设备"这条约束没被钉住** ⇒ 别的厂商的设备能被它接走。
+
+⇒ 新增 `SurveillanceValidationContractTest`（6 个用例）把上面三条钉死。
+**变异验证**（改坏生产代码 ⇒ 对应用例必须红）：
+
+| 改坏的地方 | 变红的用例 |
+|---|---|
+| 删掉 `HikAdapter.getCapabilities` 的 `validateDevice` 调用 | `adaptersRejectNullDevice` |
+| 删掉 `Gb28181Adapter.getCapabilities` 的 `validateDevice` 调用 | `adaptersRejectNullDevice`、`gb28181AdapterRejectsForeignVendor` |
+| 把 `extractLastOctet` 改成恒返回 `"0"` | `generatedDeviceIdCarriesIpLastOctet` |
+
+⇒ **实测**效果（同一把尺子、同一个包、只多了这一个测试类）：
+杀掉 **409 → 427**，存活 **116 → 98**，变异分数 **0.7717 → 0.8057（+3.4pp）**。
+
+### 3. 两条我自己的诊断被推翻（都写进文档）
+
+- `RapidDeployService.validateSubnet` 的调用被删掉（2 个存活变异体）——
+  **手动复现后发现是行为等价的**：`OnvifClient.discoverDevices` 里**也**校验空子网，
+  删掉一处校验异常照样抛（只是抛的地方变了）⇒ **不是真缺口**，显式声明无害。
+- 四个适配器的"空 IP"分支看似不可达（`SurveillanceDevice` 构造器就拒空 IP）——
+  但 `SurveillanceDevice.ip` 是**公开可变字段**，构造之后可被改坏 ⇒ 该分支**可达**，
+  用例按"构造后把 ip 置 null"来测。
+
+### 4. 把第二个包接进 CI 门禁
+
+- 根 pom 新增 `mutation-surveillance` profile（与 `mutation` 同构、换目标包）；
+  两个 profile 各自配 `reportsDirectory` ⇒ **报告目录分开**
+  （否则第二次 PIT 会覆盖第一次 ⇒ 基线张冠李戴）。
+- `scripts/mutation-baseline-surveillance.json`：**独立基线**
+  （一个包的涨分不能掩盖另一个包的退步）；数值由 `--write-baseline` 写入，不手抄。
+- CI `mutation-gate` job：两个包各跑各的、各判各的，**缺报告即判红**（跳过不等于通过）。
+
+### 5. 计数
+
+Java **4979 → 4985**（新增 6 个用例），前端 vitest **382** 不变，REST 端点 **409** 不变。
+
+---
+
+---
 
 ---
 

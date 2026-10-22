@@ -83,6 +83,9 @@ jobs:
           python3 scripts/check-revert-looking-diff.py --self-test
           python3 scripts/check-claimed-endpoint-count.py --self-test
           python3 scripts/check-frontend-endpoints.py --self-test
+          # 变异验证的还原必须刷新时间戳，否则增量编译会继续用改坏的 .class
+          # （2026-10-22 踩过，见 docs/agent-constraints.md 第 12 条）
+          python3 scripts/mutate-verify.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
@@ -1593,10 +1596,10 @@ jobs:
   # 再由 scripts/check-mutation-baseline.py 对基线判红（变异分数是**棘轮**，
   # 不许低于基线；报告缺失/损坏一律判红 —— 跳过不等于通过）。
   mutation-gate:
-    name: Mutation baseline gate (security package)
+    name: Mutation baseline gate (security + surveillance packages)
     runs-on: ubuntu-24.04
-    # 本机实测 15 分钟（共享 runner 更慢，留够余量）；超时是安全网，不是常态。
-    timeout-minutes: 45
+    # 本机实测两个包各约 15 分钟（共享 runner 更慢，留够余量）；超时是安全网，不是常态。
+    timeout-minutes: 75
     needs: [ maven-warm ]
     steps:
       - uses: actions/checkout@v4
@@ -1626,9 +1629,15 @@ jobs:
         # 带 -am 会让 PIT 在上游模块（mavlink-core 等）上各跑一遍，而那边没有匹配的类
         # ⇒ 插件报"没找到变异体"把构建打断。上一行的 install 已经把依赖装进本地 m2。
         run: mvn -B -pl cloud-backend -Pmutation pitest:mutationCoverage
+      - name: Mutation test (PIT, surveillance package)
+        # 第二个包的变异分数**单独记基线**（scripts/mutation-baseline-surveillance.json）：
+        # 一个包的涨分不能掩盖另一个包的退步。
+        # 报告目录与 security 包**分开**（profile 里配的 reportsDirectory），
+        # 否则第二次跑会把第一次的报告覆盖掉 ⇒ 基线张冠李戴。
+        run: mvn -B -pl cloud-backend -Pmutation-surveillance pitest:mutationCoverage
       - name: Mutation baseline gate self-test
         run: python3 scripts/check-mutation-baseline.py --self-test
-      - name: Mutation baseline gate
+      - name: Mutation baseline gate (security)
         run: |
           if [ ! -f cloud-backend/target/pit-reports/mutations.xml ]; then
             echo "::error::PIT 没有产出报告 —— 变异门禁本次无法判定，直接判红（跳过不等于通过）"
@@ -1637,6 +1646,29 @@ jobs:
           fi
           python3 scripts/check-mutation-baseline.py \
             --report cloud-backend/target/pit-reports/mutations.xml
+      - name: Mutation baseline gate (surveillance)
+        run: |
+          if [ ! -f cloud-backend/target/pit-reports-surveillance/mutations.xml ]; then
+            echo "::error::PIT 没有产出 surveillance 报告 —— 变异门禁本次无法判定，直接判红（跳过不等于通过）"
+            ls -la cloud-backend/target/pit-reports-surveillance/ 2>/dev/null || true
+            exit 1
+          fi
+          python3 scripts/check-mutation-baseline.py \
+            --report cloud-backend/target/pit-reports-surveillance/mutations.xml \
+            --baseline scripts/mutation-baseline-surveillance.json
+      # 报告必须上传：判定为红时更需要它 —— 否则只能看到"分数回退"，
+      # 看不到**具体是哪些变异体**在 CI 上存活（2026-10-22 就卡在这里：
+      # 本地杀掉 427、CI 杀掉 424，3 个变异体漂移，没有报告无法定位）。
+      - name: Upload PIT reports (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pit-reports
+          path: |
+            cloud-backend/target/pit-reports/mutations.xml
+            cloud-backend/target/pit-reports-surveillance/mutations.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   # 数据库**升级**演练。**硬门禁**。
   #

@@ -2,7 +2,7 @@
   "scope": "io.aerofleet.cloud.security.*",
   "tool": "pitest 1.15.0 (mvn -pl cloud-backend -Pmutation pitest:mutationCoverage)",
   "measuredAt": "2026-10-21",
-  "note": "变异分数是**棘轮**：只能涨不能跌。基线取实测值**向下取整到 2 位小数**（留 0.3pp 的运行间抖动余量），所以 CI 上测出 0.843x 也算通过；真回退（掉几个百分点）会红。改基线必须手改本文件（会在 PR diff 里显形）。",
+  "note": "变异分数是**棘轮**：只能涨不能跌。基线取实测值**向下取整到 2 位小数**（留 0.3pp 的运行间抖动余量），所以 CI 上测出 0.843x 也算通过；真回退（掉几个百分点）会红。改基线必须手改本文件（会在 PR diff 里显形）。 **2026-10-23 订正**：testStrength 改用 PIT 自己的口径 killed/(killed+survived)；旧实现 (killed+noCoverage)/total 会把未覆盖算成强度。",
   "total": 767,
   "killed": 566,
   "survived": 102,
@@ -10,12 +10,12 @@
   "timedOut": 2,
   "runError": 0,
   "mutationScore": 0.84,
-  "testStrength": 0.86,
+  "testStrength": 0.84,
   "beforeAudit": {
     "killed": 538,
     "survived": 116,
     "noCoverage": 111,
     "mutationScore": 0.8201,
-    "testStrength": 0.8462
+    "testStrength": 0.82
   }
 }

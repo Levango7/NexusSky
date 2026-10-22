@@ -176,7 +176,9 @@
                     <limit>
                       <counter>LINE</counter>
                       <value>COVEREDRATIO</value>
-                      <minimum>0.65</minimum>
+                      <!-- 2026-10-23 由 0.65 抬到 0.70：补 45 例测试后实测 70.4%；
+                           覆盖率门禁(strict)要求声明值等于实测向下取整到 5%。 -->
+                      <minimum>0.70</minimum>
                     </limit>
                   </limits>
                 </rule>

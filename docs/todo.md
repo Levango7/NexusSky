@@ -1,0 +1,79 @@
+# 待办清单：按"证据 + 验收标准"排，不按愿望排
+
+> **这份清单的规矩**：每一条都必须有**可核对的证据**（文件:行 / 门禁输出 / 变异体数），
+> 以及**能验收的标准**（做完之后哪个门禁或哪个用例会变）。没有证据的条目不许进这里。
+>
+> 维护方式：做完一条就在下面划掉并写明"哪次 PR 做的"；**不要删条目**——
+> 删掉就等于"没人知道它曾经存在"，而这正是本仓库主线一直在清的那个病。
+>
+> 最后更新：2026-10-23
+
+---
+
+## P0 —— 今天审计直接查出的，证据最硬
+
+**当前无未处理条目**：3 条已全部清掉 —— #1 由本轮（PR #139）清；
+#2/#3 由原 #140（已并入 #139）清（`SurveillanceStreamAndPruneContractTest` 3 例 + `scripts/mutate-verify.py` 改坏⇒红、还原⇒绿）。
+
+> 这三条的共同形状：**删掉生产代码里的一个动作，没有任何测试会红**。
+> 这类"行为等价 vs 真缺口"的判定必须**手动复现**（`docs/agent-constraints.md` 第 9 条），
+> 复现过才能写进清单。
+
+## P1 —— 变异审计的剩余存活变异体（不是"没测到"，是"测了没盯住"）
+
+| # | 条目 | 证据 | 验收标准 |
+|---|---|---|---|
+| 4 | **四个厂商适配器的 `extractPrefix`（CIDR 前缀解析）没被钉住** | Hik / Uniview / Dahua / Gb28181 各 3–4 个存活变异体（边界/取反/返回空串） | 四个适配器的前缀解析各有边界用例（带 `/`、不带 `/`、无点、末尾有点） |
+| 5 | **`SurveillanceDeviceRegistry` 的谓词没被钉住** | `getDevice` / `listDevicesByVendor` / `listDevices` 共 14 个存活变异体 | 过滤条件（按厂商、按 ID）各有反例用例 |
+| 6 | **`OnvifClient` / `OnvifVendorAdapter` 剩余 9 个存活** | PIT 报告 | 逐条手动复现后定性（同上） |
+| 7 | **security 包的 102 个存活变异体尚未逐条分诊** | 2026-10-21 只审出 4 处真缺口（限流阈值 / XFF 信任 / 密钥掩码 / 口令哈希），其余未定性 | 全部手动复现并分成"真缺口 / 行为等价 / 覆盖缺口"三类 |
+
+## P1 —— 前端端点契约门禁里登记的 6 条已知缺口
+
+`scripts/check-frontend-endpoints.py` 的 `KNOWN_GAPS`（**是债务登记，不是豁免**）：
+修好一条就从那里删一条，门禁会提醒。
+
+| # | 缺口 | 为什么还没修 | 验收标准 |
+|---|---|---|---|
+| 8 | `GET /api/v1/env/status` | 气象图层要"机队级环境状态"读口径；后端只有 POST 覆盖写 + `/env-alerts` | 后端补读端点 + 前端改指向 |
+| 9 | `GET /api/v1/link-sim/profiles` | 后端口径在 `/api/v1/comm-adapt/quality/*`，**返回形状不同** ⇒ 不是纯路径替换，要改面板取数逻辑 | 面板改读真实形状 |
+| 10 | `GET /api/v1/link-sim/status` | 同上 | 同上 |
+| 11 | `POST /api/v1/link-sim/damage` | 链路损伤注入，后端无对应能力 | 要么实现，要么前端显式禁用并写明原因（像物理模型按钮那样） |
+| 12 | `GET /api/v1/vision/thermal/sources` | 后端只有 `/api/v1/thermal/tasks`（任务），没有"源"的概念 | 补"源"的概念或前端改读任务列表 |
+| 13 | `POST /api/v1/hardware/physics-model` | 概念只在模拟器 `VirtualDrone.physicsModel`，**没有 MAVLink 下发通道** ⇒ 按钮已显式禁用并写明原因 | 要接下发通道才谈得上实现 |
+
+## P2 —— 产品级缺口（量级大，先把口径钉住再动）
+
+| # | 条目 | 现状 | 备注 |
+|---|---|---|---|
+| 14 | **厂商 SDK 全是桩** | 海康/大华/宇视/GB28181 适配器都是模拟实现，媒体面未实现 | ONVIF **协议级**优先（`gb28181-invite://` 这类描述性标识不能当可播流） |
+| 15 | **10+ 个模块只存内存** | 业务模块的产出没落库，重启即失 | 逐个模块列出"落库缺什么" |
+| 16 | **UOM `sink-type` 未落地** | 默认 Noop | 机巢/监管上报的真实去向 |
+| 17 | **机巢只有 sim** | 机巢 MQTT 未接 | 硬件到位再动 |
+| 18 | **死枚举 / 空端点** | 审计期发现的历史遗留 | 需要一次全仓扫描确认清单 |
+
+---
+
+## 已清零（留档：别重复劳动）
+
+| 条目 | 清在哪 | 证据 |
+|---|---|---|
+| **前端 7 处 404**（前端在调后端没有的端点，404 被 `.catch(() => null)` 静默吞掉） | PR #137 | `scripts/check-frontend-endpoints.py`：238 处调用全部对得上后端 |
+| **端点数门禁自己的文法盲区**（9 处「358 个端点」活过了它，而它报的是「通过」） | PR #135 | 门禁自测 6 条，含表格行文法与限定词写法 |
+| **演练脚本的假 PASS**（`pg_dump` 没带密码却照样打印"已备份"） | PR #134 | 备份步骤三道检查：退出码 / 产物非空 / `pg_restore --list` 里真有表 |
+| **SPI 9 个开关接线** | 已被别的会话清掉 | `scripts/check-spi-coverage.py`：接口 13 / 实现 35 / **未验 0 / 豁免 0** |
+| **限飞区不入命令拦截链**（平台能指挥无人机飞进民航禁飞区） | PR #136 | `GeofenceInterceptRestrictionTest` 7 例 + 变异验证 |
+| **轨迹 `ts` 永远是 0**（当天历史轨迹被前端去重成一个点） | PR #134 | `FlightLogPersistenceTest` + 变异验证 |
+| **security 包 4 处安全行为没人盯**（限流阈值 / XFF 信任 / 密钥掩码 / 口令哈希） | PR #130 | `scripts/check-mutation-baseline.py` 棘轮门禁 |
+| **`surveillance.offline.*` 子包零测试**（121 个变异体全是 NO_COVERAGE，占全仓未覆盖的 43%） | PR #139 | 36 例：`EdgeAiTriggerTest` 11 / `OfflineAlarmCacheTest` 13 / `OfflineAlarmControllerTest` 12；PIT 复测 杀掉 427→535、分数 0.8057→0.8269、未覆盖 279→162（offline：112 杀 / 3 存活已定性 / 4 未覆盖） |
+| **`MjpegStreamService.pump` 的 `flush()` 没人盯**（删掉照样全绿） | PR #140 | `SurveillanceStreamAndPruneContractTest` 3 例 + `scripts/mutate-verify.py` 改坏⇒红、还原⇒绿 |
+| **`SurveillanceDeviceRegistry.pruneStaleDevices` 的 `persistStaleStatus` 没人盯** | PR #140 | 同上（同一组动作级契约） |
+
+---
+
+## 怎么用这份清单
+
+1. **先看 P0**：证据最硬、影响最直接；
+2. 每条按"**改坏生产代码 ⇒ 对应用例必须红**"的方式验收（变异验证），
+   否则新写的用例可能又是一个摆设；
+3. 做完一条：划掉 + 写 PR 号 + 把证据补进对应门禁（让门禁以后能拦住回退）。

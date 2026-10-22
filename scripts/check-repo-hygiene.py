@@ -47,6 +47,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -129,6 +130,28 @@ def check_repo(root=None):
         sections = len(re.findall(r"(?m)^## \[Unreleased\]", text))
         problems += check_changelog_claims(text, sections)
 
+    # --- 2.5 pom 可解析 ---
+    # 一个 pom 写坏（比如 XML 注释里出现 "--"，XML 语法不允许），Maven 在 CI 里
+    # 全线 "Non-parseable POM"：缓存预热、Java 各版本编译、E2E、compose 一起红，
+    # 而且要到 2.5 小时的队列里才暴露（2026-10-23 实测踩到）。这里秒级拦住。
+    for rel in [f for f in git("ls-files", root=base).split("\n") if f.strip()]:
+        norm = rel.replace("\\", "/")
+        if norm != "pom.xml" and not norm.endswith("/pom.xml"):
+            continue
+        p = os.path.join(base, rel.replace("/", os.sep))
+        if not os.path.isfile(p):
+            continue
+        with open(p, encoding="utf-8") as f:
+            ptext = f.read()
+        for m in re.finditer(r"<!--(.*?)-->", ptext, re.S):
+            if "--" in m.group(1):
+                problems.append("%s: XML 注释里含连续连字符（XML 不允许，整个 POM 会解析失败）" % norm)
+                break
+        try:
+            ET.parse(p)
+        except ET.ParseError as e:
+            problems.append("%s 不是合法 XML：%s" % (norm, str(e)[:90]))
+
     # --- 3/4. 合并残留 / 构建产物 ---
     for rel in [f for f in git("ls-files", root=base).split("\n") if f.strip()]:
         if rel.lower().endswith(RESIDUE_EXT):
@@ -198,6 +221,27 @@ def self_test():
         pr = check_repo(tmp)
         ok["干净不误拦"] = (pr == [])
 
+        # pom 的 XML 注释里出现 "--"：2026-10-23 实测把 7 个 CI job 一起带红
+        mod = os.path.join(tmp, "mod")
+        os.makedirs(mod, exist_ok=True)
+        pom = os.path.join(mod, "pom.xml")
+        with open(pom, "w", encoding="utf-8", newline="") as f:
+            f.write("<project><!-- 传 --strict 参数 --><x/></project>")
+        run("add", "-A")
+        pr = check_repo(tmp)
+        ok["pom 注释里的连续连字符被拦"] = any("连续连字符" in x for x in pr)
+
+        with open(pom, "w", encoding="utf-8", newline="") as f:
+            f.write("<project><x>")
+        run("add", "-A")
+        pr = check_repo(tmp)
+        ok["非法 XML 的 pom 被拦"] = any("不是合法 XML" in x for x in pr)
+
+        os.remove(pom)
+        run("add", "-A")
+        pr = check_repo(tmp)
+        ok["pom 修好后不误拦"] = (pr == [])
+
         for k, v in ok.items():
             print("  [%s] %s" % ("PASS" if v else "FAIL", k))
         return 0 if all(ok.values()) else 1
@@ -219,7 +263,7 @@ def main():
         if len(problems) > 40:
             print("  ... 其余 %d 项省略" % (len(problems) - 40))
         return 1
-    print("仓库卫生门禁：通过（无冲突标记、CHANGELOG 自洽、无合并残留、无构建产物入库、无疑似回退式改动）")
+    print("仓库卫生门禁：通过（无冲突标记、CHANGELOG 自洽、pom 可解析、无合并残留、无构建产物入库、无疑似回退式改动）")
     return 0
 
 
