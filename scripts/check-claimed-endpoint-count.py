@@ -39,9 +39,13 @@ SRC = os.path.join(ROOT, "cloud-backend", "src", "main", "java")
 CLASS_ANNO = re.compile(r"@RestController\b")
 MAPPING = re.compile(r"@(Get|Post|Put|Delete|Patch)Mapping\b")
 # 「N 端点」这种窄口径 —— 误报比漏检贵（门禁一旦有噪声就会被整体忽略）
-CLAIM = re.compile(r"(\d+)\s*端点")
+# 文法说明：数字与「端点」之间允许出现限定词（个/条/REST/API/HTTP）。
+# 之前只认「N 端点」，于是「358 REST 端点」「358 个 API 端点」这类写法全部漏检 ——
+# 2026-10-21 实测就是这样让 8 处过期声称活过了门禁（门禁当时报的是「通过」）。
+CLAIM = re.compile(r"(\d+)\s*(?:(?:个|条|REST|API|HTTP)\s*)*端点")
 # 会被核对端点数的文档
 DOCS = ("README.md",
+        "docs/api-reference.md",
         "docs/contributing-guide.md",
         "docs/customer-onboarding-guide.md",
         "docs/pricing-strategy.md",
@@ -64,7 +68,14 @@ def measure(src=SRC):
     return endpoints, classes
 
 
-def check_claims(docs, actual, root=None):
+# 控制器**类数**的声称（文档里也常写「共 78 个 @RestController」）——
+# 2026-10-21 实测：这一类声称此前没人管，README 与 api-reference 里都还写着
+# 「67 个 @RestController」（实测 78）。
+CLASS_CLAIM = re.compile(r"(\d+)\s*个\s*@RestController")
+CLASS_CLAIM_BACKTICK = re.compile(r"(\d+)\s*个\s*`@RestController`")
+
+
+def check_claims(docs, actual, root=None, actual_classes=None):
     """返回不一致列表 [(文件:行号, 声称, 实测)]。"""
     problems = []
     for rel in docs:
@@ -75,9 +86,31 @@ def check_claims(docs, actual, root=None):
             lines = f.read().replace("\r\n", "\n").split("\n")
         for i, line in enumerate(lines, 1):
             for m in CLAIM.finditer(line):
+                # 增量不是总数：「（+ 5 个端点、12 例测试）」说的是"新增了 5 个"，
+                # 不是"项目一共 5 个端点"。按总数去比会误报（2026-10-21 实测撞到过）。
+                lead = line[max(0, m.start() - 8):m.start()]
+                if re.search(r"(?:\+|新增|新加|增加|又增|额外)\s*$", lead):
+                    continue
                 claimed = int(m.group(1))
                 if claimed != actual:
                     problems.append((rel, i, claimed, actual))
+            # 表格行里的声称：`| 358 | REST API 端点数量 |` —— 数字与「端点」分处两格，
+            # 上面的行内文法看不到（2026-10-21 实测漏掉了 4 处这种）。
+            stripped = line.strip()
+            if stripped.startswith("|") and stripped.endswith("|"):
+                cells = [c.strip() for c in stripped.strip("|").split("|")]
+                if any("端点" in c for c in cells):
+                    for c in cells:
+                        if re.fullmatch(r"\d+", c) and int(c) != actual:
+                            problems.append((rel, i, int(c), actual))
+                            break
+            # 控制器类数的声称（实测 78）
+            if actual_classes:
+                for pat in (CLASS_CLAIM, CLASS_CLAIM_BACKTICK):
+                    for m in pat.finditer(line):
+                        if int(m.group(1)) != actual_classes:
+                            problems.append((rel, i, int(m.group(1)), actual_classes, "classes"))
+                            break
     return problems
 
 
@@ -110,7 +143,33 @@ def self_test():
         pr = check_claims(("README.md",), actual, root=tmp)
         not_caught = (len(pr) == 0)
         print("  [%s] 一致时不误报" % ("PASS" if not_caught else "FAIL"))
-        return 0 if (ok and caught and not_caught) else 1
+
+        # 文法盲区的补一条：数字与「端点」之间夹了限定词的写法，也必须被抓到
+        # （否则「358 REST 端点」这类旧声称能活过门禁 —— 2026-10-21 实测就是这样
+        #   让 8 处过期声称留在了文档里，而门禁报的是「通过」）。
+        with open(doc, "w", encoding="utf-8") as f:
+            f.write("共 358 REST 端点\n")
+        pr = check_claims(("README.md",), actual, root=tmp)
+        caught2 = (len(pr) == 1 and pr[0][2] == 358)
+        print("  [%s] 带限定词的写法（如 358 REST 端点）也被抓到"
+              % ("PASS" if caught2 else "FAIL"))
+
+        # 增量豁免：「+ 5 个端点」说的是"新增了 5 个"，不是"一共 5 个" ⇒ 不该按总数比
+        with open(doc, "w", encoding="utf-8") as f:
+            f.write("现新增 VideoFusionController（+ %d 个端点、12 例测试）\n" % 5)
+        pr = check_claims(("README.md",), actual, root=tmp)
+        delta_ok = (len(pr) == 0)
+        print("  [%s] 增量写法（如 + 5 个端点）不误报" % ("PASS" if delta_ok else "FAIL"))
+
+        # 控制器类数的声称也要有人管（2026-10-21 实测：README 与 api-reference 里
+        # 都还写着「67 个 @RestController」，实测 78，此前无人校验）
+        with open(doc, "w", encoding="utf-8") as f:
+            f.write("共 67 个 @RestController\n")
+        pr = check_claims(("README.md",), actual, root=tmp, actual_classes=classes)
+        cls_caught = (len(pr) == 1 and pr[0][2] == 67)
+        print("  [%s] 控制器类数的声称（如 67 个 @RestController）也被抓到"
+              % ("PASS" if cls_caught else "FAIL"))
+        return 0 if (ok and caught and not_caught and caught2 and delta_ok and cls_caught) else 1
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -119,14 +178,20 @@ def main():
     if "--self-test" in sys.argv:
         return self_test()
     actual, classes = measure()
-    problems = check_claims(DOCS, actual)
+    problems = check_claims(DOCS, actual, actual_classes=classes)
     print("实测端点数 = %d（%d 个 @RestController 类）" % (actual, classes))
     if problems:
         print("端点数声称门禁：%d 处与实测不一致" % len(problems))
-        for rel, line, claimed, act in problems:
-            print("  - %s:%d  声称 %d，实测 %d" % (rel, line, claimed, act))
+        for item in problems:
+            if len(item) == 5:
+                rel, line, claimed, act, kind = item
+                label = "控制器类数" if kind == "classes" else "端点数"
+                print("  - %s:%d  %s声称 %d，实测 %d" % (rel, line, label, claimed, act))
+            else:
+                rel, line, claimed, act = item
+                print("  - %s:%d  声称 %d，实测 %d" % (rel, line, claimed, act))
         print("")
-        print("  这些是文档里对外声称的数，与代码里的实际端点数对不上。")
+        print("  这些是文档里对外声称的数，与代码里的实际数对不上。")
         print("  改端点时文档要跟着改；本门禁用 scripts/count-rest-endpoints.py 的口径。")
         return 1
     print("端点数声称门禁：通过（文档声称 %d = 实测 %d）" % (actual, actual))

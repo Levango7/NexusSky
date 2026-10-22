@@ -617,7 +617,7 @@ DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理�
 - `GET /v1/disaster/status` 灾害模式状态 · `POST /v1/disaster/budget` Budget 模式切换
 - `POST /v1/buzzer/control` 蜂鸣器控制 · `GET /v1/thermal/search` 热源搜救
 
-> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 67 个 @RestController、358 REST 端点。
+> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 78 个 @RestController、406 REST 端点。
 
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
@@ -703,7 +703,7 @@ NexusSky/
 │   └── transport/      UDP 传输
 ├── drone-sim/           虚拟无人机（状态机 + 任务协议服务端 + 物理引擎 v2）
 ├── link-sim/            链路损伤代理（延迟/丢包/带宽/分区 + Mesh 中继）
-├── regulator-sim/       UOM 监管平台模拟器（6 个 HTTP 端点 + 延迟/错误率注入）
+├── regulator-sim/       UOM 监管平台模拟器（406 个 HTTP 端点 + 延迟/错误率注入）
 ├── cloud-backend/       Spring Boot 单体（网关/机队/任务/推送/安全/编排）
 │   └── 37 个功能包：ai, alarm, api, audit, autodispatch, citytwin, commadapt,
 │       config, delivery2, drone, edge, flightlog, gateway, geofence, health,
@@ -1027,7 +1027,7 @@ NexusSky/
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
-  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：358 个端点
+  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：406 个端点
   （193 GET/138 POST/13 PUT/14 DELETE）全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
   写=`OPERATOR`、配置/用户/密钥/租户/围栏/license 面=`ADMIN`，匿名入口只有登录与刷新两处
   `@PermitAll`；漏写注解由 `RbacEndpointCoverageTest` 反射逐个校验并判红，不靠文本扫描
@@ -1072,7 +1072,7 @@ NexusSky/
   审计日志（`audit_log` 表 + SHA-256 哈希链，默认仍纯内存、保留清理默认关闭）、
   围栏/追踪/安防设备等支持持久化测试；主数据仍为内存态，换数据库是包内替换
 - **视频融合面板（`VideoFusionPanel`）后端已补齐**（2026-10-03 第七轮核查发现当时未实现，
-  2026-10-06 补齐）：该面板（GCS `videofusion` 视图）调用的 4 个端点
+  2026-10-06 补齐）：该面板（GCS `videofusion` 视图）调用的 406 个端点
   `/api/v1/video-fusion/surveillance/streams`、`/drone/feeds`、
   `/recording/{id}/start|stop` 此前在后端**没有对应 Controller**，面板运行期必然 404——
   而 `videofusion` 已在 `EMERGENCY_STANDARD_PANELS`（"应急千元级"）里作为**已定价能力**
