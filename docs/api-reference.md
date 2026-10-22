@@ -2610,17 +2610,20 @@ es.onerror = (e) => {
 | 模块 | Controller | 基础路径 | 端点数 |
 |------|-----------|----------|--------|
 | 无人机控制 | DroneController | /api/v1/drones | 8 |
+| 机巢管理 | DockController | /api/v1/docks | 10 |
 | 无人机控制 | FlightLogController | /api/v1/flightlog | 2 |
 | 飞行追踪 | TrackingController | /api/v1/tracking | 6 |
 | 电子围栏 | GeofenceController | /api/v1/geofence | 7 |
 | 远程锁机 | DroneLockController | /api/v1/drone-lock | 6 |
-| 安防监控 | SurveillanceController | /api/v1/surveillance | 12 |
+| 安防监控 | SurveillanceController | /api/v1/surveillance | 14 |
+| 感知 | SensingController | /api/v1/sensing | 2 |
 | 报警联动 | AlarmController | /api/v1/alarms | 13 |
 | 应急指挥 | EmergencyCommandController | /api/v1/emergency-command | 10 |
 | 应急指挥 | EmergencyOrchController | /api/v1/emergency | 10 |
 | 编队表演 | FormationController | /api/v1/formation | 8 |
-| 喷洒物流 | SprayController | /api/v1/spray | 3 |
-| 喷洒物流 | DeliveryController | /api/v1/delivery | 4 |
+| 航线模板 | RouteTemplateController | /api/v1/route-templates | 1 |
+| 喷洒物流 | SprayController | /api/v1/spray | 4 |
+| 喷洒物流 | DeliveryController | /api/v1/delivery | 7 |
 | 视觉感知 | VisionController | /api/v1/vision | 4 |
 | 视觉感知 | ThermalController | /api/v1/thermal | 2 |
 | 视觉感知 | MultispectralController | /api/v1/multispectral | 2 |
@@ -2630,13 +2633,16 @@ es.onerror = (e) => {
 | 通信组网 | CellTowerController | /api/v1/celltowers | 6 |
 | 通信组网 | SatLinkController | /api/v1/sat-link | 8 |
 | 通信组网 | TerrainController | /api/v1/terrain | 4 |
-| 集群调度 | SchedulingController | /api/v1/scheduling | 11 |
+| 集群调度 | SchedulingController | /api/v1/scheduling | 13 |
 | 集群调度 | SquadController | /api/v1/squad | 3 |
 | AI 决策 | DecisionMonitorController | /api/v1/ai | 2 |
 | 边缘计算 | EdgeCoordinationController | /api/v1/edge | 3 |
 | 数字孪生 | TwinController | /api/v1/twin | 4 |
 | 环境气象 | EnvAlertController | /api/v1/env-alerts | 1 |
-| 安全认证 | AuthController | /api/v1/auth | 2 |
+| 环境覆盖 | EnvOverrideController | /api/v1/env | 3 |
+| 安全认证 | AuthController | /api/v1/auth | 3 |
+| 签名密钥 | MavlinkSigningKeyController | /api/v1/mavlink/signing | 2 |
+| 签名姿态 | MavlinkSigningPostureController | /api/v1/mavlink/signing/posture | 3 |
 | 审计日志 | AuditController | /api/v1/audit | 2 |
 | 许可证 | LicenseController | /api/v1/license | 3 |
 | 自动出警 | AutoDispatchController | /api/v1/autodispatch | 6 |
@@ -2650,6 +2656,7 @@ es.onerror = (e) => {
 | 健康管理 | MaintenanceController | /api/v1/maintenance | 6 |
 | 智能巡检 | InspectionController | /api/v1/inspection | 7 |
 | 智能巡检 | InspectionReportController | /api/v1/inspection/reports | 4 |
+| 运营报表 | OperationsReportController | /api/v1/operations | 1 |
 | 航拍测绘 | MappingController | /api/v1/mapping | 11 |
 | 编排管理 | OrchestrationController | /api/v1/orch | 8 |
 | 场景管理 | ScenarioTemplateController | /api/v1/scenarios/templates | 6 |
@@ -2670,11 +2677,14 @@ es.onerror = (e) => {
 | Webhook 管理 | WebhookController | /api/v1/webhooks | 3 |
 | OpenAPI 导出 | OpenApiExportController | /api/v1/openapi | 2 |
 | 监管合规 | RegulatorController | /api/v1/regulator | 5 |
+| ROC 上报 | RocController | /api/v1/roc | 8 |
+| 缺陷管理 | DefectController | /api/v1/defects | 9 |
 | Remote ID | RidController | /api/v1/rid | 5 |
+| U-space 空域 | UspaceController | /api/v1/uspace | 4 |
 | 限飞区 | RestrictionController | /api/v1/geofence | 4 |
 | 设备归属 | DeviceProvisioningController | /api/v1/devices | 4 |
 | 视觉感知 | CvEvalController | /api/v1/cv-eval | 2 |
 | 视频融合 | VideoFusionController | /api/v1/video-fusion | 5 |
-| **合计** | **78 个 @RestController** | | **406** |
+| **合计** | **78 个 @RestController** | | **409** |
 
-> **注**: 项目共 79 个 Controller 源文件（78 个 `*Controller.java`，含 `telemetry/EnvOverrideController` + `delivery2/DeliveryController2.java` + `surveillance/VideoFusionController`），其中 78 个为 `@RestController`。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。78 个 `@RestController` 共 409 个端点（216 GET / 163 POST / 14 PUT / 16 DELETE）。
+> **注**: 项目共 79 个 Controller 源文件（78 个 `*Controller.java`，含 `telemetry/EnvOverrideController` + `delivery2/DeliveryController2.java` + `surveillance/VideoFusionController`），其中 78 个为 `@RestController`。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。78 个 `@RestController` 共 409 个端点（216 GET / 163 POST / 14 PUT / 16 DELETE）。其中 `LicenseModuleMap` 与 `OpenApiConfig` 虽标注 `@RestController` 但不含任何方法级映射注解、不暴露 API，故下表列 76 行；端点数列之和即 409。

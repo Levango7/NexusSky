@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-21 共有 171 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-21 共有 172 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,13 +31,63 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 171 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 172 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
 ---
 
 
+
+---
+
+## [Unreleased] — 端点声称第三处残留：表格合计 406 ≠ 各行之和 357 ≠ 实测 409；deck 的数字锚点也停在上两个版本（2026-10-23）
+
+### 1. 现场：门禁报「通过」，但同一份文档里有三个互不相同的数
+
+`check-claimed-endpoint-count.py` 实测 **409**（78 个 `@RestController`），门禁也显示
+「文档声称 409 = 实测 409」——因为 README 与 api-reference 正文都已改成 409（#126 / #135 / #137 的功劳）。
+但同一份 `docs/api-reference.md` 里还有两处没跟上：
+
+| 位置 | 写的数 | 为什么门禁没拦 |
+|---|---|---|
+| 端点表合计行 | **406** | 表格单元格，`CLAIM` 正则吃不到 |
+| 同表 66 个数据行逐行相加 | **357** | 与 406 / 409 三个数互不相同 ⇒ 表格本身脱节 |
+| `docs/sales-pitch-deck.md` 的数字锚点 `（4336 / 51 / 406 / 38）` | 4336 / 406 | 四个数字并列，正则也吃不到；同文件另三处已是 4988 / 409 |
+
+### 2. 根因：表格是手工维护的，且从没有「各行之和 == 合计」这道校验
+
+- **5 个 Controller 的端点数变了、文档没跟上**：AuthController 2→3、DeliveryController 4→7、
+  SchedulingController 11→13、SprayController 3→4、SurveillanceController 12→14（合计 +9）。
+- **10 个 Controller 压根没登记**：DockController 10、DefectController 9、RocController 8、
+  UspaceController 4、EnvOverrideController 3、MavlinkSigningPostureController 3、
+  MavlinkSigningKeyController 2、SensingController 2、OperationsReportController 1、
+  RouteTemplateController 1（合计 +43）。+9 与 +43 正好补上 409 − 357 的 52。
+- 另有 2 个类（`LicenseModuleMap` / `OpenApiConfig`）标注了 `@RestController` 但**不含任何
+  方法级映射**，所以 78 个类只对应 76 行有效数据——这一点此前没人写过，看表的人无法自洽。
+
+### 3. 修法：按门禁同口径从源码重算，不手抄一个数字
+
+写一次性脚本按 `@RestController` + 方法级 `@*Mapping`、排除 actuator 的口径提取
+**per-Controller 端点数**（78 classes / 409 endpoints，与门禁报数一致），然后：
+
+- 修正上述 5 个数值；补齐上述 10 行（模块名按既有命名风格，如「机巢管理」「ROC 上报」）；
+- 合计行 406 → **409**，并在注释里写明「2 个零映射类 ⇒ 表内 76 行」，让表格自洽可验；
+- `sales-pitch-deck.md` 的数字锚点 `（4336 / 51 / 406 / 38）` → `（4988 / 51 / 409 / 38）`
+  （4336 是过时的 Java 单测数，同文件另三处已是 4988）。
+
+### 4. 验证
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| 提取口径 vs 门禁 | 同数 | 78 classes / 409 = 门禁报数 |
+| 表内各行之和 | = 合计 | 409 = 409（脚本内断言，不等就拒绝写盘） |
+| `check-claimed-endpoint-count.py` | 通过 | 通过（409 = 409） |
+| `check-repo-hygiene.py` | 通过 | 通过 |
+| 两个文档行尾 | 纯 LF | CR=0 / CR=0；diff 仅 17+7 与 1+1 行 |
+
+**过程中门禁又拦了一次**：新注释里写「0 端点」被 `CLAIM` 正则当成一处声称（0 ≠ 409）判红，
+改写措辞为「不含任何方法级映射注解」后通过——门禁连自己人刚写的注释都不放过。
 
 ---
 
