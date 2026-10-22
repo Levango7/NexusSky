@@ -83,6 +83,9 @@ jobs:
           python3 scripts/check-revert-looking-diff.py --self-test
           python3 scripts/check-claimed-endpoint-count.py --self-test
           python3 scripts/check-frontend-endpoints.py --self-test
+          # 变异验证的还原必须刷新时间戳，否则增量编译会继续用改坏的 .class
+          # （2026-10-22 踩过，见 docs/agent-constraints.md 第 12 条）
+          python3 scripts/mutate-verify.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate

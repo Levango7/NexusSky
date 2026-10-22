@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-21 共有 171 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-21 共有 172 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -30,13 +30,62 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 171 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 172 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
 ---
 
 
+
+---
+
+## [Unreleased] — 安防包两条 P0：`flush()` 和“离线落库”删掉都没人发现（2026-10-23）
+
+### 1. 现场：不是“没测到”，是“测了没盯住”
+
+2026-10-22 的安防包变异审计（PR #139）里，有两条存活变异体特别扎眼 ——
+**把生产代码里的一个动作整行删掉，581 个测试类照样全绿**：
+
+| 生产代码里的动作 | 删掉之后 | 用户看到什么 |
+|---|---|---|
+| `MjpegStreamService.pump` 写完一段 multipart 后 `out.flush()` | PIT 变异体 “removed call to OutputStream::flush” **存活** | 浏览器可能一直收不到帧：面板在转圈，但接口是 200 |
+| `SurveillanceDeviceRegistry.pruneStaleDevices` 里的 `persistStaleStatus(stale)` | PIT 变异体 “removed call to persistStaleStatus” **存活** | 内存里设备已标 OFFLINE，数据库还是 ONLINE；重启后又“活”过来 |
+
+### 2. 修法：动作级契约（不是“多跑几行覆盖率”）
+
+新增 `SurveillanceStreamAndPruneContractTest`（3 例）：
+
+1. `pumpMustFlushAfterWritingPart` —— 用一个**会数 flush 次数**的 `OutputStream`，
+   断言写完首帧后 `flush()` 至少被调用一次；
+2. `pruneStaleDevicesMustPersistOfflineStatus` —— mock 仓库，断言超时设备被置 OFFLINE
+   **并且真的 `save` 了状态为 OFFLINE 的实体**；
+3. `pruneMustKeepFreshDevices` —— 守卫：心跳新鲜的设备不能被误杀、不能触发落库。
+
+### 3. 变异验证：改坏 ⇒ 红；还原 ⇒ 绿（脚本化）
+
+新增 `scripts/mutate-verify.py`（带 `--self-test`），把“改坏 / 跑 / 还原 / 再跑”做成一条命令：
+
+```
+python scripts/mutate-verify.py --file .../MjpegStreamService.java \
+  --old '<原文>' --new '<改坏>' --test 'SurveillanceStreamAndPruneContractTest#pumpMustFlushAfterWritingPart'
+```
+
+实测（本机，两条都跑完整一对）：
+
+- 删 `flush()` ⇒ `pumpMustFlushAfterWritingPart` **红**（退出码 1）；还原 ⇒ **绿**；
+- 删 `persistStaleStatus(stale)` ⇒ `pruneStaleDevicesMustPersistOfflineStatus` **红**；还原 ⇒ **绿**。
+
+### 4. 顺带纠正一个测量坑：还原源文件会把时间戳也还原
+
+手工 `Copy-Item` 还原源文件时，**LastWriteTime 回到旧值** ⇒ Maven 增量编译判定“源码没变”，
+继续用变异后的 `.class`。表现是“还原后用例仍然红”，差点被我误判成“用例不稳定”。
+已写进 `docs/agent-constraints.md` 第 12 条，并由 `mutate-verify.py` 在还原时 `os.utime` 机械避免。
+
+### 5. 计数
+
+Java **4988 → 4991**（新增 3 个用例），cloud-backend **2882 → 2885**；
+前端 vitest **382** 不变，REST 端点 **409** 不变。
 
 ---
 

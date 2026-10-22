@@ -265,6 +265,25 @@ false 换成 false」，**行为等价**，PIT 记的是"存活"，但它压根�
 `pg_restore --list` 里真有 devices 表）；本轮用容器做了对照 ——
 阴性（CI 那版）复现 `fe_sendauth: no password supplied`，阳性（修复后）**PASS=23 / FAIL=0**。
 
+## 12. 对照/变异实验的"还原"必须刷新时间戳，否则量具还在用改坏的代码
+
+事故（2026-10-22，验证安防包的两条 P0 契约）：变异验证后手工 \Copy-Item\ 还原源文件 ——
+连 **LastWriteTime 一起还原成旧值**，Maven 增量编译判定"源码没变"，继续用变异后的 \.class\。
+表现是"还原后用例仍然红"，很容易被误判成"用例本身不稳定"，然后去改一个本来没问题的测试。
+
+**硬约束**：
+
+1. **不要手工 \Copy-Item\ / \git checkout\ 还原源文件**，用 \scripts/mutate-verify.py\：
+   它把原文读进内存、还原时 \os.utime\ 刷新时间戳、还原后**再跑一遍必须绿**；
+2. 结论只认"**改坏 ⇒ 红；还原 ⇒ 绿**"这一对完整证据；只有一半（红了）不算验证；
+3. 还原后先看 \git status --porcelain\ 确认生产代码零改动，再看测试结果。
+
+\\ash
+python scripts/mutate-verify.py --self-test        # 量具自证
+python scripts/mutate-verify.py \
+  --file path/to/Foo.java --old '<原文>' --new '<改坏>' --test 'FooTest#method'
+# 退出码 0=变异被杀且还原后绿；1=变异存活；2=还原后仍红（先查环境）
+\
 ## 附：一次作业的收尾清单
 
 ```bash
