@@ -256,13 +256,28 @@ fi
 # （pgjdbc 默认把会话时区设成 **JVM 的时区** = 宿主 OS 时区）。DB 自己的会话时区是 UTC，
 # 直接拿它比较会凭空差一个时区偏移 ⇒ 比较时必须显式用宿主时区换算。
 psql_q "$PG_DB" "SELECT string_agg(to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS.US'), '|' ORDER BY id) FROM flight_log;" > "$LOG_DIR/before-ts.txt"
-if ! pg_dump -Fc -h "${PG_HOST:-localhost}" -p "${PG_PORT:-5432}" -U "$PG_USER" "$PG_DB" > "$LOG_DIR/backup.dump" 2>"$LOG_DIR/dump.log"; then
+# 备份（回滚路径的实物）。
+#
+# **PGPASSWORD 必须显式带上**：本脚本里 psql / pg_restore 都带了，只有 pg_dump 曾漏掉
+# ⇒ CI 里它以 "password authentication failed" 失败 ⇒ 产出一个**空文件**；
+# 而当时这行**不检查退出码**，于是脚本照样打印 "[PASS] 已备份" ——
+# **一个没备份成功的备份，被门禁判成了通过**（CI 首跑实测）。
+# 真正的暴露点是后面那条回滚断言（恢复后仍是 tampered），那才是"量具在测东西"。
+# 现在两处都堵上：退出码 + 产物非空 + 产物里真的有表。
+if ! PGPASSWORD="$PG_PASSWORD" pg_dump -Fc -h "${PG_HOST:-localhost}" -p "${PG_PORT:-5432}" -U "$PG_USER" "$PG_DB" > "$LOG_DIR/backup.dump" 2>"$LOG_DIR/dump.log"; then
   bad "备份失败（pg_dump 退出码非 0）："
   tail -5 "$LOG_DIR/dump.log" | sed 's/^/    /'
   exit 1
 fi
 if [ ! -s "$LOG_DIR/backup.dump" ]; then
   bad "备份产物为空（dump 失败）"
+  exit 1
+fi
+# 产物非空还不够：一个"存在但没有数据表"的 dump 也能通过上面的检查。
+# 用 pg_restore --list 读它的目录（TOC），确认里面真的有演练要恢复的那张表。
+if ! PGPASSWORD="$PG_PASSWORD" pg_restore --list -h "${PG_HOST:-localhost}" -p "${PG_PORT:-5432}" -U "$PG_USER" "$LOG_DIR/backup.dump" 2>"$LOG_DIR/dumplist.log" | grep -q "devices"; then
+  bad "备份产物里没有 devices 表（dump 不可用于恢复）："
+  tail -5 "$LOG_DIR/dumplist.log" | sed 's/^/    /'
   exit 1
 fi
 ok "已备份（回滚路径的实物）：$LOG_DIR/backup.dump"

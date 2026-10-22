@@ -127,7 +127,50 @@ ts=1790820300500  => 2026-10-01 10:05:00.500
   `options=-c TimeZone=UTC`），不靠猜；② 版本号不连续（V7 从来不存在），
   期望条数**按迁移文件数算**而不是写死。
 
-### 5. 计数
+### 5. 演练脚本进 CI 后的首跑：红在备份，根因是**一个假 PASS**
+
+CI 首跑（job `e2e-db-upgrade`）红了。**这里有一笔必须记下来的自我更正**：
+
+- 我上轮看到"回滚断言失败（恢复后仍是 `tampered`）"+ 一堆 `relation "docks" does not exist`
+  的错误刷屏，判断根因是"恢复时旧后端还活着、把被篡改的值又写回去了" ⇒
+  **这个诊断是错的**。它只是**症状**，我拿症状当成了根因。
+- 这次给备份步骤加上**退出码检查**之后，真根因自己冒出来了：
+
+  ```
+  [FAIL] 备份失败（pg_dump 退出码非 0）：
+    Password:
+    pg_dump: error: connection to server at "localhost" (::1), port 5432 failed: fe_sendauth: no password supplied
+  ```
+
+  ⇒ **`pg_dump` 是全脚本里唯一没带 `PGPASSWORD` 的那一个**（`psql` / `pg_restore` 都带了）。
+  它认证失败 ⇒ 产出一个**空文件** ⇒ 而当时那行**不检查退出码** ⇒ 脚本照样打印
+  **"[PASS] 已备份（回滚路径的实物）"** ⇒ **一次没成功的备份，被门禁判成了通过**。
+  后面的回滚断言（恢复后仍是 `tampered`）才是**唯一**发现它的地方。
+
+⇒ 修法 + 加固：
+
+- `pg_dump` 显式带 `PGPASSWORD`；
+- 备份步骤**检查退出码 + 产物非空 + 产物里真的有表**（`pg_restore --list | grep devices`）
+  ——"文件存在"不等于"文件能用"，这三道缺一道就还会出现假 PASS；
+- 回滚断言改成**恢复到干净库**（灾备的真实场景），不再在活后端上 `pg_restore --clean`。
+
+⇒ **验证方式（阴性 + 阳性对照，在与 CI 等价的条件下）**：
+本机复现不了"CI 报错、本机通过"，因为**认证路径不同** ⇒ 改成在容器里跑：
+容器经 **bridge IP** 连 PG（PG 看到的源 IP 不是回环 ⇒ 和 CI 一样走 scram 密码认证），
+客户端固定 **PG 16**（CI 是 ubuntu-24.04 的 postgresql-client-16 + postgres:16-alpine）：
+
+```
+阴性对照（CI 那版脚本）：
+  [FAIL] 备份失败（pg_dump 退出码非 0）：
+    pg_dump: error: connection to server at "192.168.16.2", port 5432 failed: fe_sendauth: no password supplied
+阳性对照（修复后）：
+  PASS=23  FAIL=0    （含"回滚（灾备）路径可跑通：恢复到干净库后数据与亚秒精度都对得上"）
+```
+
+⇒ 教训已机械化进 `docs/agent-constraints.md`（第 11 条）：
+**打印 PASS 之前必须验证产物；本地验证必须复现 CI 的条件；改前失败、改后通过才算修好。**
+
+### 6. 计数
 
 Java **4970** → **4972**（新增 2 个用例），前端 vitest **382** 不变。
 
