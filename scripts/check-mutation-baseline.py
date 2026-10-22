@@ -33,6 +33,7 @@ import json
 import os
 import sys
 import tempfile
+import datetime
 import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -78,7 +79,13 @@ def parse_report(path):
                          "或者测试一个都没跑起来（别当成'通过'）")
     covered = total - counts["NO_COVERAGE"]
     score = (counts["KILLED"] / covered) if covered else 0.0
-    strength = (counts["KILLED"] + counts["NO_COVERAGE"]) / total
+    # 必须与 PIT 自己的 "Test strength" 同口径：killed/(killed+survived)。
+    # PIT 汇总行会同时打印两者（"Mutations with no coverage 165. Test strength 83%"）。
+    # 旧实现是 (KILLED+NO_COVERAGE)/total —— 等于**把没测到的变异体算成测试强度**，
+    # 结果是"给零覆盖子包补测试"反而被判红（2026-10-23 实测踩到：杀掉 +119、
+    # 未覆盖 -120，分数 0.8057→0.8400，旧口径的"强度"却从 0.8727 掉到 0.8714）。
+    tested = counts["KILLED"] + counts["SURVIVED"]
+    strength = (counts["KILLED"] / tested) if tested else 0.0
     return {"total": total, "counts": counts, "mutationScore": score,
             "testStrength": strength, "survivors": survivors}
 
@@ -210,6 +217,20 @@ def self_test():
         else:
             print("  [FAIL] 残缺报告竟然通过了：%s" % problems)
             ok = False
+
+        # ⑧ 未覆盖**不能**算进测试强度。
+        # 50 killed / 15 survived / 35 no-coverage：
+        #   旧口径 (50+35)/100 = 0.85 ⇒ 假绿（"没测到"被当成"强度高"）
+        #   PIT 口径  50/(50+15) = 0.769 ⇒ 必须判红
+        # 基线里的变异分数压到 0.60，保证红的理由只可能是"测试强度"。
+        b_nocov = {"scope": "x", "total": 100, "mutationScore": 0.60, "testStrength": 0.80}
+        p_nocov = write_report("nocov.xml", 50, 15, 35)
+        passed, problems = compare(parse_report(p_nocov), b_nocov)
+        if not passed and any("测试强度回退" in x for x in problems):
+            print("  [PASS] 未覆盖不算测试强度（旧口径会假绿）")
+        else:
+            print("  [FAIL] 未覆盖被算进了测试强度：%s" % problems)
+            ok = False
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
@@ -272,7 +293,9 @@ def main():
         # 这里只允许**抬高**分数；想降低分数必须手改文件（那才会被 diff 看见）。
         new = dict(baseline)
         new.update({
-            "measuredAt": "2026-10-21",
+            # 写成当天日期：这个脚本现在也用于 surveillance 包的基线，
+            # 写死日期会让那份基线的"测量时间"永远停在 security 包那次。
+            "measuredAt": datetime.date.today().isoformat(),
             "total": measured["total"],
             "killed": c["KILLED"],
             "survived": c["SURVIVED"],

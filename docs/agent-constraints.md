@@ -265,14 +265,51 @@ false 换成 false」，**行为等价**，PIT 记的是"存活"，但它压根�
 `pg_restore --list` 里真有 devices 表）；本轮用容器做了对照 ——
 阴性（CI 那版）复现 `fe_sendauth: no password supplied`，阳性（修复后）**PASS=23 / FAIL=0**。
 
+## 12. 对照/变异实验的"还原"必须刷新时间戳，否则量具还在用改坏的代码
+
+事故（2026-10-22，验证安防包的两条 P0 契约）：变异验证后手工 \Copy-Item\ 还原源文件 ——
+连 **LastWriteTime 一起还原成旧值**，Maven 增量编译判定"源码没变"，继续用变异后的 \.class\。
+表现是"还原后用例仍然红"，很容易被误判成"用例本身不稳定"，然后去改一个本来没问题的测试。
+
+**硬约束**：
+
+1. **不要手工 \Copy-Item\ / \git checkout\ 还原源文件**，用 \scripts/mutate-verify.py\：
+   它把原文读进内存、还原时 \os.utime\ 刷新时间戳、还原后**再跑一遍必须绿**；
+2. 结论只认"**改坏 ⇒ 红；还原 ⇒ 绿**"这一对完整证据；只有一半（红了）不算验证；
+3. 还原后先看 \git status --porcelain\ 确认生产代码零改动，再看测试结果。
+
+\\ash
+python scripts/mutate-verify.py --self-test        # 量具自证
+python scripts/mutate-verify.py \
+  --file path/to/Foo.java --old '<原文>' --new '<改坏>' --test 'FooTest#method'
+# 退出码 0=变异被杀且还原后绿；1=变异存活；2=还原后仍红（先查环境）
+\
+## 13. 改 pom 必须本地验证可解析：XML 注释里写 "--" 会炸掉整轮 CI
+
+事故（2026-10-23，给 jacoco 阈值加说明）：在 pom 的 XML 注释里写了 `--strict` ——
+XML 语法**不允许注释里出现连续两个连字符**，整个 POM 变成 Non-parseable。
+本地只跑了 Python 门禁（它们不解析 pom），推上去后缓存预热 / Java 26 编译 /
+Playwright / compose 四个 job 一起红，而且是在 2.5 小时 CI 队列的末尾才暴露。
+
+**硬约束**：
+
+1. 动任何 `pom.xml` 之后，必须本地跑一次 `mvn -B -o -q validate`（秒级，能证明全部 POM 可读）；
+2. XML 注释里**永不**写 `--`（包括命令行参数名）；要引用参数就改写措辞，或移到正文/文档里；
+3. 「本地跑过的门禁」≠「CI 会跑的检查」：Python 门禁不解析 pom，Maven 的解析只在 CI 被真实触发。
+
+**机械化**：`scripts/check-repo-hygiene.py` 检查项 2.5 —— 每个 pom 必须
+（1）注释里无 `--`；（2）`ET.parse` 可解析。自测夹具：注释带 `--strict` 的 pom 必须红、
+修好后必须绿。
+
 ## 附：一次作业的收尾清单
 
 ```bash
 git status                                    # 有没有别人的未提交改动
 git grep -nE '^(<<<<<<< |>>>>>>> )'            # 冲突标记
-python scripts/check-repo-hygiene.py           # 卫生 + CHANGELOG 自洽
+python scripts/check-repo-hygiene.py           # 卫生 + CHANGELOG 自洽 + pom 可解析
 python scripts/check-selftest-coverage.py      # 自测是否都在 CI 里跑
 python scripts/check-test-count-docs.py --reports-root ... --frontend-json ...   # 计数
+mvn -B -o -q validate                          # 动过任何 pom 必跑（见第 13 条）
 ```
 
 ## 附：本清单的"未机械化"剩余项

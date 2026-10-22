@@ -1,0 +1,14 @@
+{
+  "scope": "io.aerofleet.cloud.surveillance.*",
+  "tool": "pitest 1.15.0 (mvn -pl cloud-backend -Pmutation-surveillance pitest:mutationCoverage)",
+  "measuredAt": "2026-10-23",
+  "note": "surveillance 包的变异基线。口径与 security 包**同一把尺子**（scripts/check-mutation-baseline.py：变异分数 = KILLED/(总-NO_COVERAGE)，测试强度 = KILLED/(KILLED+SURVIVED)，与 PIT 汇总行同口径）。两份基线**分开记**——一个包的涨分不能掩盖另一个包的退步。报告目录：cloud-backend/target/pit-reports-surveillance/mutations.xml。分数/强度**向下取整到 2 位小数**，留 ~0.3pp 运行间抖动余量（2026-10-22 CI 实测比本地低 0.57pp，4 位小数的基线直接把抖动判成回退）。2026-10-23 补 offline 子包 36 例后实测：0.8269 / 0.8372，未覆盖 279→162。同日并入 #140 的 3 例动作契约后实测：0.8400 / 0.8491，存活 104→97、未覆盖 162→159；地板暂不抬（等 CI 实测确认抖动幅度——抬地板要有 CI 数据，不靠本地）。",
+  "total": 809,
+  "killed": 546,
+  "survived": 97,
+  "noCoverage": 159,
+  "timedOut": 7,
+  "runError": 0,
+  "mutationScore": 0.82,
+  "testStrength": 0.83
+}

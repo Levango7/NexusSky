@@ -259,22 +259,69 @@
                 <version>${pitest-junit5-plugin.version}</version>
               </dependency>
             </dependencies>
-            <configuration>
-              <targetClasses>
-                <param>io.aerofleet.cloud.security.*</param>
-              </targetClasses>
-              <targetTests>
-                <param>io.aerofleet.cloud.security.*</param>
-              </targetTests>
-              <outputFormats>XML</outputFormats>
-              <timestampedReports>false</timestampedReports>
-              <!-- PIT 自己不判红：阈值由 scripts/check-mutation-baseline.py 对基线判，
-                   这样基线的口径只有一处（脚本里），不会两处口径打架。 -->
-              <mutationThreshold>0</mutationThreshold>
-            </configuration>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-  </profiles>
+            <configuration>
+              <targetClasses>
+                <param>io.aerofleet.cloud.security.*</param>
+              </targetClasses>
+              <targetTests>
+                <param>io.aerofleet.cloud.security.*</param>
+              </targetTests>
+              <!-- 两个包的报告**必须分目录**：PIT 默认都写 target/pit-reports/mutations.xml，
+                   连着跑两次的话第二个包会把第一个包的报告覆盖掉 ⇒ 基线就张冠李戴了。 -->
+              <reportsDirectory>${project.build.directory}/pit-reports</reportsDirectory>
+              <outputFormats>XML</outputFormats>
+              <timestampedReports>false</timestampedReports>
+              <!-- PIT 自己不判红：阈值由 scripts/check-mutation-baseline.py 对基线判，
+                   这样基线的口径只有一处（脚本里），不会两处口径打架。 -->
+              <mutationThreshold>0</mutationThreshold>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!--
+      变异测试（PIT）· surveillance 包 —— 与上面的 mutation profile 同构，只是换目标包。
+
+      为什么单独开一个 profile 而不是直接改 targetClasses：
+      变异分数是**棘轮**（scripts/check-mutation-baseline.py 对基线判红），
+      两个包的分数必须**分别记基线**，否则一个包的涨分会掩盖另一个包的退步。
+      审计（找"改了生产代码但没有测试变红"的地方）用哪个都行：
+        mvn -B -pl cloud-backend -Pmutation-surveillance test-compile org.pitest:pitest-maven:mutationCoverage
+      2026-10-22 实测这个包的变异分明显低于 security（见 docs/mutation-testing.md），
+      ⇒ 那是下一批"假绿"的候选区。
+    -->
+    <profile>
+      <id>mutation-surveillance</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest-maven</artifactId>
+            <version>${pitest.version}</version>
+            <dependencies>
+              <dependency>
+                <groupId>org.pitest</groupId>
+                <artifactId>pitest-junit5-plugin</artifactId>
+                <version>${pitest-junit5-plugin.version}</version>
+              </dependency>
+            </dependencies>
+            <configuration>
+              <targetClasses>
+                <param>io.aerofleet.cloud.surveillance.*</param>
+              </targetClasses>
+              <targetTests>
+                <param>io.aerofleet.cloud.surveillance.*</param>
+              </targetTests>
+              <!-- 与 security 包的报告**分目录**（否则第二次跑覆盖第一次的）。 -->
+              <reportsDirectory>${project.build.directory}/pit-reports-surveillance</reportsDirectory>
+              <outputFormats>XML</outputFormats>
+              <timestampedReports>false</timestampedReports>
+              <mutationThreshold>0</mutationThreshold>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

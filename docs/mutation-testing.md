@@ -90,9 +90,97 @@ mvn -B -pl cloud-backend -Pmutation test-compile pitest:mutationCoverage  # mave
 # 2) 对基线判红（变异分数是棘轮，不许低于基线）
 python scripts/check-mutation-baseline.py \
   --report cloud-backend/target/pit-reports/mutations.xml
+
+# 3) 第二个包（surveillance）：**独立 profile、独立基线、独立报告目录**
+mvn -B -pl cloud-backend -Pmutation-surveillance test-compile pitest:mutationCoverage  # maven-incantations:ok 只跑 cloud-backend 一个模块，理由见第 2 条
+python scripts/check-mutation-baseline.py \
+  --report cloud-backend/target/pit-reports-surveillance/mutations.xml \
+  --baseline scripts/mutation-baseline-surveillance.json
 ```
 
-CI 里对应 job `mutation-gate`（**硬门禁**）。
+CI 里对应 job `mutation-gate`（**硬门禁**，两个包各跑各的、各判各的；
+报告目录分开，否则第二次 PIT 会覆盖第一次 ⇒ 基线张冠李戴）。
+
+## 2026-10-22 的第二轮审计（cloud-backend surveillance 包）
+
+security 包审完之后，同样的方法论搬到**安防包**（`io.aerofleet.cloud.surveillance.*`，
+34 个主类 / 14 个测试类）：
+
+| 指标 | security 包（2026-10-21） | surveillance 包（2026-10-22） |
+|---|---|---|
+| 变异体总数 | 767 | 809 |
+| 杀掉 | 566 | **427** |
+| 存活 | 102 | **98** |
+| 未覆盖 | 97 | **279** |
+| 变异分数 | 0.84 | **0.8057** |
+| 测试强度 | 0.8473 | **0.8133** |
+
+> **2026-10-23 订正**：这一行的"测试强度"原先按 `(KILLED+NO_COVERAGE)/total` 算（表里当时写的
+> 0.86 / 0.8727），与 PIT 自己打印的 `Test strength` **不是一个口径**，而且把"没测到"算成了强度。
+> 现按 PIT 口径 `KILLED/(KILLED+SURVIVED)` 重算为 0.8473 / 0.8133（旧值保留在这句话里，便于对照）。
+> 口径本身也是门禁的一个 bug，详见下面"坑 5"。
+
+⇒ 这个包的**未覆盖面大得多**（279 个，多半集中在 `surveillance.offline.*` 子包 ——
+`EdgeAiTrigger` / `OfflineAlarmCache` / `OfflineAlarmController` 三个类**一个测试都没有**），
+这是**覆盖缺口**（压根没测到），与"测了但没盯住"是另一件事（见上文"三类要分开记账"）。
+
+**已确认的真缺口**（逐条手动复现过：把生产代码改坏 ⇒ 现有测试**照样全绿** ⇒
+没人盯 ⇒ 才算缺口；行为等价的存活变异体显式声明无害）：
+
+1. **四个厂商适配器的 `validateDevice` 调用被删掉，没有任何测试会红**
+   （Hik / Uniview / Dahua / Gb28181 的 `getStreamUrl` / `ptzControl` / `subscribeEvents` /
+   `getCapabilities`，合计 14 个存活变异体）⇒ 传 null 设备时从"抛
+   `IllegalArgumentException`"退化成 `NullPointerException`；传空 IP 时直接拿空地址去拼流 URL。
+2. **`RapidDeployService.extractLastOctet`（设备 ID 里的 IP 末段）没被钉住**
+   （11 个存活变异体）⇒ 设备 ID 会变成 `cam-0-...`，同网段设备 ID 撞车、认不出设备。
+3. **GB28181 适配器的"只收 GB28181 设备"这条约束没被钉住** ⇒ 别的厂商的设备能被它接走。
+
+⇒ 修法：新增 `SurveillanceValidationContractTest`（6 个用例）把上面三条钉死，
+**变异验证**（改坏生产代码 ⇒ 对应用例必须红）：
+
+| 改坏的地方 | 变红的用例 |
+|---|---|
+| 删掉 `HikAdapter.getCapabilities` 的 `validateDevice` 调用 | `adaptersRejectNullDevice` |
+| 删掉 `Gb28181Adapter.getCapabilities` 的 `validateDevice` 调用 | `adaptersRejectNullDevice`、`gb28181AdapterRejectsForeignVendor` |
+| 把 `extractLastOctet` 改成恒返回 `"0"` | `generatedDeviceIdCarriesIpLastOctet` |
+
+⇒ 实测效果（同一把尺子、同一个包、只多了这一个测试类）：
+**杀掉 409 → 427，存活 116 → 98，变异分数 0.7717 → 0.8057（+3.4pp）**。
+
+⇒ 顺带修正两条我自己的诊断错误：
+
+- `RapidDeployService.validateSubnet` 的调用被删掉（2 个存活变异体）——
+  **手动复现后发现是行为等价的**：`OnvifClient.discoverDevices` 里**也**校验空子网，
+  所以删掉一处校验，异常照样抛（只是抛的地方变了）⇒ **不是真缺口**，显式声明无害。
+- 四个适配器的"空 IP"分支看似不可达（`SurveillanceDevice` 构造器就拒空 IP）——
+  但 `SurveillanceDevice.ip` 是**公开可变字段**，构造之后可被改坏 ⇒ 该分支**可达**，
+  用例按"构造后把 ip 置 null"来测。
+
+## 2026-10-23 的第三轮：补齐 offline 子包（121 个未覆盖）
+
+第二轮留下的 279 个 NO_COVERAGE 里，**121 个（43%）集中在 `surveillance.offline.*`**：
+`EdgeAiTrigger` 35 / `OfflineAlarmCache` 38 / `OfflineAlarmController` 48，三个类**一个测试都没有**。
+这一轮补 36 个用例（11 + 13 + 12），**生产代码零改动**。下表是本分支**连同 #140 的 3 例动作契约**合并后的全包实测（那 3 例顺带多杀了 11 个变异体）。
+
+| 指标 | 补测试前 | 补测试后 |
+|---|---|---|
+| 变异体总数 | 809 | 809 |
+| 杀掉 | 427 | **546** |
+| 存活 | 98 | **97** |
+| 未覆盖 | 279 | **159** |
+| 变异分数 | 0.8057 | **0.8400** |
+| 测试强度（PIT 口径） | 0.8133 | **0.8491** |
+
+offline 子包本身：121 个变异体里 **117 个被跑到、杀掉 112**，剩 3 个手动复现后定性为无害：
+
+| 存活变异体 | 复现结果 | 定性 |
+|---|---|---|
+| `getCacheStats` 的 `<` → `<=` | 36 例仍全绿 | **行为等价**：时间戳相等时赋的是同一个值，观测不到差异 |
+| `getCacheStats` 的 `>` → `>=` | 同上 | 同上 |
+| `cacheAlarm` 的 `evicted != null` → `== null` | 同上 | **不可达**：`while (queue.size() > max)` 之后 `poll()` 必非空；变异只会在并发抽干队列时制造 NPE，测试无法稳定触发 |
+
+还有 4 个变异体仍未覆盖（日志/防御分支），没有硬凑用例；另有 2 个超时。
+更值钱的是：这一轮撞出了门禁自己的一个口径 bug（见下面"坑 5"）。
 
 ## 三条容易踩的坑（都踩过）
 
@@ -116,11 +204,28 @@ CI 里对应 job `mutation-gate`（**硬门禁**）。
    所以门禁还会校验**变异体总数不得低于基线的 95%**（`total` 字段），
    缩水超 5% 直接判红，并提示先查 `targetClasses` / 构建日志 / 是否测量中途改了源码。
    只有确认是**代码合法删减**，才去更新基线里的 `total`。
+4. **两个包共用一个报告目录 ⇒ 基线张冠李戴**：PIT 默认都写
+   `target/pit-reports/mutations.xml`，连着跑两个 profile 时**第二个会覆盖第一个的**。
+   ⇒ 两个 profile 各自配了 `reportsDirectory`（`pit-reports` / `pit-reports-surveillance`）。
+5. **指标名与工具同名输出不同口径 ⇒ 门禁把"没测到"算成"强度高"**（2026-10-23 撞到）：
+   门禁里的 `testStrength` 一直算 `(KILLED+NO_COVERAGE)/total`，而同一次 PIT 汇总行打印的是
+   `Mutations with no coverage 165. Test strength 83%`（= `KILLED/(KILLED+SURVIVED)`）。
+   后果不是"数字略有出入"，而是**方向反了**：给零覆盖子包补测试时，杀掉 119 个、未覆盖少 120 个、
+   变异分数 +3.4pp，这个指标却从 0.8727 掉到 0.8714 ⇒ 门禁判红，奖励"不测"。
+   ⇒ 改成 PIT 口径；`--self-test` 加了一条**能区分两种口径**的夹具
+   （50 killed / 15 survived / 35 no-coverage：旧口径 0.85 假绿，新口径 0.769 必须红）。
+   教训：自测夹具如果两种实现都能通过，它只证明"代码能跑"，不证明"口径对"。
 
 ## 基线
 
-`scripts/mutation-baseline.json`（由门禁读）。它是**棘轮**：
-分数只能涨，不能跌。要跌就得显式改基线，并在 PR 里说明为什么这次可以接受。
+- `scripts/mutation-baseline.json` —— security 包（由门禁读）。
+- `scripts/mutation-baseline-surveillance.json` —— surveillance 包。
 
+两份都是**棘轮**：分数只能涨，不能跌。要跌就得显式改基线，并在 PR 里说明为什么这次可以接受。
+**两份分开记**——一个包的涨分不能掩盖另一个包的退步。
 基线里的 `total`（变异体总数）同时充当**报告完整性锚点**：实测总数低于它 95% 判红。
 `--write-baseline` 只允许**抬高**分数；降低分数必须手改文件（改动会进 PR diff 被看见）。
+
+**数值向下取整到 2 位小数**（分数与强度都是），留 ~0.3pp 的运行间抖动余量。
+2026-10-22 的 surveillance 基线曾按 4 位小数（0.8057）写，CI 实测 0.8000
+（同一份代码、本地 0.8057）⇒ 0.57pp 的抖动被当成"回退"判红。抖动不是退步，别用精度去惩罚它。
