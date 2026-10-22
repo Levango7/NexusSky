@@ -599,7 +599,26 @@ export default function UnifiedCommandPanel() {
     setResponding(true)
     setError(null)
     try {
-      await triggerReconFromAlarm(eventId)
+      // 后端 POST /api/v1/air-ground/recon 要目标坐标（body 里的 lat/lon）。
+      // 没有坐标就**不触发**：后端缺省 lat/lon=0 ⇒ 侦察计划会落到 (0,0)，
+      // 无人机飞往几内亚湾（2026-10-21 实测口径，不是推测）。
+      const ev = alarmEventsRef.current.find((e) => (e.id || e.eventId) === eventId)
+      const lat = ev?.lat ?? ev?.latitude
+      const lon = ev?.lon ?? ev?.longitude
+      if (lat == null || lon == null) {
+        setError('该告警没有坐标，无法定位侦察点')
+        return
+      }
+      await triggerReconFromAlarm(eventId, {
+        lat,
+        lon,
+        alt: ev?.alt ?? ev?.altitude ?? 0,
+        sourceDeviceId: ev?.sourceDeviceId ?? ev?.deviceId ?? '',
+        sourceDeviceName: ev?.sourceDeviceName ?? ev?.deviceName ?? '',
+        eventType: ev?.eventType ?? ev?.type ?? 'CUSTOM',
+        severity: ev?.severity ?? 'WARN',
+        description: ev?.description ?? ev?.message ?? '',
+      })
       setAlarmEvents((prev) => prev.map((e) => ((e.id || e.eventId) === eventId ? { ...e, reconTriggered: true } : e)))
     } catch (e) {
       setError('触发无人机侦察失败：' + e.message)

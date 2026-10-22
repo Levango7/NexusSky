@@ -10,7 +10,9 @@ import io
 import os
 import re
 
-ROOT = r"F:\Nexus\NexusSky"
+# 从脚本位置推导仓库根：硬编码绝对路径会让这个计数器**只在一个 worktree 里是对的**
+# （换目录/CI 上 os.walk 扫不到任何文件 ⇒ 数出 0 个端点，比没有还误导）。
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "cloud-backend", "src", "main", "java")
 
 CLASS_ANNO = re.compile(r"@RestController\b")

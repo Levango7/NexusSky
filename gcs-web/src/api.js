@@ -207,7 +207,7 @@ export const api = {
   // ---- Formation (编队表演 M1) ----
   // 创建编队：members=sysid 数组 + 队形参数 + 参考点经纬高
   createFormation: (payload) =>
-    jsonFetch(`${BASE}/formation/create`, {
+    jsonFetch(`${BASE}/formation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -254,25 +254,27 @@ export const api = {
   // ---- Spray & Delivery (喷洒物流 M2) ----
   // 创建喷洒任务：sysid + 喷洒量 + 速率 + 航段列表
   createSprayTask: (payload) =>
-    jsonFetch(`${BASE}/spray/task`, {
+    jsonFetch(`${BASE}/spray`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
 
   // 查询喷洒状态：泵状态 / 剩余液量 / 喷洒速率
-  getSprayStatus: (sysid) => jsonFetch(`${BASE}/spray/status/${sysid}`),
+  getSprayStatus: (sysid) => jsonFetch(`${BASE}/spray/by-sysid/${sysid}`),
 
   // 夹爪控制：开/关
   controlGripper: (sysid, open) =>
-    jsonFetch(`${BASE}/spray/gripper`, {
+    // 夹爪命令后端本来就有（MAV_CMD_NEXUS_GRIPPER_CONTROL：START=抓取 / DROP=释放），
+    // 但只挂在「按配送序列 id」的控制端点上，前端手里只有 sysid ⇒ 走按 sysid 的口径。
+    jsonFetch(`${BASE}/delivery/by-sysid/${sysid}/control`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sysid, open }),
+      body: JSON.stringify({ action: open ? 'START' : 'DROP' }),
     }),
 
   // 物流配送序列：站点列表 + 状态
-  getDeliverySequence: (sysid) => jsonFetch(`${BASE}/delivery/sequence/${sysid}`),
+  getDeliverySequence: (sysid) => jsonFetch(`${BASE}/delivery/by-sysid/${sysid}`),
 
   // ---- Hardware Abstraction (硬件抽象 M4) ----
   // 雷达扫描配置：扫描模式 / 方位角范围 / 周期
@@ -954,7 +956,7 @@ export const api = {
 
   // ---- Environment (气象环境) ----
   getEnvStatus: () => jsonFetch('/api/v1/env/status'),
-  getEnvAlerts: () => jsonFetch('/api/v1/env/alerts'),
+  getEnvAlerts: () => jsonFetch('/api/v1/env-alerts'),
 
   // ---- Link Simulation (链路仿真) ----
   getLinkSimProfiles: () => jsonFetch('/api/v1/link-sim/profiles'),
@@ -1405,20 +1407,33 @@ export async function getAirGroundSituation() {
 }
 
 // 报警事件触发无人机侦察（安防检测目标 → 无人机航拍确认）
+// 后端口径：POST /api/v1/air-ground/recon —— 报警字段走 **body**，不是路径参数
+// （2026-10-21 实测：前端原来调 /air-ground/recon/alarm/{eventId}，后端没有这条端点）
 export async function triggerReconFromAlarm(eventId, payload = {}) {
-  return jsonFetch(`${AIR_GROUND_BASE}/recon/alarm/${eventId}`, {
+  return jsonFetch(`${AIR_GROUND_BASE}/recon`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, eventId }),
   })
 }
 
 // PTZ 跟踪联动（安防摄像头 PTZ 自动跟踪检测目标）
+// 后端口径：POST /api/v1/air-ground/ptz-track —— 目标位置走 body 的 lat/lon
+// （后端字段名是 lat/lon，不是 targetLat/targetLon；2026-10-21 实测前端原来两处都错）
+// confidence：后端 GeoTarget.isReliable() 要求 >= 0.6，否则静默返回 LOW_CONFIDENCE
+//（看着像成功、其实没动）。这是**操作员手动触发**（点按钮即意图），故按高置信度下发。
 export async function triggerPtzTracking(deviceId, payload = {}) {
-  return jsonFetch(`${AIR_GROUND_BASE}/ptz-tracking/${deviceId}`, {
+  const { targetLat, targetLon, ...rest } = payload
+  return jsonFetch(`${AIR_GROUND_BASE}/ptz-track`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...rest,
+      lat: targetLat ?? rest.lat,
+      lon: targetLon ?? rest.lon,
+      confidence: rest.confidence ?? 1,
+      sourceDeviceId: rest.sourceDeviceId ?? deviceId,
+    }),
   })
 }
 
