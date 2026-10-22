@@ -20,6 +20,7 @@
 
 |---|---|---|---|---|
 
+| **v1.0.7** | 2026-10-21 | 22 | e2e 十批全转硬门禅（B2 十脚本观察接入 → 五 job 转硬门禅 → 断言聚合真判红 → roc / mjpeg / phone-camera 相继接入）+ 变异测试入场（PIT 审出 4 处安全行为没人盯：限流 / XFF 信任 / 密钥掩码 / 口令哈希；基线 0.8201→0.8448）+ 挖出三处「以为有人守、其实没人守」（变异门禅自身假绿、185 行 docker-compose e2e 从未在 CI 跑过、CHANGELOG 小节计数漂移）+ 4 个真 bug（Redis 硬依赖 / 状态板冻 8 天 / 哈希链断链 / vite high 公告）；0 破坏性变更；CI 37 success + 1 skipped（run 39598501784，tag run 39608087044） | [compare v1.0.6...v1.0.7](https://github.com/Levango7/NexusSky/compare/v1.0.6...v1.0.7) |
 | **v1.0.6** | 2026-10-19 | 115 | 安防取流六连救活（/events 真实事件、能力声明门控、取流面板播放、MJPEG 出口、RTSP 凭据编码、HLS 断流）+ gcs-web 前端诚实性清算（55 处「声明了却没人用」系列）；C5 签名 posture 变代码门禁；0 破坏性变更；CI 30 success + 1 skipped（run 39228507697，tag run 39231095908） | [compare v1.0.5...v1.0.6](https://github.com/Levango7/NexusSky/compare/v1.0.5...v1.0.6) |
 
 | **v1.0.5** | 2026-10-12 | 139 | 安防 B1–B5 全线（PTZ 厂商路由、GB28181 事件订阅、设备四态+多通道、FAILED 态+失败重试、空域预约闭环）；C5 签名改逐帧单调时间戳，修高帧率遥测被误判重放；2 项破坏性变更（license 模块 5→7、AlarmTrigger.alarmId）；CI 18 job 全绿（run 38152795212） | [compare v1.0.4...v1.0.5](https://github.com/Levango7/NexusSky/compare/v1.0.4...v1.0.5) |
