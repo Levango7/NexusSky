@@ -461,7 +461,7 @@ public class FlightLogService {
                     }
                     if (e.getLat() != null && e.getLon() != null) {
                         double alt = e.getRelativeAlt() != null ? e.getRelativeAlt() : 0;
-                        pts.add(new TrackPoint(e.getLat(), e.getLon(), alt, 0));
+                        pts.add(new TrackPoint(e.getLat(), e.getLon(), alt, tsOf(e.getTimestamp())));
                     }
                 }
                 return pts;
@@ -480,8 +480,44 @@ public class FlightLogService {
             }
             double alt = m.get("relativeAlt") instanceof Number n ? n.doubleValue() : 0;
             pts.add(new TrackPoint(((Number) lat).doubleValue(), ((Number) lon).doubleValue(),
-                    alt, 0));
+                    alt, tsOf(m.get("t"))));
         }
         return pts;
+    }
+
+    /**
+     * 轨迹点的 {@code ts}：**epoch 毫秒**（与实时/内存路径的 {@code System.currentTimeMillis()} 同口径）。
+     *
+     * <p><b>为什么这里以前写死 0 是 bug</b>：前端 {@code mergeTrack()} 用 {@code ts} 当
+     * **合并键**（同一 ts 只留一个点）并按它排序；{@code useDrones.js} 也用 {@code prev[last].ts
+     * === point.ts} 去重。持久化路径把 {@code ts} 写成常量 0 ⇒ <b>当天的历史轨迹被去重成
+     * 一个点</b>，且因为 0 最小还会排到折线最前面。API 明明声明了 {@code ts} 字段，
+     * 实际永远不带时间戳 —— 典型的「声明≠行为」，而单元测试喂的是合成的非零 ts，测不出来。
+     *
+     * <p>DB 路径给的是 {@link Instant}（绝对时刻，直接 {@code toEpochMilli}）；
+     * JSONL 路径给的是写入侧 {@code now()} 的 **本地墙钟** ISO 字符串
+     * （{@code DateTimeFormatter.ISO_LOCAL_DATE_TIME}），按系统时区还原成绝对时刻。
+     */
+    private static long tsOf(Instant instant) {
+        return instant == null ? 0L : instant.toEpochMilli();
+    }
+
+    /** JSONL 里的 {@code "t"}（本地墙钟 ISO 字符串）→ epoch 毫秒；认不出来时退回 0。 */
+    private static long tsOf(Object raw) {
+        if (raw == null) {
+            return 0L;
+        }
+        if (raw instanceof Number n) {
+            return n.longValue();
+        }
+        if (raw instanceof Instant i) {
+            return i.toEpochMilli();
+        }
+        try {
+            return LocalDateTime.parse(String.valueOf(raw))
+                    .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        } catch (RuntimeException e) {
+            return 0L;
+        }
     }
 }
