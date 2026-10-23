@@ -90,6 +90,38 @@ def parse_report(path):
             "testStrength": strength, "survivors": survivors}
 
 
+ACCOUNT_KEYS = ("killed", "survived", "noCoverage", "timedOut", "runError")
+
+
+def check_accounting(block, label):
+    """基线里那几列计数必须加得回 total。返回问题列表（空 = 自洽）。
+
+    为什么单独判：**这几列不参与分数判定**（判据只有 mutationScore / testStrength 加
+    total 完整性锚点），所以它们写错了不会有任何东西变红 —— 而记账字段一旦不可信，
+    下一个读它的人只能重跑一次 PIT 才知道。surveillance 基线就挂着过
+    「本地 636/22 vs CI 635/23」的差 1 好几位数（真相是运行间抖动，见
+    scripts/mutation-baseline-surveillance.json 的 note 与 ciObserved）。
+    缺键就跳过：老基线与自测夹具都只带 total 与两条分数。
+    """
+    if not isinstance(block, dict) or "total" not in block:
+        return []
+    present = [k for k in ACCOUNT_KEYS if k in block]
+    if not present:
+        return []
+    missing = [k for k in ACCOUNT_KEYS if k not in block]
+    if missing:
+        # 只写了几列中的几列 ⇒ 必须拦住。否则"删掉一列"就等于"关掉这条判据"，
+        # 门禁会在账目明明残缺的情况下安静地继续打分。
+        return ["基线记账字段残缺：%s 缺 %s —— 要么补齐五列，要么一列都别写"
+                % (label, "+".join(missing))]
+    s = sum(int(block[k]) for k in ACCOUNT_KEYS)
+    if s != int(block["total"]):
+        return ["基线记账不平：%s 的 %s 之和 = %d ≠ total = %d —— "
+                "这几个计数不参与判红，但错了就是账目，别挂着"
+                % (label, "+".join(ACCOUNT_KEYS), s, int(block["total"]))]
+    return []
+
+
 def compare(measured, baseline):
     """返回 (是否通过, 问题列表)。
 
@@ -99,6 +131,10 @@ def compare(measured, baseline):
     problems = []
     score = round(measured["mutationScore"], 4)
     strength = round(measured["testStrength"], 4)
+
+    # 基线自身的记账（含 ciObserved 那一块）先对一遍账，再比分数。
+    problems.extend(check_accounting(baseline, "基线"))
+    problems.extend(check_accounting(baseline.get("ciObserved"), "基线 ciObserved"))
 
     # 报告完整性：变异体数量不该大幅缩水。
     # 分数是 killed/(total-noCoverage)，**分母变小时分数反而更容易变高** ——
@@ -231,6 +267,70 @@ def self_test():
         else:
             print("  [FAIL] 未覆盖被算进了测试强度：%s" % problems)
             ok = False
+        # ⑨ 基线记账不平 => 必须判红。
+        # 夹具刻意让分数与基线**持平**（60+... 与 p_same 的 0.80 无关，分数由报告决定）：
+        # p_same = 80 killed / 20 survived ⇒ 0.80，两条分数都过 ⇒ 判红的理由只可能是记账。
+        b_unbalanced = {"scope": "x", "total": 100, "mutationScore": 0.80, "testStrength": 0.80,
+                        "killed": 60, "survived": 30, "noCoverage": 5, "timedOut": 0, "runError": 0}
+        passed, problems = compare(parse_report(p_same), b_unbalanced)
+        if not passed and any("基线记账不平" in x for x in problems):
+            print("  [PASS] 基线记账不平被拦（60+30+5+0+0 = 95 ≠ 100）")
+        else:
+            print("  [FAIL] 基线记账不平竟然没被拦：%s" % problems)
+            ok = False
+
+        # ⑩ 记账自洽（含 ciObserved 块）的基线不许被这条新判据误报。
+        b_balanced = {"scope": "x", "total": 100, "mutationScore": 0.80, "testStrength": 0.80,
+                      "killed": 80, "survived": 20, "noCoverage": 0, "timedOut": 0, "runError": 0,
+                      "ciObserved": {"total": 100, "killed": 79, "survived": 21,
+                                     "noCoverage": 0, "timedOut": 0, "runError": 0}}
+        passed, problems = compare(parse_report(p_same), b_balanced)
+        if passed:
+            print("  [PASS] 记账自洽（含 ciObserved）不误报")
+        else:
+            print("  [FAIL] 记账自洽被误报：%s" % problems)
+            ok = False
+
+        # ⑪ ciObserved 自己不平也要拦住（它是"异源那一次"的留档，错了同样误导人）。
+        b_ci_unbalanced = {"scope": "x", "total": 100, "mutationScore": 0.80, "testStrength": 0.80,
+                           "killed": 80, "survived": 20, "noCoverage": 0, "timedOut": 0,
+                           "runError": 0,
+                           "ciObserved": {"total": 100, "killed": 70, "survived": 20,
+                                          "noCoverage": 0, "timedOut": 0, "runError": 0}}
+        passed, problems = compare(parse_report(p_same), b_ci_unbalanced)
+        if not passed and any("ciObserved" in x for x in problems):
+            print("  [PASS] ciObserved 记账不平被拦")
+        else:
+            print("  [FAIL] ciObserved 记账不平没被拦：%s" % problems)
+            ok = False
+
+        # ⑫ 记账字段**残缺**也要拦住：否则"删掉一列"就等于"关掉这条判据"。
+        # （反过来，一列都没有的老基线/夹具仍放行 —— 上面②③⑦⑧就是它的负向对照。）
+        b_partial = {"scope": "x", "total": 100, "mutationScore": 0.80, "testStrength": 0.80,
+                     "killed": 80, "survived": 20, "noCoverage": 0}
+        passed, problems = compare(parse_report(p_same), b_partial)
+        if not passed and any("记账字段残缺" in x for x in problems):
+            print("  [PASS] 记账字段残缺被拦（缺 timedOut+runError 不算'没这回事'）")
+        else:
+            print("  [FAIL] 记账字段残缺没被拦：%s" % problems)
+            ok = False
+
+        # ⑬ 仓里那两份**真**基线的记账必须自洽。
+        # 上面都是合成夹具；"真文件本身写错"只有直接读真文件才拦得住 ——
+        # 而 --self-test 是每轮 CI 必跑的一步，不需要 PIT 报告就能判红。
+        for name in ("mutation-baseline.json", "mutation-baseline-surveillance.json"):
+            real = os.path.join(ROOT, "scripts", name)
+            if not os.path.exists(real):
+                print("  [FAIL] 找不到真基线文件：scripts/%s" % name)
+                ok = False
+                continue
+            data = json.load(io.open(real, encoding="utf-8"))
+            probs = check_accounting(data, name) + check_accounting(data.get("ciObserved"), name + ".ciObserved")
+            if probs:
+                print("  [FAIL] %s 账目不对：%s" % (name, probs[0]))
+                ok = False
+            else:
+                print("  [PASS] %s 记账自洽（含 ciObserved）" % name)
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
@@ -332,8 +432,19 @@ def main():
 
     print("  变异基线门禁：通过（分数未回退）")
     if measured["survivors"]:
-        print("    存活变异体 %d 个（基线登记 %s 个）—— 详情见报告"
-              % (len(measured["survivors"]), baseline.get("survived", "?")))
+        # 存活数对账：优先与"最近一次 CI 实测"（ciObserved）比。基线主块是本地 XML 快照，
+        # 与 CI 之间本就允许一个变异体的抖动 —— 拿它对账每次都会打印一个假"差 N"，
+        # 于是那条真差（22↔23）也一起被当成噪音略过了。
+        ci = baseline.get("ciObserved") or {}
+        ref = ci.get("survived")
+        ref_label = "上次 CI 实测" if ref is not None else "基线登记"
+        if ref is None:
+            ref = baseline.get("survived", "?")
+        n = len(measured["survivors"])
+        print("    存活变异体 %d 个（%s %s 个）—— 详情见报告" % (n, ref_label, ref))
+        if isinstance(ref, int) and ref != n:
+            print("    [账目差] 与%s差 %+d 个：分数没回退所以不判红，"
+                  "但要么补断言、要么更新基线留档，别长期挂着" % (ref_label, n - ref))
     return 0
 
 
