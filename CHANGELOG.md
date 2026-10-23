@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-23 共有 178 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 179 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 178 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 179 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,46 @@
 
 
 ---
+## [Unreleased] — 前端取消请求真的取消：AbortSignal 不再被 api 层丢弃，且不把「用户取消」报成「超时」（2026-10-24）
+
+### 1. 现场：`abort()` 只改了 React 状态，网络请求照跑
+
+`TrackingPanel` 的四条请求（`getLostDrones` / `getSearchGuide` / `getFlightTrack` /
+`replayTrack`）各自带 `AbortController`，切换选中项时会 `abort()` 上一次请求。
+但 api 层这 4 个包装函数**签名里没有 options 形参**（arity 分别 0/1/2/4）⇒
+多传的实参被 JS 直接丢弃；即便透传下去也没用：`jsonFetch` 会**无条件**用超时
+controller 覆盖 `fetchOptions.signal`，调用方的 signal 根本到不了 `fetch`。
+
+后果不是脏数据（组件层读的是同一个 controller 对象，`controller.signal.aborted` 是真的，
+`if (cancelled || controller.signal.aborted) return` 也确实挡住了旧结果），
+而是**请求白跑**：快速切换选中项时旧请求继续占用连接、按原样返回，结果被丢掉。
+
+### 2. 第二个坑：任何 AbortError 都被翻成 TimeoutError
+
+旧代码是 `catch (e) { if (e.name === 'AbortError') throw new TimeoutError(timeout) }`，
+把调用方的取消也算成超时 ⇒ **用户点了取消，界面上报「请求超时（15000ms）」**，
+排查时会把用户操作误读成网络故障。
+
+### 3. 修法
+
+- `jsonFetch`：超时与调用方取消两条通路合并到同一个 controller（超时置 `timedOut=true`；
+  调用方 signal 已 abort 则立即 abort，否则挂**一次性** `abort` 监听），
+  请求结束（含失败）时**摘掉监听**——长轮询每次重挂 controller，不摘就是泄漏。
+- 只有 `timedOut` 为真才抛 `TimeoutError`；其余 `AbortError` **原样抛**。
+- 4 个包装函数增加 options 形参并透传：`getFlightTrack(sysid, limit, options)`、
+  `replayTrack(sysid, from, to, limit, options)`、`getLostDrones(options)`、
+  `getSearchGuide(sysid, options)`。调用点本来就是这个形状（传 `{ signal }`），无需改动。
+
+### 4. 验证：新增 11 例，两条反向变异都实跑
+
+- 4 个包装函数各两条：options（含 signal/headers）透传到 fetch；调用方 abort ⇒
+  请求真中止且错误是 `AbortError` 而非 `TimeoutError`
+- 已 abort 的 signal ⇒ 立即拒绝；超时仍报 `TimeoutError`，且不把调用方 controller 标成 aborted
+- 请求结束后摘掉监听（防泄漏）
+- **变异证明**：① 把 signal 合并退回旧写法 ⇒ 6 例红；② 把 4 个包装函数的 options 去掉 ⇒
+  11 例全红。只测正例的自测等于自己绿自己。
+- 本机全量 vitest **393/393**（原 382 + 新增 11），`npm run lint` 0 error。
+
 ## [Unreleased] — 状态板给「不可合并的 PR」打上「CI 不会被调度」的标记（2026-10-23）
 
 ### 1. 为什么要在状态板上标
