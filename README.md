@@ -735,10 +735,10 @@ NexusSky/
 | `mavlink-core` | 492 |
 | `drone-sim` | 1443 |
 | `link-sim` | 122 |
-| `cloud-backend` | 2978 |
+| `cloud-backend` | 3030 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 40 |
-| **总计** | **5094** |
+| **总计** | **5146** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写

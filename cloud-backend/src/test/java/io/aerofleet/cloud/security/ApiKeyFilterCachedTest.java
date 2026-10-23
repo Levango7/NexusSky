@@ -140,6 +140,12 @@ class ApiKeyFilterCachedTest {
         verify(repository, never()).save(any());
         // 请求结束后 ThreadLocal 必须清理（防线程池泄漏）
         assertThat(ApiKeyContext.isPresent()).isFalse();
+        // 变异收口：finally 里 clear() 的**两个**都必须被钉住——此前只断言了
+        // ApiKeyContext（L146 的 clear 被杀了），TenantContext（L147）删掉后
+        // 租户上下文会留在线程上，线程池复用时跨请求串数据。
+        assertThat(TenantContext.getTenantId())
+                .as("请求结束后 TenantContext 也必须清理（否则线程池复用把租户带给下一个请求）")
+                .isNull();
     }
 
     @Test
@@ -234,6 +240,24 @@ class ApiKeyFilterCachedTest {
         assertThat(s.keyId).isEqualTo("nsk_1_device01");
         assertThat(s.sysid).isEqualTo(42);
         verify(repository, times(1)).findByKeyHash(sha256Hex(PLAIN_KEY));
+    }
+
+    @Test
+    @DisplayName("无缓存退化路径：已撤销的 Key 仍然拒绝（退化路线不许变成放行）")
+    void fallsBackWithoutCacheRejectsRevokedKey() throws ServletException, IOException {
+        ApiKeyEntity revoked = validEntity();
+        revoked.setRevoked(true);
+        when(repository.findByKeyHash(sha256Hex(PLAIN_KEY))).thenReturn(Optional.of(revoked));
+        ApiKeyFilter bare = new ApiKeyFilter(false);
+        bare.setApiKeyRepository(repository);
+
+        Snapshot s = run(bare, PLAIN_KEY);
+
+        // 变异收口：resolveKey 的无缓存分支 filter(entity -> !entity.isRevoked())
+        // 取反后，这条路径会**放行已撤销的 Key**——而现有缓存路径的撤销用例盖不到这里。
+        assertThat(s.apiKeyPresent).as("无缓存路径下已撤销 Key 也必须拒绝").isFalse();
+        assertThat(s.authenticated).as("revoked Key 不得建立认证").isFalse();
+        verify(tracker, never()).record(anyString());
     }
 
     /** 与 ApiKeyFilter 同口径的 SHA-256 hex（测试独立复算防口径漂移）。 */

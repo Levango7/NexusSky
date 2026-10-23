@@ -2,7 +2,7 @@
 
 > **文档版本**：v1.0 | **日期**：2026-09-24 | **定位**：内部商务参考，不对外发布
 >
-> **项目阶段**：PoC（5094 单测全绿，模拟器验证通过，未在真机集群上完成验证）
+> **项目阶段**：PoC（5146 单测全绿，模拟器验证通过，未在真机集群上完成验证）
 >
 > **关联文档**：[产品定位](PRODUCT-POSITIONING.md)、[定价策略](pricing-strategy.md)、[部署指南](deployment-guide.md)、[集成手册](integration-guide.md)、[演示场景](demo-scenarios.md)
 
@@ -220,7 +220,7 @@ POC 环境采用 Docker Compose 部署，确保快速搭建与一致性。
 | **Docker** | 24+ | 26+ |
 | **Docker Compose** | v2+ | v2.24+ |
 | **Java** | 17+ | 17 (POC 环境构建需要) |
-| **网络** | 端口 8080/14540/14550/5173/14600 可用 | 同左 |
+| **网络** | 端口 8080/14540/14550/5146/14600 可用 | 同左 |
 
 #### 3.3.2 部署步骤
 
@@ -241,7 +241,7 @@ curl http://localhost:8080/actuator/health
 # 期望响应：{"status":"UP"}
 
 # 5. 验证 GCS Web 可访问
-# 浏览器打开 http://localhost:5173
+# 浏览器打开 http://localhost:5146
 ```
 
 #### 3.3.3 服务端口确认
@@ -250,7 +250,7 @@ curl http://localhost:8080/actuator/health
 |---|---|---|---|
 | cloud-backend | 8080 | REST API + WebSocket | ✅ |
 | drone-sim | 14540 | MAVLink UDP（模拟器） | ✅ |
-| gcs-web | 5173 | 地面站前端 | ✅ |
+| gcs-web | 5146 | 地面站前端 | ✅ |
 | link-sim | 14600 | 链路代理（多机场景必需） | 视场景 |
 
 > **注意**：根据经验，部署 Docker Compose 时需确认 docker-compose.yml 中各服务的 `environment` 段配置完整，所有 `${VAR}` 引用均有对应的环境变量注入。重点检查 `S3_BUCKET`、`S3_ENDPOINT`、`S3_ACCESS_KEY`、`S3_SECRET_KEY`、`S3_REGION`、`LIVEKIT_E2EE_ENABLED` 等变量是否正确配置。（来源：2026-09-23-docker-compose-livekit-sfu-config-audit-checklist）
@@ -750,7 +750,7 @@ kubectl get svc
 | 风险 | 概率 | 影响 | 应对策略 |
 |---|---|---|---|
 | **PoC 阶段真机未验证** | 高 | 高 | 所有商务沟通中如实告知 PoC 状态；不夸大能力；合同中约定真机验证里程碑 |
-| **5094 单测覆盖但不等于生产验证** | 中 | 中 | 强调单测 + 模拟器 e2e 双重验证；POC 阶段在客户环境中补充验证 |
+| **5146 单测覆盖但不等于生产验证** | 中 | 中 | 强调单测 + 模拟器 e2e 双重验证；POC 阶段在客户环境中补充验证 |
 | **功能迭代节奏与客户期望不匹配** | 中 | 中 | 合同中明确版本升级政策；SDK 授权版季度更新；私有部署版按合同约定 |
 
 ---

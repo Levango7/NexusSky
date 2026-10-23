@@ -94,4 +94,16 @@ class AdminBootstrapRunnerTest {
 
         verify(repository, never()).save(any());
     }
+
+    @Test
+    @DisplayName("口令恰好 8 位放行（弱口令边界是 <8 拒，不是 <=8 拒）")
+    void acceptsExactlyEightCharPassword() {
+        UserRepository repository = mock(UserRepository.class);
+        when(repository.findByUsername("admin")).thenReturn(Optional.empty());
+
+        runner(repository, "12345678").run(null);
+
+        // < → <= 变异会把恰好 8 位的合法口令当弱口令拒掉（最省事的引导口令尺寸被误杀）
+        verify(repository).save(any());
+    }
 }
