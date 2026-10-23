@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.surveillance;
 
+import ch.qos.logback.classic.Level;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -187,6 +188,23 @@ class Gb28181ShapeTest {
             assertThatThrownBy(() -> parser.parse("  "))
                     .isInstanceOf(IllegalArgumentException.class);
         }
+
+        /**
+         * 变异收口：Manufacturer 的三元（显式保留 / 缺省 GB28181）此前无任何断言，
+         * 取反后"有厂商被换成缺省码、无厂商的缺省被抹成 null"都穿了过去。
+         */
+        @Test
+        void 制造商显式与缺省都如实保留() {
+            String xml = """
+                    <DeviceList Num="2">
+                    <Item><DeviceID>34010000001101320001</DeviceID><Name>东门</Name>
+                    <Status>ON</Status><Manufacturer>演示厂</Manufacturer></Item>
+                    <Item><DeviceID>34010000001101320002</DeviceID><Name>西门</Name></Item>
+                    </DeviceList>""";
+            Gb28181CatalogParser.CatalogResult r = parser.parse(xml);
+            assertThat(r.items().get(0).manufacturer()).isEqualTo("演示厂");
+            assertThat(r.items().get(1).manufacturer()).isEqualTo("GB28181");
+        }
     }
 
     // ------------------------------------------------------------------
@@ -250,6 +268,77 @@ class Gb28181ShapeTest {
             assertThatThrownBy(() -> adapter.ptzControl(hik, "up"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("only accepts GB28181 devices");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // D6 适配器可观测行为（日志契约与订阅句柄）
+    // ------------------------------------------------------------------
+
+    /**
+     * 日志是这条链路的可观测面：目录解析跳过条目、PTZ 别名折叠、订阅建立
+     * 都只在日志里表达。mock 掉 logger 就丢掉了这部分契约——此前的存活
+     * 变异体（跳过分支取反/边界、别名箭头取反、订阅句柄抹空）全部从这里漏走。
+     */
+    @Nested
+    @DisplayName("D6 适配器日志契约与订阅")
+    class AdapterObservabilityTest {
+        private final Gb28181Adapter adapter = new Gb28181Adapter(
+                new Gb28181CatalogParser(), "34010000002000000001", "10.0.0.5:5060");
+        private final Gb28181DeviceId dev = Gb28181DeviceId.of("34010000001", "10", "132", "0001");
+
+        private SurveillanceDevice camera() {
+            return new SurveillanceDevice(dev.value(), "东门", SurveillanceDevice.Vendor.GB28181,
+                    "0.0.0.0", 5060, "sip", "none");
+        }
+
+        @Test
+        void 目录含坏条目时必须warn_全好条目不许warn() {
+            String bad = """
+                    <DeviceList Num="2">
+                    <Item><DeviceID>123</DeviceID><Name>坏条目</Name></Item>
+                    <Item><DeviceID>34010000001101320001</DeviceID><Name>好条目</Name></Item>
+                    </DeviceList>""";
+            try (LogWiretap tap = LogWiretap.on(Gb28181Adapter.class)) {
+                List<SurveillanceDevice> devices = adapter.discover(bad);
+                assertThat(devices).hasSize(1);   // 好条目照常产出
+                assertThat(tap.linesAtLeast(Level.WARN)).singleElement().asString()
+                        .contains("skipped 1 item");
+            }
+
+            String clean = """
+                    <DeviceList Num="1">
+                    <Item><DeviceID>34010000001101320001</DeviceID><Name>好条目</Name></Item>
+                    </DeviceList>""";
+            try (LogWiretap tap = LogWiretap.on(Gb28181Adapter.class)) {
+                adapter.discover(clean);
+                // 没有跳过就不许发警告噪音（边界变异体会在 0 条跳过时也告警）
+                assertThat(tap.linesAtLeast(Level.WARN)).isEmpty();
+            }
+        }
+
+        @Test
+        void PTZ别名折叠带箭头_直连命令不带() {
+            try (LogWiretap tap = LogWiretap.on(Gb28181Adapter.class)) {
+                adapter.ptzControl(camera(), "zoomIn");
+                adapter.ptzControl(camera(), "up");
+
+                String zoomLine = tap.lines().stream()
+                        .filter(s -> s.contains("cmd=zoomIn"))
+                        .findFirst().orElseThrow();
+                assertThat(zoomLine).contains("(-> zoom_in");
+
+                String upLine = tap.lines().stream()
+                        .filter(s -> s.contains("cmd=up"))
+                        .findFirst().orElseThrow();
+                assertThat(upLine).doesNotContain("(->");
+            }
+        }
+
+        @Test
+        void 订阅句柄形状固定() {
+            String handle = adapter.subscribeEvents(camera(), payload -> { });
+            assertThat(handle).isEqualTo("gb28181-sub-" + dev.value());
         }
     }
 }

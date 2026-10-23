@@ -343,6 +343,27 @@ class SurveillanceControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.onlineCameras").value(2));
 
+        // 合法边界（变异收口）：0 路在线（全离线，不是非法值）；
+        // 恰好 totalCameras 路（全在线，不是越界）
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-ch2/channels")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("onlineCameras", 0))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onlineCameras").value(0));
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-ch2/channels")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("onlineCameras", 3))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onlineCameras").value(3));
+        // 恰好 totalCameras 路 = 合法（不是越界）。变异收口：上面的 0/2/3 都小于
+        // total(4)，`n > total` 被翻转成 `n >= total` 时它们仍然通过——只有"n 恰好
+        // 撞上 totalCameras"这一个输入能把两个边界分开（全在线不是非法值）。
+        mockMvc.perform(post("/api/v1/surveillance/devices/cam-ch2/channels")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("onlineCameras", 4))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onlineCameras").value(4));
+
         // 越界（> totalCameras）400；负值 400
         mockMvc.perform(post("/api/v1/surveillance/devices/cam-ch2/channels")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -930,6 +951,8 @@ class SurveillanceControllerTest {
 
         assertThat(res.getResponse().getStatus()).isEqualTo(200);
         assertThat(res.getResponse().getHeader("Cache-Control")).contains("no-store");
+        // Pragma: no-cache 加给不认识 Cache-Control 的老代理——半截 MJPEG 流绝不能被中间层缓存
+        assertThat(res.getResponse().getHeader("Pragma")).isEqualTo("no-cache");
         assertThat(res.getResponse().getContentType()).startsWith("multipart/x-mixed-replace");
 
         byte[] body = res.getResponse().getContentAsByteArray();
@@ -1029,12 +1052,85 @@ class SurveillanceControllerTest {
     }
 
     @Test
-    @DisplayName("未知设备：/mjpeg 返回 404")
+    @DisplayName("未知设备：/mjpeg 返回 404，且错误体是定长的（Content-Length 与 no-store 在位）")
     void mjpeg_unknownDevice_is404() throws Exception {
         MvcResult r = performMjpeg(get("/api/v1/surveillance/devices/ghost/mjpeg"));
 
         assertThat(r.getResponse().getStatus()).isEqualTo(404);
         assertThat(r.getResponse().getContentAsString()).contains("ghost");
+        // 错误体绕过 async 流（一次性写完），必须自带定长与禁缓存——前端不再从头拉半截流
+        assertThat(r.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(r.getResponse().getContentAsByteArray().length).isPositive();
+        assertThat(r.getResponse().getHeader("Content-Length"))
+                .isEqualTo(String.valueOf(r.getResponse().getContentAsByteArray().length));
+    }
+
+    // ===== 边界反例与能力真实面（变异审计收口） =====
+
+    @Test
+    @DisplayName("POST /devices port 边界：0/65536 拒绝，1/65535 接受")
+    void registerDevice_portBoundaries() throws Exception {
+        for (int port : new int[]{0, 65536}) {
+            Map<String, Object> bad = deviceBody("cam-port-" + port, "HIKVISION");
+            bad.put("port", port);
+            mockMvc.perform(post("/api/v1/surveillance/devices")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json(bad)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value(
+                            org.hamcrest.Matchers.containsString("port must be in [1, 65535]")));
+        }
+        for (int port : new int[]{1, 65535}) {
+            Map<String, Object> ok = deviceBody("cam-port-" + port, "HIKVISION");
+            ok.put("port", port);
+            mockMvc.perform(post("/api/v1/surveillance/devices")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json(ok)))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Test
+    @DisplayName("POST /devices channels 合法边界：1 与 255 都接受并落视图")
+    void registerDevice_channelEdgesAccepted() throws Exception {
+        Map<String, Object> one = deviceBody("cam-ch-1", "HIKVISION");
+        one.put("channels", 1);
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(one)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalCameras").value(1));
+
+        Map<String, Object> max = deviceBody("cam-ch-255", "HIKVISION");
+        max.put("channels", 255);
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(max)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalCameras").value(255));
+    }
+
+    @Test
+    @DisplayName("POST /devices 注册时抓取的能力非空（视图不许安静的空数组）")
+    void registerDevice_capabilitiesNotEmpty() throws Exception {
+        mockMvc.perform(post("/api/v1/surveillance/devices")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(deviceBody("cam-caps", "HIKVISION"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/surveillance/devices/cam-caps"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.capabilities").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("GET /events size=1000（合法上界）返回 200 并原样回显 size")
+    void listEvents_maxSizeAllowed() throws Exception {
+        mockMvc.perform(get("/api/v1/surveillance/events")
+                        .param("size", "1000"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.size").value(1000));
     }
 
     /**

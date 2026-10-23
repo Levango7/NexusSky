@@ -182,6 +182,78 @@ offline 子包本身：121 个变异体里 **117 个被跑到、杀掉 112**，�
 还有 4 个变异体仍未覆盖（日志/防御分支），没有硬凑用例；另有 2 个超时。
 更值钱的是：这一轮撞出了门禁自己的一个口径 bug（见下面"坑 5"）。
 
+## 2026-10-23 的第四轮：surveillance 收口——97 个存货逐条分诊
+
+第三轮结束时 surveillance 包还挂 **97 个存活**（分数 0.8400 的主要拖累）。
+这一轮不再扩覆盖面，只做一件事：把 97 条逐个定性——**真缺口的补测试杀掉；
+确实观测不到差异的，逐条给出"为什么测不到"的证据**，在册不再有"未定性"。
+改动仍然全部落在测试，生产代码零改动。
+
+新增 6 个契约测试文件 + 1 个测试工具（`LogWiretap`：try-with-resources 挂在
+logback root 上拦日志——"跳过必须告警/全好不许告警"这类可观测面以前从没被断言过），
+扩展 8 个既有测试类，共 **49 个新用例**：
+
+| 测试 | 例数 | 钉住的契约 |
+|---|---:|---|
+| `VendorAdapterPrefixContractTest` | 6 | 四适配器 + `OnvifClient` 的 CIDR / 不带 `/` / 无点 三个形状逐位精确；`StreamUrlOrigin` 双值语义 |
+| `SurveillanceRegistryTenantContractTest` | 7 | global/租户两套读口径的**精确成员资格**与按 id 排序；prune(0) 合法、hb=0 恒新鲜、fresh 不被 prune 顺带删 |
+| `OnvifVendorAdapterContractTest` | 6 | 适配器层的 device 校验不许被删（null/blank 均抛指名道姓的 IllegalArgumentException，而不是往下传成 NPE）；PTZ 委托逐字全等 |
+| `SurveillanceDeviceIdentityContractTest` | 3 | 端口 [1,65535] 边界；equals 按 id 对称；capabilities 永不为 null |
+| `SurveillanceControllerSseContractTest` | 3 | 未知设备流立即错误终止；`AsyncContext.complete()` 必须触发厂商注销；断开重订阅不遗留 |
+| `VideoFusionRecordingServiceTest` | 4 | start 的拒绝条件；stop 的时长=结束-开始（拿真实时间戳字段算，不是发明值） |
+| `SurveillanceControllerTest`（扩展） | +4 | /mjpeg 错误体定长 + no-store + Pragma；端口/通道/在线通道三处边界；注册时真抓能力；size=1000 上界 |
+| `MjpegStreamServiceTest`（扩展） | +4 | fps=0 走兜底不炸；SOI 三字节判定；fps=1 第二帧节流下限 ≥400ms；第 3 帧照常递增 + 每段 flush + 每帧尾 CRLF；中断后返回且**保留线程中断标记** |
+| `Gb28181ShapeTest`（扩展） | +4 | 目录跳过必须 warn、全好不许 warn；PTZ 别名箭头与直连命令的差别；订阅句柄形状；manufacturer 显式/缺省 |
+| `OnvifClientTest`（扩展） | +2 | 订阅前参数校验不许被删；端口边界（0 拒、65535 收） |
+| `VendorAdapterRegistryTest`（扩展） | +2 | hasAdapter 未注册/null 必须 false（不是恒真）；null 句柄温和忽略不 NPE |
+| `SurveillanceStatusPusherTest`（扩展） | +1 | 新鲜设备 uptimeSec 精确为 0（除→乘 / 减→加 两种变异都会给出天文数字） |
+| `RapidDeployServiceTest`（扩展） | +2 | 尾段畸形（`.8`/`x.`/`1.2.3.100`）；mock 掉客户端也必须自校验子网；完成日志计数逐项钉死（计数断言并入混合场景用例） |
+| `VideoFusionControllerTest`（扩展） | +1 | userinfo 脱敏输出**全等**（@ 后必须从主机位起）；scheme 空边界照常脱敏 |
+
+装配口径与 #139 相同：真实适配器 + 真实客户端；仅当"必须把下游干扰掉才能证明
+本层责任"时用 mock（快速部署的子网自校验、SSE 契约对厂商客户端的 spy）。
+
+### 实测
+
+- 定点点名 4 批共 331 例全绿（214 + 10 + 40 + 67；首跑 4 处失败如实修复，见"坑 6"）。
+- A/B 批量实验（`tools/mutate-verify.py` 顺序跑 7 组，退出码存档
+  `tools/ab_batch_surv_results.json`）：**X1 排序 key 突变为空——被杀**
+  （按 id 排序确实差出顺序，`listDevicesByVendor_sortedById` 的有序断言抓到）；
+  K1（prune 的 compute 返回 null ⇒ 整个条目被删）**被杀**；
+  E1-E5（sleep 边界 / 两处前缀边界 / Capability null 分支 / onError 注销）**全部按预期存活**
+  ——存活的留作等价性证据（行为分叉在测试观测面之外）。
+- 变异复测（同包同尺，XML 精确对账）：杀掉 **546 → 636**、存活 **97 → 22**、
+  未覆盖 **159 → 144**（总 809、超时 7、运行错误 0 均不变）；分数 **0.8400 → 0.9564**、
+  强度 **0.8491 → 0.9666**。注意 PIT 汇总行把 TIMED_OUT 计进 "Killed"
+  （控制台打 643 = 636 + 7），**解析以 XML 为准**（见"坑 7"）。
+- 增量账目对得严丝合缝：**+90 = 计划杀 75（含 X1）+ 新覆盖顺带被杀 11 + 4 个"新面孔"补杀**。
+  4 个新面孔是本轮新用例把原本 NO_COVERAGE 的 15 个变异体跑活后浮出水面的
+  （pump 的中断重置、writePart 的尾 CRLF、setOnlineCameras 的 n==totalCameras 边界、
+  hashCode 恒 0）——发现即补杀再复测，**存活恰好收敛回 22 条已定性清单**。
+  基线地板：分数 0.95、强度 0.96。
+
+### 定性为无害的 22 条（每条都有"为什么测不到"的证据）
+
+| 存活变异体 | 复现 | 定性 |
+|---|---|---|
+| 四路前缀提取的 `lastDot > 0` → `>= 0`（Dahua/Hik/Uniview/`OnvifClient` 各 1） | A/B E2/E3：变异跑下测试仍全绿 | **行为等价（值域论证）**：只可能在 addr 以 `.` 开头（空主机名）时分叉；discover 的入参由租户表与设备表约束，不存在该形状的真实输入 |
+| `MjpegStreamService.pump` 的 `sleep > 0` → `>= 0` | A/B E1：变异跑下 12 例全绿 | **行为等价**：sleep==0 时 `sleep(0)` 与"重对表"只差纳秒级；帧节奏的机器可读面（fps=1 的 400ms 下限）已被钉住 |
+| `DeviceCapability.normalize` 的 raw==null 分支返回值 → `emptySet` | A/B E4：变异跑下全绿 | **行为等价**：该分支入口事件下 out 恒为空集；`unmodifiableSet(空)` 与 `emptySet` 都不可变、`add` 同抛 UOE |
+| SSE 的 `onTimeout` 注册与 `onError` 注册/注销 | A/B E5：变异跑下全绿 | **依赖容器不可达**：MockAsyncContext 无法 fire error/timeout（只有真容器断连/超时才触发）；清理体与 onComplete 同形且 onComplete 路径已被杀掉 |
+| SSE 建立连接时立即发送的 `stream-established` 注释行 | mock 容器下头部提交时机不可观测 | **不可观测**（注释行的语义已由 asyncStarted 路径间接钉住） |
+| 心跳线程工厂的 `setDaemon` 与 `return null`（×2） | 测试窗口 <15s，心跳任务不 fire，工厂不执行 | **不可达**（守护属性只影响进程退出行为；NPE 只在建线时发生） |
+| `VideoFusionController.maskRtspCredentials` 的三个 `at`/`slash` 边界（L245 ×3） | 变异跑下 13 例全绿 | **值域不可达**：分叉需要 `at == 0`（'@' 在 URL 第一位）、`slash == 0`（'/' 开头）或 `at == slash`（'@' 与 '/' 是同一字符），合法 `scheme://userinfo@host` 里三者都不会出现 |
+| `SurveillanceController` 自带 username 掩码的 null 护栏取反（L830） | /stream 的 url 恒非空（适配器先验 IP 非空 + 模板拼装） | **不可达**（与 VideoFusion 版同形，后者的行为已被全等用例钉住） |
+| `SurveillanceDeviceEntity.fromDevice` 的 capability null 判断取反 | 设备侧 capabilities 恒非 null（identity 契约钉住） | **不可达** |
+| `Registry.pruneStaleDevices` 年龄比较 `>` → `>=` | 需要 age == timeoutMs 精确相等才分叉（毫秒级竞态） | **不可稳定测**（边界点两侧皆合理语义；命中概率 1/timeout） |
+| `Registry.pruneStaleDevices` 日志 ago 参数 减→加 | 日志诊断字段；机器可读面（返回值+落库状态）已被 persist 用例钉住 | **等价-日志参数** |
+| `Registry.listDevicesByVendor(null)` 返回 `new ArrayList` → `emptyList` | 调用方全部只读（快照语义），可变性差异无人观察 | **行为等价**（仅可变性） |
+| `OfflineAlarmCache` ×3 | 第三轮已复现（转引上表） | **行为等价 / 不可达** |
+
+13 行摘要覆盖 22 个变异体：4（前缀边界）+ 1（sleep）+ 1（Capability null）+ 2（SSE 注册）
++ 1（established 行）+ 2（心跳工厂）+ 3（mask L245）+ 1（L830）+ 1（Entity）
++ 1（prune 边界）+ 1（prune 日志）+ 1（emptyList）+ 3（OfflineAlarmCache）。
+
 ## 三条容易踩的坑（都踩过）
 
 1. **PIT 找不到 JUnit 5 测试**：只打一句
@@ -215,6 +287,23 @@ offline 子包本身：121 个变异体里 **117 个被跑到、杀掉 112**，�
    ⇒ 改成 PIT 口径；`--self-test` 加了一条**能区分两种口径**的夹具
    （50 killed / 15 survived / 35 no-coverage：旧口径 0.85 假绿，新口径 0.769 必须红）。
    教训：自测夹具如果两种实现都能通过，它只证明"代码能跑"，不证明"口径对"。
+6. **未初始化的 emitter 上 `complete()` 是 no-op（2026-10-23 撞到）**：给 SSE 回调
+   （onCompletion 里注销厂商订阅）写直调测试时，`controller.subscribeEvents(id)`
+   返回的 emitter 还没进 MVC 初始化，`emitter.complete()` 只把内部 complete 标志
+   置位，**回调不会同步触发**——测试里 verify 注销就永远落空，而且看起来像
+   "回调根本没注册"。要真实触发得走 MockMvc 的 async 路径：先
+   `perform(...)` 等 `request().asyncStarted()`（此时返回值处理器已挂上 emitter），
+   再 `result.getRequest().getAsyncContext().complete()`——mock 容器把这次完成
+   同步派发给回调链。onError/onTimeout 在 mock 容器里没法 fire（坑在"定性 4"里），
+   但 onComplete 的注销语义这样就能钉死了。
+7. **PIT 的 XML 是"最后一刻才写盘"的（2026-10-23 撞到）**：报告 XML 在覆盖阶段
+   一结束就先被**清空占位**（0 字节文件，mtime 是覆盖完成时刻），
+   完整内容要等到 BUILD SUCCESS 那一瞬才落盘。中途读它的下场：拿到 0 字节、
+   或者更糟——拿到**上一轮残留的旧清单**，做出"变异体没被杀"的假结论
+   （本轮就把 632/26 的旧账当过新结果，追了半天"新面孔怎么又复活了"的幽灵）。
+   另有一处口径差异：**PIT 汇总行把 TIMED_OUT 也算进 "Killed"**——控制台打
+   `Killed 643`，XML 里 KILLED=636、TIMED_OUT=7，643 = 636 + 7，不是玄学。
+   规矩：**永远等 BUILD SUCCESS，解析永远以 XML 为准**。
 
 ## 基线
 

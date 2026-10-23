@@ -204,4 +204,26 @@ class VideoFusionControllerTest {
         String url = "rtsp://10.0.0.16:554/live@2x";
         assertThat(VideoFusionController.maskRtspCredentials(url)).isEqualTo(url);
     }
+
+    /**
+     * 变异收口：脱敏输出此前只做 contains 断言，"at 取下一位"的变异
+     * 会把输出变成 {@code rtsp://***:***@p@host/...} 也照样穿过去。
+     * 这里钉全等（@ 后必须从主机位起），并钉 scheme 为空（"://u@x"）的边界——
+     * {@code schemeEnd == 0} 不是"没有 scheme"，必须照常脱敏。
+     */
+    @Test
+    @DisplayName("脱敏输出全等：@ 后从主机位起；scheme 空串边界照常脱敏")
+    void maskUserInfo_exactOutput() {
+        assertThat(VideoFusionController.maskRtspCredentials(
+                "rtsp://admin:SuperSecret123@10.0.0.14:554/Streaming/Channels/101"))
+                .isEqualTo("rtsp://***:***@10.0.0.14:554/Streaming/Channels/101");
+
+        // 短主机名同样钉住
+        assertThat(VideoFusionController.maskRtspCredentials("rtsp://user:p@h/x"))
+                .isEqualTo("rtsp://***:***@h/x");
+
+        // schemeEnd == 0（URL 以 :// 开头）仍要进入脱敏分支
+        assertThat(VideoFusionController.maskRtspCredentials("://u@x"))
+                .isEqualTo("://***:***@x");
+    }
 }
