@@ -197,6 +197,28 @@ class OnvifClientTest {
     }
 
     @Test
+    @DisplayName("subscribeEvents 空 ip 必须被参数校验拦下（校验调用不许被删）")
+    void subscribeEvents_blankIp_throws() {
+        OnvifClient client = new OnvifClient();
+        assertThatThrownBy(() -> client.subscribeEvents("   ", PORT, USER, PASS, payload -> {}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ip");
+        assertThat(client.activeSubscriberCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("subscribeEvents 端口边界：0 拒绝、65535 合法，句柄就是 ip:port")
+    void subscribeEvents_portBoundaries() {
+        OnvifClient client = new OnvifClient();
+        assertThatThrownBy(() -> client.subscribeEvents(IP, 0, USER, PASS, payload -> {}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("port");
+
+        String handle = client.subscribeEvents(IP, 65535, USER, PASS, payload -> {});
+        assertThat(handle).isEqualTo(IP + ":65535");
+    }
+
+    @Test
     @DisplayName("simulateEvent 触发已注册回调")
     void simulateEvent_triggersCallback() {
         OnvifClient client = new OnvifClient();

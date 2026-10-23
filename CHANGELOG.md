@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-23 共有 175 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-23 共有 176 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 175 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 176 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,58 @@
 
 
 ---
+## [Unreleased] — surveillance 收口：97 个存活变异体逐条清账，不再挂"未定性"（2026-10-23）
+
+### 1. 现场：账是清的，但 97 条悬而未决
+
+第三轮（#139）把 offline 子包的覆盖面补完之后，surveillance 包还剩 **97 个存活变异体**
+挂在册上。它们不是"没测到"（未覆盖已收敛到 159）——是"测了、但这段行为没人盯"
+（变异分数 0.84 的主要拖累）。问题是：这 97 条里有多少是**真缺口**（改坏生产代码
+照样全绿），有多少是**等价/不可达**（观测面上根本分不出差异）？当时没有任何一条
+有结论。
+
+### 2. 分诊方法：逐条复现，两头都要实证
+
+- 判定"真缺口"：补测试 → 复测变异必须**死**（杀不动的老实承认没守住）。
+- 判定"等价/不可达"：**主动把生产代码改坏**（`tools/mutate-verify.py`，改坏⇒跑用例⇒还原⇒再跑），
+  存活下用例必须**仍绿**，并给出"为什么测不到"的值域论证——没有论证的等价不算定性。
+
+### 3. 补了什么（6 个新契约文件 + 8 处扩展，49 个新用例，生产代码零改动）
+
+| 测试 | 例数 | 钉住的契约 |
+|---|---:|---|
+| `VendorAdapterPrefixContractTest` | 6 | 四适配器 + OnvifClient 前缀形状逐位精确（CIDR / 不带 `/` / 无点）；`StreamUrlOrigin` 双值语义 |
+| `SurveillanceRegistryTenantContractTest` | 7 | global/租户读口径精确成员资格与排序；prune(0) 合法、hb=0 恒新鲜、fresh 不被顺带删 |
+| `OnvifVendorAdapterContractTest` | 6 | 适配器层 device 校验不许被删（null/blank 反例）；PTZ 委托逐字全等 |
+| `SurveillanceDeviceIdentityContractTest` | 3 | 端口 [1,65535]；equals 按 id 对称；capabilities 永不为 null |
+| `SurveillanceControllerSseContractTest` | 3 | 未知设备流立即错误终止；`AsyncContext.complete()` 必须触发厂商注销；断开重订阅不遗留 |
+| `VideoFusionRecordingServiceTest` | 4 | start 拒绝条件；stop 时长=真实时间戳差值 |
+| 扩展 8 类（`SurveillanceControllerTest` / `MjpegStreamServiceTest` / `Gb28181ShapeTest` / `OnvifClientTest` / `VendorAdapterRegistryTest` / `SurveillanceStatusPusherTest` / `RapidDeployServiceTest` / `VideoFusionControllerTest`） | +20 | mjpeg 错误体定长+no-store+Pragma、三处注册边界（含 n==totalCameras 正例）、size=1000 上界、fps=0 兜底、SOI 三字节、fps=1 节流下限、seq 单调+段级 flush+每帧尾 CRLF、中断标记保留、目录跳过告警、PTZ 别名箭头、订阅句柄形状、manufacturer 三元、订阅参数校验、hasAdapter 反例、null 句柄温和忽略、uptimeSec=0、部署尾段畸形、子网自校验、脱敏全等、hashCode 不碰撞 |
+
+### 4. 实测
+
+- 定点点名 4 批共 331 例全绿（214 + 10 + 40 + 67；首跑 4 处失败如实修过：SSE 3 例重写成
+  MockMvc async 路径、prune(0) 改用未来心跳消掉毫秒竞态——都是测量面的坑，不是产品行为 bug，见坑 6）。
+- A/B 批量等价实验（`tools/mutate-verify.py`，7 组顺序跑，退出码存档
+  `tools/ab_batch_surv_results.json`）：**X1 排序 key 突变被杀**（按 id 排序差得出顺序，
+  `listDevicesByVendor_sortedById` 的有序断言抓到）；K1（prune 的 compute 返回 null
+  ⇒ 条目被整个删掉）**被杀**；E1-E5（sleep 边界 / 两处前缀边界 / Capability null 分支 /
+  onError 注销）**全部按预期存活**——存活本身就是等价性证据（行为分叉在测试观测面之外）。
+- PIT 复测（XML 精确对账）：杀掉 **546 → 636**、存活 **97 → 22**、未覆盖 **159 → 144**
+  （总 809、超时 7、运行错误 0 均不变）、变异分数 **0.8400 → 0.9564**、测试强度
+  **0.8491 → 0.9666**；基线 `scripts/mutation-baseline-surveillance.json`
+  地板抬到 **0.95 / 0.96**。增量账目严丝合缝：+90 = 计划杀 75（含 X1）+ 新覆盖
+  顺带被杀 11 + 4 个新面孔补杀；**22 条存活恰好全部是已定性清单**。
+- 22 条定性为无害（值域论证 + A/B 证据），清单与证据在 `docs/mutation-testing.md` 第四轮。
+
+### 5. 没做什么
+
+- 生产代码零改动：这一轮没有暴露行为 bug——所有"改坏"都撞在了"测试没盯住"上。
+- security 包 102 个存活变异体（P1 #7）留下一轮单独 PR 分诊；surveillance 的分诊模板
+  （等价要给值域论证 + A/B 实证）直接沿用。
+
+---
+
 ## [Unreleased] — 离线自治子包零测试：36 个用例把"断网报警不丢"钉住（2026-10-23）
 
 ### 1. 现场：卖点最硬的地方，一行断言都没有

@@ -23,10 +23,7 @@
 
 | # | 条目 | 证据 | 验收标准 |
 |---|---|---|---|
-| 4 | **四个厂商适配器的 `extractPrefix`（CIDR 前缀解析）没被钉住** | Hik / Uniview / Dahua / Gb28181 各 3–4 个存活变异体（边界/取反/返回空串） | 四个适配器的前缀解析各有边界用例（带 `/`、不带 `/`、无点、末尾有点） |
-| 5 | **`SurveillanceDeviceRegistry` 的谓词没被钉住** | `getDevice` / `listDevicesByVendor` / `listDevices` 共 14 个存活变异体 | 过滤条件（按厂商、按 ID）各有反例用例 |
-| 6 | **`OnvifClient` / `OnvifVendorAdapter` 剩余 9 个存活** | PIT 报告 | 逐条手动复现后定性（同上） |
-| 7 | **security 包的 102 个存活变异体尚未逐条分诊** | 2026-10-21 只审出 4 处真缺口（限流阈值 / XFF 信任 / 密钥掩码 / 口令哈希），其余未定性 | 全部手动复现并分成"真缺口 / 行为等价 / 覆盖缺口"三类 |
+| 7 | **security 包的 102 个存活变异体尚未逐条分诊** | 2026-10-21 只审出 4 处真缺口（限流阈值 / XFF 信任 / 密钥掩码 / 口令哈希），其余未定性；PIT 明细可用 `-Pmutation` 复跑导出（surveillance 97 条在 2026-10-23 第四轮已全部清账，同为 800+ 变异体的包，分诊周期可控） | 全部手动复现并分成"真缺口 / 行为等价 / 覆盖缺口"三类，等价项要有"为什么测不到"的证据 |
 
 ## P1 —— 前端端点契约门禁里登记的 6 条已知缺口
 
@@ -68,6 +65,7 @@
 | **`surveillance.offline.*` 子包零测试**（121 个变异体全是 NO_COVERAGE，占全仓未覆盖的 43%） | PR #139 | 36 例：`EdgeAiTriggerTest` 11 / `OfflineAlarmCacheTest` 13 / `OfflineAlarmControllerTest` 12；PIT 复测 杀掉 427→535、分数 0.8057→0.8269、未覆盖 279→162（offline：112 杀 / 3 存活已定性 / 4 未覆盖） |
 | **`MjpegStreamService.pump` 的 `flush()` 没人盯**（删掉照样全绿） | PR #140 | `SurveillanceStreamAndPruneContractTest` 3 例 + `scripts/mutate-verify.py` 改坏⇒红、还原⇒绿 |
 | **`SurveillanceDeviceRegistry.pruneStaleDevices` 的 `persistStaleStatus` 没人盯** | PR #140 | 同上（同一组动作级契约） |
+| **surveillance 包 97 个存活变异体逐条分诊**（P1 #4/#5/#6 全清：前缀形状、Registry 谓词与排序、Onvif 校验链、SSE 生命周期、MJPEG 泵、mask 全等、快速部署尾段与计数日志） | 本分支（第四轮，见 `docs/mutation-testing.md`） | 6 个新契约文件 + 8 处扩展共 49 个新用例；A/B 批量 `tools/mutate-verify.py` 等价项复现；PIT 复测 杀掉 546→**636**、存活 97→**22**（全部是已定性清单）、未覆盖 159→144、分数 0.8400→**0.9564**、强度 0.8491→**0.9666**；22 条定性无害已留档 |
 
 ---
 

@@ -116,12 +116,64 @@ class RapidDeployServiceTest {
         assertThat(reg.size()).isEqualTo(0);
     }
 
+    /**
+     * 变异收口：extractLastOctet 的三个存活变异（{@code >=0} 边界、
+     * {@code <len-1} 边界、减→加）在常规 IP 上都不可见。用 ".8"（点在第 0 位，
+     * 原实现取 "8"）与 "x."（末尾点，原实现取 "0"）两个畸形形状逐个现形。
+     */
+    @Test
+    @DisplayName("10. 设备 id 尾段取 IP 最后一个点之后（畸形形状不许退化）")
+    void deviceIdLastOctetEdgeShapes() {
+        OnvifClient mockOnvif = mock(OnvifClient.class);
+        SurveillanceDeviceRegistry reg = new SurveillanceDeviceRegistry();
+        RapidDeployService svc = new RapidDeployService(mockOnvif, reg);
+
+        SurveillanceDevice dot0 = new SurveillanceDevice(
+                "preset-dot", "cam", SurveillanceDevice.Vendor.ONVIF, ".8", 80, "admin", "pass");
+        SurveillanceDevice trailingDot = new SurveillanceDevice(
+                "preset-tail", "cam", SurveillanceDevice.Vendor.ONVIF, "x.", 80, "admin", "pass");
+        SurveillanceDevice normal = new SurveillanceDevice(
+                "preset-100", "cam", SurveillanceDevice.Vendor.ONVIF, "1.2.3.100", 80, "admin", "pass");
+        when(mockOnvif.discoverDevices("10.0.0.0/24"))
+                .thenReturn(List.of(dot0, trailingDot, normal));
+        when(mockOnvif.getDeviceCapabilities(anyString(), anyInt(), anyString(), anyString()))
+                .thenReturn(Set.of("Media"));
+        when(mockOnvif.getRtspUrl(anyString(), anyInt(), anyString(), anyString(), anyInt()))
+                .thenReturn("rtsp://stub/Streaming/Channels/1");
+
+        List<DeployResult> results = svc.scanAndDeploy("10.0.0.0/24", "admin", "pass");
+
+        assertThat(results).extracting(DeployResult::getStatus)
+                .containsOnly(DeployResult.Status.SUCCESS);
+        assertThat(results).extracting(DeployResult::getDeviceId)
+                .anySatisfy(id -> assertThat(id).startsWith("cam-8-"))    // ".8" → "8"
+                .anySatisfy(id -> assertThat(id).startsWith("cam-0-"))    // "x." → 无末段取 "0"
+                .anySatisfy(id -> assertThat(id).startsWith("cam-100-")); // 规则 IP 取末段
+
+        // 注册进 Registry 的设备能力集是真实抓取的（变异体删 setCapabilities 后是空集）
+        for (DeployResult r : results) {
+            SurveillanceDevice deployed = reg.getDevice(r.getDeviceId());
+            assertThat(deployed).isNotNull();
+            assertThat(deployed.getCapabilities()).isNotEmpty();
+        }
+    }
+
     @Test
     @DisplayName("4. scanAndDeploy 多设备混合（部分新+部分已注册）→ 各自状态正确")
-    void scanAndDeployMixedDevices() {
+    void scanAndDeployMixedDevices() throws Exception {
         preRegister(registry, "existing-100", "192.168.1.100", SurveillanceDevice.Vendor.HIKVISION);
 
-        List<DeployResult> results = service.scanAndDeploy("192.168.1.0/24", "admin", "admin123");
+        List<DeployResult> results;
+        try (LogWiretap tap = LogWiretap.on(RapidDeployService.class)) {
+            results = service.scanAndDeploy("192.168.1.0/24", "admin", "admin123");
+
+            // 收口（变异体在此存活过）：完成日志的计数逐项固定——筛选谓词取反/恒真
+            // 不会改变返回值，只会让运维看到的 success/skipped/failed 数字说谎
+            String countLine = tap.lines().stream()
+                    .filter(s -> s.contains("Rapid deploy complete:"))
+                    .findFirst().orElseThrow();
+            assertThat(countLine).contains("total=3 success=2 skipped=1 failed=0");
+        }
 
         assertThat(results).hasSize(3);
 
@@ -266,6 +318,26 @@ class RapidDeployServiceTest {
     void scanOnlyBlankSubnetThrows() {
         assertThatThrownBy(() -> service.scanOnly(""))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /**
+     * 变异收口：子网校验是<b>服务自身</b>的入参契约。既有测试用真实客户端，
+     * 而 {@code OnvifClient.discoverDevices} 恰好对空子网抛同形异常——删掉
+     * {@code validateSubnet} 调用两条测试都看不出差别。把客户端 mock 掉，
+     * 服务这一道闸必须自己立住（ Kraut 检查的双保险，删一道必须现形）。
+     */
+    @Test
+    @DisplayName("10b. 即使下游客户端被 mock，服务也必须自己校验子网")
+    void blankSubnetSelfValidatedEvenWithMockClient() {
+        RapidDeployService svc = new RapidDeployService(
+                mock(OnvifClient.class), new SurveillanceDeviceRegistry());
+
+        assertThatThrownBy(() -> svc.scanAndDeploy("   ", "admin", "pass"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("subnet");
+        assertThatThrownBy(() -> svc.scanOnly("  "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("subnet");
     }
 
     @Test

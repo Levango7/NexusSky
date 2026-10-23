@@ -142,6 +142,8 @@ class MjpegStreamServiceTest {
         assertThat(MjpegStreamService.looksLikeJpeg(new byte[0])).isFalse();
         assertThat(MjpegStreamService.looksLikeJpeg(new byte[]{(byte) 0xFF, (byte) 0xD8})).isFalse();
         assertThat(MjpegStreamService.looksLikeJpeg(new byte[]{0x47, 0x49, 0x46, 0x38})).isFalse();
+        // 边界（变异收口）：3 字节（FF D8 FF）已越过 SOI+JPEG 标记，必须判真
+        assertThat(MjpegStreamService.looksLikeJpeg(new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF})).isTrue();
     }
 
     // ===== multipart 输出 =====
@@ -193,8 +195,195 @@ class MjpegStreamServiceTest {
         assertThat(countParts(out)).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("fps=0/负数走 200ms 兜底节奏——兜底不能变成除零崩溃")
+    void pump_fpsZeroFallsBackToDefaultInterval() throws Exception {
+        snapshotBody = ascii(jpeg(16));
+        MjpegStreamService svc = newService();
+        byte[] first = svc.fetchFrame(baseUrl + "/snapshot");
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        snapshotStatus = 500; // 开流即断：只写首帧
+        svc.pump(baseUrl + "/snapshot", 0, first, out);
+
+        assertThat(countParts(out)).isEqualTo(1);
+    }
+
+    /**
+     * 调度契约（变异收口）：interval 是真实节流。把"首轮对表"翻转
+     * （{@code nextAt = now + interval → now - interval}）会让第二帧立刻冲出去，
+     * 上述节奏在常规测试断言（帧数/内容）下不可见，只有时间下限能拦。
+     * 下限取得宽松（名义 1000ms，断言 ≥400ms）：慢机器只会把间隔拉得更晚。
+     */
+    @Test
+    @DisplayName("fps=1 时第二帧不早于节流下限到达（对表节奏是真实节流）")
+    void pump_secondFrameRespectsInterval() throws Exception {
+        snapshotBody = ascii(jpeg(16));
+        MjpegStreamService svc = newService();
+        byte[] first = svc.fetchFrame(baseUrl + "/snapshot");
+
+        long startAt = System.nanoTime();
+        TapStream out = new TapStream();
+        Thread t = new Thread(() -> {
+            try {
+                svc.pump(baseUrl + "/snapshot", 1, first, out);
+            } catch (Exception ignored) {
+                // 中断收尾即可
+            }
+        });
+        t.start();
+        waitFor(() -> out.secondPartAtNanos != 0, 8000);
+        snapshotStatus = 500;
+        t.interrupt();
+        t.join(3000);
+
+        assertThat(out.secondPartAtNanos)
+                .as("第二帧必须出现过（帧源在 8s 内保持供帧）").isNotZero();
+        long elapsedMs = (out.secondPartAtNanos - startAt) / 1_000_000;
+        assertThat(elapsedMs).isGreaterThanOrEqualTo(400);
+    }
+
+    /**
+     * 可中断性契约（变异收口）：pump 被 {@code interrupt} 时的收尾必须在
+     * {@code catch} 里<b>先重置中断标记再返回</b>。如果把这一行删掉，pump 照样
+     * 正常返回（帧数/flush 等断言全都无感），但调用线程的"我被要求停"信号
+     * 被吞掉——线程池复用该线程时，下一个任务永远感知不到自己已被中断。
+     * 只有在独立线程里等它返回、再查线程的中断状态才抓得到。
+     */
+    @Test
+    @DisplayName("pump 收到中断后尽快返回，且线程中断标记被保留")
+    void pump_interruptPreservesInterruptFlag() throws Exception {
+        snapshotBody = ascii(jpeg(16));
+        MjpegStreamService svc = newService();
+        byte[] first = svc.fetchFrame(baseUrl + "/snapshot");
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Thread t = new Thread(() -> {
+            try {
+                // fps=1 ⇒ 首帧之后 pump 进入 1000ms 的 sleep；中断会落在 sleep 里
+                svc.pump(baseUrl + "/snapshot", 1, first, out);
+            } catch (Exception ignored) {
+                // 帧源一直活着，唯一出路就是这次中断
+            }
+        });
+        t.start();
+        Thread.sleep(250); // 稳定落在第一次 sleep（约 1000ms）内
+        t.interrupt();
+        t.join(3000);
+
+        assertThat(t.isAlive())
+                .as("收到中断后 pump 必须尽快返回（不许滞留在循环里）").isFalse();
+        assertThat(t.isInterrupted())
+                .as("pump 结束必须保留中断标记——sleep 抛出时 JVM 会清掉标记，"
+                        + "catch 里必须显式恢复（这是给调用线程的契约，不是装饰）")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("第 3 帧照常出现、帧字节完整落流、每段都 flush（半帧不许丢）")
+    void pump_thirdPartFullBytesAndFlushes() throws Exception {
+        byte[] frame = jpeg(64);
+        snapshotBody = ascii(frame);
+        MjpegStreamService svc = newService();
+        byte[] first = svc.fetchFrame(baseUrl + "/snapshot");
+
+        TapStream out = new TapStream();
+        Thread t = new Thread(() -> {
+            try {
+                svc.pump(baseUrl + "/snapshot", 50, first, out);
+            } catch (Exception ignored) {
+                // 断源收尾即可
+            }
+        });
+        t.start();
+        waitFor(() -> countParts(out.bytes()) >= 4, 5000);
+        snapshotStatus = 500;
+        t.join(3000);
+
+        String text = ascii(out.bytes());
+        // 帧号跨三帧仍递增（若第二段起计数回退，"X-Frame-Seq: 3" 永远不出现）
+        assertThat(text).contains("X-Frame-Seq: 3");
+        // 帧字节必须完整出现在流中（只写半帧会找不到完整序列）
+        assertThat(indexOf(out.bytes(), frame)).isGreaterThanOrEqualTo(0);
+        // 每段 part 一次 flush：首帧 + 至少一段续帧
+        assertThat(out.flushCount.get()).isGreaterThanOrEqualTo(2);
+
+        // multipart 框架逐字钉死（变异收口）：每一段的帧数据后面必须紧跟 CRLF 再接
+        // 下一段的 boundary。writePart 尾部的 {@code out.write(CRLF)}（L165）被删掉后，
+        // 帧字节会与下一个 "--" 直接相接——帧数计数与帧内容断言全都察觉不到，
+        // 但真实浏览器会把残缺的 multipart 解析成坏帧。
+        byte[] raw = out.bytes();
+        int from = 0;
+        int framesSeen = 0;
+        while (true) {
+            int at = indexOf(raw, frame, from);
+            if (at < 0) {
+                break;
+            }
+            framesSeen++;
+            assertThat(at + frame.length + 2 <= raw.length)
+                    .as("第 %d 帧之后必须有分隔字节", framesSeen).isTrue();
+            assertThat(raw[at + frame.length]).as("第 %d 帧后必须是 \\r", framesSeen).isEqualTo((byte) '\r');
+            assertThat(raw[at + frame.length + 1]).as("第 %d 帧后必须是 \\n", framesSeen).isEqualTo((byte) '\n');
+            from = at + 1;
+        }
+        assertThat(framesSeen).as("至少两段帧完整落流").isGreaterThanOrEqualTo(2);
+    }
+
+    /** 计数/计时输出流：记 flush 次数与各 part 首次出现的时刻。 */
+    private static final class TapStream extends OutputStream {
+        final ByteArrayOutputStream delegate = new ByteArrayOutputStream();
+        final AtomicInteger flushCount = new AtomicInteger();
+        /** "X-Frame-Seq: 2"（第二段 part 的帧号头）首次出现的时刻。 */
+        volatile long secondPartAtNanos;
+
+        byte[] bytes() {
+            return delegate.toByteArray();
+        }
+
+        @Override
+        public void write(int b) {
+            delegate.write(b);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) {
+            String chunk = new String(b, off, len, StandardCharsets.ISO_8859_1);
+            if (secondPartAtNanos == 0 && chunk.contains("X-Frame-Seq: 2")) {
+                secondPartAtNanos = System.nanoTime();
+            }
+            delegate.write(b, off, len);
+        }
+
+        @Override
+        public void flush() {
+            flushCount.incrementAndGet();
+        }
+    }
+
+    private static int indexOf(byte[] haystack, byte[] needle) {
+        return indexOf(haystack, needle, 0);
+    }
+
+    private static int indexOf(byte[] haystack, byte[] needle, int from) {
+        outer:
+        for (int i = Math.max(0, from); i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    continue outer;
+                }
+            }
+            return i;
+        }
+        return -1;
+    }
+
     private static int countParts(ByteArrayOutputStream out) {
-        String s = ascii(out.toByteArray());
+        return countParts(out.toByteArray());
+    }
+
+    private static int countParts(byte[] raw) {
+        String s = ascii(raw);
         int n = 0;
         int i = s.indexOf("X-Frame-Seq:");
         while (i >= 0) {

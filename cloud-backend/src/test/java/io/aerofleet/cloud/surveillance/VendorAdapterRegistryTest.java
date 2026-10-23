@@ -61,6 +61,18 @@ class VendorAdapterRegistryTest {
     }
 
     @Test
+    @DisplayName("hasAdapter：未注册厂商与 null 都返回 false（查询不许恒真）")
+    void hasAdapter_unregisteredAndNull_returnFalse() {
+        VendorAdapterRegistry registry = new VendorAdapterRegistry(List.of(new HikAdapter()));
+
+        assertThat(registry.hasAdapter(Vendor.HIKVISION)).isTrue();
+        // 反例：恒真变异体在这里必现形
+        assertThat(registry.hasAdapter(Vendor.ONVIF)).isFalse();
+        assertThat(registry.hasAdapter(Vendor.DAHUA)).isFalse();
+        assertThat(registry.hasAdapter(null)).isFalse();
+    }
+
+    @Test
     @DisplayName("getAllAdapters 返回不可变映射，包含所有 4 个适配器")
     void getAllAdapters_returnsImmutableMapWithAllFour() {
         VendorAdapterRegistry registry = createFullRegistry();
@@ -232,6 +244,19 @@ class VendorAdapterRegistryTest {
 
         adapter.unsubscribeEvents(handle);
         // 无异常即通过
+    }
+
+    /**
+     * 变异收口：null 句柄必须<b>温和地</b>被忽略（容错路径），而不是走进
+     * 订阅表去 {@code ConcurrentHashMap.remove(null)} 抛 NPE。判空取反
+     * 的变异会把"防御分支"变成"必炸分支"——只有传 null 才能分出真假。
+     */
+    @Test
+    @DisplayName("HikAdapter unsubscribeEvents(null) 温和忽略（不 NPE）")
+    void hikAdapter_unsubscribeEvents_nullHandleIgnored() {
+        HikAdapter adapter = new HikAdapter();
+        adapter.unsubscribeEvents(null);
+        adapter.unsubscribeEvents("");
     }
 
     // ===== DahuaAdapter 功能测试 =====

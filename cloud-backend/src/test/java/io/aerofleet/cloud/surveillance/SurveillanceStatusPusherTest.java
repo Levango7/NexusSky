@@ -165,6 +165,28 @@ class SurveillanceStatusPusherTest {
     }
 
     @Test
+    @DisplayName("新鲜设备的 uptimeSec 精确为 0（秒化不许变成天文数字）")
+    void uptimeZeroForFreshDevice() {
+        SurveillanceDevice d = registerDevice("cam-upt", SurveillanceDevice.Vendor.HIKVISION, null);
+
+        // 跨过一个时钟刻度，保证发布时的 now > firstSeenMs（Windows 计时粒度 ~15.6ms）
+        long spins = 0;
+        while (System.currentTimeMillis() <= d.firstSeenMs && spins++ < 100_000) {
+            Thread.onSpinWait();
+        }
+        assertThat(System.currentTimeMillis()).isGreaterThan(d.firstSeenMs);
+
+        pusher.pushOnce();
+
+        ArgumentCaptor<MavlinkMessageEvent> captor =
+                ArgumentCaptor.forClass(MavlinkMessageEvent.class);
+        verify(publisher, times(1)).publishEvent(captor.capture());
+        SurveillanceStatusMsg msg = (SurveillanceStatusMsg) captor.getValue().getMessage();
+        // age < 1s ⇒ 整除秒数为 0：除→乘变异会给 ≥1000，减→加会给 ~3.4e9，都现形
+        assertThat(msg.uptimeSec).isZero();
+    }
+
+    @Test
     @DisplayName("设备 ID → u16 哈希稳定且在范围内")
     void deviceIdHashStable() {
         int a = SurveillanceStatusPusher.deviceIdToU16("cam-hik");
