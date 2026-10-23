@@ -25,19 +25,11 @@
 （见下方已清零表；两个包的分诊至此全部完成，surveillance 22 条 / security 27 条
 均为逐条定性的等价项）。
 
-## P1 —— 前端端点契约门禁里登记的 6 条已知缺口
+## P1 —— 前端端点契约门禁里登记的已知缺口
 
-`scripts/check-frontend-endpoints.py` 的 `KNOWN_GAPS`（**是债务登记，不是豁免**）：
-修好一条就从那里删一条，门禁会提醒。
-
-| # | 缺口 | 为什么还没修 | 验收标准 |
-|---|---|---|---|
-| 8 | `GET /api/v1/env/status` | 气象图层要"机队级环境状态"读口径；后端只有 POST 覆盖写 + `/env-alerts` | 后端补读端点 + 前端改指向 |
-| 9 | `GET /api/v1/link-sim/profiles` | 后端口径在 `/api/v1/comm-adapt/quality/*`，**返回形状不同** ⇒ 不是纯路径替换，要改面板取数逻辑 | 面板改读真实形状 |
-| 10 | `GET /api/v1/link-sim/status` | 同上 | 同上 |
-| 11 | `POST /api/v1/link-sim/damage` | 链路损伤注入，后端无对应能力 | 要么实现，要么前端显式禁用并写明原因（像物理模型按钮那样） |
-| 12 | `GET /api/v1/vision/thermal/sources` | 后端只有 `/api/v1/thermal/tasks`（任务），没有"源"的概念 | 补"源"的概念或前端改读任务列表 |
-| 13 | `POST /api/v1/hardware/physics-model` | 概念只在模拟器 `VirtualDrone.physicsModel`，**没有 MAVLink 下发通道** ⇒ 按钮已显式禁用并写明原因 | 要接下发通道才谈得上实现 |
+**当前无未处理条目**：6 条 KNOWN_GAPS 已于 2026-10-24 全部清账（见下方已清零表；
+`KNOWN_GAPS` 现为空，门禁 233 处前端调用全部有后端对应端点）。
+后续若新增缺口，登记会回到 `scripts/check-frontend-endpoints.py`。
 
 ## P2 —— 产品级缺口（量级大，先把口径钉住再动）
 
@@ -48,6 +40,8 @@
 | 16 | **UOM `sink-type` 未落地** | 默认 Noop | 机巢/监管上报的真实去向 |
 | 17 | **机巢只有 sim** | 机巢 MQTT 未接 | 硬件到位再动 |
 | 18 | **死枚举 / 空端点** | 审计期发现的历史遗留 | 需要一次全仓扫描确认清单 |
+| 19 | **热成像链路未接线** | MAVLink 30012 (ThermalDataMsg) 在 cloud-backend 零引用：任务壳永不推进（无 ingest）、无机队级热状态读端点、热源只有图像坐标（lat/lon 需位姿解算）。2026-10-24 分诊确证，ThermalOverlayPanel 已改"未实现"说明页（P1 #12 的真实现选项） | 接线 30012 ingest → 补聚合读端点 → 位姿解算出热源坐标；三步各自可独立验收 |
+| 20 | **link-sim 无运行时控制通道** | 损伤参数（延迟/丢包/带宽/分区）是启动期 `--profile` 固定的，进程内无 HTTP/控制帧入口，云端无从下发。链路损伤注入面板（P1 #11 的真实现选项）依赖它 | link-sim 加控制端口（如 HTTP PATCH /profile）+ cloud-backend 转发端点 + 鉴权口径；先钉协议再动 |
 
 ---
 
@@ -66,6 +60,7 @@
 | **`MjpegStreamService.pump` 的 `flush()` 没人盯**（删掉照样全绿） | PR #140 | `SurveillanceStreamAndPruneContractTest` 3 例 + `scripts/mutate-verify.py` 改坏⇒红、还原⇒绿 |
 | **`SurveillanceDeviceRegistry.pruneStaleDevices` 的 `persistStaleStatus` 没人盯** | PR #140 | 同上（同一组动作级契约） |
 | **surveillance 包 97 个存活变异体逐条分诊**（P1 #4/#5/#6 全清：前缀形状、Registry 谓词与排序、Onvif 校验链、SSE 生命周期、MJPEG 泵、mask 全等、快速部署尾段与计数日志） | 本分支（第四轮，见 `docs/mutation-testing.md`） | 6 个新契约文件 + 8 处扩展共 49 个新用例；A/B 批量 `tools/mutate-verify.py` 等价项复现；PIT 复测 杀掉 546→**636**、存活 97→**22**（全部是已定性清单）、未覆盖 159→144、分数 0.8400→**0.9564**、强度 0.8491→**0.9666**；22 条定性无害已留档 |
+| **前端端点契约 6 条 KNOWN_GAPS 清账**（P1 #8~#13：env/status 补读端点；链路质量面板改读 comm-adapt 真实口径；损伤滑块/热成像面板/物理模型三处假控件按诚实性原则移除或禁用并写明） | 本分支（见 `CHANGELOG.md` 2026-10-24 节） | 后端新增 `GET /api/v1/env/status` + `EnvStatusReadContractTest` 5 例（圆周风向均值/NaN 不进 JSON/众数并列取小）；`KNOWN_GAPS` 清空，端点门禁 233 处调用全匹配 + self-test；vitest 382 例 + vite build 全绿；#12 真实现选项登记 P2 #19、#11 登记 P2 #20 |
 | **security 包 102 个存活变异体逐条分诊**（P1 #7 全清：租户守卫三角、缓存边界、追踪器后台写者、限流定时器、RBAC 直调断言、Bean 工厂哨兵、租户过滤器、签名审计归属） | 本分支（第五轮，见 `docs/mutation-testing.md`） | 4 个新契约文件 + 16 处扩展净增 52 个新用例；A/B 批量 42/42「改坏⇒红、还原⇒绿」；PIT 复测 杀掉 566→**649**、存活 102→**27**（全部是已定性清单）、未覆盖 97→89、分数 0.8448→**0.9572**、强度 0.8473→**0.9601**；27 条定性无害已留档（含坑 8/坑 9 两个新坑） |
 
 ---
