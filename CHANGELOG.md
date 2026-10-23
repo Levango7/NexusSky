@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-25 共有 197 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 194 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 197 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 192189（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -971,6 +971,40 @@ pymavlink 已确认官方参数（`ordered_fieldnames` + `crc_extra=178`），
 上一轮（#154）写过「本地 `check-test-count-docs.py` 报的 22 处不一致是 surefire 残缺假象」。
 本轮把全仓 Java 测试**完整跑了一遍**后复核：门禁输出 **「全部一致」**（同步掉本 PR 新增的
 11 个用例后）。⇒ 那个判断成立：**本地残缺时不能改文档，完整跑之后才可信**。
+## [Unreleased] — P2 #19 热成像接线：从"消息定义"到"面板有数"的全链补完（2026-10-24）
+
+### 1. 现场：三件齐备、唯独没人发送
+
+P1 #12 把热成像面板改成"未实现"说明页时分诊确证：THERMAL_DATA(30012) 的消息定义
+（mavlink-core）、解码（`MavlinkMessage.decode`）、载荷源（drone-sim 的
+`SimulatedThermalSource`/`BudgetThermalSource`）三件齐备，但**全仓零发送点**——
+且完整版 VirtualDrone 根本没装配热像源（只有 budget 模式有）。链上每一环都在，
+唯独没人把它们接起来：cloud-backend 零引用、任务壳永不推进、前端吃 404。
+
+### 2. 补了什么（三端各一环）
+
+- **drone-sim 发送环**：完整版构造器装配 `SimulatedThermalSource`（此前仅 budget
+  模式装配）；`telemetryRates` 1Hz 块挂钩（照 LiDAR(30020) 模板）：
+  `synthesizeThermalScene`（基线 22℃ + 两个缓变热源，位置由 sysid 派生、确定性可测）
+  → `analyze` → `ThermalDataMsg` 下发。
+- **cloud-backend ingest 环**：新 `ThermalIngestListener`（照
+  `TelemetrySnapshotListener` 的 @EventListener + msgId 条件姿势）——每帧写
+  `DroneSnapshot` 热像五元组快照 + 收账该 sysid 最老活跃任务（PENDING → COMPLETED；
+  每帧都是完整分析，RUNNING 态在此接线不可观测，Javadoc 诚实记录）。
+- **cloud-backend 读环**：`ThermalController` + `GET /api/v1/thermal/status`
+  （机队热读数：只列 online 且上报过的机，租户口径由 `DeviceRegistry.all()` 过滤）。
+- **前端**：ThermalOverlayPanel 从"未实现"说明页换成真实机队热读数表
+  （tempMax/mean/min/σ + 热点数 + 上报时刻，温度阈值告警为客户端过滤并注明）。
+
+### 3. 实测
+
+- 新用例 11 个：sim 侧 `ThermalDataEmissionTest` 2 例（**真实 UDP 往返**：1Hz 帧必达
+  + 数值非平凡 + 场景确定性）、cloud 侧 ingest 契约 5 例 + 读口径 4 例。
+- **A/B 4/4 KILLED**：1Hz 挂钩删除 / 完整版热像源装配删除 / 收账调用删除 /
+  离线过滤取反——全部"改坏⇒红、还原⇒绿"。
+- 端点 410 → **411**；vitest 382 + build + lint ✓。
+- 恢复条件③（逐点热源经纬度）仍留 P2 #19：需要图像→地理位姿解算，本轮面板按
+  聚合口径显示（每机五元组），不假装有逐点坐标。
 
 ---
 
