@@ -42,7 +42,11 @@
 - 只动标记块内的内容；手写的「开工声明」「规则速记」等段落不会被覆盖
 - 重写是幂等的；若状态板里还留着手写的同名段，脚本**拒绝写入**并要求先迁移（防两份并存让人挑到旧的）
 - gh 或网络不可用时该栏写 `UNVERIFIED`——**不会**把"没查到"报成"没有在途 PR"
-- 自测：`bash scripts/coord-status.sh --self-test`（五种情形，重点断言"降级不得伪装成通过"）
+- **PR 不可合并（`CONFLICTING`/`DIRTY`）时，会在该 PR 行上标 `⚠不可合并⇒Actions 不会调度`**——
+  因为这种情况下 GitHub 合成不出 `refs/pull/<N>/merge`，`pull_request` 流水线**根本不会被调度**
+  （零 run / 零 check suite / 零失败记录）。详见第六节
+- 自测：`bash scripts/coord-status.sh --self-test`（六种情形，重点断言"降级不得伪装成通过"
+  与"该标的标、不该标的不标"）
 - 本节此前另存一份"当前状态"快照（写死 sha 与"空闲"结论），已删除：
   **同一事实不留两处**，否则两处会各自过期，而过期那份看起来更像权威
 
@@ -100,3 +104,67 @@
 - `scripts/check-test-count-docs.py`：命中冲突标记即返回非零，并说明**哪些行没被核对**
 - CI `Docs test-count gate` 在下载产物**之前**先跑 `--self-test`，坏了最早暴露
 - 维修方：改文档时顺手清掉历史标记（相同侧去重、不同侧全留），并跑一次 `--self-test`
+
+<a id="ci-no-schedule"></a>
+
+## 六、PR 不可合并 ⇒ Actions 根本不调度（"CI 没跑"的真相）
+
+**为什么单列一节**：这个失败形态**不产生任何失败记录**——GitHub 上没有红叉、没有失败 job、
+`Actions` 页签里没有这条 PR 的 run。它长得像"GitHub 挂了"或"CI 没触发"，
+于是排查方向整个跑偏（有人因此去改流水线、有人因此重跑、有人因此认定是平台故障）。
+
+### 症状
+
+- 这条 PR 的 `pull_request` 检查**一个都没有**；`Actions` 里**没有它的 run**
+- 但**第三方 App 的 check suite 照常出现**（依赖更新机器人、许可证扫描等）——这正是最容易误判的一点：
+  "别人拿得到检查结果，说明 GitHub 正常"，而缺的那几项恰恰是 GitHub Actions 自己的
+- `gh run list` 按 head sha 查不到任何 run；`commits/<sha>/check-suites` 里**没有 Actions 的 suite**
+
+### 机制
+
+`pull_request` 事件跑在 `refs/pull/<N>/merge`（base + head 合成）这个 ref 上。
+**PR 不可合并时（`mergeable=CONFLICTING` / `mergeStateStatus=DIRTY`），GitHub 合成不出这个 ref**
+（`git ls-remote origin refs/pull/<N>/merge` 为空、API 返回 404）
+⇒ 事件**永不触发** workflow ⇒ **零 run、零 Actions check suite、零失败记录**。
+
+反过来也成立：**一旦解掉冲突，合成 ref 立刻出现，workflow 随即被调度**——
+所以"CI 静默"是"CI 不被调度"的表现，不是另一个独立故障。
+
+### 判读四步（按顺序做，别跳步）
+
+1. `gh api repos/<owner>/<repo>/pulls/<N> --jq '.mergeable, .mergeStateStatus'`
+   → `CONFLICTING` / `DIRTY` ⇒ **命中本节**，到此为止，别再去查 GitHub 状态页
+   （`UNKNOWN` 是 GitHub 还没算完 mergeability 的**暂态**，不是冲突，别误判）
+2. `git ls-remote origin refs/pull/<N>/merge` → 空 ⇒ 合成 ref 确实不存在（与第 1 步互证）
+3. `gh api repos/<owner>/<repo>/actions/runs?per_page=100 --jq '.[].head_sha'` → 没有该 head sha
+   ⇒ 从没被调度
+   （**别用 `created=>=…` 这类过滤参数**——它是无效过滤，会静默返回空列表，拿它当证据就白查了）
+4. `gh api repos/<owner>/<repo>/commits/<sha>/check-suites` → 没有 Actions 的 suite ⇒ 同上
+
+### 修复
+
+把 master 合进分支（或 rebase），push 之后**合成 ref 出现 ⇒ run 在秒级被创建**
+（实测：push 后 1m50s 出现第一个 job）。
+**不用改 CI 配置，也不用重跑**——问题在分支，不在流水线。
+
+### 旁证（2026-10-23 实测，PR #142）
+
+- 冲突未解时：PR 为 `CONFLICTING`/`DIRTY`，`refs/pull/142/merge` 不存在，
+  **该 PR 零 run、零 Actions check suite**；同期第三方 App 的 check suite 正常出现
+  ⇒ 症状与"GitHub 故障"完全一致
+- 解冲突并 push 后：PR 转 `MERGEABLE`，合成 ref 出现，**run `39942694142` 被创建**，
+  推送后近乎瞬时 ⇒ 因果链闭合
+
+### 同族的另一个坑：合并方式被拒 ≠ PR 已经合了
+
+实测 `gh pr merge <N> --merge` 被拒（*"Merge commits are not allowed on this repository"*），
+而同一仓库 `gh api` 报的合并方式**三种都允许**、`rulesets` 为空数组——**这个矛盾至今没有解释清楚**。
+本仓 master 最近若干笔都是**单父 + `(#N)` 后缀**的线性历史 ⇒ 惯例是 `--squash`。
+遇到 `--merge` 被拒可以改试 `--squash`；但**被拒不等于已合并**，合并后必须回查 PR 状态与 master tip。
+
+### 硬规则
+
+1. 看到"CI 没跑"，**先查 mergeability**，再查 GitHub 状态页 / runner 配额 / 网络
+2. **不可合并时不要改 CI 配置**——问题在分支，不在流水线
+3. 状态板「在途与占用」段里带 `⚠不可合并⇒Actions 不会调度` 的行 = 这条 PR 的 CI 不会被调度
+   （`scripts/coord-status.sh` 自动标，见第三节的脚本说明）

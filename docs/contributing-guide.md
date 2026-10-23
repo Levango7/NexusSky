@@ -342,6 +342,13 @@ git push origin feature/spray-task-persistence
 5. 等待 CI 通过和代码审查
 6. 审查通过后合入
 
+> **"CI 没跑"先查 mergeability，别先怀疑 GitHub**：PR 一旦与目标分支冲突
+> （`mergeable=CONFLICTING` / `mergeStateStatus=DIRTY`），GitHub 就**合成不出**
+> `refs/pull/<N>/merge`，`pull_request` 流水线**根本不会被调度**——症状是零 run、
+> 零 check suite、零失败记录（第三方 App 的 check suite 反而照常出现，最容易被误判成平台故障）。
+> 判读四步与修复办法见 [`COORDINATION.md` 第六节](../COORDINATION.md#ci-no-schedule)。
+> 合并方式被拒（`--merge` 不允许）时改试 `--squash`，但**被拒不等于已合并**，合并后要回查 master tip。
+
 ### 5.2 PR 模板
 
 ```markdown
