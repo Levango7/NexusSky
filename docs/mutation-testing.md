@@ -254,7 +254,93 @@ logback root 上拦日志——"跳过必须告警/全好不许告警"这类可�
 + 1（established 行）+ 2（心跳工厂）+ 3（mask L245）+ 1（L830）+ 1（Entity）
 + 1（prune 边界）+ 1（prune 日志）+ 1（emptyList）+ 3（OfflineAlarmCache）。
 
-## 三条容易踩的坑（都踩过）
+## 2026-10-24 的第五轮：security 收口——102 个存货逐条分诊
+
+第一轮审计 security 包时只清出 4 处真缺口，账上还挂着 **102 个存活**。
+第五轮沿用第四轮的方法论：102 条逐个定性——**真缺口的补测试杀掉；确实观测不到
+差异的，逐条给出"为什么测不到"的证据**。改动仍然全部落在测试，生产代码零改动。
+
+新增 4 个契约测试文件 + 16 处既有测试扩展，净增 **52 个新用例**
+（写入 54 个，中途删除 2 个墙钟竞态用例，见坑 9；补杀 3 条第一跑浮出的真缺口）：
+
+| 测试 | 例数 | 钉住的契约 |
+|---|---:|---|
+| `ApiKeyAuthContractTest`（新） | 4 | ApiKey 认证 Token 的 authenticated/principal/role 微契约；ApiKeyEntity 的 name/scopes 访问器（absence=null 不是空串）；StreamToken Token 构造即认证 |
+| `SecurityConfigContractTest`（新） | 2 | Bean 工厂返回 null = 上下文启动失败——单测全是"直接 new"绕开上下文，谁都不撞这个坑 |
+| `TenantFilterTest`（新） | 2 | TenantContext 的 finally 清理（跨请求串租户）；`tenant_id` claim 的 Double 形状解析 |
+| `ValidationConfigContractTest`（新） | 1 | methodValidationPostProcessor 非 null（同上，Bean 工厂哨兵） |
+| `ApiKeyControllerDeviceKeyTest`（扩展） | +8 | scopes 默认/显式、grace 0/8760/8761、同租户轮换、跨租户撤销 403 与 ADMIN 放行、**同租户撤销成功**、null-tenant 特权、sysid 1/254 边界 + 落库字段逐项断言 |
+| `ApiKeyCacheTest`（扩展） | +4 | size() 非零方向、负缓存上限精确 =MAX、evictExpired 整点边界与真实移除 |
+| `ApiKeyFilterCachedTest`（扩展） | +1 | 无缓存退化路径必须照样拒绝已撤销 Key；TenantContext 的 finally 清理 |
+| `ApiKeyLastUsedTrackerTest`（扩展） | +4 | flusher 线程存在且守护（工厂返 null 时 ThreadPoolExecutor 静默不启动）；merge 重映射取最新时刻；pendingSize 非零方向 |
+| `RoleInterceptorTest`（扩展） | +4 | **直调 preHandle 断言返回值**（坑 8）：dev-mode/默认拒绝/无角色三分支的 boolean 本体 + 满足角色对照；拒绝响应 content-type |
+| `AuthControllerTest`（扩展） | +3 | 流令牌 subject 哨兵 "unknown"；parseUsers 的空用户名/空口令两个冒号边界 |
+| `AuthControllerRateLimitTest`（扩展） | +2 | 窗口边界与 cleanup 定时器的 7 个确定性变异体（反射构造桶，零 sleep；两个墙钟竞态用例删除，见坑 9） |
+| `UserControllerTest`（扩展） | +2 | 改密落库值（captor 全等，不是"调用过"）；tenantId 传/不传双向 |
+| `AdminBootstrapRunnerTest`（扩展） | +1 | 恰好 8 位口令放行（<8 拒不是 <=8 拒） |
+| `DeviceIngestKeyBootstrapRunnerTest`（扩展） | +3 | 恰好 16 位 key；name/scopes/createdAt 落库；已撤销行重启复活 |
+| `MavlinkSigningPostureControllerTest`（扩展） | +3 | readyToTighten 正向；拒绝原因非空；preferred_username≠subject 时操作者归属；reason 原样/哨兵双向 |
+| `MavlinkSigningKeyControllerTest`（扩展） | +2 | rejectUnsigned/keyStorePath 如实回显；sysid=255 循环上界；轮换审计记 preferred_username（security 包内自包含 LogWiretap 副本） |
+| `SigningPostureServiceTest`（扩展） | +3 | loosen 成功路径返回 readiness；审计环恰好 50 条；autoRollback 开关往返 |
+| `StreamTokenServiceTest`（扩展） | +1 | 惰性清理的过期整点边界（注入时钟，确定性） |
+| `StreamTokenFilterTest`（扩展） | +1 | 头凭证在场分支的链继续（doFilter 删掉 = 请求挂起，只有链断言能看见） |
+| `TenantControllerTest`（扩展） | +2 | enabled/createdAt **真落库**（captor，不是响应体好看）；显式 enabled=false 落库 |
+
+### 本轮发现（写代码之前先说清楚三个"看起来有覆盖"）
+
+1. **MockMvc 对拦截器的 boolean 返回值失明（坑 8，A/B 实测）**。
+   `RoleInterceptor` 的三个分支翻转（dev-mode `true→false`、默认拒绝/无角色
+   `false→true`）在**旧测试全体下全绿**。机理：拒绝分支先 `writeForbidden` 写定
+   403+错误体（响应已提交），mutant 返回 true 后处理器照常执行但写入被丢弃——
+   HTTP 观测面（状态码/错误体）与原实现完全相同；而**处理器的业务副作用会真的跑**，
+   所以这是真缺口不是等价。L79 反方向（`true→false`）则是 abort 后 MockMvc 停在
+   默认 200，断言 200 的用例照样绿。⇒ 杀法只有一条：**直调 preHandle 断言返回值**
+   （另加一个"角色满足返回 true"的对照组防恒 false）。
+2. **TenantFilter 在 src/test 里零引用**：它只在 Spring 上下文里被 new 出来，而本仓
+   门禁测试全部"直接 new 绕开上下文"——两条契约（finally 清理、claim 兼容解析）
+   此前一个都没被盯过。
+3. **松断言的边界假绿**：`ApiKeyCache` 负缓存上限的旧断言是 `<= MAX+10`，
+   `>= MAX → > MAX` 的边界变异（放行第 MAX+1 个）完全过得了。边界类断言必须
+   **精确等号**，"不爆炸"方向的断言只是烟雾。
+
+### 跨 PR 依赖的处理
+
+轮换审计归属的断言需要旁听 logger。surveillance 第四轮的 `LogWiretap` 是那个 PR 的
+**新增文件**——security PR 若直接引用，从 master 拉分支就编译不过（跨 PR 隐藏依赖）。
+⇒ security 包内放一份**自包含精简副本**（包私有），surveillance 侧保持原样。
+教训：A PR 的测试工具要被 B PR 引用时，要么先合 A，要么复制——**别让两个 PR
+在被依赖方不知情的情况下连体**。
+
+### 实测
+
+- 全量 surefire **3028 例 0 失败**（比第四轮净增 52 = 本轮净新增用例数）。
+- A/B 批量复核：`tools/run_ab_batch.py` 42 条 + 收尾 2 条 = **42/42 全部"改坏⇒红、
+  还原⇒绿"**（退出码存档 `tools/ab_batch_sec_evidence.txt`）。
+  三个 RoleInterceptor 翻转单独 A/B：补测前**全部存活**（坐实坑 8）→ 补测后全部被杀。
+- 变异复测两跑（同包同尺，XML 精确对账，工具 `tools/sec-pit-reconcile.py`——
+  底账 102 vs 新 XML 按**多重集**逐条对账，score/strength 口径与基线 header 逐位吻合）：
+  第一跑杀掉 566 → 647、存活 102 → 29（74 杀 + 28 仍活 + 1 新面孔）；对账发现
+  **同行兄弟变异体**（A/B 杀掉的是同行已死的那个）与 1 个被 PIT 排除的竞态用例
+  （坑 9），补 3 个真缺口用例、删 2 个竞态用例后第二跑定账：
+  **649 杀 / 27 存活 / 未覆盖 89**（总 767、超时 2、运行错误 0）；
+  分数 **0.8448 → 0.9572**、强度 **0.8473 → 0.9601**。
+  增量账目：杀掉 +83 = 底账存活补杀 76 + 新覆盖顺带被杀 7；存活 27 = 底账余 26 + 新面孔 1
+  （`ApiKeyAuthenticationToken` L54，从未覆盖浮出，已定性等价）。基线地板：分数 0.95、强度 0.96。
+
+### 定性为无害的 27 条（每条都有"为什么测不到"的证据）
+
+| 存活变异体 | 复现/机理 | 定性 |
+|---|---|---|
+| `ApiKeyController` 4 条：L447 `instanceof Integer` 取反、L488 `setLastUsedAt(null)` 删除、L489 `setRevoked(false)` 删除、L532 maskKey `<=8 → <8` | A/B：变异跑下用例全绿 | **行为等价（值域/初始化论证）**：Integer 必命中下一个 `instanceof Number` 分支同值返回；实体字段无初始化器（new 即 null）、`revoked` 声明即 false，显式置缺省是冗余写；maskKey 全部调用方只传 68 字符 Key（`nsk_`+64hex），短 Key 分支值域不可达 |
+| `ApiKeyFilter` 4 条：L200 `==null` 取反、L200 `<=12` 边界两向、L203 maskForLog → "" | A/B：全绿 | **行为等价**：非 null 调用方恒走 `!=null`=false；maskForLog 只在**无效 Key** 的 debug 日志路径调用，入参是攻击者自喷的值（12 字符时泄漏的也是攻击者已知信息），日志装饰无机器可读面 |
+| `UserController` L264 `return null → ""`；`JwtTokenProvider` L242 `initialize(2048)` 删除 | A/B：全绿 | **行为等价**：调用方自删检查对 null/"" 同跳过（空用户名双重不可达）；RSA_KEY_SIZE=2048 == JDK "RSA" 默认模长，删除后密钥逐位同规格 |
+| `DeviceIngestKeyBootstrapRunner` L100 `hash.length*2 → /`；`RoleInterceptor` L144 `return null → ""`；`StreamTokenService` L160 `< oldestExpiry → <=`；`ApiKeyAuthenticationToken` L54 `setAuthenticated(false)` 删除 | A/B / 机理 | **行为等价**：StringBuilder 初始容量提示仅影响扩容次数；"" 走 parseRole→null 汇入同一 403；相等过期时间的同 subject 条目可互换，淘汰哪个观测全同；父类 `authenticated` 字段默认即 false，显式 false 是冗余（镜像 L42 的 `setAuthenticated(true)` 不冗余——已被杀） |
+| `ApiKeyLastUsedTracker` L47 `setDaemon(true)` 删除 | A/B（surefire）能杀；PIT 下 12 例全绿 | **PIT 运行环境不可分辨**：`new Thread` 的 daemon 位由创建线程**继承**——PIT minion 的测试线程本身是 daemon，变异后线程照样 daemon；surefire 主线程非 daemon 所以 A/B 可杀。生产意义（防挂 JVM 退出）不受影响：同文件的 `return thread → null`（L48）已被杀 |
+| `AuthController` L345 `return true→true`、L348 `return false→false` | XML：21/9 个测试跑过全绿 | **字节码结构产物**：`synchronized` 块的返回被 javac 复制出多份 `ireturn`（主路径/异常路径），PIT 对每份各出一个变异体——恒等副本（每行的非恒等兄弟变异体均已被杀） |
+| `AuthController` L343/L358 `now-ts > WINDOW_MS → >=`（两个 lambda） | 整点用例在 PIT 覆盖阶段即失败被排除（见坑 9） | **不可稳定测（墙钟整点竞态）**：分叉需要测试内时钟捕获与被测代码内部时钟捕获精确同毫秒（Δ=0）；PIT 插桩 JVM 里 Δ≥1ms 时**原始代码自己就把整点记录清了**。与 surveillance 第四轮 prune 年龄边界同款判定；测试上下文里留有完整说明，两个竞态用例已删 |
+| `SecurityConfig` 8 条：L64 `if (devMode)` 取反、L76/79/82 三个 `!= null` 守卫取反、L77/80/83 三个 setter 删除、L115 `http.build() → null` | 上下文级 | **依赖 Spring 上下文，门禁单测层不可达**：全部位于 `securityFilterChain`（只有上下文装配才执行）；Bean 返 null = 上下文启动失败，而构造 `HttpSecurity` 本身需要上下文级设施。dev 分支在测试环境恒不可达（devMode=false）。留档：链路装配层（@SpringBootTest + 真实 API Key 数据）补位时收口 |
+
+## 九条容易踩的坑（都踩过）
 
 1. **PIT 找不到 JUnit 5 测试**：只打一句
    `JUnit 5 is on the classpath but the pitest junit 5 plugin is not installed`，
@@ -304,6 +390,25 @@ logback root 上拦日志——"跳过必须告警/全好不许告警"这类可�
    另有一处口径差异：**PIT 汇总行把 TIMED_OUT 也算进 "Killed"**——控制台打
    `Killed 643`，XML 里 KILLED=636、TIMED_OUT=7，643 = 636 + 7，不是玄学。
    规矩：**永远等 BUILD SUCCESS，解析永远以 XML 为准**。
+8. **MockMvc 对拦截器/过滤器的 boolean 与"提前返回"失明（2026-10-24 撞到）**：
+   拦截器拒绝分支先 `writeForbidden` 写定 403+错误体——响应**已提交**；此后
+   `return false`（真中断）与 `return true`（放行，处理器执行但写入被丢弃）在
+   HTTP 观测面上**完全同形**，MockMvc 断言（状态码/错误体）全绿。反方向更隐蔽：
+   abort 时 MockMvc 停在**默认 200**，断言 200 的"放行"用例也全绿。
+   RoleInterceptor 三条翻转 A/B 全存活坐实了这一点（其中两条此前在册"真缺口"
+   却被误信为"现有用例盖得住"）。规矩：**拦截器/过滤器的控制流契约必须直调**
+   ——`preHandle`/`doFilter` 的返回值、"链是否继续"（捕获式 FilterChain）本身
+   就是断言对象；HTTP 面只配当对照组。
+9. **"墙钟整点"边界用例在 PIT 的插桩 JVM 下必然自曝（2026-10-24 撞到）**：
+   被测代码直接读 `System.currentTimeMillis()` 且无法注入时钟时，写
+   "恰在窗口边界（now - WINDOW_MS）"的用例，等于赌**测试的时钟捕获与被测代码的
+   时钟捕获落在同一毫秒**。surefire 下 Δ 恒 0 看似稳定；PIT 的插桩 JVM 里
+   Δ≥1ms 时**原始代码自己就把边界记录清了**——用例在未变异代码上就红，被 PIT
+   排除出变异验证，它本来要杀的边界变异体反而没人杀（本轮 `> → >=` 两个
+   lambda 变异体因此存活；surefire 里同型用例还把兄弟变异体杀掉了，纯系 Δ=0 的运气）。
+   规矩：**边界用例必须用注入时钟写**（ManualClock / AtomicLong，参照
+   `ApiKeyCacheTest` / `StreamTokenServiceTest`）；生产代码无法注入时钟的边界，
+   如实定性"不可稳定测"并删掉竞态用例，**别让假边界用例混进变异账本**。
 
 ## 基线
 

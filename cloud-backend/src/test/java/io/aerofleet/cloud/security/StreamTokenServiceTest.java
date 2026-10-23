@@ -96,6 +96,21 @@ class StreamTokenServiceTest {
     }
 
     @Test
+    @DisplayName("惰性清理边界：恰在过期整点的条目也被清掉（>= 含整点；> 会把它留在容量里）")
+    void issue_sweepsEntriesAtExactExpiry() {
+        service = newService();
+        service.issue("admin", "ADMIN", null);
+        clock.advance(StreamTokenService.TTL_MILLIS); // now - 签发时刻恰等于 TTL
+
+        service.issue("admin", "ADMIN", null);
+
+        assertThat(service.size())
+                .as("整点 = 已过期必须清掉；> → >= 变异会让过期条目留在表里白占容量"
+                        + "（consume 会顺手清掉它，size 才是惰性清理的真正观测面）")
+                .isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("单 subject 上限：第 9 枚签发会淘汰最早的未用令牌")
     void issue_perSubjectCapEvictsOldest() {
         service = newService();

@@ -1,9 +1,12 @@
 package io.aerofleet.cloud.security;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -12,10 +15,12 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.method.HandlerMethod;
 
 import java.time.Instant;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -206,24 +211,30 @@ class RoleInterceptorTest {
     @Test
     @DisplayName("fail-closed 只在 RBAC 开启时生效：rbac-enabled=false 与 dev-mode 仍整体放行")
     void unannotatedStillPassesWhenRbacOffOrDevMode() throws Exception {
+        // 补 content 断言：拦截器 return false 中断链时 MockMvc 状态码仍是默认 200，
+        // 只有"处理器真的跑了"（回到响应体）才能从 HTTP 面分辨放行与中断。
         mockMvc(false, false).perform(get("/rbac/open"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(content().string(METHOD_OK));
         mockMvc(true, true).perform(get("/rbac/open"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(content().string(METHOD_OK));
     }
 
     @Test
     @DisplayName("rbac-enabled=false 时整体放行（向后兼容）")
     void disabledRbacPassesEverything() throws Exception {
         mockMvc(false, false).perform(get("/rbac/admin"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(content().string(METHOD_OK));
     }
 
     @Test
     @DisplayName("dev-mode=true 时整体放行，即便 RBAC 开启")
     void devModePassesEverything() throws Exception {
         mockMvc(true, true).perform(get("/rbac/admin"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(content().string(METHOD_OK));
     }
 
     @Test
@@ -366,5 +377,80 @@ class RoleInterceptorTest {
 
         mockMvc(false, true).perform(get("/rbac/operator"))
                 .andExpect(status().isForbidden());
+    }
+
+    // ===== 变异收口：preHandle 的**返回值**本身（MockMvc 面看不见，必须直调） =====
+    //
+    // 2026-10-23 A/B 实测（mutate-verify.py，RoleInterceptorTest 全体）：
+    // dev-mode 跳过分支 `return true` 翻成 false、默认拒绝/无角色分支
+    // `return false` 翻成 true——**三条全部存活**。机理：拦截器拒绝时
+    // writeForbidden 先把 403+错误体写定（响应随即 committed），MockMvc 最终
+    // 拿到的响应与"放行后处理器改写"无法区分，HTTP 面断言对 boolean 翻转全部失明。
+    // 唯一可靠观测面 = 直调 preHandle 读返回值与响应状态/头。
+
+    private MockHttpServletRequest freshRequest() {
+        return new MockHttpServletRequest("GET", "/rbac/open");
+    }
+
+    private static HandlerMethod handler(String method) throws Exception {
+        return new HandlerMethod(new MethodAnnotatedController(),
+                MethodAnnotatedController.class.getMethod(method));
+    }
+
+    @Test
+    @DisplayName("直调：dev-mode=true 时 preHandle 返回 true（返回值本身，不是状态码）")
+    void devModeReturnsTrueFromPreHandle() throws Exception {
+        RoleInterceptor interceptor = new RoleInterceptor(mock(JwtDecoder.class), true, true);
+
+        assertThat(interceptor.preHandle(freshRequest(), new MockHttpServletResponse(), handler("admin")))
+                .as("dev-mode 跳过 RBAC：preHandle 必须返回 true（MockMvc 只验 200，翻成 false 它照样绿）")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("直调：未标注端点默认拒绝——preHandle 返回 false 且写 403（fail-closed 不许翻成放行）")
+    void unannotatedEndpointReturnsFalseFromPreHandle() throws Exception {
+        RoleInterceptor interceptor = new RoleInterceptor(mock(JwtDecoder.class), false, true);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertThat(interceptor.preHandle(freshRequest(), response, handler("open")))
+                .as("漏声明端点必须拒绝：return false 翻成 true 时 MockMvc 全绿（响应已被 403 写定），直调才能抓住")
+                .isFalse();
+        assertThat(response.getStatus()).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(response.getContentAsString())
+                .contains("forbidden: endpoint has no role declaration");
+    }
+
+    @Test
+    @DisplayName("直调：无角色凭据访问受护端点——返回 false 写 403 且响应头是 JSON（翻成 true = 匿名通行证）")
+    void missingRoleReturnsFalseFromPreHandle() throws Exception {
+        RoleInterceptor interceptor = new RoleInterceptor(mock(JwtDecoder.class), false, true);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/rbac/operator");
+        // 无 Authorization 头、无 API Key 上下文、无流令牌 ⇒ 三种角色来源全空
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertThat(interceptor.preHandle(request, response, handler("operator")))
+                .as("无任何角色来源的调用方必须被拒绝：return false 翻成 true = 匿名获得角色通行证")
+                .isFalse();
+        assertThat(response.getStatus()).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(response.getContentType())
+                .as("拒绝响应必须声明 JSON content-type（setContentType 删掉后客户端按 text/html 解析错误体）")
+                .isEqualTo("application/json;charset=UTF-8");
+        assertThat(response.getContentAsString()).contains("forbidden: requires role OPERATOR");
+    }
+
+    @Test
+    @DisplayName("直调：角色满足时 preHandle 返回 true（对照组，证明上面三个 false 不是恒 false）")
+    void satisfyingRoleReturnsTrueFromPreHandle() throws Exception {
+        JwtDecoder decoder = mock(JwtDecoder.class);
+        when(decoder.decode("tok-admin"))
+                .thenReturn(new Jwt("tok-admin", Instant.now(), Instant.now().plusSeconds(300),
+                        Map.of("typ", "JWT"), Map.of("role", "ADMIN")));
+        RoleInterceptor interceptor = new RoleInterceptor(decoder, false, true);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/rbac/admin");
+        request.addHeader("Authorization", "Bearer tok-admin");
+
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), handler("admin")))
+                .isTrue();
     }
 }

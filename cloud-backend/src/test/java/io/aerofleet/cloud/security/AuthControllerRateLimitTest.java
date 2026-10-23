@@ -300,4 +300,75 @@ class AuthControllerRateLimitTest {
                 .as("桶表满时新 IP 也必须被限流（防内存耗尽的闸门）")
                 .isEqualTo(429);
     }
+
+    // ===== 变异收口（P1 #7）：窗口边界 + 清理定时器（反射构造桶，零 sleep）=====
+    //
+    // 生存机理（A/B 实测复核过同族形状）：三个判定都用真实时钟跑，30/60 秒级的
+    // 边界无法靠 sleep 命中；而 cleanupRateBuckets 是 @Scheduled，测试框架根本不
+    // 调度它。所以这里直接把桶表反射出来按"精确时间差"构造，再直调被测方法。
+
+    @SuppressWarnings("unchecked")
+    private java.util.Map<String, Object> buckets() throws Exception {
+        java.lang.reflect.Field f = AuthController.class.getDeclaredField("loginRateBuckets");
+        f.setAccessible(true);
+        return (java.util.Map<String, Object>) f.get(controller);
+    }
+
+    private Object newBucket() throws Exception {
+        Class<?> bucketClass = Class.forName("io.aerofleet.cloud.security.AuthController$RateBucket");
+        java.lang.reflect.Constructor<?> ctor = bucketClass.getDeclaredConstructor();
+        ctor.setAccessible(true);
+        return ctor.newInstance();
+    }
+
+    private java.util.List<Long> timestampsOf(Object bucket) throws Exception {
+        java.lang.reflect.Field f = bucket.getClass().getDeclaredField("timestamps");
+        f.setAccessible(true);
+        return (java.util.List<Long>) f.get(bucket);
+    }
+
+    // 注：这里**刻意没有**「恰在窗口整点」的用例（isRateLimited 与 cleanup 各一，
+    // 2026-10-24 PIT 第五轮实测已删）。原因：被测代码直接读 System.currentTimeMillis()，
+    // 测试无法注入时钟——「now2 - ts == WINDOW_MS 恰好相等」需要测试内的时钟捕获与
+    // 被测代码内部的时钟捕获落在同一毫秒（Δ=0）。surefire 下 Δ 恒 0 看似稳定，PIT 的
+    // 插桩 JVM 里 Δ≥1ms 时**原始代码自己就把整点记录清了**，用例在未变异代码上就红，
+    // 被 PIT 排除出变异验证（cleanupKeepsExactlyAtWindowEdge 实测触发）。这正是
+    // surveillance 第四轮 prune 年龄边界「> → >= 需要精确相等才分叉 ⇒ 不可稳定测」
+    // 的同款判定：边界点两侧皆合理语义，墙钟竞态命中概率取决于调度器心情。
+    // ⇒ 两个边界变异体（isRateLimited 的 L343、cleanup 的 L358）定性为不可稳定测，
+    // 其余 7 个确定性变异体由下列用例钉死。
+
+    @Test
+    @DisplayName("cleanupRateBuckets：新桶原样保留（Math/Negate/恒 true 三个变异都会清掉它）")
+    void cleanupKeepsFreshBuckets() throws Exception {
+        long now = System.currentTimeMillis();
+        java.util.Map<String, Object> buckets = buckets();
+        Object fresh = newBucket();
+        timestampsOf(fresh).add(now); // 刚发生的尝试（now - ts == 0）
+        buckets.put("10.8.8.8", fresh);
+
+        controller.cleanupRateBuckets();
+
+        // now-ts → now+ts（Math）/ > → <=（Negate）/ return isEmpty → 恒 true（BooleanTrue）
+        // 三种变异都会把新桶清掉/删掉——线上表现为"限流保护每 60 秒被定时器自己清空"。
+        assertThat(buckets)
+                .as("新桶必须存活：清掉它的变异会让限流每隔一个周期形同虚设")
+                .containsKey("10.8.8.8");
+        assertThat(timestampsOf(buckets.get("10.8.8.8")))
+                .as("新桶里的时间戳也必须原样保留").hasSize(1);
+    }
+
+    @Test
+    @DisplayName("cleanupRateBuckets：只剩过期记录的空桶被移除（return isEmpty → 恒 false 变异会保留它）")
+    void cleanupDropsEmptyBuckets() throws Exception {
+        long now = System.currentTimeMillis();
+        java.util.Map<String, Object> buckets = buckets();
+        Object stale = newBucket();
+        timestampsOf(stale).add(now - 120_000L); // 两窗口前
+        buckets.put("10.6.6.6", stale);
+
+        controller.cleanupRateBuckets();
+
+        assertThat(buckets).as("过期空桶必须移除，否则空桶无限堆积").doesNotContainKey("10.6.6.6");
+    }
 }
