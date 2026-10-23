@@ -172,6 +172,52 @@ class TenantControllerTest {
         assertThat(body.get("enabled")).isEqualTo(true);
     }
 
+    @Test
+    @DisplayName("createTenant：enabled 落库 + createdAt 落库（mint 字段缺失让租户半成品入库）")
+    void createTenant_persistsEnabledAndCreatedAt() {
+        TenantRequest request = new TenantRequest();
+        request.setName("新租户");
+        request.setCode("PERSIST_TENANT");
+        request.setEnabled(null); // 缺省：三态默认必须真落库，不只是响应体里好看
+
+        when(tenantRepository.findByCode("PERSIST_TENANT")).thenReturn(Optional.empty());
+        when(tenantRepository.save(any(TenantEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        controller.createTenant(request);
+
+        org.mockito.ArgumentCaptor<TenantEntity> captor =
+                org.mockito.ArgumentCaptor.forClass(TenantEntity.class);
+        verify(tenantRepository).save(captor.capture());
+        // setEnabled 删除：实体 enabled 停在 null/默认——响应体还能显示 true，库里已是 NULL
+        assertThat(captor.getValue().isEnabled()).isTrue();
+        // setCreatedAt 删除：租户的"寿命"从此处断档（审计/按创建时间清理全部失真）
+        assertThat(captor.getValue().getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("createTenant：显式 enabled=false 落库（字段默认 true 会把漏 setEnabled 的变异体藏起来）")
+    void createTenant_persistsExplicitFalse() {
+        TenantRequest request = new TenantRequest();
+        request.setName("停用租户");
+        request.setCode("DISABLED_TENANT");
+        request.setEnabled(false); // 显式停用：与字段默认值相反，漏 setEnabled 必现形
+
+        when(tenantRepository.findByCode("DISABLED_TENANT")).thenReturn(Optional.empty());
+        when(tenantRepository.save(any(TenantEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        controller.createTenant(request);
+
+        org.mockito.ArgumentCaptor<TenantEntity> captor =
+                org.mockito.ArgumentCaptor.forClass(TenantEntity.class);
+        verify(tenantRepository).save(captor.capture());
+        // PIT 第五轮：setEnabled 删除变异体在 enabled=null（默认即 true）下与原实现
+        // 全同，唯独 enabled=false 请求会把"停用租户"创建成"启用租户"——权限闸门方向
+        // 的数据错误，只有显式 false 用例能抓住。
+        assertThat(captor.getValue().isEnabled())
+                .as("显式停用的租户不许被落成启用")
+                .isFalse();
+    }
+
     // ===== updateTenant =====
 
     @Test

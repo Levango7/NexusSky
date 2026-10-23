@@ -60,6 +60,18 @@ class DeviceIngestKeyBootstrapRunnerTest {
     }
 
     @Test
+    @DisplayName("key 恰好 16 位放行（弱密钥边界是 <16 拒，不是 <=16 拒）")
+    void acceptsExactlySixteenCharKey() {
+        ApiKeyRepository repository = mock(ApiKeyRepository.class);
+        when(repository.findByKeyId(DeviceIngestKeyBootstrapRunner.KEY_ID)).thenReturn(Optional.empty());
+
+        runner(repository, "abcdefghijklmnop").run(null); // 恰好 16
+
+        // < → <= 变异会把 16 位合法 key 当弱密钥拒掉（最小尺寸的引导凭据被误杀）
+        verify(repository).save(any());
+    }
+
+    @Test
     @DisplayName("配置合法 key 时写入 OPERATOR 档，且只存哈希")
     void bootstrapsHashNotPlaintext() {
         ApiKeyRepository repository = mock(ApiKeyRepository.class);
@@ -95,6 +107,39 @@ class DeviceIngestKeyBootstrapRunnerTest {
         assertThat(saved.getKeyHash()).isEqualTo(sha256Hex(GOOD_KEY));
         // 换 key 是轮换通路，但 createdAt 不该被重置，否则审计上看不出这条 key 的寿命
         assertThat(saved.getCreatedAt()).isEqualTo(createdAt);
+    }
+
+    @Test
+    @DisplayName("新建设置 name/scopes/createdAt（mint 字段缺失会让实体半成品入库）")
+    void bootstrapsFillsEntityMetadata() {
+        ApiKeyRepository repository = mock(ApiKeyRepository.class);
+        when(repository.findByKeyId(DeviceIngestKeyBootstrapRunner.KEY_ID)).thenReturn(Optional.empty());
+
+        runner(repository, GOOD_KEY).run(null);
+
+        ApiKeyEntity saved = captureSave(repository);
+        // setName/setScopes 删除：库里的引导 key 在管理面显示无名无档（运维认不出它是谁）
+        assertThat(saved.getName()).isEqualTo("device-ingest (bootstrap)");
+        assertThat(saved.getScopes()).isEqualTo("[ingest]");
+        // createdAt 守卫内赋值删除：name 列 NOT NULL 的兄弟字段缺了，审计上 key 没有寿命
+        assertThat(saved.getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("已存在但被撤销的引导 key：重启覆写时复活（setRevoked(false) 承担重启用途）")
+    void overwriteReactivatesRevokedRow() {
+        ApiKeyRepository repository = mock(ApiKeyRepository.class);
+        ApiKeyEntity existing = new ApiKeyEntity();
+        existing.setKeyId(DeviceIngestKeyBootstrapRunner.KEY_ID);
+        existing.setKeyHash("stale-hash");
+        existing.setRevoked(true); // 之前被撤销过
+        when(repository.findByKeyId(DeviceIngestKeyBootstrapRunner.KEY_ID)).thenReturn(Optional.of(existing));
+
+        runner(repository, GOOD_KEY).run(null);
+
+        // 删掉 setRevoked(false)：撤销过的引导 key 重启也不恢复 ⇒ 摄取通道静默断供，
+        // 而"重复启动覆写同一条"的用例根本没覆盖"撤销后重启"这条真实路径。
+        assertThat(existing.isRevoked()).isFalse();
     }
 
     private static ApiKeyEntity captureSave(ApiKeyRepository repository) {

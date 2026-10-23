@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-25 共有 194 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-25 共有 195 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 194 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 195 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,61 @@
 
 
 ---
+## [Unreleased] — security 收口：102 个存活变异体逐条清账，两包分诊全部完成（2026-10-24）
+
+### 1. 现场：第一轮只清出 4 处真缺口，账上还挂着 102 个
+
+security 包（PIT 变异 767 个）在 2026-10-21 审出限流阈值 / XFF 信任 / 密钥掩码 / 口令哈希
+4 处真缺口后，还有 **102 个存活变异体**没有任何定性。P1 #7 悬了三轮——这轮把
+surveillance 第四轮的分诊模板原样搬过来，逐条清账。
+
+### 2. 分诊方法：模板沿用，A/B 升级成批量 42 条
+
+- 判定"真缺口"：补测试 → 复测变异必须**死**。
+- 判定"等价/不可达"：`tools/mutate-verify.py` 改坏⇒跑用例⇒还原⇒再跑，存活下用例
+  必须**仍绿**，并给出"为什么测不到"的值域论证。本轮把单发 A/B 升级成**批量 42 条**
+  （`tools/run_ab_batch.py` + 2 条收尾），**42/42 全部"改坏⇒红、还原⇒绿"**
+  （退出码存档 `tools/ab_batch_sec_evidence.txt`）。
+
+### 3. 补了什么（4 个新契约文件 + 16 处扩展，净增 52 个新用例，生产代码零改动）
+
+| 测试 | 例数 | 钉住的契约 |
+|---|---:|---|
+| `ApiKeyAuthContractTest` / `SecurityConfigContractTest` / `TenantFilterTest` / `ValidationConfigContractTest`（新） | 9 | 认证 Token 微契约（authenticated/principal/role、absence=null 不是空串）；Bean 工厂返 null = 上下文启动失败的哨兵；TenantContext 的 finally 清理 + `tenant_id` claim 的 Double 形状解析 |
+| 扩展 16 类（`ApiKeyControllerDeviceKeyTest` / `ApiKeyCacheTest` / `ApiKeyFilterCachedTest` / `ApiKeyLastUsedTrackerTest` / `RoleInterceptorTest` / `AuthControllerTest` / `AuthControllerRateLimitTest` / `UserControllerTest` / `AdminBootstrapRunnerTest` / `DeviceIngestKeyBootstrapRunnerTest` / `MavlinkSigningPostureControllerTest` / `MavlinkSigningKeyControllerTest` / `SigningPostureServiceTest` / `StreamTokenServiceTest` / `StreamTokenFilterTest` / `TenantControllerTest`） | +43 | 租户守卫三角（同租户 / 跨租户 / 无租户 × ADMIN）、grace 与 sysid 边界、负缓存上限精确 =MAX、evictExpired 整点、flusher 线程存在且守护、**直调 preHandle 断言 boolean**（坑 8）、限流窗口与 cleanup 定时器、改密与租户**落库值**（captor 不是"调用过"）、引导 key 撤销复活、审计操作者归属（preferred_username≠subject）、签名姿态 loosen 成功路径与审计环 50 条、流令牌惰性清理整点、头凭证分支链继续、显式 enabled=false 落库 |
+
+### 4. 实测
+
+- 全量 surefire **3028 例 0 失败**（比第四轮净增 52）。
+- PIT 复测两跑（XML 精确对账，对账工具按**多重集**逐条比底账）：第一跑 647 杀 / 29 存活，
+  对账揪出**同行兄弟变异体**（A/B 杀掉的是同行已死的那个，活的是另一个）与
+  1 个被 PIT 排除的竞态用例（坑 9）；补 3 个真缺口用例、删 2 个竞态用例后第二跑定账：
+  杀掉 **566 → 649**、存活 **102 → 27**、未覆盖 97 → **89**（总 767、超时 2、运行错误 0）、
+  变异分数 **0.8448 → 0.9572**、测试强度 **0.8473 → 0.9601**；基线
+  `scripts/mutation-baseline.json` 地板抬到 **0.95 / 0.96**。增量账目：
+  杀掉 +83 = 底账存活补杀 76 + 新覆盖顺带被杀 7；存活 27 = 底账余 26 + 新面孔 1
+  （L54，从未覆盖浮出，已定性）——**27 条恰好全部是已定性清单**。
+- 三个新发现进了坑册：**坑 8**（MockMvc 对拦截器 boolean/提前返回失明——拒绝分支
+  先提交 403 响应，`return false→true` 后处理器照常执行但写入被丢弃，HTTP 面全同形；
+  控制流契约必须直调）、**坑 9**（"墙钟整点"边界用例在 PIT 插桩 JVM 里必然自曝——
+  Δ≥1ms 时原始代码自己就清了边界记录，用例未变异先红被排除，变异体反而没人杀；
+  边界用例必须注入时钟，注入不了的如实定性"不可稳定测"）。
+- 27 条定性为无害（14 行为等价 + 1 PIT 环境不可分辨 + 2 字节码恒等副本 + 2 墙钟竞态
+  不可稳定测 + 8 上下文级），清单与证据在 `docs/mutation-testing.md` 第五轮。
+
+### 5. 没做什么 / 留了什么
+
+- 生产代码零改动：这一轮没有暴露行为 bug——所有"改坏"都撞在了"测试没盯住"上。
+- `SecurityConfig.securityFilterChain` 的 8 条链路装配变异体（守卫/setter/Bean 返 null）
+  留给链路层（@SpringBootTest + 真实 API Key 数据）——门禁单测层构造不了
+  `HttpSecurity`，已在第五轮文档留档。
+- 至此 **surveillance（22 条）与 security（27 条）两包的分诊全部完成**，P1 变异审计
+  台账清空。
+
+---
+
+---
+
 ## [Unreleased] — 同一架没有 `mode` 的无人机，三个面板三种说法：`待命` / `MANUAL` / 空（2026-10-25）
 
 ### 1. 现场：三份 `MODE_LABEL`，缺省口径互不相同
