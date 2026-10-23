@@ -715,7 +715,7 @@ NexusSky/
 ├── gcs-web/             React GCS（51 个组件文件，其中 49 个 .jsx 面板）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
-├── scripts/             start-all.cmd / e2e-smoke.sh / 90 个脚本（其中 44 个 e2e-*）
+├── scripts/             start-all.cmd / e2e-smoke.sh / 89 个脚本（其中 44 个 e2e-*）
 ├── docker-compose.yml   Linux 下一键编排
 ├── docs/                39 篇文档
 └── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）

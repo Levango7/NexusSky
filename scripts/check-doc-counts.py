@@ -53,16 +53,23 @@ ANCHORS = (
 )
 
 
+# 计数时必须排除的噪声条目：它们只存在于本地工作区，不会出现在 CI 的 checkout 里。
+# 2026-10-24 踩过：本地 scripts/ 有未跟踪的 __pycache__ ⇒ 本地数出 90、CI 数出 89，
+# 门禁在 CI 上红，而本地怎么跑都绿（典型的"本地对、CI 错"环境差异）。
+IGNORED = {"__pycache__", ".pytest_cache", ".mypy_cache", ".DS_Store", "node_modules"}
+
+
 def measure(root):
-    """返回 (scripts 条目数, e2e-* 条目数, docs/*.md 篇数)。"""
+    """返回 (scripts 条目数, e2e-* 条目数, docs/*.md 篇数)。已排除 IGNORED 噪声。"""
     sd = os.path.join(root, "scripts")
     dd = os.path.join(root, "docs")
     if not os.path.isdir(sd) or not os.path.isdir(dd):
         return None
-    scripts = [e for e in os.listdir(sd) if e not in (".", "..")]
+    scripts = [e for e in os.listdir(sd) if e not in (".", "..") and e not in IGNORED]
     e2e = [e for e in scripts if e.startswith("e2e-")]
     docs = [e for e in os.listdir(dd)
-            if e.endswith(".md") and os.path.isfile(os.path.join(dd, e))]
+            if e.endswith(".md") and e not in IGNORED
+            and os.path.isfile(os.path.join(dd, e))]
     return len(scripts), len(e2e), len(docs)
 
 
