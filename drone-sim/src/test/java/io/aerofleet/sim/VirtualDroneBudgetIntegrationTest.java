@@ -13,6 +13,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * （UltrasonicSource / BudgetThermalSource / OpticalFlowSource），
  * 以及 advanced/null 模式下既有行为完全不变（DFX 4.5 向下兼容）。
  * <p>
+ * P2 #19（2026-10-24）例外：null（完整版）模式的热像源由"从未装配"改为
+ * SimulatedThermalSource（THERMAL_DATA 全仓零发送的缺口在此收口），
+ * 其余丐版传感器装配断言不变。
+ * <p>
  * 每个测试用独立 UDP 端口避免冲突，通过 try-with-resources 确保 VirtualDrone 关闭释放资源。
  */
 class VirtualDroneBudgetIntegrationTest {
@@ -225,7 +229,7 @@ class VirtualDroneBudgetIntegrationTest {
     // ===== null 模式（完整版，既有行为不变）=====
 
     @Test
-    @DisplayName("null 模式（完整版）：不实例化任何丐版传感器")
+    @DisplayName("null 模式（完整版）：丐版传感器全部不实例化；热像源为高端 Simulated（P2 #19 装配）")
     void nullMode_noBudgetSensors() throws Exception {
         try (VirtualDrone drone = new VirtualDrone(configWithBudget(null, BASE_PORT + 30))) {
             assertNull(drone.getBudgetMode(), "null 模式 budgetMode 为 null");
@@ -234,7 +238,14 @@ class VirtualDroneBudgetIntegrationTest {
             assertNull(drone.getOpticalFlowSource());
             assertNull(drone.getDepthSource());
             assertNull(drone.getObstacleDetector());
-            assertNull(drone.getThermalSource());
+            // P2 #19（2026-10-24）：断言方向翻转——完整版热像源此前从未装配
+            // （THERMAL_DATA 全仓零发送、热成像任务壳到 sim 侧），这是本轮要修的
+            // 缺口而非要保留的现状：完整版用高端 SimulatedThermalSource，budget 各模式
+            // 仍用各自的 BudgetThermalSource（见上方 budget 用例）。
+            Object thermal = drone.getThermalSource();
+            assertNotNull(thermal, "完整版热像源必须装配（P2 #19）");
+            assertTrue(thermal instanceof SimulatedThermalSource,
+                    "完整版用高端 SimulatedThermalSource（budget 模式用 Budget 版）");
         }
     }
 

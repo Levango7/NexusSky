@@ -26,6 +26,7 @@ import io.aerofleet.mavlink.messages.SystemTimeMsg;
 import io.aerofleet.mavlink.messages.VfrHud;
 import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
 import io.aerofleet.mavlink.messages.EnvironmentStatus;
+import io.aerofleet.mavlink.messages.ThermalDataMsg;
 import io.aerofleet.mavlink.messages.ObstacleReportMsg;
 import io.aerofleet.mavlink.messages.RadarScanMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
@@ -545,6 +546,10 @@ public final class VirtualDrone implements AutoCloseable {
             this.ultrasonicSource = null;
             this.budgetThermalSource = null;
             this.opticalFlowSource = null;
+            // P2 #19（2026-10-24）：完整版此前从未装配热像源——THERMAL_DATA 全仓零发送、
+            // 热成像任务壳到 sim 侧的最后一环。按文档口径补上高端热像相机
+            // （SimulatedThermalSource：合成温度场 + 热点检测）；budget 各模式维持原装配。
+            this.thermalSource = new SimulatedThermalSource();
         }
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "drone-sim-tick");
@@ -1712,6 +1717,11 @@ public final class VirtualDrone implements AutoCloseable {
             if (lidarSource != null) {
                 sendLidarData();
             }
+            // M3 热成像数据 1Hz（FR-21）：thermalSource 注入时下传 ThermalDataMsg(30012)。
+            // 2026-10-24 接线：此前 ThermalDataMsg 在全仓零发送（P2 #19 分诊确证壳到 sim 侧）
+            if (thermalSource != null) {
+                sendThermalData();
+            }
             // M4 雷达扫描（FR-06/FR-18/FR-19）：radar 启用时按 scanPeriodMs 周期扫描
             if (radar != null && radarEnabled && radarConfig != null) {
                 runRadarScan();
@@ -2493,6 +2503,50 @@ public final class VirtualDrone implements AutoCloseable {
         } catch (Exception e) {
             SimLog.warn("lidar data failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * M3 热成像数据上报 1Hz（FR-21）：合成机下视温度场 → 热像源分析 →
+     * ThermalDataMsg(30012)。此前的"壳任务"诊断：消息定义/解码/载荷源三件齐备，
+     * 唯独没有任何发送点——这里补上最后一个环节。
+     */
+    private void sendThermalData() {
+        try {
+            ThermalSource.ThermalResult r = thermalSource.analyze(synthesizeThermalScene(config.sysid, System.currentTimeMillis()));
+            send(new ThermalDataMsg(
+                    (float) r.mean(), (float) r.min(), (float) r.max(), (float) r.stdDev(),
+                    System.currentTimeMillis(), r.hotspots().size(), config.sysid));
+        } catch (Exception e) {
+            SimLog.warn("thermal data failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 合成机下视温度场：基线 22℃ + 两个缓变热源（位置由 sysid 派生——不同机看到
+     * 不同场景；强度按 60s 周期正弦缓变——读数非平凡但不抖）。分辨率 32×24：
+     * 与 AMG8833 8×8 同量级、远小于模拟 640×480，1Hz 分析成本可忽略。
+     * static 供测试断言场景确定性（同 sysid 同时刻同场景）。
+     */
+    static double[][] synthesizeThermalScene(int sysid, long nowMs) {
+        final int w = 32;
+        final int h = 24;
+        double[][] field = new double[h][w];
+        double phase = (nowMs % 60_000) / 60_000.0 * 2 * Math.PI;
+        double i1 = 30 + 20 * (0.5 + 0.5 * Math.sin(phase));
+        double i2 = 26 + 18 * (0.5 + 0.5 * Math.cos(phase + 1.3));
+        int x1 = 4 + (sysid * 7) % (w - 8);
+        int y1 = 3 + (sysid * 5) % (h - 6);
+        int x2 = (x1 + w / 2) % w;
+        int y2 = (y1 + h / 3) % h;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                double v = 22.0
+                        + i1 * Math.exp(-((x - x1) * (double) (x - x1) + (y - y1) * (double) (y - y1)) / 18.0)
+                        + i2 * Math.exp(-((x - x2) * (double) (x - x2) + (y - y2) * (double) (y - y2)) / 12.0);
+                field[y][x] = v;
+            }
+        }
+        return field;
     }
 
     /**

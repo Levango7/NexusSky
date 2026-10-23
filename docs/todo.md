@@ -40,7 +40,7 @@
 | 16 | **UOM `sink-type` 未落地** | 默认 Noop | 机巢/监管上报的真实去向 |
 | 17 | **机巢只有 sim** | 机巢 MQTT 未接 | 硬件到位再动 |
 | 18 | **死枚举 / 空端点** | 审计期发现的历史遗留 | 需要一次全仓扫描确认清单 |
-| 19 | **热成像链路未接线** | MAVLink 30012 (ThermalDataMsg) 在 cloud-backend 零引用：任务壳永不推进（无 ingest）、无机队级热状态读端点、热源只有图像坐标（lat/lon 需位姿解算）。2026-10-24 分诊确证，ThermalOverlayPanel 已改"未实现"说明页（P1 #12 的真实现选项） | 接线 30012 ingest → 补聚合读端点 → 位姿解算出热源坐标；三步各自可独立验收 |
+| 19 | **热成像链路未接线** | ~~MAVLink 30012 在 cloud-backend 零引用~~ **ingest/读端点/面板已于 2026-10-24 接线**（见已清零表）；剩余恢复条件③：逐点热源经纬度（图像 u/v → lat/lon 需图像→地理位姿解算，CameraPose/GeolocationSolver 在 vision 包已有底子） | 位姿解算接入 → /thermal/status 增逐点坐标 → 面板恢复热力图；三步各自可独立验收 |
 | 20 | **link-sim 无运行时控制通道** | 损伤参数（延迟/丢包/带宽/分区）是启动期 `--profile` 固定的，进程内无 HTTP/控制帧入口，云端无从下发。链路损伤注入面板（P1 #11 的真实现选项）依赖它 | link-sim 加控制端口（如 HTTP PATCH /profile）+ cloud-backend 转发端点 + 鉴权口径；先钉协议再动 |
 
 ---
@@ -61,6 +61,7 @@
 | **`SurveillanceDeviceRegistry.pruneStaleDevices` 的 `persistStaleStatus` 没人盯** | PR #140 | 同上（同一组动作级契约） |
 | **surveillance 包 97 个存活变异体逐条分诊**（P1 #4/#5/#6 全清：前缀形状、Registry 谓词与排序、Onvif 校验链、SSE 生命周期、MJPEG 泵、mask 全等、快速部署尾段与计数日志） | 本分支（第四轮，见 `docs/mutation-testing.md`） | 6 个新契约文件 + 8 处扩展共 49 个新用例；A/B 批量 `tools/mutate-verify.py` 等价项复现；PIT 复测 杀掉 546→**636**、存活 97→**22**（全部是已定性清单）、未覆盖 159→144、分数 0.8400→**0.9564**、强度 0.8491→**0.9666**；22 条定性无害已留档 |
 | **前端端点契约 6 条 KNOWN_GAPS 清账**（P1 #8~#13：env/status 补读端点；链路质量面板改读 comm-adapt 真实口径；损伤滑块/热成像面板/物理模型三处假控件按诚实性原则移除或禁用并写明） | 本分支（见 `CHANGELOG.md` 2026-10-24 节） | 后端新增 `GET /api/v1/env/status` + `EnvStatusReadContractTest` 5 例（圆周风向均值/NaN 不进 JSON/众数并列取小）；`KNOWN_GAPS` 清空，端点门禁 233 处调用全匹配 + self-test；vitest 382 例 + vite build 全绿；#12 真实现选项登记 P2 #19、#11 登记 P2 #20 |
+| **P2 #19 热成像接线**（ingest + 机队读端点 + 面板启用；P1 #12 的真实现第一步） | 本分支（见 `CHANGELOG.md` 2026-10-24 P2 #19 节） | sim 侧补发送环（完整版装配 SimulatedThermalSource + 1Hz 挂钩，此前全仓零发送）；`ThermalIngestListener` ingest + `GET /api/v1/thermal/status` + 面板真实聚合表；新用例 11 个（sim 真实 UDP 往返 2 + ingest 契约 5 + 读口径 4）；**A/B 4/4 KILLED**（挂钩删除/装配删除/收账删除/离线过滤取反）；剩余条件③（逐点经纬度=位姿解算）留本表 #19 |
 | **security 包 102 个存活变异体逐条分诊**（P1 #7 全清：租户守卫三角、缓存边界、追踪器后台写者、限流定时器、RBAC 直调断言、Bean 工厂哨兵、租户过滤器、签名审计归属） | 本分支（第五轮，见 `docs/mutation-testing.md`） | 4 个新契约文件 + 16 处扩展净增 52 个新用例；A/B 批量 42/42「改坏⇒红、还原⇒绿」；PIT 复测 杀掉 566→**649**、存活 102→**27**（全部是已定性清单）、未覆盖 97→89、分数 0.8448→**0.9572**、强度 0.8473→**0.9601**；27 条定性无害已留档（含坑 8/坑 9 两个新坑） |
 
 ---
