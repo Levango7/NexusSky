@@ -1,5 +1,5 @@
 import React from 'react'
-import { battClass } from '../utils/battery'
+import { battClass, fmtBattery } from '../utils/battery'
 
 const MODE_LABEL = {
   STANDBY: '待命',
@@ -45,10 +45,7 @@ export default function DroneList({ drones, selectedSysid, onSelect }) {
             >
               <span className="dot" />
               <span className="name">{d.callsign || `Drone-${d.sysid}`}</span>
-              <span className={`batt ${battClass(d.battery)}`}>
-                {d.battery != null ? `${d.battery}` : '--'}
-                <span style={{ fontSize: 10, opacity: .7 }}>%</span>
-              </span>
+              <span className={`batt ${battClass(d.battery)}`}>{fmtBattery(d.battery)}</span>
               <span className="sub">
                 <span>{MODE_LABEL[d.mode] || d.mode || '待命'}</span>
               {(d.rtkStatus === 'RTK_FIXED' || d.rtkStatus === 'RTK_FLOAT') && (

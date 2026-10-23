@@ -30,11 +30,16 @@ export default function AlertFeed({ alerts }) {
               const meta = SEV_META[a.severity ?? 6] || SEV_META[6]
               // 同毫秒内告警可能重复，索引仅用于业务字段组合仍冲突时兜底。
               const key = `${a.id ?? ''}-${a.ts}-${a.sysid}-${i}`
+              // 缺 ts 时显示占位而不是 "Invalid Date"：后端字段缺失是数据缺失，
+              // 不是"这条告警发生在无效时刻"。
+              const time = a.ts == null || Number.isNaN(new Date(a.ts).getTime())
+                ? '--:--:--'
+                : new Date(a.ts).toLocaleTimeString('zh-CN', { hour12: false })
               return (
                 <li key={key} style={{ borderLeftColor: meta.color }}>
                   <span className="sev" style={{ color: meta.color }}>[{meta.label}]</span>
                   {a.text}
-                  <time>{new Date(a.ts).toLocaleTimeString('zh-CN', { hour12: false })}</time>
+                  <time>{time}</time>
                 </li>
               )
             })}

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { battClass, battColor, battLevel } from '../utils/battery'
+import { battClass, battColor, battLevel, fmtBattery, normBatteryPct } from '../utils/battery'
 
 /**
  * 仪表盘汇总面板
@@ -95,7 +95,7 @@ function DroneCard({ drone, onSelect }) {
         <div className="db-row">
           <label>电量</label>
           <BattBar value={batt} />
-          <b className={`mono ${battClass(batt)}`}>{batt != null ? `${batt}%` : '--'}</b>
+          <b className={`mono ${battClass(batt)}`}>{fmtBattery(batt)}</b>
         </div>
         <div className="db-row">
           <label>高度</label>
@@ -128,7 +128,8 @@ export default function DashboardPanel({ drones, onSelect }) {
   // 顶部汇总
   const summary = useMemo(() => {
     const online = list.filter((d) => d.online).length
-    const battVals = list.map((d) => d.battery).filter((b) => b != null)
+    // 电量样本走 utils 的归一化：后端的 -1 是"未知"哨兵，既不该拉低均值，也不该算成告警
+    const battVals = list.map((d) => normBatteryPct(d.battery)).filter((b) => b != null)
     const avgBatt = battVals.length > 0 ? battVals.reduce((a, b) => a + b, 0) / battVals.length : null
     const altVals = list.map((d) => d.relativeAlt).filter((a) => a != null)
     const maxAlt = altVals.length > 0 ? Math.max(...altVals) : null

@@ -195,7 +195,7 @@ export default function RouteTemplatePanel({ drone }) {
                 </tr>
               </thead>
               <tbody>
-                {result.waypoints.map((w, i) => (
+                {(Array.isArray(result.waypoints) ? result.waypoints : []).map((w, i) => (
                   <tr key={i}>
                     <td style={{ padding: '2px 8px', color: '#64748b' }}>{i}</td>
                     <td style={{ padding: '2px 8px' }}>{w.cmd}</td>

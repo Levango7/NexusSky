@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { getAuthToken } from '../api.js'
+import { battColorVar, fmtBattery } from '../utils/battery'
 
 const POLL_MS = 3000
 
@@ -93,7 +94,8 @@ export default function RocPanel() {
 
   const dispatch = (id) => call('POST', `/api/v1/roc/seats/${seatId}/incidents/${id}/dispatch`, { holdSec: 30 })
 
-  const batteryColor = (b) => (b == null ? '#6b7280' : b >= 50 ? '#22c55e' : b >= 25 ? '#eab308' : '#ef4444')
+  // 电量判级走 utils/battery（这里曾有第三套阈值：>=50 绿 / >=25 黄 / 否则红，
+  // 与 utils 的 20/40、以及 TrackingPanel 曾经的 15/30 并存——同一架机三个面板三种颜色）
 
   return (
     <div className="page">
@@ -140,7 +142,7 @@ export default function RocPanel() {
               }}>
                 <div style={{ fontWeight: 700 }}>Drone-{d.sysid} {!d.online && <span style={{ color: '#ef4444', fontSize: 12 }}>离线</span>}</div>
                 <div style={{ fontSize: 12, color: '#94a3b8' }}>{d.mode}</div>
-                <div style={{ fontSize: 12, color: batteryColor(d.battery) }}>电池 {d.battery ?? '--'}%</div>
+                <div style={{ fontSize: 12, color: battColorVar(d.battery) }}>电池 {fmtBattery(d.battery)}</div>
                 <div style={{ fontSize: 11, color: '#64748b' }}>
                   {d.lat != null ? `${Number(d.lat).toFixed(4)}, ${Number(d.lon).toFixed(4)}` : '无定位'}
                   {d.relativeAlt != null ? ` · ${Number(d.relativeAlt).toFixed(0)}m` : ''}
