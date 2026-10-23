@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api.controller;
 
+import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.vision.ThermalTaskService;
@@ -11,6 +13,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,6 +25,7 @@ import java.util.Map;
  * <pre>
  * POST /api/v1/thermal/tasks          创建任务（FR-28）
  * GET  /api/v1/thermal/tasks/{taskId} 查询任务状态 + 温度场结果（FR-28）
+ * GET  /api/v1/thermal/status         机队热成像最新读数（P2 #19，2026-10-24 接线）
  * </pre>
  */
 @RestController
@@ -28,9 +34,11 @@ import java.util.Map;
 public class ThermalController {
 
     private final ThermalTaskService service;
+    private final DeviceRegistry registry;
 
-    public ThermalController(ThermalTaskService service) {
+    public ThermalController(ThermalTaskService service, DeviceRegistry registry) {
         this.service = service;
+        this.registry = registry;
     }
 
     /** FR-28 创建热成像任务。 */
@@ -70,5 +78,37 @@ public class ThermalController {
                     Map.of("error", "task " + taskId + " not found"));
         }
         return ResponseEntity.ok(task.toView());
+    }
+
+    /**
+     * 机队热成像最新读数（P2 #19，2026-10-24 接线）。
+     *
+     * <p>数据源是各机 THERMAL_DATA(30012) 遥测的快照（{@link DroneSnapshot} 热像字段，
+     * {@code ThermalIngestListener} 写入）——机队级聚合读口径，不含逐点热源坐标
+     * （那需要图像→地理位姿解算，登记在 docs/todo.md P2 #19 恢复条件 ③）。
+     * 只列 online 且上报过（thermalUpdatedAtMs > 0）的机；租户口径由
+     * {@code DeviceRegistry.all()} 按 TenantContext 过滤。
+     */
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, Object>> status() {
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (DroneSnapshot s : registry.all()) {
+            if (!s.online || s.thermalUpdatedAtMs == 0) {
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("sysid", s.sysid);
+            item.put("tempMean", s.thermalTempMean);
+            item.put("tempMin", s.thermalTempMin);
+            item.put("tempMax", s.thermalTempMax);
+            item.put("tempStdDev", s.thermalTempStdDev);
+            item.put("hotspotCount", s.thermalHotspotCount);
+            item.put("updatedAtMs", s.thermalUpdatedAtMs);
+            items.add(item);
+        }
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("items", items);
+        resp.put("total", items.size());
+        return ResponseEntity.ok(resp);
     }
 }

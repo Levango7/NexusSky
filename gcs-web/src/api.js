@@ -962,9 +962,9 @@ export const api = {
     }),
 
   // ---- Thermal Vision (热成像可视化) ----
-  // getThermalSources **已删除**（P1 #12，2026-10-24）：GET /api/v1/vision/thermal/sources
-  // 后端不存在——「热源」概念未落地（只有 /thermal/tasks 任务壳，ThermalDataMsg 未接线），
-  // ThermalOverlayPanel 已改为"未实现"说明页。
+  // P2 #19（2026-10-24 接线）：THERMAL_DATA(30012) ingest 落地后改读真实聚合口径——
+  // 机队热像最新读数（此前 getThermalSources 的逐点热源端点已随 P1 #12 删除）。
+  getThermalStatus: () => jsonFetch('/api/v1/thermal/status'),
 
   // ---- Environment (气象环境) ----
   getEnvStatus: () => jsonFetch('/api/v1/env/status'),

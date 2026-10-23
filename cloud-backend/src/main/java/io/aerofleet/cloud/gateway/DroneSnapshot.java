@@ -102,6 +102,17 @@ public final class DroneSnapshot {
     /** 降雨率 mm/h。 */
     public volatile int envRainRate = 0;
 
+    // --- M3 热成像（THERMAL_DATA 30012，2026-10-24 接线，P2 #19）---
+    /** 热像分析均值（℃）；NaN before the first THERMAL_DATA。 */
+    public volatile double thermalTempMean = Double.NaN;
+    public volatile double thermalTempMin = Double.NaN;
+    public volatile double thermalTempMax = Double.NaN;
+    public volatile double thermalTempStdDev = Double.NaN;
+    /** 热点数量；-1 = 从未上报。 */
+    public volatile int thermalHotspotCount = -1;
+    /** 最近一帧 THERMAL_DATA 的到达时刻（epoch ms）；0 = 从未上报。 */
+    public volatile long thermalUpdatedAtMs;
+
     // --- mission progress (MISSION_CURRENT) ---
     public volatile int missionSeq = -1;
     public volatile int missionTotal = -1;
