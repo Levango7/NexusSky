@@ -2,7 +2,7 @@
   "scope": "io.aerofleet.cloud.surveillance.*",
   "tool": "pitest 1.15.0 (mvn -pl cloud-backend -Pmutation-surveillance pitest:mutationCoverage)",
   "measuredAt": "2026-10-23",
-  "note": "surveillance 包的变异基线。口径与 security 包**同一把尺子**（scripts/check-mutation-baseline.py：变异分数 = KILLED/(总-NO_COVERAGE)，测试强度 = KILLED/(KILLED+SURVIVED)，与 PIT 汇总行同口径）。两份基线**分开记**——一个包的涨分不能掩盖另一个包的退步。报告目录：cloud-backend/target/pit-reports-surveillance/mutations.xml。分数/强度**向下取整到 2 位小数**，留 ~0.3pp 运行间抖动余量（2026-10-22 CI 实测比本地低 0.57pp，4 位小数的基线直接把抖动判成回退）。历史：round-3 实测 0.8233/0.8334 → offline 36 例后 0.8269/0.8372 → 并入 #140 动作契约后 0.8400/0.8491（地板当时未抬，等 CI 数据）；2026-10-23 第四轮（surveillance 97 存活逐条分诊收口，见 docs/mutation-testing.md）：实测 **0.9564 / 0.9666**（杀掉 546→636、存活 97→22、未覆盖 159→144），地板抬到 **0.95 / 0.96**（2 位向下取整口径：0.9564→0.95、0.9666→0.96）。两个测量坑留档：PIT 汇总行的 \"Killed\" 把 TIMED_OUT 计入（控制台 643 = XML 636 + 7 超时），**解析以 XML 为准**；报告 XML 在覆盖阶段即被清空占位、BUILD SUCCESS 那一瞬才写盘，**中途读会拿到 0 字节或上一轮的旧内容**。",
+  "note": "surveillance 包的变异基线。口径与 security 包**同一把尺子**（scripts/check-mutation-baseline.py：变异分数 = KILLED/(总-NO_COVERAGE)，测试强度 = KILLED/(KILLED+SURVIVED)，与 PIT 汇总行同口径）。两份基线**分开记**——一个包的涨分不能掩盖另一个包的退步。报告目录：cloud-backend/target/pit-reports-surveillance/mutations.xml。分数/强度**向下取整到 2 位小数**，留 ~0.3pp 运行间抖动余量（2026-10-22 CI 实测比本地低 0.57pp，4 位小数的基线直接把抖动判成回退）。历史：round-3 实测 0.8233/0.8334 → offline 36 例后 0.8269/0.8372 → 并入 #140 动作契约后 0.8400/0.8491（地板当时未抬，等 CI 数据）；2026-10-23 第四轮（surveillance 97 存活逐条分诊收口，见 docs/mutation-testing.md）：实测 **0.9564 / 0.9666**（杀掉 546→636、存活 97→22、未覆盖 159→144），地板抬到 **0.95 / 0.96**（2 位向下取整口径：0.9564→0.95、0.9666→0.96）。两个测量坑留档：PIT 汇总行的 \"Killed\" 把 TIMED_OUT 计入（控制台 643 = XML 636 + 7 超时），**解析以 XML 为准**；报告 XML 在覆盖阶段即被清空占位、BUILD SUCCESS 那一瞬才写盘，**中途读会拿到 0 字节或上一轮的旧内容**。账目对齐（2026-10-24 补）：上面 total/killed/survived/noCoverage/timedOut/runError 是**本地那一次 PIT 的 XML 快照**，而门禁的判据只有 mutationScore / testStrength 两条分数 + total 完整性锚点，这几个计数**不参与判红**，只作留档。同一份代码在 CI 上独立跑出的计数是 809 | 635 | 23 | 144 | 7 | 0（run 40002936758、head `293bf74`、job 120591475471 日志原文『变异体总数 = 809 | 杀掉 = 635 | 存活 = 23 | 未覆盖 = 144 | 超时 = 7 | 运行错误 = 0』『变异分数 = 0.9549（基线 0.9500） 测试强度 = 0.9650（基线 0.9600）』），与本地块差 1 个变异体（636/22 ↔ 635/23）——是同一个变异体在两次运行里从『被杀掉』翻成『存活』，与上面那句 ~0.3pp 抖动余量同源，不是抄错数也不是缺项：两侧各自都满足 killed+survived+noCoverage+timedOut+runError == total（636+22+144+7+0 = 635+23+144+7+0 = 809），PIT 控制台行也同步差 1（本地 643 = 636+7、CI 642 = 635+7）。CI 那次真值单独记在 ciObserved，门禁打印存活数时改与它对账，不再让 22↔23 看起来像笔误。",
   "total": 809,
   "killed": 636,
   "survived": 22,
@@ -10,5 +10,19 @@
   "timedOut": 7,
   "runError": 0,
   "mutationScore": 0.95,
-  "testStrength": 0.96
+  "testStrength": 0.96,
+  "ciObserved": {
+    "measuredAt": "2026-10-23",
+    "runId": 40002936758,
+    "headSha": "293bf74fea5c2977f5f4ae763f4d6ad1df61298c",
+    "source": "GitHub Actions job 120591475471（Mutation baseline gate）日志原文，非手抄",
+    "total": 809,
+    "killed": 635,
+    "survived": 23,
+    "noCoverage": 144,
+    "timedOut": 7,
+    "runError": 0,
+    "mutationScore": 0.9549,
+    "testStrength": 0.965
+  }
 }
