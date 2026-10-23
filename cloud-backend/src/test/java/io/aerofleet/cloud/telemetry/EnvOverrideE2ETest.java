@@ -97,7 +97,7 @@ class EnvOverrideE2ETest {
         DeviceRegistry registry = new DeviceRegistry();
         registry.provision(DRONE_SYSID, null);
         controller = new EnvOverrideController(
-                new DroneCommandService(gateway, pendings, registry, DRONE_SYSID));
+                new DroneCommandService(gateway, pendings, registry, DRONE_SYSID), registry);
 
         // 等网关学到机载路由（发现握手 → 机载回传遥测 → 路由表写入）
         long deadline = System.currentTimeMillis() + WAIT_MS;

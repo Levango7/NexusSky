@@ -44,7 +44,10 @@ export default function HardwarePanel({ drones = [] }) {
   })
 
   // 物理模型
-  const [physicsModel, setPhysicsModel] = useState('kinematics')
+  // 物理模型：后端没有下发通道（概念只在模拟器里，2026-10-21 实测切换必然 404），
+  // 恒为模拟器默认值 'kinematics'。切换按钮已显式禁用（见下方注释），
+  // api.setPhysicsModel 死代码已删除（P1 #13，2026-10-24）。
+  const [physicsModel] = useState('kinematics')
 
   // 硬件状态
   const [radarStatus, setRadarStatus] = useState(null)
@@ -133,18 +136,6 @@ export default function HardwarePanel({ drones = [] }) {
           period: Number(radarForm.period),
         }),
       '雷达配置'
-    )
-  }
-
-  const handlePhysicsModel = (model) => {
-    if (sysid == null) return
-    call(
-      () =>
-        api.setPhysicsModel(sysid, model).then((r) => {
-          setPhysicsModel(model)
-          return r
-        }),
-      `物理模型 → ${model}`
     )
   }
 
@@ -288,15 +279,14 @@ export default function HardwarePanel({ drones = [] }) {
           <div className="panel-body">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
               {/* 物理模型切换：**后端没有这条通道**。
-                  概念只存在于模拟器（drone-sim 的 VirtualDrone.physicsModel），
-                  没有 MAVLink 下发路径 ⇒ 2026-10-21 实测 POST /api/v1/hardware/physics-model
-                  必然 404。这个按钮此前是"点了必报错"的假控件，
-                  现已显式禁用并写明原因（缺口登记在 scripts/check-frontend-endpoints.py 的 KNOWN_GAPS）。 */}
+                  概念只存在于模拟器（drone-sim 的 VirtualDrone.physicsModel，且无调用方），
+                  没有 MAVLink 下发路径 ⇒ POST /api/v1/hardware/physics-model 必然 404。
+                  按钮显式禁用并写明原因（P1 #13，2026-10-24）；
+                  api.setPhysicsModel 调用代码已删除，KNOWN_GAPS 登记同步移除。 */}
               <button
                 className={`btn ${physicsModel === 'kinematics' ? 'primary' : ''}`}
                 disabled
                 title="后端未实现物理模型下发通道（概念只在模拟器里），暂时无法切换"
-                onClick={() => handlePhysicsModel('kinematics')}
               >
                 运动学
               </button>
@@ -304,7 +294,6 @@ export default function HardwarePanel({ drones = [] }) {
                 className={`btn ${physicsModel === 'aero' ? 'primary' : ''}`}
                 disabled
                 title="后端未实现物理模型下发通道（概念只在模拟器里），暂时无法切换"
-                onClick={() => handlePhysicsModel('aero')}
               >
                 气动
               </button>
