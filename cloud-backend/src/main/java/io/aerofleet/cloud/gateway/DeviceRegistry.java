@@ -80,12 +80,17 @@ public class DeviceRegistry { // MUTANT
                 if (entity.getSigningVerifiedAt() != null) {
                     signingVerifiedAt.put(entity.getSysid(), entity.getSigningVerifiedAt());
                 }
+                // V28 另一列：重启后"地面已经给过谁密钥"也要跟着回来，否则配置单会退回空白
+                if (entity.getSigningKeyFingerprint() != null) {
+                    signingKeyFingerprint.put(entity.getSysid(), entity.getSigningKeyFingerprint());
+                }
                 drones.put(entity.getSysid(), snapshot);
                 count++;
             }
             log.info("Restored {} devices from repository (all offline, awaiting heartbeat), "
-                    + "{} with last-known flight state, {} with signing evidence",
-                    count, withFlightState, signingVerifiedAt.size());
+                    + "{} with last-known flight state, {} with signing evidence, "
+                    + "{} with an issued key fingerprint",
+                    count, withFlightState, signingVerifiedAt.size(), signingKeyFingerprint.size());
         } catch (Exception e) {
             log.warn("设备恢复失败，降级为空缓存: {}", e.getMessage());
         }
@@ -223,10 +228,26 @@ public class DeviceRegistry { // MUTANT
     }
 
     /**
+     * 内存里的"地面为该机生成/轮换过的密钥指纹"表。DB 列 {@code devices.signing_key_fingerprint}
+     * 是权威值，这份镜像存在的理由是：<b>persist=false 是出厂默认</b>，若只写库，
+     * 默认部署下"已生成、等现场写进飞控"这一半状态永远读不出来——发放配置单会全线显示
+     * "没配过密钥"，而那恰好是收紧时最需要看见的一栏。
+     */
+    private final Map<Integer, String> signingKeyFingerprint = new ConcurrentHashMap<>();
+
+    /**
      * 记下地面为该设备生成/轮换过的密钥指纹（"已生成，等现场写入"那一半状态）。
      * 与 {@link #markSigningVerified(int)} 分开：只有真看到签名帧才算过线。
+     *
+     * <p>调用方是 {@code MavlinkSigningKeyController.rotateKey} 的成功分支——
+     * 在此之前这个方法是<b>生产代码里零调用方</b>的，{@code signing_key_fingerprint} 列因此恒为 NULL。
      */
     public void recordSigningKeyFingerprint(int sysid, String fingerprint) {
+        if (fingerprint == null || fingerprint.isBlank()) {
+            // 空指纹不记账：否则"清掉"会被读成"地面给过它密钥"
+            return;
+        }
+        signingKeyFingerprint.put(sysid, fingerprint);
         if (!isPersisting()) {
             return;
         }
@@ -237,6 +258,16 @@ public class DeviceRegistry { // MUTANT
         } catch (Exception e) {
             log.warn("签名密钥指纹落库失败 sysid={}: {}", sysid, e.getMessage());
         }
+    }
+
+    /** 地面最近一次为该设备记下的密钥指纹；null = 从没为它生成/轮换过密钥。 */
+    public String signingKeyFingerprint(int sysid) {
+        return signingKeyFingerprint.get(sysid);
+    }
+
+    /** 全部有指纹记录的设备（供发放配置单端点使用；返回副本，调用方改不动内部表）。 */
+    public Map<Integer, String> signingKeyFingerprintSnapshot() {
+        return Map.copyOf(signingKeyFingerprint);
     }
 
     /**

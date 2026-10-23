@@ -134,6 +134,50 @@ class DeviceRegistryPersistenceTest {
         assertThat(deviceRepository.findById(4)).isEmpty();
     }
 
+    // ===== C5 发放账：signing_key_fingerprint 的写入方与重启回填 =====
+
+    @Test
+    @DisplayName("recordSigningKeyFingerprint 写库并在重启后回填内存（发放配置单的数据源）")
+    void fingerprintPersistsAndRestores() throws Exception {
+        injectRepository(deviceRepository);   // 有用例把它换成过 mock，这里显式换回真的
+        setPersist(true);
+
+        deviceRegistry.recordSigningKeyFingerprint(51, "aabbccdd");
+
+        assertThat(deviceRegistry.signingKeyFingerprint(51)).isEqualTo("aabbccdd");
+        assertThat(deviceRepository.findById(51).orElseThrow().getSigningKeyFingerprint())
+                .isEqualTo("aabbccdd");
+
+        // 模拟重启：清内存（含 drones 与指纹镜像），再看 restoreFromRepository 能不能把账找回来
+        clearDronesMap();
+        java.lang.reflect.Field f = DeviceRegistry.class.getDeclaredField("signingKeyFingerprint");
+        f.setAccessible(true);
+        ((java.util.Map<?, ?>) f.get(deviceRegistry)).clear();
+        assertThat(deviceRegistry.signingKeyFingerprint(51)).isNull();
+
+        deviceRegistry.restoreFromRepository();
+
+        assertThat(deviceRegistry.signingKeyFingerprint(51)).isEqualTo("aabbccdd");
+    }
+
+    @Test
+    @DisplayName("persist=false（出厂默认）时指纹仍进内存镜像；空指纹不记账")
+    void fingerprintKeptInMemoryWhenNotPersisting() throws Exception {
+        injectRepository(deviceRepository);
+        setPersist(false);
+
+        deviceRegistry.recordSigningKeyFingerprint(52, "deadbeef");
+
+        // 默认部署不落库，但"这台配过密钥"必须仍然读得出来——否则配置单会全线显示没配过
+        assertThat(deviceRegistry.signingKeyFingerprint(52)).isEqualTo("deadbeef");
+        assertThat(deviceRepository.findById(52)).isEmpty();
+
+        // null / 空白不是账：不能把"清掉"读成"给过它密钥"
+        deviceRegistry.recordSigningKeyFingerprint(53, null);
+        deviceRegistry.recordSigningKeyFingerprint(53, "   ");
+        assertThat(deviceRegistry.signingKeyFingerprint(53)).isNull();
+    }
+
     // ===== 降级测试 =====
 
     @Test
