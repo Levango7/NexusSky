@@ -86,28 +86,42 @@ export function resolveApiUrl(url) {
 
 async function jsonFetch(rawUrl, options = {}) {
   const url = resolveApiUrl(rawUrl)
-  const { timeout = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options
+  const { timeout = DEFAULT_TIMEOUT_MS, signal: callerSignal, ...fetchOptions } = options
 
   if (authToken) {
     fetchOptions.headers = { ...(fetchOptions.headers || {}), 'Authorization': `Bearer ${authToken}` }
   }
 
-  // AbortController + setTimeout 实现请求超时控制
-  // 经验来源：2026-09-12-abortcontroller-timeout-cleartimeout-finally-block
+  // 超时与"调用方取消"是两条独立通路，必须合并到同一个 controller。
+  // 旧写法无条件把 fetchOptions.signal 覆盖成超时 controller ⇒ 调用方的 abort()
+  // 对真实请求零效果：组件层看 signal.aborted 是真的（同一个 controller 对象），
+  // 但网络请求照跑到底，取消只省下了后续 setState。
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeout)
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeout)
+  const onCallerAbort = () => controller.abort()
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort()
+    else callerSignal.addEventListener('abort', onCallerAbort, { once: true })
+  }
   fetchOptions.signal = controller.signal
 
   let res
   try {
     res = await fetch(url, fetchOptions)
   } catch (e) {
-    if (e.name === 'AbortError') {
+    // 只有"超时引发的 abort"才算 TimeoutError。调用方主动取消要原样抛 AbortError，
+    // 否则用户点了取消，界面上报的是"请求超时（15000ms）"。
+    if (e && e.name === 'AbortError' && timedOut) {
       throw new TimeoutError(timeout)
     }
     throw e
   } finally {
     clearTimeout(timer)
+    if (callerSignal) callerSignal.removeEventListener('abort', onCallerAbort)
   }
 
   // 401 响应：token 过期或无效。清除令牌，并让界面切回登录态。
@@ -398,26 +412,27 @@ export const api = {
 
   // ---- Tracking (飞行轨迹追踪与丢失找回) ----
   // base 路径 /api/v1/tracking（独立于 v1 BASE）
-  // 获取无人机飞行轨迹（limit 限制点数）
-  getFlightTrack: (sysid, limit) => {
+  // 获取无人机飞行轨迹（limit 限制点数；options 透传给 jsonFetch，含调用方的 signal）
+  getFlightTrack: (sysid, limit, options) => {
     const qs = limit != null ? `?limit=${encodeURIComponent(limit)}` : ''
-    return jsonFetch(`/api/v1/tracking/${sysid}/track${qs}`)
+    return jsonFetch(`/api/v1/tracking/${sysid}/track${qs}`, options)
   },
 
   // 轨迹回放：时间范围 [from, to] + 点数限制
-  replayTrack: (sysid, from, to, limit) => {
+  replayTrack: (sysid, from, to, limit, options) => {
     const qs = new URLSearchParams({ from, to, limit }).toString()
-    return jsonFetch(`/api/v1/tracking/${sysid}/replay?${qs}`)
+    return jsonFetch(`/api/v1/tracking/${sysid}/replay?${qs}`, options)
   },
 
   // 最近一次已知位置
   getLastKnown: (sysid) => jsonFetch(`/api/v1/tracking/${sysid}/last-known`),
 
   // 丢失无人机列表
-  getLostDrones: () => jsonFetch('/api/v1/tracking/lost'),
+  getLostDrones: (options) => jsonFetch('/api/v1/tracking/lost', options),
 
   // 搜索引导（预测航向/距离）
-  getSearchGuide: (sysid) => jsonFetch(`/api/v1/tracking/${sysid}/search-guide`),
+  getSearchGuide: (sysid, options) =>
+    jsonFetch(`/api/v1/tracking/${sysid}/search-guide`, options),
 
   // 触发丢失无人机扫描
   scanLostDrones: () => jsonFetch('/api/v1/tracking/scan'),
