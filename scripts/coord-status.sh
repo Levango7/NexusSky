@@ -45,7 +45,7 @@ warn() { echo "$*" >&2; }
 # 全部在临时目录里跑，绝不碰真实的 .coord/STATUS.md。
 # =============================================================================
 self_test() {
-  local fails="" tmp status out rc marks n1 n2 heads self
+  local fails="" tmp status out rc marks n1 n2 heads self pr_fix pr_fix2 pr_fix3
   SELF="${COORD_STATUS_SELF:-scripts/coord-status.sh}"
   [ -f "$SELF" ] || { echo "无法判定：自测目标不存在（$SELF）——绝不测别的文件冒充通过。" >&2; return 1; }
   tmp="$(mktemp -d)"
@@ -128,6 +128,31 @@ EOF
   [ "$rc" = "2" ] || fails="${fails}T5:缺文件时期望 2 实得 $rc "
   [ ! -e "$status" ] || fails="${fails}T5:不该凭空造状态板 "
 
+  # T6 不可合并的 PR ⇒ 看板必须标出「Actions 不会被调度」。
+  #    这条提示的价值全在"出现"与"不出现"都对，所以正反两面都要断言：
+  #    ① CONFLICTING ⇒ 必须出现，且必须指向那条合成不出来的 refs/pull/<N>/merge；
+  #    ② MERGEABLE ⇒ **不得**出现（别把正常的 PR 也标一遍）；
+  #    ③ mergeable=UNKNOWN 是 GitHub 还没算完的暂态，不是冲突 ⇒ **不得**出现；
+  #    ④ 夹具缺失 ⇒ 必须 UNVERIFIED 且退出 2，绝不能伪装成「没有在途 PR」。
+  #    走 COORD_PR_FIXTURE 注入，不依赖 GitHub 当时算出的 mergeability。
+  pr_fix="$tmp/prs-conflict.tsv"
+  printf '142\tfeat/x\tCONFLICTING\tDIRTY\t标题\n' > "$pr_fix"
+  out="$(COORD_PR_FIXTURE="$pr_fix" bash "$SELF" 2>/dev/null)"
+  printf '%s' "$out" | grep -q "Actions 不会调度" || fails="${fails}T6:不可合并的 PR 没标出 Actions 不会调度 "
+  printf '%s' "$out" | grep -q "refs/pull/142/merge" || fails="${fails}T6:提示没指出 refs/pull/142/merge "
+  pr_fix2="$tmp/prs-ok.tsv"
+  printf '143\tfeat/y\tMERGEABLE\tBLOCKED\t标题\n' > "$pr_fix2"
+  out="$(COORD_PR_FIXTURE="$pr_fix2" bash "$SELF" 2>/dev/null)"
+  printf '%s' "$out" | grep -q "Actions 不会调度" && fails="${fails}T6:可合并的 PR 被误标成 Actions 不会调度 "
+  pr_fix3="$tmp/prs-unknown.tsv"
+  printf '144\tfeat/z\tUNKNOWN\tUNKNOWN\t标题\n' > "$pr_fix3"
+  out="$(COORD_PR_FIXTURE="$pr_fix3" bash "$SELF" 2>/dev/null)"
+  printf '%s' "$out" | grep -q "Actions 不会调度" && fails="${fails}T6:mergeable=UNKNOWN 被误标成 Actions 不会调度 "
+  out="$(COORD_PR_FIXTURE="$tmp/prs-missing.tsv" bash "$SELF" 2>/dev/null)"; rc=$?
+  printf '%s' "$out" | grep -q "UNVERIFIED" || fails="${fails}T6:夹具缺失没走 UNVERIFIED "
+  printf '%s' "$out" | grep -q "当前无在途 PR" && fails="${fails}T6:夹具缺失却伪装成「无在途 PR」 "
+  [ "$rc" = "2" ] || fails="${fails}T6:夹具缺失时期望退出 2 实得 $rc "
+
   rm -rf "$tmp"
   if [ -n "$fails" ]; then
     echo "自测失败：$fails" >&2
@@ -135,7 +160,8 @@ EOF
   fi
   echo "自测目标=$SELF（用 COORD_STATUS_SELF 注入，防副本测到原文件）"
   echo "自测通过：假 slug→UNVERIFIED/exit2、首写插入且他人段落齐全、重写幂等（begin/标题各 1 份、行数不变）、"
-  echo "手写段并存→拒绝写入且文件未被改动、缺文件→exit2 且不凭空造板。"
+  echo "手写段并存→拒绝写入且文件未被改动、缺文件→exit2 且不凭空造板、"
+  echo "不可合并的 PR→标出 Actions 不会调度（可合并与 UNKNOWN 都不标、夹具缺失→UNVERIFIED）。"
   return 0
 }
 
@@ -185,32 +211,67 @@ fi
 # 上一版用 `gh api repos` 探测，它本来就该 404 ⇒ gh 明明能用却被报成 UNVERIFIED。
 # 现在的判据是「真调用的退出码」：0 且空列表＝确实没有在途 PR；非 0＝UNVERIFIED。
 PR_BLOCK=""
+PR_CI_WARN=0
+PR_TSV_FILE=""
+PR_TSV_TMP=""
 # COORD_NO_GH=1 是测试注入点：让降级分支可被确定性验证（不依赖网络/鉴权是否恰好坏）
+# COORD_PR_FIXTURE 是另一个注入点：给它一个 TSV 文件（列与 gh --jq 输出同构：
+#   number \t branch \t mergeable \t mergeStateStatus \t title），就用它代替真实调用——
+#   这样「不可合并 ⇒ Actions 不会被调度」这条提示的**出现与不出现**都能被确定性断言，
+#   不必等 GitHub 什么时候算出 mergeability（它常常是 UNKNOWN 的暂态）。
 if [ "${COORD_NO_GH:-0}" = "1" ]; then
   DEGRADED=1
   PR_BLOCK="UNVERIFIED：gh 取不到（此处为注入的降级场景），**不要**把这条读成『没有在途 PR』。"
+elif [ -n "${COORD_PR_FIXTURE:-}" ]; then
+  if [ ! -s "${COORD_PR_FIXTURE}" ]; then
+    DEGRADED=1
+    PR_BLOCK="UNVERIFIED：注入的 PR 夹具 \`${COORD_PR_FIXTURE}\` 不存在或是空文件。**不要**把这条读成『没有在途 PR』。"
+  else
+    PR_TSV_FILE="${COORD_PR_FIXTURE}"
+  fi
 elif [ -n "$REPO_SLUG" ] && command -v gh >/dev/null 2>&1; then
   PR_TSV_FILE="$(mktemp)"
+  PR_TSV_TMP="$PR_TSV_FILE"
   if gh pr list --repo "$REPO_SLUG" --state open \
        --json number,title,headRefName,mergeable,mergeStateStatus \
        --jq '.[] | [.number, .headRefName, .mergeable, .mergeStateStatus, .title] | @tsv' \
        > "$PR_TSV_FILE" 2>/dev/null; then
+    :
+  else
+    DEGRADED=1
+    PR_BLOCK="UNVERIFIED：\`gh pr list --repo $REPO_SLUG\` 调用失败（鉴权/网络/限流）。**不要**把这条读成『没有在途 PR』。"
+    rm -f "$PR_TSV_FILE"
+    PR_TSV_FILE=""
+  fi
+else
+  DEGRADED=1
+  PR_BLOCK="UNVERIFIED：gh 不可用或 origin 无法解析出 owner/repo。**不要**把这条读成『没有在途 PR』。"
+fi
+
+if [ -n "$PR_TSV_FILE" ]; then
+  if [ -z "$PR_BLOCK" ]; then
     if [ ! -s "$PR_TSV_FILE" ]; then
       PR_BLOCK="（当前无在途 PR）"
     else
       while IFS=$'\t' read -r num br mr ms title; do
         [ -z "$num" ] && continue
-        PR_BLOCK="${PR_BLOCK}#${num} \`[${br}]\` merge=${mr}/${ms} :: ${title}"$'\n'
+        mark=""
+        # 不可合并 ⇒ GitHub 合成不出 refs/pull/<N>/merge ⇒ pull_request workflow 不会被调度
+        # （零 run / 零 Actions check suite / 零失败记录）。这条不写出来，看板就会让人
+        # 去查「GitHub 是不是挂了」。mergeable=UNKNOWN 是 GitHub 还没算完的暂态，不是冲突。
+        if [ "$mr" = "CONFLICTING" ] || [ "$ms" = "DIRTY" ]; then
+          mark=" ⚠不可合并⇒Actions 不会调度（GitHub 合成不出 refs/pull/${num}/merge）"
+          PR_CI_WARN=1
+        fi
+        PR_BLOCK="${PR_BLOCK}#${num} \`[${br}]\` merge=${mr}/${ms}${mark} :: ${title}"$'\n'
       done < "$PR_TSV_FILE"
     fi
-  else
-    DEGRADED=1
-    PR_BLOCK="UNVERIFIED：\`gh pr list --repo $REPO_SLUG\` 调用失败（鉴权/网络/限流）。**不要**把这条读成『没有在途 PR』。"
   fi
-  rm -f "$PR_TSV_FILE"
-else
-  DEGRADED=1
-  PR_BLOCK="UNVERIFIED：gh 不可用或 origin 无法解析出 owner/repo。**不要**把这条读成『没有在途 PR』。"
+  [ -n "$PR_TSV_TMP" ] && rm -f "$PR_TSV_TMP"
+fi
+
+if [ "$PR_CI_WARN" = "1" ]; then
+  PR_BLOCK="${PR_BLOCK}"$'\n'"**上面标 ⚠ 的 PR：GitHub 合成不出 \`refs/pull/<N>/merge\` ⇒ \`pull_request\` workflow **不会被调度**（零 run / 零 Actions check suite / 零失败记录；第三方 App 的 check suite 照常出现）。⇒ 「CI 没跑」多半是这个，不是 GitHub 故障——先解冲突。"$'\n'
 fi
 
 # --- worktree 逐个体检 ---------------------------------------------------------

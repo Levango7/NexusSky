@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-23 共有 176 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-23 共有 178 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 176 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 178 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,60 @@
 
 
 ---
+## [Unreleased] — 状态板给「不可合并的 PR」打上「CI 不会被调度」的标记（2026-10-23）
+
+### 1. 为什么要在状态板上标
+
+机制写进 `COORDINATION.md` 第六节了，但知识躺在文档里，还得有人去翻。
+**再往下一层，把它变成看板上的常驻提示**：`scripts/coord-status.sh` 生成「在途与占用」段时
+本来就会列出每个 PR 的 `mergeable/mergeStateStatus`，现在额外给不可合并的那几条打上
+`⚠不可合并⇒Actions 不会调度（GitHub 合成不出 refs/pull/<N>/merge）`，段末再附一句判读。
+
+### 2. 双向断言（不只测「该出现的时候出现」）
+
+新增自测 T6，走新的注入点 `COORD_PR_FIXTURE`（给定 TSV 文件代替真实 `gh` 调用，
+不依赖 GitHub 当时算出的 mergeability）：
+
+- `CONFLICTING`/`DIRTY` ⇒ 必须出现标记，且必须指出那条合成不出来的 `refs/pull/<N>/merge`
+- `MERGEABLE` ⇒ **不得**出现（别把正常的 PR 也标一遍）
+- `mergeable=UNKNOWN`（GitHub 还没算完的暂态）⇒ **不得**出现
+- 注入的夹具缺失 ⇒ 必须 `UNVERIFIED` + 退出码 2，**不得**伪装成「没有在途 PR」
+
+### 3. 变异证明
+
+两处定向变异都被自测抓住：① 判定条件改成永不命中 ⇒ 报「不可合并的 PR 没标出」；
+② 改成永远命中 ⇒ 报「可合并的 PR 被误标成」与「UNKNOWN 被误标成」。
+只测正例的自测，等于自己绿自己。
+
+## [Unreleased] — 「PR 不可合并 ⇒ Actions 根本不调度」写进仓：症状、机制、判读四步（2026-10-23）
+
+### 1. 现场：一种不产生任何失败记录的失败
+
+2026-10-23 排查 PR #142 时撞上的现象：PR 页面上**一条 `pull_request` 检查都没有**，
+`Actions` 里**没有这条 PR 的 run**，而第三方 App 的 check suite 照常出现。
+它被误判成「GitHub 故障」，排查方向整个跑偏——去查状态页、查 runner 配额、查网络，全是空的。
+
+### 2. 机制
+
+`pull_request` 事件跑在 `refs/pull/<N>/merge`（base + head 合成）这个 ref 上。
+PR 不可合并时（`mergeable=CONFLICTING` / `mergeStateStatus=DIRTY`），GitHub **合成不出这个 ref**
+⇒ 事件**永不触发** workflow ⇒ **零 run、零 Actions check suite、零失败记录**。
+反过来也成立：解掉冲突后合成 ref 立刻出现，workflow 随即被调度——
+所以「CI 静默」是「CI 不被调度」的表现，不是另一个独立故障。
+
+### 3. 沉淀到哪里
+
+- `COORDINATION.md` 新增第六节：症状、机制、判读四步、修复办法、2026-10-23 实测旁证，
+  以及同族的另一个坑（`--merge` 被拒 ≠ 已合并；本仓惯例是 `--squash`，被拒后仍要回查 master tip）
+- `docs/contributing-guide.md` §5.1 加一条指引：看到「CI 没跑」先查 mergeability，
+  别先去怀疑 GitHub
+
+### 4. 一个容易踩的判读坑（也一并写进去了）
+
+`mergeable=UNKNOWN` 是 GitHub **还没算完** mergeability 的暂态，**不是**冲突；
+另外 `actions/runs` 的 `created=>=…` 是**无效过滤参数**，会静默返回空列表——
+拿它当证据，等于把「查不到」读成「没有」。
+
 ## [Unreleased] — surveillance 收口：97 个存活变异体逐条清账，不再挂"未定性"（2026-10-23）
 
 ### 1. 现场：账是清的，但 97 条悬而未决
