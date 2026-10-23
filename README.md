@@ -639,9 +639,11 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 
 ## 能力腿 e2e 的实测状态（2026-10-06 实测，非推断）
 
-`scripts/` 下 28 个 `e2e-*` 脚本中，**7 个进 CI 门禁**（`e2e-smoke` /
-`e2e-fault-linux` / `e2e-failsafe-linux` / `e2e-vision-linux`，以及 2026-10-07
-转正的 `e2e-capability` 三条腿）。
+`scripts/` 下 **44** 个 `e2e-*` 脚本（28 个 `.ps1` / 11 个 `.sh` / 4 个 `.py` /
+1 个 `.cmd`）中，**31 个被 `ci.yml` 直接引用**（其中
+`e2e-common.ps1` 与 `e2e-common-selftest.ps1` 是公共库与自测，
+**能力腿 e2e 为 29 个**；2026-10-24 实测。旧口径 2026-10-07 转正的
+`e2e-capability` 三条腿已并入 `E2E capability` job。
 
 **2026-10-06 首轮实测**（真 Linux / WSL2 内核，对着当时的 `master` 后端）发现
 两条腿存在 API 漂移、一条腿语义误解：
@@ -713,9 +715,9 @@ NexusSky/
 ├── gcs-web/             React GCS（51 个组件文件，其中 49 个 .jsx 面板）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
-├── scripts/             start-all.cmd / e2e-smoke.sh / 50 个脚本（其中 28 个 e2e-*）
+├── scripts/             start-all.cmd / e2e-smoke.sh / 90 个脚本（其中 44 个 e2e-*）
 ├── docker-compose.yml   Linux 下一键编排
-├── docs/                32 篇文档
+├── docs/                39 篇文档
 └── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）
 ```
 
