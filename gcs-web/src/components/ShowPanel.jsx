@@ -447,8 +447,10 @@ export default function ShowPanel() {
               ) : taskDetail ? (
                 <div style={{ fontSize: 10, color: 'var(--dim-2)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                   <div>状态：<span style={{ color: SHOW_STATUS_META[pick(taskDetail, 'status')]?.color || 'var(--text)' }}>{SHOW_STATUS_META[pick(taskDetail, 'status')]?.label || pick(taskDetail, 'status') || '--'}</span></div>
-                  <div>队形ID：{pick(taskDetail, 'formationId') || '--'}</div>
-                  <div>无人机数：{pick(taskDetail, 'droneCount') || '--'}</div>
+                  {/* 0 是合法值：`||` 会把「0 架无人机」显示成 `--`（同文件 :302/:414 用的是
+                      != null，两套口径互斥）。这里统一成 `??`，只把 null/undefined 当缺失。 */}
+                  <div>队形ID：{pick(taskDetail, 'formationId') ?? '--'}</div>
+                  <div>无人机数：{pick(taskDetail, 'droneCount') ?? '--'}</div>
                 </div>
               ) : (
                 <div className="empty-hint">暂无详情</div>

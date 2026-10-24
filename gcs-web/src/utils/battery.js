@@ -82,3 +82,30 @@ export function battColorVar(b) {
   if (lv == null) return 'var(--dim)'
   return lv === 'crit' ? 'var(--crit)' : lv === 'warn' ? 'var(--warn)' : 'var(--ok)'
 }
+
+/**
+ * 电量 → 展示文案（唯一实现）。
+ *
+ * 为什么要有这个函数：此前有**四份**各自的写法，其中一份带 bug——
+ * `TrackingPanel` 里的本地 `fmtBattery` 写的是 `n <= 1 ? n * 100 : n`（假设 0–1 归一化），
+ * 而后端 `DroneSnapshot.battery` 用的是 **0–100 百分比、-1 表示未知**。于是：
+ * <ul>
+ *   <li>电量 **1%** → 命中 `n <= 1` → 显示 **100%**（把没电显示成满电，方向完全反了）</li>
+ *   <li>哨兵 **-1** → 命中 `n <= 1` → 显示 **-100%**</li>
+ * </ul>
+ * 另外两处（`TelemetryPanel` / `CityTwinPanel`）用的是 `x != null ? x : '--'`，
+ * 于是哨兵 -1 会原样显示成 `-1` / `-1%`。
+ *
+ * 契约：**任何非有限值、负数、空串一律 `'--'`**；0 是合法电量（0%），必须显示出来。
+ *
+ * @param {*} b 电量百分比（0–100；-1 / null / 空串 = 无数据）
+ * @param {boolean} [withUnit=true] 是否带 `%` 后缀
+ * @returns {string}
+ */
+export function fmtBattery(b, withUnit = true) {
+  if (b == null || b === '') return '--'
+  const n = Number(b)
+  if (!Number.isFinite(n) || n < 0) return '--'
+  return withUnit ? `${n}%` : String(n)
+}
+

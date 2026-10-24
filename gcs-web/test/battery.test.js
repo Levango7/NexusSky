@@ -4,6 +4,7 @@ import {
   battColor,
   battColorVar,
   battLevel,
+  fmtBattery,
   BATT_OK,
   BATT_WARN,
   BATT_CRIT,
@@ -106,5 +107,43 @@ describe('battery: 全域单调性', () => {
       expect(r).toBeGreaterThanOrEqual(prev)
       prev = r
     }
+  })
+})
+
+/**
+ * fmtBattery（2026-10-24 新增）。
+ *
+ * 它存在的直接原因：此前四份各自的写法，其中 `TrackingPanel` 的本地版本写了
+ * `n <= 1 ? n * 100 : n`（假设 0–1 归一化），而后端 `DroneSnapshot.battery`
+ * 用的是 0–100 百分比、-1 表示未知。于是 **1% 显示成 100%**、**-1 显示成 -100%**。
+ * 下面第一条用例就是这个 bug 的回归断言——它必须在旧实现下失败。
+ */
+describe('battery: fmtBattery', () => {
+  it('电量 1 必须显示 1%，不是 100%（旧实现的 n<=1 归一化假设是错的）', () => {
+    expect(fmtBattery(1)).toBe('1%')
+  })
+
+  it('哨兵 -1 显示 --（旧实现显示 -100%）', () => {
+    expect(fmtBattery(-1)).toBe('--')
+  })
+
+  it('0 是合法电量，显示 0%（不能被当成缺失）', () => {
+    expect(fmtBattery(0)).toBe('0%')
+  })
+
+  it('正常值原样带百分号', () => {
+    expect(fmtBattery(85)).toBe('85%')
+    expect(fmtBattery(100)).toBe('100%')
+  })
+
+  it('无数据一律 --：null / undefined / 空串 / NaN / 负无穷', () => {
+    for (const v of [null, undefined, '', NaN, -5, -Infinity]) {
+      expect(fmtBattery(v)).toBe('--')
+    }
+  })
+
+  it('withUnit=false 时只给数字（供调用方自己拼单位）', () => {
+    expect(fmtBattery(85, false)).toBe('85')
+    expect(fmtBattery(-1, false)).toBe('--')
   })
 })

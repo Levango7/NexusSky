@@ -7,6 +7,7 @@ import {
   scanLostDrones,
 } from '../api.js'
 import { pick, fmtTime, POLL_MS } from '../utils/panelUtils.js'
+import { fmtBattery } from '../utils/battery.js'
 
 // M12 无人机追踪 / 遗失辅助查找面板
 // 失联无人机列表（轮询） + 搜索引导卡片 + 飞行轨迹查询 + 历史轨迹回放 + 手动扫描
@@ -58,21 +59,18 @@ function datetimeLocalToMs(str) {
   return isNaN(t) ? null : t
 }
 
-// 电量格式化（兼容 0-1 和 0-100）
-function fmtBattery(b) {
-  if (b == null) return '--'
-  const n = Number(b)
-  if (isNaN(n)) return '--'
-  const pct = n <= 1 ? n * 100 : n
-  return pct.toFixed(0) + '%'
-}
+// 电量格式化已统一到 utils/battery.js 的 fmtBattery（2026-10-24）。
+// 本地副本曾写 `n <= 1 ? n * 100 : n`（假设 0–1 归一化），而后端 battery 是 0–100、
+// -1 表示未知 ⇒ 1% 显示成 100%、-1 显示成 -100%。删掉副本，只留一个实现。
 
-// 电量颜色
+// 电量颜色（阈值 15/30 保持本面板原有口径；仅修 -1 哨兵被算成 -100% 判红的问题）
 function batteryColor(b) {
   if (b == null) return 'var(--dim-2)'
   const n = Number(b)
-  if (isNaN(n)) return 'var(--dim-2)'
-  const pct = n <= 1 ? n * 100 : n
+  // -1 = 后端"电量未知"哨兵。原实现按 n <= 1 归一会把它算成 -100%，落进 <= 15 判成
+  // "严重低电"的红色——把"没数据"画成"要没电了"（2026-10-24 修）。
+  if (isNaN(n) || n < 0) return 'var(--dim-2)'
+  const pct = n
   if (pct <= 15) return 'var(--crit)'
   if (pct <= 30) return 'var(--warn)'
   return 'var(--ok)'
