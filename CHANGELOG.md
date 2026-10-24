@@ -116,9 +116,12 @@ keystore 现值不一致 ⇒ "以为配过了，其实配的是旧密钥"那种�
 `test/budgetBadge.test.jsx`(17) / `alertFeed.test.jsx`(19) / `droneList.test.jsx`(19) /
 `dashboardPanel.test.jsx`(29) / `routeTemplatePanel.test.jsx`(20)——全部 `render()` 真实组件、
 断言真实 DOM，**不在测试里复制组件的常量表**（`dockPanel.test.jsx` 旧版那种"镜像自证"：
-组件把表改错、甚至把面板删掉，测试照样全绿）。前端 **393 → 514 例**，`npm run test:ci`
-实测 `numTotalTests=514 / numPassedTests=514 / numFailedTests=0`，35 个测试文件
-（`test/` 33 + `src/` 2）。
+组件把表改错、甚至把面板删掉，测试照样全绿）。**本批净新增 104 例**（上列 5 个文件逐文件实测
+17+19+19+29+20），全量 `npm run test:ci` 实测 **`numTotalTests=518 / numPassedTests=518 /
+numFailedTests=0`**，37 个测试文件（`test/` 35 + `src/` 2）。
+> 这一节原先写的是「393 → 514、35 个文件」——那是本 PR 刚开出时 base 上的数；分支后来两次
+> rebase 到前进过的 master，base 已不是 393，而 514 也在与 #156 的 `fmtBattery` 收敛后被重测取代。
+> **改成只报「本批增量 + 终值」**，不再报一个已经对不上任何一次实测的箭头。
 
 最值钱的是 `RouteTemplatePanel`：四种模板类型各自要带不同的请求体字段
 （tower→`towers`+`orbitRadiusM/Points/hoverSec`、solar→`polygon`+`lineSpacingM/directionDeg`、
@@ -173,14 +176,24 @@ pipeline→`line`+`stepM`、shoreline→`polygon`+`stepM`+`offsetM`），字段�
 `UnifiedCommandPanel.jsx` 现在 **1686 行**且 `test/unifiedCommandWiring.test.jsx` 就在挂载它；
 `api.js` 现在 **1502 行**且有 `src/api.test.js` + `test/apiCancelSignal.test.js`。
 真正"最大且无直测"的是 `MapView.jsx`（1112 行）。已按实测重写该段并写明原判据。
+> **这里要留一条自我纠正的痕迹**：本段原先写"已按实测重写该段"，但那次 README 改写在与 #156
+> 的 rebase 冲突中**丢了**——分支里 `README.md:896` 仍是"404 例 / 32 个测试文件 / 47 个零测试"。
+> 是 `check-test-count-docs.py` 把它点出来的（`README.md:896 [前端] 声称 404，实测 518`、
+> `ROADMAP.md:25` 同），不是我自己看出来的。**"文档我已经改了"这句话的正确验证方式是让门禁
+> 对着文件重读一遍**，而不是记得改过。现已按最终实测重写，并把判据（页面级面板 37、真渲染 35、
+> SKIP 2、组件级直测 20、两条链都进不去 13）写进 README 本体，便于后来人复算。
 
 ### 6. 验证
 
-- `npm run test:ci` ⇒ **514/514**，`numFailedTests=0`，退出码 0。
+- `npm run test:ci` ⇒ **518/518**，`numFailedTests=0`，`numTotalTestSuites=144`，退出码 0。
 - `npx eslint src --ext .js,.jsx` ⇒ **0 error**。
-- 前端声称用门禁自己的文法核过：`README.md:894`、`ROADMAP.md:25` 三处命中**全部 514**，
-  与 `vitest-report.json` 实测一致（0 处不符）。
-- 本批**不动任何 Java 测试**，Java 声称原样 5082（由并行批次按实测重驱动，谁后合谁重跑门禁）。
+- 前端声称由门禁自己核对（不是手算）：`python scripts/check-test-count-docs.py
+  --root <本树> --frontend-json gcs-web/vitest-report.json` 首轮点名 **2 处**
+  （`README.md:896`、`ROADMAP.md:25`，均「声称 404 → 实测 518」），按它点名的 `(文件, 行)`
+  逐行重驱动后复跑 ⇒ 前端 0 处不符。同一轮门禁实测 Java **5094 用例 / 0 失败 / 0 错误**
+  （593 个测试类，来自本树 fresh `mvn -B -o test` 的 surefire 报告，`MVN_EXIT=0` 先断言再用），
+  文档里的 Java 声称全部落在 5094 上，本批不动。
+- 本批**不动任何 Java 测试**；Java 侧数字与 master 一致（`5094` 由本次 fresh 运行复核）。
 
 ### 7. 登记进 `.coord/GAPS.md` 而**不在本批动**的（都是补口时顺手量到的，不是猜的）
 
