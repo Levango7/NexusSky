@@ -83,6 +83,8 @@ public abstract class MavlinkMessage {
             // 变成 null 被整个丢掉 —— GCS 上"起飞中/降落中"就永远只能靠 custom_mode 猜。
             case ExtendedSysState.ID:
                 return ExtendedSysState.decode(frame);
+            case AutopilotVersion.ID:
+                return AutopilotVersion.decode(frame);
             case MissionItemInt.ID:
                 return MissionItemInt.decode(frame);
             case CommandLong.ID:

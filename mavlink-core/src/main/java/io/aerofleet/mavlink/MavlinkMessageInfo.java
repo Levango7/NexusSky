@@ -65,6 +65,10 @@ public final class MavlinkMessageInfo {
         // 此前只能靠 HEARTBEAT.custom_mode 猜，而 custom_mode 是固件相关的导航状态，
         // PX4 与 ArduPilot 对同一数字解释不同 —— 官方为此单独定义了这条消息。
         INFOS[245] = new Info(2, 130);    // EXTENDED_SYS_STATE
+        // 2026-10-25 补：固件版本与能力位（PX4 按请求下发）。
+        // ⚠ 178 只由前 11 个字段（60 字节）算出 —— MAVLink2 扩展字段 uid2（偏移 60、18 字节）
+        // 不参与 CRC_EXTRA（否则只实现 v1 的那一端无法校验）。把 uid2 一起喂算法会得到 39（错）。
+        INFOS[148] = new Info(78, 178);   // AUTOPILOT_VERSION
         INFOS[253] = new Info(54, 83);    // STATUSTEXT
         INFOS[109] = new Info(9, 185);    // RADIO_STATUS（官方 CRC_EXTRA=185；
                                             // 原为 88，与 pymavlink 官方定义不符）
