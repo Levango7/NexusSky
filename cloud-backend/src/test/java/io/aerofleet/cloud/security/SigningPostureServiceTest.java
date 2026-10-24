@@ -202,4 +202,57 @@ class SigningPostureServiceTest {
         assertThat(r.ready()).isTrue();      // 没有敞口
         assertThat(r.covered()).isZero();    // 但别把它读成"全部已配"
     }
+
+    // ===== 变异收口（P1 #7）：loosen 成功路径 / 审计环容量 / 自动退回开关 =====
+
+    @Test
+    @DisplayName("8. loosen 成功路径返回 readiness（返回 null = 端点 500，而现有用例只测了 409 拒）")
+    void permissiveSucceedsWhenEnabled() {
+        MavlinkSignatureConfig cfg = signingEnabled(true);
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(71);
+        registry.markSigningVerified(71);
+        SigningPostureService svc = new SigningPostureService(providerOf(cfg), registry);
+
+        SigningPostureService.Readiness r = svc.requestPermissive("ops@aerofleet", "演练退场");
+
+        assertThat(r).as("requestPermissive 必须返回 readiness（endpoint 的成功分支全靠这个返回值）").isNotNull();
+        assertThat(r.current()).isEqualTo(SigningPostureService.Posture.PERMISSIVE);
+        assertThat(cfg.isRejectUnsigned()).isFalse();
+        assertThat(svc.recentEvents().get(0).actor()).isEqualTo("ops@aerofleet");
+    }
+
+    @Test
+    @DisplayName("9. 审计环恰好存 50 条（> 50 才淘汰，>= 会少留一条）")
+    void eventsRingHoldsExactlyFifty() {
+        MavlinkSignatureConfig cfg = signingEnabled(false);
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(71);
+        registry.markSigningVerified(71);
+        SigningPostureService svc = new SigningPostureService(providerOf(cfg), registry);
+
+        for (int i = 0; i < 50; i++) {
+            svc.setAutoRollback(true);
+            svc.requestStrict("ops@aerofleet", "第 " + i + " 次收紧");
+            svc.requestPermissive("ops@aerofleet", "第 " + i + " 次退回");
+        }
+
+        assertThat(svc.recentEvents())
+                .as("环的容量边界：第 50 条后仍在；>= 50 的变异会在第 50 条就开始淘汰")
+                .hasSize(50);
+    }
+
+    @Test
+    @DisplayName("10. setAutoRollback(false) 后 isAutoRollback 如实回显（getter 恒真的变异会让开关失灵）")
+    void autoRollbackFlagRoundTrips() {
+        SigningPostureService svc = new SigningPostureService(providerOf(null), new DeviceRegistry());
+
+        assertThat(svc.isAutoRollback()).isTrue();   // 默认开
+        svc.setAutoRollback(false);
+        assertThat(svc.isAutoRollback())
+                .as("关掉自动退回必须如实回显——这个值直接进状态响应，也是看门狗的总开关")
+                .isFalse();
+        svc.setAutoRollback(true);
+        assertThat(svc.isAutoRollback()).isTrue();
+    }
 }

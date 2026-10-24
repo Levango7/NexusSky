@@ -20,8 +20,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
 
 /**
  * UserController 用户管理 CRUD 单测（直接实例化，无 Spring 上下文）。
@@ -266,6 +268,36 @@ class UserControllerTest {
 
         assertThat(resp.getStatusCode().value()).isEqualTo(200);
         verify(passwordEncoder).encode("newPassword");
+        // 变异收口：此前只验证"encode 被调用"——删掉 setPasswordHash 后哈希永远不落库，
+        // 口令原地不动，而"调用过"这条断言毫无察觉（证明调用 ≠ 证明落库，正是本类
+        // 自我警告的反模式）。
+        ArgumentCaptor<UserEntity> captor = ArgumentCaptor.forClass(UserEntity.class);
+        verify(userRepository).save(captor.capture());
+        assertThat(captor.getValue().getPasswordHash()).isEqualTo("newEncodedHash");
+    }
+
+    @Test
+    @DisplayName("updateUser：传 tenantId 落库；不传保持原值（取反变异会让不传的被置 null）")
+    void updateUserTenantIdBothDirections() {
+        UserEntity existing = new UserEntity(1, "user1", "oldHash", "ADMIN", 7, true, Instant.now());
+        when(userRepository.findById(1)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(UserEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UserRequest withTenant = new UserRequest();
+        withTenant.setTenantId(9);
+        controller.updateUser(1, withTenant);
+
+        ArgumentCaptor<UserEntity> captor = ArgumentCaptor.forClass(UserEntity.class);
+        verify(userRepository).save(captor.capture());
+        assertThat(captor.getValue().getTenantId()).as("传了 tenantId 必须落库").isEqualTo(9);
+
+        UserRequest withoutTenant = new UserRequest();
+        existing.setTenantId(7); // 复位：证明"不传"保留的是**当前值**，而不是把它清空
+        controller.updateUser(1, withoutTenant);
+        verify(userRepository, times(2)).save(captor.capture());
+        assertThat(captor.getAllValues().get(1).getTenantId())
+                .as("不传 tenantId 必须保持当前值；条件取反变异会在缺失时把租户清空（数据丢失）")
+                .isEqualTo(7);
     }
 
     @Test

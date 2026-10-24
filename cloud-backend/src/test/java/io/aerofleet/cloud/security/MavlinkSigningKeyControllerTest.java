@@ -79,10 +79,14 @@ class MavlinkSigningKeyControllerTest {
     }
 
     private void loginAsAdmin() {
+        loginAsAdmin("operator-a", "operator-a");
+    }
+
+    private void loginAsAdmin(String preferredUsername, String subject) {
         Jwt jwt = Jwt.withTokenValue("test-token")
                 .header("alg", "none")
-                .claim("preferred_username", "operator-a")
-                .subject("operator-a")
+                .claim("preferred_username", preferredUsername)
+                .subject(subject)
                 .build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(jwt, "n/a",
@@ -125,6 +129,13 @@ class MavlinkSigningKeyControllerTest {
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(resp.getBody()).containsEntry("enabled", true);
         assertThat(resp.getBody()).containsEntry("multiKeyMode", true);
+        // 变异收口：rejectUnsigned 字段（listKeys 的 && 链成员被取反时会显示成假状态，
+        // 运维在面板上看到"不拒未签名"而实际策略是拒的——状态查询必须如实回显策略）
+        assertThat(resp.getBody()).containsEntry("rejectUnsigned", true);
+        // PIT 第五轮：keyStorePath 行的 enabled&&isMultiMode 两个条件取反在别的字段
+        // 上不可见（multiKeyMode/rejectUnsigned 各有专属用例），keyStorePath 在
+        // 多机模式下必须如实回显库路径——否则运维按面板路径找文件会扑空。
+        assertThat(resp.getBody()).containsEntry("keyStorePath", store.toString());
         @SuppressWarnings("unchecked")
         Map<String, Object> entries = (Map<String, Object>) resp.getBody().get("entries");
         assertThat(entries).containsKey("7");
@@ -136,6 +147,31 @@ class MavlinkSigningKeyControllerTest {
 
         // 整个响应体不得出现密钥本体
         assertThat(resp.getBody().toString()).doesNotContain("secret-key-for-seven");
+    }
+
+    @Test
+    @DisplayName("11. 边界 sysid=255 的条目必须列出（循环上界含 255）")
+    void listKeys_includesBoundarySysid255() throws Exception {
+        Path store = storeWith("""
+                {
+                  "version": 1,
+                  "sysids": {
+                    "7": {"key": "secret-key-for-seven", "linkId": 7},
+                    "255": {"key": "secret-key-for-255", "linkId": 255}
+                  }
+                }
+                """);
+        enableMultiMode(store);
+
+        ResponseEntity<Map<String, Object>> resp = controller.listKeys();
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> entries = (Map<String, Object>) resp.getBody().get("entries");
+        // for (sysid = 1; sysid <= 255) → < 255 变异会静默漏掉 255 这台机
+        // （无人机 sysid 255 是合法边界，漏列 = 运维以为它没配密钥）
+        assertThat(entries).containsKey("255");
+        assertThat(entries).containsKey("7");
     }
 
     @Test
@@ -255,6 +291,30 @@ class MavlinkSigningKeyControllerTest {
     }
 
     // ==================== 坏输入不碰文件 ====================
+
+    @Test
+    @DisplayName("12. 轮换成功时审计记 preferred_username 而非 subject（两者不同才分得开）")
+    void rotate_logsOperatorAsPreferredUsername() throws Exception {
+        Path store = storeWith("""
+                {
+                  "version": 1,
+                  "sysids": {"7": {"key": "old", "linkId": 7}}
+                }
+                """);
+        enableMultiMode(store);
+        // 现有登录辅助里 preferred_username 与 subject 同值——回退顺序变了也分不出。
+        // 密钥轮换的审计归属只落在日志行上（响应体不含操作者），这是它唯一的观测面。
+        loginAsAdmin("operator-a", "subject-1234");
+
+        try (LogWiretap wiretap = LogWiretap.on(MavlinkSigningKeyController.class)) {
+            assertThat(controller.rotateKey(7, bodyOfKey("new-key")).getStatusCode())
+                    .isEqualTo(HttpStatus.OK);
+
+            assertThat(wiretap.lines())
+                    .as("轮换审计行必须记 preferred_username；operator() 的两个条件取反会退到 subject，审计认错人")
+                    .anyMatch(l -> l.contains("MAVLink 签名密钥轮换成功") && l.contains("operator=operator-a"));
+        }
+    }
 
     @Test
     @DisplayName("9. sysid 越界：409，且文件逐字节不变")

@@ -16,6 +16,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -150,6 +151,15 @@ class ApiKeyControllerDeviceKeyTest {
         assertThat(body.get("role")).isEqualTo("OPERATOR");
         // maskedKey 不含明文中段
         assertThat((String) body.get("maskedKey")).doesNotContain(plaintext.substring(8, plaintext.length() - 4));
+        // 变异收口：keyId/name/scopes 落库与响应双侧都要钉住——
+        // 此前只断言了 hash/sysid/role，mintKey 里的 setKeyId/setName/setScopes
+        // 任何一行被删掉，字段停在 null 而测试全绿。
+        assertThat(saved.getKeyId()).matches("nsk_" + DEVICE_TENANT + "_[0-9a-f]{8}");
+        assertThat(body.get("keyId")).isEqualTo(saved.getKeyId());
+        assertThat(saved.getName()).isEqualTo("drone-42");
+        // 设备 Key 未显式给 scopes 时的默认档位（来源只有一处，删掉就变 "[]"）
+        assertThat(saved.getScopes()).isEqualTo("[ingest]");
+        assertThat(body.get("scopes")).isEqualTo("[ingest]");
     }
 
     @Test
@@ -343,6 +353,132 @@ class ApiKeyControllerDeviceKeyTest {
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(old.isRevoked()).isTrue();
         verify(apiKeyCache).invalidate("old-key-hash");
+    }
+
+    @Test
+    @DisplayName("设备 Key：显式 scopes 原样保留（默认 [ingest] 不许反向覆盖显式值）")
+    void deviceKeyKeepsExplicitScopes() {
+        loginAs("admin", DEVICE_TENANT, "ADMIN");
+        knownDevice(DEVICE_TENANT);
+
+        var response = controller.createApiKey(body(
+                "name", "drone-42", "sysid", SYSID, "scopes", List.of("ingest", "read")));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(201);
+        ArgumentCaptor<ApiKeyEntity> captor = ArgumentCaptor.forClass(ApiKeyEntity.class);
+        verify(apiKeyRepository).save(captor.capture());
+        assertThat(captor.getValue().getScopes()).isEqualTo("[ingest, read]");
+        assertThat(responseBody(response).get("scopes")).isEqualTo("[ingest, read]");
+    }
+
+    @Test
+    @DisplayName("轮换：graceHours=0 立即失效且放行；=8760（上限）放行；8761 拒绝（边界三点）")
+    void rotateGraceBoundaries() {
+        loginAs("admin", DEVICE_TENANT, "ADMIN");
+        when(apiKeyRepository.findByKeyId("nsk_7_oldkey01"))
+                .thenReturn(Optional.of(existingKey(DEVICE_TENANT, SYSID, null)));
+
+        // 0：显式传 0 = 合法（立即失效路径），不是「非正即非法」
+        var zero = controller.rotateApiKey("nsk_7_oldkey01", body("graceHours", 0));
+        assertThat(zero.getStatusCode().value()).as("graceHours=0 必须放行").isEqualTo(201);
+        assertThat(responseBody(zero)).containsEntry("oldKeyRevoked", true);
+
+        // 8760 = MAX_GRACE_HOURS 本身合法（上限包含）
+        var max = controller.rotateApiKey("nsk_7_oldkey01", body("graceHours", 8760));
+        assertThat(max.getStatusCode().value()).as("graceHours=8760（上限）必须放行").isEqualTo(201);
+
+        // 8761 越界拒绝
+        var over = controller.rotateApiKey("nsk_7_oldkey01", body("graceHours", 8761));
+        assertThat(over.getStatusCode().value()).as("graceHours=8761 必须拒绝").isEqualTo(400);
+    }
+
+    @Test
+    @DisplayName("轮换：同租户 OPERATOR 轮换自家 Key → 放行（跨租户守卫不许过紧误拒）")
+    void rotateSameTenantOperatorAllowed() {
+        loginAs("operator-of-7", DEVICE_TENANT, "OPERATOR");
+        when(apiKeyRepository.findByKeyId("nsk_7_oldkey01"))
+                .thenReturn(Optional.of(existingKey(DEVICE_TENANT, SYSID, null)));
+
+        var response = controller.rotateApiKey("nsk_7_oldkey01", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(201);
+    }
+
+    @Test
+    @DisplayName("撤销：跨租户非特权 → 403，且不落库（与轮换同一口径）")
+    void revokeRejectsCrossTenant() {
+        loginAs("operator-of-8", 8, "OPERATOR");
+        when(apiKeyRepository.findByKeyId("nsk_7_oldkey01"))
+                .thenReturn(Optional.of(existingKey(DEVICE_TENANT, SYSID, null)));
+
+        var response = controller.revokeApiKey("nsk_7_oldkey01");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(403);
+        verify(apiKeyRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("撤销：同租户 OPERATOR 撤销本租户 Key → 放行（守卫只拦跨租户，不许误伤同租户）")
+    void revokeSameTenantOperatorAllowed() {
+        loginAs("operator-7", DEVICE_TENANT, "OPERATOR");
+        ApiKeyEntity key = existingKey(DEVICE_TENANT, SYSID, null);
+        when(apiKeyRepository.findByKeyId("nsk_7_oldkey01")).thenReturn(Optional.of(key));
+
+        var response = controller.revokeApiKey("nsk_7_oldkey01");
+
+        // 变异收口（PIT 第五轮）：守卫里 entity.getTenantId()==null → !=null 的
+        // 取反在跨租户（403 用例）与 null-tenant（两路都拦）下不分叉，唯独把
+        // 「同租户放行」翻成 403——同租户成功用例是它唯一的现形面。
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(key.isRevoked()).as("撤销必须真的落到实体上").isTrue();
+        verify(apiKeyRepository).save(key);
+    }
+
+    @Test
+    @DisplayName("撤销：无 tenant_id claim 的 OPERATOR 属全局特权上下文 → 放行（守卫不许把 null 判反）")
+    void revokeNullTenantOperatorAllowed() {
+        loginAs("svc-global", null, "OPERATOR");
+        when(apiKeyRepository.findByKeyId("nsk_7_oldkey01"))
+                .thenReturn(Optional.of(existingKey(DEVICE_TENANT, SYSID, null)));
+
+        // 变异收口：租户守卫移位/取反时这里可能抛 NPE——转换成断言失败，
+        // 不让 PIT 把「测试抛异常」记成 RUN_ERROR（既不算杀也不算活）。
+        org.springframework.http.ResponseEntity<Map<String, Object>> response;
+        try {
+            response = controller.revokeApiKey("nsk_7_oldkey01");
+        } catch (Exception e) {
+            throw new AssertionError("撤销不该抛异常（租户守卫误触发）: " + e, e);
+        }
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("撤销：租户 8 的 ADMIN 跨租户撤销 → 放行（角色本身即特权，与签发同口径）")
+    void revokeCrossTenantAdminAllowed() {
+        loginAs("admin-of-8", 8, "ADMIN");
+        when(apiKeyRepository.findByKeyId("nsk_7_oldkey01"))
+                .thenReturn(Optional.of(existingKey(DEVICE_TENANT, SYSID, null)));
+
+        var response = controller.revokeApiKey("nsk_7_oldkey01");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("设备 Key：合法边界 sysid=1 / sysid=254 均放行（越界筛查不许误伤边界）")
+    void sysidBoundariesAllowed() {
+        loginAs("admin", DEVICE_TENANT, "ADMIN");
+
+        for (int boundary : new int[]{1, 254}) {
+            when(deviceRegistry.isKnownDevice(boundary)).thenReturn(true);
+            when(deviceRegistry.tenantOf(boundary)).thenReturn(DEVICE_TENANT);
+
+            var response = controller.createApiKey(body("name", "d-" + boundary, "sysid", boundary));
+
+            assertThat(response.getStatusCode().value())
+                    .as("sysid=%d 是合法边界，必须放行", boundary).isEqualTo(201);
+        }
     }
 
     /** 与 ApiKeyFilter/DeviceIngestKeyBootstrapRunner 同口径的 SHA-256 hex（独立复算）。 */

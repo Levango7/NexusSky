@@ -125,6 +125,58 @@ class ApiKeyCacheTest {
     }
 
     @Test
+    @DisplayName("size() 反映条目数（观测 API 此前只被空方向和松上界覆盖）")
+    void sizeReflectsEntries() {
+        cache.putValid(KEY_HASH, entity(KEY_HASH, 7, null, null));
+
+        assertThat(cache.size()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("evictExpired：条目全过期后 size()==0（懒淘汰只影响单键 lookup，size 才是 evict 的观测面）")
+    void evictExpiredClearsAllStale() {
+        cache.putValid("a", entity("a-hash", 1, null, null));
+        cache.putInvalid("b");
+        assertThat(cache.size()).isEqualTo(2);
+
+        clock.addAndGet(ApiKeyCache.TTL_MILLIS); // 两条同时到界（>= TTL 归过期）
+
+        cache.evictExpired();
+
+        assertThat(cache.size())
+                .as("过期条目必须真正从表里移除：hasNext 取反/remove 删除两个变异体下循环空转或删不掉，size 是它们唯一的现形面")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("evictExpired：恰好 TTL 整点的条目也清掉（>= 边界含整点）")
+    void evictExpiredDropsExactlyAtTtl() {
+        cache.putValid("edge", entity("edge-hash", 1, null, null));
+        clock.addAndGet(ApiKeyCache.TTL_MILLIS); // now - fetchedAt 恰等于 TTL
+
+        cache.evictExpired();
+
+        assertThat(cache.size())
+                .as("整点 = 已过期；边界变异（>= → >）会恰把这条留在表里——单键 lookup 会顺手清掉它，唯有 size 能抓住")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("负缓存上限精确等于 MAX：满后拒绝新条目（防内存耗尽的闸门）")
+    void negativeCapHoldsExactlyAtMax() {
+        for (int i = 0; i < ApiKeyCache.MAX_NEGATIVE_ENTRIES; i++) {
+            cache.putInvalid("cap-" + i);
+        }
+        assertThat(cache.size()).isEqualTo(ApiKeyCache.MAX_NEGATIVE_ENTRIES);
+
+        cache.putInvalid("one-too-many");
+
+        assertThat(cache.size())
+                .as("第 MAX+1 个不同 hash 必须被拒绝：边界变异（>= → >）只在这个点上放行，size 会变成 MAX+1")
+                .isEqualTo(ApiKeyCache.MAX_NEGATIVE_ENTRIES);
+    }
+
+    @Test
     @DisplayName("evictExpired 清掉过期条目，保留新鲜条目")
     void evictExpiredKeepsFreshEntries() {
         cache.putValid("fresh", entity("fresh-hash", 1, null, null));
