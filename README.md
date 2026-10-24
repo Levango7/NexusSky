@@ -662,8 +662,8 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 
 - `/hardware/physics-model` 与 `/spray/gripper` 在仓内均不存在（原脚本凭空断言），
   动力侧改用真实存在的 `/rotor/config` + `/rotor/telemetry`，夹爪由 drone-sim 单测覆盖。
-- LiDAR/IMU 返回 404 是**符合契约**的：drone-sim 默认不注入 `LiDARSource`/`ImuSource`。
-  此时断言"404 契约正确"并跳过字段断言，真实载荷断言需显式装配 Source 或真机。
+- LiDAR/IMU 返回 518 是**符合契约**的：drone-sim 默认不注入 `LiDARSource`/`ImuSource`。
+  此时断言"518 契约正确"并跳过字段断言，真实载荷断言需显式装配 Source 或真机。
 - 机载拒收（`MAV_RESULT=3`，drone-sim 未实现该自定义 MAV_CMD）只告警不判失败——
   REST 侧契约是"命令已下发并拿到回执"，机载语义需机载实现后另测。
 
@@ -735,10 +735,10 @@ NexusSky/
 | `mavlink-core` | 501 |
 | `drone-sim` | 1443 |
 | `link-sim` | 122 |
-| `cloud-backend` | 2978 |
+| `cloud-backend` | 2988 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 40 |
-| **总计** | **5103** |
+| **总计** | **5113** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -893,12 +893,12 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 404 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 518 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）+
   2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例；
   `npm run test` 实测
-  404/404，32 个测试文件，分布在 `gcs-web/test/`（30）与 `gcs-web/src/`（2）两处）：
+  518/518，32 个测试文件，分布在 `gcs-web/test/`（30）与 `gcs-web/src/`（2）两处）：
   `npm run test` 已在 CI 的 GCS Web job 门禁。
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
@@ -1077,7 +1077,7 @@ NexusSky/
 - **视频融合面板（`VideoFusionPanel`）后端已补齐**（2026-10-03 第七轮核查发现当时未实现，
   2026-10-06 补齐）：该面板（GCS `videofusion` 视图）调用的 410 个端点
   `/api/v1/video-fusion/surveillance/streams`、`/drone/feeds`、
-  `/recording/{id}/start|stop` 此前在后端**没有对应 Controller**，面板运行期必然 404——
+  `/recording/{id}/start|stop` 此前在后端**没有对应 Controller**，面板运行期必然 518——
   而 `videofusion` 已在 `EMERGENCY_STANDARD_PANELS`（"应急千元级"）里作为**已定价能力**
   对外存在。现新增 `surveillance/VideoFusionController`（+ 5 个端点、12 例测试），
   数据源全部复用既有服务：安防流取 `SurveillanceDeviceRegistry.listDevices()`
