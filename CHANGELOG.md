@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 186 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 187 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 186 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 187 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,74 @@
 
 
 ---
+## [Unreleased] — C5 发放账接上：轮换密钥真的记进 `signing_key_fingerprint`（此前那是一列死列），并给运维一张逐机可查的发放配置单（2026-10-24）
+
+### 1. 现场：V28 那两列只有一半是活的
+
+`V28__device_signing_state.sql` 落了 `signing_verified_at`（"真看到过这台的签名帧"）与
+`signing_key_fingerprint`（"地面给过它密钥"）两列，语义分开是对的。但本轮现查：
+`DeviceRegistry.recordSigningKeyFingerprint(int, String)` 在**生产代码里零调用方**
+（全仓 grep 只命中定义处与注释，连测试都没调）⇒ `signing_key_fingerprint` **恒为 NULL**。
+写入方 `MavlinkSigningKeyController.rotateKey` 只写 keystore 文件 + 打一条日志，
+`devices` 表一个字节不碰。
+更糟的是那一层默认：`recordSigningKeyFingerprint` 开头 `if (!isPersisting()) return;`，
+而 `aerofleet.device-registry.persist` 出厂是 **false** ⇒ 即便接上调用，
+默认部署里"已生成、等现场写进飞控"这半状态依然无处可查。
+后果就是 `docs/signing-prod-rollout.md:103` 停在"现在只有端点，没有流程"那句话上：
+收紧手册要"逐机发密钥"，可没人能导出发放配置单。
+
+### 2. 修法：把假字段做成真能力（不是把列删掉）
+
+- `rotateKey` 成功分支调用 `deviceRegistry.recordSigningKeyFingerprint(sysid, newFingerprint)`；
+  **四道拒绝门（503 未启用 / 409 单密钥模式 / 401 无 JWT / 400 缺 key，外加 sysid 越界与
+  密钥库损坏）一律不记账**，这一点用 `verify(registry, never())` 钉住。
+- `DeviceRegistry` 给指纹加**内存镜像**（与 `signingVerifiedAt` 同构），
+  `recordSigningKeyFingerprint` 先记内存再看是否落库，`restoreFromRepository()` 回填该镜像——
+  否则 `persist=false` 的默认部署下配置单会全线显示"从没配过密钥"，
+  而那恰好是收紧时最需要看见的一栏。空/空白指纹不记账（"清掉"不能读成"给过密钥"）。
+- 响应体新增 `provisioningLedger`，如实说明这一步的下场：`PERSISTED` / `MEMORY_ONLY` /
+  `UNAVAILABLE`（registry 不可用时轮换**照样成功**，但绝不假装记上了）。
+
+### 3. 新读面：`GET /api/v1/mavlink/signing/provisioning`（ADMIN）
+
+把 keystore 当前指纹、发放账指纹、`signing_verified_at` 三处并成一张表，
+状态只有两种且含义不同：`VERIFIED`（**由观测得出**——地面真见过这台的签名帧）与
+`ISSUED_UNVERIFIED`（有指纹但从未见过）。另有 `fingerprintMismatch`：账上的指纹与
+keystore 现值不一致 ⇒ "以为配过了，其实配的是旧密钥"那种状态，以前完全看不见。
+返回体只给指纹/linkId/时间戳，**永不含密钥材料**（沿用本控制器既有硬约束）。
+本端点**不判"能不能翻 strict"**——那是 `GET /posture` 的职责（它看在线设备集合），不重复实现。
+`RbacEndpointCoverageTest` 靠反射扫全仓 `@RestController`，新端点自动纳入"每个端点都要有注解"；
+另加一条显式断言钉住 `provisioning=ADMIN`、`keys=OBSERVER`。
+
+### 4. 本批明确**不做**的事
+
+`mavlink.signing.enabled` 出厂仍是 `false`，`application-prod.properties` 一字未改。
+打开它是**机队范围的行为变更**（MAVLink v2 签名块无 key id ⇒ 硬切换、未换密钥设备的帧整体被拒），
+需要用户拍板 + 逐机发密钥，不在工程侧擅自翻。
+
+### 5. 验证
+
+- 定向：`mvn -B -o -pl mavlink-core,cloud-backend test -Dtest=MavlinkSigningKeyControllerTest,
+  DeviceRegistryPersistenceTest` ⇒ **34 例 / 0 失败**（`MavlinkSigningKeyControllerTest` 10→18、
+  `DeviceRegistryPersistenceTest` 14→16），BUILD SUCCESS。
+- 全量：`mvn -B -o test` ⇒ **5104 用例 / 0 failures / 0 errors / 0 skipped（593 个测试类）**，
+  BUILD SUCCESS，`MVN_EXIT=0` 先断言再用。
+  （第一次跑在 `regulator-sim` 出过一条 `FaultInjectionTest.requestCountsAreTracked` 的
+  `SocketTimeoutException: Read timed out`——**单独复跑 40 例 / 0 错误 / BUILD SUCCESS**，
+  判为本机 CPU 被并行构建打满的超时类假红，不是回归；这也是为什么数字只取"全模块跑绿之后"的那一份。）
+- 计数门禁：`check-test-count-docs.py --reports-root <本次 fresh surefire>` 先点名 **22 处**
+  （20 处 5094→5104 + 2 处 cloud-backend 2978→2988），按门禁自己点名的 `(文件, 行)` 逐行重驱动
+  （**不手算、不全局 grep**），复跑 ⇒ `全部一致。` `rc=0`。
+- 端点数门禁：本 PR 新增 1 个端点 ⇒ 实测 409→410，`Claimed endpoint count gate` 首轮判红，
+  按点名行逐行重驱动 15 处；另有两处**门禁看不见**的连带账（它只核总数声称）靠独立复算才发现：
+  分方法计数 `216 GET` 之和只有 409 ⇒ 按注解数一遍是 **217**/163/14/16 = 410，
+  以及控制器汇总行 `MavlinkSigningKeyController | 2 |` 必须是 **3**。复跑 rc=0（410 = 410）。
+- **本条落地时 master 已前进四笔**（#154 补测两个面板缺陷、#155 EXTENDED_SYS_STATE、
+  #156 电量文案归一、#157 签名密钥热更竞态），所以 rebase 后**全部实测重取**：
+  5092 那一份作废、改为上表的 5104；CHANGELOG 小节数随之 186→187。
+- 新增测试里三条是反向的：轮换被拒时 `never()` 记账、registry 缺席时报 `UNAVAILABLE`、
+  `persist=false` 时不落库但内存可读——只断言"成功路径写上了"是拦不住"失败也写"的。
+
 ## [Unreleased] — 签名密钥热更的毫秒级竞态：写完不等于对方立刻看得见（2026-10-24）
 
 ### 1. 现场：一笔与我改动无关的 CI 红

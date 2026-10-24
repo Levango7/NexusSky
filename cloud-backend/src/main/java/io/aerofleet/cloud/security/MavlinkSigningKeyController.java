@@ -18,9 +18,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * MAVLink v2 签名密钥轮换端点（C5）。
@@ -61,6 +66,32 @@ public class MavlinkSigningKeyController {
     private SigningKeyManager signingKeyManager;
 
     /**
+     * 设备注册表——轮换成功后要把指纹记进"发放账"（{@code devices.signing_key_fingerprint}）。
+     *
+     * <p>{@code required = false} 是因为本控制器在签名关闭时也存在；缺它轮换本身仍能成功，
+     * 但响应会如实写 {@code provisioningLedger=UNAVAILABLE}，<b>不假装记上了</b>。
+     */
+    @Autowired(required = false)
+    private io.aerofleet.cloud.gateway.DeviceRegistry deviceRegistry;
+
+    /** keystore 里当前有密钥的设备（sysid → 条目）；签名未启用或非多机模式时为空。 */
+    private Map<Integer, SigningKeyManager.KeyEntry> keystoreEntries() {
+        Map<Integer, SigningKeyManager.KeyEntry> out = new TreeMap<>();
+        if (signatureConfig == null || signingKeyManager == null
+                || !signatureConfig.isEnabled() || !signingKeyManager.isMultiMode()) {
+            return out;
+        }
+        // keyFor 会触发热重载检查，所以这里反映的是文件当前真实内容
+        for (int sysid = 1; sysid <= 255; sysid++) {
+            SigningKeyManager.KeyEntry e = signingKeyManager.keyFor(sysid);
+            if (e != null) {
+                out.put(sysid, e);
+            }
+        }
+        return out;
+    }
+
+    /**
      * 查看当前签名状态与各 sysid 的密钥指纹（<b>不含密钥</b>）。
      *
      * <p>签名未启用时返回 enabled=false 与原因，而不是 503——查询状态应该总是可读的；
@@ -84,17 +115,12 @@ public class MavlinkSigningKeyController {
                 enabled ? signingKeyManager.getGlobalKeyFingerprint() : null);
 
         Map<String, Object> entries = new TreeMap<>();
-        if (enabled && signingKeyManager.isMultiMode()) {
-            // keyFor 会触发热重载检查，所以这里反映的是文件当前真实内容
-            for (int sysid = 1; sysid <= 255; sysid++) {
-                SigningKeyManager.KeyEntry e = signingKeyManager.keyFor(sysid);
-                if (e != null) {
-                    Map<String, Object> one = new LinkedHashMap<>();
-                    one.put("linkId", e.linkId());
-                    one.put("fingerprint", signingKeyManager.fingerprint(e.key()));
-                    entries.put(String.valueOf(sysid), one);
-                }
-            }
+        for (Map.Entry<Integer, SigningKeyManager.KeyEntry> en : keystoreEntries().entrySet()) {
+            SigningKeyManager.KeyEntry e = en.getValue();
+            Map<String, Object> one = new LinkedHashMap<>();
+            one.put("linkId", e.linkId());
+            one.put("fingerprint", signingKeyManager.fingerprint(e.key()));
+            entries.put(String.valueOf(en.getKey()), one);
         }
         resp.put("entries", entries);
         return ResponseEntity.ok(resp);
@@ -105,8 +131,11 @@ public class MavlinkSigningKeyController {
      *
      * <p>请求体：{@code {"key": "新密钥"}}。<b>没有 graceHours</b>——见类注释的协议边界。
      *
-     * <p>响应：{@code {sysid, linkId, oldFingerprint, newFingerprint, path, totalEntries}}，
-     * 全部是指纹与元信息，不含密钥。
+     * <p>响应：{@code {sysid, linkId, oldFingerprint, newFingerprint, path, totalEntries,
+     * provisioningLedger}}，全部是指纹与元信息，不含密钥。
+     * {@code provisioningLedger} 说明发放账那一步的真实下场（{@code PERSISTED} /
+     * {@code MEMORY_ONLY} / {@code UNAVAILABLE}）——轮换成功但没记上账是两种不同的运维后果，
+     * 别让响应体把它们说成同一件事。
      */
     @PostMapping("/keys/{sysid}/rotate")
     @RequireRole(Role.ADMIN)
@@ -163,6 +192,20 @@ public class MavlinkSigningKeyController {
                 result.sysid(), result.linkId(), result.oldFingerprint(),
                 result.newFingerprint(), operator, result.path());
 
+        // 发放账：记下"地面已为这台生成/轮换过什么指纹"，写进 V28 的
+        // devices.signing_key_fingerprint。缺这一步时那一列恒为 NULL，
+        // 手册里"已生成、等现场写进飞控"与"从没配过"就分不开。
+        String ledger;
+        if (deviceRegistry == null) {
+            ledger = "UNAVAILABLE";
+            log.warn("签名密钥已轮换但发放账没记上（DeviceRegistry 不可用）: sysid={} —— "
+                    + "这台机会在 GET /api/v1/mavlink/signing/provisioning 里显示为『从未发过密钥』",
+                    result.sysid());
+        } else {
+            deviceRegistry.recordSigningKeyFingerprint(result.sysid(), result.newFingerprint());
+            ledger = deviceRegistry.isPersisting() ? "PERSISTED" : "MEMORY_ONLY";
+        }
+
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("sysid", result.sysid());
         resp.put("linkId", result.linkId());
@@ -170,10 +213,89 @@ public class MavlinkSigningKeyController {
         resp.put("newFingerprint", result.newFingerprint());
         resp.put("path", result.path());
         resp.put("totalEntries", result.totalEntries());
+        resp.put("provisioningLedger", ledger);
         // 提醒运维这一步的协议后果，别让人以为有宽限期
         resp.put("warning",
                 "MAVLink v2 签名无 key id 字段，本次为硬切换：远端设备须在同一维护窗口内"
                         + "换上新密钥，否则其下行帧将按验签失败被丢弃。轮换已热更，无需重启。");
+        return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * 发放配置单：逐机列出「地面给过它什么密钥指纹」与「是否真见过它的签名帧」。
+     *
+     * <p><b>为什么需要它</b>：收紧手册第 1 步要"逐机发密钥"，而在此之前仓里只有
+     * {@code GET /keys}（keystore 里现在有什么）和 {@code GET /posture}（在线设备是否都有验签证据），
+     * <b>没有一处回答得了"这台机我到底配过没有"</b>——V28 那两列里指纹那一半
+     * 既没有写入方也没有读面。
+     *
+     * <p><b>状态只有两种，含义不同</b>：
+     * <ul>
+     *   <li>{@code VERIFIED}：{@code signing_verified_at} 非空——地面<b>真看到过</b>这台的签名帧，
+     *       这是唯一能支撑"翻 strict"的证据；</li>
+     *   <li>{@code ISSUED_UNVERIFIED}：有指纹（keystore 里有它，或轮换时记进过发放账），
+     *       但从没看到它的签名帧——通常是"密钥已生成、还没写进飞控"。</li>
+     * </ul>
+     * 本端点<b>不判"能不能翻 strict"</b>（那要看在线设备集合，是 {@code /posture} 的职责），只把账列清。
+     *
+     * <p>返回体同样永不含密钥材料：只有指纹、linkId 与时间戳。
+     */
+    @GetMapping("/provisioning")
+    @RequireRole(Role.ADMIN)
+    public ResponseEntity<Map<String, Object>> provisioningSheet() {
+        Map<Integer, SigningKeyManager.KeyEntry> keystore = keystoreEntries();
+        Map<Integer, String> issued = deviceRegistry == null
+                ? Map.of() : deviceRegistry.signingKeyFingerprintSnapshot();
+        Map<Integer, Instant> verified = deviceRegistry == null
+                ? Map.of() : deviceRegistry.signingVerifiedSnapshot();
+
+        Set<Integer> sysids = new TreeSet<>();
+        sysids.addAll(keystore.keySet());
+        sysids.addAll(issued.keySet());
+        sysids.addAll(verified.keySet());
+
+        List<Map<String, Object>> devices = new ArrayList<>();
+        int verifiedCount = 0;
+        int mismatchCount = 0;
+        for (int sysid : sysids) {
+            String issuedFp = issued.get(sysid);
+            String storeFp = keystore.containsKey(sysid)
+                    ? signingKeyManager.fingerprint(keystore.get(sysid).key()) : null;
+            Instant seen = verified.get(sysid);
+            // 发放账里的指纹与 keystore 当前的不一致 ⇒ 密钥后来又被换过（或现场写的是另一把），
+            // 这正是"以为配过了其实配的是旧的"那种状态，必须让它看得见。
+            boolean mismatch = issuedFp != null && storeFp != null && !issuedFp.equals(storeFp);
+            Map<String, Object> one = new LinkedHashMap<>();
+            one.put("sysid", sysid);
+            one.put("linkId", keystore.containsKey(sysid) ? keystore.get(sysid).linkId() : null);
+            one.put("issuedFingerprint", issuedFp);
+            one.put("keyStoreFingerprint", storeFp);
+            one.put("fingerprintMismatch", mismatch);
+            one.put("signingVerifiedAt", seen);
+            one.put("state", seen != null ? "VERIFIED" : "ISSUED_UNVERIFIED");
+            devices.add(one);
+            if (seen != null) {
+                verifiedCount++;
+            }
+            if (mismatch) {
+                mismatchCount++;
+            }
+        }
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("devices", devices.size());
+        summary.put("verified", verifiedCount);
+        summary.put("issuedUnverified", devices.size() - verifiedCount);
+        summary.put("fingerprintMismatch", mismatchCount);
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("enabled", signatureConfig != null && signatureConfig.isEnabled());
+        resp.put("ledgerAvailable", deviceRegistry != null);
+        resp.put("summary", summary);
+        resp.put("devices", devices);
+        resp.put("note", "state=VERIFIED 由观测得出（地面真看到过该机的签名帧）；"
+                + "ISSUED_UNVERIFIED 表示地面已生成/轮换过密钥但从未看到它的签名帧。"
+                + "本表不含密钥材料，也不判定『能不能翻 strict』——后者看 GET /api/v1/mavlink/signing/posture。");
         return ResponseEntity.ok(resp);
     }
 

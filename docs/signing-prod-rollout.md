@@ -40,6 +40,14 @@
 3. **多机分密钥能力已验证**：`UdpGatewaySigningTest`「5. 多机密钥库：各 sysid 用自己的口令都能通过」
    「6. 未知 sysid：密钥库无其口令且无 defaultKey → 拒绝（不顶替放行）」。
    运营侧要回答：新设备入网时密钥怎么发（端点见 `MavlinkSigningKeyController`）。
+   **工具侧 2026-10-24 已补齐**：`POST /keys/{sysid}/rotate` 成功后会把新密钥的**指纹**记进
+   `devices.signing_key_fingerprint`（`persist=false` 的默认部署记在内存镜像里，重启后由
+   `restoreFromRepository()` 从库回填），响应里的 `provisioningLedger` 如实说明这一步落到哪一层
+   （`PERSISTED` / `MEMORY_ONLY` / `UNAVAILABLE`）；逐机状态查
+   `GET /api/v1/mavlink/signing/provisioning`（ADMIN）——它把"地面配过"（ISSUED_UNVERIFIED）与
+   "真见过这台的签名帧"（VERIFIED）分开，另给 `fingerprintMismatch` 用来暴露
+   "以为配过了、其实 keystore 里已经是另一把"。这张表就是手册里一直缺的那张**发放配置单**；
+   它不含密钥材料，也不替你判"能不能翻 strict"（那仍看 `GET /posture`）。
 4. **面板与告警先接好再翻开关**（不是反过来）：计数器与 PromQL 在 `docs/security-design.md` §签名统计；
    至少要有 `aerofleet_signing_rejected_total{reason=...}` 的看板 + 告警静默期。
    注意该文已提醒：收紧成 `reject-unsigned=true` 后 `unsigned` 计数**恒为 0**（未签名直接算 rejected），
@@ -100,6 +108,9 @@ service 容器的环境里全链路通过。
 
 ## 6. 还需要人回答的三件事
 
-1. **谁负责给每台在网设备配密钥**，以及维修/新增设备的密钥发放动作挂在哪个流程上（现在只有端点，没有流程）。
+1. **谁负责给每台在网设备配密钥**，以及维修/新增设备的密钥发放动作挂在哪个流程上。
+   ~~现在只有端点，没有流程~~ ⇒ 2026-10-24 起**端点与台账都有了**（见 §2 第 3 条：轮换自动记指纹、
+   `GET /provisioning` 出配置单），**缺的仍是"流程归谁"**：谁按下 rotate、密钥怎么送到现场、
+   维修后重配算不算新设备、发放节奏跟不跟得上翻 strict 的窗口——这四条不是代码能替运营定的。
 2. **能不能接受第 1 步那段"开着签名但不拒未签名"的窗口**（几周内安全性只增不减，但不是终态）。
 3. **时间窗**：第 2 步（strict）翻牌时若某机失联，是否有人在现场可以立刻回滚——没有人值守就不要翻。
