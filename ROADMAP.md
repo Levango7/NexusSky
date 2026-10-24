@@ -25,10 +25,11 @@
   51815191（Java surefire 实测；前端已有 522 例 vitest——api.js 会话/预算
 =======
   51815191（Java surefire 实测；前端已有 522 例 vitest——api.js 会话/预算
-=======
   51815191（Java surefire 实测；前端已有 522 例 vitest——api.js 会话/预算
 =======
   51815191（Java surefire 实测；前端已有 522 例 vitest——api.js 会话/预算
+=======
+>>>>>>> c05fe66 (docs：P2 #20 证据补齐 PR #153、真机 curl 复核、部署表端口)
 >>>>>>> 4f6436b (P2 #20 link-sim 运行时控制通道：损伤参数从"启动期固定"变为可调、可见、可启动验证)
 >>>>>>> 5d10e95 (P2 #20 link-sim 运行时控制通道：损伤参数从"启动期固定"变为可调、可见、可启动验证)
     档位/WS URL、组件逻辑、孪生同步换算与分桶、M11 决策三帧归一化；Playwright
