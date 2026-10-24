@@ -90,11 +90,21 @@ keystore 现值不一致 ⇒ "以为配过了，其实配的是旧密钥"那种�
 - 定向：`mvn -B -o -pl mavlink-core,cloud-backend test -Dtest=MavlinkSigningKeyControllerTest,
   DeviceRegistryPersistenceTest` ⇒ **34 例 / 0 失败**（`MavlinkSigningKeyControllerTest` 10→18、
   `DeviceRegistryPersistenceTest` 14→16），BUILD SUCCESS。
-- 全量：`mvn -B -o test` ⇒ **5092 用例 / 0 failures / 0 errors / 0 skipped（592 个测试类）**，
+- 全量：`mvn -B -o test` ⇒ **5104 用例 / 0 failures / 0 errors / 0 skipped（593 个测试类）**，
   BUILD SUCCESS，`MVN_EXIT=0` 先断言再用。
+  （第一次跑在 `regulator-sim` 出过一条 `FaultInjectionTest.requestCountsAreTracked` 的
+  `SocketTimeoutException: Read timed out`——**单独复跑 40 例 / 0 错误 / BUILD SUCCESS**，
+  判为本机 CPU 被并行构建打满的超时类假红，不是回归；这也是为什么数字只取"全模块跑绿之后"的那一份。）
 - 计数门禁：`check-test-count-docs.py --reports-root <本次 fresh surefire>` 先点名 **22 处**
-  （20 处 5082→5092 + 2 处 cloud-backend 2976→2986），按门禁自己点名的 `(文件, 行)` 逐行重驱动
+  （20 处 5094→5104 + 2 处 cloud-backend 2978→2988），按门禁自己点名的 `(文件, 行)` 逐行重驱动
   （**不手算、不全局 grep**），复跑 ⇒ `全部一致。` `rc=0`。
+- 端点数门禁：本 PR 新增 1 个端点 ⇒ 实测 409→410，`Claimed endpoint count gate` 首轮判红，
+  按点名行逐行重驱动 15 处；另有两处**门禁看不见**的连带账（它只核总数声称）靠独立复算才发现：
+  分方法计数 `216 GET` 之和只有 409 ⇒ 按注解数一遍是 **217**/163/14/16 = 410，
+  以及控制器汇总行 `MavlinkSigningKeyController | 2 |` 必须是 **3**。复跑 rc=0（410 = 410）。
+- **本条落地时 master 已前进四笔**（#154 补测两个面板缺陷、#155 EXTENDED_SYS_STATE、
+  #156 电量文案归一、#157 签名密钥热更竞态），所以 rebase 后**全部实测重取**：
+  5092 那一份作废、改为上表的 5104；CHANGELOG 小节数随之 186→187。
 - 新增测试里三条是反向的：轮换被拒时 `never()` 记账、registry 缺席时报 `UNAVAILABLE`、
   `persist=false` 时不落库但内存可读——只断言"成功路径写上了"是拦不住"失败也写"的。
 
