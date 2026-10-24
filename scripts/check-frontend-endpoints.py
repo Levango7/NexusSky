@@ -56,14 +56,11 @@ CLASS_ANNO = re.compile(r"@RestController\b")
 QUOTED = re.compile(r"[\"']([^\"']*)[\"']")
 
 # 已知缺口登记：path -> 原因。修好一条就删一条（门禁会检查登记是否过期）。
-KNOWN_GAPS = {
-    "/api/v1/env/status": "气象图层要机队级环境状态读口径；后端只有 POST /env/{sysid}/wind|weather|thresholds 覆盖写 + GET /api/v1/env-alerts",
-    "/api/v1/link-sim/profiles": "链路质量面板；后端口径在 /api/v1/comm-adapt/quality/*，返回形状不同（不是纯路径替换，要改面板取数逻辑）",
-    "/api/v1/link-sim/status": "同上",
-    "/api/v1/link-sim/damage": "同上（链路损伤注入，后端无对应能力）",
-    "/api/v1/vision/thermal/sources": "热成像源列表；后端只有 /api/v1/thermal/tasks（任务），没有「源」的概念",
-    "/api/v1/hardware/physics-model": "物理模型切换；概念只存在于模拟器 VirtualDrone.physicsModel，没有 MAVLink 下发通道，后端无法真正生效",
-}
+# 2026-10-24：6 条登记全部清账（P1 #8~#13）——#8 后端补 GET /env/status 读端点；
+# #9/#10 链路质量面板改读 /api/v1/comm-adapt/quality/fleet 真实口径；#11/#12/#13
+# 能力不存在的前端调用连同 api.js 死代码一并删除（ThermalOverlayPanel 改"未实现"
+# 说明页、损伤滑块移除、物理模型按钮保持禁用）。当前无未登记债务。
+KNOWN_GAPS = {}
 
 
 def norm(p):

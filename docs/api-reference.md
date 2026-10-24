@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 更新至 2026-10-06，共 78 个 `@RestController`、3 个 `@Service` 辅助类、409 个 REST API 端点
+> 更新至 2026-10-06，共 78 个 `@RestController`、3 个 `@Service` 辅助类、410 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -2687,4 +2687,4 @@ es.onerror = (e) => {
 | 视频融合 | VideoFusionController | /api/v1/video-fusion | 5 |
 | **合计** | **78 个 @RestController** | | **409** |
 
-> **注**: 项目共 79 个 Controller 源文件（78 个 `*Controller.java`，含 `telemetry/EnvOverrideController` + `delivery2/DeliveryController2.java` + `surveillance/VideoFusionController`），其中 78 个为 `@RestController`。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。78 个 `@RestController` 共 409 个端点（216 GET / 163 POST / 14 PUT / 16 DELETE）。其中 `LicenseModuleMap` 与 `OpenApiConfig` 虽标注 `@RestController` 但不含任何方法级映射注解、不暴露 API，故下表列 76 行；端点数列之和即 409。
+> **注**: 项目共 79 个 Controller 源文件（78 个 `*Controller.java`，含 `telemetry/EnvOverrideController` + `delivery2/DeliveryController2.java` + `surveillance/VideoFusionController`），其中 78 个为 `@RestController`。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。78 个 `@RestController` 共 410 个端点（217 GET / 163 POST / 14 PUT / 16 DELETE）。其中 `LicenseModuleMap` 与 `OpenApiConfig` 虽标注 `@RestController` 但不含任何方法级映射注解、不暴露 API，故下表列 76 行；端点数列之和即 410。
