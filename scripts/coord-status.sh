@@ -62,6 +62,15 @@ self_test() {
 **C 系列仅剩的三条**：见下
 EOF
 
+  # T2/T3/T4/T5 也一律走 COORD_PR_FIXTURE 注入 —— 这几条断言的是"写回逻辑"（插入/幂等/
+  # 并存拒绝/合法变短），不该被 GitHub 当场算出的 open PR 列表污染。
+  # 上一版就是在这里翻车的：T2 那次写进去的是"UNVERIFIED 一行"，T3 第二次写进去的是
+  # "若干 PR 若干行"，于是幂等断言报「22→23（不幂等，正文残留）」——脚本一行没改，
+  # master 却连红四笔。**同一个原理 T1/T6 的注释里早就写了，只是没贯彻到 --write 那几条。**
+  # 下面还加了一条"夹具确实被消费"的断言：谁把注入拿掉，这里就红，不会退回实时数据。
+  pr_det="$tmp/prs-deterministic.tsv"
+  printf '142\tfeat/x\tCONFLICTING\tDIRTY\t标题甲\n143\tfeat/y\tMERGEABLE\tCLEAN\t标题乙\n' > "$pr_det"
+
   # T1 gh 不可用 ⇒ 必须 UNVERIFIED 且 exit 2（绝不能报成「无在途 PR」）
   #    用 COORD_NO_GH 注入，不依赖网络/鉴权是否恰好坏——上一版拿真实 gh 调用做断言，结果
   #    同一份代码两次跑出不同结论，那叫自测自己在 flaky。
@@ -71,17 +80,22 @@ EOF
   [ "$rc" = "2" ] || fails="${fails}T1:期望退出 2 实得 $rc "
 
   # T2 首次 --write：插入标记块，且他人段落都在
-  COORD_STATUS_FILE="$status" bash "$SELF" --write >/dev/null 2>&1
+  COORD_PR_FIXTURE="$pr_det" COORD_STATUS_FILE="$status" bash "$SELF" --write >/dev/null 2>&1
   grep -qF 'coord-status:begin' "$status" || fails="${fails}T2:没写入标记块 "
   for a in "开工声明" "规则速记" "C 系列仅剩的三条"; do
     grep -qF "$a" "$status" || fails="${fails}T2:丢了段落$a "
   done
+  # 夹具必须真的被消费：否则说明又退回读实时数据，幂等断言就只是在测网络
+  grep -qF "#142" "$status" || fails="${fails}T2:注入的 PR 夹具没进生成段（疑似仍在读实时数据） "
+  grep -qF "#143" "$status" || fails="${fails}T2:注入的第二条 PR 夹具没进生成段 "
 
   # T3 重写必须**幂等**：begin 恰一份、标题段一份、有效行数不变
   #    （上一版只查了 begin 计数，结果 awk 丢了 inside 追踪、把旧块正文留在原地，
   #      自测照样绿——就是这种"绿着的失效"要盯住。）
   n1="$(grep -c . "$status")"
-  COORD_STATUS_FILE="$status" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+  t3_diff=""
+  cp "$status" "$tmp/STATUS.t1"   # 留住第一次写回的正文，供不一致时当场 diff
+  COORD_PR_FIXTURE="$pr_det" COORD_STATUS_FILE="$status" bash "$SELF" --write >/dev/null 2>&1; rc=$?
   # 重写必须**成功**（exit 0）且幂等。只断言"文件没变"会被"被守卫拒绝所以没变"蒙混过去——
   # 变异测试就是这么暴露的：正文重复的老 bug 触发了并存守卫，退出码 1，而 T3 仍判"通过"。
   [ "$rc" = "0" ] || fails="${fails}T3:重写应成功(exit0) 实得 $rc（多半是生成段自己撞出了重复） "
@@ -90,13 +104,19 @@ EOF
   n2="$(grep -c . "$status")"
   [ "$marks" = "1" ] || fails="${fails}T3:begin 出现 $marks 次（应 1） "
   [ "$heads" = "1" ] || fails="${fails}T3:在途与占用 段有 $heads 份（应 1） "
-  [ "$n1" = "$n2" ] || fails="${fails}T3:重写后有效行数 $n1→$n2（不幂等，正文残留） "
+  if [ "$n1" != "$n2" ]; then
+    fails="${fails}T3:重写后有效行数 $n1→$n2（两次写回的正文不一致） "
+    # 只报「行数变了」等于把已经算出来的归因扔掉。原先这句写成「不幂等，正文残留」，
+    # 这四个字是本脚本自己的措辞，它把人推向「写回逻辑坏了」这个假目标；实跑四笔红
+    # 全是同一句 22→23，而 coord-status.sh 在那四笔里一行没动。⇒ 现在当场把差异打出来。
+    t3_diff="$(diff "$tmp/STATUS.t1" "$status" | head -30)"
+  fi
 
   # T4 已有手写「在途与占用」段且无标记块 ⇒ 拒绝写入（不能让两份并存）
   status2="$tmp/STATUS2.md"
   printf '# 板\n## 在途与占用（手写的旧段）\n旧内容\n## 开工声明\n- x\n## 规则速记\n- y\n' > "$status2"
   before="$(grep -c . "$status2")"
-  COORD_STATUS_FILE="$status2" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+  COORD_PR_FIXTURE="$pr_det" COORD_STATUS_FILE="$status2" bash "$SELF" --write >/dev/null 2>&1; rc=$?
   [ "$rc" = "1" ] || fails="${fails}T4:并存场景期望 1 实得 $rc "
 
     # T5 旧块比新块长（worktree 变少）时，写回必须**成功**——合法变短不是「写坏」。
@@ -114,7 +134,7 @@ EOF
       index($0,b){print; for(i=0;i<40;i++) print "| 旧块多出来的第 " i " 行"; next}
       {print}
     ' "$status3" > "$status3.tmp" && mv "$status3.tmp" "$status3"
-    COORD_STATUS_FILE="$status3" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+    COORD_PR_FIXTURE="$pr_det" COORD_STATUS_FILE="$status3" bash "$SELF" --write >/dev/null 2>&1; rc=$?
     [ "$rc" = "0" ] || fails="${fails}T5:旧块更长时应仍写成功(exit0) 实得 $rc "
     grep -qF 'coord-status:begin' "$status3" || fails="${fails}T5:写不进去标记块 "
     grep -qF '规则速记' "$status3" || fails="${fails}T5:丢了手写段 "
@@ -124,7 +144,7 @@ EOF
 
   # T5 目标文件不存在 ⇒ exit 2 且绝不凭空创建
   rm -f "$status"
-  COORD_STATUS_FILE="$status" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+  COORD_PR_FIXTURE="$pr_det" COORD_STATUS_FILE="$status" bash "$SELF" --write >/dev/null 2>&1; rc=$?
   [ "$rc" = "2" ] || fails="${fails}T5:缺文件时期望 2 实得 $rc "
   [ ! -e "$status" ] || fails="${fails}T5:不该凭空造状态板 "
 
@@ -156,6 +176,10 @@ EOF
   rm -rf "$tmp"
   if [ -n "$fails" ]; then
     echo "自测失败：$fails" >&2
+    if [ -n "$t3_diff" ]; then
+      echo "---- T3 两次写回的正文差异（< 第一次 / > 第二次）----" >&2
+      printf '%s\n' "$t3_diff" >&2
+    fi
     return 1
   fi
   echo "自测目标=$SELF（用 COORD_STATUS_SELF 注入，防副本测到原文件）"
