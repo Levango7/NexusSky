@@ -43,7 +43,11 @@
   <build>
     <plugins>
       <!-- 覆盖率门禁（与 cloud-backend 同型：BUNDLE LINE ≥ 阈值，verify 阶段阻断）。
-           阈值 0.65 = 实测 LINE 覆盖率 67.93%（331 个用例全绿）向下取整到 5%。
+           阈值 0.70 = 实测 LINE 覆盖率 70%（501 个用例全绿）向下取整到 5%。
+           2026-10-25 从 0.65 上调：补上 EXTENDED_SYS_STATE(#245) 与 AUTOPILOT_VERSION(#148)
+           两条标准消息（各带与 pymavlink 官方帧逐字节对等的测试）后，实测由 67.93% 升到 70%，
+           按 scripts/ci-coverage-threshold.sh 的 POLICY 口径（实测向下取整到 5%）必须同步，
+           否则 "Coverage threshold consistency" 步骤会红。
            2026-09-29 之前本模块没有 jacoco，CI 里名为 "Coverage gate check" 的步骤
            对本模块是空转（无 jacoco.exec → jacoco:check 直接 skip），故门禁在此落地。
            注意：jacoco:check 在 jacoco.exec 缺失时会静默跳过，CI 步骤已加显式断言
@@ -74,7 +78,7 @@
                     <limit>
                       <counter>LINE</counter>
                       <value>COVEREDRATIO</value>
-                      <minimum>0.65</minimum>
+                      <minimum>0.70</minimum>
                     </limit>
                   </limits>
                 </rule>

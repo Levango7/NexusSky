@@ -78,6 +78,16 @@ public final class DroneSnapshot {
     /** MAV_VTOL_STATE：0=UNDEFINED 1=TRANS_TO_FW 2=TRANS_TO_MC 3=MC 4=FW；-1 = 尚未收到。 */
     public volatile int vtolState = -1;
 
+    // --- 固件版本（AUTOPILOT_VERSION, 2026-10-25）---
+    /**
+     * PX4 口径的固件版本整数：{@code (major<<24)|(minor<<16)|patch}；0 = 尚未收到/未上报。
+     * 接真机后"这是哪版固件、支不支持某项能力"只有这条消息能回答。
+     */
+    public volatile int flightSwVersion = 0;
+
+    /** 同上的人类可读形式（"1.14.7"）；null = 尚未收到。 */
+    public volatile String firmwareVersion = null;
+
     // --- link quality (RADIO_STATUS, E1) ---
     /** Downlink RSSI [dBm]; NaN before the first RADIO_STATUS. */
     public volatile double rssiDbm = Double.NaN;
