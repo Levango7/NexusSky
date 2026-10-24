@@ -23,9 +23,6 @@
   接口框架，为真实卫星硬件接入预留接口（P3）
 - **代码审查**：6 轮收敛性审查完成，累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增），
   5181 单测全绿（Java surefire 实测；前端已有 408 例 vitest——api.js 会话/预算
-=======
-  5181 单测全绿（Java surefire 实测；前端已有 408 例 vitest——api.js 会话/预算
->>>>>>> aa9b646 (P2 #20 link-sim 运行时控制通道：损伤参数从"启动期固定"变为可调、可见、可启动验证)
     档位/WS URL、组件逻辑、孪生同步换算与分桶、M11 决策三帧归一化；Playwright
     真浏览器 E2E 4 例已于 2026-10-04 补齐，见 docs/devops-enhancement-plan.md CI7）
   > 第六轮（2026-10-02）明细见 CHANGELOG「Unreleased — 第六轮审查」。此前此处写

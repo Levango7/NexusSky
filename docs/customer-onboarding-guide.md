@@ -220,7 +220,7 @@ POC 环境采用 Docker Compose 部署，确保快速搭建与一致性。
 | **Docker** | 24+ | 26+ |
 | **Docker Compose** | v2+ | v2.24+ |
 | **Java** | 17+ | 17 (POC 环境构建需要) |
-| **网络** | 端口 8080/14540/14550/5181/14600 可用 | 同左 |
+| **网络** | 端口 8080/14540/14550/5173/14600 可用 | 同左 |
 
 #### 3.3.2 部署步骤
 
@@ -241,7 +241,7 @@ curl http://localhost:8080/actuator/health
 # 期望响应：{"status":"UP"}
 
 # 5. 验证 GCS Web 可访问
-# 浏览器打开 http://localhost:5181
+# 浏览器打开 http://localhost:5173
 ```
 
 #### 3.3.3 服务端口确认
@@ -250,7 +250,7 @@ curl http://localhost:8080/actuator/health
 |---|---|---|---|
 | cloud-backend | 8080 | REST API + WebSocket | ✅ |
 | drone-sim | 14540 | MAVLink UDP（模拟器） | ✅ |
-| gcs-web | 5181 | 地面站前端 | ✅ |
+| gcs-web | 5173 | 地面站前端 | ✅ |
 | link-sim | 14600 | 链路代理（多机场景必需） | 视场景 |
 
 > **注意**：根据经验，部署 Docker Compose 时需确认 docker-compose.yml 中各服务的 `environment` 段配置完整，所有 `${VAR}` 引用均有对应的环境变量注入。重点检查 `S3_BUCKET`、`S3_ENDPOINT`、`S3_ACCESS_KEY`、`S3_SECRET_KEY`、`S3_REGION`、`LIVEKIT_E2EE_ENABLED` 等变量是否正确配置。（来源：2026-09-23-docker-compose-livekit-sfu-config-audit-checklist）
