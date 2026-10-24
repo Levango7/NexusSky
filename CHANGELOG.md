@@ -267,6 +267,9 @@ pymavlink 已确认官方参数（`ordered_fieldnames` + `crc_extra=178`），
   RBAC 注解直调断言）。
 - **A/B 3/3 KILLED**：控制面 `d.engine.apply(next)` 删除 / 转发把 PATCH 降级成 GET /
   去掉 PATCH 端的 `@RequireRole(Role.OPERATOR)`——全部"改坏⇒红、还原⇒绿"。
+  **真机 curl 复核**（另起进程跑 jar，不是只看单用例）：GET /profile 返回默认 `lan`、
+  PATCH 后 `mode=custom`、`profile=radio-sik` 切换后 dropModel 回到 `ge`、
+  `{"delayMs":-5}` 返回 400 且 result 给出具体原因、POST 返回 405（带 Allow 头）。
 - link-sim 122 → **133**，cloud-backend 3042 → **3050**，全仓 **5169** 用例 0 失败；
   端点 411 → **413**（新增 GET+PATCH），vitest 28 例整文件 + build + lint 全绿。
 - **安全口径**：link-sim 控制端口只绑 127.0.0.1 且**不做应用层鉴权**；对外只有云端控制器。
