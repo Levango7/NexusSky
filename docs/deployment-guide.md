@@ -25,6 +25,7 @@ docker-compose up -d
 | drone-sim | 14540 | MAVLink UDP |
 | gcs-web | 5173 | 地面站前端 |
 | link-sim | 14600 | 链路代理 |
+| link-sim 控制面 | 14601 | 运行时伤害控制（`--control-port`，默认关闭） |
 
 ### 1.4 停止
 

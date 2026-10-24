@@ -229,6 +229,7 @@ grep "API 调用超限" cloud-backend.log
 | 14550 | cloud-backend 监听（GCS 侧） | cloud-backend |
 | 14541-14543 | 额外模拟无人机 | drone-sim (extra rigs) |
 | 14600 | link-sim 代理端口 | link-sim |
+| 14601 | link-sim 控制面端口（运行时伤害控制，默认关闭） | link-sim |
 
 **诊断步骤**：
 
