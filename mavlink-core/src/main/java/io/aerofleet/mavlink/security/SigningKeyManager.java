@@ -191,6 +191,27 @@ public class SigningKeyManager {
     }
 
     /**
+     * 强制重载，**跳过 mtime 比较**。
+     * <p>
+     * 为什么需要它（2026-10-24 实测）：{@link #reloadIfNeeded()} 用
+     * {@code getLastModifiedTime().toMillis()} 比较，只有**毫秒**精度。而
+     * {@code SigningKeyStoreWriter.rotate()} 写盘后，调用方往往在同一毫秒内就
+     * {@code keyFor()} —— mtime 与上次记录相同 ⇒ 判定"文件没改" ⇒ **返回旧密钥**。
+     * CI 上 `SigningKeyStoreWriterTest.rotate_thenKeyManagerSeesNewKey` 就是这么偶发红的
+     * （本地文件系统精度更高，3 次连跑未复现）。
+     * <p>
+     * 正确做法不是让调用方 sleep，而是**由写入方主动通知**：写完立刻重载，不依赖文件系统
+     * 时间精度。{@code rotate()} 已接上。
+     */
+    public void forceReload() {
+        if (!multiMode || keyStorePath == null) {
+            return;
+        }
+        log.info("Keystore force reload (writer notified): {}", keyStorePath);
+        loadKeyStore();
+    }
+
+    /**
      * 计算密钥指纹：SHA-256 前 4 字节的 hex 格式（如 {@code a1b2c3d4}）。
      * <p>
      * 用于日志中标识密钥而不泄露密钥本身。

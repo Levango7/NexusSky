@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -108,6 +109,47 @@ class SigningKeyStoreWriterTest {
 
         // reloadIfNeeded 在 keyFor 内部被调用，无需重启
         assertThat(km.keyFor(3).key()).isEqualTo("after");
+    }
+
+    /**
+     * 确定性复现 CI 上那笔偶发红（2026-10-24）。
+     * <p>
+     * 真实竞态：{@code reloadIfNeeded()} 用 {@code getLastModifiedTime().toMillis()} 比较，
+     * 只有毫秒精度；{@code rotate()} 写盘后调用方若在同一毫秒内 {@code keyFor()}，
+     * mtime 与上次记录相同 ⇒ 判定"文件没改" ⇒ 返回旧密钥。
+     * <p>
+     * 测试里不去赌文件系统精度（那正是它偶发的原因），而是**手工把 mtime 钉死**：
+     * 轮换后把 mtime 改回轮换前的值，等价于"文件系统没有报告变化"。
+     * 修复前这条必红（拿到 {@code before}），修复后必绿（{@code rotate()} 里已 forceReload）。
+     */
+    @Test
+    @DisplayName("3b. 即使 mtime 未变（同毫秒写入）也必须看到新密钥")
+    void rotate_visibleEvenIfMtimeUnchanged() throws Exception {
+        Path store = storeWith("""
+                {
+                  "version": 1,
+                  "sysids": {
+                    "3": {"key": "before", "linkId": 3}
+                  }
+                }
+                """);
+
+        SigningKeyManager km = managerFor(store);
+
+        // 把 mtime 钉到一个确定值，并让管理器以它为基准
+        FileTime fixed = FileTime.fromMillis(1_700_000_000_000L);
+        Files.setLastModifiedTime(store, fixed);
+        km.reloadIfNeeded();
+        assertThat(km.keyFor(3).key()).isEqualTo("before");
+
+        writer.rotate(km, 3, "after");
+
+        // 关键一步：把 mtime 改回 fixed —— 模拟"文件系统没报告变化"的毫秒精度竞态
+        Files.setLastModifiedTime(store, fixed);
+
+        assertThat(km.keyFor(3).key())
+                .as("rotate 必须主动通知重载，不能依赖 mtime 变化")
+                .isEqualTo("after");
     }
 
     @Test

@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 185 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 186 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 185 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 186 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,73 @@
 
 
 ---
+## [Unreleased] — 签名密钥热更的毫秒级竞态：写完不等于对方立刻看得见（2026-10-24）
+
+### 1. 现场：一笔与我改动无关的 CI 红
+
+PR #156（纯前端改动）的 `Java cloud-backend` job 红在
+`SigningKeyStoreWriterTest.rotate_thenKeyManagerSeesNewKey:110` —— 断言
+`km.keyFor(3).key() == "after"` 却拿到 `"before"`。这条此前被当作「已知 flaky」登记过，
+留言板写的是「谁碰上谁另查并登记」。这次碰上了，就查了。
+
+### 2. 根因：`reloadIfNeeded()` 只有毫秒精度
+
+`SigningKeyManager.reloadIfNeeded()` 用 `Files.getLastModifiedTime(path).toMillis()`
+与上次记录比较：
+
+```java
+long currentModified = Files.getLastModifiedTime(keyStorePath).toMillis();
+if (currentModified != lastModified) { loadKeyStore(); }
+```
+
+而 `SigningKeyStoreWriter.rotate()` 写盘后，**调用方往往在同一毫秒内就 `keyFor()`** ——
+mtime 与上次记录相同 ⇒ 判定「文件没改」⇒ **不重载** ⇒ 返回旧密钥。
+
+`SigningKeyStoreWriter` 的 Javadoc 自己写着「写成功后由 `reloadIfNeeded()` 按 mtime 自动热更」，
+所以这不是环境噪声，是**设计上依赖文件系统时间精度**。
+
+**与那条旧建议的关系**：zcode 当年建议「用 `createTempDirectory` 隔离 keystore 路径」，
+现文件 `:31` 早有 `@TempDir` —— **那条与本根因无关**，留言板「别再按它动手」的判断是对的。
+
+### 3. 修法：由写入方主动通知，不等 mtime
+
+- `SigningKeyManager` 新增 `forceReload()`：跳过 mtime 比较，直接 `loadKeyStore()`
+- `SigningKeyStoreWriter.rotate()` 写盘成功后调用它
+
+比「测试里 sleep 2ms」正确 —— 后者是绕开缺陷，前者是消除对时间精度的依赖。
+
+### 4. 怎么证明修好了（不赌文件系统精度）
+
+偶发测试的修法最容易「改完看着绿了，其实只是运气好」。所以新增的
+`rotate_visibleEvenIfMtimeUnchanged` **手工把 mtime 钉死**，确定性复现那个竞态：
+
+1. 把 mtime 设成固定值 `T`，让管理器以它为基准；
+2. `rotate()` 写入新密钥；
+3. **把 mtime 改回 `T`** —— 等价于「文件系统没有报告变化」；
+4. 断言 `keyFor(3)` 必须拿到 `"after"`。
+
+**验证这条测试有证明力**：临时注释掉 `forceReload()` 后，它**必红**
+（`SigningKeyStoreWriterTest.java:152`，且 9 条里只有它红，说明断言精准）；
+恢复后 9/9 全绿。
+
+### 5. 验证
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| 禁用 `forceReload()` | 新测试必红 | **红**（`rotate_visibleEvenIfMtimeUnchanged:152`） |
+| 恢复修复 | 全绿 | **9/9** |
+| `mavlink-core` 全量 | 全绿 | **492 用例 / 0 失败** |
+| 全仓 Java | 全绿 | **5094 用例 / 593 类** |
+| 测试数文档门禁 | 全部一致 | 全部一致（5093→5094、491→492 已同步） |
+
+### 6. 生产影响评估
+
+`rotate()` 是低频运维动作，真实调用方与写盘之间通常远大于 1ms，所以**生产几乎不会命中**。
+但「写完立刻读」在测试、脚本、以及将来任何「轮换后立即用新密钥」的代码路径上都会命中 ——
+这次修的是那条路径的正确性，不是为一个测试打补丁。
+
+---
+
 ## [Unreleased] — 电量展示四处口径收成一处，顺带修掉「电量 1% 显示成 100%」（2026-10-24）
 
 ### 1. 起因：`GAPS` 第八节第 7 条说「`-1` 哨兵的文案层只统一了一半」

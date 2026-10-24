@@ -154,6 +154,12 @@ public class SigningKeyStoreWriter {
         writeAtomically(store, objectMapper.writerWithDefaultPrettyPrinter()
                 .writeValueAsString(mutable));
 
+        // 2026-10-24：写盘后**主动通知**内存侧重载，不等 mtime 变化。
+        // reloadIfNeeded() 用毫秒级 mtime 比较，而调用方常在同一毫秒内就 keyFor()
+        // ⇒ mtime 未变 ⇒ 判定"文件没改" ⇒ 返回旧密钥（CI 上该场景偶发红）。
+        // 这里用 forceReload() 跳过 mtime 比较，消除对文件系统时间精度的依赖。
+        keyManager.forceReload();
+
         String newFingerprint = fingerprint(newKey);
         log.info("MAVLink 签名密钥已轮换: path={} sysid={} linkId={} {} -> {}",
                 store, sysid, linkId, oldFingerprint, newFingerprint);
