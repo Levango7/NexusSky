@@ -46,6 +46,7 @@ public final class LinkSimMain {
         String droneIp = "127.0.0.1";
         boolean envCoupled = false;  // M0b 雨衰叠加开关（FR-15）
         double tamperRate = 1.0;     // 安全画像篡改概率（默认1.0，仅安全画像生效）
+        int controlPort = 0;         // P2 #20 运行时控制通道（0=关闭，默认不改变既有行为）
 
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
@@ -67,6 +68,8 @@ public final class LinkSimMain {
                 envCoupled = true;
             } else if (a.equals("--tamper-rate") && i + 1 < args.length) {
                 tamperRate = Double.parseDouble(args[++i]);
+            } else if (a.equals("--control-port") && i + 1 < args.length) {
+                controlPort = parseControlPort(args[++i]);
             }
         }
 
@@ -74,6 +77,13 @@ public final class LinkSimMain {
         if (profile == null) {
             log.warn("[link-sim] unknown profile: {}", profileName);
             usage();
+            System.exit(1);
+            return;
+        }
+
+        if (profile.isSecurityProfile() && controlPort > 0) {
+            log.error("[link-sim] --control-port is not supported for security profile '{}'"
+                    + " (security damage has no numeric delay/drop/bandwidth parameters)", profile.name);
             System.exit(1);
             return;
         }
@@ -89,20 +99,44 @@ public final class LinkSimMain {
         if (envCoupled) {
             log.info("[link-sim] env-coupled: ON (rain attenuation overlay enabled)");
         }
+        if (controlPort > 0) {
+            log.info("[link-sim] control: http://127.0.0.1:{}/profile (loopback only, no auth)", controlPort);
+        }
 
-        new LinkSimMain(profile, proxyPort, new InetSocketAddress(droneIp, dronePort), envCoupled, tamperRate).run();
+        new LinkSimMain(profile, proxyPort, new InetSocketAddress(droneIp, dronePort),
+                envCoupled, tamperRate, controlPort).run();
     }
 
     private static void usage() {
-        log.info("[link-sim] usage: link-sim --profile P [--port N] [--drone-ip IP] [--drone-port N]");
+        log.info("[link-sim] usage: link-sim --profile P [--port N] [--drone-ip IP] [--drone-port N] [--control-port N]");
         log.info("[link-sim]   --profile   {}", LinkProfile.names());
         log.info("[link-sim]   --port      proxy bind port (default 14600)");
         log.info("[link-sim]   --drone-ip  drone side address (default 127.0.0.1)");
         log.info("[link-sim]   --drone-port drone side port (default 14540)");
         log.info("[link-sim]   --env-coupled  enable rain attenuation overlay (M0b)");
         log.info("[link-sim]   --tamper-rate  tamper probability for security profiles (default 1.0)");
+        log.info("[link-sim]   --control-port runtime damage control port, loopback only (default 0 = off)");
         // 追加 relay 模式参数说明（FR-01, DFX 4.4 配置可追溯）
         RelayConfig.usage();
+    }
+
+    /** 解析控制端口（P2 #20）：0=关闭，[1,65535]=监听回环。 */
+    private static int parseControlPort(String raw) {
+        int port;
+        try {
+            port = Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            log.error("[link-sim] invalid --control-port: {}", raw);
+            usage();
+            System.exit(1);
+            return -1;
+        }
+        if (port < 0 || port > 65535) {
+            log.error("[link-sim] --control-port out of range [0,65535]: {}", port);
+            usage();
+            System.exit(1);
+        }
+        return port;
     }
 
     /** 预扫描命令行是否含指定 flag（用于 --relay 模式分流，不消费参数）。 */
@@ -122,6 +156,8 @@ public final class LinkSimMain {
     private final boolean envCoupled;
     /** 安全画像篡改概率（0.0~1.0，仅安全画像生效）。 */
     private final double tamperRate;
+    /** 运行时控制端口（0=关闭；P2 #20，只绑回环）。 */
+    private final int controlPort;
     /** GCS/云端侧学到的对端（谁往 proxy 发过包，转发目标就是它）。 */
     private volatile InetSocketAddress gcsAddr;
     /** 延迟调度：到期任务按时间出队发送。 */
@@ -141,12 +177,13 @@ public final class LinkSimMain {
     }
 
     private LinkSimMain(LinkProfile profile, int proxyPort, InetSocketAddress droneAddr,
-                         boolean envCoupled, double tamperRate) {
+                         boolean envCoupled, double tamperRate, int controlPort) {
         this.profile = profile;
         this.proxyPort = proxyPort;
         this.droneAddr = droneAddr;
         this.envCoupled = envCoupled;
         this.tamperRate = tamperRate;
+        this.controlPort = controlPort;
     }
 
     private void run() throws Exception {
@@ -164,6 +201,21 @@ public final class LinkSimMain {
                 ? new EnvAwareImpairmentEngine(uplinkBase, profile.delayMs) : null;
         EnvAwareImpairmentEngine downlink = envCoupled
                 ? new EnvAwareImpairmentEngine(downlinkBase, profile.delayMs) : null;
+
+        // P2 #20：运行时控制通道（默认关闭，--control-port 显式开启）。
+        // 数据面仍然走下面两个引擎；控制面只是持有同一对引擎的引用。
+        if (controlPort > 0) {
+            try {
+                LinkSimControlServer control = new LinkSimControlServer(controlPort,
+                        new LinkSimControl(profile, uplinkBase, profile, downlinkBase, envCoupled));
+                control.start();
+                log.info("[link-sim] control listening on http://127.0.0.1:{}/profile", control.port());
+            } catch (IOException e) {
+                log.error("[link-sim] control port {} bind failed: {}", controlPort, e.getMessage());
+                System.exit(1);
+                return;
+            }
+        }
 
         try (DatagramSocket socket = new DatagramSocket(new InetSocketAddress(proxyPort))) {
             Thread pump = new Thread(() -> wirePump(socket), "link-wire");

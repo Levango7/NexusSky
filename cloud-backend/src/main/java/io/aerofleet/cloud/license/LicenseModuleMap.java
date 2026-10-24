@@ -181,6 +181,9 @@ final class LicenseModuleMap {
         m.put("/api/v1/comm-adapt", NETWORK);
         m.put("/api/v1/loRa", NETWORK);
         m.put("/api/v1/edge", NETWORK);
+        // link-sim 运行时损伤控制（P2 #20）：链路仿真属于通信组网域的能力，
+        // 写操作要求 OPERATOR（LinkSimControlController），授权仍按 network 模块计。
+        m.put("/api/v1/link-sim", NETWORK);
 
         // ============ advanced：数字孪生 / AI 决策 / 城市孪生 ============
         m.put("/api/v1/twin", ADVANCED);

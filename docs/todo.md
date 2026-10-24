@@ -40,8 +40,8 @@
 | 16 | **UOM `sink-type` 未落地** | 默认 Noop | 机巢/监管上报的真实去向 |
 | 17 | **机巢只有 sim** | 机巢 MQTT 未接 | 硬件到位再动 |
 | 18 | **死枚举 / 空端点** | 审计期发现的历史遗留 | 需要一次全仓扫描确认清单 |
-| 19 | **热成像链路未接线** | ~~MAVLink 30012 在 cloud-backend 零引用~~ **ingest/读端点/面板已于 2026-10-24 接线**（见已清零表）；剩余恢复条件③：逐点热源经纬度（图像 u/v → lat/lon 需图像→地理位姿解算，CameraPose/GeolocationSolver 在 vision 包已有底子） | 位姿解算接入 → /thermal/status 增逐点坐标 → 面板恢复热力图；三步各自可独立验收 |
-| 20 | **link-sim 无运行时控制通道** | 损伤参数（延迟/丢包/带宽/分区）是启动期 `--profile` 固定的，进程内无 HTTP/控制帧入口，云端无从下发。链路损伤注入面板（P1 #11 的真实现选项）依赖它 | link-sim 加控制端口（如 HTTP PATCH /profile）+ cloud-backend 转发端点 + 鉴权口径；先钉协议再动 |
+| 19 | **热成像链路未接线** | ~~MAVLink 30012 在 cloud-backend 零引用~~ **ingest/读端点/面板已于 2026-10-24 接线**（PR #152，见已清零表）；剩余恢复条件③：逐点热源经纬度（图像 u/v → lat/lon 需图像→地理位姿解算，CameraPose/GeolocationSolver 在 vision 包已有底子） | 位姿解算接入 → /thermal/status 增逐点坐标 → 面板恢复热力图；三步各自可独立验收 |
+| 20 | **link-sim 无运行时控制通道** | ~~进程内无控制入口、云端无从下发~~ **2026-10-24 已接线**（PR #153，见已清零表）：`--control-port N`（默认 0=关闭）起 `GET/PATCH /profile`（只绑 127.0.0.1，无应用层鉴权），云端 `GET/PATCH /api/v1/link-sim/control` 转发（读=OBSERVER，写=OPERATOR），前端链路质量面板恢复损伤滑块 | 剩余：安全画像（tamper/unsigned）不支持控制通道（已 exit 1 拒绝）；`EnvAwareImpairmentEngine` 包装层不受控制面直调影响 |
 
 ---
 
@@ -62,6 +62,7 @@
 | **surveillance 包 97 个存活变异体逐条分诊**（P1 #4/#5/#6 全清：前缀形状、Registry 谓词与排序、Onvif 校验链、SSE 生命周期、MJPEG 泵、mask 全等、快速部署尾段与计数日志） | 本分支（第四轮，见 `docs/mutation-testing.md`） | 6 个新契约文件 + 8 处扩展共 49 个新用例；A/B 批量 `tools/mutate-verify.py` 等价项复现；PIT 复测 杀掉 546→**636**、存活 97→**22**（全部是已定性清单）、未覆盖 159→144、分数 0.8400→**0.9564**、强度 0.8491→**0.9666**；22 条定性无害已留档 |
 | **前端端点契约 6 条 KNOWN_GAPS 清账**（P1 #8~#13：env/status 补读端点；链路质量面板改读 comm-adapt 真实口径；损伤滑块/热成像面板/物理模型三处假控件按诚实性原则移除或禁用并写明） | 本分支（见 `CHANGELOG.md` 2026-10-24 节） | 后端新增 `GET /api/v1/env/status` + `EnvStatusReadContractTest` 5 例（圆周风向均值/NaN 不进 JSON/众数并列取小）；`KNOWN_GAPS` 清空，端点门禁 233 处调用全匹配 + self-test；vitest 382 例 + vite build 全绿；#12 真实现选项登记 P2 #19、#11 登记 P2 #20 |
 | **P2 #19 热成像接线**（ingest + 机队读端点 + 面板启用；P1 #12 的真实现第一步） | 本分支（见 `CHANGELOG.md` 2026-10-24 P2 #19 节） | sim 侧补发送环（完整版装配 SimulatedThermalSource + 1Hz 挂钩，此前全仓零发送）；`ThermalIngestListener` ingest + `GET /api/v1/thermal/status` + 面板真实聚合表；新用例 11 个（sim 真实 UDP 往返 2 + ingest 契约 5 + 读口径 4）；**A/B 4/4 KILLED**（挂钩删除/装配删除/收账删除/离线过滤取反）；剩余条件③（逐点经纬度=位姿解算）留本表 #19 |
+| **P2 #20 link-sim 运行时控制通道**（P1 #11 假滑块的真实现恢复条件；三端各一环接通） | 本分支（见 `CHANGELOG.md` 2026-10-24 P2 #20 节） | link-sim：`ImpairmentSpec` + `LinkSimControl` + `LinkSimControlServer`（`--control-port` 默认 0=关闭、只绑 127.0.0.1）+ `ImpairmentEngine.apply/spec/statsSnapshot`；cloud：`GET/PATCH /api/v1/link-sim/control`（OBSERVER/OPERATOR，503/504/400 透传/502）+ LicenseModuleMap 登记 network；前端：`api.js` 两个函数 + `LinkQualityPanel` 恢复滑块（初值读当前值、失败可见）；新用例 19 个；**A/B 3/3 KILLED**（apply 删除/PATCH→GET/去掉 OPERATOR 注解）；link-sim 133 / cloud 3050 / 全仓 5169 全绿；端点 411→413 |
 | **security 包 102 个存活变异体逐条分诊**（P1 #7 全清：租户守卫三角、缓存边界、追踪器后台写者、限流定时器、RBAC 直调断言、Bean 工厂哨兵、租户过滤器、签名审计归属） | 本分支（第五轮，见 `docs/mutation-testing.md`） | 4 个新契约文件 + 16 处扩展净增 52 个新用例；A/B 批量 42/42「改坏⇒红、还原⇒绿」；PIT 复测 杀掉 566→**649**、存活 102→**27**（全部是已定性清单）、未覆盖 97→89、分数 0.8448→**0.9572**、强度 0.8473→**0.9601**；27 条定性无害已留档（含坑 8/坑 9 两个新坑） |
 
 ---
