@@ -19,6 +19,13 @@
       <groupId>io.aerofleet</groupId>
       <artifactId>aerofleet-mavlink-core</artifactId>
     </dependency>
+    <!-- P2 #20 运行时控制通道：HTTP + JSON（GET/PATCH /profile）。
+         只用于控制面，不参与数据面转发。版本由父 pom 的 jackson.version 统一。 -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>

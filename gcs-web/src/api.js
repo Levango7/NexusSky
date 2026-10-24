@@ -144,7 +144,10 @@ async function jsonFetch(rawUrl, options = {}) {
     body = null
   }
   if (!res.ok) {
-    throw new Error((body && body.error) || `HTTP ${res.status}`)
+    // 后端错误形状有两套：较早的 {error:"..."}，以及 doc/link-sim 的
+    // {status:"error", result:"..."}。只认 error 会把后者显示成 "HTTP 400"，
+    // 把真正的原因（"delayMs 越界"）丢掉。
+    throw new Error((body && (body.error || body.result || body.message)) || `HTTP ${res.status}`)
   }
   return body
 }
@@ -970,10 +973,19 @@ export const api = {
   getEnvStatus: () => jsonFetch('/api/v1/env/status'),
   getEnvAlerts: () => jsonFetch('/api/v1/env-alerts'),
 
-  // ---- Link Simulation (链路仿真) ----
-  // getLinkSimProfiles / getLinkSimStatus / setLinkSimDamage **已删除**（P1 #9/#10/#11，
-  // 2026-10-24）：链路质量面板改读真实口径 getCommLinks()（/api/v1/comm-adapt/quality/fleet）；
-  // 损伤注入后端无对应能力（link-sim 无运行时控制通道），假滑块已移除。
+  // ---- Link Simulation (链路仿真运行时控制，P2 #20) ----
+  // link-sim 以 --control-port 启动 HTTP 控制面（默认关闭），云端转发到
+  // /api/v1/link-sim/control。链路**质量**仍读上面的 comm-adapt 实测口径；
+  // 这里控制的是仿真代理本身的损伤参数（延迟/抖动/丢包/带宽/分区）。
+  getLinkSimControl: () => jsonFetch('/api/v1/link-sim/control'),
+
+  // 三种互斥形态：{profile} / {reset:true} / 损伤字段；可加 direction。
+  patchLinkSimControl: (patch) =>
+    jsonFetch('/api/v1/link-sim/control', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
 
   // ---- Auth ----
   login: (username, password) => jsonFetch('/api/v1/auth/login', {
@@ -1483,6 +1495,7 @@ export const {
   getDroneHealth, getFleetHealth, getDroneHealthHistory, getComponentHealth, getHealthWarnings,
   listMaintenanceRecords, createMaintenanceRecord, updateMaintenanceRecord, getMaintenancePredictions, getDroneMaintenancePredictions, getMaintenanceSchedule,
   getCommLinks, getCommLink, getCommScore, getCommDecision, executeCommFailover, getCommFailoverHistory, getCommConfig, updateCommConfig,
+  getLinkSimControl, patchLinkSimControl,
   createMappingTask, listMappingTasks, getMappingTask, planMappingRoute, getMappingPhotos, generateMappingResult, getMappingResult,
   parseVoiceCommand, executeVoiceCommand, confirmVoiceCommand, broadcastVoiceMessage, getVoiceStatus, broadcastVoiceAlert, getVoiceHistory, getVoicePending,
   createCityModel, listCityModels, getCityModel, getCitySituation, createCitySimulation, getCitySimulation, createCityMarker, listCityMarkers,

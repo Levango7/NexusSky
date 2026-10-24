@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../api.js'
 
 const POLL_MS = 2000
+const CONTROL_POLL_MS = 3000
 
 const LINK_COLORS = {
   excellent: '#2de2a5',
@@ -19,17 +20,49 @@ function getLinkColor(score) {
   return LINK_COLORS.critical
 }
 
+const DEFAULT_FORM = {
+  delayMs: 0,
+  jitterMs: 0,
+  dropPct: 0,
+  bandwidthKbps: 0,
+  partitionCycleSec: 0,
+  partitionDownSec: 0,
+}
+
+/** 控制面视图 → 滑块表单（只用上行；面板默认双向同时改）。 */
+function formFromControl(control) {
+  const d = control?.uplink || {}
+  return {
+    delayMs: d.delayMs ?? 0,
+    jitterMs: d.jitterMs ?? 0,
+    dropPct: d.dropPct ?? 0,
+    bandwidthKbps: d.bandwidthKbps ?? 0,
+    partitionCycleSec: d.partitionCycleSec ?? 0,
+    partitionDownSec: d.partitionDownSec ?? 0,
+  }
+}
+
+function formatBandwidth(kbps) {
+  if (!kbps) return '不限速'
+  return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${Math.round(kbps)} kbps`
+}
+
 /**
- * 链路质量面板（P1 #9/#10，2026-10-24 改造）。
+ * 链路质量面板。
  *
- * <p>此前读的 GET /api/v1/link-sim/profiles|status 在后端不存在（假数据面板）；
- * 真实口径是 /api/v1/comm-adapt/quality/fleet（按机 × 链路的质量评分）。
- * 本面板改为：选机 → 读该机 bestLinkType 那条链路的实测质量
- * （latencyMs / packetLossPct / bandwidthKbps→Mbps），2s 轮询攒历史曲线。
+ * <p><b>质量读数</b>（P1 #9/#10）：/api/v1/comm-adapt/quality/fleet，按机 × 链路
+ * 的实测评分，2s 轮询攒历史曲线。
  *
- * <p>「链路损伤注入」滑块已移除（P1 #11）：link-sim 是 CLI UDP 代理，损伤参数
- * 启动时固定、无运行时控制通道，云端也没有转发端点——此前滑块拖了没有任何
- * 反应（失败被 .catch(() => {}) 静默吞掉），是假控件。
+ * <p><b>损伤控制</b>（P2 #20，2026-10-24 恢复）：link-sim 新增了运行时控制面
+ * （HTTP GET/PATCH /profile，只绑 127.0.0.1），云端转发为
+ * /api/v1/link-sim/control（GET=OBSERVER，PATCH=OPERATOR）。
+ * 与 P1 #11 移除的假滑块的区别：这里的每个滑块都读自控制面的**当前真实值**，
+ * 拖动后必须点「应用」才发 PATCH，成功后以响应回填；控制面不可达时整块控件
+ * 禁用并显示原因（503），不再出现「拖了没反应」。
+ *
+ * <p>参数的权威校验在 link-sim 侧：越界/互斥会返回 400，面板原样显示后端原因。
+ * 丢包滑块是<b>独立随机丢包</b>（uniform），应用后会替换画像的 GE 突发模型，
+ * 界面上用 dropModel 标记说清楚。
  */
 export default function LinkQualityPanel() {
   const [fleet, setFleet] = useState([])
@@ -41,6 +74,14 @@ export default function LinkQualityPanel() {
   const pollRef = useRef(null)
   const historyRef = useRef([])
   const selectedRef = useRef(null)
+
+  const [control, setControl] = useState(null)
+  const [controlError, setControlError] = useState(null)
+  const [form, setForm] = useState(null)
+  const [profileChoice, setProfileChoice] = useState('')
+  const [busy, setBusy] = useState(false)
+  // 用户正在拖滑块时，轮询回来的值不能覆盖表单（否则滑块会"弹回去"）。
+  const dirtyRef = useRef(false)
 
   const bestLinkOf = (item) => {
     if (!item) return null
@@ -79,6 +120,23 @@ export default function LinkQualityPanel() {
     }
   }, [])
 
+  const fetchControl = useCallback(async () => {
+    try {
+      const data = await api.getLinkSimControl()
+      setControl(data)
+      if (!dirtyRef.current) {
+        setForm(formFromControl(data))
+      }
+      setProfileChoice((prev) => prev || (data.profile || '').split('/')[0])
+      setControlError(null)
+    } catch (e) {
+      // 控制通道默认关闭（link-sim 未带 --control-port）是正常部署形态，
+      // 不是"面板坏了"：如实标注不可用并把所有控件禁用。
+      setControl(null)
+      setControlError(e.message || 'link-sim 控制通道不可用')
+    }
+  }, [])
+
   useEffect(() => {
     selectedRef.current = selectedSysid
   }, [selectedSysid])
@@ -88,6 +146,12 @@ export default function LinkQualityPanel() {
     pollRef.current = setInterval(fetchFleet, POLL_MS)
     return () => clearInterval(pollRef.current)
   }, [fetchFleet])
+
+  useEffect(() => {
+    fetchControl()
+    const timer = setInterval(fetchControl, CONTROL_POLL_MS)
+    return () => clearInterval(timer)
+  }, [fetchControl])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -148,10 +212,52 @@ export default function LinkQualityPanel() {
     ctx.fillText(`带宽(Mbps) max=${maxBw.toFixed(0)}`, padding + 240, padding - 6)
   }, [history])
 
+  const setField = (key, value) => {
+    dirtyRef.current = true
+    setForm((prev) => {
+      const next = { ...(prev || DEFAULT_FORM), [key]: value }
+      if (key === 'partitionCycleSec') {
+        // 周期为 0 时黑洞窗口必须为 0（后端语义：无周期分区）；否则不能超过周期。
+        next.partitionDownSec = value === 0
+          ? 0
+          : Math.min(next.partitionDownSec || 0, value)
+      }
+      if (key === 'partitionDownSec') {
+        next.partitionDownSec = Math.min(value, next.partitionCycleSec || 0)
+      }
+      return next
+    })
+  }
+
+  const applyPatch = async (patch) => {
+    setBusy(true)
+    try {
+      const data = await api.patchLinkSimControl(patch)
+      setControl(data)
+      dirtyRef.current = false
+      setForm(formFromControl(data))
+      setProfileChoice((data.profile || '').split('/')[0])
+      setControlError(null)
+    } catch (e) {
+      setControlError(e.message || '应用损伤参数失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const applyDamage = () => {
+    if (!form) return
+    applyPatch({ ...form })
+  }
+
   const current = fleet.find((it) => it.sysid === selectedSysid) || fleet[0] || null
   const bestLink = bestLinkOf(current)
   const currentScore = current?.overallScore ?? 0
   const linkColor = getLinkColor(currentScore)
+  const online = !!control
+  const up = control?.uplink
+  const down = control?.downlink
+  const profiles = control?.profiles || []
 
   return (
     <div className="page">
@@ -216,14 +322,100 @@ export default function LinkQualityPanel() {
         </div>
       </div>
 
-      <div style={{ padding: 12, borderRadius: 8, background: 'var(--card)', border: '1px dashed var(--border)' }}>
-        <h3 style={{ fontSize: 13, color: 'var(--dim)', margin: '0 0 8px 0' }}>链路损伤注入（未实现）</h3>
-        <p style={{ fontSize: 11, color: 'var(--dim)', margin: 0, lineHeight: 1.7 }}>
-          后端没有损伤注入通道：link-sim 是 CLI UDP 代理，损伤参数在启动时按画像固定、
-          运行期不可调，云端也没有转发端点（2026-10-24 分诊确证）。此前的三个滑块是
-          「拖了没有任何反应」的假控件（失败被静默吞掉），已按前端诚实性原则移除。
-          待 link-sim 增加运行时控制通道（HTTP/控制帧）+ 云端转发端点后恢复此面板。
-        </p>
+      <div style={{ padding: 12, borderRadius: 8, background: 'var(--card)', border: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <h3 style={{ fontSize: 13, margin: 0 }}>仿真损伤（link-sim 控制面）</h3>
+          <span
+            className="chip mono"
+            style={{
+              fontSize: 10,
+              color: online ? '#2de2a5' : 'var(--dim)',
+              background: online ? '#2de2a520' : 'transparent',
+              border: '1px solid var(--border)',
+            }}
+          >
+            {online ? `在线 · ${control.mode} · 丢包模型 ${up?.dropModel || 'ge'}` : '离线'}
+          </span>
+        </div>
+
+        {!online && (
+          <p style={{ fontSize: 11, color: 'var(--dim)', margin: '0 0 8px 0', lineHeight: 1.7 }}>
+            控制通道不可用：{controlError}。link-sim 必须以
+            {' '}<code>--control-port 14601</code>{' '}
+            启动（默认 0=关闭），云端才能转发损伤参数；此处不显示假控件。
+          </p>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--dim)' }}>画像</span>
+          <select
+            value={profileChoice}
+            disabled={!online || busy}
+            onChange={(e) => setProfileChoice(e.target.value)}
+            style={{ padding: '4px 8px', fontSize: 12, background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4 }}
+          >
+            {profiles.map((p) => <option key={p} value={p}>{p}</option>)}
+            {profiles.length === 0 && <option value="">--</option>}
+          </select>
+          <button
+            className="btn sm"
+            disabled={!online || busy || !profileChoice}
+            onClick={() => applyPatch({ profile: profileChoice })}
+          >
+            切换画像
+          </button>
+          <button className="btn sm" disabled={!online || busy} onClick={() => applyPatch({ reset: true })}>
+            恢复画像默认
+          </button>
+          <span style={{ fontSize: 10, color: 'var(--dim)' }}>
+            上行 {up?.stats ? `fwd ${up.stats.forwarded} / drop ${up.stats.dropped} (${up.stats.dropPct.toFixed(1)}%) / ${up.stats.avgDelayMs}ms` : '--'}
+            {' · '}
+            下行 {down?.stats ? `fwd ${down.stats.forwarded} / drop ${down.stats.dropped}` : '--'}
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 16px' }}>
+          <SliderRow
+            label="基准延迟" value={form?.delayMs ?? 0} min={0} max={2000} step={5}
+            disabled={!online || busy} onChange={(v) => setField('delayMs', v)}
+            display={`${Math.round(form?.delayMs ?? 0)} ms`}
+          />
+          <SliderRow
+            label="抖动" value={form?.jitterMs ?? 0} min={0} max={1000} step={5}
+            disabled={!online || busy} onChange={(v) => setField('jitterMs', v)}
+            display={`${Math.round(form?.jitterMs ?? 0)} ms`}
+          />
+          <SliderRow
+            label="丢包（独立随机）" value={form?.dropPct ?? 0} min={0} max={100} step={0.5}
+            disabled={!online || busy} onChange={(v) => setField('dropPct', v)}
+            display={`${(form?.dropPct ?? 0).toFixed(1)} %`}
+          />
+          <SliderRow
+            label="带宽" value={form?.bandwidthKbps ?? 0} min={0} max={100000} step={100}
+            disabled={!online || busy} onChange={(v) => setField('bandwidthKbps', v)}
+            display={formatBandwidth(form?.bandwidthKbps ?? 0)}
+          />
+          <SliderRow
+            label="分区周期" value={form?.partitionCycleSec ?? 0} min={0} max={120} step={0.5}
+            disabled={!online || busy} onChange={(v) => setField('partitionCycleSec', v)}
+            display={form?.partitionCycleSec ? `${form.partitionCycleSec.toFixed(1)} s` : '关闭'}
+          />
+          <SliderRow
+            label="分区黑洞窗口" value={form?.partitionDownSec ?? 0} min={0} max={60} step={0.5}
+            disabled={!online || busy || !form?.partitionCycleSec}
+            onChange={(v) => setField('partitionDownSec', v)}
+            display={form?.partitionDownSec ? `${form.partitionDownSec.toFixed(1)} s` : '0 s'}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+          <button className="btn primary sm" disabled={!online || busy || !form} onClick={applyDamage}>
+            {busy ? '应用中…' : '应用损伤'}
+          </button>
+          <span style={{ fontSize: 10, color: 'var(--dim)' }}>
+            应用后双向生效（direction=both）；丢包滑块切换到独立随机模型，恢复画像默认即回到 GE 突发模型。
+          </span>
+        </div>
       </div>
 
       {loading && <div style={{ textAlign: 'center', padding: 20, color: 'var(--dim)' }}>加载链路数据…</div>}
@@ -231,5 +423,26 @@ export default function LinkQualityPanel() {
         <div style={{ textAlign: 'center', padding: 20, color: 'var(--crit)' }}>⚠ {error}</div>
       )}
     </div>
+  )
+}
+
+function SliderRow({ label, value, min, max, step, disabled, onChange, display }) {
+  return (
+    <label style={{ display: 'block', fontSize: 11, color: 'var(--dim)' }}>
+      <span style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+        <span>{label}</span>
+        <span className="mono" style={{ color: disabled ? 'var(--dim)' : 'var(--text)' }}>{display}</span>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: '100%', accentColor: '#00d4ff' }}
+      />
+    </label>
   )
 }

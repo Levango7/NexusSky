@@ -34,17 +34,21 @@ final class RelayConfig {
     final LinkProfile uplink;
     /** 下行（飞机 -> GCS）链路画像。 */
     final LinkProfile downlink;
+    /** 运行时控制端口（0=关闭；P2 #20，只绑回环）。 */
+    final int controlPort;
 
     /** 运行时学习到的 GCS/后端对端地址（volatile，跨接收/发送线程）。初始为 null。 */
     volatile InetSocketAddress gcsAddr;
     /** 运行时学习到的远端飞机对端地址（volatile，跨接收/发送线程）。初始为 null。 */
     volatile InetSocketAddress droneAddr;
 
-    private RelayConfig(int gcsPort, int relayPort, LinkProfile uplink, LinkProfile downlink) {
+    private RelayConfig(int gcsPort, int relayPort, LinkProfile uplink, LinkProfile downlink,
+                        int controlPort) {
         this.gcsPort = gcsPort;
         this.relayPort = relayPort;
         this.uplink = uplink;
         this.downlink = downlink;
+        this.controlPort = controlPort;
         // gcsAddr / droneAddr 默认 null，由 RelayNode 接收循环 learn-once 赋值
     }
 
@@ -64,6 +68,7 @@ final class RelayConfig {
         int relayPort = DEFAULT_RELAY_PORT;
         String uplinkName = DEFAULT_PROFILE;
         String downlinkName = DEFAULT_PROFILE;
+        int controlPort = 0;
 
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
@@ -78,12 +83,17 @@ final class RelayConfig {
                 uplinkName = args[++i];
             } else if (a.equals("--downlink-profile") && i + 1 < args.length) {
                 downlinkName = args[++i];
+            } else if (a.equals("--control-port") && i + 1 < args.length) {
+                controlPort = parsePort(args[++i], "--control-port");
             }
         }
 
         // 校验端口范围
         validatePort(gcsPort, "--gcs-port");
         validatePort(relayPort, "--relay-port");
+        if (controlPort > 0) {
+            validatePort(controlPort, "--control-port");
+        }
         // 校验端口互异
         if (gcsPort == relayPort) {
             log.error("[mesh-relay] gcs-port and relay-port must differ: gcs-port={} relay-port={}",
@@ -111,7 +121,7 @@ final class RelayConfig {
             return null;
         }
 
-        return new RelayConfig(gcsPort, relayPort, uplink, downlink);
+        return new RelayConfig(gcsPort, relayPort, uplink, downlink, controlPort);
     }
 
     /** 解析单个端口整数，失败打印 usage 并 exit(1)。 */
@@ -141,10 +151,12 @@ final class RelayConfig {
     static void usage() {
         log.info("[mesh-relay] usage: link-sim --relay"
                 + " [--gcs-port N] [--relay-port N]"
-                + " [--uplink-profile P] [--downlink-profile P]");
+                + " [--uplink-profile P] [--downlink-profile P]"
+                + " [--control-port N]");
         log.info("[mesh-relay]   --gcs-port        relay port facing GCS/backend (default {})", DEFAULT_GCS_PORT);
         log.info("[mesh-relay]   --relay-port      relay port facing remote drone (default {})", DEFAULT_RELAY_PORT);
         log.info("[mesh-relay]   --uplink-profile  uplink (gcs->drone) profile (default {}): {}", DEFAULT_PROFILE, LinkProfile.names());
         log.info("[mesh-relay]   --downlink-profile downlink (drone->gcs) profile (default {}): {}", DEFAULT_PROFILE, LinkProfile.names());
+        log.info("[mesh-relay]   --control-port    runtime damage control port, loopback only (default 0 = off)");
     }
 }

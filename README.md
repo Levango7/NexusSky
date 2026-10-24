@@ -26,7 +26,7 @@
 |---|---|---|---|
 | `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**503 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
-| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（411 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
+| `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（413 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 45 个功能面板（顶栏按 8 个业务域分组导航） | 不需要换 |
 | `link-sim` | 纯 Java 17 | MAVLink/UDP 链路损伤代理：延迟/Gilbert-Elliot 突发丢包/令牌桶带宽/周期分区四引擎 + 7 种链路画像 + 一跳静态中继 | 不需要换——损伤模型本身就是要保留的实验变量 |
 | `regulator-sim` | 纯 Java 17 + JDK HttpServer | 模拟 CAAC UOM 监管平台 HTTP API（`/api/verify\|activate\|cancel\|telemetry\|records\|reset` 六端点 + `--delay-ms`/`--error-rate` 故障注入），独立进程，供 regulator 包集成测试与本地开发 | 不需要换——对接端是真 UOM 平台 |
@@ -130,6 +130,13 @@ powershell -File scripts\e2e-network.ps1 -Profile lte-edge   :: 换更恶劣的�
 
 手动实验：`link-sim --profile radio-sik --port 14600 --drone-ip 127.0.0.2` 然后起
 `drone-sim --bind-ip 127.0.0.2`——GCS 上能直观看到窄带链路的遥测断续。
+
+**运行时损伤控制**（P2 #20，2026-10-24）：`link-sim --control-port 14601` 额外起一个只绑
+`127.0.0.1` 的控制面（`GET/PATCH /profile`，无应用层鉴权），cloud-backend 转发为
+`GET/PATCH /api/v1/link-sim/control`（读=OBSERVER、写=**OPERATOR**），GCS「链路质量面板」
+的损伤滑块因此可在运行期调延迟/抖动/丢包/带宽/分区、或整画像切换。默认
+`--control-port 0`（关闭）——不带该参数时行为与以前完全一致；安全画像（`tamper`/`unsigned`）
+不支持控制通道，传了直接退出 1。
 
 模拟器支持 `--scenario` 在时间轴上注入硬件级故障，验证云端/地面站对异常的**反应链**：
 
@@ -617,7 +624,7 @@ DB 行按精确时刻、JSONL 按文件名日期整天删，`<=0` 关闭清理�
 - `GET /v1/disaster/status` 灾害模式状态 · `POST /v1/disaster/budget` Budget 模式切换
 - `POST /v1/buzzer/control` 蜂鸣器控制 · `GET /v1/thermal/search` 热源搜救
 
-> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 78 个 @RestController、411 REST 端点。
+> 完整 API 文档详见 [docs/api-reference.md](docs/api-reference.md)，共 79 个 @RestController、413 REST 端点。
 
 ## 硬件替换指南（“缺斤少两”补齐之路）
 
@@ -705,7 +712,7 @@ NexusSky/
 │   └── transport/      UDP 传输
 ├── drone-sim/           虚拟无人机（状态机 + 任务协议服务端 + 物理引擎 v2）
 ├── link-sim/            链路损伤代理（延迟/丢包/带宽/分区 + Mesh 中继）
-├── regulator-sim/       UOM 监管平台模拟器（411 个 HTTP 端点 + 延迟/错误率注入）
+├── regulator-sim/       UOM 监管平台模拟器（/apin 实名验证/激活/遥测 + 延迟/错误率注入）
 ├── cloud-backend/       Spring Boot 单体（网关/机队/任务/推送/安全/编排）
 │   └── 37 个功能包：ai, alarm, api, audit, autodispatch, citytwin, commadapt,
 │       config, delivery2, drone, edge, flightlog, gateway, geofence, health,
@@ -734,11 +741,11 @@ NexusSky/
 |---|---|
 | `mavlink-core` | 501 |
 | `drone-sim` | 1445 |
-| `link-sim` | 122 |
-| `cloud-backend` | 3054 |
+| `link-sim` | 133 |
+| `cloud-backend` | 3062 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 40 |
-| **总计** | **5181** |
+| **总计** | **5200** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -893,7 +900,7 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 566 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 522 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）+
   2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例 +
@@ -1034,8 +1041,8 @@ NexusSky/
 - **安全认证：RBAC 已默认拒绝**。JWT + API Key + Spring Security + 三态租户域
   （有归属=本租户 / 无归属+ADMIN=显式全局 / 无归属+非 ADMIN=看不到任何租户数据）+
   审计日志 + License 管理；dev-mode 白名单便于本地开发（默认 false）。
-  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：411 个端点
-  （193 GET/138 POST/13 PUT/14 DELETE）全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
+  2026-10-01 起 `RoleInterceptor` 已从"无注解即放行"翻为**无注解即 403**：413 个端点
+  全部有显式声明——读=类级 `@RequireRole(OBSERVER)`、
   写=`OPERATOR`、配置/用户/密钥/租户/围栏/license 面=`ADMIN`，匿名入口只有登录与刷新两处
   `@PermitAll`；漏写注解由 `RbacEndpointCoverageTest` 反射逐个校验并判红，不靠文本扫描
   （awk 版会把签名里的 `@RequestBody` 当注解行，把 272 个未声明少报成 99）。
@@ -1079,7 +1086,7 @@ NexusSky/
   审计日志（`audit_log` 表 + SHA-256 哈希链，默认仍纯内存、保留清理默认关闭）、
   围栏/追踪/安防设备等支持持久化测试；主数据仍为内存态，换数据库是包内替换
 - **视频融合面板（`VideoFusionPanel`）后端已补齐**（2026-10-03 第七轮核查发现当时未实现，
-  2026-10-06 补齐）：该面板（GCS `videofusion` 视图）调用的 411 个端点
+  2026-10-06 补齐）：该面板（GCS `videofusion` 视图）调用的
   `/api/v1/video-fusion/surveillance/streams`、`/drone/feeds`、
   `/recording/{id}/start|stop` 此前在后端**没有对应 Controller**，面板运行期必然 518——
   而 `videofusion` 已在 `EMERGENCY_STANDARD_PANELS`（"应急千元级"）里作为**已定价能力**
