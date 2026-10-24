@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 189 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 190 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 189 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 190 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -229,6 +229,57 @@ pymavlink 已确认官方参数（`ordered_fieldnames` + `crc_extra=178`），
 上一轮（#154）写过「本地 `check-test-count-docs.py` 报的 22 处不一致是 surefire 残缺假象」。
 本轮把全仓 Java 测试**完整跑了一遍**后复核：门禁输出 **「全部一致」**（同步掉本 PR 新增的
 11 个用例后）。⇒ 那个判断成立：**本地残缺时不能改文档，完整跑之后才可信**。
+## [Unreleased] — P2 #20 link-sim 运行时控制通道：伤害参数从“启动期固定”变“可调、可见、可启动验证”（2026-10-24）
+
+### 1. 现场：P1 #11 移除的假滑块，背后是一个真的缺口
+
+前端链路质量面板曾有三个伤害滑块，2026-10-24 按诚实性原则移除（P1 #11）。
+删除时记下的恢复条件是：link-sim 加 HTTP 控制面 + 云端转发端点。
+实测：伤害参数（延迟/抖动/Gilbert-Elliot 丢包/带宽/分区）只能由启动参数
+`--profile` 固定，进程内没有任何控制入口；云端也没有对应端点。
+本轮把这两件补上，滑块按当时记下的恢复条件恢复。
+
+### 2. 补了什么（link-sim / cloud / 前端各一环）
+
+- **link-sim 控制面**：`--control-port N`（**默认 0=关闭**，不改变既有默认行为）
+  启动 `GET/PATCH /profile`（JDK HttpServer，**只绑 127.0.0.1**，无应用层鉴权、
+  64 KB 请求体上限的校验）。新 `ImpairmentSpec`（十元组不可变规格）+
+  `LinkSimControl`（语义层）+ `LinkSimControlServer`（HTTP 层）三个新类各只负责一层；
+  `ImpairmentEngine` 字段改非 final + `apply/spec/statsSnapshot`，参数替换对判决原子生效。
+  语义边界写死：统计计数跨参数保留、令牌桶 clamp 到新箱、分区相位不重置（调参本身不制造假黑洞）。
+- **控制语义**：三种互斥形态——`profile`（整画像切换）/ `reset`（恢复**当前**画像默认）/
+  自定义字段局部更新；支持 `direction=uplink|downlink|both`。
+  `dropPct` 显式切换为**独立随机丢包**（`dropModel=uniform`），与画像的 GE 突发模型区分，视图里直接显示。
+- **cloud-backend 转发**：`GET /api/v1/link-sim/control`（OBSERVER）+
+  `PATCH /api/v1/link-sim/control`（**OPERATOR**）。错误分层映射：
+  连不上 503（提示启动参数）/超时 504/上游 400 透传原因/上游 5xx 映 502。
+  参数校验的唯一权威留在 link-sim（云端不复制一份规则）；
+  LicenseModuleMap 登记 `/api/v1/link-sim` → network 模块（不登记即 fail-closed）。
+- **前端**：`api.js` 新增 `getLinkSimControl` / `patchLinkSimControl`（错误提示改读后端的
+  `result` 字段，不再只显示 "HTTP 400"）；`LinkQualityPanel` 恢复伤害面板——
+  滑块初值读自控制面**当前值**，拖动后必须点“应用”才发 PATCH，成功后以响应回填；
+  控制面不可达时整块控件禁用并显示原因。
+
+### 3. 实测
+
+- 新用例 19 个：link-sim 控制面契约 11 例（真实 HTTP + **按住引擎判决断言**）+
+  云端转发契约 8 例（假 link-sim 真实转发方法/路径/请求体、400 透传、503/504/502、
+  RBAC 注解直调断言）。
+- **A/B 3/3 KILLED**：控制面 `d.engine.apply(next)` 删除 / 转发把 PATCH 降级成 GET /
+  去掉 PATCH 端的 `@RequireRole(Role.OPERATOR)`——全部"改坏⇒红、还原⇒绿"。
+- link-sim 122 → **133**，cloud-backend 3042 → **3050**，全仓 **5169** 用例 0 失败；
+  端点 411 → **413**（新增 GET+PATCH），vitest 28 例整文件 + build + lint 全绿。
+- **安全口径**：link-sim 控制端口只绑 127.0.0.1 且**不做应用层鉴权**；对外只有云端控制器。
+  改 `aerofleet.linksim.control-url` 指向非回环地址等同于把沙盒搭到公网——已写入类注释。
+
+### 4. 未关闭 / 边界
+
+- 安全画像（`tamper`/`unsigned`）不支持控制通道：传 `--control-port` 直接退出 1（安全伤害没有可调的数值参数）。
+- `--env-coupled` 的雨衰覆盖层不受控制面直接影响（包装层读环境状态）；视图的 `envCoupled` 字段只表示开关状态。
+- 控制面本身不持久化、不做并发管控：转发失败不重试。
+
+---
+
 ## [Unreleased] — P2 #19 热成像接线：从"消息定义"到"面板有数"的全链补完（2026-10-24）
 
 ### 1. 现场：三件齐备、唯独没人发送

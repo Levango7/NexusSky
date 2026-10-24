@@ -73,9 +73,7 @@ enum LinkProfile {
     }
 
     ImpairmentEngine engine() {
-        return new ImpairmentEngine(delayMs, jitterMs, pGoodDrop, pBadDrop,
-                pGoodToBad, pBadToGood, burstBytes, rateBytesPerSec,
-                partitionUpSec, partitionDownSec);
+        return ImpairmentSpec.of(this).engine();
     }
 
     static LinkProfile of(String name) {
@@ -93,5 +91,14 @@ enum LinkProfile {
             sb.append(p.name).append(' ');
         }
         return sb.toString().trim();
+    }
+
+    /** 画像名列表（控制面 GET 返回给前端做下拉，避免前端硬编码枚举）。 */
+    static java.util.List<String> nameList() {
+        java.util.List<String> out = new java.util.ArrayList<>(values().length);
+        for (LinkProfile p : values()) {
+            out.add(p.name);
+        }
+        return out;
     }
 }

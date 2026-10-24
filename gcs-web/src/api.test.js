@@ -208,3 +208,81 @@ describe('mjpegPreviewUrl（<img> 预览，凭据口径）', () => {
     expect(url).not.toContain('streamToken')
   })
 })
+
+/**
+ * link-sim 运行时控制（P2 #20）。
+ *
+ * 这组断言钉的是"面板真的会打到控制端点"：方法必须是 PATCH（后端只映射了
+ * @PatchMapping，写成 POST 会 405）、body 是 JSON、错误消息取后端 result。
+ * 组件层不重复测滑块（渲染细节易变），这里测的是前后端之间的 HTTP 契约。
+ */
+describe('link-sim 运行时控制 API（P2 #20）', () => {
+  const realFetch = globalThis.fetch
+
+  afterEach(() => {
+    vi.stubGlobal('fetch', realFetch)
+  })
+
+  function stubFetch(response) {
+    const calls = []
+    vi.stubGlobal('fetch', vi.fn(async (url, options = {}) => {
+      calls.push({ url, options })
+      return response
+    }))
+    return calls
+  }
+
+  it('getLinkSimControl 读 GET /api/v1/link-sim/control', async () => {
+    const calls = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ profile: 'lte', mode: 'profile', profiles: ['lan', 'lte'] }),
+    })
+
+    const view = await api.getLinkSimControl()
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('/api/v1/link-sim/control')
+    expect(calls[0].options.method).toBeUndefined()
+    expect(view.profile).toBe('lte')
+  })
+
+  it('patchLinkSimControl 用 PATCH + JSON body（POST 会被后端 405）', async () => {
+    const calls = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ profile: 'lte', mode: 'custom' }),
+    })
+
+    await api.patchLinkSimControl({ direction: 'uplink', delayMs: 120 })
+
+    expect(calls[0].url).toBe('/api/v1/link-sim/control')
+    expect(calls[0].options.method).toBe('PATCH')
+    expect(calls[0].options.headers['Content-Type']).toBe('application/json')
+    expect(JSON.parse(calls[0].options.body)).toEqual({ direction: 'uplink', delayMs: 120 })
+  })
+
+  it('后端 400 的 result 作为异常消息（不能只剩 "HTTP 400"）', async () => {
+    stubFetch({
+      ok: false,
+      status: 400,
+      json: async () => ({ status: 'error', result: "'delayMs' out of range [0.0, 5000.0]: -5.0" }),
+    })
+
+    await expect(api.patchLinkSimControl({ delayMs: -5 }))
+      .rejects.toThrow("'delayMs' out of range")
+  })
+
+  it('控制通道关闭（503）时错误消息透传启动提示', async () => {
+    stubFetch({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        status: 'error',
+        result: 'link-sim control unreachable at http://127.0.0.1:14601/profile; start link-sim with --control-port',
+      }),
+    })
+
+    await expect(api.getLinkSimControl()).rejects.toThrow('--control-port')
+  })
+})
