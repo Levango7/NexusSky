@@ -4,8 +4,8 @@ import {
   battColor,
   battColorVar,
   battLevel,
-  fmtBattery,
   normBatteryPct,
+  fmtBattery,
   BATT_OK,
   BATT_WARN,
   BATT_CRIT,
@@ -72,8 +72,6 @@ describe('battery: 三个访问器判级必须完全一致', () => {
   // 这是本次去重的核心断言：抽出前 battClass/battColor/battColorVar 在 6 个地方
   // 各写各的，其中两处用 15/30、其余用 20/40 —— 同一架飞机换个面板就变色。
   // 三个访问器现在共用 battLevel，阈值只有一个来源。
-  // "未知"在三家访问器里的表示法各不同，但都必须指向同一个 lv=null。
-  // 2026-10-24 起负数（后端的 -1 未知哨兵）也归到这里。
   const LEVEL_OF_CLASS = { '': null, 'batt-crit': 'crit', 'batt-warn': 'warn', 'batt-ok': 'ok' }
   const LEVEL_OF_HEX = { 'var(--dim)': null, [BATT_CRIT]: 'crit', [BATT_WARN]: 'warn', [BATT_OK]: 'ok' }
   const LEVEL_OF_VAR = {
@@ -149,48 +147,36 @@ describe('battery: fmtBattery', () => {
   it('withUnit=false 时只给数字（供调用方自己拼单位）', () => {
     expect(fmtBattery(85, false)).toBe('85')
     expect(fmtBattery(-1, false)).toBe('--')
-describe('battery: 后端的 -1「未知」哨兵不是"电量极低"（2026-10-24 补）', () => {
+  })
+})
+
+describe('battery: 后端的 -1「未知」哨兵在**判级层**也不算"电量极低"（2026-10-24 补）', () => {
+  // fmtBattery 那半边由 #156 修掉了；这里补的是**判级**那半边——
+  // battLevel 此前只把 null/''/NaN 当未知，负数一路落到 `n <= 20 ⇒ crit`，
+  // 于是"从未上报过电量"的设备会被染红、并在 DashboardPanel 的告警计数里白占一条。
   // 出处（不是猜测）：cloud-backend/.../gateway/DroneSnapshot.java 的
   //   `public volatile int battery = -1;          // %`
   // 与 cloud-backend/.../health/TelemetrySnapshot.java 的
   //   "batteryPct — 电池电量百分比 [0,100]，-1 表示未知"
-  // 修这条之前，一架从未上报电量的设备会显示 "-1%"、染成红色，
-  // 并在 DashboardPanel 的告警计数里白占一条告警。
-  it.each([-1, -0.5, -100])('%i → 判级 null（不是 crit）', (v) => {
+  it.each([-1, -0.5, -100, -Infinity])('%s → 判级 null、不套任何类', (v) => {
     expect(battLevel(v)).toBeNull()
     expect(battClass(v)).toBe('')
+    expect(battColor(v)).not.toBe(BATT_CRIT)
     expect(normBatteryPct(v)).toBeNull()
   })
 
-  it('负数哨兵的文案是 --，绝不出现 "-1%"', () => {
-    expect(fmtBattery(-1)).toBe('--')
-  })
-
-  it('0% 仍然是"严重"，不被负数规则误伤（0 是真实读数）', () => {
+  it('0 与 1 都是真实读数，不被"负数=未知"误伤', () => {
     expect(battLevel(0)).toBe('crit')
-    expect(fmtBattery(0)).toBe('0%')
-  })
-
-  it('1% 就显示 1%（历史上 TrackingPanel 的 `n <= 1 ? n * 100 : n` 会把它说成 100%）', () => {
-    expect(fmtBattery(1)).toBe('1%')
-    expect(fmtBattery(1.4)).toBe('1%')
     expect(battLevel(1)).toBe('crit')
+    expect(normBatteryPct(1)).toBe(1)
   })
 
-  it.each([
-    [null, '--'],
-    [undefined, '--'],
-    ['', '--'],
-    ['oops', '--'],
-    [NaN, '--'],
-  ])('未知输入 %o → %s', (input, expected) => {
-    expect(fmtBattery(input)).toBe(expected)
-    expect(battLevel(input)).toBeNull()
-  })
-
-  it('正常读数按整数百分比显示（80 → 80%，79.6 → 80%）', () => {
-    expect(fmtBattery(80)).toBe('80%')
-    expect(fmtBattery(79.6)).toBe('80%')
-    expect(fmtBattery('30')).toBe('30%')
+  it('三访问器在未知区上一致：null / undefined / 空串 / NaN / 负数都是"无着色"', () => {
+    for (const v of [null, undefined, '', NaN, -1]) {
+      expect(battLevel(v)).toBeNull()
+      expect(battClass(v)).toBe('')
+      expect(battColor(v)).not.toBe(BATT_CRIT)
+      expect(battColorVar(v)).not.toBe('var(--crit)')
+    }
   })
 })

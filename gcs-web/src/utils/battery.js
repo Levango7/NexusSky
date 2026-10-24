@@ -62,25 +62,6 @@ export function normBatteryPct(b) {
 }
 
 /**
- * 电量 → 展示文本（单一真相源；此前这段逻辑在组件里有本地副本，且副本自带两处错误）。
- *
- * 未知 → `--`；已知 → 四舍五入到整数百分比。
- *
- * 这里刻意**没有** "0~1 分数就放大 100 倍" 那种猜测。全链路给的都是百分比：
- * `SimulatedHardwareAdapter` 起始 `battery = 100.0` 且按 0.01/tick 递减、
- * `SysStatus.batteryRemaining` 是 MAVLink i8 的百分比字段、`DroneViews` 原样透传。
- * 那句猜测（`TrackingPanel` 的本地副本里就有）会把真实的 **1% 说成 100%**、
- * 把 **-1（未知哨兵）算成 -100%**。
- *
- * @param {*} b 电量百分比
- * @returns {string} 例如 `80%`，未知时 `--`
- */
-export function fmtBattery(b) {
-  const n = normBatteryPct(b)
-  return n == null ? '--' : `${n.toFixed(0)}%`
-}
-
-/**
  * 电量 → CSS 类名。
  *
  * 契约：无数据显示空串（不套任何样式）。
