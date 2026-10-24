@@ -83,6 +83,7 @@ jobs:
           python3 scripts/check-revert-looking-diff.py --self-test
           python3 scripts/check-claimed-endpoint-count.py --self-test
           python3 scripts/check-frontend-endpoints.py --self-test
+          python3 scripts/check-doc-counts.py --self-test
           # 变异验证的还原必须刷新时间戳，否则增量编译会继续用改坏的 .class
           # （2026-10-22 踩过，见 docs/agent-constraints.md 第 12 条）
           python3 scripts/mutate-verify.py --self-test
@@ -94,6 +95,11 @@ jobs:
       # 2026-10-20 实测：同一件事在文档里有三个不同的数（358 / 345 / 345），而实测是 406。
       - name: Claimed endpoint count gate
         run: python3 scripts/check-claimed-endpoint-count.py
+      # README 目录树里的「脚本数 / e2e-* 数 / 文档篇数」必须等于实测值。
+      # 2026-10-24 实测：README 写着 28 个 e2e-* / 50 个脚本 / 32 篇文档，而实测是
+      # 44 / 90 / 39 —— #114 起大量 e2e 跨平台适配（新增 .ps1）后没人再核过这三个数。
+      - name: Directory count gate
+        run: python3 scripts/check-doc-counts.py
       # 前端调用的每个端点，后端都必须真的有。
       # 2026-10-21 实测：前端 api.js 有 12 处调的后端压根没有的端点，而前端的轮询普遍
       # 写成 .catch(() => null) ⇒ 404 被静默吞掉，界面上面板永远空、看不出任何异常。
