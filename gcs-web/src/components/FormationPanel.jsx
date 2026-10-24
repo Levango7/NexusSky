@@ -807,7 +807,9 @@ function MemberRow({ m, onRemove, busy }) {
       </td>
       <td style={{ padding: '7px 8px', fontSize: 11, color: 'var(--dim)' }}>{role}</td>
       <td style={{ padding: '7px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--dim)' }}>
-        {target.lat != null ? `${target.lat.toFixed(5)}, ${target.lon.toFixed(5)} · ${target.alt ?? '--'}m` : '--'}
+        {target.lat != null && target.lon != null
+          ? `${target.lat.toFixed(5)}, ${target.lon.toFixed(5)} · ${target.alt ?? '--'}m`
+          : '--'}
       </td>
       <td style={{ padding: '7px 8px' }}>
         <LedBadge led={led} />
