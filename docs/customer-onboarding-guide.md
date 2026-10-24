@@ -155,7 +155,7 @@ NexusSky 客户接入遵循 **评估 → POC → 签约 → 部署 → 培训** 
 | 分析项 | 评估内容 | 结论 |
 |---|---|---|
 | **MAVLink 协议兼容** | 客户飞控是否支持 MAVLink v2 | PX4/ArduPilot 原生支持；自研飞控需确认 MAVLink 实现 |
-| **REST API 集成** | 客户系统是否可通过 REST API 对接 | 409 端点，OpenAPI 3.0 规范，标准 HTTP/JSON |
+| **REST API 集成** | 客户系统是否可通过 REST API 对接 | 410 端点，OpenAPI 3.0 规范，标准 HTTP/JSON |
 | **WebSocket 实时接入** | 客户是否需要实时遥测推送 | 支持 telemetry/alert/formation/scheduling/decision 五类消息 |
 | **部署环境适配** | 客户服务器资源是否满足部署要求 | Docker Compose 单机：4C8G 起步；K8s 集群：按规模配置 |
 | **定制开发范围** | 是否需要行业定制开发 | 评估定制工作量，纳入行业定制版报价 |
@@ -595,7 +595,7 @@ kubectl get svc
 
 | 培训模块 | 内容 | 时长 | 对象 |
 |---|---|---|---|
-| **API 概览** | REST API 409 端点分类与用途 | 1 小时 | 开发者 |
+| **API 概览** | REST API 410 端点分类与用途 | 1 小时 | 开发者 |
 | **认证与授权** | JWT 获取、刷新、多租户 Header | 0.5 小时 | 开发者 |
 | **设备管理 API** | 设备注册、查询、状态监控、遥测查询 | 1 小时 | 开发者 |
 | **任务控制 API** | 航点任务上传、飞行控制、任务状态查询 | 1 小时 | 开发者 |
