@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 186 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 188 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 186 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 188 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,138 @@
 
 
 ---
+## [Unreleased] — 「组件覆盖比例」终于有门禁了：README 那句长期失真的话当场被抓（2026-10-25）
+
+### 1. 这条是 GAPS 里点名要单独 PR 的
+
+`GAPS.md` 第八节第 8 条的原文：
+
+> `README.md` 的组件覆盖比例声明此前长期失真（"49 个组件 47 个零测试 / 最大三个无测试"，
+> 实为 59 个 / 42 个无直测，且点名的 `UnifiedCommandPanel.jsx`、`api.js` 都有测试在挂）——
+> 本轮已按实测重写。**结构性原因留着**：计数门禁只把**用例数**纳入，
+> **"组件覆盖比例"没有任何机器约束**，所以这类句子可以悄悄烂掉。要收口就得给
+> `check-test-count-docs.py` 加一条"组件直测数"的实测声称（口径：被任一测试文件 import 过），
+> 这是新门禁、要单独 PR。
+
+本轮就做这一条。
+
+### 2. 先实测，确认它现在还是失真的
+
+按 Qoder 定的口径（**被任一测试文件 import 过**的组件才算有直测）实测：
+
+```
+jsx 组件总数: 59
+被测试 import 的: 14
+零测试: 45
+```
+
+而 README 两处都还写着旧值：
+
+- `README.md:715`：「51 个组件文件，其中 49 个 .jsx 面板」
+- `README.md:906`：「49 个 `.jsx` 组件里 **47 个零测试**」
+
+⇒ 新规则一接上就**当场报红**，抓住的正是 Qoder 预言会烂掉的那句。
+
+### 3. 做了什么
+
+`scripts/check-test-count-docs.py`：
+
+- 新增 `measure_components(root)`：实测 `(组件总数, 有直测数, 零测试数)`。
+  口径写死在 docstring 里，免得各说各话：
+  - 组件 = `gcs-web/src/**/*.jsx`（**不排除入口文件**——排除规则本身会变成第二个要维护的真值源）；
+  - 有直测 = 被**任一测试文件 import 过**。只认 import，**不认文件名撞巧**——
+    一个组件"碰巧与某测试同名"不算覆盖，这是本条要防的假象之一。
+- 新增 `COMPONENT_CLAIM` 正则：`N 个 \`.jsx\` 组件里 **M 个零测试**`。
+- 接入 `_run`：匹配到但数值不符 ⇒ **红**；**匹配不到只警告不红**（格式可能已变，
+  不该把整份文档判死）。
+
+`README.md`：两处按实测改写（59 个 .jsx / 14 个有直测 / 45 个零测试）。
+
+### 4. 自证：三条用例证明它真的会红
+
+`--self-test` 新增 `component_selftest()`，造迷你 `gcs-web/`（3 个 .jsx + 1 份 import 了
+其中一个的测试 ⇒ 实测 3/1/2）：
+
+| 用例 | 期望 | 实测 |
+|---|---|---|
+| 声称正确（3 个里 2 个零测试） | 不红 | **不红** ✓ |
+| 数字漂移（写成 5 个里 4 个零测试） | 红 | **红，且只点 1 处** ✓ |
+| 完全没有该声称 | 只警告 | **不红** ✓ |
+
+既有 9 条自检用例也全部保持通过（新规则没有顶掉旧的）。
+
+**没有自检的门禁 = 又一个"看起来在检查"的东西**——2026-10-08 那次静默失效正是因为
+这类防护从未被证明有效过。所以这一步不能省。
+
+---
+
+## [Unreleased] — 接上 AUTOPILOT_VERSION，并查清「MAVLink2 扩展字段不参与 CRC_EXTRA」（2026-10-25）
+
+### 1. 上一轮卡在哪
+
+产品级盘点把 `AUTOPILOT_VERSION`(#148) 列为值得补的两条之一，但当时**主动没做**：
+官方 `LEN=78 / CRC_EXTRA=178`，我用官方算法复算得到 **39** —— 长度对、CRC 不对，
+说明字段顺序/数组长度有细节没对齐。当时的选择是不做半成品，等能拿到权威定义再说。
+
+### 2. 本轮怎么破的：不猜字段，直接读官方帧
+
+用 pymavlink 生成一条**字段值全部可辨认**的官方帧，按字节反推出真实布局：
+
+```
+capabilities=0x0102030405060708, uid=0x778899aabbccddee,
+flight_sw=0x11223344, middleware_sw=0x55667788, os_sw=0x99aabbcc, board=0xddeeff00,
+vendor_id=0x3344, product_id=0x5566,
+flight_custom=[1..8], middleware_custom=[9..16], os_custom=[17..24], uid2=[25..42]
+
+→ payload(78B): 0807060504030201 eeddccbbaa998877 44332211 88776655 ccbbaa99 00ffeedd
+                4433 6655 01..08 09..10 11..18 19..2a
+```
+
+由此定下 wire 布局：`capabilities(u64) → uid(u64) → 四个 u32 → vendor_id/product_id(u16) →
+三个 uint8[8] → uid2[18]`（偏移 0/8/16/20/24/28/32/34/36/44/52/60）。
+
+**但按这 12 个字段重算 CRC 仍是 39。** 逐项排除后定位到真正的原因：
+
+> **MAVLink 2 的扩展字段不参与 CRC_EXTRA 计算。**
+
+`uid2`（偏移 60、18 字节）是 MAVLink2 才有的扩展字段。它不参与 CRC 的原因是**协议约束**：
+只实现了 v1 的那一端必须也能校验这个帧，而 v1 根本不认识扩展字段。去掉 `uid2` 只算前
+11 个字段，重算结果正好是官方的 **178**。
+
+**这个细节此前在本项目是隐性的**：现有 51 条自定义消息**都没有扩展字段**，所以
+`MavlinkMessageChecksum`（算法本身与官方一致）从来没被这个口径检验过。本轮把它写进了
+`MavlinkMessageInfo` 的注释与 `MavlinkCrcExtraTest` 的签名表——**签名表里 148 也只列前 11 个**，
+否则生成器会把算法引到错的口径上。
+
+### 3. 做了什么
+
+| 位置 | 改动 |
+|---|---|
+| `AutopilotVersion.java` | 新增消息类（ID=148, LEN=78, 12 字段 + `firmwareVersion()` 解析） |
+| `MavlinkMessageInfo` | `INFOS[148] = Info(78, 178)`，注释说明扩展字段口径 |
+| `MavlinkMessage.decode()` | 加 `case AutopilotVersion.ID`（此前落 default 被丢弃） |
+| `MavlinkCrcExtraTest.SIGNATURES` | 加 148，**只列前 11 个字段** |
+| `DroneSnapshot` | 新增 `flightSwVersion` / `firmwareVersion` |
+| `TelemetrySnapshotListener` | 新增 `onAutopilotVersion` |
+
+### 4. 验证
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| 完整 v2 帧 vs pymavlink | 逐字节相等 | **相等**（78 字节 payload，含尾部 `5173` CRC） |
+| `MavlinkCrcExtraTest` | 独立重算 = 178 | **110/110**（含新加的 148 签名） |
+| `AutopilotVersionTest` | 全绿 | **7/7**（往返、扩展字段仍在 payload、版本解析、分发） |
+| `mavlink-core` 全量 | 全绿 | **501 用例 / 0 失败** |
+| 测试数文档门禁 | 全部一致 | 全部一致（5094→5103、492→501） |
+
+### 5. 顺带修掉一个自己的 bug
+
+`AutopilotVersionTest.shortArraysPadded` 在写的时候就红了：构造器对**短于定长的数组**
+直接 `System.arraycopy(..., 8)` ⇒ `ArrayIndexOutOfBounds`。改成 `Math.min(src.length, dst.length)`
+（源短按 0 补齐、源长截断，都不抛）。这是"测试写完先跑一遍"的直接收益。
+
+---
+
 ## [Unreleased] — 签名密钥热更的毫秒级竞态：写完不等于对方立刻看得见（2026-10-24）
 
 ### 1. 现场：一笔与我改动无关的 CI 红

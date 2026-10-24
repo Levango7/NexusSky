@@ -24,7 +24,7 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**492 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**501 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（409 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 45 个功能面板（顶栏按 8 个业务域分组导航） | 不需要换 |
@@ -712,7 +712,7 @@ NexusSky/
 │       inspection, license, mapping, metrics, mission, orch, regulator, rid,
 │       scenario, scheduling, security, show, spi, surveillance, telemetry,
 │       tenant, tracking, twin, vision, voicecmd, webhook, write
-├── gcs-web/             React GCS（51 个组件文件，其中 49 个 .jsx 面板）
+├── gcs-web/             React GCS（59 个 .jsx 组件文件，其中 14 个已有直测）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
 ├── scripts/             start-all.cmd / e2e-smoke.sh / 89 个脚本（其中 44 个 e2e-*）
@@ -732,13 +732,13 @@ NexusSky/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 492 |
+| `mavlink-core` | 501 |
 | `drone-sim` | 1443 |
 | `link-sim` | 122 |
 | `cloud-backend` | 2978 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 40 |
-| **总计** | **5094** |
+| **总计** | **5103** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -903,7 +903,7 @@ NexusSky/
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
   而加测试不会让任何东西变红。
-  选的是**已确认缺陷**加相关契约，不是全量覆盖——49 个 `.jsx` 组件里 **47 个零测试**，
+  选的是**已确认缺陷**加相关契约，不是全量覆盖——59 个 `.jsx` 组件里 **45 个零测试**，
   且最大的三个（`UnifiedCommandPanel.jsx` 1451 行 / `api.js` 1337 行 /
   `MapView.jsx` 1016 行）均无测试文件，只受 lint + build 保护。
   新增的 `FleetOpsPanel.jsx` 亦无组件级测试（其逻辑已全部下沉到

@@ -3,6 +3,7 @@ package io.aerofleet.cloud.gateway;
 import io.aerofleet.cloud.telemetry.AlertBus;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.Attitude;
+import io.aerofleet.mavlink.messages.AutopilotVersion;
 import io.aerofleet.mavlink.messages.EnvironmentAlert;
 import io.aerofleet.mavlink.messages.EnvironmentStatus;
 import io.aerofleet.mavlink.messages.ExtendedSysState;
@@ -154,6 +155,21 @@ public class TelemetrySnapshotListener {
         DroneSnapshot s = registry.registerIfAbsent(sysid);
         s.landedState = e.landedState;
         s.vtolState = e.vtolState;
+    }
+
+    /**
+     * 固件版本与能力位（AUTOPILOT_VERSION，2026-10-25）。
+     * <p>
+     * PX4 按请求（或周期）下发。接上之前这条消息同样落在 {@code decode()} 的 default 里被整帧丢弃，
+     * 于是 GCS 无法回答"这是哪版固件、支不支持某项能力"。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.AutopilotVersion).ID")
+    public void onAutopilotVersion(MavlinkMessageEvent event) {
+        int sysid = event.getSysid();
+        AutopilotVersion v = (AutopilotVersion) event.getMessage();
+        DroneSnapshot s = registry.registerIfAbsent(sysid);
+        s.flightSwVersion = v.flightSwVersion;
+        s.firmwareVersion = v.firmwareVersion();
     }
 
     @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.GlobalPositionInt).ID")
