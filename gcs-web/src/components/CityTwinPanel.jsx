@@ -10,6 +10,7 @@ import {
 } from '../api.js'
 import { POLL_MS, fmtTime, pick, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
 import { normalizeTwinState, twinSyncFreshness } from '../utils/twinSync.js'
+import { fmtBattery } from '../utils/battery.js'
 
 // P3 数字孪生城市面板
 // 城市模型管理 + 实时态势 + 灾害模拟 + 态势标绘 + M13 每机实时孪生同步
@@ -374,7 +375,7 @@ export default function CityTwinPanel({ twinStates }) {
                         <span>高度 <b style={{ color: 'var(--text)' }}>{t.altM != null ? `${t.altM.toFixed(1)} m` : '--'}</b></span>
                         <span>航向 <b style={{ color: 'var(--text)' }}>{t.headingDeg != null ? `${t.headingDeg.toFixed(0)}°` : '--'}</b></span>
                         <span>速度 <b style={{ color: 'var(--text)' }}>{t.velocity != null ? `${t.velocity.toFixed(1)} m/s` : '--'}</b></span>
-                        <span>电量 <b style={{ color: 'var(--text)' }}>{t.battery != null ? `${t.battery}%` : '--'}</b></span>
+                        <span>电量 <b style={{ color: 'var(--text)' }}>{fmtBattery(t.battery)}</b></span>
                         <span title="相邻两次同步的位置位移（云端同源估计，非独立实测偏差）">
                           漂移 <b style={{ color: 'var(--text)' }}>{t.driftM != null ? `${t.driftM.toFixed(1)} m` : '--'}</b>
                         </span>

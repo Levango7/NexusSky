@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { battClass } from '../utils/battery'
+import { battClass, fmtBattery } from '../utils/battery'
 
 const MODE_LABEL = {
   STANDBY: '待命',
@@ -109,7 +109,7 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
           </div>
           <div className="hud-cell">
             <label>电量 BAT</label>
-            <b className={battClass(t.battery)}>{t.battery != null ? t.battery : '--'}</b>
+            <b className={battClass(t.battery)}>{fmtBattery(t.battery, false)}</b>
             <span className="unit">%</span>
           </div>
           <div className="hud-cell">
