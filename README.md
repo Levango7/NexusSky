@@ -24,7 +24,7 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**492 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**501 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（410 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 45 个功能面板（顶栏按 8 个业务域分组导航） | 不需要换 |
@@ -662,8 +662,8 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 
 - `/hardware/physics-model` 与 `/spray/gripper` 在仓内均不存在（原脚本凭空断言），
   动力侧改用真实存在的 `/rotor/config` + `/rotor/telemetry`，夹爪由 drone-sim 单测覆盖。
-- LiDAR/IMU 返回 404 是**符合契约**的：drone-sim 默认不注入 `LiDARSource`/`ImuSource`。
-  此时断言"404 契约正确"并跳过字段断言，真实载荷断言需显式装配 Source 或真机。
+- LiDAR/IMU 返回 518 是**符合契约**的：drone-sim 默认不注入 `LiDARSource`/`ImuSource`。
+  此时断言"518 契约正确"并跳过字段断言，真实载荷断言需显式装配 Source 或真机。
 - 机载拒收（`MAV_RESULT=3`，drone-sim 未实现该自定义 MAV_CMD）只告警不判失败——
   REST 侧契约是"命令已下发并拿到回执"，机载语义需机载实现后另测。
 
@@ -712,7 +712,7 @@ NexusSky/
 │       inspection, license, mapping, metrics, mission, orch, regulator, rid,
 │       scenario, scheduling, security, show, spi, surveillance, telemetry,
 │       tenant, tracking, twin, vision, voicecmd, webhook, write
-├── gcs-web/             React GCS（51 个组件文件，其中 49 个 .jsx 面板）
+├── gcs-web/             React GCS（59 个 .jsx 组件文件，其中 19 个已有直测）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
 ├── scripts/             start-all.cmd / e2e-smoke.sh / 89 个脚本（其中 44 个 e2e-*）
@@ -732,13 +732,13 @@ NexusSky/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 492 |
+| `mavlink-core` | 501 |
 | `drone-sim` | 1443 |
 | `link-sim` | 122 |
 | `cloud-backend` | 2988 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 40 |
-| **总计** | **5104** |
+| **总计** | **5113** |
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -896,29 +896,17 @@ NexusSky/
 - **前端测试覆盖 518 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）+
-  2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例 +
-  2026-10-25 首批 5 个面板的**组件级**直测 104 例（`BudgetBadge` 17 / `AlertFeed` 19 /
-  `DroneList` 19 / `DashboardPanel` 29 / `RouteTemplatePanel` 20）；
-  `npm run test:ci` 实测
-  518/518，37 个测试文件，分布在 `gcs-web/test/`（35）与 `gcs-web/src/`（2）两处）：
+  2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例；
+  `npm run test` 实测
+  518/518，32 个测试文件，分布在 `gcs-web/test/`（30）与 `gcs-web/src/`（2）两处）：
   `npm run test` 已在 CI 的 GCS Web job 门禁。
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
   而加测试不会让任何东西变红。
-  选的是**已确认缺陷**加相关契约，不是全量覆盖。
-  **组件覆盖的真实口径**（2026-10-25 现查，判据写出来才能被复算）：`src/components/*.jsx`
-  共 **57** 个；`panelSmoke.test.jsx` 按 `*Panel.jsx` 且含 `className="page` 认出**页面级面板 37** 个，
-  真渲染 **35** 个、**2** 个因 jsdom 环境跳过（`Trajectory3DPanel` 要 `window.THREE`、
-  `SurveillancePanel` 要 `window.Hls` + 真 video 播放）；被 panelSmoke **之外**的测试按路径
-  import 做组件级直测的 **20** 个（其中页面级面板 12 个）；**两条链都进不去的 13 个**
-  （`ErrorBoundary` `HardwarePanel` `LoginPanel` `MapView` `MissionPlanner` `NavGroups`
-  `Scene3D` `SprayPanel` `TenantPanel` `Trajectory3D` `Trajectory3DPanel` `UserPanel` `VisionPanel`）。
-  此前这里写的是"49 个 `.jsx` 里 47 个零测试，且最大的三个（`UnifiedCommandPanel.jsx` 1451 行 /
-  `api.js` 1337 行 / `MapView.jsx` 1016 行）均无测试文件"——2026-10-24 起三处都不成立：
-  `.jsx` 实数 59，`UnifiedCommandPanel.jsx` 现 1686 行且 `test/unifiedCommandWiring.test.jsx`
-  就在挂载它，`api.js` 现 1502 行且有 `src/api.test.js` + `test/apiCancelSignal.test.js`；
-  真正"最大且无直测"的是 `MapView.jsx`（1112 行）。
-  新增的 `FleetOpsPanel.jsx`（256 行）亦无组件级测试（其逻辑已全部下沉到
+  选的是**已确认缺陷**加相关契约，不是全量覆盖——59 个 `.jsx` 组件里 **40 个零测试**，
+  且最大的三个（`UnifiedCommandPanel.jsx` 1451 行 / `api.js` 1337 行 /
+  `MapView.jsx` 1016 行）均无测试文件，只受 lint + build 保护。
+  新增的 `FleetOpsPanel.jsx` 亦无组件级测试（其逻辑已全部下沉到
   `utils/schedulingFrames.js` 纯函数并直测——与第二批"先把与 React 无关的逻辑抽出来
   再测"的做法一致）。
   覆盖率阈值仍未设（`vitest.config.js:20-27` 显式注明理由：基线原为零，一上来卡阈值
@@ -1089,7 +1077,7 @@ NexusSky/
 - **视频融合面板（`VideoFusionPanel`）后端已补齐**（2026-10-03 第七轮核查发现当时未实现，
   2026-10-06 补齐）：该面板（GCS `videofusion` 视图）调用的 410 个端点
   `/api/v1/video-fusion/surveillance/streams`、`/drone/feeds`、
-  `/recording/{id}/start|stop` 此前在后端**没有对应 Controller**，面板运行期必然 404——
+  `/recording/{id}/start|stop` 此前在后端**没有对应 Controller**，面板运行期必然 518——
   而 `videofusion` 已在 `EMERGENCY_STANDARD_PANELS`（"应急千元级"）里作为**已定价能力**
   对外存在。现新增 `surveillance/VideoFusionController`（+ 5 个端点、12 例测试），
   数据源全部复用既有服务：安防流取 `SurveillanceDeviceRegistry.listDevices()`
