@@ -40,7 +40,7 @@ describe('单一真相源：组件不得再自行定义已抽出的函数', () =
   // 且 #156 的注释明写"阈值 15/30 保持本面板原有口径"——那是另一个会话已经合并的、
   // 有意的产品决策。把它判红等于用一条测试替别人改产品口径；正确动作是先要决策
   // （已登记 .coord/GAPS.md 第八节）。等口径定了，再把这个名字加回来。
-  const FORBIDDEN = ['battClass', 'battColor', 'battColorVar', 'batteryClass', 'normPriority', 'normSeverity', 'haversine', 'fmtDur', 'circularLayout', 'gradeColor', 'fmtPct', 'fmtMs', 'fmtBattery', 'normBatteryPct']
+  const FORBIDDEN = ['battClass', 'battColor', 'battColorVar', 'batteryClass', 'normPriority', 'normSeverity', 'haversine', 'fmtDur', 'circularLayout', 'gradeColor', 'fmtPct', 'fmtMs', 'fmtBattery', 'normBatteryPct', 'flightStatsOf', 'fmtMeters']
 
   for (const fn of FORBIDDEN) {
     it(`src/components 下没有组件再定义 ${fn}()`, () => {
@@ -126,10 +126,28 @@ describe('单一真相源：引用方确实接到了共享实现', () => {
     })
   }
 
-  it('App.jsx 从 utils 导入 haversine / fmtDur', () => {
+  // 2026-10-25：`App.jsx` 里那段"航程 / 时长 / 最高高度"的内联计算抽进了
+  // `utils/flightStats.js`（GAPS §八-2：没轨迹时它返回 `maxAlt: 0`，而展示层用真值判断
+  // ⇒ 贴地飞行和"还没有轨迹"在界面上都是 `--`）。这条断言的被钉对象随之换了，
+  // 但**目的没变**：引用方必须接共享实现 —— 而且"抽取"本身会带来新风险：有人顺手再抄一份。
+  it('App.jsx 经 utils/flightStats 使用共享的 haversine，且不再自己算距离', () => {
     const src = read(join(SRC, 'App.jsx'))
-    expect(src).toMatch(/import\s*\{[^}]*\bhaversine\b[^}]*\}\s*from\s*'\.\/utils\/geo'/)
     expect(src).toMatch(/import\s*\{[^}]*\bfmtDur\b[^}]*\}\s*from\s*'\.\/utils\/format'/)
+    expect(src).toMatch(/import\s*\{[^}]*\bflightStatsOf\b[^}]*\}\s*from\s*'\.\/utils\/flightStats'/)
+    // 抽取成功的判据：App.jsx 里不该再出现 haversine 调用（引用方换成了 flightStats.js）
+    expect(src).not.toMatch(/\bhaversine\s*\(/)
+    const stats = read(join(SRC, 'utils', 'flightStats.js'))
+    expect(stats).toMatch(/import\s*\{[^}]*\bhaversine\b[^}]*\}\s*from\s*'\.\/geo\.js'/)
+  })
+
+  it('全 src 只有 utils/geo.js 定义 haversine（抽取之后更要防"顺手再抄一份"）', () => {
+    const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const full = join(dir, e.name)
+      return e.isDirectory() ? walk(full) : (/\.jsx?$/.test(e.name) ? [full] : [])
+    })
+    const definers = walk(SRC).filter((f) =>
+      /\b(?:function\s+haversine\b|const\s+haversine\s*=)/.test(stripComments(read(f))))
+    expect(definers).toEqual([join(SRC, 'utils', 'geo.js')])
   })
 })
 

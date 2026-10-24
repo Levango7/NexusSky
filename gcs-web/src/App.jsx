@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { haversine } from './utils/geo'
+import { flightStatsOf, fmtMeters } from './utils/flightStats'
 import { fmtDur } from './utils/format'
 import MapView from './components/MapView.jsx'
 import DroneList from './components/DroneList.jsx'
@@ -168,15 +168,9 @@ export default function App() {
   const selected = drones.find((d) => d.sysid === selectedSysid)
   const onlineCount = drones.filter((d) => d.online).length
 
-  // 飞行统计（从轨迹实时计算：航程 / 时长 / 最高高度）
-  const stats = useMemo(() => {
-    if (!track || track.length < 2) return { dist: 0, dur: 0, maxAlt: 0 }
-    let d = 0
-    for (let i = 1; i < track.length; i++) d += haversine(track[i - 1], track[i])
-    const dur = (track[track.length - 1].ts - track[0].ts) / 1000
-    const maxAlt = Math.max(...track.map((p) => p.alt || 0))
-    return { dist: d / 1000, dur, maxAlt }
-  }, [track])
+  // 飞行统计（航程 / 时长 / 最高高度）——算法在 utils/flightStats.js，可单测。
+  // maxAlt 为 null 表示"还没有可算的轨迹"，与"贴地飞过（0 米）"是两件事。
+  const stats = useMemo(() => flightStatsOf(track), [track])
 
   // 未认证时渲染登录面板
   if (!authed) {
@@ -585,7 +579,7 @@ export default function App() {
           <div className="stage-strip">
             <span>飞行时间 <b className="mono">{fmtDur(stats.dur)}</b></span>
             <span>航程 <b className="mono">{stats.dist >= 1 ? stats.dist.toFixed(2) + ' km' : Math.round(stats.dist * 1000) + ' m'}</b></span>
-            <span>最高高度 <b className="mono">{stats.maxAlt ? stats.maxAlt.toFixed(0) + ' m' : '--'}</b></span>
+            <span>最高高度 <b className="mono">{fmtMeters(stats.maxAlt)}</b></span>
             {selected && <span>链路 <b className="mono">UDP 14550</b></span>}
           </div>
         </main>

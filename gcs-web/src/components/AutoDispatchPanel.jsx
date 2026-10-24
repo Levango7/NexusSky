@@ -476,7 +476,7 @@ export default function AutoDispatchPanel() {
                         </button>
                       </div>
                       <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                        <span>无人机：{pick(d, 'droneCount', 'drones') || '--'}</span>
+                        <span>无人机：{pick(d, 'droneCount', 'drones') ?? '--'}</span>
                         {pick(d, 'lat') != null && pick(d, 'lon') != null && (
                           <span>位置：{Number(pick(d, 'lat')).toFixed(4)}, {Number(pick(d, 'lon')).toFixed(4)}</span>
                         )}
@@ -615,7 +615,7 @@ export default function AutoDispatchPanel() {
                         </span>
                       </div>
                       <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                        <span>无人机：{pick(d, 'droneCount', 'drones') || '--'}</span>
+                        <span>无人机：{pick(d, 'droneCount', 'drones') ?? '--'}</span>
                         <span>时间：{fmtTime(pick(d, 'triggeredAt', 'createdAt', 'timestamp', 'completedAt'))}</span>
                       </div>
                     </div>
