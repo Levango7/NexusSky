@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 187 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 188 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 187 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 188 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -107,6 +107,103 @@ keystore 现值不一致 ⇒ "以为配过了，其实配的是旧密钥"那种�
   5092 那一份作废、改为上表的 5104；CHANGELOG 小节数随之 186→187。
 - 新增测试里三条是反向的：轮换被拒时 `never()` 记账、registry 缺席时报 `UNAVAILABLE`、
   `persist=false` 时不落库但内存可读——只断言"成功路径写上了"是拦不住"失败也写"的。
+
+## [Unreleased] — 前端组件级测试补口 121 例；顺着它挖出电量 -1「未知」哨兵被画成红色 -1%、三套阈值并存，以及一条按变量名判范围因而一直看不见案发现场的守卫（2026-10-24）
+
+### 1. 补口：5 个面板第一次被真实挂载
+
+`@testing-library/react` 早就在 devDependencies 里，却只有少数面板用得上。本轮新增
+`test/budgetBadge.test.jsx`(17) / `alertFeed.test.jsx`(19) / `droneList.test.jsx`(19) /
+`dashboardPanel.test.jsx`(29) / `routeTemplatePanel.test.jsx`(20)——全部 `render()` 真实组件、
+断言真实 DOM，**不在测试里复制组件的常量表**（`dockPanel.test.jsx` 旧版那种"镜像自证"：
+组件把表改错、甚至把面板删掉，测试照样全绿）。**本批净新增 104 例**（上列 5 个文件逐文件实测
+17+19+19+29+20），全量 `npm run test:ci` 实测 **`numTotalTests=518 / numPassedTests=518 /
+numFailedTests=0`**，37 个测试文件（`test/` 35 + `src/` 2）。
+> 这一节原先写的是「393 → 514、35 个文件」——那是本 PR 刚开出时 base 上的数；分支后来两次
+> rebase 到前进过的 master，base 已不是 393，而 514 也在与 #156 的 `fmtBattery` 收敛后被重测取代。
+> **改成只报「本批增量 + 终值」**，不再报一个已经对不上任何一次实测的箭头。
+
+最值钱的是 `RouteTemplatePanel`：四种模板类型各自要带不同的请求体字段
+（tower→`towers`+`orbitRadiusM/Points/hoverSec`、solar→`polygon`+`lineSpacingM/directionDeg`、
+pipeline→`line`+`stepM`、shoreline→`polygon`+`stepM`+`offsetM`），字段名拼错后端不会报错、
+只会给一条"看起来对"的航线——这形状此前一条测试都没钉。另钉住：切类型必清旧预览、
+坐标 JSON 语法错**不发请求**、4xx 带状态码、dispatch 两阶段里
+"任务已上传但启动失败（409）——先 ARM"这条唯一会被吞的错误、以及"上传失败就绝不喊启动"。
+
+### 2. 顺着补口挖到的真缺陷：`-1 = 未知电量` 这个后端哨兵，前端当成 -100% 红色
+
+出处不是猜的：`DroneSnapshot.java:29` 是 `public volatile int battery = -1; // %`，
+`TelemetrySnapshot.java:15` 明写"batteryPct — 电池电量百分比 [0,100]，**-1 表示未知**"。
+而 `utils/battery.js` 的 `battLevel()` 只把 `null/''/NaN` 当未知，负数一路落到
+`n <= 20 ⇒ 'crit'`。后果（全部有断言钉住）：
+- `DroneList` / `TelemetryPanel` / `RocPanel` / `CityTwinPanel` 把未知显示成 **`-1%` 并染红**；
+- `DashboardPanel` 的告警计数把每一台**从未上报过电量**的设备**各算一条告警**；
+- `TrackingPanel` 的本地副本更糟：`n <= 1 ? n * 100 : n` 把 **-1 算成 -100%**、
+  把真实的 **1% 说成 100%**（还是绿色）。
+
+修法走单一真相源：`battLevel()` 与新增的 `normBatteryPct()` 把负数判为未知，
+新增 `fmtBattery()`；`TrackingPanel`/`RocPanel` 的本地副本删掉。顺带把第三套阈值一并收掉——
+`RocPanel` 用的是 `>=50 绿 / >=25 黄 / 否则红`，`TrackingPanel` 曾用 `15/30`，
+`utils` 是 `20/40`：**同一架飞机三个面板三种颜色**，正是 `utils/battery.js` 头部注释
+声称已经消灭的那件事。prod 默认值与后端零改动。
+
+### 3. 一条按变量名判范围、因此对案发现场完全瞎掉的守卫
+
+`test/singleSourceOfTruth.test.js` 里那条"组件里也没有内联的电量阈值三元式"用的正则是
+`/batt\w*\s*<=\s*\d+/` 与 `/battery\w*\s*<=\s*\d+/`——**左值必须叫 batt\*/battery\* 才算**。
+而 `TrackingPanel` 那份副本写的是 `if (pct <= 15)`：左值叫 `pct`，两条都不认，
+于是这条守卫在它声称要防的事情正在发生的情况下，长期全绿。
+
+处置不是把正则放宽：实测 `towers.length <= 20`（`CellTowerPanel`）与 `for (i < 20)`
+（`ThermalOverlayPanel`）会被误报，而为了压误报加的白名单就是下一个盲区。改成把
+**被复制的函数名**纳入 `FORBIDDEN`（`fmtBattery` / `batteryColor` / `normBatteryPct`），
+并新增两条自证：① 把历史上那份 `TrackingPanel` 副本的形状塞进合成源码，守卫必须报出它；
+② 阈值形状正则自身也不是永真的。扩展生效的当场证据：`FORBIDDEN` 加上去之后，
+`RocPanel` 立刻被判红——那是**第二份**此前无人看见的本地副本。
+
+### 4. 两处诚实化小修
+
+- `AlertFeed.jsx:37` `new Date(a.ts)` 无守卫：`ts` 缺失就渲染出字面 **"Invalid Date"**。
+  改成占位 `--:--:--`（缺字段是"没数据"，不是"发生在无效时刻"）。
+- `RouteTemplatePanel.jsx:198` 直接 `result.waypoints.map(...)`：后端回 200 但没带
+  `waypoints` 时整个面板抛 TypeError。改成按数组判定，渲染 0 行。
+
+### 5. 收回三处过期的文档数字
+
+`README.md` 那段"49 个 `.jsx` 组件里 47 个零测试，且最大的三个
+（`UnifiedCommandPanel.jsx` 1451 行 / `api.js` 1337 行 / `MapView.jsx` 1016 行）均无测试文件"
+——2026-10-24 现查后三处都不成立：`.jsx` 实数 **59**（无直测 42，其中连冒烟都进不去的 15）；
+`UnifiedCommandPanel.jsx` 现在 **1686 行**且 `test/unifiedCommandWiring.test.jsx` 就在挂载它；
+`api.js` 现在 **1502 行**且有 `src/api.test.js` + `test/apiCancelSignal.test.js`。
+真正"最大且无直测"的是 `MapView.jsx`（1112 行）。已按实测重写该段并写明原判据。
+> **这里要留一条自我纠正的痕迹**：本段原先写"已按实测重写该段"，但那次 README 改写在与 #156
+> 的 rebase 冲突中**丢了**——分支里 `README.md:896` 仍是"404 例 / 32 个测试文件 / 47 个零测试"。
+> 是 `check-test-count-docs.py` 把它点出来的（`README.md:896 [前端] 声称 404，实测 518`、
+> `ROADMAP.md:25` 同），不是我自己看出来的。**"文档我已经改了"这句话的正确验证方式是让门禁
+> 对着文件重读一遍**，而不是记得改过。现已按最终实测重写，并把判据（页面级面板 37、真渲染 35、
+> SKIP 2、组件级直测 20、两条链都进不去 13）写进 README 本体，便于后来人复算。
+
+### 6. 验证
+
+- `npm run test:ci` ⇒ **518/518**，`numFailedTests=0`，`numTotalTestSuites=144`，退出码 0。
+- `npx eslint src --ext .js,.jsx` ⇒ **0 error**。
+- 前端声称由门禁自己核对（不是手算）：`python scripts/check-test-count-docs.py
+  --root <本树> --frontend-json gcs-web/vitest-report.json` 首轮点名 **2 处**
+  （`README.md:896`、`ROADMAP.md:25`，均「声称 404 → 实测 518」），按它点名的 `(文件, 行)`
+  逐行重驱动后复跑 ⇒ 前端 0 处不符。同一轮门禁实测 Java **5094 用例 / 0 失败 / 0 错误**
+  （593 个测试类，来自本树 fresh `mvn -B -o test` 的 surefire 报告，`MVN_EXIT=0` 先断言再用），
+  文档里的 Java 声称全部落在 5094 上，本批不动。
+- 本批**不动任何 Java 测试**；Java 侧数字与 master 一致（`5094` 由本次 fresh 运行复核）。
+
+### 7. 登记进 `.coord/GAPS.md` 而**不在本批动**的（都是补口时顺手量到的，不是猜的）
+
+`App.jsx:588` `stats.maxAlt ? … : '--'` 把 0 米当成缺失；`ShowPanel.jsx:450-451` 的
+`|| '--'` 与同文件 `!=null` 口径互斥；`FormationPanel.jsx:810` 只判 `lat != null` 就取
+`lon.toFixed(5)`；`RocPanel.jsx:103` `Number('') === 0` 会去拉 0 号席位；
+`HardwarePanel.jsx:178` / `SprayPanel.jsx:199` 的 `e.target.value ? Number(…)` 让 sysid=0
+选不中；`TelemetryPanel.jsx:112` 与 `CityTwinPanel.jsx:377` 的 `-1` 文本（本轮只统一了
+判级与颜色，这几处文案仍是裸值）；`MODE_LABEL` 三份各有不同缺省（`'待命'` / `'未知'` /
+原样透传）。逐条见 GAPS。
 
 ## [Unreleased] — 签名密钥热更的毫秒级竞态：写完不等于对方立刻看得见（2026-10-24）
 

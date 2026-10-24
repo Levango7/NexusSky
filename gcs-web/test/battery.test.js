@@ -4,6 +4,7 @@ import {
   battColor,
   battColorVar,
   battLevel,
+  normBatteryPct,
   fmtBattery,
   BATT_OK,
   BATT_WARN,
@@ -71,9 +72,10 @@ describe('battery: 三个访问器判级必须完全一致', () => {
   // 这是本次去重的核心断言：抽出前 battClass/battColor/battColorVar 在 6 个地方
   // 各写各的，其中两处用 15/30、其余用 20/40 —— 同一架飞机换个面板就变色。
   // 三个访问器现在共用 battLevel，阈值只有一个来源。
-  const LEVEL_OF_CLASS = { 'batt-crit': 'crit', 'batt-warn': 'warn', 'batt-ok': 'ok' }
-  const LEVEL_OF_HEX = { [BATT_CRIT]: 'crit', [BATT_WARN]: 'warn', [BATT_OK]: 'ok' }
+  const LEVEL_OF_CLASS = { '': null, 'batt-crit': 'crit', 'batt-warn': 'warn', 'batt-ok': 'ok' }
+  const LEVEL_OF_HEX = { 'var(--dim)': null, [BATT_CRIT]: 'crit', [BATT_WARN]: 'warn', [BATT_OK]: 'ok' }
   const LEVEL_OF_VAR = {
+    'var(--dim)': null,
     'var(--crit)': 'crit',
     'var(--warn)': 'warn',
     'var(--ok)': 'ok',
@@ -145,5 +147,36 @@ describe('battery: fmtBattery', () => {
   it('withUnit=false 时只给数字（供调用方自己拼单位）', () => {
     expect(fmtBattery(85, false)).toBe('85')
     expect(fmtBattery(-1, false)).toBe('--')
+  })
+})
+
+describe('battery: 后端的 -1「未知」哨兵在**判级层**也不算"电量极低"（2026-10-24 补）', () => {
+  // fmtBattery 那半边由 #156 修掉了；这里补的是**判级**那半边——
+  // battLevel 此前只把 null/''/NaN 当未知，负数一路落到 `n <= 20 ⇒ crit`，
+  // 于是"从未上报过电量"的设备会被染红、并在 DashboardPanel 的告警计数里白占一条。
+  // 出处（不是猜测）：cloud-backend/.../gateway/DroneSnapshot.java 的
+  //   `public volatile int battery = -1;          // %`
+  // 与 cloud-backend/.../health/TelemetrySnapshot.java 的
+  //   "batteryPct — 电池电量百分比 [0,100]，-1 表示未知"
+  it.each([-1, -0.5, -100, -Infinity])('%s → 判级 null、不套任何类', (v) => {
+    expect(battLevel(v)).toBeNull()
+    expect(battClass(v)).toBe('')
+    expect(battColor(v)).not.toBe(BATT_CRIT)
+    expect(normBatteryPct(v)).toBeNull()
+  })
+
+  it('0 与 1 都是真实读数，不被"负数=未知"误伤', () => {
+    expect(battLevel(0)).toBe('crit')
+    expect(battLevel(1)).toBe('crit')
+    expect(normBatteryPct(1)).toBe(1)
+  })
+
+  it('三访问器在未知区上一致：null / undefined / 空串 / NaN / 负数都是"无着色"', () => {
+    for (const v of [null, undefined, '', NaN, -1]) {
+      expect(battLevel(v)).toBeNull()
+      expect(battClass(v)).toBe('')
+      expect(battColor(v)).not.toBe(BATT_CRIT)
+      expect(battColorVar(v)).not.toBe('var(--crit)')
+    }
   })
 })

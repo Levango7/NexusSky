@@ -36,7 +36,11 @@ function stripComments(src) {
 const files = allComponentFiles()
 
 describe('单一真相源：组件不得再自行定义已抽出的函数', () => {
-  const FORBIDDEN = ['battClass', 'battColor', 'battColorVar', 'batteryClass', 'normPriority', 'normSeverity', 'haversine', 'fmtDur', 'circularLayout', 'gradeColor', 'fmtPct', 'fmtMs']
+  // 'batteryColor' **刻意不在名单里**：master 上 `TrackingPanel.jsx:67` 仍本地定义它，
+  // 且 #156 的注释明写"阈值 15/30 保持本面板原有口径"——那是另一个会话已经合并的、
+  // 有意的产品决策。把它判红等于用一条测试替别人改产品口径；正确动作是先要决策
+  // （已登记 .coord/GAPS.md 第八节）。等口径定了，再把这个名字加回来。
+  const FORBIDDEN = ['battClass', 'battColor', 'battColorVar', 'batteryClass', 'normPriority', 'normSeverity', 'haversine', 'fmtDur', 'circularLayout', 'gradeColor', 'fmtPct', 'fmtMs', 'fmtBattery', 'normBatteryPct']
 
   for (const fn of FORBIDDEN) {
     it(`src/components 下没有组件再定义 ${fn}()`, () => {
@@ -59,6 +63,44 @@ describe('单一真相源：组件不得再自行定义已抽出的函数', () =
       offenders.map((o) => o.name),
       '电量阈值只能来自 utils/battery 的常量；内联阈值会造成同一架飞机在不同面板显示不同颜色'
     ).toEqual([])
+  })
+
+  // 上面那条按**变量名**判范围，所以它有盲区：TrackingPanel 的本地副本写的是
+  // `if (pct <= 15) return 'var(--crit)'`——左边叫 pct，两条正则都不认，
+  // 于是"15/30 与 20/40 并存"这件它声称要防的事，实际防了整整一年都没红过。
+  // 修法不是把正则放宽（实测会误报 CellTowerPanel 的 `towers.length <= 20` 与
+  // ThermalOverlay 的 `for (i < 20)`，而为了压误报加的白名单就是下一个盲区），
+  // 而是把**被复制的那个函数名**纳入 FORBIDDEN：batteryColor / fmtBattery / normBatteryPct。
+  // 下面这条自证钉住"这个扩展本身有效"——把历史形状塞进合成源码，守卫必须报出它。
+  it('自证：守卫能抓住历史上那份 TrackingPanel 本地副本', () => {
+    const HISTORIC_COPY = [
+      'function fmtBattery(b) {',
+      '  if (b == null) return \'--\'',
+      '  const n = Number(b)',
+      '  const pct = n <= 1 ? n * 100 : n',
+      '  return pct.toFixed(0) + \'%\'',
+      '}',
+      'function batteryColor(b) {',
+      '  const pct = Number(b)',
+      '  if (pct <= 15) return \'var(--crit)\'',
+      '  return \'var(--ok)\'',
+      '}',
+    ].join('\n')
+    const flagged = ['fmtBattery', 'batteryColor', 'normBatteryPct'].filter((fn) =>
+      new RegExp(`(?:function\\s+${fn}\\s*\\(|const\\s+${fn}\\s*=)`).test(stripComments(HISTORIC_COPY))
+    )
+    expect(flagged).toEqual(expect.arrayContaining(['fmtBattery', 'batteryColor']))
+    // 上面证的是"形状抓得到"，下面证的是"实际入册的是哪两个"——
+    // 'batteryColor' **没入册**（#156 有意保留 TrackingPanel 的 15/30，见上方注释与 GAPS）。
+    // 这一对断言的意义：将来有人悄悄把 FORBIDDEN 改回去、或把 batteryColor 塞进来却不改注释，
+    // 都会在这里被抓住，而不是只留一段自说自话。
+    expect(FORBIDDEN).toEqual(expect.arrayContaining(['fmtBattery', 'normBatteryPct']))
+    expect(FORBIDDEN).not.toContain('batteryColor')
+  })
+
+  it('自证：阈值形状守卫自身也不是永真的（能抓住 batt<= 的写法）', () => {
+    const SYNTH = 'const s = batt => (batt <= 15 ? "crit" : "ok")'
+    expect(/batt\w*\s*<=\s*\d+/.test(SYNTH)).toBe(true)
   })
 })
 

@@ -26,20 +26,39 @@ export const BATT_WARN_AT = 40
 /**
  * 电量分级（唯一判级函数，其余两个只是把同一结果翻译成不同表现形式）。
  *
- * 契约：`null` / `undefined` / 空串 / NaN 一律返回 `null`（表示"未知"，不套任何样式），
- * **不是**返回 'batt-ok' / 绿色——把"没数据"画成"电量充足"是误导。
+ * 契约：`null` / `undefined` / 空串 / NaN / **任何负数**一律返回 `null`（表示"未知"，不套任何样式），
+ * **不是**返回 'batt-crit' / 绿色——把"没数据"画成"电量充足"是误导，画成"红色告警"同样是误导。
  * 空串必须单独判掉：JS 里 `Number('') === 0`，不特判会被当成 0% 电量显示成红色。
+ *
+ * 负数也是"没数据"，不是"电量极低"——这是后端的显式哨兵，不是我们的猜测：
+ * `cloud-backend/.../gateway/DroneSnapshot.java` 的 `public volatile int battery = -1; // %`
+ * 与 `cloud-backend/.../health/TelemetrySnapshot.java` 的
+ * "batteryPct — 电池电量百分比 [0,100]，-1 表示未知"。
+ * 在这一条修掉之前，一架从未上报过电量的设备会：显示 `-1%`、染成红色，
+ * 并且在 DashboardPanel 的告警计数里**白占一条告警**。
  *
  * @param {*} b 电量百分比
  * @returns {'crit'|'warn'|'ok'|null}
  */
 export function battLevel(b) {
-  if (b == null || b === '') return null
-  const n = Number(b)
-  if (Number.isNaN(n)) return null
+  const n = normBatteryPct(b)
+  if (n == null) return null
   if (n <= BATT_CRIT_AT) return 'crit'
   if (n <= BATT_WARN_AT) return 'warn'
   return 'ok'
+}
+
+/**
+ * 电量 → 可比较的百分比数值；`null` = 未知（判据与 {@link battLevel} 完全同源）。
+ *
+ * @param {*} b 电量百分比
+ * @returns {number|null}
+ */
+export function normBatteryPct(b) {
+  if (b == null || b === '') return null
+  const n = Number(b)
+  if (Number.isNaN(n) || n < 0) return null
+  return n
 }
 
 /**

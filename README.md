@@ -893,20 +893,32 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 404 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 518 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）+
-  2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例；
-  `npm run test` 实测
-  404/404，32 个测试文件，分布在 `gcs-web/test/`（30）与 `gcs-web/src/`（2）两处）：
+  2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例 +
+  2026-10-25 首批 5 个面板的**组件级**直测 104 例（`BudgetBadge` 17 / `AlertFeed` 19 /
+  `DroneList` 19 / `DashboardPanel` 29 / `RouteTemplatePanel` 20）；
+  `npm run test:ci` 实测
+  518/518，37 个测试文件，分布在 `gcs-web/test/`（35）与 `gcs-web/src/`（2）两处）：
   `npm run test` 已在 CI 的 GCS Web job 门禁。
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
   而加测试不会让任何东西变红。
-  选的是**已确认缺陷**加相关契约，不是全量覆盖——49 个 `.jsx` 组件里 **47 个零测试**，
-  且最大的三个（`UnifiedCommandPanel.jsx` 1451 行 / `api.js` 1337 行 /
-  `MapView.jsx` 1016 行）均无测试文件，只受 lint + build 保护。
-  新增的 `FleetOpsPanel.jsx` 亦无组件级测试（其逻辑已全部下沉到
+  选的是**已确认缺陷**加相关契约，不是全量覆盖。
+  **组件覆盖的真实口径**（2026-10-25 现查，判据写出来才能被复算）：`src/components/*.jsx`
+  共 **57** 个；`panelSmoke.test.jsx` 按 `*Panel.jsx` 且含 `className="page` 认出**页面级面板 37** 个，
+  真渲染 **35** 个、**2** 个因 jsdom 环境跳过（`Trajectory3DPanel` 要 `window.THREE`、
+  `SurveillancePanel` 要 `window.Hls` + 真 video 播放）；被 panelSmoke **之外**的测试按路径
+  import 做组件级直测的 **20** 个（其中页面级面板 12 个）；**两条链都进不去的 13 个**
+  （`ErrorBoundary` `HardwarePanel` `LoginPanel` `MapView` `MissionPlanner` `NavGroups`
+  `Scene3D` `SprayPanel` `TenantPanel` `Trajectory3D` `Trajectory3DPanel` `UserPanel` `VisionPanel`）。
+  此前这里写的是"49 个 `.jsx` 里 47 个零测试，且最大的三个（`UnifiedCommandPanel.jsx` 1451 行 /
+  `api.js` 1337 行 / `MapView.jsx` 1016 行）均无测试文件"——2026-10-24 起三处都不成立：
+  `.jsx` 实数 59，`UnifiedCommandPanel.jsx` 现 1686 行且 `test/unifiedCommandWiring.test.jsx`
+  就在挂载它，`api.js` 现 1502 行且有 `src/api.test.js` + `test/apiCancelSignal.test.js`；
+  真正"最大且无直测"的是 `MapView.jsx`（1112 行）。
+  新增的 `FleetOpsPanel.jsx`（256 行）亦无组件级测试（其逻辑已全部下沉到
   `utils/schedulingFrames.js` 纯函数并直测——与第二批"先把与 React 无关的逻辑抽出来
   再测"的做法一致）。
   覆盖率阈值仍未设（`vitest.config.js:20-27` 显式注明理由：基线原为零，一上来卡阈值
