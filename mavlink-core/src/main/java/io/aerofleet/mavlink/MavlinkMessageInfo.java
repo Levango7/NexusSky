@@ -61,6 +61,10 @@ public final class MavlinkMessageInfo {
         INFOS[76]  = new Info(33, 152);   // COMMAND_LONG
         INFOS[77]  = new Info(10, 143);   // COMMAND_ACK
         INFOS[242] = new Info(60, 104);   // HOME_POSITION
+        // 2026-10-24 补：飞行阶段（与机型无关的 landed_state）。
+        // 此前只能靠 HEARTBEAT.custom_mode 猜，而 custom_mode 是固件相关的导航状态，
+        // PX4 与 ArduPilot 对同一数字解释不同 —— 官方为此单独定义了这条消息。
+        INFOS[245] = new Info(2, 130);    // EXTENDED_SYS_STATE
         INFOS[253] = new Info(54, 83);    // STATUSTEXT
         INFOS[109] = new Info(9, 185);    // RADIO_STATUS（官方 CRC_EXTRA=185；
                                             // 原为 88，与 pymavlink 官方定义不符）

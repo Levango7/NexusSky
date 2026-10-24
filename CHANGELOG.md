@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 183 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 184 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 183 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 184 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,82 @@
 
 
 ---
+## [Unreleased] — 接真机的第一块砖：EXTENDED_SYS_STATE 让"起飞中/降落中"有官方依据；顺带补齐 land 命令（2026-10-24）
+
+### 1. 为什么是这条
+
+产品级盘点（`GAPS.md` 第九节）把「软硬件结合」列为最大实质缺口：遥测**读取**是完整的
+（电池/位置/姿态/GPS/链路都从标准消息提取），但 PX4 常用消息里有一批**全仓零实现**，
+其中影响最直接的是 `EXTENDED_SYS_STATE`(#245) —— 它承载 `landed_state`
+（地面 / 空中 / 起飞中 / 降落中）。
+
+在这之前，`MavlinkMessage.decode()` 的 switch 没有 245 分支，落到 `default: return null`，
+**整帧被丢弃**；GCS 上"起飞中 / 降落中"只能靠 `HEARTBEAT.custom_mode` 猜，而 custom_mode
+是**固件相关的导航状态**——PX4 与 ArduPilot 对同一个数字的解释不同。接真机后这两句话
+只有 landed_state 有资格说。
+
+### 2. 做了什么
+
+| 位置 | 改动 |
+|---|---|
+| `mavlink-core/.../messages/ExtendedSysState.java` | 新增消息类（ID=245, LEN=2, 编解码 + `landedStateName()`） |
+| `MavlinkMessageInfo` | `INFOS[245] = Info(2, 130)` |
+| `MavlinkMessage.decode()` | 加 `case ExtendedSysState.ID`（此前落到 default 被丢弃） |
+| `DroneSnapshot` | 新增 `landedState` / `vtolState`（-1 = 尚未收到） |
+| `TelemetrySnapshotListener` | 新增 `onExtendedSysState` 监听器 |
+| `DroneController.sendCommand` | 补 `case "land"` → `MAV_CMD_NAV_LAND(21)` |
+
+`land` 那条是盘点时顺带发现的**同动作两条路径支持度不一致**：`/roc/seats/{id}/commands`
+一直有 `land`，而 `/drones/{sysid}/commands` 没有——第三方走 REST 想降落只能自己填
+`raw` 的 `cmd=21`。
+
+### 3. 怎么证明它是对的（本节是重点）
+
+CRC_EXTRA 填错时**本地一切正常、对端整帧丢弃**——自己发给自己当然能通。所以判据不是
+"代码看起来对"，而是**与 pymavlink 生成的官方帧逐字节相等**：
+
+```
+vtol=3, landed=1 → fd 02 00 00 00 01 01 f5 00 00 03 01 72 06
+vtol=3, landed=2 → fd 02 00 00 00 01 01 f5 00 00 03 02 1a 2c
+vtol=3, landed=3 → fd 02 00 00 00 01 01 f5 00 00 03 03 c2 35
+vtol=3, landed=4 → fd 02 00 00 00 01 01 f5 00 00 03 04 ca 78
+```
+
+`f5 00 00` 是 msgId 245 的小端，末尾两字节是帧 CRC —— 它把 CRC_EXTRA=130 钉死了。
+`ExtendedSysStateTest.frameMatchesPymavlinkByteForByte` 断言 Java 侧
+`toFrame(1,1,0).encodeV2()` 与上面四行**逐字节相等**；另有三条校准用例（HEARTBEAT /
+ATTITUDE / GLOBAL_POSITION_INT）先证明算法本身正确。
+
+同时 `MavlinkCrcExtraTest` 的 `SIGNATURES` 加了 245 的字段签名，由 `MavlinkMessageChecksum`
+**独立重算**并与线上常量比对（108 条参数化用例全过）——以后谁改了字段忘了重算 CRC，
+构建会红。
+
+### 4. 验证
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| `ExtendedSysStateTest`（7 条） | 全绿 | **7/7**（含帧字节对等、CRC=130、分发不再返回 null） |
+| `MavlinkCrcExtraTest`（108 条） | 全绿 | **108/108** |
+| `DroneControllerTest`（20 条） | 全绿 | **20/20**（含新增 land 被接受、未知命令仍拒） |
+| 全仓 Java 测试 | 全绿 | **5093 用例 / 593 类 / 0 失败** |
+| 测试数文档门禁 | 全部一致 | **全部一致** |
+
+### 5. 为什么没一起做 AUTOPILOT_VERSION（诚实交代）
+
+盘点时列了 8 类未实现消息，逐条判读后**6 类有替代或不需要**，值得补的是两条。
+`AUTOPILOT_VERSION`(#148) 本轮**没做**：它 12 个字段、官方 LEN=78 / CRC_EXTRA=178，
+我用官方算法复算得到 39（长度对、CRC 不对），说明字段顺序/数组长度还有细节没对齐。
+pymavlink 已确认官方参数（`ordered_fieldnames` + `crc_extra=178`），
+**下次按它逐字段对齐后再补**——不做"填个数字看起来能跑"的半成品。
+
+### 6. 顺带澄清一条此前的判断
+
+上一轮（#154）写过「本地 `check-test-count-docs.py` 报的 22 处不一致是 surefire 残缺假象」。
+本轮把全仓 Java 测试**完整跑了一遍**后复核：门禁输出 **「全部一致」**（同步掉本 PR 新增的
+11 个用例后）。⇒ 那个判断成立：**本地残缺时不能改文档，完整跑之后才可信**。
+
+---
+
 ## [Unreleased] — 两个前端缺陷先补测试再修：RocPanel 空席位会去拉 0 号、FormationPanel 半坐标渲染崩溃（2026-10-24）
 
 ### 1. 选题来源：`GAPS.md` 第八节，Qoder 登记但明确「没动」的两条

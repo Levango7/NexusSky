@@ -61,6 +61,9 @@ class MavlinkCrcExtraTest {
 
     /** {@code {msgId, 消息名, 字段签名}}；由 scripts/mavlink-crc-extra-gen.py --emit-java 生成。 */
     private static final Object[][] SIGNATURES = {
+        // 2026-10-24 新增：官方标准消息（PX4/ArduPilot 均下发），CRC_EXTRA 由 pymavlink 的
+        // MAVLink_extended_sys_state_message.crc_extra 核对 = 130，与本仓库算法重算一致。
+        {245, "EXTENDED_SYS_STATE", new Field[]{F(U8, "vtol_state"), F(U8, "landed_state")}},
         {30000, "LED_CONTROL", new Field[]{F(U8, "colorR"), F(U8, "colorG"), F(U8, "colorB"), F(U8, "pattern"), F(U8, "brightness"), F(U8, "freq"), F(U8, "flags"), F(U32, "phaseStartUs"), F(U8, "targetSystem"), F(U8, "targetComp"), F(U8, "reserved"), F(U8, "ledIndex"), F(U16, "transitionMs"), F(U8, "reserved2")}},
         {30001, "ENVIRONMENT_ALERT", new Field[]{F(U8, "alertType"), F(U8, "severity"), F(I16, "value"), F(I16, "threshold"), F(CH, "text", 40)}},
         {30002, "ENVIRONMENT_STATUS", new Field[]{F(U8, "humidity"), F(U8, "weather"), F(U8, "rainRate"), F(I16, "temperature"), F(U16, "windSpeed"), F(U16, "windDirection"), F(I16, "gust"), F(U16, "visibility")}},
