@@ -79,6 +79,10 @@ public abstract class MavlinkMessage {
                 return CameraFovStatus.decode(frame);
             case RadioStatus.ID:
                 return RadioStatus.decode(frame);
+            // 2026-10-24：飞行阶段。不接的话真机发来的这一帧会在下面的 default 里
+            // 变成 null 被整个丢掉 —— GCS 上"起飞中/降落中"就永远只能靠 custom_mode 猜。
+            case ExtendedSysState.ID:
+                return ExtendedSysState.decode(frame);
             case MissionItemInt.ID:
                 return MissionItemInt.decode(frame);
             case CommandLong.ID:

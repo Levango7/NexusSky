@@ -5,6 +5,7 @@ import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.Attitude;
 import io.aerofleet.mavlink.messages.EnvironmentAlert;
 import io.aerofleet.mavlink.messages.EnvironmentStatus;
+import io.aerofleet.mavlink.messages.ExtendedSysState;
 import io.aerofleet.mavlink.messages.GlobalPositionInt;
 import io.aerofleet.mavlink.messages.GpsRawInt;
 import io.aerofleet.mavlink.messages.Heartbeat;
@@ -137,6 +138,22 @@ public class TelemetrySnapshotListener {
         s.roll = Math.toDegrees(a.roll);
         s.pitch = Math.toDegrees(a.pitch);
         s.yaw = Math.toDegrees(a.yaw);
+    }
+
+    /**
+     * 飞行阶段（EXTENDED_SYS_STATE，2026-10-24）。
+     * <p>
+     * 之前这条消息在 {@code MavlinkMessage.decode()} 里落到 default 返回 null，被整帧丢弃——
+     * 于是 GCS 上"起飞中 / 降落中"只能靠 HEARTBEAT.custom_mode 猜，而 custom_mode 是
+     * 固件相关的导航状态（PX4 与 ArduPilot 枚举不同）。接上后 landed_state 是与机型无关的真值。
+     */
+    @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.ExtendedSysState).ID")
+    public void onExtendedSysState(MavlinkMessageEvent event) {
+        int sysid = event.getSysid();
+        ExtendedSysState e = (ExtendedSysState) event.getMessage();
+        DroneSnapshot s = registry.registerIfAbsent(sysid);
+        s.landedState = e.landedState;
+        s.vtolState = e.vtolState;
     }
 
     @EventListener(condition = "#event.msgId == T(io.aerofleet.mavlink.messages.GlobalPositionInt).ID")

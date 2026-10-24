@@ -3,7 +3,9 @@ package io.aerofleet.cloud.api.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
+import io.aerofleet.cloud.flightlog.FlightLogService;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.mission.common.DroneCommandService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +14,11 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyFloat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * DroneController REST 端点单测（机队列表 / 详情 / 遥测 / 航迹）。
@@ -172,6 +179,44 @@ class DroneControllerTest {
     }
 
     /** 构造任意 items 的 body：itemsJson 是 items 数组的原文。 */
+    @Test
+    @DisplayName("land 命令被接受并发出 MAV_CMD_NAV_LAND(21)（此前落到 default 抛 BadRequest）")
+    void landCommandAccepted() throws Exception {
+        // 背景（2026-10-24）：/drones/{sysid}/commands 的 switch 里此前只有
+        // arm/disarm/start_mission/rtl/takeoff/raw，**没有 land**；而
+        // /roc/seats/{id}/commands 是有的。同一个动作两条路径两种支持度，
+        // 第三方走 REST 想"降落"只能自己填 raw 的 cmd=21。
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        FlightLogService flightLog = mock(FlightLogService.class);
+        when(commands.command(eq(1), eq(21), anyFloat(), anyFloat(), anyFloat(),
+                anyFloat(), anyFloat(), anyFloat(), anyFloat())).thenReturn(0);
+
+        DroneController controller = new DroneController(registry, commands, flightLog);
+        JsonNode body = new ObjectMapper().readTree("{\"type\":\"land\"}");
+
+        Map<String, Object> resp = controller.sendCommand(1, body);
+
+        assertThat(resp.get("status")).isEqualTo("ok");
+        // 关键：不是"没抛错"就算过，要确认真的把 21 发出去了
+        verify(commands).command(eq(1), eq(21), anyFloat(), anyFloat(), anyFloat(),
+                anyFloat(), anyFloat(), anyFloat(), anyFloat());
+    }
+
+    @Test
+    @DisplayName("未支持的命令类型仍然抛 BadRequest（land 之外不得被静默接受）")
+    void unknownCommandStillRejected() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneController controller = new DroneController(registry,
+                mock(DroneCommandService.class), mock(FlightLogService.class));
+        JsonNode body = new ObjectMapper().readTree("{\"type\":\"self_destruct\"}");
+
+        assertThatThrownBy(() -> controller.sendCommand(1, body))
+                .hasMessageContaining("unsupported command type");
+    }
+
     private static JsonNode rawBody(String itemsJson) throws Exception {
         return new ObjectMapper().readTree("{\"items\":" + itemsJson + "}");
     }

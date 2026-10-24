@@ -203,6 +203,14 @@ public class DroneController {
                     commands.takeoff(sysid, alt);
                     yield "ACCEPTED";
                 }
+                // 2026-10-24 补：此前这条路径没有 land，而 /roc/seats/{id}/commands 有
+                // （RocController 里是 commands.command(sysid, 21, ...)）——同一个动作两条路径
+                // 两种支持度，第三方用 REST 想"降落"只能走 raw 填 cmd=21。这里补齐一等公民入口。
+                case "land" -> {
+                    commands.command(sysid, io.aerofleet.mavlink.enums.MavEnums.MAV_CMD_NAV_LAND,
+                            0, 0, 0, 0, 0, 0, 0);
+                    yield "ACCEPTED";
+                }
                 case "raw" -> {
                     // Passthrough for any MAV_CMD (camera protocol session
                     // commands 518/520/521 etc.): cmd + p1..p7 numeric.

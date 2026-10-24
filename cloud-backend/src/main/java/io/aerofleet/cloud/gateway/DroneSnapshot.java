@@ -66,6 +66,18 @@ public final class DroneSnapshot {
     /** Derived: 3D fix with enough satellites; false during gps-loss scenarios. */
     public volatile boolean gpsHealthy = true;
 
+    // --- 飞行阶段（EXTENDED_SYS_STATE, 2026-10-24）---
+    /**
+     * MAV_LANDED_STATE：0=UNDEFINED 1=ON_GROUND 2=IN_AIR 3=TAKEOFF 4=LANDING；-1 = 尚未收到该消息。
+     * <p>
+     * 为什么不能只用 {@link #mode}：mode 来自 HEARTBEAT.custom_mode，是**固件相关的导航状态**，
+     * PX4 与 ArduPilot 对同一数字的解释不同；landed_state 是官方定义的、与机型无关的飞行阶段。
+     * 接真机后"起飞中 / 降落中"这两句话只有它有资格说。
+     */
+    public volatile int landedState = -1;
+    /** MAV_VTOL_STATE：0=UNDEFINED 1=TRANS_TO_FW 2=TRANS_TO_MC 3=MC 4=FW；-1 = 尚未收到。 */
+    public volatile int vtolState = -1;
+
     // --- link quality (RADIO_STATUS, E1) ---
     /** Downlink RSSI [dBm]; NaN before the first RADIO_STATUS. */
     public volatile double rssiDbm = Double.NaN;
