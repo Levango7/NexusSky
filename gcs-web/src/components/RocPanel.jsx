@@ -28,7 +28,10 @@ export default function RocPanel() {
     try {
       const list = await fetch('/api/v1/roc/seats', { headers: auth() })
       if (list.ok) setSeats(await list.json())
-      if (seatRef.current != null) {
+      // 席位 ID 从 1 起分配（RocSeatService.idSeq = AtomicLong(1)），0 永远不是合法席位。
+      // 只判 != null 会让 0 通过（Number('') === 0）⇒ 去拉 /seats/0，而组件里
+      // `if (res.ok)` 没有 else 分支，那两个 4xx 会被静默吞掉（2026-10-24 修）。
+      if (seatRef.current != null && seatRef.current > 0) {
         const [v, i] = await Promise.all([
           fetch(`/api/v1/roc/seats/${seatRef.current}`, { headers: auth() }),
           fetch(`/api/v1/roc/seats/${seatRef.current}/incidents`, { headers: auth() }),
@@ -100,7 +103,7 @@ export default function RocPanel() {
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <input placeholder="操作员名" value={newOp} onChange={(e) => setNewOp(e.target.value)} style={{ width: 110, padding: 4 }} />
         <button onClick={createSeat} disabled={busy || !newOp}>创建席位</button>
-        <select value={seatId ?? ''} onChange={(e) => setSeatId(Number(e.target.value))} style={{ padding: 4 }}>
+        <select value={seatId ?? ''} onChange={(e) => setSeatId(e.target.value === '' ? null : Number(e.target.value))} style={{ padding: 4 }}>
           <option value="">选择席位…</option>
           {seats.map((s) => (
             <option key={s.seatId} value={s.seatId}>

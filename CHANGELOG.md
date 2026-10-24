@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 182 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 183 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 182 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 183 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,71 @@
 
 
 ---
+## [Unreleased] — 两个前端缺陷先补测试再修：RocPanel 空席位会去拉 0 号、FormationPanel 半坐标渲染崩溃（2026-10-24）
+
+### 1. 选题来源：`GAPS.md` 第八节，Qoder 登记但明确「没动」的两条
+
+Qoder 在 2026-10-24 前端组件级补口时逐行读过组件，登记了 8 条缺口，其中两条是**真缺陷**，
+但他写明了没修的原因——「**没有组件测试兜住这两个面板，改错没人发现**」。本轮就是把这两条补上：
+**先写测试让它红，再改，再让它绿**。
+
+### 2. 缺陷一：`RocPanel` 选回「选择席位…」会去拉 0 号席位
+
+`RocPanel.jsx` 的下拉框第一项是 `<option value="">选择席位…</option>`，onChange 写的是
+`setSeatId(Number(e.target.value))` —— 而 **`Number('') === 0`**。于是：
+
+- 操作员把席位选回「选择席位…」⇒ `seatId = 0`
+- `load()` 的守卫是 `if (seatRef.current != null)` —— **0 也满足**
+- ⇒ 真的发出 `GET /api/v1/roc/seats/0` 与 `/0/incidents`
+- 而后端席位 ID 从 **1** 起分配（`RocSeatService.idSeq = new AtomicLong(1)`），0 永远不是合法席位
+- 组件里 `if (v.ok)` / `if (i.ok)` **都没有 else 分支** ⇒ 两个 4xx 全程静默
+
+**测试复现（修之前跑出来的原文）**：
+
+    AssertionError: 不该请求 0 号席位，实际发了：
+    ["/api/v1/roc/seats/0","/api/v1/roc/seats/0/incidents"]
+
+**修法两处**：① onChange 空值映射成 `null`；② 加载守卫加 `> 0`（防其他路径传入 0）。
+
+### 3. 缺陷二：`FormationPanel` 目标坐标只有一半时渲染崩溃
+
+`MemberRow` 渲染坐标时写的是 `target.lat != null ? \`${lat.toFixed(5)}, ${lon.toFixed(5)}…\` : '--'`
+—— **只判了 lat，却无条件对 lon 调 `.toFixed()`**。WS 帧里单侧坐标是可能出现的
+（编队刚下发、飞机还没回报经度）。此时抛 **TypeError**，而 `FormationPanel` 第 70 行会
+**自动选中第一个编队** ⇒ 只要有编队就渲染，**不需要任何交互就会崩**。
+
+**测试复现**：`render()` 直接抛错，报错行正是 `target.lon.toFixed(5)`。
+
+**修法**：`target.lat != null && target.lon != null`（两个都齐才格式化）。
+
+### 4. 验证
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| 修复前：RocPanel 选回空 | 应红（复现） | 红，抓到 `/seats/0` 与 `/seats/0/incidents` |
+| 修复前：FormationPanel 半坐标 | 应红（复现） | 红，`render()` 抛 TypeError |
+| 修复后：两个文件 | 全绿 | **5/5 通过** |
+| 完整前端套件 | 全绿 | **32 files / 398 tests 通过** |
+| `check-frontend-endpoints.py` | 通过 | 通过（238 处调用） |
+| `check-repo-hygiene.py` | 通过 | 通过 |
+| `check-doc-counts.py` | 通过 | 通过 |
+
+两个测试都带**对照组**（选真实席位仍会请求该席位；完整坐标仍正常显示），防止「为了消除报错把功能关掉」。
+
+### 5. 一条必须写下来的判断：本地 `check-test-count-docs.py` 的 22 处「不一致」是假象
+
+修完后本地跑该门禁报 **22 处不一致**（Java 5082 vs 实测 4970、67 vs 78 个 `@RestController` 等）。
+**这不是文档腐烂，是本地 surefire 报告残缺**：
+
+- 本地 `cloud-backend/target/surefire-reports/` 只有 **333 个 XML**，而门禁自己说「来自 577 个测试类」；
+- 该目录的时间戳停在 **10-21 05:54**（三天前，且不完整）；
+- **master 上 `Docs test-count gate` 是 success** ⇒ CI 环境里文档与实测一致。
+
+⇒ **绝不能按本地的 4970 去改那 22 处文档**，那会把对的改成错的。本轮只同步了**确实被本 PR 改变**的
+前端用例数（393 → 398、测试文件 30 → 32 个，README:896 与 ROADMAP:25 两处）。
+
+---
+
 ## [Unreleased] — 变异基线的账目差收口：636/22 与 CI 的 635/23 都留下名字，并给基线加一条"五列必须加回 total"的判据（2026-10-24）
 
 ### 1. 现场：门禁每次绿，却也每次打一句没人解释的"差 1"
