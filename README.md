@@ -712,7 +712,7 @@ NexusSky/
 │       inspection, license, mapping, metrics, mission, orch, regulator, rid,
 │       scenario, scheduling, security, show, spi, surveillance, telemetry,
 │       tenant, tracking, twin, vision, voicecmd, webhook, write
-├── gcs-web/             React GCS（51 个组件文件，其中 49 个 .jsx 面板）
+├── gcs-web/             React GCS（59 个 .jsx 组件文件，其中 14 个已有直测）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
 ├── scripts/             start-all.cmd / e2e-smoke.sh / 89 个脚本（其中 44 个 e2e-*）
@@ -903,7 +903,7 @@ NexusSky/
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
   而加测试不会让任何东西变红。
-  选的是**已确认缺陷**加相关契约，不是全量覆盖——49 个 `.jsx` 组件里 **47 个零测试**，
+  选的是**已确认缺陷**加相关契约，不是全量覆盖——59 个 `.jsx` 组件里 **45 个零测试**，
   且最大的三个（`UnifiedCommandPanel.jsx` 1451 行 / `api.js` 1337 行 /
   `MapView.jsx` 1016 行）均无测试文件，只受 lint + build 保护。
   新增的 `FleetOpsPanel.jsx` 亦无组件级测试（其逻辑已全部下沉到

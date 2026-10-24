@@ -77,11 +77,17 @@ import os
 import re
 import shutil
 import sys
+import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 
 # 当前口径文档：这些文件里的单测数是对外声称，必须与实测一致。
 # 注意这里刻意不含 CHANGELOG.md——它是历史记录，改写等于篡改。
+# 组件覆盖声称的文法：「N 个 `.jsx` 组件里 M 个零测试」。
+# 刻意要求反引号包住 `.jsx`：README 里就是这么写的，多一个锚点少一类误匹配。
+COMPONENT_CLAIM = re.compile(
+    r'(\d+)\s*个\s*`\.jsx`\s*组件里\s*\*\*(\d+)\s*个零测试\*\*')
+
 CURRENT_DOCS = [
     'README.md',
     'ROADMAP.md',
@@ -458,6 +464,59 @@ def measure_frontend(report_path):
     return data['numTotalTests'], data['numPassedTests'], data['numFailedTests']
 
 
+def measure_components(root):
+    """实测 gcs-web 的组件直测覆盖。
+
+    返回 ``(组件总数, 有直测数, 零测试数)``。口径（写死在这里，免得各说各话）：
+
+    - **组件** = `gcs-web/src/**/*.jsx` 里导出的、被测试 import 过的那些；
+      更简单也更稳的口径是「src 下所有 .jsx 文件数」——把 `App.jsx` / `main.jsx`
+      这类入口也算进去。之所以不排除入口：排除规则本身会变成第二个要维护的真值源。
+    - **有直测** = 被**任一测试文件 import 过**的组件（`from '../src/components/X.jsx'`
+      或 `from '../components/X.jsx'`）。只认 import，不认文件名撞巧——一个组件
+      「碰巧与某测试同名」不算覆盖，这是本条要防的假象之一。
+
+    为什么要这个数：README 里「N 个 .jsx 组件里 M 个零测试」这句话**此前长期失真**
+    （Qoder 2026-10-24 在 GAPS 第八节记过：写 49/47，实为 59/42），而计数门禁只把
+    **用例数**纳入，**组件覆盖比例没有任何机器约束**，所以这类句子可以悄悄烂掉。
+    """
+    web = os.path.join(root, 'gcs-web')
+    src = os.path.join(web, 'src')
+    if not os.path.isdir(src):
+        return None
+
+    components = set()
+    for dirpath, dirnames, filenames in os.walk(src):
+        for fn in filenames:
+            if fn.endswith('.jsx'):
+                components.add(os.path.splitext(fn)[0])
+
+    test_files = []
+    for base in (os.path.join(web, 'test'), src):
+        for dirpath, dirnames, filenames in os.walk(base):
+            for fn in filenames:
+                if fn.endswith('.test.js') or fn.endswith('.test.jsx'):
+                    test_files.append(os.path.join(dirpath, fn))
+
+    tested = set()
+    imp = re.compile(r"from\s+'([^']*)'")
+    for tf in test_files:
+        try:
+            with open(tf, encoding='utf-8', errors='ignore') as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        for m in imp.finditer(text):
+            target = os.path.basename(m.group(1))
+            name = os.path.splitext(target)[0]
+            if name in components:
+                tested.add(name)
+
+    total = len(components)
+    covered = len(tested)
+    return total, covered, total - covered
+
+
 def find_conflict_marks(root, docs):
     """返回 [(rel, [行号...])]，命中的文档带有未解决的 merge 冲突标记。"""
     hits = []
@@ -683,7 +742,88 @@ def self_test():
         shutil.rmtree(tmp, ignore_errors=True)
 
     print('自检%s' % ('通过' if ok else '未通过'))
+    if component_selftest() != 0:
+        ok = False
+    print('总体%s' % ('通过' if ok else '未通过'))
     return 0 if ok else 1
+
+
+def component_selftest():
+    """证明「组件直测覆盖」这条新防线真的会红，且不误伤正确声称。
+
+    为什么单独一个函数：夹具要造一个迷你 `gcs-web/`（几个 .jsx + 一份 import 了
+    其中一个的测试），与 surefire 夹具是两套东西，塞进 `build()` 会把它撑成
+    所有人都要读的怪物。这里自成一体，只服务这一条规则。
+
+    三条用例：声称正确不红 / 数字漂移判红 / 完全没有声称时只警告不红。
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    ok = True
+
+    def make(tmp, readme):
+        web = os.path.join(tmp, 'gcs-web')
+        os.makedirs(os.path.join(web, 'src'))
+        os.makedirs(os.path.join(web, 'test'))
+        for name in ('Alpha', 'Beta', 'Gamma'):
+            with open(os.path.join(web, 'src', '%s.jsx' % name), 'w',
+                      encoding='utf-8') as fh:
+                fh.write('export default function %s() { return null }\n' % name)
+        # 只有 Alpha 被测试 import ⇒ 实测 3 个组件 / 1 个有直测 / 2 个零测试
+        with open(os.path.join(web, 'test', 'alpha.test.js'), 'w',
+                  encoding='utf-8') as fh:
+            fh.write("import Alpha from '../src/Alpha.jsx'\n")
+        # surefire 夹具：不然后面 files==0 会提前 return，根本走不到组件校验
+        reports = os.path.join(tmp, 'reports')
+        for m in EXPECTED_MODULES:
+            pkg = os.path.join(reports, m)
+            os.makedirs(pkg)
+            with open(os.path.join(pkg, 'TEST-%s.DemoTest.xml' % m),
+                      'w', encoding='utf-8') as fh:
+                fh.write('<?xml version="1.0" encoding="UTF-8"?>\n'
+                         '<testsuite name="%s" tests="1" failures="0" errors="0"'
+                         ' skipped="0"><testcase name="ok" classname="%s.DemoTest"/>'
+                         '</testsuite>\n' % (m, m))
+        with open(os.path.join(tmp, 'README.md'), 'w', encoding='utf-8') as fh:
+            fh.write(readme)
+
+    def run_case(name, readme, expect_red, expect_hits):
+        tmp = tempfile.mkdtemp(prefix='countgate-component-')
+        try:
+            make(tmp, readme)
+            # 用子进程再跑一遍本脚本，而不是复用 self_test() 里的 run_loud ——
+            # 那个是嵌套函数，模块级拿不到；而且子进程跑的是与 CI 完全相同的入口。
+            proc = subprocess.run(
+                [sys.executable, os.path.abspath(__file__),
+                 '--root', tmp, '--reports-root', os.path.join(tmp, 'reports')],
+                capture_output=True, text=True)
+            out = proc.stdout + proc.stderr
+            red = proc.returncode != 0
+            good = (red == expect_red)
+            if expect_hits is not None and out.count('✗') != expect_hits:
+                good = False
+            print('  %s %s' % ('✓' if good else '✗', name))
+            if not good:
+                print('    期望%s，实际 rc=%d；组件相关输出：%s'
+                      % ('红' if expect_red else '绿', proc.returncode,
+                         [l for l in out.splitlines() if '组件' in l][:3]))
+            return good
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    good = True
+    # 1. 声称与实测一致 ⇒ 不红
+    good &= run_case('声称正确（3 个里 2 个零测试）不判红',
+                     '# Demo\n\n3 个 `.jsx` 组件里 **2 个零测试**\n',
+                     expect_red=False, expect_hits=None)
+    # 2. 数字漂移 ⇒ 红（这是 Qoder 记的那类失真：写小了数组、写大了零测试）
+    good &= run_case('数字漂移判红（写成 5 个里 4 个零测试）',
+                     '# Demo\n\n5 个 `.jsx` 组件里 **4 个零测试**\n',
+                     expect_red=True, expect_hits=1)
+    # 3. 没有该声称 ⇒ 只警告，不红（格式可能已变，不该把文档判死）
+    good &= run_case('缺少声称只警告不判红',
+                     '# Demo\n\n没有任何组件统计\n',
+                     expect_red=False, expect_hits=None)
+    return 0 if good else 1
 
 
 def main():
@@ -765,6 +905,44 @@ def _run(root, reports_root=None, frontend_json=None, print_actual=False):
 
     print('\n校验当前口径文档：')
     bad = 0
+
+    # ---- 组件直测覆盖（2026-10-25 新增）----
+    # README 里「N 个 `.jsx` 组件里 M 个零测试」这句话此前长期失真：Qoder 在
+    # GAPS 第八节记的是「写 49/47，实为 59/42」。而本门禁此前只把**用例数**纳入，
+    # **组件覆盖比例没有任何机器约束**，所以这类句子可以悄悄烂掉。
+    # 现在把它纳入：匹配不到只警告（格式可能已变，不误红），匹配到但数值不符即红。
+    comp = measure_components(root)
+    if comp is None:
+        print('  （未找到 gcs-web/src，跳过组件覆盖校验）')
+    else:
+        c_total, c_cov, c_zero = comp
+        print('实测（组件覆盖）：%d 个 .jsx 组件 / %d 个有直测 / %d 个零测试'
+              % (c_total, c_cov, c_zero))
+        claims_found = 0
+        for rel in CURRENT_DOCS:
+            path = os.path.join(root, rel)
+            if not os.path.exists(path):
+                continue
+            with open(path, encoding='utf-8') as fh:
+                for lineno, line in enumerate(fh, 1):
+                    m = COMPONENT_CLAIM.search(line)
+                    if not m:
+                        continue
+                    claims_found += 1
+                    claimed_total, claimed_zero = int(m.group(1)), int(m.group(2))
+                    if claimed_total != c_total or claimed_zero != c_zero:
+                        print('  ✗ %s:%d 声称 %d 个 `.jsx` 组件里 %d 个零测试，'
+                              '实测 %d 个里 %d 个'
+                              % (rel, lineno, claimed_total, claimed_zero,
+                                 c_total, c_zero))
+                        bad += 1
+                    else:
+                        print('  ok %s:%d（%d 个里 %d 个零测试）'
+                              % (rel, lineno, c_total, c_zero))
+        if claims_found == 0:
+            print('  ⚠ 未在任何文档找到「N 个 `.jsx` 组件里 M 个零测试」的声称'
+                  '（格式可能已变、或该句被删）。本条不因此判红，'
+                  '但请确认组件覆盖比例仍有人核对。')
 
     # ---- 结构完整性前置检查 ----
     # 2026-10-08 实测事故：master 上 README.md / ROADMAP.md 带着**误提交的 merge
