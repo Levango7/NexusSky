@@ -100,11 +100,70 @@ def check_changelog_claims(text, sections):
     return problems
 
 
+# --- 5. HTTP 状态码完整性 ---
+# 2026-10-25 实测事故：PR #159 为了把"前端 404 例"重驱动成 518，做了一次**全局数字替换**，
+# 结果连带把 `docs/api-reference.md` 里 178 处 HTTP 404 换成了 518（README 3 处、
+# `docs/todo.md` 1 行 2 处、`docs/demo-scenarios.md` 1 处、需求调研 2 处）。
+# 计数门禁看不见它（它只核"N 例"这类句式），而**读者会照着契约文档实现客户端**——
+# 一份写着"200 Telemetry / 518"的 API 参考比没有更坏。
+# 所以这里钉的是**形状**：出现在"状态码位置"的三位数必须是真 HTTP 状态码。
+ALLOWED_HTTP = {
+    "200", "201", "202", "204", "301", "302", "304", "400", "401", "403", "404",
+    "405", "406", "409", "410", "412", "415", "418", "422", "429", "500", "501",
+    "502", "503", "504",
+}
+
+STATUS_CONTEXTS = [
+    # 表格单元：`200 DroneDetail / 404`。要求 200 后面跟的是 **ASCII 类型名**——
+    # 否则 GB28181 那种"200 报警输入/215 报警输出"的中文码表会被误判（真仓里就有这行）。
+    re.compile(r"\b200\s+[A-Za-z{][A-Za-z0-9{}<>\[\],. ]{0,40}/\s*(\d{3})\b"),
+    re.compile(r"[；;]\s*(\d{3})\s*[-－]"),         # 响应说明：`；404 - 无人机未注册`
+    re.compile(r"(?:返回|必然|得到|命中)\s*(\d{3})\b"),  # 散文：`面板运行期必然 404`
+    re.compile(r"渲染\s*/\s*(\d{3})\s*/"),           # 引用注记：`JS 渲染/404/内网页面`
+]
+
+
+def strip_code_lines(text):
+    """逐行剥掉代码内容，但**保留行号对齐**（围栏块里的行换成空行，不删行）。
+
+    必要性是当场撞出来的：本条规则上线后第一件事就是把它**自己的验收说明**判红
+    （CHANGELOG 里那句 `复核 grep -rnE "返回 518|必然 518|…"` 正好命中"返回 518"形状）。
+    被反引号包住的是"关于这个数的陈述"，不是"对客户端承诺的状态码"，不该进判定；
+    而 `docs/api-reference.md` 的契约正文（`| 200 DroneDetail / 404 |`、`；404 - 未注册`）
+    恰恰都在反引号**外面**，所以剥掉代码不影响它抓真问题。
+    行号必须保住，否则报错会指到不存在的行。
+    """
+    out = []
+    in_fence = False
+    for line in text.replace("\r\n", "\n").split("\n"):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            out.append("")
+            continue
+        out.append("" if in_fence else re.sub(r"`[^`\n]*`", "", line))
+    return out
+
+
+def check_http_status(pairs):
+    """pairs = [(相对路径, 文本)]；返回"状态码位置出现非 HTTP 状态码"的问题列表。"""
+    out = []
+    for rel, text in pairs:
+        raw_lines = text.replace("\r\n", "\n").split("\n")
+        for i, cleaned in enumerate(strip_code_lines(text), 1):
+            for rex in STATUS_CONTEXTS:
+                for m in rex.finditer(cleaned):
+                    code = m.group(1)
+                    if code not in ALLOWED_HTTP:
+                        out.append("HTTP 状态码位置出现非法状态 %s:%d  %s  ←「%s」不是 HTTP 状态码，"
+                                   "怀疑是被批量数字替换改坏的（状态码位置只该出现 404/500 这类真状态）"
+                                   % (rel, i, raw_lines[i - 1].strip()[:72], code))
+    return out
+
+
 def check_repo(root=None):
     """对指定目录做检查，返回问题列表。"""
     problems = []
     base = root or ROOT
-
     # --- 1. 冲突标记 ---
     for rel in [f for f in git("ls-files", root=base).split("\n") if f.strip()]:
         p = os.path.join(base, rel.replace("/", os.sep))
@@ -161,6 +220,21 @@ def check_repo(root=None):
             problems.append("构建产物/依赖目录入库: %s" % rel)
         if os.path.basename(norm) in FORBIDDEN_NAMES:
             problems.append("本地报告/配置入库: %s" % rel)
+
+    # --- 5. HTTP 状态码完整性（markdown 全扫，含 docs/）---
+    md_pairs = []
+    for rel in [f for f in git("ls-files", root=base).split("\n") if f.strip()]:
+        if not rel.lower().endswith(".md"):
+            continue
+        p = os.path.join(base, rel.replace("/", os.sep))
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                md_pairs.append((rel, f.read()))
+        except OSError:
+            continue
+    problems += check_http_status(md_pairs)
     return problems
 
 
@@ -220,6 +294,40 @@ def self_test():
         run("add", "-A")
         pr = check_repo(tmp)
         ok["干净不误拦"] = (pr == [])
+
+        # --- 新增检查项 5 的自证：坏形状必拦、真数字不误伤 ---
+        docdir = os.path.join(tmp, "docs")
+        os.makedirs(docdir, exist_ok=True)
+        dp = os.path.join(docdir, "api.md")
+        bad = ("| GET | /x | 详情 | - | 200 Detail / 518 |\n"
+               "- 响应: 200 - 详情；518 - 未注册\n"
+               "面板运行期必然 518——\n"
+               "（JS 渲染/518/内网页面无法直抓）\n")
+        with open(dp, "w", encoding="utf-8", newline="") as f:
+            f.write(bad)
+        run("add", "-A")
+        pr = check_repo(tmp)
+        hits = [x for x in pr if "HTTP 状态码位置" in x]
+        # 四种形状各抓一次：漏一种就是"门禁只防了它想起来的那一种"
+        ok["状态码 518 的四种形状都被拦"] = len(hits) == 4
+
+        good = ("| CAMERA_INFORMATION | 259 | 237 | 92 | MAV_CMD 518 / 512(param1=259) |\n"
+                '- 透传通道：`{"type":"raw","cmd":518,"p1".."p7"}`\n'
+                "| GET | /x | 详情 | - | 200 Detail / 404 |\n"
+                "- 响应: 200 - 详情；404 - 未注册\n"
+                "前端测试覆盖 518 例\n"
+                "- 说明文字里引用 `必然 518` 这种形状不算对客户端的声称\n"
+                "```\n"
+                "日志原文引用：200 Telemetry / 518\n"
+                "```\n")
+        with open(dp, "w", encoding="utf-8", newline="") as f:
+            f.write(good)
+        run("add", "-A")
+        pr = check_repo(tmp)
+        ok["MAV_CMD 518 / 用例数 518 / 代码引用都不误伤"] = not any("HTTP 状态码位置" in x for x in pr)
+        with open(dp, "w", encoding="utf-8", newline="") as f:
+            f.write("")
+        run("add", "-A")
 
         # pom 的 XML 注释里出现 "--"：2026-10-23 实测把 7 个 CI job 一起带红
         mod = os.path.join(tmp, "mod")
