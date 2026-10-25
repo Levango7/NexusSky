@@ -18,13 +18,21 @@ CHANGELOG 是**历史记录**，记的是"当时是什么状态"。改写历史�
 例如 CHANGELOG 里那条「测试数 3230（实为 3787）」本身就是在描述一次历史修复，
 把它改成今天的数字会让那次修复的叙述失真。故 CHANGELOG 显式排除。
 
-同理，文档里**追述旧值**的行也不校验：ROADMAP 里那句「此前此处写「6 轮 / 32 问题 /
+同理，文档里**追述旧值**的声称也不校验：ROADMAP 里那句「此前此处写「6 轮 / 32 问题 /
 3230 单测」」是引述一个已被本轮修正的错误值，把它改成今天的数字会让句子变成
 "此前写的是 3994"——一句假话。见 ``RETROSPECTIVE``。
 
-已知局限：追述判定是**逐行**的。若一个追述句跨行、数字落在续行上（该续行本身不含
-追述标记），那行仍会被当当前口径校验。本仓当前 12 行命中已逐条人工核对，确认均为
-真正的历史叙述；新增文档请把「追述 + 数字」写在同一行。
+追述豁免的**粒度是片段，不是行**（2026-10-26 修，GAPS G-3）：豁免只作用于与追述标记
+**同片段**的数字（片段以表格竖线、中英文标点、破折号为界）。行内**别处**的追述词不再
+连带豁免当前口径的数字——「5222 单测全绿（此前为 3230 单测）」这类行里，5222 必须
+照常核对、3230 仍豁免。行级豁免的年代（2026-10-13 两次独立复现，GAPS G-3）行内任何
+位置出现「此前/旧值」整行逃检，偏低的历史值一路绿灯进 master。唯一保留**行级**豁免的
+是含 ``commit `` 引用的行：「测试验证：3230（commit abc1234）」型历史记录的追述证据
+在数字**之后**的括号里，与数字分属不同片段，按片段判会误伤。
+
+已知局限：片段判定仍是**逐行**的。若追述句跨行、数字落在续行上（该续行的同片段不含
+追述标记），该数字仍会被当当前口径校验。本仓当前命中已逐条人工核对，确认均为真正的
+历史叙述；新增文档请把「追述标记 + 数字」写在**同一片段**里。
 
 **前端用例数（2026-10-06 补）**
 --------------------------
@@ -178,6 +186,17 @@ RETROSPECTIVE = ('此前', '原先', '曾经', '曾写', '已过期', '旧值', 
                  # 那些数字**在当时是对的**，改成今天的值是篡改历史（2026-10-05 修）。
                  'commit ')
 
+# 行级豁免标记（G-3 修，2026-10-26）：追述豁免整体从「行」下沉到「数字所在片段」，
+# 唯独 ``commit `` 保留行级——「测试验证：3230（commit abc1234）」的追述证据在数字
+# **之后**的括号里，与数字分属不同片段，按片段判会把真历史记录误伤成红。
+# 其余标记见 ``RETROSPECTIVE``，只豁免同片段的数字（``_retro_span``）。
+RETROSPECTIVE_LINE = ('commit ',)
+
+# 片段边界：表格竖线（单元格）、中英文标点、破折号。追述标记与数字被这些隔开时，
+# 说明标记修饰的不是这个数字——「5222 单测全绿（此前为 3230 单测）」里
+# 「（」一隔，5222 就必须照常核对，3230 仍豁免。
+_SEGMENT_BOUNDARY = re.compile(r'[|，。；：、！？,;:!?()\[\]（）【】“”‘’\'"\-—]')
+
 # 表格单元格里剥掉 Markdown 强调/代码标记
 _CELL_NOISE = re.compile(r'[*`\s]')
 
@@ -319,6 +338,27 @@ def measure_actual(root, reports_root=None):
 
 def _is_retrospective(line):
     return any(marker in line for marker in RETROSPECTIVE)
+
+
+def _retro_line(line):
+    """整行按历史台账豁免（G-3 修后仅剩 ``commit `` 引用行走这条）。"""
+    return any(marker in line for marker in RETROSPECTIVE_LINE)
+
+
+def _retro_span(text, start, end):
+    """数字声称区间 [start, end) 是否落在追述片段内（G-3 修，2026-10-26）。
+
+    片段 = 数字两侧各扩到最近的 ``_SEGMENT_BOUNDARY``。行内**别处**的追述词
+    不再连带豁免本数字——行级豁免曾放过「当前口径数字 + 同行历史叙述」，
+    偏低的历史值两次独立复现一路绿灯进 master（GAPS G-3）。
+    """
+    a = start
+    while a > 0 and not _SEGMENT_BOUNDARY.match(text[a - 1]):
+        a -= 1
+    b = end
+    while b < len(text) and not _SEGMENT_BOUNDARY.match(text[b]):
+        b += 1
+    return _is_retrospective(text[a:b])
 
 
 def retrospective_section_lines(lines, rel):
@@ -741,6 +781,73 @@ def self_test():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    # 追述豁免的粒度（G-3，2026-10-26 修）：标记只豁免**同片段**的数字，
+    # 行内别处的追述词不再连带豁免当前口径的数字。
+    # 形态来自 GAPS G-3 两次独立复现：行级豁免时行内任何位置有「此前/旧值」，
+    # 整行连同当前口径的数字一起逃检，偏低的历史值一路绿灯进 master。
+    # ① 当前声称 + 同行异片段追述词 ⇒ 仍判红（偏高形态）
+    retro_hi = '# Demo\n\n9999 单测全绿（此前为 111 单测）\n'
+    tmp, reports = build(retro_hi, each=100)
+    try:
+        rc, out = run_loud(tmp, reports)
+        if rc == 0:
+            print('自检失败：同行异片段的追述词把当前声称也豁免了（偏高形态）——'
+                  'G-3 的洞没堵上')
+            ok = False
+        else:
+            print('  ✓ 追述词在同行另一片段：当前声称（偏高）仍判红')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    # ② 同上，偏低形态——G-3 点名要覆盖的另一半（偏低值不刺眼，最易被放过）
+    retro_low = '# Demo\n\n111 单测全绿（此前为 9999 单测）\n'
+    tmp, reports = build(retro_low, each=100)
+    try:
+        rc, out = run_loud(tmp, reports)
+        if rc == 0:
+            print('自检失败：同行异片段的追述词把偏低的当前声称也豁免了——'
+                  '「偏低必红」这半没覆盖')
+            ok = False
+        else:
+            print('  ✓ 追述词在同行另一片段：当前声称（偏低）也判红')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    # ③ 追述词与数字同片段 ⇒ 仍豁免（真历史叙述不误伤）
+    retro_ok = '# Demo\n\n旧值 111 单测（已过期两年多）\n'
+    tmp, reports = build(retro_ok, each=100)
+    try:
+        rc = run(tmp, reports)
+        if rc != 0:
+            print('自检失败：真历史叙述（追述词与数字同片段）被误伤判红')
+            ok = False
+        else:
+            print('  ✓ 追述词与数字同片段：仍豁免（不误伤历史叙述）')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    # ④ 表格历史台账：数字格自带「旧值」标记 ⇒ 整格豁免；首列标签带标记同理
+    retro_tbl = '# Demo\n\n| 模块 | 单测数 |\n|---|---|\n| **总计** | 999（旧值） |\n'
+    tmp, reports = build(retro_tbl)
+    try:
+        rc = run(tmp, reports)
+        if rc != 0:
+            print('自检失败：表格数字格自带的「旧值」标记没豁免该格声称')
+            ok = False
+        else:
+            print('  ✓ 表格数字格自带追述标记：该格声称豁免')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    # ⑤ 含 commit 引用的行 ⇒ 整行豁免（追述证据在数字之后的括号里，行级保留）
+    retro_commit = '# Demo\n\n111 个测试用例全绿（commit abc1234）\n'
+    tmp, reports = build(retro_commit, each=100)
+    try:
+        rc = run(tmp, reports)
+        if rc != 0:
+            print('自检失败：commit 引用行被误伤判红——那是历史记录，不是当前声称')
+            ok = False
+        else:
+            print('  ✓ commit 引用行整行豁免（历史记录不误伤）')
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     print('自检%s' % ('通过' if ok else '未通过'))
     if component_selftest() != 0:
         ok = False
@@ -989,7 +1096,7 @@ def _run(root, reports_root=None, frontend_json=None, print_actual=False):
         fe_hits = []
         skipped_retro = 0
         for lineno, line in enumerate(lines, 1):
-            if lineno in exempt_rows or _is_retrospective(line):
+            if lineno in exempt_rows or _retro_line(line):
                 skipped_retro += 1
                 continue
             # 前端声称（--frontend-json 启用时）。**先抽取，再从行文本里挖掉这些片段**，
@@ -1017,7 +1124,10 @@ def _run(root, reports_root=None, frontend_json=None, print_actual=False):
                             # 刻意按**区间重叠**而不是按数值去重：同一行里两处不同位置的
                             # 独立声称（哪怕数值相同）仍是两处，不能被误并成一处。
                             if not any(a < mb and ma < b for ma, mb in matched):
-                                fe_hits.append((lineno, claimed, line.strip()))
+                                if _retro_span(line, a, b):
+                                    skipped_retro += 1
+                                else:
+                                    fe_hits.append((lineno, claimed, line.strip()))
                             matched.append((a, b))
                             spans.append((a, b))
                 if spans:
@@ -1031,6 +1141,15 @@ def _run(root, reports_root=None, frontend_json=None, print_actual=False):
             if lineno in table_rows:
                 claim = row_claim(line, per_module)
                 if claim:
+                    # 追述豁免（片段级，G-3）：首列标签（「更新前/改前」）带标记的行
+                    # 整行都是历史台账；数字所在格自带标记的（如 `999（旧值）`）
+                    # 只豁免那一格的声称。其余照常核对。
+                    cells = line.lstrip().split('|')
+                    label_retro = len(cells) > 2 and _is_retrospective(cells[1])
+                    value_retro = len(cells) > 2 and _is_retrospective(cells[2])
+                    if label_retro or value_retro:
+                        skipped_retro += 1
+                        continue
                     scope, claimed, exact = claim
                     expected = actual if scope == '__total__' else per_module[scope]
                     if exact:
@@ -1053,9 +1172,13 @@ def _run(root, reports_root=None, frontend_json=None, print_actual=False):
                 for m in pat.finditer(scan):
                     claimed = _parse_count(m.group(1))
                     if 100 <= claimed <= 200_000:      # 过滤明显不是测试数的巧合数字
+                        if _retro_span(scan, m.start(1), m.end(1)):
+                            # 追述片段里的数字（「此前为 3230 单测」）不参与当前口径校验。
+                            skipped_retro += 1
+                            continue
                         hits.append((lineno, claimed, expected, scope, line.strip()))
 
-        note = '，跳过 %d 行追述旧值' % skipped_retro if skipped_retro else ''
+        note = '，跳过 %d 处追述旧值' % skipped_retro if skipped_retro else ''
         if not hits and not approx and not fe_hits:
             print('  ok %s（无单测数声称%s）' % (rel, note))
             continue
