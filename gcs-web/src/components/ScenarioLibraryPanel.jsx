@@ -306,7 +306,7 @@ export default function ScenarioLibraryPanel() {
                         </span>
                       </div>
                       <div style={{ fontSize: 9, color: 'var(--dim-2)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                        <span>无人机：{pick(t, 'droneCount', 'drones') || '--'}</span>
+                        <span>无人机：{pick(t, 'droneCount', 'drones') ?? '--'}</span>
                         <span>半径：{pick(t, 'radiusM', 'radius') != null ? `${Number(pick(t, 'radiusM', 'radius')).toFixed(0)}m` : '--'}</span>
                         <span>高度：{pick(t, 'altitudeM', 'altitude', 'alt') != null ? `${Number(pick(t, 'altitudeM', 'altitude', 'alt')).toFixed(0)}m` : '--'}</span>
                       </div>

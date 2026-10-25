@@ -234,7 +234,7 @@ export default function RidPanel() {
                       <div style={{ fontSize: 12, color: 'var(--cyan)', marginBottom: 6 }}>系统信息</div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 6 }}>
                         <InfoItem label="操作者位置类型" value={OPERATOR_LOCATION_TYPE_LABELS[system.operatorLocationType] || '--'} />
-                        <InfoItem label="区域无人机数" value={system.areaCount || '--'} />
+                        <InfoItem label="区域无人机数" value={system.areaCount ?? '--'} />
                         <InfoItem label="区域半径" value={system.areaRadius != null ? `${system.areaRadius} m` : '--'} />
                         <InfoItem label="区域上限" value={system.areaCeiling != null ? `${system.areaCeiling.toFixed(1)} m` : '--'} />
                         <InfoItem label="区域下限" value={system.areaFloor != null ? `${system.areaFloor.toFixed(1)} m` : '--'} />

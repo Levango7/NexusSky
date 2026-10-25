@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-25 共有 191 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-25 共有 192 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,13 +31,87 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 191 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 192 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
 ---
 
 
+
+---
+## [Unreleased] — 「0 架无人机」和「没有这一帧」在界面上是同一个 `--`：四处收口 + 一条会咬人的形状守卫（2026-10-25）
+
+### 1. 现场：GAPS §八-2/3 记的两条，实测清单比记的多
+
+登记时写的是两条（`App.jsx` 的最高高度、`ShowPanel` 的队形ID/无人机数）。这一轮真去扫的时候：
+
+| 站点 | 原写法 | 后果 | 本轮 |
+|---|---|---|---|
+| `App.jsx:173` + `:588` | 没轨迹时返回 `maxAlt: 0`，展示层 `stats.maxAlt ? … : '--'` | **贴地飞行（真 0 米）与"一条轨迹都还没有"都显示 `--`** | 已修 |
+| `AutoDispatchPanel.jsx:479` / `:618` | `pick(d, 'droneCount', 'drones') \|\| '--'` | 0 架显示 `--` | 已修 |
+| `RidPanel.jsx:237` | `system.areaCount \|\| '--'` | 区域内 0 架显示 `--`；**同文件 `:238-240` 的 `areaRadius/areaCeiling` 用的是 `!= null`**，一个文件两种口径 | 已修 |
+| `ScenarioLibraryPanel.jsx:294` | `pick(t, 'droneCount', 'drones') \|\| '--'` | 同上 | **已修——这处是我手工 grep 漏掉、被新写的守卫抓出来的** |
+| `ShowPanel.jsx:450-451` | 已在 `d39ea7c0`（#156）改成 `??`，注释就写着"0 是合法值" | —— | **GAPS §八-3 是过期记录，划掉而不是再"修"一遍** |
+
+我那条 grep 之所以漏掉 `ScenarioLibraryPanel`：模式写的是"字段名后面紧跟非字母"，而
+`pick(t, 'droneCount', 'drones')` 在字段名后面还有 `', 'drones')` —— **人写的正则会漏，
+形状守卫不会**，这也是为什么这条 PR 的重点不是那四行改动，而是第 3 节那个守卫。
+
+### 2. 根因：`||` 与真值判断都不区分「0」和「没有」，而 `App.jsx` 还把两种语义压成同一个值
+
+`maxAlt` 这一处比展示层更糟：**计算函数在"算不了"时返回 `0`**。就算把 `:588` 改成 `??`，
+`0` 依然既可能是"贴地飞过"也可能是"还没收到轨迹"——**语义在源头就丢了，展示层修不回来**。
+所以这一步必须动数据结构，而不是只换运算符。
+
+### 3. 修法：语义拆开 + 一条扫形状、且自证会咬人的守卫
+
+- 新增 `gcs-web/src/utils/flightStats.js`：
+  `flightStatsOf(track)` ⇒ 算不了时 `maxAlt = null`（不是 0）；`fmtMeters(v)` ⇒
+  **只有 `null`/`undefined`/`NaN` 才降级成 `--`**，`0` 照原样显示 `0 m`。
+  `App.jsx` 的内联 `useMemo` 换成调它，`haversine` 的引用方随之从 `App.jsx` 挪到 `flightStats.js`。
+- 三处 `\|\| '--'` 改成 `?? '--'`。
+- 新增 `gcs-web/test/zeroIsNotNull.test.js`：扫 `src/**` 的**形状**，两种坏写法都抓 ——
+  ① `field || '--'`（含把字段名藏在 `pick(...)` 实参里的写法），② `field ? field.toFixed(…) : '--'`。
+  名单只放**已核过"0 是合法读数"**的字段（`droneCount`/`areaCount`/`maxAlt`/`count`/`qty`/`remaining`），
+  不随手扩成"所有字段"——字符串字段的 `|| '--'` 无害，硬卷进来只会造假红。
+  判据本身配三条自证：**坏形状必被抓、好形状（`??` 与 `!= null`）不误伤、注释里的说明文字不算输入**
+  （"注释也算输入"是这一族门禁的经典假红来源，`singleSourceOfTruth.test.js` 早就为此剥注释）。
+  另外留一条"历史样本对照"：三条改动前的原文逐字钉进测试，证明判据对准的是真实现场，
+  不是先有了判据再凑样本。
+- `singleSourceOfTruth.test.js` 的 `FORBIDDEN` 加入 `flightStatsOf` / `fmtMeters`
+  （抽出去的东西，禁止有人在组件里再抄一份）。
+
+### 4. 顺带修一条被我改坏的旧断言（不是放宽它）
+
+`singleSourceOfTruth` 里原来钉的是「**App.jsx 从 utils 导入 haversine**」。抽取之后 App.jsx
+不再直接用 `haversine`，这条断言当场变红——**这是真红**：被钉的对象变了，不是判据错了。
+处置没有删掉或放宽它，而是改成钉住**新的接线**并且更严：
+① `App.jsx` 必须从 `./utils/flightStats` 导入 `flightStatsOf`；
+② `App.jsx` 里**不该再出现** `haversine(` 调用；
+③ `utils/flightStats.js` 必须从 `./geo.js` 导入 `haversine`；
+④ 新加一条：**全 `src` 只有 `utils/geo.js` 定义 `haversine`**（抽取动作本身最容易留下的
+正是"顺手再抄一份"）。
+
+### 5. 计数与验证
+
+- `npm run test:ci` ⇒ **540 / 540 通过 / 0 失败**，39 个测试文件（原 518 / 37）。
+  **+22 逐项可复算**：`flightStats.test.js` 13 + `zeroIsNotNull.test.js` 6
+  \+ `FORBIDDEN` 加 2 个名字（该套件按名单循环生 `it`）+ 第 4 节那条断言拆成 2 条（+1）。
+- `npx eslint src --ext .js,.jsx` ⇒ 0 error。
+- 前端声称由门禁重驱动（`README.md` 与 `ROADMAP.md:25` 两处 518 → **540**），
+  Java 侧本批一字未改，数字由本树 fresh `mvn -B -o test` 复核。
+- `.coord/GAPS.md` §八：**第 2、3 条收口**（第 3 条是 #156 早就修好的，我的记录过期）；
+  第 6 条（`HardwarePanel.jsx:154` 把 `{}` 当一架旋翼）本轮复核过——
+  后果是"多渲染一行空数据"，不是崩溃，**定级为外观问题，不在本批动**；
+  第 4 条残留（`RocPanel` 三处 `if (res.ok)` 无 else）需要错误文案口径，留待下批。
+
+### 6. 这一条属于哪一族
+
+`x || fallback` 把 `0`/`''` 当缺失是 JS 老坑，但这里值得记的不是坑本身，而是
+**"没数据"被编码成 `0` 之后，展示层无论怎么写都区分不回来**——所以修法必须先动数据语义，
+再谈运算符。第二件值得记的是**我的手工 grep 漏了一处、机器守卫没漏**：
+凡是"这类写法本来就该禁"的约定，落成形状门禁而不是靠 review 眼神。
 
 ---
 ## [Unreleased] — 状态板自测连红四笔：那条幂等断言测的是 GitHub，不是代码（2026-10-25）
