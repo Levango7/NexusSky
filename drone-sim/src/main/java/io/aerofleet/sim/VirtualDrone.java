@@ -85,14 +85,21 @@ public final class VirtualDrone implements AutoCloseable {
      * 最近一次收到 {@code GPS_RTCM_DATA}(#233) 的时刻（毫秒）；0 表示从未收到。
      * <p>
      * 由 NTRIP caster 或本地基站经 {@code GpsRtcmData} 注入差分改正数时更新。
-     * 目前<b>不改变</b> {@link #rtkFixType()} 的口径（那是配置驱动的，见 GAPS 第七节），
-     * 但它让「差分数据到底有没有到机载」这件事变成可观测的：
-     * 没有这个字段时，{@code --rtk fixed} 的模拟机永远报 RTK_FIXED，
-     * 而外界无法判断它是真的收到改正数，还是仅仅配置成了 fixed。
+     * 2026-10-26 起（GAPS §十.10-1 裁决为「上界语义」）它**直接决定**
+     * {@link #rtkFixType()}：{@code --rtk} 只声明能力上界，5/6 只有在
+     * 新鲜度窗口内真的收到过改正数时才上报——NTRIP 断链会掉回 3D_FIX，
+     * 「配置成 fixed」不再等于「界面显示厘米级」。
      */
     private volatile long lastRtcmAtMs = 0;
     /** 累计收到的 RTCM 字节数（排障用）。 */
     private volatile long rtcmBytes = 0;
+    /**
+     * RTK 改正数新鲜度窗口（毫秒）：超过它没收到 {@code GPS_RTCM_DATA}，
+     * fix_type 就降回 3D_FIX（上界语义）。默认 5s（RTK 差分流典型 1Hz），
+     * 单测/e2e 用 {@code -Daerofleet.sim.rtcm-fresh-window-ms=50} 把窗口压短。
+     */
+    private final long rtcmFreshWindowMs = Long.getLong(
+            "aerofleet.sim.rtcm-fresh-window-ms", 5_000L);
     /** Fault-injection controller (inert when --scenario none). */
     private final ScenarioController scenario;
     /** Autopilot failsafe layer (link loss / battery crit / GPS loss). */
@@ -728,10 +735,9 @@ public final class VirtualDrone implements AutoCloseable {
                     }
                 }
                 // F6 / NTRIP：差分改正数注入（GPS_RTCM_DATA #233）。
-                // 只记录「收到了多少、什么时候」，**不改变** rtkFixType() 的口径——
-                // 那个口径是配置驱动的（--rtk fixed 恒报 6），要不要改成「必须收到改正数才报 5/6」
-                // 属于产品决策，已登记 .coord/GAPS.md 第十节，不在本笔里替它定。
-                // 但接收本身必须留下痕迹：否则 NTRIP 接上了也看不出数据到没到机载。
+                // 记录到达时刻与累计字节，并驱动 rtkFixType() 的上界语义
+                // （GAPS §十.10-1，2026-10-26 裁决 B 案）：--rtk 只声明能力上界，
+                // 5/6 只有在新鲜度窗口内收到过改正数才上报，断链掉回 3D_FIX。
                 if (msg instanceof io.aerofleet.mavlink.messages.GpsRtcmData rtcm) {
                     lastRtcmAtMs = System.currentTimeMillis();
                     rtcmBytes += rtcm.len;
@@ -1932,14 +1938,27 @@ public final class VirtualDrone implements AutoCloseable {
 
     /**
      * F6 RTK：GPS_FIX_TYPE 口径——3=3D_FIX(单点) / 5=RTK_FLOAT / 6=RTK_FIXED
-     *（MAVLink common.xml；PX4 同口径）。--rtk none 时保持既有 3D_FIX 不变。
+     *（MAVLink common.xml；PX4 同口径）。
+     * <p>
+     * <b>上界语义</b>（GAPS §十.10-1 裁决 B 案，2026-10-26）：{@code --rtk} 声明的是
+     * 能力**上界**而非事实——只有在新鲜度窗口（{@link #rtcmFreshWindowMs}）内真的
+     * 收到过 {@code GPS_RTCM_DATA} 改正数，才按上界上报 5/6；否则一律 3D_FIX。
+     * 未配置 {@code --rtk} 的机器收到改正数也**不**抬升——上界是 3。
+     * 这样 NTRIP 断链会立刻在界面上「掉精度」，而不是继续显示厘米级（假绿）。
      */
-    private int rtkFixType() {
-        return switch (config.rtkMode) {
+    int rtkFixType() {
+        int ceiling = switch (config.rtkMode) {
             case "fixed" -> 6;
             case "float" -> 5;
             default -> 3;
         };
+        if (ceiling < 5) {
+            return 3;   // 未配置 RTK：上界即 3，改正数不越过 --rtk 声明的能力
+        }
+        long last = lastRtcmAtMs;
+        boolean fresh = last > 0
+                && System.currentTimeMillis() - last <= rtcmFreshWindowMs;
+        return fresh ? ceiling : 3;
     }
 
     private void sendSystemTime() throws IOException {

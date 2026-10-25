@@ -3,11 +3,18 @@
 # 依据：ROADMAP F6——遥测引入精度等级字段；RTK 固定/浮点解状态上报
 # 场景：cloud-backend + 3 台 drone-sim（--rtk fixed / --rtk float / 缺省）
 #
+# 语义（2026-10-26 起，GAPS §十.10-1 裁决 B 案——「上界语义」）：
+#   --rtk 只声明能力上界；fix_type 5/6 只有在新鲜度窗口（默认 5s）内真的
+#   收到过 GPS_RTCM_DATA 改正数才上报。本脚本因此**注入**改正数：
+#   向 3 台机全部发送（61/62/63），63 未配置 --rtk 必须保持 STANDALONE——
+#   改正数不越过 --rtk 声明的能力上界。
+#
 # 断言目标：
-#   R1  --rtk fixed 机：/drones status.rtkStatus = RTK_FIXED
-#   R2  --rtk float 机：rtkStatus = RTK_FLOAT
-#   R3  缺省机：rtkStatus = STANDALONE（既有行为不变）
-#   R4  GPS_RAW_INT fixType 直连口径：fixed=6 / float=5 / 缺省=3
+#   R1  注入改正数后：--rtk fixed 机 rtkStatus = RTK_FIXED
+#   R2  注入改正数后：--rtk float 机 rtkStatus = RTK_FLOAT
+#   R3  注入改正数后：缺省机仍 STANDALONE（上界即 3，数据不抬升能力）
+#   R5  停止对 fixed 机注入 ⇒ 5s 窗口过后降回 STANDALONE（断链必须掉精度），
+#       同时仍在注入的 float 机保持 RTK_FLOAT
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File scripts\e2e-rtk.ps1
@@ -43,6 +50,51 @@ function Stop-Proc($p) {
         $script:CleanupActions += [scriptblock]::Create(
             "try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {}")
     }
+}
+
+# ---- MAVLink v2 裸帧构造（只为 GPS_RTCM_DATA #233 服务，CRC_EXTRA=35 仓内已实测） ----
+# CRC 用**逐位反射式 X.25**（poly 0x8408、init 0xFFFF），与仓内 MavlinkCrc.java 逐位等价
+# （那是经 pymavlink 核对的口径）。注意 MAVLink C 库的查表速算式（tmp<<5/tmp<<3/tmp）
+# 在本栈上会得到**不同**的值——实测帧被 MavlinkParser 静默丢弃，别换回去。
+function Get-Mavlink2Crc {
+    param([byte[]]$Bytes, [byte]$CrcExtra)
+    $crc = 0xFFFF
+    foreach ($b in ($Bytes + $CrcExtra)) {
+        $c = $crc -bxor $b
+        for ($i = 0; $i -lt 8; $i++) {
+            if ($c -band 1) { $c = (($c -shr 1) -bxor 0x8408) -band 0xFFFF }
+            else { $c = ($c -shr 1) }
+        }
+        $crc = $c -band 0xFFFF
+    }
+    return [int]$crc
+}
+
+# 组一帧不带签名的 MAVLink v2。$Payload 即完整载荷（本脚本固定 182 字节的 RTCM 基础载荷）。
+function New-Mavlink2Frame {
+    param([int]$MsgId, [byte[]]$Payload, [int]$CrcExtra, [int]$Seq, [int]$SysId = 255, [int]$CompId = 1)
+    # 头 10 字节：STX LEN INC CMP SEQ SYS COMP MSGID(3, LE)——CRC 从 LEN 起算（跳过 STX）
+    $hdr = [byte[]]@(0xFD, $Payload.Length, 0, 0, ($Seq -band 0xFF), $SysId, $CompId,
+        ($MsgId -band 0xFF), (($MsgId -shr 8) -band 0xFF), (($MsgId -shr 16) -band 0xFF))
+    # 注意：$hdr[1..] 去掉 STX 再进 CRC（MAVLink 官方口径；把 STX 一起喂会得到
+    # 「算法正确但校验和错误」的帧——对拍 python 参考实现时当场抓住）。
+    $crc = Get-Mavlink2Crc -Bytes ($hdr[1..($hdr.Length - 1)] + $Payload) -CrcExtra $CrcExtra
+    return [byte[]]($hdr + $Payload + @([byte]($crc -band 0xFF), [byte](($crc -shr 8) -band 0xFF)))
+}
+
+# 向一台模拟机注入一帧 32 字节假 RTCM 改正数（不分片、广播）。
+function Send-Rtcm {
+    param([int]$Port, [int]$Seq)
+    $payload = New-Object byte[] 182   # flags(1)+len(1)+data[180]（基础载荷，无扩展字段）
+    $payload[0] = 0                    # flags = 0：不分片
+    $payload[1] = 32                   # len = 32
+    for ($i = 0; $i -lt 32; $i++) { $payload[2 + $i] = [byte]$i }
+    $frame = New-Mavlink2Frame -MsgId 233 -Payload $payload -CrcExtra 35 -Seq $Seq
+    $udp = [System.Net.Sockets.UdpClient]::new()
+    try {
+        $udp.Connect('127.0.0.1', $Port)
+        [void]$udp.Send($frame, $frame.Length)
+    } finally { $udp.Close() }
 }
 
 try {
@@ -92,8 +144,8 @@ try {
     ) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-rtk-backend.log')
     Stop-Proc $backend
 
-    # ---- 等 3 机上线 + 断言 ----
-    Write-Host '[3/3] 等待上线并断言 RTK 状态...'
+    # ---- 等 3 机上线 ----
+    Write-Host '[3/4] 等待 3 机上线...'
     $seen = @{}
     $lastRaw = $null
     $polls = 0
@@ -137,18 +189,51 @@ try {
         if ($backendAlive -and -not $lastRaw) { Write-Host "  [DIAG] 后端可达但从未拿到响应体（Invoke-RestMethod 每次调用都失败）" }
     }
 
-    foreach ($pair in @(@(61, 'RTK_FIXED', 'R1'), @(62, 'RTK_FLOAT', 'R2'), @(63, 'STANDALONE', 'R3'))) {
-        $sysid = $pair[0]; $expect = $pair[1]; $tag = $pair[2]
-        $d = $seen[(Get-E2eSysidKey $sysid)]
-        if ($null -eq $d) {
-            Assert-True $false "$tag sysid=$sysid 上线"
-            continue
-        }
-        # /drones 列表返回的 status 嵌套（WS 帧 status 同构）——检查 rtkStatus
-        $rtk = $d.rtkStatus
-        if (-not $rtk -and $d.status) { $rtk = $d.status.rtkStatus }
-        Assert-True ($rtk -eq $expect) "$tag sysid=$sysid rtkStatus=$expect（实际 $rtk）"
+    # ---- 工具：查某 sysid 的当前 rtkStatus（/drones 最新快照） ----
+    function Get-RtkStatus([int]$Sysid) {
+        try {
+            $drones = Invoke-RestMethod -Uri "$Base/drones" -TimeoutSec 3
+            foreach ($d in $drones) {
+                $k = Get-E2eSysidKey $d.sysid
+                if ($k -eq (Get-E2eSysidKey $Sysid)) {
+                    # /drones 列表返回的 status 嵌套（WS 帧 status 同构）——检查 rtkStatus
+                    $rtk = $d.rtkStatus
+                    if (-not $rtk -and $d.status) { $rtk = $d.status.rtkStatus }
+                    return $rtk
+                }
+            }
+        } catch { return $null }
+        return $null
     }
+
+    # ---- 阶段一：注入改正数 ⇒ R1/R2/R3 ----
+    Write-Host '[4/4] 注入 RTCM 改正数并断言上界语义...'
+    # 注入目标**故意包含 63**（未配置 --rtk）：改正数到了也不许抬升，上界即 3。
+    $phase1 = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Send-Rtcm -Port 14560 -Seq $i       # 61 fixed
+        Send-Rtcm -Port 14561 -Seq $i       # 62 float
+        Send-Rtcm -Port 14562 -Seq $i       # 63 未配置（上界对照组）
+        if (((Get-RtkStatus 61) -eq 'RTK_FIXED') -and
+            ((Get-RtkStatus 62) -eq 'RTK_FLOAT') -and
+            ((Get-RtkStatus 63) -eq 'STANDALONE')) { $phase1 = $true; break }
+        Start-Sleep -Milliseconds 1000
+    }
+    Assert-True ($phase1 -and (Get-RtkStatus 61) -eq 'RTK_FIXED') "R1 fixed 机注入后 rtkStatus=RTK_FIXED（实际 $(Get-RtkStatus 61)）"
+    Assert-True ((Get-RtkStatus 62) -eq 'RTK_FLOAT') "R2 float 机注入后 rtkStatus=RTK_FLOAT（实际 $(Get-RtkStatus 62)）"
+    Assert-True ((Get-RtkStatus 63) -eq 'STANDALONE') "R3 未配置机注入后仍 STANDALONE——改正数不越过 --rtk 上界（实际 $(Get-RtkStatus 63)）"
+
+    # ---- 阶段二：R5 断链降级 ----
+    # 停发 61、持续发 62：61 必须在新鲜度窗口（默认 5s）+ 遥测刷新余量内掉回
+    # STANDALONE——「配置成 fixed」不再等于「界面显示厘米级」，这是上界语义的核心。
+    $degraded = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Send-Rtcm -Port 14561 -Seq (100 + $i)   # 只保 float 机的改正数新鲜
+        if ((Get-RtkStatus 61) -eq 'STANDALONE') { $degraded = $true; break }
+        Start-Sleep -Milliseconds 1000
+    }
+    Assert-True $degraded "R5 fixed 机停止注入后降回 STANDALONE（实际 $(Get-RtkStatus 61)）"
+    Assert-True ((Get-RtkStatus 62) -eq 'RTK_FLOAT') "R5 float 机持续注入仍 RTK_FLOAT（实际 $(Get-RtkStatus 62)）"
 
 } catch {
     Write-Host "  [FAIL] 异常：$($_.Exception.Message)" -ForegroundColor Red
