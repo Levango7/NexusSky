@@ -740,12 +740,12 @@ NexusSky/
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 503 |
-| `drone-sim` | 1445 |
+| `drone-sim` | 1449 |
 | `link-sim` | 133 |
 | `cloud-backend` | 3081 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5222
+| **总计** | **5226
 
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -859,8 +859,11 @@ NexusSky/
 - **出海合规（E3）是 USSP 服务接口形状**：四服务响应按 U-space 语义建模，
   映射为字段级换名/换算（不做字节级帧编码）；飞行授权=限飞区几何求交
   （不接入真实空域审批）；与真实 U-space 网络互联（CISP/EASA 认证）属生产阶段。
-- **RTK（F6）是 fix_type 上报语义**：协议层（GPS_FIX_TYPE 5/6）+ 展示链路就绪，
-  坐标噪声模型未区分 RTK/单点——真实差分改正数接入属生产阶段（需 RTK 基站/网络 RTK）。
+- **RTK（F6）是 fix_type 上报语义，且自 2026-10-26 起为「上界语义」**：`--rtk` 只声明能力
+  上界，GPS_FIX_TYPE 5/6 仅在新鲜度窗口（默认 5s，`aerofleet.sim.rtcm-fresh-window-ms` 可调）
+  内真的收到过 `GPS_RTCM_DATA` 差分改正数时上报——NTRIP 断链会立刻掉回 3D_FIX，
+  「配置成 fixed」不再等于「界面显示厘米级」（e2e-rtk.ps1 注入/断链双向断言）。
+  坐标噪声模型仍未区分 RTK/单点——真实差分数据源（NTRIP 服务层拉流→转发）属下一步（GAPS §十.10-3）。
 - **缺陷闭环（F4）的复检与去重口径**：复检=真拍一张（复用 F1 captureAndLocate）+ 逐缺陷
   10m 同 kind 比对——**要求托管机已飞临缺陷点**（派飞属运维职责，工单不驱动飞控）；
   去重与复检是同一空间近似口径。报告导出 json/csv/md，PDF 属渲染层不在本轮。

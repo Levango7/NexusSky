@@ -85,6 +85,11 @@ public abstract class MavlinkMessage {
                 return ExtendedSysState.decode(frame);
             case AutopilotVersion.ID:
                 return AutopilotVersion.decode(frame);
+            // 2026-10-26：RTK 差分改正数入口。此前缺这个 case，帧在 default 里被丢成
+            // null——VirtualDrone 那段「收到 RTCM 记 lastRtcmAtMs」的分发是死代码，
+            // 发送方发了也不被接收（rtk 上界语义单测当场抓住）。
+            case GpsRtcmData.ID:
+                return GpsRtcmData.decode(frame);
             case MissionItemInt.ID:
                 return MissionItemInt.decode(frame);
             case CommandLong.ID:
