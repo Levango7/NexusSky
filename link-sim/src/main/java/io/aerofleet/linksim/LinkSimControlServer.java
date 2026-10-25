@@ -42,6 +42,9 @@ final class LinkSimControlServer {
     /** 请求体上限：控制请求只是一小组标量，64 KB 已非常宽松。 */
     private static final int MAX_BODY_BYTES = 64 * 1024;
 
+    /** 早拒绝路径 drain 请求体的上限：够覆盖误发的超大 body，又不给恶意请求无限内存。 */
+    private static final long MAX_DRAIN_BYTES = 4 * 1024 * 1024;
+
     private static final String PATH = "/profile";
 
     private final HttpServer server;
@@ -109,11 +112,17 @@ final class LinkSimControlServer {
     private void handlePatch(HttpExchange ex) throws IOException {
         long declared = parseContentLength(ex);
         if (declared > MAX_BODY_BYTES) {
+            // 必须先消费掉请求体再应答：413 早拒绝时直接关连接，客户端若还在发 body
+            // 会收到 RST（JDK HttpClient 抛 IOException 而不是拿到 413）——CI 慢 runner
+            // 上三跑两挂（LinkSimControlServerTest.malformedBodiesAreRejected），本机
+            // loopback 快所以从不复现。有界 drain 防恶意超长 body 打爆内存。
+            drainRequest(ex);
             respond(ex, 413, error("request body too large (max " + MAX_BODY_BYTES + " bytes)"));
             return;
         }
         byte[] raw = ex.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
         if (raw.length > MAX_BODY_BYTES) {
+            drainRequest(ex);   // 同上：只读了前 64KB+1，剩余部分不消费就关是同一个竞态
             respond(ex, 413, error("request body too large (max " + MAX_BODY_BYTES + " bytes)"));
             return;
         }
@@ -143,6 +152,28 @@ final class LinkSimControlServer {
             return Long.parseLong(raw.trim());
         } catch (NumberFormatException e) {
             return -1;
+        }
+    }
+
+    /**
+     * 丢弃（消费）尚未读取的请求体，上限 {@link #MAX_DRAIN_BYTES}。
+     * 场景：早拒绝（413 等）路径不读 body 就应答+关连接，慢客户端（CI runner、跨网段）
+     * 还在发数据 ⇒ 内核回 RST ⇒ 客户端拿到的是 IOException 而不是我们的 413。
+     * drain 让客户端把已声明的内容发完，应答才能可靠送达。客户端中途断开属正常，忽略。
+     */
+    private static void drainRequest(HttpExchange ex) {
+        try (java.io.InputStream in = ex.getRequestBody()) {
+            byte[] buf = new byte[8192];
+            long total = 0;
+            while (total < MAX_DRAIN_BYTES) {
+                int n = in.read(buf);
+                if (n == -1) {
+                    return;
+                }
+                total += n;
+            }
+        } catch (IOException ignored) {
+            // 客户端已断开：没有也不需要补救
         }
     }
 

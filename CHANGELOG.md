@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 204 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 205 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,13 +31,37 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 204 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 205 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
 ---
 
 
+
+## [Unreleased] — link-sim 控制面 413 早拒绝不消费请求体：CI 上三跑两挂的真竞态（2026-10-26）
+
+### 形态（本批 #163/#170 的 CI 连续抓到）
+
+`LinkSimControlServerTest.malformedBodiesAreRejected` 在 CI 上 `IOException:
+fixed content-length … bytes received: 0` + Connection reset，三跑两挂；
+本机 loopback 快从不复现——一度被误判为「环境 flake 重跑即绿」，#170 的重跑
+又挂同一条后推翻该判定，定位到**服务端真实竞态**：
+
+`handlePatch` 对超过 64KB 的请求**不读 body 就应答 413 并关连接**，慢客户端
+（CI runner / 跨网段）还在发 70KB body ⇒ 内核回 RST ⇒ 客户端拿到 IOException
+而不是 413。超长 body 走 `readNBytes(MAX+1)` 只读 64KB+1 的路径同理。
+
+### 修法
+
+`LinkSimControlServer`：两条 413 路径先 `drainRequest(ex)`（有界 4MB，客户端中途
+断开忽略）把请求体消费掉再应答——客户端把已声明内容发完，413 才能可靠送达。
+测试不改（它断言的 413 本来就是对的行为）。
+
+### 教训
+
+「重跑即绿」两次成立不等于 flake：**挂同一条测试 ≥2 次就该去找机制**，
+本仓 #162（regulator-sim 端口交内核分配）与本次是同族教训。
 
 ## [Unreleased] — 一次"把 404 改成 518"的批量替换，改走了 186 处 HTTP 状态码（2026-10-25）
 
