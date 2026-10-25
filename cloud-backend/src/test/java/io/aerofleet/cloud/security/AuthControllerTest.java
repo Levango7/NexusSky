@@ -15,7 +15,15 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.mockito.ArgumentCaptor;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * AuthController 认证端点单测（直接实例化，无 Spring 上下文 / MockMvc）。
@@ -284,5 +292,54 @@ class AuthControllerTest {
 
         assertThat(streamTokenService.consume(token)).isNotNull();
         assertThat(streamTokenService.consume(token)).isNull();
+    }
+
+    // ===== 变异收口（P1 #7）：无认证主体的容量记账哨兵 + parseUsers 两个边界 =====
+
+    @Test
+    @DisplayName("stream-token：无认证主体时 subject 落哨兵 \"unknown\"（离开它容量记账把无主体混成空串）")
+    void streamTokenSubjectIsUnknownWithoutAuthContext() {
+        StreamTokenService service = mock(StreamTokenService.class);
+        when(service.issue(anyString(), anyString(), any())).thenReturn("tok-1");
+        AuthController controller = new AuthController(tokenProvider, passwordEncoder, USERS_CONFIG,
+                EXPIRY_SECONDS, service, null);
+        // API Key 上下文提供角色（流令牌鉴权源之一），但 SecurityContext 无认证主体。
+        ApiKeyContext.set("nsk_1_aaaa", 7, "[ingest]", "OPERATOR", null);
+
+        ResponseEntity<Map<String, Object>> resp = controller.issueStreamToken(request());
+
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        ArgumentCaptor<String> subjects = ArgumentCaptor.forClass(String.class);
+        verify(service).issue(subjects.capture(), org.mockito.ArgumentMatchers.eq("OPERATOR"), any());
+        // 变异收口：哨兵返回 ""（EmptyObjectReturnVals）时，"无主体"与空 subject 混淆，
+        // 容量记账里它和真实空用户名账号落进同一桶。
+        assertThat(subjects.getValue()).isEqualTo("unknown");
+    }
+
+    @Test
+    @DisplayName("users 配置：缺用户名的条目（\":pass\"）被忽略，空用户名不可登录")
+    void parseUsersIgnoresEntryWithoutUsername() {
+        // 含一个合法条目，避开构造器"users 空且无 repo"的 fail-fast
+        AuthController controller = new AuthController(tokenProvider, passwordEncoder, ":pass,admin:admin",
+                EXPIRY_SECONDS, streamTokenService, null);
+
+        // first <= 0 拒绝 first==0（冒号在开头 = 空用户名）；
+        // < 0 边界变异会放进 username="" 的账号，且它能登录。
+        assertThat(controller.login(body("", "pass"), request()).getStatusCode().value())
+                .as("空用户名条目必须被忽略").isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("users 配置：\"u1::ADMIN\" 不解析出空口令+ADMIN（rest 以冒号开头时角色段不成立）")
+    void parseUsersDoesNotTreatLeadingColonAsRole() {
+        AuthController controller = new AuthController(tokenProvider, passwordEncoder, "u1::ADMIN,admin:admin",
+                EXPIRY_SECONDS, streamTokenService, null);
+
+        assertThat(controller.login(body("u1", ""), request()).getStatusCode().value())
+                .as("空口令不许通过：last>0 → >=0 变异会把 \"::ADMIN\" 解析成 空口令+ADMIN 角色（弱口令出厂）")
+                .isEqualTo(401);
+        // 反向对照：真实口令（含冒号）能登——证明边界没有误伤合法形状
+        assertThat(controller.login(body("u1", ":ADMIN"), request()).getStatusCode().value())
+                .isEqualTo(200);
     }
 }

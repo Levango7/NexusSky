@@ -245,6 +245,23 @@ class StreamTokenFilterTest {
     }
 
     @Test
+    @DisplayName("头凭证在场时链必须继续（Authorization 分支的 doFilter 删掉 = 请求挂起）")
+    void headerPresenceStillContinuesChain() throws ServletException, IOException {
+        String token = service.issue("op-1", "OPERATOR", 7);
+        MockHttpServletRequest withBearer = request("GET", "/api/v1/alarms/stream");
+        withBearer.setParameter("streamToken", token);
+        withBearer.addHeader("Authorization", "Bearer some.jwt.value");
+        snapshot.chainReached = false; // 复位：上一条用例的链执行状态不能污染本次断言
+
+        runFilter(withBearer);
+
+        // 变异收口：这个分支里的 filterChain.doFilter 被删掉时，过滤器不继续链也不
+        // 设认证——客户端表现是"请求挂着直到超时"，而现有用例只断言 authenticated
+        // 为 false（本来就不认证），全绿。链是否继续才是这个 branch 被删后的唯一表象。
+        assertThat(snapshot.chainReached).isTrue();
+    }
+
+    @Test
     @DisplayName("dev-mode=true：带有效令牌也跳过（不认证不消费）")
     void devModeSkipsEverything() throws ServletException, IOException {
         StreamTokenFilter devFilter = new StreamTokenFilter(true, service);
