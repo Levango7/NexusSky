@@ -171,7 +171,7 @@ describe('DashboardPanel 卡片', () => {
   })
 })
 
-describe('DashboardPanel 模式文案（与 DroneList 的分叉处之一）', () => {
+describe('DashboardPanel 模式文案（三份 MODE_LABEL 归一后的共用口径）', () => {
   it.each([['STANDBY', '待命'], ['MANUAL', '待命'], ['ARMED', '已解锁'], ['MISSION', '任务中'], ['RTL', '返航']])(
     '%s → %s',
     (mode, label) => {
@@ -179,8 +179,10 @@ describe('DashboardPanel 模式文案（与 DroneList 的分叉处之一）', ()
     }
   )
 
-  // mode 缺失时这里显示"未知"，DroneList 同条件显示"待命"（已登记 .coord/GAPS.md，
-  // 统一成 utils/statusMeta 一份表时这两条断言要一起改）。
+  // 2026-10-24 这条当时钉的是"和 DroneList 分叉"（那里显示"待命"、这里显示"未知"、
+  // TelemetryPanel 显示空白）。2026-10-25 用户拍板缺省一律「未知」，三份归一进
+  // utils/statusMeta —— 分叉消失，但断言本身**留着**：它现在钉的是归一后的共同口径，
+  // 谁把缺省改回冒充真实状态，这里就红。
   it('mode 缺失 → 未知', () => {
     const { cards } = renderPanel([D({ mode: undefined })])
     expect(cards[0].querySelector('.db-mode').textContent).toBe('未知')

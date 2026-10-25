@@ -149,12 +149,18 @@ describe('DroneList 模式文案', () => {
     expect(items[0].querySelector('.sub').textContent).toContain('GUIDED')
   })
 
-  // 注意：mode 缺失时这里显示"待命"，而 DashboardPanel 同一条件显示"未知"，
-  // TelemetryPanel 显示空白——三份 MODE_LABEL 各自为政（已登记 .coord/GAPS.md）。
-  // 统一成一份 utils/statusMeta 的 MODE_LABEL 时，**本条断言要跟着改**，别让它变成阻力。
-  it('mode 缺失 → 当前显示"待命"（与 DashboardPanel 的"未知"分叉，见 GAPS）', () => {
+  // 这条原来钉的是"三份 MODE_LABEL 各自为政"的分叉：mode 缺失时这里显示"待命"，
+  // DashboardPanel 显示"未知"，TelemetryPanel 显示空白（GAPS §八-1）。
+  // 2026-10-25 用户拍板缺省一律「未知」并归一进 utils/statusMeta ⇒ 断言跟着翻，
+  // 这正是当初留这条注释的用意：**它该在这里变红，而不是变成阻力**。
+  it('mode 缺失 → 「未知」（不再冒充"待命"，与 Dashboard/Telemetry 同一口径）', () => {
     const { items } = renderList([D({ mode: undefined })])
-    expect(items[0].querySelector('.sub').textContent).toContain('待命')
+    expect(items[0].querySelector('.sub').textContent).toContain('未知')
+  })
+
+  it('后端显式发的 UNKNOWN 也归一成「未知」（旧表里那个小写 unknown 键永远不会命中）', () => {
+    const { items } = renderList([D({ mode: 'UNKNOWN' })])
+    expect(items[0].querySelector('.sub').textContent).toContain('未知')
   })
 })
 

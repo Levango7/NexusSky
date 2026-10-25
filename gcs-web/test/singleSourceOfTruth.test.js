@@ -40,7 +40,7 @@ describe('单一真相源：组件不得再自行定义已抽出的函数', () =
   // 且 #156 的注释明写"阈值 15/30 保持本面板原有口径"——那是另一个会话已经合并的、
   // 有意的产品决策。把它判红等于用一条测试替别人改产品口径；正确动作是先要决策
   // （已登记 .coord/GAPS.md 第八节）。等口径定了，再把这个名字加回来。
-  const FORBIDDEN = ['battClass', 'battColor', 'battColorVar', 'batteryClass', 'normPriority', 'normSeverity', 'haversine', 'fmtDur', 'circularLayout', 'gradeColor', 'fmtPct', 'fmtMs', 'fmtBattery', 'normBatteryPct', 'flightStatsOf', 'fmtMeters']
+  const FORBIDDEN = ['battClass', 'battColor', 'battColorVar', 'batteryClass', 'normPriority', 'normSeverity', 'haversine', 'fmtDur', 'circularLayout', 'gradeColor', 'fmtPct', 'fmtMs', 'fmtBattery', 'normBatteryPct', 'flightStatsOf', 'fmtMeters', 'MODE_LABEL', 'normModeLabel']
 
   for (const fn of FORBIDDEN) {
     it(`src/components 下没有组件再定义 ${fn}()`, () => {
@@ -111,6 +111,7 @@ describe('单一真相源：引用方确实接到了共享实现', () => {
     battColorVar: ['EmergencyOrchPanel.jsx', 'UnifiedCommandPanel.jsx'],
     normPriority: ['EmergencyOrchPanel.jsx', 'UnifiedCommandPanel.jsx'],
     normSeverity: ['AlarmPanel.jsx', 'UnifiedCommandPanel.jsx'],
+    normModeLabel: ['DashboardPanel.jsx', 'DroneList.jsx', 'TelemetryPanel.jsx'],
     circularLayout: ['CellTowerPanel.jsx', 'MeshTopologyPanel.jsx'],
     gradeColor: ['CvEvalPanel.jsx'],
   }

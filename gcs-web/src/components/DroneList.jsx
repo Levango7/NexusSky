@@ -1,13 +1,6 @@
 import React from 'react'
 import { battClass, fmtBattery } from '../utils/battery'
-
-const MODE_LABEL = {
-  STANDBY: '待命',
-  ARMED: '已解锁',
-  MISSION: '任务中',
-  RTL: '返航',
-  unknown: '未知',
-}
+import { normModeLabel } from '../utils/statusMeta'
 
 export default function DroneList({ drones, selectedSysid, onSelect }) {
   return (
@@ -47,7 +40,7 @@ export default function DroneList({ drones, selectedSysid, onSelect }) {
               <span className="name">{d.callsign || `Drone-${d.sysid}`}</span>
               <span className={`batt ${battClass(d.battery)}`}>{fmtBattery(d.battery)}</span>
               <span className="sub">
-                <span>{MODE_LABEL[d.mode] || d.mode || '待命'}</span>
+                <span>{normModeLabel(d.mode)}</span>
               {(d.rtkStatus === 'RTK_FIXED' || d.rtkStatus === 'RTK_FLOAT') && (
                 <span
                   title={`RTK ${d.rtkStatus === 'RTK_FIXED' ? '固定解 (cm 级)' : '浮点解 (dm 级)'}`}

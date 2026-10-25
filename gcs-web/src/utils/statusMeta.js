@@ -72,3 +72,48 @@ export function normSeverity(s) {
   if (u.includes('ERR')) return 'ERROR'
   return 'INFO'
 }
+
+/**
+ * 飞行模式标签（单一真相源）。
+ *
+ * 抽出前有三份 `MODE_LABEL`：`DashboardPanel.jsx`、`TelemetryPanel.jsx` 各一份（5 个键，
+ * 外加一个**永远不会命中**的小写 `unknown` 键——后端发的是大写 `UNKNOWN`），
+ * `DroneList.jsx` 少一个 `MANUAL` 键。三份的**缺省口径互不相同**：
+ * 同一架"没有 mode 字段"的设备，在 Dashboard 显示「未知」、在 DroneList 显示「待命」、
+ * 在 TelemetryPanel 显示**空白**。"待命"是一种真实状态，把它当成"没数据"的兜底
+ * 就是在骗操作员——这与本文件开头那四份复制品是同一族问题（GAPS §八-1）。
+ *
+ * 2026-10-25 用户拍板：缺省一律「未知」。
+ */
+export const MODE_LABEL = {
+  STANDBY: '待命',
+  MANUAL: '待命',   // 沿用 Dashboard/Telemetry 两份旧表的既有映射，不是本轮新造的词
+  ARMED: '已解锁',
+  MISSION: '任务中',
+  RTL: '返航',
+}
+
+/** 无 mode / 后端显式报 UNKNOWN 时的文案。 */
+export const MODE_UNKNOWN_TEXT = '未知'
+
+/**
+ * 把 mode 归一成展示文案。
+ *
+ * 三条规则，按顺序：
+ * 1. `null` / `undefined` / 空串 ⇒ 「未知」——**没有数据不许冒充任何一种真实状态**；
+ * 2. 后端显式发的 `UNKNOWN` ⇒ 同样「未知」（它自己就说不知道）；
+ * 3. 表里没有的真实值（如 `LAND` / `LOITER` / `TAKEOFF`）⇒ **原样透传**，
+ *    既不伪装成"已知状态"，也不降级成"未知"把真信息弄丢。
+ *    这 6 个模式缺中文标签是**产品命名决策**，已在 GAPS 登记；补进 `MODE_LABEL` 即可，
+ *    不需要改任何调用方。
+ *
+ * @param {string|null|undefined} mode 遥测里的飞行模式
+ * @returns {string} 展示文案
+ */
+export function normModeLabel(mode) {
+  if (mode == null || mode === '') return MODE_UNKNOWN_TEXT
+  const u = String(mode).toUpperCase()
+  if (u === 'UNKNOWN') return MODE_UNKNOWN_TEXT
+  if (MODE_LABEL[u]) return MODE_LABEL[u]
+  return String(mode)
+}
