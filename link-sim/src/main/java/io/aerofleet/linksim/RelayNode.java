@@ -93,15 +93,27 @@ final class RelayNode {
     void run() throws IOException {
         // P2 #20：运行时控制通道（默认关闭）。中继模式上下行可能是不同画像，
         // 控制面按 direction 分别改；前端默认 both。
+        // 安全画像同样支持（P2 #20 收尾）：但语义层必须换成 SecurityControl——
+        // 对安全链路挂 LinkSimControl 等于摆一排"改了没人看"的十元组假旋钮
+        // （延迟/丢包/带宽/分区在安全链路上一个都不存在）。
         if (cfg.controlPort > 0) {
-            if (cfg.uplink.isSecurityProfile() || cfg.downlink.isSecurityProfile()) {
-                log.error("[mesh-relay] --control-port is not supported for security profiles");
-                System.exit(1);
-                return;
-            }
             try {
-                LinkSimControlServer control = new LinkSimControlServer(cfg.controlPort,
-                        new LinkSimControl(cfg.uplink, uplink, cfg.downlink, downlink, false));
+                LinkSimControlServer control;
+                if (cfg.uplink.isSecurityProfile() || cfg.downlink.isSecurityProfile()) {
+                    // 任一侧是安全画像就走安全语义层；混合画像（一侧安全一侧普通）
+                    // 是测试构造，此时控制面只表达安全侧的可调参数，另一半如实记日志，
+                    // 不假装能两层同屏。
+                    SecurityImpairmentEngine sec = secUplink != null ? secUplink : secDownlink;
+                    if (secUplink != null && secDownlink == null
+                            || secUplink == null && secDownlink != null) {
+                        log.warn("[mesh-relay] mixed security/impairment profiles: control exposes"
+                                + " the security side only (tamperRate); {}", cfg.uplink.name);
+                    }
+                    control = new LinkSimControlServer(cfg.controlPort, new SecurityControl(sec));
+                } else {
+                    control = new LinkSimControlServer(cfg.controlPort,
+                            new LinkSimControl(cfg.uplink, uplink, cfg.downlink, downlink, false));
+                }
                 control.start();
                 log.info("[mesh-relay] control listening on http://127.0.0.1:{}/profile", control.port());
             } catch (IOException e) {

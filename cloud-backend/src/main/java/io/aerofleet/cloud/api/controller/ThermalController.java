@@ -81,11 +81,19 @@ public class ThermalController {
     }
 
     /**
-     * 机队热成像最新读数（P2 #19，2026-10-24 接线）。
+     * 机队热成像最新读数（P2 #19，2026-10-24 接线；2026-10-26 条件③补逐点坐标）。
      *
-     * <p>数据源是各机 THERMAL_DATA(30012) 遥测的快照（{@link DroneSnapshot} 热像字段，
-     * {@code ThermalIngestListener} 写入）——机队级聚合读口径，不含逐点热源坐标
-     * （那需要图像→地理位姿解算，登记在 docs/todo.md P2 #19 恢复条件 ③）。
+     * <p>数据源是各机热成像遥测的快照（{@link DroneSnapshot} 热像字段，
+     * {@code ThermalIngestListener} 写入）：
+     * <ul>
+     *   <li>聚合量来自 THERMAL_DATA(30012)；</li>
+     *   <li>{@code hotspots} 来自 THERMAL_HOTSPOT(30064)——逐点像素坐标反投影出的
+     *       地面经纬度（P2 #19 恢复条件③，见监听器注释里的输入来源与时效口径）。</li>
+     * </ul>
+     *
+     * <p>逐点坐标契约：{@code lat}/{@code lon} 为 <b>null = 当时无法解算</b>（缺
+     * GPS/高度/姿态或射线朝天），不是 0/NaN——前端必须如实显示"无法解算"。
+     * {@code truncated=true} 表示飞机侧热点数超出单帧容量 3，被截断的是较冷的那些。
      * 只列 online 且上报过（thermalUpdatedAtMs > 0）的机；租户口径由
      * {@code DeviceRegistry.all()} 按 TenantContext 过滤。
      */
@@ -104,6 +112,18 @@ public class ThermalController {
             item.put("tempStdDev", s.thermalTempStdDev);
             item.put("hotspotCount", s.thermalHotspotCount);
             item.put("updatedAtMs", s.thermalUpdatedAtMs);
+            item.put("hotspotTruncated", s.thermalHotspotsTruncated);
+            List<Map<String, Object>> hotspots = new ArrayList<>();
+            for (DroneSnapshot.ThermalHotspot h : s.thermalHotspots) {
+                Map<String, Object> hv = new LinkedHashMap<>();
+                hv.put("u", h.u());
+                hv.put("v", h.v());
+                hv.put("tempC", h.tempC());
+                hv.put("lat", h.lat());
+                hv.put("lon", h.lon());
+                hotspots.add(hv);
+            }
+            item.put("hotspots", hotspots);
             items.add(item);
         }
         Map<String, Object> resp = new LinkedHashMap<>();

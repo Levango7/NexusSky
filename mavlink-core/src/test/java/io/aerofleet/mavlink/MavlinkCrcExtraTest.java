@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>
  * SIGNATURES 由 {@code scripts/mavlink-crc-extra-gen.py --emit-java} 生成，勿手改。
  * 该生成器自身已被双重验证：用本仓库算法重算 23 条标准 MAVLink 消息与 pymavlink 官方值
- * 逐条相等（证明算法实现正确），且 51 条自定义消息与 pymavlink {@code message_checksum}
+ * 逐条相等（证明算法实现正确），且 52 条自定义消息与 pymavlink {@code message_checksum}
  * 重算结果全部一致（证明字段提取正确）。
  */
 class MavlinkCrcExtraTest {
@@ -88,6 +88,7 @@ class MavlinkCrcExtraTest {
         {30010, "OBSTACLE_REPORT", new Field[]{F(F32, "distance"), F(F32, "direction"), F(U32, "timestamp"), F(U8, "threat"), F(U8, "type"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2"), F(U8, "reserved3", 2)}},
         {30011, "MULTISPECTRAL_DATA", new Field[]{F(F32, "ndviMean"), F(F32, "ndviMin"), F(F32, "ndviMax"), F(F32, "vegetationCoverage"), F(U32, "timestamp"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2")}},
         {30012, "THERMAL_DATA", new Field[]{F(F32, "tempMean"), F(F32, "tempMin"), F(F32, "tempMax"), F(F32, "tempStdDev"), F(U32, "timestamp"), F(U8, "hotspotCount"), F(U8, "sysid"), F(U16, "reserved")}},
+        {30064, "THERMAL_HOTSPOT", new Field[]{F(U8, "sysid"), F(U8, "count"), F(U8, "truncated"), F(U8, "reserved"), F(U32, "timestamp"), F(I16, "hotspot0_x"), F(I16, "hotspot0_y"), F(I16, "hotspot0_t"), F(I16, "hotspot1_x"), F(I16, "hotspot1_y"), F(I16, "hotspot1_t"), F(I16, "hotspot2_x"), F(I16, "hotspot2_y"), F(I16, "hotspot2_t")}},
         {30013, "DEPTH_DATA", new Field[]{F(F32, "nearestDistance"), F(F32, "nearestDirection"), F(F32, "pointCloudDensity"), F(U32, "pointCount"), F(U8, "sysid"), F(U8, "reserved"), F(U16, "reserved2")}},
         {30014, "VISION_DETECTION", new Field[]{F(F32, "u"), F(F32, "v"), F(F32, "confidence"), F(U8, "kind"), F(U8, "trackId"), F(U8, "sysid"), F(U32, "timestamp"), F(U8, "reserved")}},
         {30017, "RADAR_SCAN", new Field[]{F(U8, "mode"), F(F32, "beamAzim"), F(F32, "beamElev"), F(U16, "scanPeriodMs"), F(U8, "targetCount"), F(U8, "sysid"), F(U32, "timestamp"), F(U8, "reserved"), F(U16, "reserved2")}},
@@ -262,6 +263,7 @@ class MavlinkCrcExtraTest {
             case 30010 -> "ObstacleReportMsg";
             case 30011 -> "MultispectralDataMsg";
             case 30012 -> "ThermalDataMsg";
+            case 30064 -> "ThermalHotspotMsg";
             case 30013 -> "DepthDataMsg";
             case 30014 -> "VisionDetectionMsg";
             case 30017 -> "RadarScanMsg";
