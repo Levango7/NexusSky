@@ -36,10 +36,15 @@ class RegulatorSimMainTest {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    // 各 Nested 类使用不同端口，避免并行测试时端口冲突
-    private static final int PORT_DEFAULT = 19090;
-    private static final int PORT_DELAY = 19091;
-    private static final int PORT_ERROR = 19092;
+    /**
+     * 三个 HTTP 段一律用 {@code --port 0} 让内核分配端口，再从 {@code server.getPort()} 读回。
+     * <p>
+     * 原先写死 19090/19091/19092：2026-10-25 本机 {@code dev-stack-prometheus-1} 容器把
+     * 0.0.0.0:19090 占了（映射到 9090），于是 MockUomServerTests 整段 7 个用例
+     * {@code BindException} —— 一次与本仓库代码无关的环境占用，表现成"测试红了"。
+     * 写死端口在 CI 上是隐性的（runner 干净），在共享开发机上就是别人随时能点燃的雷。
+     */
+    private static final String EPHEMERAL_PORT = "0";
 
     // =====================================================================
     // 1. PresetDataStore 测试
@@ -194,12 +199,14 @@ class RegulatorSimMainTest {
 
         private MockUomServer server;
         private HttpClient httpClient;
+        private int port;
 
         @BeforeEach
         void setUp() throws IOException {
-            SimConfig config = SimConfig.parse(new String[]{"--port", String.valueOf(PORT_DEFAULT)});
+            SimConfig config = SimConfig.parse(new String[]{"--port", EPHEMERAL_PORT});
             server = new MockUomServer(config);
             server.start();
+            port = server.getPort();
             httpClient = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
                     .build();
@@ -210,13 +217,33 @@ class RegulatorSimMainTest {
             server.stop();
         }
 
+        @Test
+        @DisplayName("绑的是内核分配的临时端口，且服务真在这个端口上应答")
+        void bindsEphemeralPortAndAnswersThere() throws Exception {
+            // 这条是"改的原因"本身：以前要写死 19090，端口被别的进程占了就整段 BindException。
+            // 断言两件事：(1) 拿回来的不是固定段（>1023，且不再落在原来那三个数上）；
+            // (2) 请求真的打在这个动态端口上并拿到 200——只读端口号不证明能用。
+            assertThat(port).isGreaterThan(1023);
+            assertThat(port).isNotEqualTo(19090).isNotEqualTo(19091).isNotEqualTo(19092);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:" + port + "/api/verify?serialNo=TEST-001"))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(objectMapper.readValue(response.body(), Map.class).get("status"))
+                    .isEqualTo("VERIFIED");
+        }
+
         // ── GET /api/verify ──
 
         @Test
         @DisplayName("GET /api/verify 已实名序列号返回 VERIFIED")
         void verifyVerifiedEntry() throws Exception {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DEFAULT +
+                    .uri(URI.create("http://localhost:" + port +
                             "/api/verify?serialNo=TEST-001&certNo=CERT-001"))
                     .GET()
                     .build();
@@ -234,7 +261,7 @@ class RegulatorSimMainTest {
         @DisplayName("GET /api/verify 未实名序列号返回 UNVERIFIED")
         void verifyUnverifiedEntry() throws Exception {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DEFAULT +
+                    .uri(URI.create("http://localhost:" + port +
                             "/api/verify?serialNo=TEST-002"))
                     .GET()
                     .build();
@@ -252,7 +279,7 @@ class RegulatorSimMainTest {
         @DisplayName("GET /api/verify 不存在的序列号返回 NOT_FOUND")
         void verifyNotFoundEntry() throws Exception {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DEFAULT +
+                    .uri(URI.create("http://localhost:" + port +
                             "/api/verify?serialNo=TEST-999"))
                     .GET()
                     .build();
@@ -278,7 +305,7 @@ class RegulatorSimMainTest {
             requestBody.put("lon", 116.3);
 
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DEFAULT + "/api/activate"))
+                    .uri(URI.create("http://localhost:" + port + "/api/activate"))
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody)))
                     .header("Content-Type", "application/json")
                     .build();
@@ -301,7 +328,7 @@ class RegulatorSimMainTest {
             requestBody.put("reason", "用户主动注销");
 
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DEFAULT + "/api/cancel"))
+                    .uri(URI.create("http://localhost:" + port + "/api/cancel"))
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody)))
                     .header("Content-Type", "application/json")
                     .build();
@@ -328,7 +355,7 @@ class RegulatorSimMainTest {
             activateBody.put("lat", 39.9);
             activateBody.put("lon", 116.3);
             HttpRequest activateReq = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DEFAULT + "/api/activate"))
+                    .uri(URI.create("http://localhost:" + port + "/api/activate"))
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(activateBody)))
                     .header("Content-Type", "application/json")
                     .build();
@@ -343,7 +370,7 @@ class RegulatorSimMainTest {
             requestBody.put("lon", 116.3);
 
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DEFAULT + "/api/telemetry"))
+                    .uri(URI.create("http://localhost:" + port + "/api/telemetry"))
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody)))
                     .header("Content-Type", "application/json")
                     .build();
@@ -368,7 +395,7 @@ class RegulatorSimMainTest {
             activateBody.put("lon", 116.3);
 
             HttpRequest activateRequest = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DEFAULT + "/api/activate"))
+                    .uri(URI.create("http://localhost:" + port + "/api/activate"))
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(activateBody)))
                     .header("Content-Type", "application/json")
                     .build();
@@ -376,7 +403,7 @@ class RegulatorSimMainTest {
 
             // 查询 records
             HttpRequest recordsRequest = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DEFAULT + "/api/records?type=activation"))
+                    .uri(URI.create("http://localhost:" + port + "/api/records?type=activation"))
                     .GET()
                     .build();
 
@@ -400,15 +427,17 @@ class RegulatorSimMainTest {
 
         private MockUomServer server;
         private HttpClient httpClient;
+        private int port;
 
         @BeforeEach
         void setUp() throws IOException {
             SimConfig config = SimConfig.parse(new String[]{
-                    "--port", String.valueOf(PORT_DELAY),
+                    "--port", EPHEMERAL_PORT,
                     "--delay-ms", "100"
             });
             server = new MockUomServer(config);
             server.start();
+            port = server.getPort();
             httpClient = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(10))
                     .build();
@@ -423,7 +452,7 @@ class RegulatorSimMainTest {
         @DisplayName("--delay-ms 100 → 响应时间 ≥ 100ms")
         void delayAtLeast100ms() throws Exception {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_DELAY + "/api/verify?serialNo=TEST-001"))
+                    .uri(URI.create("http://localhost:" + port + "/api/verify?serialNo=TEST-001"))
                     .GET()
                     .build();
 
@@ -446,15 +475,17 @@ class RegulatorSimMainTest {
 
         private MockUomServer server;
         private HttpClient httpClient;
+        private int port;
 
         @BeforeEach
         void setUp() throws IOException {
             SimConfig config = SimConfig.parse(new String[]{
-                    "--port", String.valueOf(PORT_ERROR),
+                    "--port", EPHEMERAL_PORT,
                     "--error-rate", "1.0"
             });
             server = new MockUomServer(config);
             server.start();
+            port = server.getPort();
             httpClient = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
                     .build();
@@ -470,7 +501,7 @@ class RegulatorSimMainTest {
         void allGetRequestsReturn500() throws Exception {
             // verify 端点
             HttpRequest verifyRequest = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_ERROR + "/api/verify?serialNo=TEST-001"))
+                    .uri(URI.create("http://localhost:" + port + "/api/verify?serialNo=TEST-001"))
                     .GET()
                     .build();
             HttpResponse<String> verifyResponse = httpClient.send(verifyRequest, HttpResponse.BodyHandlers.ofString());
@@ -481,7 +512,7 @@ class RegulatorSimMainTest {
 
             // records 端点
             HttpRequest recordsRequest = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:" + PORT_ERROR + "/api/records?type=activation"))
+                    .uri(URI.create("http://localhost:" + port + "/api/records?type=activation"))
                     .GET()
                     .build();
             HttpResponse<String> recordsResponse = httpClient.send(recordsRequest, HttpResponse.BodyHandlers.ofString());
@@ -500,7 +531,7 @@ class RegulatorSimMainTest {
             String[] postEndpoints = {"/api/activate", "/api/cancel", "/api/telemetry"};
             for (String endpoint : postEndpoints) {
                 HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:" + PORT_ERROR + endpoint))
+                        .uri(URI.create("http://localhost:" + port + endpoint))
                         .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(postBody)))
                         .header("Content-Type", "application/json")
                         .build();

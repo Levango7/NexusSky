@@ -41,11 +41,14 @@ class FaultInjectionTest {
 
     @Test
     @DisplayName("请求计数：按 方法+路径 累计，reset 清零") void requestCountsAreTracked() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=18182"});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0"});
         MockUomServer server = new MockUomServer(config);
         try {
             server.start();
-            int port = config.port;
+            // 端口由内核分配：这个测试只需要"计数按 方法+路径 累计"，绑定哪个端口无关，
+            // 写死端口只会让它和任何占着该端口的进程（本机是别的项目的容器）互斥。
+            int port = server.getPort();
+            assertThat(port).isGreaterThan(1023);
 
             // 两个不同端点各打一次 + 其中一个再打一次
             get(port, "/api/verify?serialNo=TEST-001&certNo=CERT-001");
