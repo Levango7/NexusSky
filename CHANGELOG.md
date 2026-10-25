@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-25 共有 193 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-25 共有 194 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 193 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 194 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,46 @@
 
 
 ---
+## [Unreleased] — 同一架没有 `mode` 的无人机，三个面板三种说法：`待命` / `MANUAL` / 空（2026-10-25）
+
+### 1. 现场：三份 `MODE_LABEL`，缺省口径互不相同
+
+`GAPS` §八-1 登记的现象，本轮按用户裁定的「统一成『未知』」落地。实测三处的分叉：
+
+| 组件 | 表里有没有 `MANUAL` | 缺省写法 | `mode='MANUAL'` 时显示 | `mode` 缺失时显示 |
+|---|---|---|---|---|
+| `DashboardPanel.jsx:23-30` | 有（`'待命'`） | `\|\| '未知'` | 待命 | 未知 |
+| `DroneList.jsx:4-10` | **没有** | `\|\| '待命'` | **英文原文 `MANUAL`** | **待命**（冒充了一个它并不知道的状态） |
+| `TelemetryPanel.jsx:4` | 有 | `\|\| mode` | 待命 | **空/undefined** |
+
+三份表对同一架机器的同一个值给出三种答案。**最坏的是 DroneList 的 `|| '待命'`**：
+它把「不知道」渲染成一个确定状态，操作员会以为飞机真的在待命。
+
+### 2. 修法：并进 `utils/statusMeta.js`，判据写死成函数
+
+新增 `MODE_LABEL`（码表）+ `MODE_UNKNOWN_TEXT = '未知'` + `normModeLabel(mode)`：
+
+- `null` / 空串 / `'UNKNOWN'` ⇒ `'未知'`（**不知道就说不知道**）
+- 已知码 ⇒ 查表
+- **其余真实值原样透传**（不降级成「未知」——后端加了新 mode 时，宁可显示原始码也不冒充已知状态）
+
+三个面板改为 `import { normModeLabel } from '../utils/statusMeta'`，
+`singleSourceOfTruth.test.js` 的 `FORBIDDEN` 加上 `MODE_LABEL` / `normModeLabel`，
+`EXPECTED_IMPORTERS` 登记三个引用方（引用方少了也判红，防「并进去了但没人用」）。
+
+### 3. 两条「分叉断言」按新口径翻正
+
+补口轮在 `droneList.test.jsx` / `dashboardPanel.test.jsx` 里各留了一条点名这处分叉的断言
+（当时钉的是「两个面板显示不同」）。口径统一后它们必然红 —— **同批翻成正向断言**，
+没有靠删测试收口。
+
+### 4. 验证
+
+`npx vitest run` ⇒ **562 例 / 40 文件全绿**（本轮 +22：`modeLabel.test.js` 18 +
+`droneList` 1 + `singleSourceOfTruth` 3）。四门禁（hygiene / 用例数 / 端点数 / 目录计数）通过。
+
+---
+
 ## [Unreleased] — regulator-sim 把端口写死在 19090：别的项目占了这个号，本机就有 7 个用例红（2026-10-25）
 
 ### 1. 现场：一次全量回归在本地红 7 个 error，红的原因不在这个仓库里
