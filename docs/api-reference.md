@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 更新至 2026-10-06，共 78 个 `@RestController`、3 个 `@Service` 辅助类、411 个 REST API 端点
+> 更新至 2026-10-24，共 79 个 `@RestController`、3 个 `@Service` 辅助类、414 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -743,6 +743,43 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/delivery/1/
 |------|------|------|--------|------|
 | POST | `/tasks` | 创建多光谱任务（FR-27，需 OPERATOR） | {sysid,bands,region} | 200 TaskView / 400 |
 | GET | `/tasks/{taskId}` | 查询任务状态+NDVI 结果（FR-27） | - | 200 TaskView / 518 |
+
+### 基础路径 `/api/v1/link-sim`
+
+**Controller**: `linksim/LinkSimControlController` | link-sim 运行时损伤控制转发（P2 #20）
+
+透明转发到本机 link-sim 的控制面（默认 `http://127.0.0.1:14601/profile`）；
+link-sim 必须以 `--control-port 14601` 启动，否则读/写都返回 503。
+参数校验（字段/范围/互斥）的权威在 link-sim 侧，云端只做鉴权、超时与错误映射。
+
+| 方法 | 路径 | 说明 | 请求体 | 响应 |
+|------|------|------|--------|------|
+| GET | `/control` | 当前画像/模式 + 上下行十元组参数 + 累计统计 + 参数上限 + 画像清单（需 OBSERVER） | - | 200 视图 / 503 控制面未启动 / 504 超时 |
+| PATCH | `/control` | 换画像 / 恢复默认 / 改损伤参数（需 **OPERATOR**） | 见下 | 200 应用后视图 / 400 参数非法 / 503 / 504 / 502 上游异常 |
+
+**PATCH 请求体**（三种互斥形态，可加 `direction=uplink|downlink|both`，默认 both）：
+
+| 形态 | 示例 | 语义 |
+|------|------|------|
+| 整画像切换 | `{"profile":"lte-edge"}` | 两个方向都回到该画像的 Gilbert-Elliot 默认值 |
+| 恢复默认 | `{"reset":true}` | 丢弃自定义改动，回到**当前**画像默认值 |
+| 局部更新 | `{"delayMs":120,"jitterMs":0,"dropPct":5,"bandwidthKbps":8000,"partitionCycleSec":25,"partitionDownSec":2.5}` | 未给出的字段保持当前值；含 `dropPct` 即把丢包模型切为**独立随机**（`dropModel=uniform`） |
+
+**GET 视图字段**（`/control` 200 响应）：
+
+| 字段 | 含义 |
+|------|------|
+| `profile` | 当前画像名（上下行不同时为 `a/b`） |
+| `mode` | `profile` / `custom` / `mixed`（一侧自定义一侧画像） |
+| `profiles` | 可供切换的画像名清单（取自 `LinkProfile` 枚举） |
+| `envCoupled` | link-sim 是否带 `--env-coupled`（只读开关状态） |
+| `uplink` / `downlink` | 每个方向：`delayMs` `jitterMs` `dropModel`(ge/uniform) `dropPct` `pGoodDrop`… `pBadToGood` `bandwidthKbps` `partitionCycleSec` `partitionDownSec` `stats{forwarded,dropped,dropPct,avgDelayMs}` |
+| `limits` | 参数上限（`delayMsMax` 5000、`jitterMsMax` 5000、`bandwidthKbpsMax` 1000000、`partitionCycleSecMax` 3600、`partitionDownSecMax` 3600） |
+
+> **安全边界**：link-sim 控制端口只绑 `127.0.0.1` 且**无应用层鉴权**——对外可达的只有
+> 本控制器（写操作 OPERATOR）。`aerofleet.linksim.control-url` 指向非回环地址会让该
+> 副作用面暴露，配置项注释已写明。安全画像（`tamper`/`unsigned`）不支持控制通道：
+> link-sim 见到 `--control-port` 直接退出 1。
 
 ### 基础路径 `/api/v1/obstacle`
 
@@ -2625,7 +2662,7 @@ es.onerror = (e) => {
 | 喷洒物流 | SprayController | /api/v1/spray | 4 |
 | 喷洒物流 | DeliveryController | /api/v1/delivery | 7 |
 | 视觉感知 | VisionController | /api/v1/vision | 4 |
-| 视觉感知 | ThermalController | /api/v1/thermal | 2 |
+| 视觉感知 | ThermalController | /api/v1/thermal | 3 |
 | 视觉感知 | MultispectralController | /api/v1/multispectral | 2 |
 | 视觉感知 | ObstacleController | /api/v1/obstacle | 4 |
 | 硬件抽象 | HardwareDataController | /api/v1 | 8 |
@@ -2685,6 +2722,7 @@ es.onerror = (e) => {
 | 设备归属 | DeviceProvisioningController | /api/v1/devices | 4 |
 | 视觉感知 | CvEvalController | /api/v1/cv-eval | 2 |
 | 视频融合 | VideoFusionController | /api/v1/video-fusion | 5 |
-| **合计** | **78 个 @RestController** | | **409** |
+| 链路仿真 | LinkSimControlController | /api/v1/link-sim | 2 |
+| **合计** | **79 个 @RestController** | | **414** |
 
-> **注**: 项目共 79 个 Controller 源文件（78 个 `*Controller.java`，含 `telemetry/EnvOverrideController` + `delivery2/DeliveryController2.java` + `surveillance/VideoFusionController`），其中 78 个为 `@RestController`。`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。78 个 `@RestController` 共 411 个端点（217 GET / 163 POST / 14 PUT / 16 DELETE）。其中 `LicenseModuleMap` 与 `OpenApiConfig` 虽标注 `@RestController` 但不含任何方法级映射注解、不暴露 API，故下表列 76 行；端点数列之和即 411。
+> **注**: 项目共 80 个 Controller 源文件：77 个为 `@RestController`，`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。不算 actuator，`@RestController` 类共 79 个（另有 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的类也标注 `@RestController`，但不含任何方法级映射注解、不暴露 API）—— 共 414 个端点（219 GET / 163 POST / 14 PUT / 16 DELETE / 1 PATCH）。因此下表列 77 行（+链接仿真的 `LinkSimControlController`），端点列之和 411 = 414 − 2。

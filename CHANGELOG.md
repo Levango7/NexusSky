@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-25 共有 197 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 200 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 197 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 200 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,56 @@
 
 
 ---
+## [Unreleased] — P2 #19/#20 接上最新 master：热成像 + link-sim 控制面真正落地（2026-10-25）
+
+### 1. 现场：链式合并被从中间截断
+
+上一轮把整条链 rebase 到 master 2926475，四层 PR 的 base 全部对齐。
+但随后 master 继续前进（#161/#162/#164/#165），**前三层被别的 PR 以 squash 形式
+分别送上了 master，链从中间断掉**：
+
+- security P1 #7 → `3335658c (#147)` ✓ 在 master
+- 前端 KNOWN_GAPS 清账 → `685b844d (#165)` ✓ 在 master
+- regulator-sim 临时端口 → `e787e1f6 (#162)` ✓ 在 master
+- **P2 #19 热成像** → PR #152 显示 merged=true，但合进的是 base 分支
+  `audit/frontend-endpoint-gaps`，而那个分支被 #165 提前取走时**不含 thermal**
+  → `ThermalIngestListener.java` 不在 master 上
+- **P2 #20 link-sim 控制面** → PR #153 同理，`LinkSimControl.java` 不在 master 上
+
+### 2. 做了什么
+
+跳过已在 master 的前两层，只把后 5 个提交重放到最新 master（`58bb8009`）：
+
+| 提交 | 内容 |
+|---|---|
+| 热成像接线 | drone-sim 发送环 + `ThermalIngestListener` + `GET /api/v1/thermal/status` + 面板真实聚合表 |
+| link-sim 控制面 | `--control-port`（默认 0）+ `GET/PATCH /profile`（只绑回环）+ cloud 转发 + 前端滑块恢复 |
+| 端口表文档 | 14601 进部署/排障端口表 |
+| 证据/PR 号文档 | 真机 curl 复核、todo.md 登记 |
+| 计数归位 | 全仓计数订正到实测 |
+
+regulator-sim 的临时端口改动**取 master 版本**（#162 已落地，实现略不同但同一意图），
+不重复造第二份。
+
+### 3. 实测（本机，mvn -B -o clean test）
+
+```
+mavlink-core 503 / drone-sim 1445 / link-sim 133
+cloud-backend 3081 / regulator-sim 41 / sdk-java 19     合计 5222
+BUILD SUCCESS   0 失败 0 错误 0 跳过
+```
+
+- 端点 **414**（thermal +1、link-sim +2、env-status +1，后者已由 #165 带上 master）
+- vitest **570**；CHANGELOG 小节 199
+- 全仓文档计数 13 处订正到 5222，端点声称 13 处订正到 414
+- 12 项 Python 门禁全 exit 0；含 docs/api-reference 模块表合计 411→414
+
+### 4. 仍未关闭
+
+- P2 #19 的条件③（逐点热源经纬度 = 图像→地理位姿解算）——需要 vision 包的姿态解算，
+  不属于本轮范围。
+- P2 #20 的安全画像（tamper/unsigned）不支持控制通道，link-sim 侧已 exit 1 拒绝。
+
 ## [Unreleased] — 清掉 GAPS 剩下的三项纯软件活：NTRIP 差分源 + 两处口径（2026-10-25）
 
 ### 1. NTRIP 客户端：定位维度唯一「纯软件可立即补」的缺口
@@ -971,6 +1021,94 @@ pymavlink 已确认官方参数（`ordered_fieldnames` + `crc_extra=178`），
 上一轮（#154）写过「本地 `check-test-count-docs.py` 报的 22 处不一致是 surefire 残缺假象」。
 本轮把全仓 Java 测试**完整跑了一遍**后复核：门禁输出 **「全部一致」**（同步掉本 PR 新增的
 11 个用例后）。⇒ 那个判断成立：**本地残缺时不能改文档，完整跑之后才可信**。
+## [Unreleased] — P2 #20 link-sim 运行时控制通道：伤害参数从“启动期固定”变“可调、可见、可启动验证”（2026-10-24）
+
+### 1. 现场：P1 #11 移除的假滑块，背后是一个真的缺口
+
+前端链路质量面板曾有三个伤害滑块，2026-10-24 按诚实性原则移除（P1 #11）。
+删除时记下的恢复条件是：link-sim 加 HTTP 控制面 + 云端转发端点。
+实测：伤害参数（延迟/抖动/Gilbert-Elliot 丢包/带宽/分区）只能由启动参数
+`--profile` 固定，进程内没有任何控制入口；云端也没有对应端点。
+本轮把这两件补上，滑块按当时记下的恢复条件恢复。
+
+### 2. 补了什么（link-sim / cloud / 前端各一环）
+
+- **link-sim 控制面**：`--control-port N`（**默认 0=关闭**，不改变既有默认行为）
+  启动 `GET/PATCH /profile`（JDK HttpServer，**只绑 127.0.0.1**，无应用层鉴权、
+  64 KB 请求体上限的校验）。新 `ImpairmentSpec`（十元组不可变规格）+
+  `LinkSimControl`（语义层）+ `LinkSimControlServer`（HTTP 层）三个新类各只负责一层；
+  `ImpairmentEngine` 字段改非 final + `apply/spec/statsSnapshot`，参数替换对判决原子生效。
+  语义边界写死：统计计数跨参数保留、令牌桶 clamp 到新箱、分区相位不重置（调参本身不制造假黑洞）。
+- **控制语义**：三种互斥形态——`profile`（整画像切换）/ `reset`（恢复**当前**画像默认）/
+  自定义字段局部更新；支持 `direction=uplink|downlink|both`。
+  `dropPct` 显式切换为**独立随机丢包**（`dropModel=uniform`），与画像的 GE 突发模型区分，视图里直接显示。
+- **cloud-backend 转发**：`GET /api/v1/link-sim/control`（OBSERVER）+
+  `PATCH /api/v1/link-sim/control`（**OPERATOR**）。错误分层映射：
+  连不上 503（提示启动参数）/超时 504/上游 400 透传原因/上游 5xx 映 502。
+  参数校验的唯一权威留在 link-sim（云端不复制一份规则）；
+  LicenseModuleMap 登记 `/api/v1/link-sim` → network 模块（不登记即 fail-closed）。
+- **前端**：`api.js` 新增 `getLinkSimControl` / `patchLinkSimControl`（错误提示改读后端的
+  `result` 字段，不再只显示 "HTTP 400"）；`LinkQualityPanel` 恢复伤害面板——
+  滑块初值读自控制面**当前值**，拖动后必须点“应用”才发 PATCH，成功后以响应回填；
+  控制面不可达时整块控件禁用并显示原因。
+
+### 3. 实测
+
+- 新用例 19 个：link-sim 控制面契约 11 例（真实 HTTP + **按住引擎判决断言**）+
+  云端转发契约 8 例（假 link-sim 真实转发方法/路径/请求体、400 透传、503/504/502、
+  RBAC 注解直调断言）。
+- **A/B 3/3 KILLED**：控制面 `d.engine.apply(next)` 删除 / 转发把 PATCH 降级成 GET /
+  去掉 PATCH 端的 `@RequireRole(Role.OPERATOR)`——全部"改坏⇒红、还原⇒绿"。
+  **真机 curl 复核**（另起进程跑 jar，不是只看单用例）：GET /profile 返回默认 `lan`、
+  PATCH 后 `mode=custom`、`profile=radio-sik` 切换后 dropModel 回到 `ge`、
+  `{"delayMs":-5}` 返回 400 且 result 给出具体原因、POST 返回 405（带 Allow 头）。
+- link-sim 122 → **133**，cloud-backend 3042 → **3050**，全仓 **5169** 用例 0 失败；
+  端点 411 → **413**（新增 GET+PATCH），vitest 28 例整文件 + build + lint 全绿。
+- **安全口径**：link-sim 控制端口只绑 127.0.0.1 且**不做应用层鉴权**；对外只有云端控制器。
+  改 `aerofleet.linksim.control-url` 指向非回环地址等同于把沙盒搭到公网——已写入类注释。
+
+### 4. 未关闭 / 边界
+
+- 安全画像（`tamper`/`unsigned`）不支持控制通道：传 `--control-port` 直接退出 1（安全伤害没有可调的数值参数）。
+- `--env-coupled` 的雨衰覆盖层不受控制面直接影响（包装层读环境状态）；视图的 `envCoupled` 字段只表示开关状态。
+- 控制面本身不持久化、不做并发管控：转发失败不重试。
+
+---
+
+## [Unreleased] — P2 #19 热成像接线：从"消息定义"到"面板有数"的全链补完（2026-10-24）
+
+### 1. 现场：三件齐备、唯独没人发送
+
+P1 #12 把热成像面板改成"未实现"说明页时分诊确证：THERMAL_DATA(30012) 的消息定义
+（mavlink-core）、解码（`MavlinkMessage.decode`）、载荷源（drone-sim 的
+`SimulatedThermalSource`/`BudgetThermalSource`）三件齐备，但**全仓零发送点**——
+且完整版 VirtualDrone 根本没装配热像源（只有 budget 模式有）。链上每一环都在，
+唯独没人把它们接起来：cloud-backend 零引用、任务壳永不推进、前端吃 404。
+
+### 2. 补了什么（三端各一环）
+
+- **drone-sim 发送环**：完整版构造器装配 `SimulatedThermalSource`（此前仅 budget
+  模式装配）；`telemetryRates` 1Hz 块挂钩（照 LiDAR(30020) 模板）：
+  `synthesizeThermalScene`（基线 22℃ + 两个缓变热源，位置由 sysid 派生、确定性可测）
+  → `analyze` → `ThermalDataMsg` 下发。
+- **cloud-backend ingest 环**：新 `ThermalIngestListener`（照
+  `TelemetrySnapshotListener` 的 @EventListener + msgId 条件姿势）——每帧写
+  `DroneSnapshot` 热像五元组快照 + 收账该 sysid 最老活跃任务（PENDING → COMPLETED；
+  每帧都是完整分析，RUNNING 态在此接线不可观测，Javadoc 诚实记录）。
+- **cloud-backend 读环**：`ThermalController` + `GET /api/v1/thermal/status`
+  （机队热读数：只列 online 且上报过的机，租户口径由 `DeviceRegistry.all()` 过滤）。
+- **前端**：ThermalOverlayPanel 从"未实现"说明页换成真实机队热读数表
+  （tempMax/mean/min/σ + 热点数 + 上报时刻，温度阈值告警为客户端过滤并注明）。
+
+### 3. 实测
+
+- 新用例 11 个：sim 侧 `ThermalDataEmissionTest` 2 例（**真实 UDP 往返**：1Hz 帧必达
+  + 数值非平凡 + 场景确定性）、cloud 侧 ingest 契约 5 例 + 读口径 4 例。
+- **A/B 4/4 KILLED**：1Hz 挂钩删除 / 完整版热像源装配删除 / 收账调用删除 /
+  离线过滤取反——全部"改坏⇒红、还原⇒绿"。
+- 端点 410 → **411**；vitest 382 + build + lint ✓。
+- 恢复条件③（逐点热源经纬度）仍留 P2 #19：需要图像→地理位姿解算，本轮面板按
+  聚合口径显示（每机五元组），不假装有逐点坐标。
 
 ---
 
