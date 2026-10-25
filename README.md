@@ -669,8 +669,8 @@ SITL（真固件软件在环）接入步骤见 [docs/sitl-integration.md](docs/s
 
 - `/hardware/physics-model` 与 `/spray/gripper` 在仓内均不存在（原脚本凭空断言），
   动力侧改用真实存在的 `/rotor/config` + `/rotor/telemetry`，夹爪由 drone-sim 单测覆盖。
-- LiDAR/IMU 返回 518 是**符合契约**的：drone-sim 默认不注入 `LiDARSource`/`ImuSource`。
-  此时断言"518 契约正确"并跳过字段断言，真实载荷断言需显式装配 Source 或真机。
+- LiDAR/IMU 返回 404 是**符合契约**的：drone-sim 默认不注入 `LiDARSource`/`ImuSource`。
+  此时断言"404 契约正确"并跳过字段断言，真实载荷断言需显式装配 Source 或真机。
 - 机载拒收（`MAV_RESULT=3`，drone-sim 未实现该自定义 MAV_CMD）只告警不判失败——
   REST 侧契约是"命令已下发并拿到回执"，机载语义需机载实现后另测。
 
@@ -917,9 +917,13 @@ NexusSky/
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
   而加测试不会让任何东西变红。
-  选的是**已确认缺陷**加相关契约，不是全量覆盖——59 个 `.jsx` 组件里 **40 个零测试**，
-  且最大的三个（`UnifiedCommandPanel.jsx` 1451 行 / `api.js` 1337 行 /
-  `MapView.jsx` 1016 行）均无测试文件，只受 lint + build 保护。
+  选的是**已确认缺陷**加相关契约，不是全量覆盖——59 个 `.jsx` 组件里 **40 个零测试**
+  （口径由 `check-test-count-docs.py` 的 `measure_components` 机器核对：组件＝`src/**/*.jsx`
+  全部文件，含入口；有直测＝被任一测试文件按路径 `import` 过，只认 import 不认文件名撞巧）。
+  注意**"最大的三个都没有测试"这句话是假的**，2026-10-24 实测：
+  `UnifiedCommandPanel.jsx`（1686 行）由 `test/unifiedCommandWiring.test.jsx` 真实挂载、
+  `api.js`（1502 行）有 `src/api.test.js` + `test/apiCancelSignal.test.js`；
+  真正"最大且无直测"的是 `MapView.jsx`（1112 行）。
   新增的 `FleetOpsPanel.jsx` 亦无组件级测试（其逻辑已全部下沉到
   `utils/schedulingFrames.js` 纯函数并直测——与第二批"先把与 React 无关的逻辑抽出来
   再测"的做法一致）。
@@ -1091,7 +1095,7 @@ NexusSky/
 - **视频融合面板（`VideoFusionPanel`）后端已补齐**（2026-10-03 第七轮核查发现当时未实现，
   2026-10-06 补齐）：该面板（GCS `videofusion` 视图）调用的
   `/api/v1/video-fusion/surveillance/streams`、`/drone/feeds`、
-  `/recording/{id}/start|stop` 此前在后端**没有对应 Controller**，面板运行期必然 518——
+  `/recording/{id}/start|stop` 此前在后端**没有对应 Controller**，面板运行期必然 404——
   而 `videofusion` 已在 `EMERGENCY_STANDARD_PANELS`（"应急千元级"）里作为**已定价能力**
   对外存在。现新增 `surveillance/VideoFusionController`（+ 5 个端点、12 例测试），
   数据源全部复用既有服务：安防流取 `SurveillanceDeviceRegistry.listDevices()`
