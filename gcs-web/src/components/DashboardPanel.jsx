@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react'
 import { battClass, battColor, battLevel, fmtBattery, normBatteryPct } from '../utils/battery'
+import { normModeLabel } from '../utils/statusMeta'
 
 /**
  * 仪表盘汇总面板
@@ -19,15 +20,6 @@ import { battClass, battColor, battLevel, fmtBattery, normBatteryPct } from '../
 const CYAN = '#00d4ff'
 const OK = '#2de2a5'   // 调色板用（在线数），电量色见 utils/battery
 const CRIT = '#ff5d5d'  // 调色板用（告警数），电量色见 utils/battery
-
-const MODE_LABEL = {
-  STANDBY: '待命',
-  MANUAL: '待命',
-  ARMED: '已解锁',
-  MISSION: '任务中',
-  RTL: '返航',
-  unknown: '未知',
-}
 
 // 电池条（横向）
 function BattBar({ value }) {
@@ -88,7 +80,7 @@ function DroneCard({ drone, onSelect }) {
         <span className="db-name">{name}</span>
         <span className="db-sysid mono">#{d.sysid}</span>
         <span className={`db-mode mode-pill mode-${d.mode || 'unknown'}`}>
-          {MODE_LABEL[d.mode] || d.mode || '未知'}
+          {normModeLabel(d.mode)}
         </span>
       </div>
       <div className="db-card-body">

@@ -1,14 +1,6 @@
 import React, { useState } from 'react'
 import { battClass, fmtBattery } from '../utils/battery'
-
-const MODE_LABEL = {
-  STANDBY: '待命',
-  MANUAL: '待命',
-  ARMED: '已解锁',
-  MISSION: '任务中',
-  RTL: '返航',
-  unknown: '未知',
-}
+import { normModeLabel } from '../utils/statusMeta'
 
 // 航空姿态仪（人工地平仪）：roll 旋转、pitch 平移，蓝上棕下
 function AttitudeIndicator({ roll = 0, pitch = 0 }) {
@@ -87,7 +79,7 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
       <div className="panel-head">
         <h3>飞行仪表</h3>
         <span className={`mode-pill mode-${mode}`}>
-          {MODE_LABEL[mode] || mode}
+          {normModeLabel(mode)}
         </span>
       </div>
       <div className="panel-body">
