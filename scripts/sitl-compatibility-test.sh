@@ -267,7 +267,7 @@ fi
 
 # ─────────────────── 8. NexusSky 扩展消息验证 ───────────────────
 step "8. NexusSky 扩展消息（30000-30063）编解码验证"
-echo "   （已在步骤 1 离线自检中覆盖全部 51 条扩展消息的帧层往返）"
+echo "   （已在步骤 1 离线自检中覆盖全部 52 条扩展消息的帧层往返）"
 echo "   扩展消息区间: 30000(LED_CONTROL) ~ 30063(BUZZER_CONTROL)，私有方言段 30000-30099"
 echo "   含 4 条可变长度消息: MESH_NEIGHBOR_TABLE(30034), TERRAIN_TYPE_MAP(30042), TERRAIN_UPDATE(30043), FLIGHT_RESTRICTION(30044)"
 # 原写法是 "[ '$FAIL' = '0' ] || true"：check 用 eval 执行这个串，尾巴上的 `|| true`

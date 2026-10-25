@@ -123,6 +123,8 @@ public abstract class MavlinkMessage {
                 return MultispectralDataMsg.decode(frame);
             case ThermalDataMsg.ID:
                 return ThermalDataMsg.decode(frame);
+            case ThermalHotspotMsg.ID:
+                return ThermalHotspotMsg.decode(frame);
             case DepthDataMsg.ID:
                 return DepthDataMsg.decode(frame);
             case VisionDetectionMsg.ID:

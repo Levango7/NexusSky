@@ -27,6 +27,7 @@ import io.aerofleet.mavlink.messages.VfrHud;
 import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
 import io.aerofleet.mavlink.messages.EnvironmentStatus;
 import io.aerofleet.mavlink.messages.ThermalDataMsg;
+import io.aerofleet.mavlink.messages.ThermalHotspotMsg;
 import io.aerofleet.mavlink.messages.ObstacleReportMsg;
 import io.aerofleet.mavlink.messages.RadarScanMsg;
 import io.aerofleet.mavlink.messages.RadarTargetMsg;
@@ -2552,16 +2553,71 @@ public final class VirtualDrone implements AutoCloseable {
      * M3 热成像数据上报 1Hz（FR-21）：合成机下视温度场 → 热像源分析 →
      * ThermalDataMsg(30012)。此前的"壳任务"诊断：消息定义/解码/载荷源三件齐备，
      * 唯独没有任何发送点——这里补上最后一个环节。
+     *
+     * <p>P2 #19 条件③（2026-10-26）：同帧附带 THERMAL_HOTSPOT(30064) 逐热点像素
+     * 坐标，让云端能把每个热源反投影成 lat/lon（只有聚合量的话，
+     * "热源在地面哪个位置"在链路层就丢了）。
      */
     private void sendThermalData() {
         try {
-            ThermalSource.ThermalResult r = thermalSource.analyze(synthesizeThermalScene(config.sysid, System.currentTimeMillis()));
+            long nowMs = System.currentTimeMillis();
+            ThermalSource.ThermalResult r = thermalSource.analyze(synthesizeThermalScene(config.sysid, nowMs));
             send(new ThermalDataMsg(
                     (float) r.mean(), (float) r.min(), (float) r.max(), (float) r.stdDev(),
-                    System.currentTimeMillis(), r.hotspots().size(), config.sysid));
+                    nowMs, r.hotspots().size(), config.sysid));
+            sendThermalHotspots(r.hotspots(), nowMs);
         } catch (Exception e) {
             SimLog.warn("thermal data failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * P2 #19 条件③：热点按峰值温度降序截断。
+     *
+     * <p>{@link ThermalHotspotMsg#MAX_HOTSPOTS} 装不下时保留哪个：取峰值最热的。
+     * 理由：截掉"较冷的"比静默丢弃任意一个都更可解释——云端至少看到的是
+     * 最危险的那几个，且 {@code truncated} 标志让缺口显式可见。静态 + 无副作用，
+     * 供测试直接钉契约（走 UDP 只能断言"到达"，断言不了"选了谁"）。
+     *
+     * @param hotspots 检测结果，null/空按空处理
+     * @param max      保留个数（≤0 返回空）
+     * @return 新列表（不改入参），长度 ≤ min(size, max)，按峰值降序
+     */
+    static java.util.List<ThermalSource.Hotspot> hottestFirst(
+            java.util.List<ThermalSource.Hotspot> hotspots, int max) {
+        if (hotspots == null || hotspots.isEmpty() || max <= 0) {
+            return java.util.List.of();
+        }
+        java.util.List<ThermalSource.Hotspot> sorted = new java.util.ArrayList<>(hotspots);
+        sorted.sort((a, b) -> Double.compare(b.tempC(), a.tempC()));
+        return sorted.subList(0, Math.min(sorted.size(), max));
+    }
+
+    /**
+     * P2 #19 条件③：逐热点像素坐标下发 THERMAL_HOTSPOT(30064)。
+     *
+     * <p>ThermalDataMsg(30012) 只带热点<b>数量</b>，像素坐标一个字节都没有——
+     * 于是"热源在地面哪个位置"在链路层就丢了，云端 {@code GeolocationSolver}
+     * 有像素→lat/lon 反投影能力却拿不到输入。这里把
+     * {@code SimulatedThermalSource.detectHotspots} 产出的 (u, v, 峰值温度)
+     * 逐条补上，与同帧 30012 共用一个时间戳（云端据此配对两帧）。
+     *
+     * <p>容量 MAX_HOTSPOTS=3 装不下时按峰值温度降序保留最热的，并置
+     * {@code truncated=true}：截断优先丢"较冷的"总比静默丢弃好——静默丢的那几个
+     * 会变成云端眼里<b>根本不存在的热源</b>，而 truncated 至少让云端能说出来。
+     */
+    private void sendThermalHotspots(java.util.List<ThermalSource.Hotspot> hotspots, long timestampMs)
+            throws java.io.IOException {
+        java.util.List<ThermalSource.Hotspot> src =
+                hotspots == null ? List.of() : hotspots;
+        java.util.List<ThermalSource.Hotspot> byPeak = hottestFirst(src, ThermalHotspotMsg.MAX_HOTSPOTS);
+        int[][] carry = new int[byPeak.size()][];
+        for (int i = 0; i < byPeak.size(); i++) {
+            ThermalSource.Hotspot h = byPeak.get(i);
+            carry[i] = new int[]{h.u(), h.v(), (int) Math.round(h.tempC() * 10)};
+        }
+        send(new ThermalHotspotMsg(config.sysid, timestampMs,
+                src.size() > ThermalHotspotMsg.MAX_HOTSPOTS, carry));
     }
 
     /**

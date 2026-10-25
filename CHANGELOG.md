@@ -4,8 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 205 个 `[Unreleased]` 小节，自 v1.0.5
-
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 206 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -31,8 +30,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 205 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
-
+| **[Unreleased]** | 累积中 | — | 206 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
@@ -208,6 +206,57 @@ NTRIP 服务层（定时拉流→切帧→分片→发送 GPS_RTCM_DATA，GAPS �
 - 用与 CI 同口径的合成 surefire（README 表值，总计 5222）+ vitest 570 对全部
   12 份口径文档预跑：**全部一致**；ROADMAP 跳过 1 处追述、commercialization-plan
   章节 134 处追述——豁免计数从「行」变「处」后更精确，无新增误报。
+
+---
+
+## [Unreleased] — P2 #19 条件③ 与 P2 #20 安全画像控制通道收官（2026-10-26）
+
+### 1. 现场
+
+todo.md 里 P2 #19/#20 各剩一条尾巴：
+
+- **#19 条件③**：热成像只剩"逐点热源经纬度"。30012 只带聚合量（均值/极值/热点数），
+  像素坐标一个字节都没有——云端 `GeolocationSolver` 有反投影能力却拿不到输入，
+  "热源在地面哪个位置"这个问题在链路层就丢了。
+- **#20 剩余**：link-sim 安全画像（tamper/unsigned）**不支持**控制通道
+  （`--control-port` 命中安全画像直接 exit 1）。
+
+### 2. 做了什么（三步各自独立验收，都有实测与变异验证）
+
+| 项 | 做法 | 为什么不那么做 |
+|---|---|---|
+| 逐点坐标传输 | 新消息 `THERMAL_HOTSPOT(30064, LEN=26, CRC_EXTRA=111)`：8 字节头 + 3×6 字节（每条 x/y/峰值温度×10 三个 i16），drone-sim 1Hz 与 30012 **同帧同时间戳**下发；超容量按峰值温度降序截断并置 `truncated` | 不改已发线的 30012：它的 LEN/CRC 与两端收发方（含 e2e 脚本）都已写死，另起 msgId 不动既有契约（ROADMAP 规定新增从 30064 起） |
+| 坐标解算 | 复用既有 `GeolocationSolver`：`ThermalIngestListener` 增加 30064 监听，把 `DroneSnapshot` 的最新位姿（GPS=本地原点、relativeAlt=离地高度、roll/pitch/yaw、云台按正下视假设）喂进反投影，写 `thermalHotspots(u,v,tempC,lat,lon)`；`GET /thermal/status` 增 `hotspots` 段；前端逐点显示 | 不给安全画像硬套十元组（见下）；解不出来时 lat/lon=null，**不填 0/NaN 冒充坐标**，面板明说"无法解算" |
+| 安全画像控制通道 | 新语义层 `SecurityControl`：只暴露真实存在的 `tamperRate`（0~1，越界/夹带字段一律 400 带原因）；签名剥离是**检测到签名帧必剥**（动作全命中），无概率可调，**刻意不给滑块**。`LinkSimControlServer` 改双构造器 + instanceof 分派，对外 HTTP 契约同形，前端/云端不分支；中继模式按画像选语义层（不再 exit 1，也不再给安全链路挂十元组假旋钮） | 构造十元组控制面：`delayMs` 恒 0、改了没人看——正是 P1 #11 清掉的假滑块换了层皮 |
+| stats 口径 | 安全视图的 stats **刻意不与 `ImpairmentEngine.Stats` 同构**：通用键按安全画像事实填（dropped=0：篡改/剥离后的帧全都照发，否则对端 CRC 阶段就丢帧、走不到验签失败），另给 `tampered/stripped/tamperRatio` 三个如实键 | 把 tampered 填进 dropped 等于告诉面板"这些包丢了"，事实上一个都没少到 |
+
+### 3. 实测（本机）
+
+Java `mvn -B -o clean test`：mavlink-core 511 / drone-sim 1452 / link-sim 139 /
+cloud-backend 3088 / regulator-sim 41 / sdk-java 19，合计 **5250**，0 失败 0 错误。
+前端 vitest 577 例全绿；REST 端点 414；`scripts/mavlink-crc-extra-gen.py` 重算
+30064 的 CRC_EXTRA=111（`--check` exit 0，23/23 标准消息自检通过）。
+
+A/B 变异验证（`scripts/mutate-verify.py`，改坏⇒红、还原⇒绿，两个变异体都杀掉）：
+
+| 变异 | 被抓住它的用例 |
+|---|---|
+| drone-sim 删掉 `sendThermalHotspots(...)` 调用 | ThermalHotspotEmissionTest（真实 UDP 等到 30064 帧 + 与 30012 时间戳配对） |
+| `SecurityImpairmentEngine.applyTamperRate` 变空操作 | SecurityControlServerTest（PATCH 后引擎每帧必 TAMPER） |
+| `SecurityControl.patch` 不再拒绝夹带字段 | SecurityControlServerTest（`{"delayMs":120,"tamperRate":0.5}` 必须 400） |
+
+### 4. 口径与残留（写进注释与面板，不藏在数据后面）
+
+1. **位姿时效**：30064 不带位姿，云端只能取 `DroneSnapshot` 的"最新已知"姿态——
+   不是拍摄时刻值。10Hz 姿态 + 1Hz 热像下最坏 ~100ms 偏移；高速机动场景误差放大。
+2. **云台假设**：正下视（0/0）。合成场景定义即"机下视"，但这是假设值；真实可俯仰
+   云台需要在消息里带 gimbalPitch/Yaw，否则斜视场景解算会错。
+3. **FOV 假设**：热成像水平 FOV 取 55°（常见热像机芯量级）。合成场景没有真实相机
+   FOV，取值影响是单调的；接入真实载荷后应按机型配置。
+4. **混合画像中继**：一侧安全一侧普通时，控制面只表达安全侧（如实 WARN），
+   不假装能两层同屏。
+
+---
 
 ## [Unreleased] — P2 #19/#20 接上最新 master：热成像 + link-sim 控制面真正落地（2026-10-25）
 
