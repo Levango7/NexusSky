@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-25 共有 192 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-25 共有 193 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 192 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 193 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,60 @@
 
 
 ---
+## [Unreleased] — regulator-sim 把端口写死在 19090：别的项目占了这个号，本机就有 7 个用例红（2026-10-25）
+
+### 1. 现场：一次全量回归在本地红 7 个 error，红的原因不在这个仓库里
+
+`mvn -B clean test` 在本机跑出 7 个 `java.net.BindException`，全部集中在
+`RegulatorSimMainTest$MockUomServerTests`。逐条查监听方：
+
+```
+TCP  0.0.0.0:19090  LISTENING  54560   ← docker-proxy（dev-stack-prometheus-1，19090->9090）
+```
+
+也就是说：**另一套项目的 Prometheus 容器把 19090 占了**，本仓库的测试写死了 19090，
+谁先起来谁赢。这不是产品缺陷，也不是回归——但它的表现和回归一模一样，
+而且直接把 `scripts/check-test-count-docs.py` 的 Java 腿也带停
+（"有测试未通过，先修测试再谈文档口径"），于是本地连"文档口径对不对"都问不出答案。
+
+### 2. 根因：CI runner 干净，把"写死端口"这件事变成了隐性契约
+
+`RegulatorSimMainTest` 原来写 `PORT_DEFAULT = 19090` / `PORT_DELAY = 19091` /
+`PORT_ERROR = 19092`，`FaultInjectionTest` 里还有一个 `--port=18182`。CI 的 runner 是
+专享的、没有别的服务，所以这四个数在 CI 上**从来没红过**——它只在共享开发机上红，
+而共享开发机正是人干活的地方。同类写法在 `cloud-backend` / `drone-sim` 用的是
+24xxx 段（或 `aerofleet.udp-port=0`），撞车概率低；本次只统一 regulator-sim 这一处，
+不去动别人那批能跑的写法。
+
+### 3. 修：绑 0 号端口让内核分配，端口号从服务器本身读回来
+
+`HttpServer.create(new InetSocketAddress(0), 0)` 由内核分配 ephemeral 端口，构造那一刻
+就已绑定，`server.getAddress().getPort()` 拿得到真实端口号——但 `MockUomServer` 以前
+只在自己日志里用这个值，没对外暴露，调用方**只能猜**，这才是测试必须写死端口的根因。
+所以先补 `public int getPort()`（`MockUomServer.java`），再把四个测试的
+`--port <固定>` 全换成 `--port 0` + `server.getPort()`。
+
+新增一条把"改的原因"本身钉住的用例：
+`bindsEphemeralPortAndAnswersThere` —— 断言端口 > 1023、不再是 19090/19091/19092，
+并且**请求真在这个动态端口上拿到 200**（只读端口号不证明能用）。
+
+### 4. 验收：占用者还在那儿，测试已经绿
+
+| | 改前 | 改后 |
+|---|---|---|
+| 本机 19090 | 被 `dev-stack-prometheus-1` 占用 | **仍然被占用**（没动别人的容器） |
+| `mvn -pl regulator-sim clean test` | 7 个 `BindException` error | **Tests run: 41, Failures: 0, Errors: 0**（`MVN_EXIT=0`） |
+
+### 5. 计数口径：regulator-sim 40 → 41，11 份口径文档同步
+
+新增 1 个用例 ⇒ Java 总计 5113 → **5114**（regulator-sim 40 → 41）。`README.md` 的分模块
+表与 `ROADMAP.md`、`docs/` 下 9 份对外材料的同一数字一并改；这一步不是自愿的——
+`check-test-count-docs.py` 逐格核对 surefire 实测值，加测试而不改文档会直接让 CI 变红。
+
+---
+
+---
+
 ## [Unreleased] — 「0 架无人机」和「没有这一帧」在界面上是同一个 `--`：四处收口 + 一条会咬人的形状守卫（2026-10-25）
 
 ### 1. 现场：GAPS §八-2/3 记的两条，实测清单比记的多
