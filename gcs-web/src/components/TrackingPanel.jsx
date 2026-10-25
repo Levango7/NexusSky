@@ -7,7 +7,7 @@ import {
   scanLostDrones,
 } from '../api.js'
 import { pick, fmtTime, POLL_MS } from '../utils/panelUtils.js'
-import { fmtBattery } from '../utils/battery.js'
+import { fmtBattery, battColorVar } from '../utils/battery.js'
 
 // M12 无人机追踪 / 遗失辅助查找面板
 // 失联无人机列表（轮询） + 搜索引导卡片 + 飞行轨迹查询 + 历史轨迹回放 + 手动扫描
@@ -63,18 +63,11 @@ function datetimeLocalToMs(str) {
 // 本地副本曾写 `n <= 1 ? n * 100 : n`（假设 0–1 归一化），而后端 battery 是 0–100、
 // -1 表示未知 ⇒ 1% 显示成 100%、-1 显示成 -100%。删掉副本，只留一个实现。
 
-// 电量颜色（阈值 15/30 保持本面板原有口径；仅修 -1 哨兵被算成 -100% 判红的问题）
-function batteryColor(b) {
-  if (b == null) return 'var(--dim-2)'
-  const n = Number(b)
-  // -1 = 后端"电量未知"哨兵。原实现按 n <= 1 归一会把它算成 -100%，落进 <= 15 判成
-  // "严重低电"的红色——把"没数据"画成"要没电了"（2026-10-24 修）。
-  if (isNaN(n) || n < 0) return 'var(--dim-2)'
-  const pct = n
-  if (pct <= 15) return 'var(--crit)'
-  if (pct <= 30) return 'var(--warn)'
-  return 'var(--ok)'
-}
+// 电量颜色已统一到 utils/battery.js 的 battColorVar（2026-10-25）。
+// 本地副本曾用 15/30 阈值，而 utils 与其余四个面板是 20/40 ⇒ 同一架无人机在追踪面板
+// 与无人机列表里可能一个绿一个黄。口径经用户裁定统一成 20/40（GAPS 第八节第 9 条）。
+// 副作用（已记录）：15~20% 这段电量在追踪面板由「黄」变「红」，与列表一致。
+// 无数据时的颜色也从 var(--dim-2) 变为 utils 统一的 var(--dim)，同为灰色系。
 
 // 经纬度格式化
 function fmtCoord(v, suffix) {
@@ -392,8 +385,8 @@ export default function TrackingPanel({ onTrackLoaded }) {
                         </div>
                         <span style={{
                           fontSize: 9, padding: '1px 5px', borderRadius: 3,
-                          color: batteryColor(d.battery),
-                          border: `1px solid ${batteryColor(d.battery)}`,
+                          color: battColorVar(d.battery),
+                          border: `1px solid ${battColorVar(d.battery)}`,
                         }}>
                           {fmtBattery(d.battery)}
                         </span>
@@ -458,7 +451,7 @@ export default function TrackingPanel({ onTrackLoaded }) {
                       {' '}
                       ({fmtCoord(d.lat)}, {fmtCoord(d.lon)})
                       {' '}
-                      <span style={{ color: batteryColor(d.battery) }}>{fmtBattery(d.battery)}</span>
+                      <span style={{ color: battColorVar(d.battery) }}>{fmtBattery(d.battery)}</span>
                     </div>
                   ))}
                 </div>
@@ -585,7 +578,7 @@ function GuideView({ guide }) {
     { label: '最后已知高度', value: g.alt != null ? `${Number(g.alt).toFixed(1)} m` : '--' },
     { label: '轨迹方向', value: g.heading != null ? `${Number(g.heading).toFixed(0)}°` : '--' },
     { label: '末速度', value: g.speed != null ? `${Number(g.speed).toFixed(1)} m/s` : '--' },
-    { label: '电量', value: fmtBattery(g.battery), color: batteryColor(g.battery) },
+    { label: '电量', value: fmtBattery(g.battery), color: battColorVar(g.battery) },
     { label: '预计坠落半径', value: g.radius != null ? `${Number(g.radius).toFixed(1)} m` : '--', color: 'var(--warn)' },
   ]
   return (
@@ -637,7 +630,7 @@ function TrackTable({ points, loading, emptyHint }) {
                 <td style={tdStyle}>{p.lat != null ? Number(p.lat).toFixed(6) : '--'}</td>
                 <td style={tdStyle}>{p.lon != null ? Number(p.lon).toFixed(6) : '--'}</td>
                 <td style={tdStyle}>{p.alt != null ? Number(p.alt).toFixed(1) : '--'}</td>
-                <td style={{ ...tdStyle, color: batteryColor(p.battery) }}>{fmtBattery(p.battery)}</td>
+                <td style={{ ...tdStyle, color: battColorVar(p.battery) }}>{fmtBattery(p.battery)}</td>
               </tr>
             ))}
           </tbody>

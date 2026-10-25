@@ -167,6 +167,17 @@ public final class MockUomServer {
         log.info("[regulator-sim] MockUomServer stopped");
     }
 
+    /**
+     * 实际监听端口。
+     * <p>
+     * 传 {@code --port 0} 时 {@link com.sun.net.httpserver.HttpServer} 由内核分配 ephemeral
+     * 端口，构造那一刻就已绑定，所以这个值在 {@code start()} 前后都可用。没有它，调用方
+     * 只能猜自己请求要打到哪个端口——测试因此必须写死端口。
+     */
+    public int getPort() {
+        return server.getAddress().getPort();
+    }
+
     // ==================== Handler 方法 ====================
 
     /**

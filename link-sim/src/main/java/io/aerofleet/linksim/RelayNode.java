@@ -91,6 +91,26 @@ final class RelayNode {
      * 启动 uplinkLoop/wirePump/statsLoop 三个 daemon 线程，主线程跑 downlinkLoop 阻塞。
      */
     void run() throws IOException {
+        // P2 #20：运行时控制通道（默认关闭）。中继模式上下行可能是不同画像，
+        // 控制面按 direction 分别改；前端默认 both。
+        if (cfg.controlPort > 0) {
+            if (cfg.uplink.isSecurityProfile() || cfg.downlink.isSecurityProfile()) {
+                log.error("[mesh-relay] --control-port is not supported for security profiles");
+                System.exit(1);
+                return;
+            }
+            try {
+                LinkSimControlServer control = new LinkSimControlServer(cfg.controlPort,
+                        new LinkSimControl(cfg.uplink, uplink, cfg.downlink, downlink, false));
+                control.start();
+                log.info("[mesh-relay] control listening on http://127.0.0.1:{}/profile", control.port());
+            } catch (IOException e) {
+                log.error("[mesh-relay] control port {} bind failed: {}", cfg.controlPort, e.getMessage());
+                System.exit(1);
+                return;
+            }
+        }
+
         Thread up = new Thread(this::uplinkLoop, "relay-uplink");
         up.setDaemon(true);
         up.start();

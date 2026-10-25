@@ -19,22 +19,24 @@ import java.util.concurrent.ThreadLocalRandom;
 final class ImpairmentEngine {
 
     // --- 延迟（毫秒） ---
-    final double baseDelayMs;
-    final double jitterMs;
+    // 非 final：P2 #20 起支持运行时 PATCH /profile。所有读写都在 synchronized
+    // （verdict / apply / spec / stats）里，参数替换对判决是原子的。
+    double baseDelayMs;
+    double jitterMs;
 
     // --- GE 丢包 ---
-    private final double pGoodDrop;
-    private final double pBadDrop;
-    private final double pGoodToBad;
-    private final double pBadToGood;
+    private double pGoodDrop;
+    private double pBadDrop;
+    private double pGoodToBad;
+    private double pBadToGood;
 
     // --- 令牌桶 ---
-    private final double burstBytes;
-    private final double rateBytesPerSec;
+    private double burstBytes;
+    private double rateBytesPerSec;
 
     // --- 周期分区 ---
-    private final double partitionUpSec;
-    private final double partitionDownSec;
+    private double partitionUpSec;
+    private double partitionDownSec;
 
     // --- 运行态 ---
     private boolean inBadState = false;
@@ -60,6 +62,62 @@ final class ImpairmentEngine {
         this.partitionUpSec = partitionUpSec;
         this.partitionDownSec = partitionDownSec;
         this.tokens = (long) burstBytes;
+    }
+
+    /**
+     * 按完整规格构造（P2 #20 运行时控制通道用；与十参构造器等价）。
+     */
+    ImpairmentEngine(ImpairmentSpec spec) {
+        this(spec.delayMs(), spec.jitterMs(), spec.pGoodDrop(), spec.pBadDrop(),
+                spec.pGoodToBad(), spec.pBadToGood(), spec.burstBytes(),
+                spec.rateBytesPerSec(), spec.partitionUpSec(), spec.partitionDownSec());
+    }
+
+    /**
+     * 原子替换损伤参数（P2 #20）：控制通道收到 PATCH 后调用。
+     *
+     * <p>语义边界：
+     * <ul>
+     *   <li>统计计数（forwarded/dropped/totalDelayMs）跨参数替换保留——面板上的
+     *       累计值不应因为一次调参从零开始；</li>
+     *   <li>令牌桶的现有令牌被 clamp 到新桶容量（新桶更小则立即生效，不会带着
+     *       超额令牌运行）；</li>
+     *   <li>分区相位仍以进程启动时刻为基准（{@code bootMs} 不变）——运行期改
+     *       分区参数不会重置周期相位，这是刻意行为，避免调参本身制造一次假黑洞。</li>
+     * </ul>
+     */
+    synchronized void apply(ImpairmentSpec spec) {
+        this.baseDelayMs = spec.delayMs();
+        this.jitterMs = spec.jitterMs();
+        this.pGoodDrop = spec.pGoodDrop();
+        this.pBadDrop = spec.pBadDrop();
+        this.pGoodToBad = spec.pGoodToBad();
+        this.pBadToGood = spec.pBadToGood();
+        this.burstBytes = spec.burstBytes();
+        this.rateBytesPerSec = spec.rateBytesPerSec();
+        this.partitionUpSec = spec.partitionUpSec();
+        this.partitionDownSec = spec.partitionDownSec();
+        this.tokens = Math.min(this.tokens, (long) spec.burstBytes());
+        this.lastRefillNs = System.nanoTime();
+    }
+
+    /** 当前参数的不可变快照（控制面读取；与 apply 同一把锁）。 */
+    synchronized ImpairmentSpec spec() {
+        return new ImpairmentSpec(baseDelayMs, jitterMs, pGoodDrop, pBadDrop,
+                pGoodToBad, pBadToGood, burstBytes, rateBytesPerSec,
+                partitionUpSec, partitionDownSec);
+    }
+
+    /** 累计统计快照（控制面读取）。 */
+    synchronized Stats statsSnapshot() {
+        long total = forwarded + dropped;
+        return new Stats(forwarded, dropped,
+                total == 0 ? 0 : 100.0 * dropped / total,
+                forwarded == 0 ? 0 : totalDelayMs / forwarded);
+    }
+
+    /** 不可变统计视图。 */
+    record Stats(long forwarded, long dropped, double dropPct, long avgDelayMs) {
     }
 
     /** 数据包判决：返回放行延迟毫秒；-1 表示丢弃。 */
@@ -119,9 +177,8 @@ final class ImpairmentEngine {
     }
 
     synchronized String stats() {
-        long total = forwarded + dropped;
+        Stats s = statsSnapshot();
         return String.format("fwd=%d drop=%d(%.1f%%) avgDelay=%dms",
-                forwarded, dropped, total == 0 ? 0 : 100.0 * dropped / total,
-                forwarded == 0 ? 0 : totalDelayMs / forwarded);
+                s.forwarded(), s.dropped(), s.dropPct(), s.avgDelayMs());
     }
 }

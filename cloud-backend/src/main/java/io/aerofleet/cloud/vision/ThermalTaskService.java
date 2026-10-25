@@ -50,6 +50,39 @@ public class ThermalTaskService {
         return new LinkedHashMap<>(tasks);
     }
 
+    /**
+     * THERMAL_DATA 帧到达（ingest 监听器调用）：把该 sysid **最老的活跃任务**
+     * （PENDING 或 RUNNING）用这帧的分析结果收账。
+     *
+     * <p>语义说明（诚实记录）：每帧 THERMAL_DATA 都是一份完整的温度场分析，
+     * "收到帧 = 捕获已完成"——所以任务从 PENDING 直接收账为 COMPLETED，
+     * RUNNING 态在这条接线里不可观测（真实无人机上它是"飞往采样区域"的中间态，
+     * 未来若帧携带 capture-in-progress 语义再引入）。没有活跃任务时只刷机队
+     * 最新读数（由监听器写快照），不重开任务。
+     *
+     * @return 收账的任务；该 sysid 无活跃任务时返回 null
+     */
+    public ThermalTask completeOldestActive(int sysid, double tempMean, double tempMin,
+                                            double tempMax, double tempStdDev, int hotspotCount) {
+        ThermalTask oldest = tasks.values().stream()
+                .filter(t -> t.sysid == sysid && !"COMPLETED".equals(t.state))
+                .min(java.util.Comparator.comparingLong(t -> t.createdAt))
+                .orElse(null);
+        if (oldest == null) {
+            return null;
+        }
+        oldest.tempMean = tempMean;
+        oldest.tempMin = tempMin;
+        oldest.tempMax = tempMax;
+        oldest.tempStdDev = tempStdDev;
+        oldest.hotspotCount = hotspotCount;
+        oldest.state = "COMPLETED";
+        oldest.completedAt = System.currentTimeMillis();
+        log.info("thermal task completed: taskId={} sysid={} tempMax={}°C hotspots={}",
+                oldest.taskId, sysid, tempMax, hotspotCount);
+        return oldest;
+    }
+
     /** 热成像任务记录。 */
     public static class ThermalTask {
         public final String taskId;

@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-25 共有 193 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-25 共有 201 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 193 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 201 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -101,6 +101,308 @@ HTTP 没有 518 这个状态码，所以这不是"数字过时"，是**契约被
   不改变任何计数声称。
 
 ---
+## [Unreleased] — P2 #19/#20 接上最新 master：热成像 + link-sim 控制面真正落地（2026-10-25）
+
+### 1. 现场：链式合并被从中间截断
+
+上一轮把整条链 rebase 到 master 2926475，四层 PR 的 base 全部对齐。
+但随后 master 继续前进（#161/#162/#164/#165），**前三层被别的 PR 以 squash 形式
+分别送上了 master，链从中间断掉**：
+
+- security P1 #7 → `3335658c (#147)` ✓ 在 master
+- 前端 KNOWN_GAPS 清账 → `685b844d (#165)` ✓ 在 master
+- regulator-sim 临时端口 → `e787e1f6 (#162)` ✓ 在 master
+- **P2 #19 热成像** → PR #152 显示 merged=true，但合进的是 base 分支
+  `audit/frontend-endpoint-gaps`，而那个分支被 #165 提前取走时**不含 thermal**
+  → `ThermalIngestListener.java` 不在 master 上
+- **P2 #20 link-sim 控制面** → PR #153 同理，`LinkSimControl.java` 不在 master 上
+
+### 2. 做了什么
+
+跳过已在 master 的前两层，只把后 5 个提交重放到最新 master（`58bb8009`）：
+
+| 提交 | 内容 |
+|---|---|
+| 热成像接线 | drone-sim 发送环 + `ThermalIngestListener` + `GET /api/v1/thermal/status` + 面板真实聚合表 |
+| link-sim 控制面 | `--control-port`（默认 0）+ `GET/PATCH /profile`（只绑回环）+ cloud 转发 + 前端滑块恢复 |
+| 端口表文档 | 14601 进部署/排障端口表 |
+| 证据/PR 号文档 | 真机 curl 复核、todo.md 登记 |
+| 计数归位 | 全仓计数订正到实测 |
+
+regulator-sim 的临时端口改动**取 master 版本**（#162 已落地，实现略不同但同一意图），
+不重复造第二份。
+
+### 3. 实测（本机，mvn -B -o clean test）
+
+```
+mavlink-core 503 / drone-sim 1445 / link-sim 133
+cloud-backend 3081 / regulator-sim 41 / sdk-java 19     合计 5222
+BUILD SUCCESS   0 失败 0 错误 0 跳过
+```
+
+- 端点 **414**（thermal +1、link-sim +2、env-status +1，后者已由 #165 带上 master）
+- vitest **570**；CHANGELOG 小节 199
+- 全仓文档计数 13 处订正到 5222，端点声称 13 处订正到 414
+- 12 项 Python 门禁全 exit 0；含 docs/api-reference 模块表合计 411→414
+
+### 4. 仍未关闭
+
+- P2 #19 的条件③（逐点热源经纬度 = 图像→地理位姿解算）——需要 vision 包的姿态解算，
+  不属于本轮范围。
+- P2 #20 的安全画像（tamper/unsigned）不支持控制通道，link-sim 侧已 exit 1 拒绝。
+
+## [Unreleased] — 清掉 GAPS 剩下的三项纯软件活：NTRIP 差分源 + 两处口径（2026-10-25）
+
+### 1. NTRIP 客户端：定位维度唯一「纯软件可立即补」的缺口
+
+`GAPS` 第九节第 5 条记的是「真差分源（NTRIP caster 客户端）未接」。它不是硬件问题——
+NTRIP 是 HTTP 流协议，纯软件可做，也能接公共 caster 实测。本轮交付协议层：
+
+| 类 | 职责 |
+|---|---|
+| `GpsRtcmData`（mavlink-core） | `GPS_RTCM_DATA`(#233)：把改正数注入机载 GPS 的唯一入口 |
+| `NtripClient` | 连 caster、握手、认证、读原始字节流 |
+| `Rtcm3Framer` | 把字节流切成完整 RTCM 帧，含 **CRC-24Q 校验** |
+
+**三个必须说清的实现判断**：
+
+1. **为什么用裸 Socket 而不是 `HttpURLConnection`**：NTRIP 1.0 的成功响应是 `ICY 200 OK`，
+   不是合法 HTTP 状态行，`HttpURLConnection` 直接抛 `ProtocolException`。
+2. **为什么响应头要逐字节读到空行**：头部之后紧跟的就是 RTCM 二进制流，
+   用带缓冲的 `readLine` 会把流的前几个字节一起吃掉，整条流从此错位。
+   测试里有一条专门断言「握手后读到的第一个字节必须是 `0xD3`」。
+3. **为什么 CRC 错的帧要丢弃而不是转发**：转发一条坏的改正数比不转发更糟——
+   飞控会把它当有效改正解算，位置反而更偏。
+
+**`CRC_EXTRA = 35`，只由 `flags / len / data` 算出**：`target_system` / `target_component`
+是 MAVLink2 扩展字段，不参与 CRC（同 `AUTOPILOT_VERSION` 的 `uid2`）。
+已用 pymavlink 核对：`crc_extra == 35`、`fieldnames == ['flags','len','data']`；
+把扩展字段一起喂算法会得到 64（错）。**这是本项目第一条带扩展字段的官方消息**，
+所以 `MavlinkCrcExtraTest.SIGNATURES` 里也按同样口径只列前三个字段。
+
+**机载侧**：`VirtualDrone` 新增 `GPS_RTCM_DATA` 接收分支，记 `lastRtcmAtMs` / `rtcmBytes` 并打日志。
+**但没有改 `rtkFixType()`** —— 那个口径是配置驱动的（`--rtk fixed` 恒报 6），
+要不要改成「必须收到改正数才报 5/6」属于产品决策，已登记 `GAPS` 第十节，不在这笔里替它定。
+
+### 2. `TrackingPanel` 的电量阈值统一到 20/40
+
+`GAPS` 第八节第 9 条。此前本面板用 15/30、其余四处用 20/40 ⇒ 同一架无人机在列表与追踪面板
+可能一个绿一个黄。删掉本地 `batteryColor`，改 import `utils/battery` 的 `battColorVar`；
+`FORBIDDEN` 正式纳入 `batteryColor`，并把那条「反向断言」（`not.toContain('batteryColor')`）
+翻成正向 —— **没有靠删测试收口**。
+
+**代价照记**：15~20% 这段电量在追踪面板由「黄」变「红」；无数据时的颜色从 `var(--dim-2)`
+变为 `utils` 统一的 `var(--dim)`。
+
+### 3. `RocPanel` 三个请求补失败分支
+
+`GAPS` 第八节第 5 条后半。修前是 `if (res.ok) setX(...)` 三连没有 else，
+末尾还有一句**无条件**的 `setError(null)` —— 4xx 不但被吞掉，错误还被主动清成「一切正常」，
+操作员看到的是空白面板而不是「这个席位没了」。
+
+现在三路各有失败分支，**部分成功时保留已取到的数据**（整块清空会让人以为后端挂了）。
+3 条新用例按「界面有没有那句话」判，而不是断言 `fetch` 返回了 4xx（那等于什么都没测）。
+
+### 4. 验证
+
+- `NtripClientTest` 9 例 + `Rtcm3FramerTest` 10 例，含**本地假 caster 的真 TCP 连接**与跨块重组
+- cloud-backend **3064** 例（+19）、mavlink-core **503** 例（+2）、drone-sim 1443 例、前端 **566** 例
+- 全仓 **5192** 例；五门禁（hygiene / 用例数 / 端点数 / 目录计数 / 前端契约）全过
+
+## [Unreleased] — 前端端点契约 6 条 KNOWN_GAPS 清账：补 1 个真端点，删 5 处假调用（2026-10-24）
+
+### 1. 现场：门禁登记的 6 条"前端在调后端没有的端点"
+
+`check-frontend-endpoints.py` 的 KNOWN_GAPS 登记了 6 条缺口（P1 #8~#13）。
+本轮逐条分诊（只读侦察 6 条 × 前端调用点 + 后端现状）：只有 #8 是「数据后端真有、
+只差一个读端点」的纯补洞；#9/#10 是面板取数逻辑改造；#11/#12/#13 三条经确证
+**能力不存在**——最小诚实修复是移除假控件并写明原因，而不是换个假面板。
+
+### 2. 补了什么
+
+- **#8 `GET /api/v1/env/status`（后端真补）**：机队级环境状态读口径。数据源是
+  各机 ENVIRONMENT_STATUS 快照（drone-sim 每秒下发、早已落进 `DroneSnapshot`，
+  此前没有任何 Controller 暴露它）。聚合口径：online 机逐台进 stations（无定位不进
+  站表但参与顶层均值）、顶层逐字段独立平均、**风向圆周均值**（359° 与 1° 的平均
+  必须是 0° 而不是 180°——朴素算术平均会把面板箭头指反）、天气码 0-4 映射前端
+  WEATHER_MARKS 键取众数（并列取编号小者）、NaN 永不进 JSON、不造 turbulence
+  （后端无此概念）。`EnvStatusReadContractTest` 5 例钉死口径。
+- **#9/#10 链路质量面板改读真实口径**：`getLinkSimProfiles/getLinkSimStatus`（不存在
+  的端点）→ 既有的 `getCommLinks()`（/api/v1/comm-adapt/quality/fleet）。选机下拉
+  （sysid + 等级 + 最佳链路 + 评分），三卡读 bestLinkType 那条链路的
+  latencyMs/packetLossPct/bandwidthKbps→Mbps，历史曲线照旧。
+- **#11 损伤滑块移除**：link-sim 是 CLI UDP 代理，损伤参数启动期固定、无运行时
+  控制通道——此前滑块拖了没有任何反应（失败被 `.catch(() => {})` 静默吞掉）。
+  面板留"未实现"说明卡，真实现选项登记 P2 #20。
+- **#12 热成像面板改"未实现"说明页**：`/vision/thermal/sources` 后端不存在且
+  「改读任务列表」也不诚实（任务壳永不推进——30012 消息未接线；结果只有聚合统计，
+  无带坐标热源点）。移除 404 轮询与**随机扰动伪造的历史回放**；真实现选项
+  （接线 ingest → 聚合端点 → 位姿解算）登记 P2 #19。
+- **#13 物理模型死代码清理**：api.setPhysicsModel 与组件 handler 删除，按钮保持
+  禁用+写明原因（先例样式）。
+- api.js 死函数块全部删除（附分诊结论注释），`KNOWN_GAPS` 清空。
+
+### 3. 实测
+
+- 端点契约门禁：后端 410 条端点 / 前端 **233 处调用全部有对应端点**、登记 0 条
+  （含 self-test）；vitest **382 例全绿** + vite build ✓；全量 surefire **3033 例 0 失败**
+  （净增 5 = EnvStatusReadContractTest）；14 个 Python 门禁全 PASS。
+- 生产代码改动仅一处：`EnvOverrideController` 增构造参数（注入 DeviceRegistry）
+  + GET /status 方法——只补读面，未动任何既有行为。
+
+---
+
+---
+
+## [Unreleased] — security 收口：102 个存活变异体逐条清账，两包分诊全部完成（2026-10-24）
+
+### 1. 现场：第一轮只清出 4 处真缺口，账上还挂着 102 个
+
+security 包（PIT 变异 767 个）在 2026-10-21 审出限流阈值 / XFF 信任 / 密钥掩码 / 口令哈希
+4 处真缺口后，还有 **102 个存活变异体**没有任何定性。P1 #7 悬了三轮——这轮把
+surveillance 第四轮的分诊模板原样搬过来，逐条清账。
+
+### 2. 分诊方法：模板沿用，A/B 升级成批量 42 条
+
+- 判定"真缺口"：补测试 → 复测变异必须**死**。
+- 判定"等价/不可达"：`tools/mutate-verify.py` 改坏⇒跑用例⇒还原⇒再跑，存活下用例
+  必须**仍绿**，并给出"为什么测不到"的值域论证。本轮把单发 A/B 升级成**批量 42 条**
+  （`tools/run_ab_batch.py` + 2 条收尾），**42/42 全部"改坏⇒红、还原⇒绿"**
+  （退出码存档 `tools/ab_batch_sec_evidence.txt`）。
+
+### 3. 补了什么（4 个新契约文件 + 16 处扩展，净增 52 个新用例，生产代码零改动）
+
+| 测试 | 例数 | 钉住的契约 |
+|---|---:|---|
+| `ApiKeyAuthContractTest` / `SecurityConfigContractTest` / `TenantFilterTest` / `ValidationConfigContractTest`（新） | 9 | 认证 Token 微契约（authenticated/principal/role、absence=null 不是空串）；Bean 工厂返 null = 上下文启动失败的哨兵；TenantContext 的 finally 清理 + `tenant_id` claim 的 Double 形状解析 |
+| 扩展 16 类（`ApiKeyControllerDeviceKeyTest` / `ApiKeyCacheTest` / `ApiKeyFilterCachedTest` / `ApiKeyLastUsedTrackerTest` / `RoleInterceptorTest` / `AuthControllerTest` / `AuthControllerRateLimitTest` / `UserControllerTest` / `AdminBootstrapRunnerTest` / `DeviceIngestKeyBootstrapRunnerTest` / `MavlinkSigningPostureControllerTest` / `MavlinkSigningKeyControllerTest` / `SigningPostureServiceTest` / `StreamTokenServiceTest` / `StreamTokenFilterTest` / `TenantControllerTest`） | +43 | 租户守卫三角（同租户 / 跨租户 / 无租户 × ADMIN）、grace 与 sysid 边界、负缓存上限精确 =MAX、evictExpired 整点、flusher 线程存在且守护、**直调 preHandle 断言 boolean**（坑 8）、限流窗口与 cleanup 定时器、改密与租户**落库值**（captor 不是"调用过"）、引导 key 撤销复活、审计操作者归属（preferred_username≠subject）、签名姿态 loosen 成功路径与审计环 50 条、流令牌惰性清理整点、头凭证分支链继续、显式 enabled=false 落库 |
+
+### 4. 实测
+
+- 全量 surefire **3028 例 0 失败**（比第四轮净增 52）。
+- PIT 复测两跑（XML 精确对账，对账工具按**多重集**逐条比底账）：第一跑 647 杀 / 29 存活，
+  对账揪出**同行兄弟变异体**（A/B 杀掉的是同行已死的那个，活的是另一个）与
+  1 个被 PIT 排除的竞态用例（坑 9）；补 3 个真缺口用例、删 2 个竞态用例后第二跑定账：
+  杀掉 **566 → 649**、存活 **102 → 27**、未覆盖 97 → **89**（总 767、超时 2、运行错误 0）、
+  变异分数 **0.8448 → 0.9572**、测试强度 **0.8473 → 0.9601**；基线
+  `scripts/mutation-baseline.json` 地板抬到 **0.95 / 0.96**。增量账目：
+  杀掉 +83 = 底账存活补杀 76 + 新覆盖顺带被杀 7；存活 27 = 底账余 26 + 新面孔 1
+  （L54，从未覆盖浮出，已定性）——**27 条恰好全部是已定性清单**。
+- 三个新发现进了坑册：**坑 8**（MockMvc 对拦截器 boolean/提前返回失明——拒绝分支
+  先提交 403 响应，`return false→true` 后处理器照常执行但写入被丢弃，HTTP 面全同形；
+  控制流契约必须直调）、**坑 9**（"墙钟整点"边界用例在 PIT 插桩 JVM 里必然自曝——
+  Δ≥1ms 时原始代码自己就清了边界记录，用例未变异先红被排除，变异体反而没人杀；
+  边界用例必须注入时钟，注入不了的如实定性"不可稳定测"）。
+- 27 条定性为无害（14 行为等价 + 1 PIT 环境不可分辨 + 2 字节码恒等副本 + 2 墙钟竞态
+  不可稳定测 + 8 上下文级），清单与证据在 `docs/mutation-testing.md` 第五轮。
+
+### 5. 没做什么 / 留了什么
+
+- 生产代码零改动：这一轮没有暴露行为 bug——所有"改坏"都撞在了"测试没盯住"上。
+- `SecurityConfig.securityFilterChain` 的 8 条链路装配变异体（守卫/setter/Bean 返 null）
+  留给链路层（@SpringBootTest + 真实 API Key 数据）——门禁单测层构造不了
+  `HttpSecurity`，已在第五轮文档留档。
+- 至此 **surveillance（22 条）与 security（27 条）两包的分诊全部完成**，P1 变异审计
+  台账清空。
+
+---
+
+---
+
+## [Unreleased] — 同一架没有 `mode` 的无人机，三个面板三种说法：`待命` / `MANUAL` / 空（2026-10-25）
+
+### 1. 现场：三份 `MODE_LABEL`，缺省口径互不相同
+
+`GAPS` §八-1 登记的现象，本轮按用户裁定的「统一成『未知』」落地。实测三处的分叉：
+
+| 组件 | 表里有没有 `MANUAL` | 缺省写法 | `mode='MANUAL'` 时显示 | `mode` 缺失时显示 |
+|---|---|---|---|---|
+| `DashboardPanel.jsx:23-30` | 有（`'待命'`） | `\|\| '未知'` | 待命 | 未知 |
+| `DroneList.jsx:4-10` | **没有** | `\|\| '待命'` | **英文原文 `MANUAL`** | **待命**（冒充了一个它并不知道的状态） |
+| `TelemetryPanel.jsx:4` | 有 | `\|\| mode` | 待命 | **空/undefined** |
+
+三份表对同一架机器的同一个值给出三种答案。**最坏的是 DroneList 的 `|| '待命'`**：
+它把「不知道」渲染成一个确定状态，操作员会以为飞机真的在待命。
+
+### 2. 修法：并进 `utils/statusMeta.js`，判据写死成函数
+
+新增 `MODE_LABEL`（码表）+ `MODE_UNKNOWN_TEXT = '未知'` + `normModeLabel(mode)`：
+
+- `null` / 空串 / `'UNKNOWN'` ⇒ `'未知'`（**不知道就说不知道**）
+- 已知码 ⇒ 查表
+- **其余真实值原样透传**（不降级成「未知」——后端加了新 mode 时，宁可显示原始码也不冒充已知状态）
+
+三个面板改为 `import { normModeLabel } from '../utils/statusMeta'`，
+`singleSourceOfTruth.test.js` 的 `FORBIDDEN` 加上 `MODE_LABEL` / `normModeLabel`，
+`EXPECTED_IMPORTERS` 登记三个引用方（引用方少了也判红，防「并进去了但没人用」）。
+
+### 3. 两条「分叉断言」按新口径翻正
+
+补口轮在 `droneList.test.jsx` / `dashboardPanel.test.jsx` 里各留了一条点名这处分叉的断言
+（当时钉的是「两个面板显示不同」）。口径统一后它们必然红 —— **同批翻成正向断言**，
+没有靠删测试收口。
+
+### 4. 验证
+
+`npx vitest run` ⇒ **562 例 / 40 文件全绿**（本轮 +22：`modeLabel.test.js` 18 +
+`droneList` 1 + `singleSourceOfTruth` 3）。四门禁（hygiene / 用例数 / 端点数 / 目录计数）通过。
+
+---
+
+## [Unreleased] — regulator-sim 把端口写死在 19090：别的项目占了这个号，本机就有 7 个用例红（2026-10-25）
+
+### 1. 现场：一次全量回归在本地红 7 个 error，红的原因不在这个仓库里
+
+`mvn -B clean test` 在本机跑出 7 个 `java.net.BindException`，全部集中在
+`RegulatorSimMainTest$MockUomServerTests`。逐条查监听方：
+
+```
+TCP  0.0.0.0:19090  LISTENING  54560   ← docker-proxy（dev-stack-prometheus-1，19090->9090）
+```
+
+也就是说：**另一套项目的 Prometheus 容器把 19090 占了**，本仓库的测试写死了 19090，
+谁先起来谁赢。这不是产品缺陷，也不是回归——但它的表现和回归一模一样，
+而且直接把 `scripts/check-test-count-docs.py` 的 Java 腿也带停
+（"有测试未通过，先修测试再谈文档口径"），于是本地连"文档口径对不对"都问不出答案。
+
+### 2. 根因：CI runner 干净，把"写死端口"这件事变成了隐性契约
+
+`RegulatorSimMainTest` 原来写 `PORT_DEFAULT = 19090` / `PORT_DELAY = 19091` /
+`PORT_ERROR = 19092`，`FaultInjectionTest` 里还有一个 `--port=18182`。CI 的 runner 是
+专享的、没有别的服务，所以这四个数在 CI 上**从来没红过**——它只在共享开发机上红，
+而共享开发机正是人干活的地方。同类写法在 `cloud-backend` / `drone-sim` 用的是
+24xxx 段（或 `aerofleet.udp-port=0`），撞车概率低；本次只统一 regulator-sim 这一处，
+不去动别人那批能跑的写法。
+
+### 3. 修：绑 0 号端口让内核分配，端口号从服务器本身读回来
+
+`HttpServer.create(new InetSocketAddress(0), 0)` 由内核分配 ephemeral 端口，构造那一刻
+就已绑定，`server.getAddress().getPort()` 拿得到真实端口号——但 `MockUomServer` 以前
+只在自己日志里用这个值，没对外暴露，调用方**只能猜**，这才是测试必须写死端口的根因。
+所以先补 `public int getPort()`（`MockUomServer.java`），再把四个测试的
+`--port <固定>` 全换成 `--port 0` + `server.getPort()`。
+
+新增一条把"改的原因"本身钉住的用例：
+`bindsEphemeralPortAndAnswersThere` —— 断言端口 > 1023、不再是 19090/19091/19092，
+并且**请求真在这个动态端口上拿到 200**（只读端口号不证明能用）。
+
+### 4. 验收：占用者还在那儿，测试已经绿
+
+| | 改前 | 改后 |
+|---|---|---|
+| 本机 19090 | 被 `dev-stack-prometheus-1` 占用 | **仍然被占用**（没动别人的容器） |
+| `mvn -pl regulator-sim clean test` | 7 个 `BindException` error | **Tests run: 41, Failures: 0, Errors: 0**（`MVN_EXIT=0`） |
+
+### 5. 计数口径：regulator-sim 40 → 41，11 份口径文档同步
+
+新增 1 个用例 ⇒ Java 总计 5113 → **5114**（regulator-sim 40 → 41）。`README.md` 的分模块
+表与 `ROADMAP.md`、`docs/` 下 9 份对外材料的同一数字一并改；这一步不是自愿的——
+`check-test-count-docs.py` 逐格核对 surefire 实测值，加测试而不改文档会直接让 CI 变红。
+
+---
+
+---
+
 ## [Unreleased] — 「0 架无人机」和「没有这一帧」在界面上是同一个 `--`：四处收口 + 一条会咬人的形状守卫（2026-10-25）
 
 ### 1. 现场：GAPS §八-2/3 记的两条，实测清单比记的多
@@ -780,6 +1082,94 @@ pymavlink 已确认官方参数（`ordered_fieldnames` + `crc_extra=178`），
 上一轮（#154）写过「本地 `check-test-count-docs.py` 报的 22 处不一致是 surefire 残缺假象」。
 本轮把全仓 Java 测试**完整跑了一遍**后复核：门禁输出 **「全部一致」**（同步掉本 PR 新增的
 11 个用例后）。⇒ 那个判断成立：**本地残缺时不能改文档，完整跑之后才可信**。
+## [Unreleased] — P2 #20 link-sim 运行时控制通道：伤害参数从“启动期固定”变“可调、可见、可启动验证”（2026-10-24）
+
+### 1. 现场：P1 #11 移除的假滑块，背后是一个真的缺口
+
+前端链路质量面板曾有三个伤害滑块，2026-10-24 按诚实性原则移除（P1 #11）。
+删除时记下的恢复条件是：link-sim 加 HTTP 控制面 + 云端转发端点。
+实测：伤害参数（延迟/抖动/Gilbert-Elliot 丢包/带宽/分区）只能由启动参数
+`--profile` 固定，进程内没有任何控制入口；云端也没有对应端点。
+本轮把这两件补上，滑块按当时记下的恢复条件恢复。
+
+### 2. 补了什么（link-sim / cloud / 前端各一环）
+
+- **link-sim 控制面**：`--control-port N`（**默认 0=关闭**，不改变既有默认行为）
+  启动 `GET/PATCH /profile`（JDK HttpServer，**只绑 127.0.0.1**，无应用层鉴权、
+  64 KB 请求体上限的校验）。新 `ImpairmentSpec`（十元组不可变规格）+
+  `LinkSimControl`（语义层）+ `LinkSimControlServer`（HTTP 层）三个新类各只负责一层；
+  `ImpairmentEngine` 字段改非 final + `apply/spec/statsSnapshot`，参数替换对判决原子生效。
+  语义边界写死：统计计数跨参数保留、令牌桶 clamp 到新箱、分区相位不重置（调参本身不制造假黑洞）。
+- **控制语义**：三种互斥形态——`profile`（整画像切换）/ `reset`（恢复**当前**画像默认）/
+  自定义字段局部更新；支持 `direction=uplink|downlink|both`。
+  `dropPct` 显式切换为**独立随机丢包**（`dropModel=uniform`），与画像的 GE 突发模型区分，视图里直接显示。
+- **cloud-backend 转发**：`GET /api/v1/link-sim/control`（OBSERVER）+
+  `PATCH /api/v1/link-sim/control`（**OPERATOR**）。错误分层映射：
+  连不上 503（提示启动参数）/超时 504/上游 400 透传原因/上游 5xx 映 502。
+  参数校验的唯一权威留在 link-sim（云端不复制一份规则）；
+  LicenseModuleMap 登记 `/api/v1/link-sim` → network 模块（不登记即 fail-closed）。
+- **前端**：`api.js` 新增 `getLinkSimControl` / `patchLinkSimControl`（错误提示改读后端的
+  `result` 字段，不再只显示 "HTTP 400"）；`LinkQualityPanel` 恢复伤害面板——
+  滑块初值读自控制面**当前值**，拖动后必须点“应用”才发 PATCH，成功后以响应回填；
+  控制面不可达时整块控件禁用并显示原因。
+
+### 3. 实测
+
+- 新用例 19 个：link-sim 控制面契约 11 例（真实 HTTP + **按住引擎判决断言**）+
+  云端转发契约 8 例（假 link-sim 真实转发方法/路径/请求体、400 透传、503/504/502、
+  RBAC 注解直调断言）。
+- **A/B 3/3 KILLED**：控制面 `d.engine.apply(next)` 删除 / 转发把 PATCH 降级成 GET /
+  去掉 PATCH 端的 `@RequireRole(Role.OPERATOR)`——全部"改坏⇒红、还原⇒绿"。
+  **真机 curl 复核**（另起进程跑 jar，不是只看单用例）：GET /profile 返回默认 `lan`、
+  PATCH 后 `mode=custom`、`profile=radio-sik` 切换后 dropModel 回到 `ge`、
+  `{"delayMs":-5}` 返回 400 且 result 给出具体原因、POST 返回 405（带 Allow 头）。
+- link-sim 122 → **133**，cloud-backend 3042 → **3050**，全仓 **5169** 用例 0 失败；
+  端点 411 → **413**（新增 GET+PATCH），vitest 28 例整文件 + build + lint 全绿。
+- **安全口径**：link-sim 控制端口只绑 127.0.0.1 且**不做应用层鉴权**；对外只有云端控制器。
+  改 `aerofleet.linksim.control-url` 指向非回环地址等同于把沙盒搭到公网——已写入类注释。
+
+### 4. 未关闭 / 边界
+
+- 安全画像（`tamper`/`unsigned`）不支持控制通道：传 `--control-port` 直接退出 1（安全伤害没有可调的数值参数）。
+- `--env-coupled` 的雨衰覆盖层不受控制面直接影响（包装层读环境状态）；视图的 `envCoupled` 字段只表示开关状态。
+- 控制面本身不持久化、不做并发管控：转发失败不重试。
+
+---
+
+## [Unreleased] — P2 #19 热成像接线：从"消息定义"到"面板有数"的全链补完（2026-10-24）
+
+### 1. 现场：三件齐备、唯独没人发送
+
+P1 #12 把热成像面板改成"未实现"说明页时分诊确证：THERMAL_DATA(30012) 的消息定义
+（mavlink-core）、解码（`MavlinkMessage.decode`）、载荷源（drone-sim 的
+`SimulatedThermalSource`/`BudgetThermalSource`）三件齐备，但**全仓零发送点**——
+且完整版 VirtualDrone 根本没装配热像源（只有 budget 模式有）。链上每一环都在，
+唯独没人把它们接起来：cloud-backend 零引用、任务壳永不推进、前端吃 404。
+
+### 2. 补了什么（三端各一环）
+
+- **drone-sim 发送环**：完整版构造器装配 `SimulatedThermalSource`（此前仅 budget
+  模式装配）；`telemetryRates` 1Hz 块挂钩（照 LiDAR(30020) 模板）：
+  `synthesizeThermalScene`（基线 22℃ + 两个缓变热源，位置由 sysid 派生、确定性可测）
+  → `analyze` → `ThermalDataMsg` 下发。
+- **cloud-backend ingest 环**：新 `ThermalIngestListener`（照
+  `TelemetrySnapshotListener` 的 @EventListener + msgId 条件姿势）——每帧写
+  `DroneSnapshot` 热像五元组快照 + 收账该 sysid 最老活跃任务（PENDING → COMPLETED；
+  每帧都是完整分析，RUNNING 态在此接线不可观测，Javadoc 诚实记录）。
+- **cloud-backend 读环**：`ThermalController` + `GET /api/v1/thermal/status`
+  （机队热读数：只列 online 且上报过的机，租户口径由 `DeviceRegistry.all()` 过滤）。
+- **前端**：ThermalOverlayPanel 从"未实现"说明页换成真实机队热读数表
+  （tempMax/mean/min/σ + 热点数 + 上报时刻，温度阈值告警为客户端过滤并注明）。
+
+### 3. 实测
+
+- 新用例 11 个：sim 侧 `ThermalDataEmissionTest` 2 例（**真实 UDP 往返**：1Hz 帧必达
+  + 数值非平凡 + 场景确定性）、cloud 侧 ingest 契约 5 例 + 读口径 4 例。
+- **A/B 4/4 KILLED**：1Hz 挂钩删除 / 完整版热像源装配删除 / 收账调用删除 /
+  离线过滤取反——全部"改坏⇒红、还原⇒绿"。
+- 端点 410 → **411**；vitest 382 + build + lint ✓。
+- 恢复条件③（逐点热源经纬度）仍留 P2 #19：需要图像→地理位姿解算，本轮面板按
+  聚合口径显示（每机五元组），不假装有逐点坐标。
 
 ---
 

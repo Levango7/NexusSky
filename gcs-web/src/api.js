@@ -144,7 +144,10 @@ async function jsonFetch(rawUrl, options = {}) {
     body = null
   }
   if (!res.ok) {
-    throw new Error((body && body.error) || `HTTP ${res.status}`)
+    // 后端错误形状有两套：较早的 {error:"..."}，以及 doc/link-sim 的
+    // {status:"error", result:"..."}。只认 error 会把后者显示成 "HTTP 400"，
+    // 把真正的原因（"delayMs 越界"）丢掉。
+    throw new Error((body && (body.error || body.result || body.message)) || `HTTP ${res.status}`)
   }
   return body
 }
@@ -314,13 +317,8 @@ export const api = {
   // IMU 数据：加速度计 / 陀螺仪 / 磁力计
   getImuData: (sysid) => jsonFetch(`${BASE}/imu/data/${sysid}`),
 
-  // 物理模型切换：kinematics / aero
-  setPhysicsModel: (sysid, model) =>
-    jsonFetch(`${BASE}/hardware/physics-model`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sysid, model }),
-    }),
+  // 物理模型切换：**已删除**（P1 #13，2026-10-24）——后端没有下发通道，
+  // POST /api/v1/hardware/physics-model 必然 404，此前是"点了必报错"的死代码。
 
   // ---- Mesh Topology (应急 mesh 自愈组网 M5) ----
   // 获取全网拓扑
@@ -967,20 +965,27 @@ export const api = {
     }),
 
   // ---- Thermal Vision (热成像可视化) ----
-  getThermalSources: () => jsonFetch('/api/v1/vision/thermal/sources'),
+  // P2 #19（2026-10-24 接线）：THERMAL_DATA(30012) ingest 落地后改读真实聚合口径——
+  // 机队热像最新读数（此前 getThermalSources 的逐点热源端点已随 P1 #12 删除）。
+  getThermalStatus: () => jsonFetch('/api/v1/thermal/status'),
 
   // ---- Environment (气象环境) ----
   getEnvStatus: () => jsonFetch('/api/v1/env/status'),
   getEnvAlerts: () => jsonFetch('/api/v1/env-alerts'),
 
-  // ---- Link Simulation (链路仿真) ----
-  getLinkSimProfiles: () => jsonFetch('/api/v1/link-sim/profiles'),
-  getLinkSimStatus: () => jsonFetch('/api/v1/link-sim/status'),
-  setLinkSimDamage: (params) => jsonFetch('/api/v1/link-sim/damage', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  }),
+  // ---- Link Simulation (链路仿真运行时控制，P2 #20) ----
+  // link-sim 以 --control-port 启动 HTTP 控制面（默认关闭），云端转发到
+  // /api/v1/link-sim/control。链路**质量**仍读上面的 comm-adapt 实测口径；
+  // 这里控制的是仿真代理本身的损伤参数（延迟/抖动/丢包/带宽/分区）。
+  getLinkSimControl: () => jsonFetch('/api/v1/link-sim/control'),
+
+  // 三种互斥形态：{profile} / {reset:true} / 损伤字段；可加 direction。
+  patchLinkSimControl: (patch) =>
+    jsonFetch('/api/v1/link-sim/control', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
 
   // ---- Auth ----
   login: (username, password) => jsonFetch('/api/v1/auth/login', {
@@ -1490,6 +1495,7 @@ export const {
   getDroneHealth, getFleetHealth, getDroneHealthHistory, getComponentHealth, getHealthWarnings,
   listMaintenanceRecords, createMaintenanceRecord, updateMaintenanceRecord, getMaintenancePredictions, getDroneMaintenancePredictions, getMaintenanceSchedule,
   getCommLinks, getCommLink, getCommScore, getCommDecision, executeCommFailover, getCommFailoverHistory, getCommConfig, updateCommConfig,
+  getLinkSimControl, patchLinkSimControl,
   createMappingTask, listMappingTasks, getMappingTask, planMappingRoute, getMappingPhotos, generateMappingResult, getMappingResult,
   parseVoiceCommand, executeVoiceCommand, confirmVoiceCommand, broadcastVoiceMessage, getVoiceStatus, broadcastVoiceAlert, getVoiceHistory, getVoicePending,
   createCityModel, listCityModels, getCityModel, getCitySituation, createCitySimulation, getCitySimulation, createCityMarker, listCityMarkers,

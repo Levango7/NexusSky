@@ -73,6 +73,11 @@ class MavlinkCrcExtraTest {
             F(U8, "flight_custom_version", 8), F(U8, "middleware_custom_version", 8),
             F(U8, "os_custom_version", 8), F(U16, "vendor_id"), F(U16, "product_id"),
             F(U64, "uid")}},
+        // GPS_RTCM_DATA：只列前三个字段（flags / len / data）。target_system / target_component
+        // 是 MAVLink2 扩展字段，**不参与 CRC_EXTRA**（同 AUTOPILOT_VERSION 的 uid2）。
+        // 已与 pymavlink 核对：crc_extra == 35；把扩展字段也喂进算法会得到 64。
+        {233, "GPS_RTCM_DATA", new Field[]{
+            F(U8, "flags"), F(U8, "len"), F(U8, "data", 180)}},
         {30000, "LED_CONTROL", new Field[]{F(U8, "colorR"), F(U8, "colorG"), F(U8, "colorB"), F(U8, "pattern"), F(U8, "brightness"), F(U8, "freq"), F(U8, "flags"), F(U32, "phaseStartUs"), F(U8, "targetSystem"), F(U8, "targetComp"), F(U8, "reserved"), F(U8, "ledIndex"), F(U16, "transitionMs"), F(U8, "reserved2")}},
         {30001, "ENVIRONMENT_ALERT", new Field[]{F(U8, "alertType"), F(U8, "severity"), F(I16, "value"), F(I16, "threshold"), F(CH, "text", 40)}},
         {30002, "ENVIRONMENT_STATUS", new Field[]{F(U8, "humidity"), F(U8, "weather"), F(U8, "rainRate"), F(I16, "temperature"), F(U16, "windSpeed"), F(U16, "windDirection"), F(I16, "gust"), F(U16, "visibility")}},

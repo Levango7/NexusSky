@@ -76,14 +76,14 @@
 
 ### 1.4 测试基线
 
-当前项目测试基线：**5113 tests，0 failures**（全部通过）。
+当前项目测试基线：**5222 tests，0 failures**（全部通过）。
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
-| mavlink-core | 501 | MAVLink 协议编解码、CRC 一致性 |
-| drone-sim | 1443 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
-| cloud-backend | 2988 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **5113** | **全部通过，0 failures** |
+| mavlink-core | 503 | MAVLink 协议编解码、CRC 一致性 |
+| drone-sim | 1445 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
+| cloud-backend | 3081 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5222 **全部通过，0 failures** |
 
 > 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
 
@@ -98,7 +98,7 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 
 **建议新增 e2e 脚本**：
 - `e2e-dynamic-max-hops.ps1` —— 验证节点数变化时 MAX_HOPS 动态调整（SMALL→MEDIUM→LARGE 跨阈值场景）
-- `e2e-sat-providers.ps1` —— 验证卫星提供商列表查询及占位连接的 501 响应
+- `e2e-sat-providers.ps1` —— 验证卫星提供商列表查询及占位连接的 503 响应
 
 ---
 
@@ -510,7 +510,7 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e-failsafe.ps1
 | `e2e-orchestration.ps1` | M9 应急编排完整演示（灾区测绘→覆盖规划→组网部署→自愈重构） | 中 | drone-sim, cloud-backend |
 | `e2e-security.ps1` | 安防监控独立演示（监控→告警→追踪→处置闭环） | 中 | cloud-backend |
 | `e2e-dynamic-max-hops.ps1` | P3 动态 MAX_HOPS 验证（节点数跨阈值时跳数自动调整） | 中 | drone-sim, cloud-backend |
-| `e2e-sat-providers.ps1` | P3 卫星接入预留验证（提供商列表 + 占位连接 501 响应） | 低 | cloud-backend |
+| `e2e-sat-providers.ps1` | P3 卫星接入预留验证（提供商列表 + 占位连接 503 响应） | 低 | cloud-backend |
 
 ### 4.3 演示环境一键启动建议
 

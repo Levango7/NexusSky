@@ -114,6 +114,10 @@ class MavlinkSigningPostureControllerTest {
 
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(resp.getBody()).containsEntry("posture", "PERMISSIVE");
+        // 变异收口：拒绝原因必须非空（jwtOperatorDenial 的拒绝串被替换成 "" 时，
+        // 状态码仍是 401，只有消息体现形——运维排查"为什么设备不能翻牌"全靠这句话）
+        assertThat(String.valueOf(resp.getBody().get("error")))
+                .contains("JWT authentication required");
         // 关键：被挡在门禁外时，配置绝不能已经被改了
         assertThat(cfg.isRejectUnsigned()).isFalse();
     }
@@ -159,6 +163,73 @@ class MavlinkSigningPostureControllerTest {
                 (List<Map<String, Object>>) resp.getBody().get("recentEvents");
         assertThat(events).isNotEmpty();
         assertThat(events.get(0)).containsEntry("actor", "ops@aerofleet");
+        // 变异收口：reason 一路进入审计事件，但此前从未被断言过——
+        // reason() 的取反/哨兵替换都会让"为什么翻牌"在审计里失真（操作留不下动机）。
+        assertThat(events.get(0)).containsEntry("reason", "第 2 步收紧");
+    }
+
+    @Test
+    @DisplayName("6. JWT 的 preferred_username 与 subject 不同时，操作者取 preferred_username")
+    void operatorPrefersPreferredUsernameOverSubject() {
+        MavlinkSignatureConfig cfg = signingOn();
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(71);
+        registry.markSigningVerified(71);
+        MavlinkSigningPostureController controller = controllerWith(cfg, registry);
+        // 登录名与 subject 刻意不同：现有用例里两者同值，取反了也分不出
+        Jwt jwt = Jwt.withTokenValue("test-token")
+                .header("alg", "none")
+                .claim("preferred_username", "ops@aerofleet")
+                .subject("legacy-sub-1234")
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(jwt, "n/a",
+                        AuthorityUtils.createAuthorityList("ROLE_ADMIN")));
+
+        ResponseEntity<Map<String, Object>> resp = controller.tighten(reason("运维窗口"));
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> events = (List<Map<String, Object>>) resp.getBody().get("recentEvents");
+        // operator() 的两处条件取反会让 sub 回退到 subject（或 NPE）——审计就记错人
+        assertThat(events.get(0)).containsEntry("actor", "ops@aerofleet");
+    }
+
+    @Test
+    @DisplayName("7. reason 缺失/空白时落 \"(未填写原因)\" 哨兵（没有动机的翻牌必须在审计里看得出来）")
+    void blankReasonIsMarkedInAudit() {
+        MavlinkSignatureConfig cfg = signingOn();
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(71);
+        registry.markSigningVerified(71);
+        MavlinkSigningPostureController controller = controllerWith(cfg, registry);
+        loginAsAdmin("ops@aerofleet");
+
+        // 空白 reason（不是缺失）：哨兵逻辑的分叉点
+        ResponseEntity<Map<String, Object>> resp = controller.tighten(reason("   "));
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> events = (List<Map<String, Object>>) resp.getBody().get("recentEvents");
+        // reason() 的条件取反会把原样空白/原值放进去；EmptyObjectReturn 会落 ""
+        assertThat(events.get(0)).containsEntry("reason", "(未填写原因)");
+    }
+
+    @Test
+    @DisplayName("8. 全部就绪且处于 PERMISSIVE 时 readyToTighten=true（就绪面的正向断言，不被零设备骗）")
+    void readyToTightenIsTrueWhenReady() {
+        MavlinkSignatureConfig cfg = signingOn();
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(71);
+        registry.markSigningVerified(71); // 唯一设备有签名证据 ⇒ 就绪
+        MavlinkSigningPostureController controller = controllerWith(cfg, registry);
+        loginAsAdmin("viewer@aerofleet");
+
+        ResponseEntity<Map<String, Object>> resp = controller.status();
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(resp.getBody()).containsEntry("readyToTighten", true);
+        assertThat(resp.getBody()).containsEntry("posture", "PERMISSIVE");
     }
 
     @Test
