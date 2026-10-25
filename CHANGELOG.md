@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-25 共有 195 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-25 共有 196 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 195 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 196 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,51 @@
 
 
 ---
+## [Unreleased] — 前端端点契约 6 条 KNOWN_GAPS 清账：补 1 个真端点，删 5 处假调用（2026-10-24）
+
+### 1. 现场：门禁登记的 6 条"前端在调后端没有的端点"
+
+`check-frontend-endpoints.py` 的 KNOWN_GAPS 登记了 6 条缺口（P1 #8~#13）。
+本轮逐条分诊（只读侦察 6 条 × 前端调用点 + 后端现状）：只有 #8 是「数据后端真有、
+只差一个读端点」的纯补洞；#9/#10 是面板取数逻辑改造；#11/#12/#13 三条经确证
+**能力不存在**——最小诚实修复是移除假控件并写明原因，而不是换个假面板。
+
+### 2. 补了什么
+
+- **#8 `GET /api/v1/env/status`（后端真补）**：机队级环境状态读口径。数据源是
+  各机 ENVIRONMENT_STATUS 快照（drone-sim 每秒下发、早已落进 `DroneSnapshot`，
+  此前没有任何 Controller 暴露它）。聚合口径：online 机逐台进 stations（无定位不进
+  站表但参与顶层均值）、顶层逐字段独立平均、**风向圆周均值**（359° 与 1° 的平均
+  必须是 0° 而不是 180°——朴素算术平均会把面板箭头指反）、天气码 0-4 映射前端
+  WEATHER_MARKS 键取众数（并列取编号小者）、NaN 永不进 JSON、不造 turbulence
+  （后端无此概念）。`EnvStatusReadContractTest` 5 例钉死口径。
+- **#9/#10 链路质量面板改读真实口径**：`getLinkSimProfiles/getLinkSimStatus`（不存在
+  的端点）→ 既有的 `getCommLinks()`（/api/v1/comm-adapt/quality/fleet）。选机下拉
+  （sysid + 等级 + 最佳链路 + 评分），三卡读 bestLinkType 那条链路的
+  latencyMs/packetLossPct/bandwidthKbps→Mbps，历史曲线照旧。
+- **#11 损伤滑块移除**：link-sim 是 CLI UDP 代理，损伤参数启动期固定、无运行时
+  控制通道——此前滑块拖了没有任何反应（失败被 `.catch(() => {})` 静默吞掉）。
+  面板留"未实现"说明卡，真实现选项登记 P2 #20。
+- **#12 热成像面板改"未实现"说明页**：`/vision/thermal/sources` 后端不存在且
+  「改读任务列表」也不诚实（任务壳永不推进——30012 消息未接线；结果只有聚合统计，
+  无带坐标热源点）。移除 404 轮询与**随机扰动伪造的历史回放**；真实现选项
+  （接线 ingest → 聚合端点 → 位姿解算）登记 P2 #19。
+- **#13 物理模型死代码清理**：api.setPhysicsModel 与组件 handler 删除，按钮保持
+  禁用+写明原因（先例样式）。
+- api.js 死函数块全部删除（附分诊结论注释），`KNOWN_GAPS` 清空。
+
+### 3. 实测
+
+- 端点契约门禁：后端 410 条端点 / 前端 **233 处调用全部有对应端点**、登记 0 条
+  （含 self-test）；vitest **382 例全绿** + vite build ✓；全量 surefire **3033 例 0 失败**
+  （净增 5 = EnvStatusReadContractTest）；14 个 Python 门禁全 PASS。
+- 生产代码改动仅一处：`EnvOverrideController` 增构造参数（注入 DeviceRegistry）
+  + GET /status 方法——只补读面，未动任何既有行为。
+
+---
+
+---
+
 ## [Unreleased] — security 收口：102 个存活变异体逐条清账，两包分诊全部完成（2026-10-24）
 
 ### 1. 现场：第一轮只清出 4 处真缺口，账上还挂着 102 个

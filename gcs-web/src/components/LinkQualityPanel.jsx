@@ -19,75 +19,75 @@ function getLinkColor(score) {
   return LINK_COLORS.critical
 }
 
+/**
+ * 链路质量面板（P1 #9/#10，2026-10-24 改造）。
+ *
+ * <p>此前读的 GET /api/v1/link-sim/profiles|status 在后端不存在（假数据面板）；
+ * 真实口径是 /api/v1/comm-adapt/quality/fleet（按机 × 链路的质量评分）。
+ * 本面板改为：选机 → 读该机 bestLinkType 那条链路的实测质量
+ * （latencyMs / packetLossPct / bandwidthKbps→Mbps），2s 轮询攒历史曲线。
+ *
+ * <p>「链路损伤注入」滑块已移除（P1 #11）：link-sim 是 CLI UDP 代理，损伤参数
+ * 启动时固定、无运行时控制通道，云端也没有转发端点——此前滑块拖了没有任何
+ * 反应（失败被 .catch(() => {}) 静默吞掉），是假控件。
+ */
 export default function LinkQualityPanel() {
-  const [profiles, setProfiles] = useState([])
-  const [selectedProfile, setSelectedProfile] = useState(null)
-  const [status, setStatus] = useState(null)
+  const [fleet, setFleet] = useState([])
+  const [selectedSysid, setSelectedSysid] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [damageParams, setDamageParams] = useState({
-    latency: 0,
-    packetLoss: 0,
-    bandwidth: 100,
-  })
   const [history, setHistory] = useState([])
   const canvasRef = useRef(null)
   const pollRef = useRef(null)
   const historyRef = useRef([])
-  const selectedProfileRef = useRef(null)
+  const selectedRef = useRef(null)
 
-  const fetchProfiles = useCallback(async () => {
+  const bestLinkOf = (item) => {
+    if (!item) return null
+    const details = item.details || []
+    return details.find((d) => d.linkType === item.bestLinkType) || details[0] || null
+  }
+
+  const fetchFleet = useCallback(async () => {
     try {
-      const data = await api.getLinkSimProfiles()
-      setProfiles(data.profiles || data || [])
-      if (!selectedProfileRef.current && (data.profiles || data || []).length > 0) {
-        setSelectedProfile((data.profiles || data)[0].id || (data.profiles || data)[0].name)
+      const data = await api.getCommLinks()
+      const items = data.items || []
+      setFleet(items)
+      // 选中机从机队消失（下线/注销）时回落到第一台
+      const current = items.find((it) => it.sysid === selectedRef.current) || items[0] || null
+      if (current && current.sysid !== selectedRef.current) {
+        setSelectedSysid(current.sysid)
+      }
+      const best = bestLinkOf(current)
+      if (best) {
+        historyRef.current = [
+          ...historyRef.current.slice(-59),
+          {
+            ts: Date.now(),
+            latency: best.latencyMs || 0,
+            packetLoss: best.packetLossPct || 0,
+            bandwidth: (best.bandwidthKbps || 0) / 1000, // Kbps → Mbps
+          },
+        ]
+        setHistory([...historyRef.current])
       }
       setError(null)
     } catch (e) {
-      setError(e.message || '获取链路画像失败')
+      setError(e.message || '获取机队链路质量失败')
     } finally {
       setLoading(false)
     }
   }, [])
 
-  const fetchStatus = useCallback(async () => {
-    try {
-      const data = await api.getLinkSimStatus()
-      setStatus(data)
-      const entry = {
-        ts: Date.now(),
-        latency: data.latency || 0,
-        packetLoss: data.packetLoss || 0,
-        bandwidth: data.bandwidth || 0,
-        score: data.score || 0,
-      }
-      historyRef.current = [...historyRef.current.slice(-59), entry]
-      setHistory([...historyRef.current])
-      setError(null)
-    } catch (e) {
-      setError(e.message || '获取链路状态失败')
-    }
-  }, [])
+  useEffect(() => {
+    selectedRef.current = selectedSysid
+  }, [selectedSysid])
 
   useEffect(() => {
-    selectedProfileRef.current = selectedProfile
-  }, [selectedProfile])
-
-  // 损伤参数防抖提交：用户停止拖动 500ms 后才发送 API 请求，避免请求风暴
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      api.setLinkSimDamage(damageParams).catch(() => {})
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [damageParams])
-
-  useEffect(() => {
-    fetchProfiles()
-    fetchStatus()
-    pollRef.current = setInterval(fetchStatus, POLL_MS)
+    fetchFleet()
+    pollRef.current = setInterval(fetchFleet, POLL_MS)
     return () => clearInterval(pollRef.current)
-  }, [fetchProfiles, fetchStatus])
+  }, [fetchFleet])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -148,7 +148,9 @@ export default function LinkQualityPanel() {
     ctx.fillText(`带宽(Mbps) max=${maxBw.toFixed(0)}`, padding + 240, padding - 6)
   }, [history])
 
-  const currentScore = status?.score ?? 0
+  const current = fleet.find((it) => it.sysid === selectedSysid) || fleet[0] || null
+  const bestLink = bestLinkOf(current)
+  const currentScore = current?.overallScore ?? 0
   const linkColor = getLinkColor(currentScore)
 
   return (
@@ -170,15 +172,16 @@ export default function LinkQualityPanel() {
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
         <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 11, color: 'var(--dim)', display: 'block', marginBottom: 4 }}>链路画像</label>
+          <label style={{ fontSize: 11, color: 'var(--dim)', display: 'block', marginBottom: 4 }}>选择无人机（真实链路质量口径）</label>
           <select
-            value={selectedProfile || ''}
-            onChange={(e) => setSelectedProfile(e.target.value)}
+            value={current?.sysid ?? ''}
+            onChange={(e) => setSelectedSysid(Number(e.target.value))}
             style={{ width: '100%', padding: '6px 8px', fontSize: 12, background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4 }}
           >
-            {profiles.map((p) => (
-              <option key={p.id || p.name} value={p.id || p.name}>
-                {p.name || p.id} {p.description ? `— ${p.description}` : ''}
+            {fleet.length === 0 && <option value="">（机队暂无链路质量数据）</option>}
+            {fleet.map((it) => (
+              <option key={it.sysid} value={it.sysid}>
+                #{it.sysid} · {it.grade} · 最佳 {it.bestLinkType} · {it.overallScore} 分
               </option>
             ))}
           </select>
@@ -194,71 +197,33 @@ export default function LinkQualityPanel() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
         <div style={{ padding: 8, borderRadius: 6, background: 'var(--card)', border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 10, color: 'var(--dim)' }}>延迟</div>
+          <div style={{ fontSize: 10, color: 'var(--dim)' }}>延迟{bestLink ? `（${bestLink.linkType}）` : ''}</div>
           <div style={{ fontSize: 16, color: '#ff5d5d', fontWeight: 600 }}>
-            {status?.latency != null ? `${status.latency.toFixed(0)} ms` : '--'}
+            {bestLink?.latencyMs != null ? `${bestLink.latencyMs.toFixed(0)} ms` : '--'}
           </div>
         </div>
         <div style={{ padding: 8, borderRadius: 6, background: 'var(--card)', border: '1px solid var(--border)' }}>
           <div style={{ fontSize: 10, color: 'var(--dim)' }}>丢包率</div>
           <div style={{ fontSize: 16, color: '#ffc857', fontWeight: 600 }}>
-            {status?.packetLoss != null ? `${status.packetLoss.toFixed(2)}%` : '--'}
+            {bestLink?.packetLossPct != null ? `${bestLink.packetLossPct.toFixed(2)}%` : '--'}
           </div>
         </div>
         <div style={{ padding: 8, borderRadius: 6, background: 'var(--card)', border: '1px solid var(--border)' }}>
           <div style={{ fontSize: 10, color: 'var(--dim)' }}>带宽</div>
           <div style={{ fontSize: 16, color: '#00d4ff', fontWeight: 600 }}>
-            {status?.bandwidth != null ? `${status.bandwidth.toFixed(1)} Mbps` : '--'}
+            {bestLink?.bandwidthKbps != null ? `${(bestLink.bandwidthKbps / 1000).toFixed(1)} Mbps` : '--'}
           </div>
         </div>
       </div>
 
-      <div style={{ padding: 12, borderRadius: 8, background: 'var(--card)', border: '1px solid var(--border)' }}>
-        <h3 style={{ fontSize: 13, color: 'var(--cyan)', margin: '0 0 10px 0' }}>损伤参数调节</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-              <span style={{ color: 'var(--dim)' }}>注入延迟</span>
-              <span className="mono" style={{ color: '#ff5d5d' }}>{damageParams.latency} ms</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={500}
-              value={damageParams.latency}
-              onChange={(e) => setDamageParams((p) => ({ ...p, latency: Number(e.target.value) }))}
-              style={{ width: '100%' }}
-            />
-          </div>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-              <span style={{ color: 'var(--dim)' }}>注入丢包率</span>
-              <span className="mono" style={{ color: '#ffc857' }}>{damageParams.packetLoss}%</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={30}
-              value={damageParams.packetLoss}
-              onChange={(e) => setDamageParams((p) => ({ ...p, packetLoss: Number(e.target.value) }))}
-              style={{ width: '100%' }}
-            />
-          </div>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-              <span style={{ color: 'var(--dim)' }}>带宽限制</span>
-              <span className="mono" style={{ color: '#00d4ff' }}>{damageParams.bandwidth} Mbps</span>
-            </div>
-            <input
-              type="range"
-              min={1}
-              max={100}
-              value={damageParams.bandwidth}
-              onChange={(e) => setDamageParams((p) => ({ ...p, bandwidth: Number(e.target.value) }))}
-              style={{ width: '100%' }}
-            />
-          </div>
-        </div>
+      <div style={{ padding: 12, borderRadius: 8, background: 'var(--card)', border: '1px dashed var(--border)' }}>
+        <h3 style={{ fontSize: 13, color: 'var(--dim)', margin: '0 0 8px 0' }}>链路损伤注入（未实现）</h3>
+        <p style={{ fontSize: 11, color: 'var(--dim)', margin: 0, lineHeight: 1.7 }}>
+          后端没有损伤注入通道：link-sim 是 CLI UDP 代理，损伤参数在启动时按画像固定、
+          运行期不可调，云端也没有转发端点（2026-10-24 分诊确证）。此前的三个滑块是
+          「拖了没有任何反应」的假控件（失败被静默吞掉），已按前端诚实性原则移除。
+          待 link-sim 增加运行时控制通道（HTTP/控制帧）+ 云端转发端点后恢复此面板。
+        </p>
       </div>
 
       {loading && <div style={{ textAlign: 'center', padding: 20, color: 'var(--dim)' }}>加载链路数据…</div>}

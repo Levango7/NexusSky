@@ -314,13 +314,8 @@ export const api = {
   // IMU 数据：加速度计 / 陀螺仪 / 磁力计
   getImuData: (sysid) => jsonFetch(`${BASE}/imu/data/${sysid}`),
 
-  // 物理模型切换：kinematics / aero
-  setPhysicsModel: (sysid, model) =>
-    jsonFetch(`${BASE}/hardware/physics-model`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sysid, model }),
-    }),
+  // 物理模型切换：**已删除**（P1 #13，2026-10-24）——后端没有下发通道，
+  // POST /api/v1/hardware/physics-model 必然 404，此前是"点了必报错"的死代码。
 
   // ---- Mesh Topology (应急 mesh 自愈组网 M5) ----
   // 获取全网拓扑
@@ -967,20 +962,18 @@ export const api = {
     }),
 
   // ---- Thermal Vision (热成像可视化) ----
-  getThermalSources: () => jsonFetch('/api/v1/vision/thermal/sources'),
+  // getThermalSources **已删除**（P1 #12，2026-10-24）：GET /api/v1/vision/thermal/sources
+  // 后端不存在——「热源」概念未落地（只有 /thermal/tasks 任务壳，ThermalDataMsg 未接线），
+  // ThermalOverlayPanel 已改为"未实现"说明页。
 
   // ---- Environment (气象环境) ----
   getEnvStatus: () => jsonFetch('/api/v1/env/status'),
   getEnvAlerts: () => jsonFetch('/api/v1/env-alerts'),
 
   // ---- Link Simulation (链路仿真) ----
-  getLinkSimProfiles: () => jsonFetch('/api/v1/link-sim/profiles'),
-  getLinkSimStatus: () => jsonFetch('/api/v1/link-sim/status'),
-  setLinkSimDamage: (params) => jsonFetch('/api/v1/link-sim/damage', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  }),
+  // getLinkSimProfiles / getLinkSimStatus / setLinkSimDamage **已删除**（P1 #9/#10/#11，
+  // 2026-10-24）：链路质量面板改读真实口径 getCommLinks()（/api/v1/comm-adapt/quality/fleet）；
+  // 损伤注入后端无对应能力（link-sim 无运行时控制通道），假滑块已移除。
 
   // ---- Auth ----
   login: (username, password) => jsonFetch('/api/v1/auth/login', {

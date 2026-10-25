@@ -33,7 +33,7 @@ class EnvOverrideControllerTest {
     @BeforeEach
     void setUp() {
         commands = mock(DroneCommandService.class);
-        controller = new EnvOverrideController(commands);
+        controller = new EnvOverrideController(commands, new io.aerofleet.cloud.gateway.DeviceRegistry());
     }
 
     @Test
