@@ -28,17 +28,32 @@ export default function RocPanel() {
   const load = useCallback(async () => {
     try {
       const list = await fetch('/api/v1/roc/seats', { headers: auth() })
-      if (list.ok) setSeats(await list.json())
+      // 三个请求都必须有失败分支（2026-10-25）：原先只有 `if (res.ok)` 没有 else，
+      // 4xx 被静默吞掉、末尾的 setError(null) 反而把错误清成"一切正常"，
+      // 于是席位不存在时面板显示空白列表而不是"这个席位没了"。
+      if (!list.ok) {
+        setError(`席位列表加载失败（HTTP ${list.status}）`)
+        return
+      }
+      setSeats(await list.json())
       // 席位 ID 从 1 起分配（RocSeatService.idSeq = AtomicLong(1)），0 永远不是合法席位。
-      // 只判 != null 会让 0 通过（Number('') === 0）⇒ 去拉 /seats/0，而组件里
-      // `if (res.ok)` 没有 else 分支，那两个 4xx 会被静默吞掉（2026-10-24 修）。
+      // 只判 != null 会让 0 通过（Number('') === 0）⇒ 去拉 /seats/0。
       if (seatRef.current != null && seatRef.current > 0) {
         const [v, i] = await Promise.all([
           fetch(`/api/v1/roc/seats/${seatRef.current}`, { headers: auth() }),
           fetch(`/api/v1/roc/seats/${seatRef.current}/incidents`, { headers: auth() }),
         ])
+        const failed = []
         if (v.ok) setSeatView(await v.json())
+        else failed.push(`席位详情（HTTP ${v.status}）`)
         if (i.ok) setIncidents(await i.json())
+        else failed.push(`事件列表（HTTP ${i.status}）`)
+        if (failed.length) {
+          // 部分成功时**保留已取到的数据**，只把失败的那几项报出来 ——
+          // 整块清空会让操作员以为后端挂了，而实际只是某一路 4xx。
+          setError(`加载失败：${failed.join('、')}`)
+          return
+        }
       }
       setError(null)
     } catch (e) {

@@ -69,6 +69,11 @@ public final class MavlinkMessageInfo {
         // ⚠ 178 只由前 11 个字段（60 字节）算出 —— MAVLink2 扩展字段 uid2（偏移 60、18 字节）
         // 不参与 CRC_EXTRA（否则只实现 v1 的那一端无法校验）。把 uid2 一起喂算法会得到 39（错）。
         INFOS[148] = new Info(78, 178);   // AUTOPILOT_VERSION
+        // ⚠ 35 只由前三个字段（flags / len / data）算出 —— target_system / target_component
+        // 是 MAVLink2 扩展字段，不参与 CRC_EXTRA（同 AUTOPILOT_VERSION 的 uid2）。
+        // 已与 pymavlink 核对：MAVLink_gps_rtcm_data_message.crc_extra == 35，
+        // 且其 fieldnames 只有 ['flags','len','data']。把扩展字段一起喂算法会得到 64（错）。
+        INFOS[233] = new Info(184, 35);   // GPS_RTCM_DATA
         INFOS[253] = new Info(54, 83);    // STATUSTEXT
         INFOS[109] = new Info(9, 185);    // RADIO_STATUS（官方 CRC_EXTRA=185；
                                             // 原为 88，与 pymavlink 官方定义不符）

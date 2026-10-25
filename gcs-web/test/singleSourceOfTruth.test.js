@@ -36,11 +36,11 @@ function stripComments(src) {
 const files = allComponentFiles()
 
 describe('单一真相源：组件不得再自行定义已抽出的函数', () => {
-  // 'batteryColor' **刻意不在名单里**：master 上 `TrackingPanel.jsx:67` 仍本地定义它，
-  // 且 #156 的注释明写"阈值 15/30 保持本面板原有口径"——那是另一个会话已经合并的、
-  // 有意的产品决策。把它判红等于用一条测试替别人改产品口径；正确动作是先要决策
-  // （已登记 .coord/GAPS.md 第八节）。等口径定了，再把这个名字加回来。
-  const FORBIDDEN = ['battClass', 'battColor', 'battColorVar', 'batteryClass', 'normPriority', 'normSeverity', 'haversine', 'fmtDur', 'circularLayout', 'gradeColor', 'fmtPct', 'fmtMs', 'fmtBattery', 'normBatteryPct', 'flightStatsOf', 'fmtMeters', 'MODE_LABEL', 'normModeLabel']
+  // 'batteryColor' 已于 2026-10-25 入册：口径由用户裁定统一成 utils/battery 的 20/40，
+  // `TrackingPanel.jsx` 的本地副本（15/30）已删除并改为 import `battColorVar`。
+  // 此前它刻意不在名单里，是因为"改产品口径"属于决策而非清理；口径定下后就必须入册，
+  // 否则 `utils/battery.js` 作为单一真相源名不副实。
+  const FORBIDDEN = ['battClass', 'battColor', 'battColorVar', 'batteryClass', 'batteryColor', 'normPriority', 'normSeverity', 'haversine', 'fmtDur', 'circularLayout', 'gradeColor', 'fmtPct', 'fmtMs', 'fmtBattery', 'normBatteryPct', 'flightStatsOf', 'fmtMeters', 'MODE_LABEL', 'normModeLabel']
 
   for (const fn of FORBIDDEN) {
     it(`src/components 下没有组件再定义 ${fn}()`, () => {
@@ -90,12 +90,11 @@ describe('单一真相源：组件不得再自行定义已抽出的函数', () =
       new RegExp(`(?:function\\s+${fn}\\s*\\(|const\\s+${fn}\\s*=)`).test(stripComments(HISTORIC_COPY))
     )
     expect(flagged).toEqual(expect.arrayContaining(['fmtBattery', 'batteryColor']))
-    // 上面证的是"形状抓得到"，下面证的是"实际入册的是哪两个"——
-    // 'batteryColor' **没入册**（#156 有意保留 TrackingPanel 的 15/30，见上方注释与 GAPS）。
-    // 这一对断言的意义：将来有人悄悄把 FORBIDDEN 改回去、或把 batteryColor 塞进来却不改注释，
+    // 上面证的是"形状抓得到"，下面证的是"实际入册的是哪三个"——
+    // 'batteryColor' 已于 2026-10-25 入册（口径统一成 20/40 后，TrackingPanel 的本地副本已删）。
+    // 这一组断言的意义：将来有人悄悄把 FORBIDDEN 改回去、或把某个名字塞进来却不改注释，
     // 都会在这里被抓住，而不是只留一段自说自话。
-    expect(FORBIDDEN).toEqual(expect.arrayContaining(['fmtBattery', 'normBatteryPct']))
-    expect(FORBIDDEN).not.toContain('batteryColor')
+    expect(FORBIDDEN).toEqual(expect.arrayContaining(['fmtBattery', 'normBatteryPct', 'batteryColor']))
   })
 
   it('自证：阈值形状守卫自身也不是永真的（能抓住 batt<= 的写法）', () => {

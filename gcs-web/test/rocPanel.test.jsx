@@ -25,18 +25,22 @@ import RocPanel from '../src/components/RocPanel.jsx'
 /** 记录所有真正发出的 URL。 */
 let calls
 
-function installFetch(seats) {
+function installFetch(seats, fail = {}) {
   calls = []
+  const bad = (status) => ({ ok: false, status, json: async () => ({}) })
   global.fetch = vi.fn((url) => {
     const u = String(url)
     calls.push(u)
     if (u.endsWith('/api/v1/roc/seats')) {
+      if (fail.list) return Promise.resolve(bad(fail.list))
       return Promise.resolve({ ok: true, json: async () => seats })
     }
     if (/\/api\/v1\/roc\/seats\/\d+$/.test(u)) {
+      if (fail.seatView) return Promise.resolve(bad(fail.seatView))
       return Promise.resolve({ ok: true, json: async () => ({ seatId: 1, fleet: [], maxDrones: 9 }) })
     }
     if (/\/api\/v1\/roc\/seats\/\d+\/incidents$/.test(u)) {
+      if (fail.incidents) return Promise.resolve(bad(fail.incidents))
       return Promise.resolve({ ok: true, json: async () => [] })
     }
     return Promise.resolve({ ok: true, json: async () => ({}) })
@@ -93,6 +97,56 @@ describe('RocPanel 席位选择', () => {
 
     await waitFor(() => {
       expect(calls.some((u) => /\/seats\/2$/.test(u))).toBe(true)
+    })
+  })
+})
+
+/**
+ * 三个请求的失败分支（2026-10-25）。
+ *
+ * 修前的形状是 `if (res.ok) setX(await res.json())` 三连，没有 else；
+ * 末尾还有一句无条件的 `setError(null)` —— 于是 4xx 不但被吞掉，
+ * 错误还会被**主动清成"一切正常"**。操作员看到的是空白面板，不是"这个席位没了"。
+ *
+ * 判据用「界面上有没有那句话」而不是「fetch 返回了什么」：
+ * 静默失败时 fetch 的返回值本来就是 4xx，断言它等于什么都没测。
+ */
+describe('RocPanel 请求失败必须可见', () => {
+  it('席位列表 4xx：报错，而不是显示成空列表', async () => {
+    installFetch([], { list: 403 })
+    render(<RocPanel />)
+    await waitFor(() => {
+      expect(screen.getByText(/席位列表加载失败（HTTP 403）/)).toBeInTheDocument()
+    })
+  })
+
+  it('席位详情 4xx：报出是哪一路，且已取到的列表不被清空', async () => {
+    installFetch(
+      [{ seatId: 1, operatorName: 'op-1', maxDrones: 9 }],
+      { seatView: 404 }
+    )
+    render(<RocPanel />)
+    await waitForSeats()
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } })
+    await waitFor(() => {
+      expect(screen.getByText(/席位详情（HTTP 404）/)).toBeInTheDocument()
+    })
+    // 部分成功不清空：列表仍在，操作员还能换别的席位
+    expect(screen.getByRole('option', { name: /op-1/ })).toBeInTheDocument()
+  })
+
+  it('事件列表 5xx：同样报出，且不影响列表', async () => {
+    installFetch(
+      [{ seatId: 1, operatorName: 'op-1', maxDrones: 9 }],
+      { incidents: 500 }
+    )
+    render(<RocPanel />)
+    await waitForSeats()
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } })
+    await waitFor(() => {
+      expect(screen.getByText(/事件列表（HTTP 500）/)).toBeInTheDocument()
     })
   })
 })

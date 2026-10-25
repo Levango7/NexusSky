@@ -80,6 +80,18 @@ public final class VirtualDrone implements AutoCloseable {
     private final ScheduledExecutorService scheduler;
     private final AtomicInteger frameSeq = new AtomicInteger(0);
     private final long bootUnixMs = System.currentTimeMillis();
+    /**
+     * 最近一次收到 {@code GPS_RTCM_DATA}(#233) 的时刻（毫秒）；0 表示从未收到。
+     * <p>
+     * 由 NTRIP caster 或本地基站经 {@code GpsRtcmData} 注入差分改正数时更新。
+     * 目前<b>不改变</b> {@link #rtkFixType()} 的口径（那是配置驱动的，见 GAPS 第七节），
+     * 但它让「差分数据到底有没有到机载」这件事变成可观测的：
+     * 没有这个字段时，{@code --rtk fixed} 的模拟机永远报 RTK_FIXED，
+     * 而外界无法判断它是真的收到改正数，还是仅仅配置成了 fixed。
+     */
+    private volatile long lastRtcmAtMs = 0;
+    /** 累计收到的 RTCM 字节数（排障用）。 */
+    private volatile long rtcmBytes = 0;
     /** Fault-injection controller (inert when --scenario none). */
     private final ScenarioController scenario;
     /** Autopilot failsafe layer (link loss / battery crit / GPS loss). */
@@ -709,6 +721,18 @@ public final class VirtualDrone implements AutoCloseable {
                     } else if (msg instanceof io.aerofleet.mavlink.messages.CellHandoverMsg chm) {
                         handleCellHandover(chm);
                     }
+                }
+                // F6 / NTRIP：差分改正数注入（GPS_RTCM_DATA #233）。
+                // 只记录「收到了多少、什么时候」，**不改变** rtkFixType() 的口径——
+                // 那个口径是配置驱动的（--rtk fixed 恒报 6），要不要改成「必须收到改正数才报 5/6」
+                // 属于产品决策，已登记 .coord/GAPS.md 第十节，不在本笔里替它定。
+                // 但接收本身必须留下痕迹：否则 NTRIP 接上了也看不出数据到没到机载。
+                if (msg instanceof io.aerofleet.mavlink.messages.GpsRtcmData rtcm) {
+                    lastRtcmAtMs = System.currentTimeMillis();
+                    rtcmBytes += rtcm.len;
+                    SimLog.info("RTCM 差分数据到达：seq=" + rtcm.sequenceId()
+                            + " frag=" + rtcm.fragmentId() + "/" + (rtcm.fragmented() ? "多片" : "单片")
+                            + " len=" + rtcm.len + " 累计=" + rtcmBytes + "B");
                 }
             }
         } catch (IOException e) {
