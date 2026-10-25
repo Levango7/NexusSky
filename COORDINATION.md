@@ -1,16 +1,22 @@
 # NexusSky 多 agent 协作说明
 
-> 本仓库近期可能由多个 AI agent 并行操作（ZCode CLI、DevEco Code CLI 等）。
+> 本仓库近期可能由多个 AI agent 并行操作（opencode CLI、ZCode CLI、WorkBuddy AI、Qoder 等）。
 > 这份文档是它们之间的**共享事实源**，目的是避免两方在同一个仓库上互相覆盖。
 
-## 一、分工现状（2026-10-04）
+## 一、分工现状（2026-10-26 刷新）
 
-| Agent | 工作目录 | 任务范围 | 与本仓库的文件关系 |
+| Agent | 工作目录 | 角色与任务范围 | 与本仓库的文件关系 |
 |---|---|---|---|
-| **ZCode CLI**（本会话所属） | `F:\Nexus\NexusSky` | 后端/前端/CI 的工程收口：e2e-cv-eval 验证、前端测试分支合并、Playwright E2E（CI7）、WS 握手 NPE 修复 | 直接在仓库内读写（正常开发） |
-| **DevEco Code CLI** | `F:\Agent\deveco\workspace\MyApp` | 鸿蒙（HarmonyOS）可视化界面 + 设备模拟器联调 | **不碰本仓库**；其 DevEco 授权路径仅 `F:/Agent`，对本仓库只有只读评估行为 |
+| **opencode CLI** | `F:\Nexus\NexusSky`（主树） | **主力工程线**：特性开发、e2e、CI 门禁加固、PR 合并 | 直接在仓库内读写（正常开发） |
+| **ZCode CLI** | `F:\Nexus\NexusSky`（主树）或独立 worktree | 收口线：仓库卫生、缺口销账、决策登记、代理裁决用户委托的拍板项 | 直接在仓库内读写；**动手前先读 STATUS 最新声明** |
+| **WorkBuddy AI** | 独立 worktree（建议 `F:/Nexus/nexussky-workbuddy`） | **偶发参与**：只读评估或独立小任务；首次参与先读 `.coord/INBOX-workbuddy.md` | 未登记占用前**只读**；要写先在 STATUS 登记开工声明 |
+| **Qoder** | 无固定 worktree（历史上用完即清） | **偶发参与**：清账/审计/门禁自测线（历史交付记录最干净的一类） | 直接读写；开工前 STATUS 登记 |
+| DevEco Code CLI | `F:\Agent\deveco\workspace\MyApp` | 鸿蒙界面（与本仓无文件交集） | **不碰本仓库** |
 
-结论：**当前两方无文件级重叠，不存在冲突面。**
+> **历史成员**：TRAE、CodeArts/Nex 会话——其历史声明保留在 `.coord/STATUS.md` 与 `.coord/GAPS.md`，
+> 若重新出现按新成员对待（先登记再动手）。
+> **层级规则**：用户是唯一派单源；agent 之间**平级认领**——接活前在 STATUS 开工声明登记，
+> 完成后在 `.coord/INBOX-*` 回报。两个 agent 想接同一活时，**先在 STATUS 上声明的优先**。
 
 ## 二、硬性隔离规则
 
