@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 200 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 201 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 200 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 201 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,34 @@
 
 
 ---
+## [Unreleased] — --rtk 语义拍板为「上界」并落地：改正数真的到了才报 5/6，断链掉回 3D_FIX（GAPS §十.10-1，2026-10-26）
+
+### 决策（用户委托 ZCode 会话裁决，选 B 案）
+
+`--rtk` 声明的是能力**上界**而非事实。A 案（保持开关语义）会让「配置成 fixed」
+永远显示厘米级——NTRIP 断了界面也不掉精度，正是本仓一贯清算的假绿形态；
+C 案（--rtk auto 双语义）留下永久混用面。B 案与「配置即事实是假绿」的立场一致。
+
+### 交付
+
+- `VirtualDrone.rtkFixType()`：上界 + 新鲜度窗口（默认 5s，`aerofleet.sim.rtcm-fresh-window-ms`
+  可压短供测试）。未配置 --rtk 的机器收到改正数也**不**抬升（上界即 3）。
+- **顺带修掉一个死代码 bug**：`MavlinkMessage.decode` 注册表缺 `GpsRtcmData(233)` 的
+  case——帧在 default 里被丢成 null，VirtualDrone 那段「收到 RTCM 记 lastRtcmAtMs」
+  的分发从未真正执行过（新单测当场抓住；PR #166 的「sim 已接收」声称不成立）。
+- 新增 `VirtualDroneRtkCeilingTest` 4 例（真实 UDP 路径）：无改正数⇒3 / 注入⇒上界值 /
+  停注降级⇒3 / 未配置注入不抬升。
+- `scripts/e2e-rtk.ps1` 重写断言：新增 MAVLink v2 裸帧构造（逐位反射式 X.25 CRC，
+  与仓内 MavlinkCrc.java 逐位等价；**MAVLink C 库的查表速算式在本栈上算出的 CRC 不同，
+  帧会被静默丢弃，别换回去**）+ RTCM 注入。R1/R2 注入后 5/6、R3 未配置机注入也不抬升、
+  R5 停注降级（本机 Windows PowerShell 5.1 实测 ALL PASS 5/5）。
+- 测试计数：drone-sim 1445→1449，全仓 5222→5226（10 份口径文档同步）。
+
+### 边界
+
+NTRIP 服务层（定时拉流→切帧→分片→发送 GPS_RTCM_DATA，GAPS §十.10-3）仍属下一步；
+本笔裁决后该线已无语义阻塞。坐标噪声模型仍未区分 RTK/单点。
+
 ## [Unreleased] — P2 #19/#20 接上最新 master：热成像 + link-sim 控制面真正落地（2026-10-25）
 
 ### 1. 现场：链式合并被从中间截断
