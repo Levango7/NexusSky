@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 195 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-24 共有 200 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 193190（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 200 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,56 @@
 
 
 ---
+## [Unreleased] — P2 #19/#20 接上最新 master：热成像 + link-sim 控制面真正落地（2026-10-25）
+
+### 1. 现场：链式合并被从中间截断
+
+上一轮把整条链 rebase 到 master 2926475，四层 PR 的 base 全部对齐。
+但随后 master 继续前进（#161/#162/#164/#165），**前三层被别的 PR 以 squash 形式
+分别送上了 master，链从中间断掉**：
+
+- security P1 #7 → `3335658c (#147)` ✓ 在 master
+- 前端 KNOWN_GAPS 清账 → `685b844d (#165)` ✓ 在 master
+- regulator-sim 临时端口 → `e787e1f6 (#162)` ✓ 在 master
+- **P2 #19 热成像** → PR #152 显示 merged=true，但合进的是 base 分支
+  `audit/frontend-endpoint-gaps`，而那个分支被 #165 提前取走时**不含 thermal**
+  → `ThermalIngestListener.java` 不在 master 上
+- **P2 #20 link-sim 控制面** → PR #153 同理，`LinkSimControl.java` 不在 master 上
+
+### 2. 做了什么
+
+跳过已在 master 的前两层，只把后 5 个提交重放到最新 master（`58bb8009`）：
+
+| 提交 | 内容 |
+|---|---|
+| 热成像接线 | drone-sim 发送环 + `ThermalIngestListener` + `GET /api/v1/thermal/status` + 面板真实聚合表 |
+| link-sim 控制面 | `--control-port`（默认 0）+ `GET/PATCH /profile`（只绑回环）+ cloud 转发 + 前端滑块恢复 |
+| 端口表文档 | 14601 进部署/排障端口表 |
+| 证据/PR 号文档 | 真机 curl 复核、todo.md 登记 |
+| 计数归位 | 全仓计数订正到实测 |
+
+regulator-sim 的临时端口改动**取 master 版本**（#162 已落地，实现略不同但同一意图），
+不重复造第二份。
+
+### 3. 实测（本机，mvn -B -o clean test）
+
+```
+mavlink-core 503 / drone-sim 1445 / link-sim 133
+cloud-backend 3081 / regulator-sim 41 / sdk-java 19     合计 5222
+BUILD SUCCESS   0 失败 0 错误 0 跳过
+```
+
+- 端点 **414**（thermal +1、link-sim +2、env-status +1，后者已由 #165 带上 master）
+- vitest **570**；CHANGELOG 小节 199
+- 全仓文档计数 13 处订正到 5222，端点声称 13 处订正到 414
+- 12 项 Python 门禁全 exit 0；含 docs/api-reference 模块表合计 411→414
+
+### 4. 仍未关闭
+
+- P2 #19 的条件③（逐点热源经纬度 = 图像→地理位姿解算）——需要 vision 包的姿态解算，
+  不属于本轮范围。
+- P2 #20 的安全画像（tamper/unsigned）不支持控制通道，link-sim 侧已 exit 1 拒绝。
+
 ## [Unreleased] — 清掉 GAPS 剩下的三项纯软件活：NTRIP 差分源 + 两处口径（2026-10-25）
 
 ### 1. NTRIP 客户端：定位维度唯一「纯软件可立即补」的缺口

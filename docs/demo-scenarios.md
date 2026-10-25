@@ -76,14 +76,14 @@
 
 ### 1.4 测试基线
 
-当前项目测试基线：**5169 tests，0 failures**（全部通过）。
+当前项目测试基线：**5222 tests，0 failures**（全部通过）。
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
-| mavlink-core | 501 | MAVLink 协议编解码、CRC 一致性 |
+| mavlink-core | 503 | MAVLink 协议编解码、CRC 一致性 |
 | drone-sim | 1445 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
-| cloud-backend | 3062 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **5200** | **全部通过，0 failures** |
+| cloud-backend | 3081 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5222 **全部通过，0 failures** |
 
 > 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
 

@@ -40,8 +40,8 @@
 | 16 | **UOM `sink-type` 未落地** | 默认 Noop | 机巢/监管上报的真实去向 |
 | 17 | **机巢只有 sim** | 机巢 MQTT 未接 | 硬件到位再动 |
 | 18 | **死枚举 / 空端点** | 审计期发现的历史遗留 | 需要一次全仓扫描确认清单 |
-| 19 | **热成像链路未接线** | ~~MAVLink 30012 在 cloud-backend 零引用~~ **ingest/读端点/面板已于 2026-10-24 接线**（见已清零表）；剩余恢复条件③：逐点热源经纬度（图像 u/v → lat/lon 需图像→地理位姿解算，CameraPose/GeolocationSolver 在 vision 包已有底子） | 位姿解算接入 → /thermal/status 增逐点坐标 → 面板恢复热力图；三步各自可独立验收 |
-| 20 | **link-sim 无运行时控制通道** | ~~进程内无控制入口、云端无从下发~~ **2026-10-24 已接线**（PR #153，见已清零表）：`--control-port N`（默认 0=关闭）起 `GET/PATCH /profile`（只绑 127.0.0.1，无应用层鉴权），云端 `GET/PATCH /api/v1/link-sim/control` 转发（读=OBSERVER，写=OPERATOR），前端链路质量面板恢复损伤滑块 | 剩余：安全画像（tamper/unsigned）不支持控制通道（已 exit 1 拒绝）；`EnvAwareImpairmentEngine` 包装层不受控制面直调影响 |
+| 19 | **热成像链路未接线** | ~~MAVLink 30012 在 cloud-backend 零引用~~ **ingest/读端点/面板已接线并落 master**（2026-10-25，链式合并被 #165 截断后重放，ThermalIngestListener.java / thermal/status 已在 master）；剩余恢复条件③：逐点热源经纬度（图像 u/v → lat/lon 需图像→地理位姿解算，CameraPose/GeolocationSolver 在 vision 包已有底子） | 位姿解算接入 → /thermal/status 增逐点坐标 → 面板恢复热力图；三步各自可独立验收 |
+| 20 | **link-sim 无运行时控制通道** | ~~进程内无控制入口、云端无从下发~~ **2026-10-24 已接线**（链式合并被 #165 截断后 2026-10-25 重放落 master，LinkSimControl.java 已在 master）：`--control-port N`（默认 0=关闭）起 `GET/PATCH /profile`（只绑 127.0.0.1，无应用层鉴权），云端 `GET/PATCH /api/v1/link-sim/control` 转发（读=OBSERVER，写=OPERATOR），前端链路质量面板恢复损伤滑块 | 剩余：安全画像（tamper/unsigned）不支持控制通道（已 exit 1 拒绝）；`EnvAwareImpairmentEngine` 包装层不受控制面直调影响 |
 
 ---
 

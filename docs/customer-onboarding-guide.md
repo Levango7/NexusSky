@@ -2,7 +2,7 @@
 
 > **文档版本**：v1.0 | **日期**：2026-09-24 | **定位**：内部商务参考，不对外发布
 >
-> **项目阶段**：PoC（5181 单测全绿，模拟器验证通过，未在真机集群上完成验证）
+> **项目阶段**：PoC（5222 单测全绿，模拟器验证通过，未在真机集群上完成验证）
 >
 > **关联文档**：[产品定位](PRODUCT-POSITIONING.md)、[定价策略](pricing-strategy.md)、[部署指南](deployment-guide.md)、[集成手册](integration-guide.md)、[演示场景](demo-scenarios.md)
 
@@ -155,7 +155,7 @@ NexusSky 客户接入遵循 **评估 → POC → 签约 → 部署 → 培训** 
 | 分析项 | 评估内容 | 结论 |
 |---|---|---|
 | **MAVLink 协议兼容** | 客户飞控是否支持 MAVLink v2 | PX4/ArduPilot 原生支持；自研飞控需确认 MAVLink 实现 |
-| **REST API 集成** | 客户系统是否可通过 REST API 对接 | 413 端点，OpenAPI 3.0 规范，标准 HTTP/JSON |
+| **REST API 集成** | 客户系统是否可通过 REST API 对接 | 414 端点，OpenAPI 3.0 规范，标准 HTTP/JSON |
 | **WebSocket 实时接入** | 客户是否需要实时遥测推送 | 支持 telemetry/alert/formation/scheduling/decision 五类消息 |
 | **部署环境适配** | 客户服务器资源是否满足部署要求 | Docker Compose 单机：4C8G 起步；K8s 集群：按规模配置 |
 | **定制开发范围** | 是否需要行业定制开发 | 评估定制工作量，纳入行业定制版报价 |
@@ -220,7 +220,7 @@ POC 环境采用 Docker Compose 部署，确保快速搭建与一致性。
 | **Docker** | 24+ | 26+ |
 | **Docker Compose** | v2+ | v2.24+ |
 | **Java** | 17+ | 17 (POC 环境构建需要) |
-| **网络** | 端口 8080/14540/14550/5181/14600 可用 | 同左 |
+| **网络** | 端口 8080/14540/14550/5222/14600 可用 | 同左 |
 
 #### 3.3.2 部署步骤
 
@@ -241,7 +241,7 @@ curl http://localhost:8080/actuator/health
 # 期望响应：{"status":"UP"}
 
 # 5. 验证 GCS Web 可访问
-# 浏览器打开 http://localhost:5181
+# 浏览器打开 http://localhost:5222
 ```
 
 #### 3.3.3 服务端口确认
@@ -250,7 +250,7 @@ curl http://localhost:8080/actuator/health
 |---|---|---|---|
 | cloud-backend | 8080 | REST API + WebSocket | ✅ |
 | drone-sim | 14540 | MAVLink UDP（模拟器） | ✅ |
-| gcs-web | 5181 | 地面站前端 | ✅ |
+| gcs-web | 5222 | 地面站前端 | ✅ |
 | link-sim | 14600 | 链路代理（多机场景必需） | 视场景 |
 
 > **注意**：根据经验，部署 Docker Compose 时需确认 docker-compose.yml 中各服务的 `environment` 段配置完整，所有 `${VAR}` 引用均有对应的环境变量注入。重点检查 `S3_BUCKET`、`S3_ENDPOINT`、`S3_ACCESS_KEY`、`S3_SECRET_KEY`、`S3_REGION`、`LIVEKIT_E2EE_ENABLED` 等变量是否正确配置。（来源：2026-09-23-docker-compose-livekit-sfu-config-audit-checklist）
@@ -595,7 +595,7 @@ kubectl get svc
 
 | 培训模块 | 内容 | 时长 | 对象 |
 |---|---|---|---|
-| **API 概览** | REST API 413 端点分类与用途 | 1 小时 | 开发者 |
+| **API 概览** | REST API 414 端点分类与用途 | 1 小时 | 开发者 |
 | **认证与授权** | JWT 获取、刷新、多租户 Header | 0.5 小时 | 开发者 |
 | **设备管理 API** | 设备注册、查询、状态监控、遥测查询 | 1 小时 | 开发者 |
 | **任务控制 API** | 航点任务上传、飞行控制、任务状态查询 | 1 小时 | 开发者 |
@@ -750,7 +750,7 @@ kubectl get svc
 | 风险 | 概率 | 影响 | 应对策略 |
 |---|---|---|---|
 | **PoC 阶段真机未验证** | 高 | 高 | 所有商务沟通中如实告知 PoC 状态；不夸大能力；合同中约定真机验证里程碑 |
-| **5181 单测覆盖但不等于生产验证** | 中 | 中 | 强调单测 + 模拟器 e2e 双重验证；POC 阶段在客户环境中补充验证 |
+| **5222 单测覆盖但不等于生产验证** | 中 | 中 | 强调单测 + 模拟器 e2e 双重验证；POC 阶段在客户环境中补充验证 |
 | **功能迭代节奏与客户期望不匹配** | 中 | 中 | 合同中明确版本升级政策；SDK 授权版季度更新；私有部署版按合同约定 |
 
 ---
