@@ -352,11 +352,17 @@
      正确顺序的三步现状：**①** drone-sim 侧签名（CI 每次 flight e2e 都走签名帧通路）
      ✅ → **②** staging 观察 `signingStats`（实测 `verified=1259 rejected=0`，且先修掉了
      timestamp 非单调造成的 635 条误拒）✅ → **③** staging 收紧 `reject-unsigned`
-     ✅（2026-10-11）→ **④** 动 prod ⬜ **仍待拍板**。
+     ✅（2026-10-11）→ **④** 动 prod ✅ **已拍板：保持出厂关闭**（2026-10-26，决策记录见
+     `docs/decisions-2026-10-26.md` 决策一——prod 无机队，收益 0 风险面为整机队拒帧；
+     重开条件四条已登记，`prodProfileStaysDisabled` 测试不改、继续钉住现状）。
      这三步的姿态被 `MavlinkSigningConfigurationTest` 的两个用例钉死
      （`stagingProfileAssemblesStrict` / `prodProfileStaysDisabled`），改动会被 CI 拦下。
 
   ③ **C1/C2 的对端都是模拟器**（`regulator-sim` / drone-sim），未与真实 UOM 平台联调。
+     **2026-10-26 起立项为外部依赖主线**：真实 UOM 联调就绪清单五项见
+     `docs/decisions-2026-10-26.md` 决策二；仓内可先行的差异比对框架与真实现骨架
+     与用户侧「确定 UOM 对接主体」并行。GB 46750 过渡期 deadline（2026-11-01）
+     针对真实运行航空器，本系统无真机在飞故不构成违约事件，不为赶日期做假动作。
 
   > **给后来者**：这一节曾三次滞后于代码（2026-10-06 的 C1-C5 全部"待做"实则均已
   > 实现、本次 ① ②）。读它做计划前请先按文中给出的**文件:行号或测试类名**核一遍。

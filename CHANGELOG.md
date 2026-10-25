@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-24 共有 200 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 201 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 200 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 201 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,33 @@
 
 
 ---
+## [Unreleased] — 四个积压决策项统一裁决落账：C5 prod 保持关闭、GB 46750/UOM 联调立项、协作 roster 刷新（2026-10-26）
+
+### 决策一：C5 第④步「动 prod」→ **保持出厂关闭**
+
+- 结论：`mavlink.signing.enabled` 在 prod 保持 `false`，`prodProfileStaysDisabled` 测试不改。
+- 理由：prod 无机队 ⇒ strict 风险面（未配密钥设备整链失联）无对象，收益为 0；
+  打开是硬切换且前置（逐机发放配置单/面板告警/回滚演练）全部依赖真实机队。
+- 重开条件四条登记在 `docs/decisions-2026-10-26.md`（provisioning 全 VERIFIED、
+  permissive ≥7 天、回滚演练过、维护窗口内完成）。ROADMAP:355 的 ⬜ 就此落账为 ✅。
+
+### 决策二：GB 46750 / 真实 UOM 联调 → **立项为外部依赖主线，不为 deadline 做假动作**
+
+- 2026-11-01 deadline 针对真实运行航空器，本系统无真机在飞，不构成违约事件。
+- 真实 UOM 联调就绪清单五项（对接主体/UomReportSink 真实现/协议差异比对/RID 抓包比对/边界改口径）
+  登记在 `docs/decisions-2026-10-26.md`；#3 #5 仓内可先行，#1（找对接主体）为用户侧行动项。
+
+### 协作机制
+
+- `COORDINATION.md` 分工 roster 从 2026-10-04 两方刷新为 2026-10-26 五方
+  （opencode 主力 / ZCode 收口 / WorkBuddy AI 偶发只读 / Qoder 偶发清账 / DevEco 隔离），
+  并写明层级规则：用户是唯一派单源，agent 平级认领，先声明者优先。
+- WorkBuddy AI 首次获得交接文档 `.coord/INBOX-workbuddy.md`（不入库，gitignore）。
+- 删除根目录 0 字节残迹文件「更新至」（误产出的空文件，无任何引用）。
+- 仓库卫生（同日，不入 CHANGELOG 的机械操作）：删除 29 个本地与 43 个远端已合 PR 残留分支
+  （tmp*/backup* 栈与已 squash 合并的 head 分支，逐条核过 patch 等价或对应 PR），
+  移除 2 个已交付 worktree。分支历史在 GitHub PR 上完整保留。
+
 ## [Unreleased] — P2 #19/#20 接上最新 master：热成像 + link-sim 控制面真正落地（2026-10-25）
 
 ### 1. 现场：链式合并被从中间截断
