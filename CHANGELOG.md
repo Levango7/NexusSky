@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-25 共有 196 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-25 共有 197 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -31,7 +31,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 196 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 197 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 
@@ -40,6 +40,64 @@
 
 
 ---
+## [Unreleased] — 清掉 GAPS 剩下的三项纯软件活：NTRIP 差分源 + 两处口径（2026-10-25）
+
+### 1. NTRIP 客户端：定位维度唯一「纯软件可立即补」的缺口
+
+`GAPS` 第九节第 5 条记的是「真差分源（NTRIP caster 客户端）未接」。它不是硬件问题——
+NTRIP 是 HTTP 流协议，纯软件可做，也能接公共 caster 实测。本轮交付协议层：
+
+| 类 | 职责 |
+|---|---|
+| `GpsRtcmData`（mavlink-core） | `GPS_RTCM_DATA`(#233)：把改正数注入机载 GPS 的唯一入口 |
+| `NtripClient` | 连 caster、握手、认证、读原始字节流 |
+| `Rtcm3Framer` | 把字节流切成完整 RTCM 帧，含 **CRC-24Q 校验** |
+
+**三个必须说清的实现判断**：
+
+1. **为什么用裸 Socket 而不是 `HttpURLConnection`**：NTRIP 1.0 的成功响应是 `ICY 200 OK`，
+   不是合法 HTTP 状态行，`HttpURLConnection` 直接抛 `ProtocolException`。
+2. **为什么响应头要逐字节读到空行**：头部之后紧跟的就是 RTCM 二进制流，
+   用带缓冲的 `readLine` 会把流的前几个字节一起吃掉，整条流从此错位。
+   测试里有一条专门断言「握手后读到的第一个字节必须是 `0xD3`」。
+3. **为什么 CRC 错的帧要丢弃而不是转发**：转发一条坏的改正数比不转发更糟——
+   飞控会把它当有效改正解算，位置反而更偏。
+
+**`CRC_EXTRA = 35`，只由 `flags / len / data` 算出**：`target_system` / `target_component`
+是 MAVLink2 扩展字段，不参与 CRC（同 `AUTOPILOT_VERSION` 的 `uid2`）。
+已用 pymavlink 核对：`crc_extra == 35`、`fieldnames == ['flags','len','data']`；
+把扩展字段一起喂算法会得到 64（错）。**这是本项目第一条带扩展字段的官方消息**，
+所以 `MavlinkCrcExtraTest.SIGNATURES` 里也按同样口径只列前三个字段。
+
+**机载侧**：`VirtualDrone` 新增 `GPS_RTCM_DATA` 接收分支，记 `lastRtcmAtMs` / `rtcmBytes` 并打日志。
+**但没有改 `rtkFixType()`** —— 那个口径是配置驱动的（`--rtk fixed` 恒报 6），
+要不要改成「必须收到改正数才报 5/6」属于产品决策，已登记 `GAPS` 第十节，不在这笔里替它定。
+
+### 2. `TrackingPanel` 的电量阈值统一到 20/40
+
+`GAPS` 第八节第 9 条。此前本面板用 15/30、其余四处用 20/40 ⇒ 同一架无人机在列表与追踪面板
+可能一个绿一个黄。删掉本地 `batteryColor`，改 import `utils/battery` 的 `battColorVar`；
+`FORBIDDEN` 正式纳入 `batteryColor`，并把那条「反向断言」（`not.toContain('batteryColor')`）
+翻成正向 —— **没有靠删测试收口**。
+
+**代价照记**：15~20% 这段电量在追踪面板由「黄」变「红」；无数据时的颜色从 `var(--dim-2)`
+变为 `utils` 统一的 `var(--dim)`。
+
+### 3. `RocPanel` 三个请求补失败分支
+
+`GAPS` 第八节第 5 条后半。修前是 `if (res.ok) setX(...)` 三连没有 else，
+末尾还有一句**无条件**的 `setError(null)` —— 4xx 不但被吞掉，错误还被主动清成「一切正常」，
+操作员看到的是空白面板而不是「这个席位没了」。
+
+现在三路各有失败分支，**部分成功时保留已取到的数据**（整块清空会让人以为后端挂了）。
+3 条新用例按「界面有没有那句话」判，而不是断言 `fetch` 返回了 4xx（那等于什么都没测）。
+
+### 4. 验证
+
+- `NtripClientTest` 9 例 + `Rtcm3FramerTest` 10 例，含**本地假 caster 的真 TCP 连接**与跨块重组
+- cloud-backend **3064** 例（+19）、mavlink-core **503** 例（+2）、drone-sim 1443 例、前端 **566** 例
+- 全仓 **5192** 例；五门禁（hygiene / 用例数 / 端点数 / 目录计数 / 前端契约）全过
+
 ## [Unreleased] — 前端端点契约 6 条 KNOWN_GAPS 清账：补 1 个真端点，删 5 处假调用（2026-10-24）
 
 ### 1. 现场：门禁登记的 6 条"前端在调后端没有的端点"
