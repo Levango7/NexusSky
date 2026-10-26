@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.surveillance;
 
+import io.aerofleet.cloud.surveillance.onvif.OnvifSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +26,14 @@ import java.util.Map;
  * </ul>
  * <p>
  * 当请求的厂商适配器不存在时，自动降级到 ONVIF fallback 适配器。
+ *
+ * <h2>live ONVIF 下的路由</h2>
+ *
+ * <p>{@code aerofleet.onvif.mode=live} 时，海康/大华/宇视三家的<b>私有 SDK
+ * 适配器仍是模拟实现</b>，把它们当成真实通道会给出"按厂商规范推导、从未
+ * 向设备确认"的地址。此时统一路由到 ONVIF live 适配器（这三家的设备都支持
+ * ONVIF），取流地址才会带 {@code deviceVerified=true}。
+ * 模拟模式（默认）路由完全不变。
  */
 @Component
 public final class VendorAdapterRegistry {
@@ -34,15 +43,28 @@ public final class VendorAdapterRegistry {
     /** 厂商 -> 适配器 映射表。 */
     private final Map<Vendor, VendorAdapter> adapterMap;
 
+    /** live ONVIF 是否接管海康/大华/宇视的私有适配器路由。 */
+    private final boolean onvifLive;
+
+    /**
+     * 模拟路由（既有单测与离线场景）。
+     *
+     * <p>Spring 容器使用带 {@link OnvifSettings} 的构造器（{@code @Autowired}）。
+     */
+    public VendorAdapterRegistry(List<VendorAdapter> adapters) {
+        this(adapters, null);
+    }
+
     /**
      * 通过 Spring 自动注入所有 {@link VendorAdapter} Bean。
      * <p>
      * 构造时按各适配器的 {@link VendorAdapter#getVendor()} 建立路由映射。
      *
      * @param adapters Spring 容器中所有 VendorAdapter 实现
+     * @param settings ONVIF 配置（决定是否由 live 适配器接管私有厂商路由）
      */
     @Autowired
-    public VendorAdapterRegistry(List<VendorAdapter> adapters) {
+    public VendorAdapterRegistry(List<VendorAdapter> adapters, OnvifSettings settings) {
         Map<Vendor, VendorAdapter> map = new EnumMap<>(Vendor.class);
         if (adapters != null) {
             for (VendorAdapter adapter : adapters) {
@@ -52,6 +74,9 @@ public final class VendorAdapterRegistry {
             }
         }
         this.adapterMap = Collections.unmodifiableMap(map);
+        this.onvifLive = settings != null && settings.isLive();
+        log.info("ONVIF live 模式={}（live 时海康/大华/宇视将路由到 ONVIF 适配器，私有 SDK 适配器仍为模拟实现）",
+                onvifLive);
         log.info("VendorAdapterRegistry 初始化完成, 已注册 {} 个适配器", adapterMap.size());
     }
 
@@ -66,6 +91,15 @@ public final class VendorAdapterRegistry {
     public VendorAdapter getAdapter(Vendor vendor) {
         if (vendor == null) {
             throw new IllegalArgumentException("vendor must not be null");
+        }
+        // live ONVIF：私有 SDK 适配器仍是模拟实现，统一交给真实协议实现，
+        // 否则真实摄像头会拿到"按规范推导、未向设备确认"的地址。
+        if (onvifLive && (vendor == Vendor.HIKVISION || vendor == Vendor.DAHUA
+                || vendor == Vendor.UNIVIEW)) {
+            VendorAdapter onvif = adapterMap.get(Vendor.ONVIF);
+            if (onvif != null) {
+                return onvif;
+            }
         }
         VendorAdapter adapter = adapterMap.get(vendor);
         if (adapter != null) {

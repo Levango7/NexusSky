@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
@@ -635,7 +637,8 @@ public class SurveillanceController {
     @Operation(summary = "订阅设备事件（SSE）", description = "每 15 秒发送心跳，事件触发时推送数据")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "SSE 流"),
-        @ApiResponse(responseCode = "404", description = "设备不存在")
+        @ApiResponse(responseCode = "404", description = "设备不存在"),
+        @ApiResponse(responseCode = "501", description = "当前接入模式未实现设备事件订阅（live ONVIF）")
     })
     @GetMapping("/devices/{id}/events")
     public SseEmitter subscribeEvents(@PathVariable("id") String id) {
@@ -645,6 +648,14 @@ public class SurveillanceController {
             emitter.completeWithError(new IllegalArgumentException("device " + id + " not found"));
             return emitter;
         }
+        // 适配器必须在建立 SSE 之前确认它能真的接到设备：live ONVIF 的事件面
+        // 尚未实现，先回 200 再挂一条永远没有事件的流就是假成功。
+        VendorAdapter adapter = vendorAdapterRegistry.getAdapter(d);
+        if (!adapter.supportsEventSubscription()) {
+            throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED,
+                    "event subscription for device " + id + " is not implemented in the current "
+                            + "surveillance mode (ONVIF live: WS-BaseNotification not wired)");
+        }
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
         // 建立即发一条注释：立即提交 SSE 响应头（200 + text/event-stream），
         // 客户端无需等待首个设备事件或 15s 心跳即可确认连接已建立
@@ -653,7 +664,6 @@ public class SurveillanceController {
         } catch (Exception e) {
             log.debug("SSE initial send failed for device {}: {}", id, e.getMessage());
         }
-        VendorAdapter adapter = vendorAdapterRegistry.getAdapter(d);
         String handle = adapter.subscribeEvents(d, payload -> {
             try {
                 emitter.send(SseEmitter.event()
@@ -827,10 +837,7 @@ public class SurveillanceController {
      * @return 脱敏后的 URL；输入为 null/空时原样返回
      */
     private static String maskRtspCredentials(String url) {
-        if (url == null || url.isEmpty()) {
-            return url;
-        }
-        return url.replaceFirst("(rtsp://[^@]+@)", "rtsp://***@");
+        return VendorRtspUrl.maskCredentials(url);
     }
 
     private static ResponseEntity<Map<String, Object>> badRequest(String message) {

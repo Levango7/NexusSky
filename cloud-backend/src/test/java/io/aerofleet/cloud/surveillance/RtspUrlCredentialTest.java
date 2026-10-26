@@ -113,6 +113,28 @@ class RtspUrlCredentialTest {
         assertThat(u.getFragment()).isNull();
     }
 
+    // ===== maskCredentials 脱敏 =====
+
+    @Test
+    @DisplayName("maskCredentials：带凭据的地址只留下 ***@，host/path/query 不变")
+    void maskCredentials_replacesUserinfo() {
+        String masked = VendorRtspUrl.maskCredentials(
+                "rtsp://admin:p%40ss@192.168.1.64:554/Streaming/Channels/101?x=1");
+
+        assertThat(masked).isEqualTo("rtsp://***@192.168.1.64:554/Streaming/Channels/101?x=1");
+        // 凭据的任何一部分都不能残留在脱敏结果里
+        assertThat(masked).doesNotContain("admin").doesNotContain("p%40ss");
+    }
+
+    @Test
+    @DisplayName("maskCredentials：null / 空串 / 无凭据地址原样返回（不 NPE、不误伤）")
+    void maskCredentials_edgeInputsUnchanged() {
+        assertThat(VendorRtspUrl.maskCredentials(null)).isNull();
+        assertThat(VendorRtspUrl.maskCredentials("")).isEmpty();
+        assertThat(VendorRtspUrl.maskCredentials("rtsp://192.168.1.64:554/live"))
+                .isEqualTo("rtsp://192.168.1.64:554/live");
+    }
+
     // ===== 私有协议适配器（海康 / 大华 / 宇视）=====
 
     @Test

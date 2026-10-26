@@ -410,6 +410,62 @@ logback root 上拦日志——"跳过必须告警/全好不许告警"这类可�
    `ApiKeyCacheTest` / `StreamTokenServiceTest`）；生产代码无法注入时钟的边界，
    如实定性"不可稳定测"并删掉竞态用例，**别让假边界用例混进变异账本**。
 
+## 2026-10-26/27 的第五轮（surveillance：ONVIF live 协议线入库，809→1103）
+
+ONVIF live 客户端（P2 #14）给 surveillance 包带来约 1500 行真实协议代码
+（SOAP 1.2 + WS-Security PasswordDigest + WS-Discovery + 安全 XML），
+变异体总数 809 → 1103（+294）。三轮 PIT 实测：
+
+| 轮 | 变异分 | 强度 | 杀掉 | 存活 | 未覆盖 | 超时 | 动作 |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.9087 | 0.9214 | 856 | 73 | 167 | 13 | 逐条拉出分诊 |
+| 2 | 0.9376 | 0.9487 | 887 | 48 | 157 | 11 | +43 个契约用例、5 处生产小重构 |
+| 3 | **0.9419** | **0.9529** | **891** | **44** | **157** | **11** | 收包上限/诊断文案/空 Address/scopes 全文厂商/null path 共 5 杀（净 +4） |
+
+生产小重构全部是「消灭无法按契约测试的存活」而不是写白盒断言：
+`Endpoints.device` 死字段删除、`OnvifLiveBackend.mask` 私有包装删除（直走
+`VendorRtspUrl.maskCredentials`）、`sendProbes` 计数改 `boolean anySent`、
+`OnvifClient`/`VendorAdapterRegistry` 日志行去条件化、endpoint 过滤去掉
+空串归一后的永真 `!isBlank` 子句。
+
+### 地板为什么从 0.95/0.96 调到 0.94/0.95（显式下调，一行都不能省）
+
+剩余 23 条**新代码**存活与 4 条新超时全部逐条定性为「不可按契约测试的等价/阻断类」，
+再抬分只剩两条路：写白盒断言佯装测试等价项，或为 PIT 给 socket/解析器加注入缝。
+两者都不取。清单（新代码部分；旧代码 21 条存活 + 7 条超时为第四轮已定性清单原样）：
+
+- **JAXP 纵深防御标记 ×7（OnvifXml.parse 50,53-59）**：`disallow-doctype-decl` 在前，
+  外部实体/参数实体/load-external-dtd/ACCESS_EXTERNAL_DTD/SCHEMA 任一单项被移除后，
+  攻击性 XML 仍以同一条「拒绝解析」路径失败——支配等价；`setXIncludeAware(false)` 与
+  JAXP 默认同况；`setExpandEntityReferences` 只影响实体节点在 DOM 里的呈现，
+  同样被 DOCTYPE 整级拒绝支配。（其中 disallow-doctype-decl 自身的移除变异体**已被杀掉**：
+  用内部子集 `<!ENTITY boom "x">` 写断言，不靠「读不到 /etc/passwd 碰巧报错」——
+  Windows 上那个碰运气路径在第一轮骗过了一个变异体。）
+- **localName 的 negate（72）与 setNamespaceAware 移除（50）**：`getLocalName()`
+  与前缀剥离（`r:child`→`child`）是同一条「按 local name 匹配」设计目标的两条同果实现，
+  互相为对方等价体；唯一能区分两者的输入（无命名空间且 nodeName 含冒号）解析期即非法。
+- **children/descendants 的 EmptyObjectReturn（84,130）**：只替换 null 哨兵分支的
+  `return out` 为空 Collections.emptyList —— 均空、equals 同、调用点不可分。
+- **discovery 族**：
+  - `setTimeToLive(1)` 移除（94）：多播 TTL 的 JDK 默认即 1，且无平台无关的行为键可读回；
+  - `nanoTime < deadline` 边界（104）：1ns 的迭代机会差异，`receive` 另有独立超时兜底；
+  - `parseCidrOrNull` 的 negate（304）：只改 WARN 日志有无，返回值两条路径完全一致；
+  - `parseTarget` 尾冒号族（166×2 + math）：`"1.2.3.4:"` 这类目标在原路径以「主机解析失败」、
+    变异路径以 `NumberFormatException` 落入同一个 `catch` 跳过——观测等价；
+  - `port <= 0` 边界（169）：端口 0 原路径 IAE 跳过、变异路径发送期被拒/无应答，结果一致
+    （65535 上限本身由 `discover_portUpperBound65535_accepted` 杀回，占端口时假设跳过）；
+  - `scopeValue` 的 ""↔null（261,265）：所有调用点立刻 `== null || isBlank` 判定，两值同路。
+- **SimulatedOnvifBackend.extractPrefix 边界（107）**：仅「`.` 打头」的退化 subnet 可区分，
+  与海康/大华/宇视三个同名历史等价项同型。
+- **超时 ×4**：`OnvifClient` 构造器 `isLive()` negate（变异让默认构造产出 LIVE 后端，
+  既有模拟用例对真实网段做串行连接等待，minion 超时先于断言行程）；
+  `discover` 的 remainingMs 算术 ×2 与 `setSoTimeout` 删除（UDP 接收是天然阻断操作，
+  没有观察点能在不挂死自己前提下区分超时算子——与 MjpegStreamService/OfflineAlarmCache
+  既有 7 条超时同因）。
+
+棘轮性质不变：0.94/0.95 是实测 0.9419/0.9529 按既有 2 位向下取整口径所得，
+任何 >0.1pp 的回退仍会红。
+
 ## 基线
 
 - `scripts/mutation-baseline.json` —— security 包（由门禁读）。
