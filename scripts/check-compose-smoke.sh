@@ -5,7 +5,7 @@
 # 挂载 jar），断言三件事：
 #   1. 后端 HTTP 栈应答（/actuator/health 200，或安全面 401/403——只要不是 000）；
 #   2. drone-sim 打出 "listening on UDP"（进程真起来了，不是 compose Started 回显）；
-#   3. 三个容器在超时窗内保持 Running（崩溃重启不算过）。
+#   3. 五个容器在超时窗内保持 Running（崩溃重启不算过）。
 #
 # 前置：先 mvn -pl drone-sim,cloud-backend -am package -DskipTests（jar 挂载进容器）。
 # 退出码：0=全过；1=有断言失败（失败时自动 dump 各容器日志尾部）。
@@ -29,7 +29,7 @@ trap cleanup EXIT
 note "compose config 校验"
 docker compose -f docker-compose.yml config -q || { fail "compose config 解析失败"; exit 1; }
 
-note "compose up（host 网络；postgres + drone-sim + cloud-backend + gcs-web）"
+note "compose up（host 网络；postgres + redis + drone-sim + cloud-backend + gcs-web）"
 docker compose up -d || { fail "compose up 失败"; exit 1; }
 
 # ---- 1. 后端 HTTP 栈 ----
@@ -64,7 +64,7 @@ done
 
 # ---- 3. 容器存活（含崩溃重启检测） ----
 note "断言容器存活（RestartCount=0 且 Running）"
-for svc in postgres drone-sim cloud-backend gcs-web; do
+for svc in postgres redis drone-sim cloud-backend gcs-web; do
   state=$(docker inspect --format '{{.State.Running}} {{.RestartCount}}' \
       "$(docker compose ps -q "$svc" 2>/dev/null)" 2>/dev/null || echo "missing")
   if [ "$state" = "true 0" ]; then

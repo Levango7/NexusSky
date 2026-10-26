@@ -17,6 +17,14 @@ services:
       - POSTGRES_PASSWORD=aerofleet_dev_password
     restart: unless-stopped
 
+  # ===== Redis：后端缓存 + /actuator/health 的硬依赖 =====
+  # 缺它时后端能起来，但 health 一直 503（RedisHealthIndicator DOWN）——
+  # 2026-10-26 CI 首跑实测：420s 内 /actuator/health 恒 503，根因就是本编排没起 redis。
+  redis:
+    image: redis:7-alpine
+    network_mode: host          # 后端默认打 localhost:6379
+    restart: unless-stopped
+
   drone-sim:
     image: eclipse-temurin:17-jre
     # jar 挂在 /app，而官方镜像 WORKDIR=/：不设 working_dir 时相对 jar 名会解析成
@@ -48,6 +56,7 @@ services:
       - SPRING_DATASOURCE_PASSWORD=aerofleet_dev_password
     depends_on:
       - postgres
+      - redis
       - drone-sim
 
   gcs-web:

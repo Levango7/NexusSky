@@ -48,9 +48,10 @@ prod profile 打 `localhost:5432`（编排里没有库）+ `jwt-secret` 空串�
 
 ### 交付
 
-- `docker-compose.yml`：补 `postgres:15-alpine` 服务（host 网络直通 5432，Flyway
-  V1..V29 在此跑）；后端补环境变量（`AEROFLEET_SECURITY_JWT_SECRET` 显式开发值 +
-  `SPRING_DATASOURCE_PASSWORD` 与 postgres 服务对齐，注释写明生产必须覆盖）。
+- `docker-compose.yml`：补 `postgres:15-alpine`（host 网络直通 5432，Flyway V1..V29）
+  与 `redis:7-alpine`（6379，`/actuator/health` 的硬依赖——缺它 health 恒 503，首跑实测）
+  两个服务；后端补齐 5 个 prod 必填环境变量（jwt×2 / users / encryption.key / datasource
+  password），注释写明生产必须覆盖。
 - `scripts/check-compose-smoke.sh`：up → 三断言（后端 /actuator/health 200；
   drone-sim 打出 "listening on UDP"——判定面是容器日志不是 compose 回显，编排注释
   既有口径；四容器 Running 且 RestartCount=0——崩溃重启不算过）→ down，失败自动
