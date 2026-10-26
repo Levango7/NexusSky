@@ -82,10 +82,9 @@ public final class LinkSimMain {
         }
 
         if (profile.isSecurityProfile() && controlPort > 0) {
-            log.error("[link-sim] --control-port is not supported for security profile '{}'"
-                    + " (security damage has no numeric delay/drop/bandwidth parameters)", profile.name);
-            System.exit(1);
-            return;
+            // P2 #20 起安全画像也接控制通道，但可调参数只有 tamperRate
+            // （签名剥离是动作全部命中，没有概率可调）——见 SecurityControl。
+            log.info("[link-sim] security profile '{}': control exposes tamperRate only", profile.name);
         }
 
         log.info("[link-sim] AeroFleet link simulator");
@@ -114,7 +113,8 @@ public final class LinkSimMain {
         log.info("[link-sim]   --drone-ip  drone side address (default 127.0.0.1)");
         log.info("[link-sim]   --drone-port drone side port (default 14540)");
         log.info("[link-sim]   --env-coupled  enable rain attenuation overlay (M0b)");
-        log.info("[link-sim]   --tamper-rate  tamper probability for security profiles (default 1.0)");
+        log.info("[link-sim]   --tamper-rate  tamper probability for security profiles (default 1.0;"
+                + " runtime-tunable via control PATCH tamperRate)");
         log.info("[link-sim]   --control-port runtime damage control port, loopback only (default 0 = off)");
         // 追加 relay 模式参数说明（FR-01, DFX 4.4 配置可追溯）
         RelayConfig.usage();
@@ -315,6 +315,20 @@ public final class LinkSimMain {
         SecurityImpairmentEngine secUplink = new SecurityImpairmentEngine(profile, tamperRate);
         SecurityImpairmentEngine secDownlink = new SecurityImpairmentEngine(profile, tamperRate);
 
+        // P2 #20：安全画像的控制通道。与十元组路径同形（GET/PATCH /profile），
+        // 只是可调参数只有 tamperRate——见 SecurityControl 的说明。
+        if (controlPort > 0) {
+            try {
+                LinkSimControlServer control = new LinkSimControlServer(controlPort,
+                        new SecurityControl(secUplink));
+                control.start();
+                log.info("[link-sim] control listening on http://127.0.0.1:{}/profile", control.port());
+            } catch (IOException e) {
+                log.error("[link-sim] control port {} bind failed: {}", controlPort, e.getMessage());
+                System.exit(1);
+                return;
+            }
+        }
         try (DatagramSocket socket = new DatagramSocket(new InetSocketAddress(proxyPort))) {
             Thread pump = new Thread(() -> wirePump(socket), "link-wire");
             pump.setDaemon(true);

@@ -30,8 +30,20 @@ final class SecurityImpairmentEngine {
         STRIP_SIGNATURE
     }
 
+    /** 篡改概率下限（0=永不篡改）。 */
+    static final double TAMPER_RATE_MIN = 0.0;
+
+    /** 篡改概率上限（1=必篡改，对端必然验签失败）。 */
+    static final double TAMPER_RATE_MAX = 1.0;
+
     private final LinkProfile profile;
-    private final double tamperRate;
+
+    /**
+     * 篡改概率。<b>非 final</b>：P2 #20 起安全画像也接控制通道，
+     * 运行期可改（见 {@link #applyTamperRate}）。volatile 保证控制线程写、
+     * 转发线程读之间的可见性。
+     */
+    private volatile double tamperRate;
     private final Random random = new Random();
 
     private long forwarded = 0;
@@ -58,6 +70,48 @@ final class SecurityImpairmentEngine {
      * @param frameBytes MAVLink v2 帧字节
      * @return 安全动作裁决
      */
+    /**
+     * 原子替换篡改概率（P2 #20 控制通道）。
+     *
+     * <p>校验在控制层（{@link SecurityControl}）——引擎只做 clamp 不抛业务异常，
+     * 否则规则会散落两处必然漂移。
+     *
+     * @return clamp 后实际生效的概率
+     */
+    synchronized double applyTamperRate(double rate) {
+        if (Double.isNaN(rate)) {
+            rate = TAMPER_RATE_MIN;
+        }
+        this.tamperRate = Math.max(TAMPER_RATE_MIN, Math.min(TAMPER_RATE_MAX, rate));
+        return this.tamperRate;
+    }
+
+    /** 当前篡改概率。 */
+    synchronized double tamperRate() {
+        return tamperRate;
+    }
+
+    /** 当前画像。 */
+    LinkProfile profile() {
+        return profile;
+    }
+
+    /**
+     * 控制面视角的快照：画像 + 可调参数 + 三类动作的累计计数。
+     * <p>
+     * <b>刻意不与 ImpairmentEngine.Stats 同构</b>：那边的键名为丢包模型服务，
+     * 把"篡改后照发的帧"填进 dropped 会骗人（帧其实到了对端），见
+     * {@link SecurityControl} 的注释。这里三类计数分开给，由控制层如实呈现。
+     */
+    synchronized SecurityControl.Snapshot snapshot() {
+        long fwd = forwarded;
+        long tamp = tampered;
+        long strip = stripped;
+        long total = fwd + tamp + strip;
+        return new SecurityControl.Snapshot(profile.name, tamperRate, fwd, tamp, strip,
+                total == 0 ? 0 : (double) (tamp + strip) / total);
+    }
+
     synchronized SecurityAction verdict(byte[] frameBytes) {
         if (profile == LinkProfile.SIGNING_TAMPER) {
             if (random.nextDouble() < tamperRate) {

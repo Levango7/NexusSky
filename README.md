@@ -24,7 +24,7 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30063，共 51 条），**503 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30064，共 52 条），**511 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（414 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 45 个功能面板（顶栏按 8 个业务域分组导航） | 不需要换 |
@@ -739,14 +739,13 @@ NexusSky/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 503 |
-| `drone-sim` | 1449 |
-| `link-sim` | 133 |
-| `cloud-backend` | 3081 |
+| `mavlink-core` | 511 |
+| `drone-sim` | 1452 |
+| `link-sim` | 139 |
+| `cloud-backend` | 3097 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5226
-
+| **总计** | **5259
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
@@ -876,7 +875,7 @@ NexusSky/
   （曾起飞 + 相对高度回地），非任务状态机回调。
 - 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
 - 微服务/K8s 暂不引入：模块化单体已够当前规模，拆分时机见设计文档讨论
-- MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（30000–30063）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
+- MAVLink 核心消息 + 相机协议族（259/260/262/263/271）+ 扩展消息（30000–30064）；接真机时按需在 `MavlinkMessageInfo` + `messages/` 扩展
 - **链路签名（MAVLink v2 signing）自 2026-10-01 起与官方逐字节对等**：签名块 13 字节
   （LINK_ID 1 + TIMESTAMP 6 **小端** + SIGNATURE 6 = `sha256_48`，即
   `SHA-256(secret + 帧头至CRC + linkId + timestamp)` 前 6 字节），重放规则改为"同流严格递增
@@ -903,7 +902,7 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 570 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 577 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）+
   2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例 +
@@ -917,14 +916,13 @@ NexusSky/
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
   而加测试不会让任何东西变红。
-  选的是**已确认缺陷**加相关契约，不是全量覆盖——59 个 `.jsx` 组件里 **40 个零测试**
+  选的是**已确认缺陷**加相关契约，不是全量覆盖——59 个 `.jsx` 组件里 **38 个零测试**
   （口径由 `check-test-count-docs.py` 的 `measure_components` 机器核对：组件＝`src/**/*.jsx`
   全部文件，含入口；有直测＝被任一测试文件按路径 `import` 过，只认 import 不认文件名撞巧）。
   注意**"最大的三个都没有测试"这句话是假的**，2026-10-24 实测：
   `UnifiedCommandPanel.jsx`（1686 行）由 `test/unifiedCommandWiring.test.jsx` 真实挂载、
   `api.js`（1502 行）有 `src/api.test.js` + `test/apiCancelSignal.test.js`；
-  真正"最大且无直测"的是 `MapView.jsx`（1112 行）。
-  新增的 `FleetOpsPanel.jsx` 亦无组件级测试（其逻辑已全部下沉到
+  真正"最大且无直测"的是 `MapView.jsx`（1112 行）。  新增的 `FleetOpsPanel.jsx` 亦无组件级测试（其逻辑已全部下沉到
   `utils/schedulingFrames.js` 纯函数并直测——与第二批"先把与 React 无关的逻辑抽出来
   再测"的做法一致）。
   覆盖率阈值仍未设（`vitest.config.js:20-27` 显式注明理由：基线原为零，一上来卡阈值

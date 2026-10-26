@@ -93,6 +93,7 @@ public final class MavlinkMessageInfo {
         EXTENDED_INFOS.put(30010, new Info(20, 65));   // OBSTACLE_REPORT
         EXTENDED_INFOS.put(30011, new Info(24, 100));   // MULTISPECTRAL_DATA
         EXTENDED_INFOS.put(30012, new Info(24, 255));   // THERMAL_DATA
+        EXTENDED_INFOS.put(30064, new Info(26, 111));   // THERMAL_HOTSPOT（CRC 由 mavlink-crc-extra-gen 重算）
         EXTENDED_INFOS.put(30013, new Info(20, 171));   // DEPTH_DATA
         EXTENDED_INFOS.put(30014, new Info(20, 100));   // VISION_DETECTION
         // ---- NexusSky 自定义扩展消息（M4 硬件抽象，msgId 30017-30021）----

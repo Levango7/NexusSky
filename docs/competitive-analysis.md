@@ -171,9 +171,8 @@
 
 | 指标 | NexusSky | 大疆 Cloud API | PX4 SDK | MAVProxy | AirSim |
 |---|---|---|---|---|---|
-| **扩展消息数量** | 51 条 (msgId 30000-30063，区间含空号) | N/A | N/A | N/A | N/A |
-| **测试基线** | 5226 tests | N/A | N/A | N/A | N/A |
-
+| **扩展消息数量** | 52 条 (msgId 30000-30064，区间含空号) | N/A | N/A | N/A | N/A |
+| **测试基线** | 5259 tests | N/A | N/A | N/A | N/A |
 ---
 
 ## 四、竞争策略

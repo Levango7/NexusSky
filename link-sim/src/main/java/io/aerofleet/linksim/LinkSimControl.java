@@ -65,8 +65,14 @@ final class LinkSimControl {
         this.envCoupled = envCoupled;
     }
 
-    /** 控制请求不合法（映射为 HTTP 400），与内部错误分开。 */
-    static final class BadRequestException extends RuntimeException {
+    /**
+     * 控制请求不合法（映射为 HTTP 400），与内部错误分开。
+     * <p><b>不加 final</b>：安全画像的控制层（{@link SecurityControl}）复用这一
+     * 类型，让控制服务器只需一处 catch 就能把"请求错"映射成 400。若给校验异常
+     * 各起一个类型，漏接的那个会逃成 500——把请求错误报成服务器错误，排障路径
+     * 直接指错方向（实测踩过：安全画像 PATCH 空 body 返回 500 而非 400）。
+     */
+    static class BadRequestException extends RuntimeException {
         BadRequestException(String message) {
             super(message);
         }
