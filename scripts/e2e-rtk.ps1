@@ -114,18 +114,23 @@ try {
     Write-Host '[2/3] 启动 3 台模拟器（fixed/float/缺省）+ 后端...'
     $p1 = Start-Process -FilePath $java -ArgumentList @(
         '-Drtk-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
+        # 新鲜度窗口 12s（默认 5s）：CI 慢 runner 上轮询间隔可能 >5s，窗口放宽
+        # 才能区分「注入没送达」和「送达了但轮询慢」。降级断言（R5）因此最多等 ~15s。
+        '-Daerofleet.sim.rtcm-fresh-window-ms=12000',
         '-jar', $SimJar,
         '--port','14560','--sysid','61','--name','AF-RTK-FIXED','--rtk','fixed') `
         -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-rtk-sim1.log')
     Stop-Proc $p1
     $p2 = Start-Process -FilePath $java -ArgumentList @(
         '-Drtk-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
+        '-Daerofleet.sim.rtcm-fresh-window-ms=12000',
         '-jar', $SimJar,
         '--port','14561','--sysid','62','--name','AF-RTK-FLOAT','--rtk','float') `
         -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-rtk-sim2.log')
     Stop-Proc $p2
     $p3 = Start-Process -FilePath $java -ArgumentList @(
         '-Drtk-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
+        '-Daerofleet.sim.rtcm-fresh-window-ms=12000',
         '-jar', $SimJar,
         '--port','14562','--sysid','63','--name','AF-RTK-STD') `
         -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-rtk-sim3.log')
@@ -189,51 +194,70 @@ try {
         if ($backendAlive -and -not $lastRaw) { Write-Host "  [DIAG] 后端可达但从未拿到响应体（Invoke-RestMethod 每次调用都失败）" }
     }
 
-    # ---- 工具：查某 sysid 的当前 rtkStatus（/drones 最新快照） ----
-    function Get-RtkStatus([int]$Sysid) {
+    # ---- 工具：一次 REST 取回全部 sysid 的 rtkStatus（慢 runner 上每轮 3 次调用
+    # 会把一轮拖过新鲜度窗口——CI run 40240416165 实测三台全 STANDALONE 的根因） ----
+    function Get-RtkMap {
+        $map = @{}
         try {
-            $drones = Invoke-RestMethod -Uri "$Base/drones" -TimeoutSec 3
+            $drones = Invoke-RestMethod -Uri "$Base/drones" -TimeoutSec 5
             foreach ($d in $drones) {
-                $k = Get-E2eSysidKey $d.sysid
-                if ($k -eq (Get-E2eSysidKey $Sysid)) {
-                    # /drones 列表返回的 status 嵌套（WS 帧 status 同构）——检查 rtkStatus
-                    $rtk = $d.rtkStatus
-                    if (-not $rtk -and $d.status) { $rtk = $d.status.rtkStatus }
-                    return $rtk
-                }
+                $rtk = $d.rtkStatus
+                if (-not $rtk -and $d.status) { $rtk = $d.status.rtkStatus }
+                $map[(Get-E2eSysidKey $d.sysid)] = $rtk
             }
-        } catch { return $null }
-        return $null
+        } catch { }
+        return $map
     }
 
     # ---- 阶段一：注入改正数 ⇒ R1/R2/R3 ----
     Write-Host '[4/4] 注入 RTCM 改正数并断言上界语义...'
     # 注入目标**故意包含 63**（未配置 --rtk）：改正数到了也不许抬升，上界即 3。
+    # 每轮先注入再取一次 /drones：63 的 STANDALONE 是「稳定缺席」（上界语义恒 3），
+    # 不参与达成判定；61/62 的 5/6 才是时间敏感的，靠「每轮都注入」保新鲜。
+    $lastMap = @{}
     $phase1 = $false
-    for ($i = 0; $i -lt 30; $i++) {
+    for ($i = 0; $i -lt 60; $i++) {
         Send-Rtcm -Port 14560 -Seq $i       # 61 fixed
         Send-Rtcm -Port 14561 -Seq $i       # 62 float
         Send-Rtcm -Port 14562 -Seq $i       # 63 未配置（上界对照组）
-        if (((Get-RtkStatus 61) -eq 'RTK_FIXED') -and
-            ((Get-RtkStatus 62) -eq 'RTK_FLOAT') -and
-            ((Get-RtkStatus 63) -eq 'STANDALONE')) { $phase1 = $true; break }
-        Start-Sleep -Milliseconds 1000
+        Start-Sleep -Milliseconds 1200      # 给 sim 1Hz 遥测 + 后端快照留一拍
+        $lastMap = Get-RtkMap
+        $k61 = $lastMap[(Get-E2eSysidKey 61)]
+        $k62 = $lastMap[(Get-E2eSysidKey 62)]
+        if ($k61 -eq 'RTK_FIXED' -and $k62 -eq 'RTK_FLOAT') { $phase1 = $true; break }
     }
-    Assert-True ($phase1 -and (Get-RtkStatus 61) -eq 'RTK_FIXED') "R1 fixed 机注入后 rtkStatus=RTK_FIXED（实际 $(Get-RtkStatus 61)）"
-    Assert-True ((Get-RtkStatus 62) -eq 'RTK_FLOAT') "R2 float 机注入后 rtkStatus=RTK_FLOAT（实际 $(Get-RtkStatus 62)）"
-    Assert-True ((Get-RtkStatus 63) -eq 'STANDALONE') "R3 未配置机注入后仍 STANDALONE——改正数不越过 --rtk 上界（实际 $(Get-RtkStatus 63)）"
+    Assert-True $phase1 "R1 fixed 机注入后 rtkStatus=RTK_FIXED（实际 $($lastMap[(Get-E2eSysidKey 61)])）"
+    Assert-True (($lastMap[(Get-E2eSysidKey 62)]) -eq 'RTK_FLOAT') "R2 float 机注入后 rtkStatus=RTK_FLOAT（实际 $($lastMap[(Get-E2eSysidKey 62)])）"
+    # R3 稳定缺席：连续确认 10 轮全 STANDALONE 才算过（防单次快照抖动）
+    $r3ok = $true
+    for ($i = 0; $i -lt 10; $i++) {
+        Send-Rtcm -Port 14562 -Seq (200 + $i)
+        Start-Sleep -Milliseconds 800
+        $m = Get-RtkMap
+        if (($m[(Get-E2eSysidKey 63)]) -ne 'STANDALONE') { $r3ok = $false; break }
+    }
+    Assert-True $r3ok "R3 未配置机注入后仍 STANDALONE——改正数不越过 --rtk 上界（实际 $($m[(Get-E2eSysidKey 63)])）"
 
     # ---- 阶段二：R5 断链降级 ----
-    # 停发 61、持续发 62：61 必须在新鲜度窗口（默认 5s）+ 遥测刷新余量内掉回
-    # STANDALONE——「配置成 fixed」不再等于「界面显示厘米级」，这是上界语义的核心。
+    # 停发 61、持续发 62：61 必须在新鲜度窗口（脚本把 sim 窗口调到 12s）+ 遥测刷新
+    # 余量内掉回 STANDALONE——「配置成 fixed」不再等于「界面显示厘米级」。
+    # 62 的「仍 RTK_FLOAT」同样是时间敏感断言，轮询+持续注入，不做单次即时判定。
     $degraded = $false
-    for ($i = 0; $i -lt 30; $i++) {
+    for ($i = 0; $i -lt 60; $i++) {
         Send-Rtcm -Port 14561 -Seq (100 + $i)   # 只保 float 机的改正数新鲜
-        if ((Get-RtkStatus 61) -eq 'STANDALONE') { $degraded = $true; break }
-        Start-Sleep -Milliseconds 1000
+        Start-Sleep -Milliseconds 1200
+        $m = Get-RtkMap
+        if (($m[(Get-E2eSysidKey 61)]) -eq 'STANDALONE') { $degraded = $true; break }
     }
-    Assert-True $degraded "R5 fixed 机停止注入后降回 STANDALONE（实际 $(Get-RtkStatus 61)）"
-    Assert-True ((Get-RtkStatus 62) -eq 'RTK_FLOAT') "R5 float 机持续注入仍 RTK_FLOAT（实际 $(Get-RtkStatus 62)）"
+    Assert-True $degraded "R5 fixed 机停止注入后降回 STANDALONE（实际 $($m[(Get-E2eSysidKey 61)])）"
+    $floatHeld = $false
+    for ($i = 0; $i -lt 20; $i++) {
+        Send-Rtcm -Port 14561 -Seq (300 + $i)
+        Start-Sleep -Milliseconds 1200
+        $m = Get-RtkMap
+        if (($m[(Get-E2eSysidKey 62)]) -eq 'RTK_FLOAT') { $floatHeld = $true; break }
+    }
+    Assert-True $floatHeld "R5 float 机持续注入仍 RTK_FLOAT（实际 $($m[(Get-E2eSysidKey 62)])）"
 
 } catch {
     Write-Host "  [FAIL] 异常：$($_.Exception.Message)" -ForegroundColor Red

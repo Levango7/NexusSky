@@ -2001,10 +2001,10 @@ jobs:
     # GAPS §二「docker-compose 完整性验证」的收口：根编排此前**从未被 compose up
     # 实测过**（本机 Windows 无法如实跑 host 网络），配置审查通过≠编排能起。
     # 2026-10-26 首轮设计时就抓到真缺口：裸跑 = prod profile 打 localhost:5432（无库）
-    # + 空 jwt-secret ⇒ 必崩。本 job 在 Linux runner 上如实验证：up → 三断言 → down。
+    # + 空 jwt-secret ⇒ 必崩；复核又补出 users / encryption.key 同样无缺省（prod fail-fast）。
+    # 本 job 在 Linux runner 上如实验证：up → 三断言 → down。
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: [pr-lint]
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 

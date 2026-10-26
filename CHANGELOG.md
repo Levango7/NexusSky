@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 207 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 209 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,7 +30,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 207 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 209 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
@@ -58,6 +58,58 @@ prod profile 打 `localhost:5432`（编排里没有库）+ `jwt-secret` 空串�
 - `ci.yml` 新增 **compose-smoke job**（ubuntu-24.04，硬门禁语义：脚本退非零即红）：
   runner 上先 `mvn -pl drone-sim,cloud-backend -am package -DskipTests` 产出挂载 jar。
 - 首轮 smoke 的判定结果会如实写回 GAPS §二（跑得过=收口；跑不过=下一个真缺口）。
+
+## [Unreleased] — e2e-rtk 在慢 runner 上注入「看似没生效」的时序脆弱性修复（2026-10-26）
+
+### 形态（master run 40240416165，#169 的 run 绿纯属运气）
+
+e2e-rtk 三台机全 STANDALONE（R1/R2/R5-float 三断言挂）。根因不是注入没送达，而是
+**断言节奏吃不满新鲜度窗口**：阶段一每轮 3 次独立 REST（慢 runner 单次 1~3s），
+一轮可以拖过 5s 窗口 ⇒ 「第一台查完时已过期」；R5-float 还是单次即时断言，
+与 1Hz 遥测的快照滞后对撞。本机 loopback 快从不复现——与 link-sim 413 竞态同族的
+「本机绿 CI 挂」形态（见同日 link-sim 条目）。
+
+### 修法（只动脚本，不动语义）
+
+- 阶段一/二改 **Get-RtkMap**：每轮**一次** REST 取回全部 sysid（调用数 3→1）；
+- 每轮**先注入再轮询**（旧版只在轮首注入一次），61/62 的新鲜度由「每轮都注入」保证；
+- R3 改为连续 10 轮确认 STANDALONE（稳定缺席断言防单次快照抖动）；
+  R5-float 改为轮询式「持续注入下终将达到」，不再单次即时判定；
+- 3 台 sim 以 `-Daerofleet.sim.rtcm-fresh-window-ms=12000` 把窗口放宽到 12s
+  （默认 5s 由单测钉住；降级断言因此最多多等 ~7s）。
+- 本机 pwsh 5.1 实测（重建 jar）：ALL PASS 5/5。
+
+## [Unreleased] — NTRIP 服务层落地：定时拉流 → 切帧 → 分片 → 发 GPS_RTCM_DATA（GAPS §十.10-3，2026-10-26）
+
+### 交付
+
+- `cloud-backend/.../ntrip/NtripRtcmForwarder`（Spring `@Component`，
+  `aerofleet.ntrip.enabled=true` 才装配，**缺省关闭**）：`NtripClient`（#166 协议层）
+  拉流 → `Rtcm3Framer`（CRC-24Q 校验，坏帧直接丢）→ 按 GPS_RTCM_DATA 官方规则
+  分片（bit0=分片标志 / bit1-2=分片号 / bit3-7=序号；≤180 单片、>180 逐片、
+  **>720 丢弃计数——分片号只有 2 bit，绝不静默截断**）→ 经 `UdpGateway` 逐机下发**全部在线机**。
+- 未配置 `--rtk` 的机收到也不抬升 fix_type（#169 上界语义）⇒ 广播无害，云端不需要按机选发。
+- 断线退避重连（`reconnect-delay-ms`，默认 5s）；重连时 framer 重建（跨连接字节流
+  无边界连续性，旧半帧缓冲必须丢）；caster EOF / read 超时 / 连接拒绝同路处理。
+- 配置面：`application.properties` 新增 `aerofleet.ntrip.*` 七项（enabled 缺省 false，
+  host/mountpoint 必填才拉起）。
+- 观测：转发计数（frames/forwarded/dropped/no-target/reconnects）暴露为包内可见计数器，
+  供日志与后续状态端点共用——**本轮不开 REST 面**（端点数是门禁账，按需再开）。
+
+### 测试（9 例）
+
+- 分片纯函数 4 例：≤180 单片 / 181~360 两片 / 721 拒绝 / seq 5bit 回绕；
+- 目标选择 3 例（Mockito 钉「只发在线机」「无目标跳过」「超大丢弃」）；
+- 端到端 1 例：沿用 #166 假 caster 路数（真 TCP + 真 NTRIP 字节序列 + 真 framer），
+  30B+200B 两条帧 ⇒ 1+2 条 GPS_RTCM_DATA 送达在线机，载荷逐字节还原。
+  **注意转发单位是完整 RTCM 帧（含 6 字节头尾）**：接收方飞控要自己验 RTCM CRC，
+  去头/半条都会被它拒——首版测试把期望值算成裸 payload，被自己当场纠正。
+
+### 边界
+
+- 分片号 2 bit ⇒ >720 字节的 RTCM 帧丢弃（MSM7 类长报文），计数可见；
+- drone-sim 不重组分片（每片到达即算「改正数在流」）——重组是飞控职责；
+- 未做 REST 状态端点 / 未做按机选发（租户/机巢粒度），后续按需加。
 
 ## [Unreleased] — link-sim 控制面 413 早拒绝不消费请求体：CI 上三跑两挂的真竞态（2026-10-26）
 
