@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 206 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 207 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,44 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 206 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 207 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — NTRIP 服务层落地：定时拉流 → 切帧 → 分片 → 发 GPS_RTCM_DATA（GAPS §十.10-3，2026-10-26）
+
+### 交付
+
+- `cloud-backend/.../ntrip/NtripRtcmForwarder`（Spring `@Component`，
+  `aerofleet.ntrip.enabled=true` 才装配，**缺省关闭**）：`NtripClient`（#166 协议层）
+  拉流 → `Rtcm3Framer`（CRC-24Q 校验，坏帧直接丢）→ 按 GPS_RTCM_DATA 官方规则
+  分片（bit0=分片标志 / bit1-2=分片号 / bit3-7=序号；≤180 单片、>180 逐片、
+  **>720 丢弃计数——分片号只有 2 bit，绝不静默截断**）→ 经 `UdpGateway` 逐机下发**全部在线机**。
+- 未配置 `--rtk` 的机收到也不抬升 fix_type（#169 上界语义）⇒ 广播无害，云端不需要按机选发。
+- 断线退避重连（`reconnect-delay-ms`，默认 5s）；重连时 framer 重建（跨连接字节流
+  无边界连续性，旧半帧缓冲必须丢）；caster EOF / read 超时 / 连接拒绝同路处理。
+- 配置面：`application.properties` 新增 `aerofleet.ntrip.*` 七项（enabled 缺省 false，
+  host/mountpoint 必填才拉起）。
+- 观测：转发计数（frames/forwarded/dropped/no-target/reconnects）暴露为包内可见计数器，
+  供日志与后续状态端点共用——**本轮不开 REST 面**（端点数是门禁账，按需再开）。
+
+### 测试（9 例）
+
+- 分片纯函数 4 例：≤180 单片 / 181~360 两片 / 721 拒绝 / seq 5bit 回绕；
+- 目标选择 3 例（Mockito 钉「只发在线机」「无目标跳过」「超大丢弃」）；
+- 端到端 1 例：沿用 #166 假 caster 路数（真 TCP + 真 NTRIP 字节序列 + 真 framer），
+  30B+200B 两条帧 ⇒ 1+2 条 GPS_RTCM_DATA 送达在线机，载荷逐字节还原。
+  **注意转发单位是完整 RTCM 帧（含 6 字节头尾）**：接收方飞控要自己验 RTCM CRC，
+  去头/半条都会被它拒——首版测试把期望值算成裸 payload，被自己当场纠正。
+
+### 边界
+
+- 分片号 2 bit ⇒ >720 字节的 RTCM 帧丢弃（MSM7 类长报文），计数可见；
+- drone-sim 不重组分片（每片到达即算「改正数在流」）——重组是飞控职责；
+- 未做 REST 状态端点 / 未做按机选发（租户/机巢粒度），后续按需加。
 
 ## [Unreleased] — link-sim 控制面 413 早拒绝不消费请求体：CI 上三跑两挂的真竞态（2026-10-26）
 
