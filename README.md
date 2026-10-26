@@ -724,7 +724,7 @@ NexusSky/
 ├── sdk-python/          Python 客户端 SDK
 ├── scripts/             start-all.cmd / e2e-smoke.sh / 89 个脚本（其中 44 个 e2e-*）
 ├── docker-compose.yml   Linux 下一键编排
-├── docs/                40 篇文档
+├── docs/                41 篇文档
 └── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）
 ```
 
@@ -742,10 +742,10 @@ NexusSky/
 | `mavlink-core` | 511 |
 | `drone-sim` | 1452 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3102 |
+| `cloud-backend` | 3112 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5264
+| **总计** | **5274
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
@@ -902,16 +902,17 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 577 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 580 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）+
   2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例 +
   2026-10-25 首批 5 个面板的**组件级**直测 104 例（`BudgetBadge` 17 / `AlertFeed` 19 /
   `DroneList` 19 / `DashboardPanel` 29 / `RouteTemplatePanel` 20）+
   2026-10-25 「0 被当成缺失」收口 22 例（`flightStats` 纯函数 13 / 形状守卫 6，
-  另 +3 来自 `singleSourceOfTruth` 名单加两个名字与一条断言拆两条）；
+  另 +3 来自 `singleSourceOfTruth` 名单加两个名字与一条断言拆两条）+
+  2026-10-26 空地协同面板「三列恒为暂无」的键名契约与响应形状 3 例；
   `npm run test:ci` 实测
-  540/540，39 个测试文件，分布在 `gcs-web/test/`（37）与 `gcs-web/src/`（2）两处）：
+  580/580，42 个测试文件，分布在 `gcs-web/test/`（40）与 `gcs-web/src/`（2）两处）：
   `npm run test` 已在 CI 的 GCS Web job 门禁。
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168

@@ -5,6 +5,8 @@ import io.aerofleet.cloud.alarm.AlarmEventStore;
 import io.aerofleet.cloud.alarm.AlarmLinkageEngine;
 
 import io.aerofleet.cloud.api.service.EmergencyOrchService;
+import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.surveillance.DeviceCapability;
 import io.aerofleet.cloud.surveillance.OnvifClient;
 import io.aerofleet.cloud.surveillance.RapidDeployService;
@@ -68,6 +70,13 @@ public class AirGroundCoordinationService {
     private final EmergencyOrchService orchService;
     /** 安防设备注册表（可选依赖）。 */
     private final SurveillanceDeviceRegistry deviceRegistry;
+    /**
+     * 机队/遥测注册表（可选依赖）——空中单位的唯一真实来源。
+     * <p>
+     * 与 {@code deviceRegistry}（安防设备）是两个不同的注册表，名字刻意区分开：
+     * 原先空中单位靠 {@code orchService} 的编排计划拼不出来，就直接返回了空列表。
+     */
+    private final DeviceRegistry fleetRegistry;
     /** ONVIF 客户端（可选依赖，用于 PTZ 控制）。 */
     private final OnvifClient onvifClient;
     /** 报警联动引擎（可选依赖，用于规则匹配）。 */
@@ -104,7 +113,8 @@ public class AirGroundCoordinationService {
                                         @Autowired(required = false) AlarmEventStore alarmEventStore,
                                         @Autowired(required = false) EmergencyCommandWorkflow workflow,
                                         @Autowired(required = false) RapidDeployService rapidDeployService,
-                                        @Autowired(required = false) AirGroundCoordinationPusher pusher) {
+                                        @Autowired(required = false) AirGroundCoordinationPusher pusher,
+                                        @Autowired(required = false) DeviceRegistry fleetRegistry) {
         this.orchService = orchService;
         this.deviceRegistry = deviceRegistry;
         this.onvifClient = onvifClient;
@@ -113,6 +123,24 @@ public class AirGroundCoordinationService {
         this.workflow = workflow;
         this.rapidDeployService = rapidDeployService;
         this.pusher = pusher;
+        this.fleetRegistry = fleetRegistry;
+    }
+
+    /**
+     * 不接机队注册表的旧构造口径（空中单位退化为空列表）。
+     * <p>
+     * 保留它只为让既有测试不必逐个改签名；生产装配走上面那个九参构造器。
+     */
+    public AirGroundCoordinationService(EmergencyOrchService orchService,
+                                        SurveillanceDeviceRegistry deviceRegistry,
+                                        OnvifClient onvifClient,
+                                        AlarmLinkageEngine linkageEngine,
+                                        AlarmEventStore alarmEventStore,
+                                        EmergencyCommandWorkflow workflow,
+                                        RapidDeployService rapidDeployService,
+                                        AirGroundCoordinationPusher pusher) {
+        this(orchService, deviceRegistry, onvifClient, linkageEngine, alarmEventStore,
+                workflow, rapidDeployService, pusher, null);
     }
 
     // =====================================================================
@@ -534,6 +562,19 @@ public class AirGroundCoordinationService {
         return coordinationRecords.get(coordinationId);
     }
 
+    /**
+     * 列出全部空地协同指挥记录，**最新的在前**。
+     * <p>
+     * 给 {@code /situation} 的"协同任务"格用：那些记录本来就在本服务的
+     * {@code coordinationRecords} 里，只是从前没有读口，前端那格于是永远显示"暂无协同任务"。
+     * 面板只取前 5 条，这里不额外截断——截断口径留给展示层。
+     */
+    public List<CoordinationRecord> listCoordinationRecords() {
+        List<CoordinationRecord> all = new ArrayList<>(coordinationRecords.values());
+        all.sort((a, b) -> Long.compare(b.getStartTimeMs(), a.getStartTimeMs()));
+        return all;
+    }
+
     // =====================================================================
     // 六阶段流程内部辅助
     // =====================================================================
@@ -702,8 +743,11 @@ public class AirGroundCoordinationService {
         int droneCount = record.getDeploymentInfo() != null
                 ? record.getDeploymentInfo().getDroneIds().size() : 0;
         int deviceCount = situation.onlineDeviceCount();
+        // 未上报电量的机（夹取后是 0）不能进平均，否则"一架上电未就绪的机"
+        // 会把整个编队的平均电量拉低，看起来像"电量告警"。
         int avgBattery = (int) situation.getDroneStatuses().stream()
                 .filter(AirGroundSituation.DroneStatus::isOnline)
+                .filter(AirGroundSituation.DroneStatus::isBatteryKnown)
                 .mapToInt(d -> d.batteryPct)
                 .average().orElse(0);
         int meshNodes = situation.getMeshTopology().nodeCount;
@@ -906,17 +950,46 @@ public class AirGroundCoordinationService {
     }
 
     /**
-     * 从编排服务中收集无人机状态信息。
+     * 收集空中单位状态。
      * <p>
-     * 简化实现：当前 EmergencyOrchService 不直接提供无人机状态列表，
-     * 此处返回空列表。真实实现应从遥测服务或编排计划中提取无人机实时状态。
+     * 这里曾经是 {@code return List.of();}（注释自陈"简化实现"），于是
+     * {@code GET /api/v1/air-ground/situation} 的空中单位**永远为空**，
+     * 连带 {@link #buildMeshTopology} 的节点数、覆盖率与 {@code avgBatteryPct} 全部恒零，
+     * 而前端面板照常渲染"空地协同态势"——看起来是好的。
+     * <p>
+     * 现在从机队注册表取真值。注册表缺席（可选依赖未装配）时才返回空，并且留一条 WARN，
+     * 让"空"至少能区分成"真没有机"与"没接上"。
      *
      * @return 无人机状态列表
      */
     private List<AirGroundSituation.DroneStatus> collectDroneStatuses() {
-        // 简化实现：EmergencyOrchService 的 plans map 不直接暴露无人机状态
-        // 生产环境应从 TelemetryIngestService 或专用无人机状态服务获取
-        return List.of();
+        if (fleetRegistry == null) {
+            log.warn("空地协同：机队注册表（gateway.DeviceRegistry）未装配，空中单位按空处理");
+            return List.of();
+        }
+        List<AirGroundSituation.DroneStatus> out = new ArrayList<>();
+        for (DroneSnapshot s : fleetRegistry.all()) {
+            // missionPhase 取 HEARTBEAT 派生的飞行模式标签（UNKNOWN 是真实初值，不假装成任务中）；
+            // 真正的任务阶段在 mission 帧里，本视图尚未接那一层——别把它读成"任务进度"。
+            out.add(new AirGroundSituation.DroneStatus(
+                    s.sysid, s.online,
+                    finiteOrZero(s.lat), finiteOrZero(s.lon),
+                    altitudeOf(s), s.battery, s.mode));
+        }
+        return out;
+    }
+
+    /** 未上报位置在 DTO 里的既有约定是 0；NaN 透传出去会变成 JSON 里的非法字面量。 */
+    private static double finiteOrZero(double v) {
+        return Double.isFinite(v) ? v : 0.0;
+    }
+
+    /** 高度优先相对高度（任务语义），未上报退到海拔，都没有记 0。 */
+    private static double altitudeOf(DroneSnapshot s) {
+        if (Double.isFinite(s.relativeAlt)) {
+            return s.relativeAlt;
+        }
+        return Double.isFinite(s.amslAlt) ? s.amslAlt : 0.0;
     }
 
     /**

@@ -145,6 +145,10 @@ public class RestrictionController {
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("items", items);
         resp.put("total", items.size());
+        // 这份列表是环形缓冲：只返回当前还在的条数，不说明丢过多少。
+        // 不带这两个字段，调用方无法区分"就这些"与"更早的已被挤掉"。
+        resp.put("maxLogs", logStore.maxLogs());
+        resp.put("evictedCount", logStore.evictedCount());
         return ResponseEntity.ok(resp);
     }
 
