@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.tracking;
 
+import io.aerofleet.cloud.flightlog.FlightLogService;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
@@ -61,6 +62,13 @@ public class FlightTrackStore {
     @Autowired(required = false)
     private DeviceRegistry deviceRegistry;
 
+    /**
+     * 飞行日志服务：启动时从中重建内存轨迹历史（C4，ROADMAP:337）。
+     * 包内可见以便单元测试直接注入（与 {@code setMaxPoints} 同款取舍）。
+     */
+    @Autowired(required = false)
+    FlightLogService flightLogService;
+
     /** per-drone addPoint 计数器，用于节流每架无人机的持久化写入频率。 */
     private final Map<Integer, AtomicInteger> droneAddCounters = new ConcurrentHashMap<>();
 
@@ -86,23 +94,84 @@ public class FlightTrackStore {
     public void loadLastKnownPositions() {
         if (repository == null) {
             log.info("FlightTrackStore: 纯内存模式（无 JPA repository）");
+        } else {
+            try {
+                List<DroneLastKnownPositionEntity> entities = repository.findAll();
+                for (DroneLastKnownPositionEntity entity : entities) {
+                    TrackPoint point = entity.toTrackPoint();
+                    Deque<TrackPoint> deque = new ConcurrentLinkedDeque<>();
+                    deque.addLast(point);
+                    tracks.put(point.sysid, deque);
+                    log.info("Restored last known position: sysid={} lat={} lon={} alt={}m ts={}",
+                            point.sysid, point.lat, point.lon, point.alt, point.timestampMs);
+                }
+                if (!entities.isEmpty()) {
+                    log.info("Loaded {} drone last known positions from database", entities.size());
+                }
+            } catch (Exception e) {
+                log.warn("Failed to load last known positions from database: {}", e.getMessage());
+            }
+        }
+        // 轨迹历史重建不依赖 JPA repository：JSONL 模式同样能从 flight_log 重建
+        restoreTrackHistoryFromFlightLog();
+    }
+
+    /**
+     * C4（ROADMAP:337）：从 flight_log 重建内存轨迹历史。
+     *
+     * <p>之前只恢复每架机的**最后已知位置一个点**，重启后前端的实时轨迹只剩孤点，
+     * 完整历史要等用户手动查历史 API——而 flight_log 里明明躺着当天的遥测行。
+     * 本钩子在启动时把每架已知机的最近 ≤{@code maxPoints} 个轨迹点灌回内存 deque：
+     * 与 lastKnown 时间重叠（ts ≥）的点跳过（lastKnown 是更新的快照），容量照旧截尾。
+     *
+     * <p>时机：{@code @PostConstruct} 内、UDP 网关开始写遥测之前，单线程无竞争
+     * （仍按 addPoint 同款对 deque 加锁，防未来顺序调整踩坑）。JSONL / DB 两路
+     * 由 {@code FlightLogService.recentTrack} 统一处理；服务缺失（纯单元测试构造）
+     * 时安全跳过。
+     */
+    void restoreTrackHistoryFromFlightLog() {
+        if (flightLogService == null) {
+            log.info("FlightTrackStore: 无 FlightLogService，跳过轨迹历史重建");
             return;
         }
-        try {
-            List<DroneLastKnownPositionEntity> entities = repository.findAll();
-            for (DroneLastKnownPositionEntity entity : entities) {
-                TrackPoint point = entity.toTrackPoint();
-                Deque<TrackPoint> deque = new ConcurrentLinkedDeque<>();
-                deque.addLast(point);
-                tracks.put(point.sysid, deque);
-                log.info("Restored last known position: sysid={} lat={} lon={} alt={}m ts={}",
-                        point.sysid, point.lat, point.lon, point.alt, point.timestampMs);
+        int restoredTotal = 0;
+        for (Map.Entry<Integer, Deque<TrackPoint>> entry : tracks.entrySet()) {
+            int sysid = entry.getKey();
+            Deque<TrackPoint> deque = entry.getValue();
+            TrackPoint lastKnown = deque.peekLast();
+            try {
+                // FlightLogService 的轨迹点是 gateway.TrackPoint（lat/lon/alt/ts 四元组，
+                // 供历史 API 用）；内存 deque 的点是内部 TrackPoint（含速度/朝向/电量）。
+                // 重建的历史没有这些跨消息状态，置哨兵值（速度 0 / heading 0 / 电量 -1=未知，
+                // 与 DroneSnapshot 电量未知哨兵同口径），前端画线只用 lat/lon/alt/ts。
+                List<io.aerofleet.cloud.gateway.TrackPoint> recent = flightLogService.recentTrack(sysid, maxPoints);
+                int added = 0;
+                synchronized (deque) {
+                    // recent 升序；倒序 addFirst ⇒ 最终顺序 = [历史升序..., lastKnown]
+                    for (int i = recent.size() - 1; i >= 0; i--) {
+                        io.aerofleet.cloud.gateway.TrackPoint p = recent.get(i);
+                        if (lastKnown != null && p.ts >= lastKnown.timestampMs) {
+                            continue;   // 与最后已知位置重叠/更新：lastKnown 是权威快照
+                        }
+                        deque.addFirst(new TrackPoint(sysid, p.ts, p.lat, p.lon, p.alt,
+                                0.0, 0.0, 0.0, 0.0, -1.0));
+                        added++;
+                    }
+                    while (deque.size() > maxPoints) {
+                        deque.pollFirst();
+                    }
+                }
+                if (added > 0) {
+                    log.info("Restored {} track history points from flight_log: sysid={} (deque={})",
+                            added, sysid, deque.size());
+                }
+                restoredTotal += added;
+            } catch (Exception e) {
+                log.warn("Failed to restore track history for sysid={}: {}", sysid, e.getMessage());
             }
-            if (!entities.isEmpty()) {
-                log.info("Loaded {} drone last known positions from database", entities.size());
-            }
-        } catch (Exception e) {
-            log.warn("Failed to load last known positions from database: {}", e.getMessage());
+        }
+        if (restoredTotal > 0) {
+            log.info("Track history restored from flight_log: {} points total", restoredTotal);
         }
     }
 

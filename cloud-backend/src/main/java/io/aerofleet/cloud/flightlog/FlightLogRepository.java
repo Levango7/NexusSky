@@ -23,6 +23,15 @@ public interface FlightLogRepository extends JpaRepository<FlightLogEntity, Long
     /** 查找指定类型和 sysid 的所有日志记录。 */
     List<FlightLogEntity> findByTypeAndSysid(String type, int sysid);
 
+    /**
+     * 查找指定类型和 sysid 的**末尾 N 条**（id 倒序）——启动时重建内存轨迹历史用
+     * （{@code FlightTrackStore.restoreTrackHistoryFromFlightLog}）。带 Pageable
+     * 而不是全量再截尾：1 机 1 天 1Hz 就是 8.6 万行，重启路径不该为 3600 点拉整天。
+     * 排序用 id（自增主键即写入顺序，与 JSONL 追加顺序同口径，见上方排序说明）。
+     */
+    List<FlightLogEntity> findByTypeAndSysid(String type, int sysid,
+                                             org.springframework.data.domain.Pageable pageable);
+
     // 下面四个按时间范围查询一律带 ORDER BY timestamp, id：FlightLogService 的
     // limit 语义是"取列表末尾（最新）N 条"，没有确定排序时到底返回哪 N 条由执行
     // 计划决定（换 PostgreSQL 或走索引就可能翻成最旧的 N 条）。id 作次级键，
