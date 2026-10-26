@@ -1996,6 +1996,31 @@ jobs:
         run: |
           set -e
           while IFS= read -r tag; do [ -n "$tag" ] && docker push "$tag"; done <<< "${{ steps.meta.outputs.tags }}"
+  compose-smoke:
+    name: Compose smoke (Linux host network)
+    # GAPS §二「docker-compose 完整性验证」的收口：根编排此前**从未被 compose up
+    # 实测过**（本机 Windows 无法如实跑 host 网络），配置审查通过≠编排能起。
+    # 2026-10-26 首轮设计时就抓到真缺口：裸跑 = prod profile 打 localhost:5432（无库）
+    # + 空 jwt-secret ⇒ 必崩。本 job 在 Linux runner 上如实验证：up → 三断言 → down。
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs: [pr-lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      # compose 把 <module>/target 下的 jar 挂载进容器——先在 runner 上构建
+      - name: Build jars for volume mounts
+        run: mvn -B -pl drone-sim,cloud-backend -am package -DskipTests
+
+      - name: Compose smoke（up → HTTP/监听/存活三断言 → down）
+        run: bash scripts/check-compose-smoke.sh 420
+
   deploy-secrets:
     name: Deploy Secret Gate
     runs-on: ubuntu-24.04

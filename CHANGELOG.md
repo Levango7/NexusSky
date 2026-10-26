@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 206 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 207 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,34 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 206 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 207 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — docker-compose 根编排首次可起 + Linux CI smoke job（GAPS §二 收口，2026-10-26）
+
+### 设计阶段就抓到的真缺口
+
+根编排（host 网络 + 挂载 jar）自 D4 写下后**从未被 compose up 实测过**（本机 Windows
+跑不了 host 网络，配置审查≠编排能起）。为 smoke job 做设计复核时当场确认裸跑必崩：
+prod profile 打 `localhost:5432`（编排里没有库）+ `jwt-secret` 空串（过不了 ≥32 字节
+强度校验）+ `SPRING_DATASOURCE_PASSWORD` 无缺省。
+
+### 交付
+
+- `docker-compose.yml`：补 `postgres:15-alpine` 服务（host 网络直通 5432，Flyway
+  V1..V29 在此跑）；后端补环境变量（`AEROFLEET_SECURITY_JWT_SECRET` 显式开发值 +
+  `SPRING_DATASOURCE_PASSWORD` 与 postgres 服务对齐，注释写明生产必须覆盖）。
+- `scripts/check-compose-smoke.sh`：up → 三断言（后端 /actuator/health 200；
+  drone-sim 打出 "listening on UDP"——判定面是容器日志不是 compose 回显，编排注释
+  既有口径；四容器 Running 且 RestartCount=0——崩溃重启不算过）→ down，失败自动
+  dump 日志尾部。
+- `ci.yml` 新增 **compose-smoke job**（ubuntu-24.04，硬门禁语义：脚本退非零即红）：
+  runner 上先 `mvn -pl drone-sim,cloud-backend -am package -DskipTests` 产出挂载 jar。
+- 首轮 smoke 的判定结果会如实写回 GAPS §二（跑得过=收口；跑不过=下一个真缺口）。
 
 ## [Unreleased] — link-sim 控制面 413 早拒绝不消费请求体：CI 上三跑两挂的真竞态（2026-10-26）
 

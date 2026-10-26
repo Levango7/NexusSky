@@ -3,7 +3,20 @@
 #   Docker Desktop 的 host 支持不完整，直接跑 start-all.cmd / .sh 更简单）
 # - host 模式下 ports: 映射无效且误导，已移除；端口即进程真实监听端口
 # - 前置：先 mvn -DskipTests package（三个模块 jar 挂载进容器）
+# - 2026-10-26：补 postgres + 后端环境变量——此前本文件**从未被 compose up 实测过**，
+#   裸跑 = prod profile 打 localhost:5432（没有库）+ 空 jwt-secret ⇒ 必崩
+#   （GAPS §二「docker-compose 完整性验证」；compose-smoke CI job 由此而来）。
 services:
+  # ===== PostgreSQL：后端 prod profile 硬依赖（Flyway V1..V29 在此跑） =====
+  postgres:
+    image: postgres:15-alpine
+    network_mode: host          # 后端默认打 localhost:5432，host 网络直通
+    environment:
+      - POSTGRES_DB=aerofleet_prod
+      - POSTGRES_USER=aerofleet
+      - POSTGRES_PASSWORD=aerofleet_dev_password
+    restart: unless-stopped
+
   drone-sim:
     image: eclipse-temurin:17-jre
     # jar 挂在 /app，而官方镜像 WORKDIR=/：不设 working_dir 时相对 jar 名会解析成
@@ -22,7 +35,15 @@ services:
       - ./cloud-backend/target:/app
     command: java -jar aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
     network_mode: host
+    environment:
+      # jwt-secret：本地编排用显式开发值（≥32 字节），生产部署必须覆盖
+      #（AEROFLEET_* 环境变量经 Spring 宽松绑定映射 aerofleet.security.*）。
+      - AEROFLEET_SECURITY_JWT_SECRET=compose-dev-secret-0123456789abcdef0123456789abcdef
+      # prod profile 默认打 localhost:5432/aerofleet_prod（用户 aerofleet），
+      # 只差密码没有缺省——这里与 postgres 服务对齐
+      - SPRING_DATASOURCE_PASSWORD=aerofleet_dev_password
     depends_on:
+      - postgres
       - drone-sim
 
   gcs-web:
