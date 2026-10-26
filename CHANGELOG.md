@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 211 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 212 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,83 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 211 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 212 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — ONVIF 从模拟升级为 simulated/live 双后端：真实 SOAP + WS-Discovery，失败不回退猜地址（P2 #14 第一刀，2026-10-26）
+
+### 交付
+
+- `surveillance/onvif/**`（新包，11 个类）：`OnvifBackend` 接口 + `SimulatedOnvifBackend`
+  （升级前的全部行为逐字迁移）+ `OnvifLiveBackend`（真实协议）+ `OnvifSoapClient`
+  + `OnvifDiscoveryClient` + `OnvifXml` / `OnvifValidation` / `OnvifPtzCommands`
+  / `OnvifSettings` / `OnvifException` / `OnvifUnsupportedException`。
+- **live 侧发真实 SOAP**（无第三方库，JDK `HttpClient` + DOM）：
+  Device `GetCapabilities`、Media `GetProfiles` + `GetStreamUri`、
+  PTZ `ContinuousMove` / `Stop`；WS-Security `UsernameToken` +
+  `PasswordDigest = Base64(SHA1(nonce 原始字节 || created || password))`。
+- **WS-Discovery**：向 `239.255.255.250:3702` 发 `Probe`（`dn:NetworkVideoTransmitter`），
+  解析 `ProbeMatch`（XAddrs / Scopes / EndpointReference）；另支持**单播目标**
+  （`discovery-unicast-targets`，现场常丢多播），`subnet` 在 live 下只做 IPv4 CIDR
+  **结果过滤**（链路本地协议没有"扫网段"能力，非 CIDR 记 WARN 不过滤）。
+- **口径（不许含糊）**：默认 `aerofleet.onvif.mode=simulated`，demo 与现有
+  `OnvifClientTest` 行为不变；`live` 下取流地址由设备给出并标
+  `StreamUrlOrigin.ONVIF_GETSTREAM_URI`（`deviceVerified=true`）；
+  **SOAP 失败不回退**成按规范猜的 `rtsp://`；设备返回非 RTSP 的 MediaUri 直接报错。
+- **live 路由**：`aerofleet.onvif.mode=live` 时海康/大华/宇视统一路由到 ONVIF 适配器
+  （三家私有 SDK 适配器仍是模拟实现，不能拿"未向设备确认"的地址冒充真实取流）；
+  模拟模式路由完全不变。
+- **事件面不假装**：live 下 `subscribeEvents` 抛 `OnvifUnsupportedException`，
+  `VendorAdapter.supportsEventSubscription()` 由 ONVIF live 覆写为 false，
+  REST 在建立 SSE **之前**返回 501（不是先 200 再挂一条永不来事件的流）。
+- **安全**：XML 解析禁 DOCTYPE / 外部实体 / XInclude，响应体 2 MB 上限，
+  `HttpClient.Redirect.NEVER`，异常与日志不含密码/nonce/digest；
+  `VendorRtspUrl.maskCredentials` 成为唯一脱敏点，`SurveillanceController` 与
+  `RapidDeployService` 共用（后者此前 INFO 日志会打印带凭据的 RTSP URL）。
+- **配置面**：`aerofleet.onvif.*` 十项（mode / 连接与读超时 / 发现窗口 /
+  响应体上限 / device-service-path / discovery-username+password / 单播目标 /
+  多播开关），全部有代码默认值，未改 `application.properties`。
+
+### 测试（新增 41 例）
+
+- `OnvifSoapClientTest` 14 例：digest 已知答案（期望值由 Python hashlib 独立算出）、
+  假设备**独立重算** digest、固定时钟/nonce、HTTP 500/300、SOAP Fault、DOCTYPE 拒绝、
+  响应超限与恰限、snippet 300/301 双向边界、真实 nonce 源互异非全零、不可达；
+- `OnvifLiveBackendTest` 18 例：真 `HttpServer` 假固件——能力按 XAddr 映射、
+  通道号→ProfileToken、凭据 RFC 3986 注入、端口 0/缺省→554、非 RTSP/空 profiles/
+  无 Media 服务报错、device-service-path 空白/null/无斜杠回退、PTZ 速度向量与 Stop
+  逐字段断言；
+- `OnvifDiscoveryClientTest` 16 例 + `OnvifDiscoveryClientIpv4CidrTest` 5 例：
+  真 `DatagramSocket` 收 ProbeMatch、名称 %-解码、subnet 过滤、空白 subnet、
+  缺凭据报错、零发送报错（诊断含 disabled）、空主机目标不发本机、65535 上限端口可用、
+  XAddr 端口 0→80、主机名不参与过滤、无 Scopes/空 Address 兜底、scopes 全文厂商判定、
+  64 台后停止收包；CIDR 的 0/255 八位组与 /0、/32 前缀边界；
+- `OnvifSettingsTest` 5 例默认值契约 + `OnvifXmlTest` 8 例（内部子集 DOCTYPE 拒绝、
+  localName 无前缀回退、转义、文本归一、顺序）；
+- `OnvifClientModeTest` 4 例 + `OnvifLiveRoutingTest` 4 例 + 控制器 501 1 例 +
+  `RtspUrlCredentialTest` mask 脱敏 2 例
+  （上列用例数为各类当前**累计**数，其中既有 52 例控制器用例不含在"新增"里：
+  新增 = 当前 163 − 原有 122 = 41）。
+- **变异收口（三轮 PIT，surveillance 包 809→1103 变异体）**：0.9087/0.9214 →
+  0.9376/0.9487 → **0.9419/0.9529**（杀掉 636→891）；5 处生产小重构消灭
+  不可按契约测试的存活；地板显式下调 0.95/0.96 → **0.94/0.95**，23 条新存活与
+  4 条新超时逐条定性（详见 docs/mutation-testing.md 第五轮），棘轮性质不变。
+- 全量：`mvn -B -o clean test` **5351 例** / vitest **580 例** / 端点 **414** /
+  Python SDK **27 例**；A/B 变异 4 个（凭据注入 / nonce 用 Base64 文本 /
+  live 路由 / 501 前置门禁）均改坏⇒红、还原⇒绿。
+
+### 边界
+
+- 事件订阅（WS-BaseNotification / PullPoint）**未实现**，live 下明确 501；
+- 只实现明文 HTTP 的 ONVIF 服务：发现阶段跳过 `https` XAddr（需要 TLS
+  信任配置，不能把 https 当 http 去连）；
+- 通道号按 `GetProfiles` 返回顺序 1-based 映射（ONVIF 无"通道"概念）；
+- PTZ 使用第一个 Media Profile（既有 `OnvifClient.ptzControl` 无通道参数）；
+- 海康/大华/宇视私有 SDK 与 GB28181 媒体面仍是模拟实现（本条只收 ONVIF 协议级）。
 
 ## [Unreleased] — C4 收口：启动时从 flight_log 重建内存轨迹历史（ROADMAP:337，2026-10-26）
 

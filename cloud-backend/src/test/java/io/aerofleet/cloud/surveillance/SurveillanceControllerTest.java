@@ -1177,4 +1177,24 @@ class SurveillanceControllerTest {
         }
         frameSources.clear();
     }
+
+    @Test
+    @DisplayName("live ONVIF：事件订阅在建立 SSE 之前返回 501，不先回 200 再挂空流")
+    void subscribeEvents_liveOnvif_returns501BeforeOpeningStream() throws Exception {
+        io.aerofleet.cloud.surveillance.onvif.OnvifSettings live =
+                new io.aerofleet.cloud.surveillance.onvif.OnvifSettings();
+        live.setMode(io.aerofleet.cloud.surveillance.onvif.OnvifSettings.Mode.LIVE);
+        OnvifClient liveClient = new OnvifClient(live);
+        VendorAdapterRegistry liveRegistry = new VendorAdapterRegistry(
+                List.of(new OnvifVendorAdapter(liveClient)), live);
+        SurveillanceController liveController = new SurveillanceController(
+                registry, liveClient, new RapidDeployService(liveClient, registry),
+                liveRegistry, alarmEventStore, mjpegStreamService);
+        registry.register(new SurveillanceDevice("live-onvif-1", "live onvif",
+                SurveillanceDevice.Vendor.ONVIF, "127.0.0.1", 80, "admin", "pass"));
+        MockMvc liveMvc = MockMvcBuilders.standaloneSetup(liveController).build();
+
+        liveMvc.perform(get("/api/v1/surveillance/devices/live-onvif-1/events"))
+                .andExpect(status().isNotImplemented());
+    }
 }

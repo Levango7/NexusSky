@@ -95,6 +95,20 @@ public interface VendorAdapter {
     }
 
     /**
+     * 本适配器的事件订阅是否真的接到设备。
+     *
+     * <p>默认 {@code true}：既有适配器返回模拟句柄，SSE 端点行为保持不变。
+     * live ONVIF 必须覆写为 {@code false} —— 它的 {@code subscribeEvents}
+     * 会直接抛"未实现"，REST 层据此在建立 SSE <b>之前</b>返回 501，
+     * 而不是先回 200 再挂一条永远没有事件的流。
+     *
+     * @return true 表示可建立订阅
+     */
+    default boolean supportsEventSubscription() {
+        return true;
+    }
+
+    /**
      * 获取设备能力集合。
      * <p>
      * 返回设备支持的服务类型，如 "Device"、"Media"、"PTZ"、"Events"、"Imaging" 等。
