@@ -101,8 +101,8 @@ P2 #18（死枚举/空端点）跑了三路只读扫描（内存态清单 / 32 �
 | `unifiedCommandWiring.test.jsx`（+3 条） | 后端真实键名三列都出数 / 空数组才是"暂无" / 离线机原样显示 |
 
 实测（全部为本机 `mvn -B -o clean test` + `npm run test:ci` 的产物，门禁逐格核对）：
-前端 **580/580，42 个测试文件**（`test/` 40 + `src/` 2）；Java **5260 / 0 失败 / 0 错误 / 0 跳过**
-（613 个测试类；`cloud-backend` 3088 → **3098**，净增 10 例）。
+前端 **580/580，42 个测试文件**（`test/` 40 + `src/` 2）；Java **5269 / 0 失败 / 0 错误 / 0 跳过**
+（614 个测试类；`cloud-backend` 3097 → **3107**，净增 10 例）。
 `check-test-count-docs.py` **全部一致**、`check-repo-hygiene.py` 通过、
 `check-claimed-endpoint-count.py` 414=414 通过。
 

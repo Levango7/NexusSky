@@ -313,7 +313,7 @@
 
 ### 9.2 最终口径（本机实测，门禁逐格核对）
 
-- Java **5260**（613 个测试类，0 失败 / 0 错误 / 0 跳过），`cloud-backend` 3088 → **3098**。
+- Java **5269**（614 个测试类，0 失败 / 0 错误 / 0 跳过），`cloud-backend` 3097 → **3107**。
 - 前端 **580/580，42 个测试文件**（`test/` 40 + `src/` 2）。
 - `check-test-count-docs.py` 全部一致；`check-repo-hygiene.py` 通过；
   `check-claimed-endpoint-count.py` 414 = 414 通过。
