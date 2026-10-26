@@ -37,6 +37,32 @@
 
 
 
+## [Unreleased] — C4 收口：启动时从 flight_log 重建内存轨迹历史（ROADMAP:337，2026-10-26）
+
+### 之前的行为
+
+重启后 `FlightTrackStore` 只恢复每架机的**最后已知位置一个点**（DB last-known 表），
+前端实时轨迹是孤点；完整历史要等用户手动查历史 API——而 flight_log 里明明躺着当天遥测。
+
+### 交付
+
+- `FlightLogService.recentTrack(sysid, limit)`：最近 ≤limit 条轨迹点（升序），与 trackFor
+  同款双路——DB 路径用 Pageable **只取末尾 N 条**（id 倒序再反转；1 机 1 天 1Hz=8.6 万行，
+  不为 3600 点拉整天）、JSONL 路径当日不足逐日回看（至多 3 天）；启动钩子无请求上下文，
+  无租户过滤（TenantContext=null 本就全可见），内存侧的租户过滤仍在读取侧。
+- `FlightTrackStore.restoreTrackHistoryFromFlightLog()`（@PostConstruct，lastKnown 之后）：
+  每架已知机灌回最近 ≤maxPoints 点；与 lastKnown 时间重叠（ts≥）的跳过（lastKnown 是
+  权威快照）；容量照旧截尾。历史点是 gateway.TrackPoint 四元组（lat/lon/alt/ts），
+  速度/朝向置 0、电量置 -1（未知哨兵）——前端画线只用前四个。
+- **边界**：恢复对象是「已有 lastKnown 的机」（C4=PostgreSQL 主链路必然满足）；
+  纯 JSONL-only 模式（无 repository）启动时 tracks 为空、无人可恢复，历史由既有
+  trackFor/recentTrack API 按需提供——不为此扩 sysid 枚举面，账记在此。
+
+### 测试（5 例）
+
+JSONL 全链（真文件：10 历史+lastKnown ⇒ 11 点升序无重叠）/ 时间重叠过滤 /
+容量截尾（maxPoints=5 只留最新 5 点）/ DB 路径（Mockito：id 倒序反转 + lat 缺失行过滤）/
+无 FlightLogService 安全跳过。计数：cloud-backend 3088→3093、全仓 5250→5255。
 ## [Unreleased] — 「空地协同态势」三列永远显示"暂无"：一半是恒空实现，一半是前后端键名对不上（2026-10-26）
 
 ### 1. 为什么动：台账里那句"10+ 模块只存内存"从来没人逐模块核过

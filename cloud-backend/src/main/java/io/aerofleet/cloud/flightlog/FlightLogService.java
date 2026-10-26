@@ -444,9 +444,67 @@ public class FlightLogService {
         return ring;
     }
 
+    /**
+     * 最近 ≤limit 条轨迹点（时间升序），跨「DB / JSONL」两路与 {@link #trackFor} 同款；
+     * 供启动时 {@code FlightTrackStore} 重建内存轨迹历史（C4，ROADMAP:337）。
+     *
+     * <p>与 {@code trackFor} 的三点差异：①不带 day 边界——从**当下往回**取，JSONL 路径
+     * 当日不足时逐日回看（至多 3 天）；②**无租户过滤**——调用点是启动钩子，没有请求
+     * 上下文（{@code TenantContext} 为 null ⇒ 本就全可见），内存 deque 的租户过滤在
+     * 读取侧由既有路径负责；③DB 路径用 Pageable 只取末尾 N 条（id 倒序再反转），
+     * 不为 3600 点拉整天（1 机 1 天 1Hz = 8.6 万行）。
+     *
+     * @param sysid 目标机
+     * @param limit 最大点数；≤0 返回空
+     */
+    public List<TrackPoint> recentTrack(int sysid, int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        // DB 路径：id 倒序取末尾 limit 条，反转成时间升序
+        if (persistToDb && flightLogRepository != null) {
+            try {
+                List<FlightLogEntity> desc = flightLogRepository.findByTypeAndSysid("telemetry", sysid,
+                        org.springframework.data.domain.PageRequest.of(0, limit,
+                                org.springframework.data.domain.Sort.by(
+                                        org.springframework.data.domain.Sort.Direction.DESC, "id")));
+                List<TrackPoint> pts = new ArrayList<>(desc.size());
+                for (int i = desc.size() - 1; i >= 0; i--) {
+                    FlightLogEntity e = desc.get(i);
+                    if (e.getLat() != null && e.getLon() != null) {
+                        double alt = e.getRelativeAlt() != null ? e.getRelativeAlt() : 0;
+                        pts.add(new TrackPoint(e.getLat(), e.getLon(), alt, tsOf(e.getTimestamp())));
+                    }
+                }
+                return pts;
+            } catch (Exception e) {
+                log.warn("flight log DB recent-track query failed, falling back to JSONL: {}", e.getMessage());
+                // 回退到 JSONL 路径
+            }
+        }
+        // JSONL 路径：逐日回看（今天 → 前天），环形缓冲每日只留末尾 limit 条，最后整体截尾
+        List<TrackPoint> out = new ArrayList<>();
+        LocalDate today = LocalDate.now();
+        for (int back = 2; back >= 0; back--) {
+            if (out.size() >= limit) {
+                break;
+            }
+            for (Map<String, Object> m : query(today.minusDays(back), "telemetry", sysid, limit)) {
+                Object lat = m.get("lat");
+                Object lon = m.get("lon");
+                if (lat == null || lon == null) {
+                    continue;
+                }
+                double alt = m.get("relativeAlt") instanceof Number n ? n.doubleValue() : 0;
+                out.add(new TrackPoint(((Number) lat).doubleValue(), ((Number) lon).doubleValue(),
+                        alt, tsOf(m.get("t"))));
+            }
+        }
+        return out.size() > limit ? new ArrayList<>(out.subList(out.size() - limit, out.size())) : out;
+    }
+
     /** Track points for a drone on a day, reconstructed from telemetry lines. */
-    public List<TrackPoint> trackFor(LocalDate day, int sysid) {
-        // DB 查询路径：persistToDb && repository 可用时优先从数据库查询
+    public List<TrackPoint> trackFor(LocalDate day, int sysid) {        // DB 查询路径：persistToDb && repository 可用时优先从数据库查询
         if (persistToDb && flightLogRepository != null) {
             try {
                 Instant start = day.atStartOfDay(ZoneId.systemDefault()).toInstant();
