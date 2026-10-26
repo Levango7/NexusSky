@@ -40,8 +40,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("M3 THERMAL_HOTSPOT(30064) 真实下发（1Hz 遥测，P2 #19 条件③守卫）")
 class ThermalHotspotEmissionTest {
 
-    /** 独立端口：避开 ThermalData 的 24860 及其余感知段（24820+）。 */
-    private static final int DRONE_PORT = 24864;
     private static final int AUTOPILOT_COMP = 1;
     private static final long SCAN_TIMEOUT_MS = 10_000;
 
@@ -55,7 +53,7 @@ class ThermalHotspotEmissionTest {
     @Test
     @DisplayName("1Hz 遥测含 THERMAL_HOTSPOT：逐点坐标在场景内、峰值温度显著、时间戳与同 tick 30012 配对")
     void thermalHotspotsFlowOverRealUdp() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
@@ -63,7 +61,7 @@ class ThermalHotspotEmissionTest {
             int[] seq = {0};
 
             // 心跳建立回程路由（transport 只认收到的对端；沿 ThermalData 先例）
-            send(gcs, addr, seq, new Heartbeat(0, 2, 6, 0, MavEnums.MAV_STATE_ACTIVE));
+            send(gcs, addr, drone.getLocalPort(), seq, new Heartbeat(0, 2, 6, 0, MavEnums.MAV_STATE_ACTIVE));
 
             List<ThermalHotspotMsg> hotspots = new ArrayList<>();
             Set<Long> dataTimestamps = new HashSet<>();
@@ -192,9 +190,9 @@ class ThermalHotspotEmissionTest {
                 .as("全部像素都在场景分辨率内").isPositive();
     }
 
-    private void send(DatagramSocket gcs, InetAddress addr, int[] seq, MavlinkMessage msg)
-            throws Exception {
+    private void send(DatagramSocket gcs, InetAddress addr, int dronePort, int[] seq,
+                      MavlinkMessage msg) throws Exception {
         byte[] frame = msg.toFrame(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, seq[0]++).encodeV2();
-        gcs.send(new DatagramPacket(frame, frame.length, addr, DRONE_PORT));
+        gcs.send(new DatagramPacket(frame, frame.length, addr, dronePort));
     }
 }

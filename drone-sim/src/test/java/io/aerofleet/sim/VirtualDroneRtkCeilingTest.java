@@ -25,7 +25,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class VirtualDroneRtkCeilingTest {
 
-    private static final int DRONE_PORT = 24870;
     private static final int AUTOPILOT_COMP = 1;
     /** 压短后的新鲜度窗口（毫秒）。 */
     private static final long WINDOW_MS = 80;
@@ -45,7 +44,7 @@ class VirtualDroneRtkCeilingTest {
     @Test
     @DisplayName("上界语义：--rtk fixed 但从未收到改正数 ⇒ 3（配置不等于事实）")
     void fixedWithoutCorrectionsStays3dFix() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--rtk", "fixed"});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0", "--rtk", "fixed"});
         try (VirtualDrone drone = new VirtualDrone(config)) {
             drone.start();
             awaitSteady(drone);
@@ -56,7 +55,7 @@ class VirtualDroneRtkCeilingTest {
     @Test
     @DisplayName("收到改正数 ⇒ 按上界上报 6（fixed）；断链后降回 3")
     void fixedUpgradesWithCorrectionsThenDegrades() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--rtk", "fixed"});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0", "--rtk", "fixed"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
@@ -82,7 +81,7 @@ class VirtualDroneRtkCeilingTest {
     @Test
     @DisplayName("--rtk float + 改正数 ⇒ 5（上界按 float）")
     void floatCeilingReports5() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--rtk", "float"});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0", "--rtk", "float"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
@@ -99,7 +98,7 @@ class VirtualDroneRtkCeilingTest {
     @Test
     @DisplayName("未配置 --rtk 的机器收到改正数也不抬升 ⇒ 3（上界即 3）")
     void correctionsDoNotLiftUnconfiguredDrone() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
@@ -119,7 +118,7 @@ class VirtualDroneRtkCeilingTest {
         byte[] frame = GpsRtcmData.broadcast(rtcm, 0)
                 .toFrame(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0).encodeV2();
         InetAddress addr = InetAddress.getLoopbackAddress();
-        gcs.send(new DatagramPacket(frame, frame.length, addr, DRONE_PORT));
+        gcs.send(new DatagramPacket(frame, frame.length, addr, drone.getLocalPort()));
     }
 
     /** 等模拟机接收线程进入稳态（start 返回后给接收线程留一点余量，避免与启动竞态）。 */

@@ -35,8 +35,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("任务上传会话：超时中止 + 不被下载请求饿死")
 class MissionUploadSessionTest {
 
-    /** 独立端口段：AdaptivePath 24780+，UploadAckTarget 24795+。 */
-    private static final int DRONE_PORT = 24805;
     private static final int AUTOPILOT_COMP = 1;
     private static final long FRAME_TIMEOUT_MS = 5_000;
 
@@ -46,7 +44,7 @@ class MissionUploadSessionTest {
         // 生产默认 60s；这里缩到 300ms，否则这条回归要跑一分钟
         System.setProperty("aerofleet.sim.upload-session-timeout-ms", "300");
         try {
-            SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--sysid=2"});
+            SimConfig config = SimConfig.parse(new String[]{"--port=0", "--sysid=2"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
@@ -54,7 +52,7 @@ class MissionUploadSessionTest {
             int[] seq = {0};
 
             // 宣告 3 项任务，但一项都不发（模拟 GCS 消失）
-            send(gcs, addr, seq, new MissionCountMsg(3, VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0, 0));
+            send(gcs, addr, drone.getLocalPort(), seq, new MissionCountMsg(3, VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0, 0));
 
             // 等 tick 里的会话超时判定生效（60s 超时 + 3s 重发节奏）
             MissionAckMsg ack = awaitAck(gcs);
@@ -77,7 +75,7 @@ class MissionUploadSessionTest {
     @Test
     @DisplayName("死会话不再吞下载请求：GCS 要求读任务时先中止旧会话再回 COUNT")
     void downloadAbortsStaleUploadSession() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--sysid=2"});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0", "--sysid=2"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
@@ -85,9 +83,9 @@ class MissionUploadSessionTest {
             int[] seq = {0};
 
             // 先建一个上传会话（宣告 2 项，不发）
-            send(gcs, addr, seq, new MissionCountMsg(2, VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0, 0));
+            send(gcs, addr, drone.getLocalPort(), seq, new MissionCountMsg(2, VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0, 0));
             // 立刻要求下载：旧实现会因为 isUploading() 把这条请求吞掉
-            send(gcs, addr, seq, new MissionRequestList(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0));
+            send(gcs, addr, drone.getLocalPort(), seq, new MissionRequestList(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0));
 
             // 期望：飞机回一个 MISSION_COUNT（0 项 = 没有已存任务），而不是沉默
             MissionCountMsg count = awaitCount(gcs);
@@ -97,9 +95,10 @@ class MissionUploadSessionTest {
 
     // ---- GCS 侧协议助手 ----
 
-    private void send(DatagramSocket gcs, InetAddress addr, int[] seq, MavlinkMessage msg) throws Exception {
+    private void send(DatagramSocket gcs, InetAddress addr, int dronePort, int[] seq,
+                      MavlinkMessage msg) throws Exception {
         byte[] frame = msg.toFrame(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, seq[0]++).encodeV2();
-        gcs.send(new DatagramPacket(frame, frame.length, addr, DRONE_PORT));
+        gcs.send(new DatagramPacket(frame, frame.length, addr, dronePort));
     }
 
     /** 等一个 MISSION_ACK（会话超时判定是 60s，所以这里放宽到 12 个周期）。 */

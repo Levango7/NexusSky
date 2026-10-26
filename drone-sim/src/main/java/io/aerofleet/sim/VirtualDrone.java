@@ -2398,6 +2398,11 @@ public final class VirtualDrone implements AutoCloseable {
         return thermalSource;
     }
 
+    /** 实际绑定的本地 UDP 端口（`--port=0` 时由内核分配，供测试读回）。 */
+    public int getLocalPort() {
+        return transport.getLocalPort();
+    }
+
     // ------------------------------------------------------------------
     // 丐版模式（budget）传感器查询接口（供集成测试/监控验证装配状态）
     // ------------------------------------------------------------------

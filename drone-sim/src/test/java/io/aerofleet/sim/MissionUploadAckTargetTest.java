@@ -31,15 +31,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("任务上传寻址：MISSION_REQUEST / MISSION_ACK 的 targetSystem 指向 GCS")
 class MissionUploadAckTargetTest {
 
-    /** 独立端口段：AdaptivePath 用 24780+，本测试用 24790+。 */
-    private static final int DRONE_PORT = 24795;
     private static final int AUTOPILOT_COMP = 1;
     private static final long FRAME_TIMEOUT_MS = 8_000;
 
     @Test
     @DisplayName("上传握手：MISSION_REQUEST 与 MISSION_ACK 的 targetSystem = GCS sysid（而非飞机自身）")
     void uploadFramesTargetTheGcs() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--sysid=2"});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0", "--sysid=2"});
         assertThat(config.sysid).as("本测试刻意让飞机 sysid ≠ GCS sysid，否则断言失去意义")
                 .isNotEqualTo(VirtualDrone.GCS_SYSID);
 
@@ -50,7 +48,7 @@ class MissionUploadAckTargetTest {
             int[] seq = {0};
 
             // 宣告 1 项任务
-            send(gcs, addr, seq, new MissionCountMsg(1, VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0, 0));
+            send(gcs, addr, drone.getLocalPort(), seq, new MissionCountMsg(1, VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0, 0));
 
             // 飞机应来要第 0 项，且要的对象是 GCS
             MissionRequestInt req = awaitFrame(gcs, MissionRequestInt.ID, MissionRequestInt::decode);
@@ -60,7 +58,7 @@ class MissionUploadAckTargetTest {
                     .isEqualTo(VirtualDrone.GCS_SYSID);
 
             // 把唯一一项发过去
-            send(gcs, addr, seq, new MissionItemInt(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0,
+            send(gcs, addr, drone.getLocalPort(), seq, new MissionItemInt(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0,
                     MavEnums.MAV_FRAME_GLOBAL, MavEnums.MAV_CMD_NAV_WAYPOINT,
                     0, 1, 0f, 0f, 0f, 0f,
                     (int) Math.round(22.5907 * 1e7), (int) Math.round(113.9345 * 1e7), 60f, 0));
@@ -77,14 +75,14 @@ class MissionUploadAckTargetTest {
     @Test
     @DisplayName("MISSION_COUNT=0 的清空 ACK 同样指向请求方 GCS")
     void clearMissionAckTargetsTheGcs() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--sysid=2"});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0", "--sysid=2"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
             InetAddress addr = InetAddress.getLoopbackAddress();
             int[] seq = {0};
 
-            send(gcs, addr, seq, new MissionCountMsg(0, VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0, 0));
+            send(gcs, addr, drone.getLocalPort(), seq, new MissionCountMsg(0, VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, 0, 0));
 
             MissionAckMsg ack = awaitFrame(gcs, MissionAckMsg.ID, MissionAckMsg::decode);
             assertThat(ack.type).isEqualTo(MavEnums.MAV_MISSION_ACCEPTED);
@@ -94,9 +92,10 @@ class MissionUploadAckTargetTest {
 
     // ---- GCS 侧协议助手（写法对齐 AdaptivePathExecutionTest）----
 
-    private void send(DatagramSocket gcs, InetAddress addr, int[] seq, MavlinkMessage msg) throws Exception {
+    private void send(DatagramSocket gcs, InetAddress addr, int dronePort, int[] seq,
+                      MavlinkMessage msg) throws Exception {
         byte[] frame = msg.toFrame(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, seq[0]++).encodeV2();
-        gcs.send(new DatagramPacket(frame, frame.length, addr, DRONE_PORT));
+        gcs.send(new DatagramPacket(frame, frame.length, addr, dronePort));
     }
 
     /** 阻塞等待指定 msgId 的帧并解码；超时抛断言失败。 */

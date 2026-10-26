@@ -49,16 +49,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       故显式 provision（白名单关闭，与 dev 口径一致）。</li>
  * </ul>
  * <p>
- * 端口取 24840/24841，避开 UdpGatewayTest(24600+)、Lifecycle(24700+)、
- * NexusCommandDispatch(24750)、Budget(24590+) 的既有测试段。
+ * 端口全部取 {@code 0}（由内核分配），并发跑测试的进程不会互相抢端口。
  */
 @DisplayName("EnvOverrideController 端到端：REST → 真 UDP → 机载校验 → 状态回传")
 class EnvOverrideE2ETest {
 
-    /** 云端网关绑定端口。 */
-    private static final int GATEWAY_PORT = 24840;
-    /** 机载 VirtualDrone 绑定端口（也是网关主动发现的目标端口）。 */
-    private static final int DRONE_PORT = 24841;
     /** 机载 sysid（SimConfig 默认 1）。 */
     private static final int DRONE_SYSID = 1;
     /** 等待既成事实的最长时间（路由学习 / 1Hz 遥测）。 */
@@ -87,12 +82,12 @@ class EnvOverrideE2ETest {
         };
         TelemetryIngestService ingest = new TelemetryIngestService(publisher);
 
-        gateway = new UdpGateway(GATEWAY_PORT, "127.0.0.1", DRONE_PORT, "",
-                "127.0.0.1", false, 100, ingest, pendings);
-
+        // 先起机载（--port=0 由内核分配端口），网关的主动发现目标指向它
         drone = new VirtualDrone(SimConfig.parse(new String[]{
-                "--port=" + DRONE_PORT, "--failsafe=off", "--env"}));
+                "--port=0", "--failsafe=off", "--env"}));
         drone.start();
+        gateway = new UdpGateway(0, "127.0.0.1", drone.getLocalPort(), "",
+                "127.0.0.1", false, 100, ingest, pendings);
 
         DeviceRegistry registry = new DeviceRegistry();
         registry.provision(DRONE_SYSID, null);
@@ -118,7 +113,7 @@ class EnvOverrideE2ETest {
                 drone.close();
             }
         } finally {
-            // 网关端口（24840）释放必须无条件执行：drone.close() 抛异常也不能
+            // 网关端口释放必须无条件执行：drone.close() 抛异常也不能
             // 跳过 shutdown()，否则下一个用例的 setUp 会在构造网关时 BindException。
             drone = null;
             if (gateway != null) {

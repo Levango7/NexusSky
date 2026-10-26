@@ -29,10 +29,10 @@ import static org.mockito.Mockito.*;
  * <p>策略说明：UdpGateway 构造时直接 {@code new UdpMavlinkTransport(bindAddress, udpPort)} 绑定真实
  * DatagramSocket，无法注入 mock transport。因此采用"真实端口 + mock 下游"方案：
  * <ul>
- *   <li>每个测试用独立高端口（{@link #BASE_PORT} + offset）避免与其他测试/默认 14550 冲突</li>
+ *   <li>每个测试用 {@code udpPort=0}（内核分配 ephemeral 端口），并发进程不抢同一端口</li>
  *   <li>TelemetryIngestService 和 PendingAcks 用 Mockito.mock，验证 handle() 调用</li>
  *   <li>用独立 DatagramSocket 向网关端口发送 MAVLink v2 帧，Awaitility 等待异步回调</li>
- *   <li>dronePort 指向无人监听的端口，discovery 心跳发送失败仅记日志不影响测试</li>
+ *   <li>dronePort 指向无人监听的固定端口，discovery 心跳发送失败仅记日志不影响测试</li>
  * </ul>
  *
  * <p>经验来源：2026-09-17-telemetry-ingest-service-websocket-forward-routing
@@ -41,9 +41,7 @@ import static org.mockito.Mockito.*;
 @DisplayName("UdpGateway: UDP MAVLink 网关接收与转发")
 class UdpGatewayTest {
 
-    /** 基础端口：高端口区避免与默认 14550/14540 或其他测试冲突。 */
-    private static final int BASE_PORT = 24600;
-    /** dronePort：无人监听，discovery 发送失败仅记日志。 */
+    /** dronePort：无人监听（仅作为 discovery 目标地址，不在本机 bind）。 */
     private static final int DRONE_PORT = 24699;
 
     private TelemetryIngestService ingest;
@@ -65,16 +63,16 @@ class UdpGatewayTest {
         }
     }
 
-    /** 构造一个绑定指定端口的 UdpGateway（白名单关闭，频率限制 100/s）。 */
-    private UdpGateway newGateway(int udpPort) throws Exception {
-        return newGateway(udpPort, false, 100);
+    /** 构造一个绑定 ephemeral 端口的 UdpGateway（白名单关闭，频率限制 100/s）。 */
+    private UdpGateway newGateway() throws Exception {
+        return newGateway(false, 100);
     }
 
-    /** 构造一个绑定指定端口的 UdpGateway，可指定白名单和频率限制参数。 */
-    private UdpGateway newGateway(int udpPort, boolean whitelistEnabled, int maxRate) throws Exception {
-        currentPort = udpPort;
-        gateway = new UdpGateway(udpPort, "127.0.0.1", DRONE_PORT, "", "0.0.0.0",
+    /** 构造一个绑定 ephemeral 端口的 UdpGateway，可指定白名单和频率限制参数。 */
+    private UdpGateway newGateway(boolean whitelistEnabled, int maxRate) throws Exception {
+        gateway = new UdpGateway(0, "127.0.0.1", DRONE_PORT, "", "0.0.0.0",
                 whitelistEnabled, maxRate, ingest, pendings);
+        currentPort = gateway.getLocalPort();
         return gateway;
     }
 
@@ -120,15 +118,15 @@ class UdpGatewayTest {
     @Test
     @DisplayName("1. 基本启动：构造后 getLocalPort 返回绑定端口")
     void startup_returnsBoundPort() throws Exception {
-        int port = BASE_PORT + 1;
-        gateway = newGateway(port);
-        assertThat(gateway.getLocalPort()).isEqualTo(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
+        assertThat(port).as("--port=0 应被内核分配为真实端口").isBetween(1024, 65535);
     }
 
     @Test
     @DisplayName("2. shutdown 关闭网关不抛异常")
     void shutdown_noException() throws Exception {
-        gateway = newGateway(BASE_PORT + 2);
+        gateway = newGateway();
         gateway.shutdown();
         // 再调一次验证幂等不抛异常（shutdown 内部 transport.close 应安全）
         // 注意：不在此 assertDoesNotThrow 二次 shutdown，因 DatagramSocket.close 幂等但
@@ -141,8 +139,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("3. 接收单条 MAVLink Heartbeat 并转发到 TelemetryIngestService")
     void receiveSingleHeartbeat_forwardsToIngest() throws Exception {
-        int port = BASE_PORT + 3;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         // 让接收线程就绪
         Thread.sleep(100);
 
@@ -155,8 +153,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("4. 接收多条消息批量处理（5 帧）")
     void receiveMultipleFrames_batchForward() throws Exception {
-        int port = BASE_PORT + 4;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         for (int i = 0; i < 5; i++) {
@@ -172,8 +170,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("5. 接收空包（0 字节）不调用 ingest")
     void receiveEmptyPacket_noIngestCall() throws Exception {
-        int port = BASE_PORT + 5;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         sendBytes(port, new byte[0]);
@@ -185,8 +183,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("6. 接收畸形短包（1 字节）不调用 ingest")
     void receiveMalformedShortPacket_noIngestCall() throws Exception {
-        int port = BASE_PORT + 6;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         sendBytes(port, new byte[]{(byte) 0xFD}); // 只有 STX，无完整头
@@ -198,8 +196,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("7. 接收非 MAVLink 随机字节不调用 ingest")
     void receiveRandomBytes_noIngestCall() throws Exception {
-        int port = BASE_PORT + 7;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         byte[] junk = new byte[]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
@@ -214,9 +212,9 @@ class UdpGatewayTest {
     @Test
     @DisplayName("8. 端口绑定失败（端口已占用）抛 IOException")
     void portAlreadyInUse_throwsIOException() throws Exception {
-        int port = BASE_PORT + 8;
-        // 先占用端口
-        try (DatagramSocket occupier = new DatagramSocket(new InetSocketAddress(port))) {
+        // 先占用一个内核分配的端口
+        try (DatagramSocket occupier = new DatagramSocket(new InetSocketAddress("127.0.0.1", 0))) {
+            int port = occupier.getLocalPort();
             assertThatThrownBy(() -> new UdpGateway(port, "127.0.0.1", DRONE_PORT, "", "0.0.0.0",
                     false, 100, ingest, pendings))
                     .isInstanceOf(java.io.IOException.class);
@@ -228,8 +226,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("9. 并发接收：10 线程各发 1 帧，全部转发")
     void concurrentReceive_allForwarded() throws Exception {
-        int port = BASE_PORT + 9;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         int threads = 10;
@@ -257,8 +255,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("10. 关闭后不再接收消息")
     void afterShutdown_noMoreReceive() throws Exception {
-        int port = BASE_PORT + 10;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
         gateway.shutdown();
         gateway = null; // 防 tearDown 二次关闭
@@ -275,8 +273,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("11. 大包处理（1500 字节 > 标准 MTU 片段）不崩溃")
     void largePacket_noCrash() throws Exception {
-        int port = BASE_PORT + 11;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // 构造 1500 字节包：首字节伪造成 STX，其余随机
@@ -300,8 +298,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("12. 路由学习：收到 drone sysid 帧后 routeOf 返回源地址")
     void routeLearning_routeOfReturnsSource() throws Exception {
-        int port = BASE_PORT + 12;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // sysid=1（drone），非 GCS_SYSID(255)
@@ -324,8 +322,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("13. GCS sysid(255) 帧不学习路由（仅转发）")
     void gcsSysidFrame_noRouteLearning() throws Exception {
-        int port = BASE_PORT + 13;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // sysid=255 = GCS_SYSID，onFrame 中跳过路由学习
@@ -345,8 +343,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("14. ingest.handle 抛异常后接收线程仍存活")
     void ingestThrows_threadSurvives() throws Exception {
-        int port = BASE_PORT + 14;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // 第一次调用抛异常
@@ -370,8 +368,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("15. 消息计数：发送 N 帧后 ingest.handle 恰好调用 N 次")
     void messageCount_exactCount() throws Exception {
-        int port = BASE_PORT + 15;
-        gateway = newGateway(port);
+        gateway = newGateway();
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         int n = 7;
@@ -390,8 +388,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("16. 白名单启用 + DeviceRegistry 中已注册的 sysid 帧正常转发")
     void whitelistEnabled_registeredSysid_forwards() throws Exception {
-        int port = BASE_PORT + 16;
-        gateway = newGateway(port, true, 100);
+        gateway = newGateway(true, 100);
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // mock DeviceRegistry：sysid=1 已注册
@@ -407,8 +405,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("17. 白名单启用 + 未注册 sysid 帧被丢弃")
     void whitelistEnabled_unregisteredSysid_dropped() throws Exception {
-        int port = BASE_PORT + 17;
-        gateway = newGateway(port, true, 100);
+        gateway = newGateway(true, 100);
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // mock DeviceRegistry：sysid=1 未注册（返回 null）
@@ -425,8 +423,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("18. 白名单启用 + DeviceRegistry 为 null 时所有非 GCS sysid 帧被丢弃")
     void whitelistEnabled_nullRegistry_allDropped() throws Exception {
-        int port = BASE_PORT + 18;
-        gateway = newGateway(port, true, 100);
+        gateway = newGateway(true, 100);
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // 不注入 DeviceRegistry，字段保持 null
@@ -440,8 +438,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("19. 白名单启用 + GCS sysid(255) 帧始终放行（不受白名单限制）")
     void whitelistEnabled_gcsSysid_alwaysAllowed() throws Exception {
-        int port = BASE_PORT + 19;
-        gateway = newGateway(port, true, 100);
+        gateway = newGateway(true, 100);
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // 不注入 DeviceRegistry，字段保持 null，但 GCS_SYSID 应始终放行
@@ -453,8 +451,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("20. 白名单关闭 + 未注册 sysid 帧正常转发（dev 模式）")
     void whitelistDisabled_unregisteredSysid_forwards() throws Exception {
-        int port = BASE_PORT + 20;
-        gateway = newGateway(port, false, 100);
+        gateway = newGateway(false, 100);
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // 不注入 DeviceRegistry，白名单关闭时所有 sysid 都应放行
@@ -466,8 +464,8 @@ class UdpGatewayTest {
     @Test
     @DisplayName("24. 白名单启用：provision 登记才放行，deregister 撤销后重新拒收")
     void whitelistEnabled_provisionedSysid_forwards() throws Exception {
-        int port = BASE_PORT + 24;
-        gateway = newGateway(port, true, 100);
+        gateway = newGateway(true, 100);
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // 用真实 DeviceRegistry 而非 mock：mock 里 get() 恒返回快照，恰好掩盖了
@@ -498,9 +496,9 @@ class UdpGatewayTest {
     @Test
     @DisplayName("21. 频率限制：超过 maxRate 的帧被丢弃")
     void rateLimit_exceedMax_dropped() throws Exception {
-        int port = BASE_PORT + 21;
         int maxRate = 5;
-        gateway = newGateway(port, false, maxRate);
+        gateway = newGateway(false, maxRate);
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // 发送 maxRate + 3 帧，只有 maxRate 帧应被转发
@@ -517,9 +515,9 @@ class UdpGatewayTest {
     @Test
     @DisplayName("22. 频率限制：GCS sysid 不受频率限制")
     void rateLimit_gcsSysid_notLimited() throws Exception {
-        int port = BASE_PORT + 22;
         int maxRate = 3;
-        gateway = newGateway(port, false, maxRate);
+        gateway = newGateway(false, maxRate);
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // GCS sysid 不受频率限制，发送 maxRate + 5 帧都应转发
@@ -535,9 +533,9 @@ class UdpGatewayTest {
     @Test
     @DisplayName("23. 频率限制：不同 sysid 独立计数")
     void rateLimit_differentSysids_independent() throws Exception {
-        int port = BASE_PORT + 23;
         int maxRate = 3;
-        gateway = newGateway(port, false, maxRate);
+        gateway = newGateway(false, maxRate);
+        int port = gateway.getLocalPort();
         Thread.sleep(100);
 
         // sysid=1 发 maxRate 帧，sysid=2 也发 maxRate 帧，都应全部转发

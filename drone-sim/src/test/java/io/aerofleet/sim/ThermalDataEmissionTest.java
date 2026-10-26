@@ -29,15 +29,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("M3 THERMAL_DATA(30012) 真实下发（1Hz 遥测，P2 #19 接线守卫）")
 class ThermalDataEmissionTest {
 
-    /** 独立端口，避开 Obstacle(24820/1)/Sensor(24795+)/Path(24780+)/Dispatch(24750+) 测试段与云端 E2E 段。 */
-    private static final int DRONE_PORT = 24860;
     private static final int AUTOPILOT_COMP = 1;
     private static final long FRAME_TIMEOUT_MS = 8_000;
 
     @Test
     @DisplayName("1Hz 遥测含 THERMAL_DATA：数值非平凡（热源场景 ≠ 恒值场）且 sysid 正确")
     void thermalDataFlowsOverRealUdp() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
@@ -45,7 +43,7 @@ class ThermalDataEmissionTest {
             int[] seq = {0};
 
             // 心跳建立回程路由（transport.getLastPeer 只认收到的对端；构造沿 Obstacle 先例）
-            send(gcs, addr, seq, new Heartbeat(0, 2, 6, 0, MavEnums.MAV_STATE_ACTIVE));
+            send(gcs, addr, drone.getLocalPort(), seq, new Heartbeat(0, 2, 6, 0, MavEnums.MAV_STATE_ACTIVE));
 
             ThermalDataMsg thermal = awaitFrame(gcs, ThermalDataMsg.ID, ThermalDataMsg::decode);
 
@@ -90,10 +88,10 @@ class ThermalDataEmissionTest {
         assertThat(max).as("存在热源像元").isGreaterThan(22.0);
     }
 
-    private void send(DatagramSocket gcs, InetAddress addr, int[] seq, MavlinkMessage msg)
+    private void send(DatagramSocket gcs, InetAddress addr, int dronePort, int[] seq, MavlinkMessage msg)
             throws Exception {
         byte[] frame = msg.toFrame(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, seq[0]++).encodeV2();
-        gcs.send(new DatagramPacket(frame, frame.length, addr, DRONE_PORT));
+        gcs.send(new DatagramPacket(frame, frame.length, addr, dronePort));
     }
 
     /** 收一个 MAVLink 帧；不是目标 msgId 就丢弃继续（心跳/遥测噪声多）。 */
