@@ -62,6 +62,43 @@ class OfflineAlarmCacheTest {
     }
 
     @Test
+    @DisplayName("驱逐是**可量化**的：evictedCount 与 getCacheStats 都给出条数")
+    void evictionIsCountable() {
+        // 上一条用例只钉住"谁被丢了"，没钉住"丢了几条能被事后核对"。
+        // 只有 WARN 日志的话，运维要回答"这次断网丢了几条报警"得去翻日志数行数；
+        // 而这个数一旦不可采，类注释里的容量取舍就永远无法被证伪。
+        OfflineAlarmCache cache = new OfflineAlarmCache(2);
+        assertThat(cache.evictedCount()).isZero();
+
+        cache.cacheAlarm(event("A", 1));   // [A]
+        cache.cacheAlarm(event("B", 2));   // [A,B]
+        cache.cacheAlarm(event("C", 3));   // 驱逐 A
+        cache.cacheAlarm(event("D", 4));   // 驱逐 B
+        assertThat(cache.evictedCount()).isEqualTo(2L);
+        assertThat(cache.pendingCount()).isEqualTo(2);
+
+        Map<String, Object> stats = cache.getCacheStats();
+        assertThat(stats).containsEntry("evictedCount", 2L);
+        // 被驱逐的事件确实不在待上传队列里（否则这个计数是虚报）
+        assertThat(cache.getPendingAlarms()).extracting(
+                        OfflineAlarmCache.OfflineAlarmEvent::getDeviceId)
+                .containsExactly("C", "D");
+    }
+
+    @Test
+    @DisplayName("clear 清队列但**不抹掉**历史驱逐数（它是累计账，不是当前态）")
+    void clearKeepsCumulativeEvictedCount() {
+        OfflineAlarmCache cache = new OfflineAlarmCache(1);
+        cache.cacheAlarm(event("A", 1));
+        cache.cacheAlarm(event("B", 2));   // 驱逐 A
+        assertThat(cache.evictedCount()).isEqualTo(1L);
+
+        cache.clear();
+        assertThat(cache.pendingCount()).isZero();
+        assertThat(cache.evictedCount()).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("getPendingAlarms 返回快照：改返回值不影响队列")
     void pendingIsSnapshot() {
         OfflineAlarmCache cache = new OfflineAlarmCache(4);
@@ -189,6 +226,7 @@ class OfflineAlarmCacheTest {
         Map<String, Object> stats = new OfflineAlarmCache(4).getCacheStats();
         assertThat(stats).containsEntry("totalCount", 0)
                 .containsEntry("maxCacheSize", 4)
+                .containsEntry("evictedCount", 0L)
                 .containsEntry("oldestTimestampMs", 0L)
                 .containsEntry("newestTimestampMs", 0L);
     }

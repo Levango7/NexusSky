@@ -67,7 +67,7 @@ public class AirGroundCoordinationController {
     @RequireRole(Role.OBSERVER)
     public ResponseEntity<Map<String, Object>> getSituation() {
         AirGroundSituation situation = coordinationService.fuseAirGroundSituation();
-        return ResponseEntity.ok(situationToMap(situation));
+        return ResponseEntity.ok(situationToMap(situation, coordinationService.listCoordinationRecords()));
     }
 
     // =====================================================================
@@ -372,7 +372,8 @@ public class AirGroundCoordinationController {
     }
 
     /** 将 AirGroundSituation 转为响应 Map。 */
-    private static Map<String, Object> situationToMap(AirGroundSituation situation) {
+    private static Map<String, Object> situationToMap(AirGroundSituation situation,
+                                                     List<AirGroundCoordinationService.CoordinationRecord> records) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("generatedAtMs", situation.getGeneratedAtMs());
         m.put("onlineDeviceCount", situation.onlineDeviceCount());
@@ -392,6 +393,25 @@ public class AirGroundCoordinationController {
             drones.add(droneStatusToMap(d));
         }
         m.put("droneStatuses", drones);
+
+        // 协同任务列表（六阶段指挥记录，最新在前）
+        // 这一格此前在后端**根本没有对应键**：前端读 coordinationTasks || tasks，
+        // 而记录一直好好存在服务里，只是没有读口——于是面板永远显示"暂无协同任务"。
+        List<Map<String, Object>> tasks = new ArrayList<>();
+        for (AirGroundCoordinationService.CoordinationRecord r : records) {
+            Map<String, Object> t = new LinkedHashMap<>();
+            t.put("coordinationId", r.getCoordinationId());
+            t.put("alarmEventId", r.getAlarmEventId());
+            t.put("planId", r.getPlanId());
+            t.put("phase", r.getPhase() == null ? "UNKNOWN" : r.getPhase().name());
+            t.put("status", r.getPhase() == null ? "UNKNOWN" : r.getPhase().name());
+            t.put("name", "协同 " + r.getCoordinationId());
+            t.put("startTimeMs", r.getStartTimeMs());
+            t.put("droneIds", r.getDeploymentInfo() == null
+                    ? new ArrayList<Integer>() : new ArrayList<>(r.getDeploymentInfo().getDroneIds()));
+            tasks.add(t);
+        }
+        m.put("coordinationTasks", tasks);
 
         // 报警事件列表
         List<Map<String, Object>> alarms = new ArrayList<>();
@@ -430,6 +450,8 @@ public class AirGroundCoordinationController {
         m.put("lon", d.lon);
         m.put("alt", d.alt);
         m.put("batteryPct", d.batteryPct);
+        // 未上报电量夹取后是 0，与"真的 0%"同形；不带这个标志，消费方只能把未知读成告急
+        m.put("batteryKnown", d.batteryKnown);
         m.put("missionPhase", d.missionPhase);
         return m;
     }

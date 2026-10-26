@@ -1467,6 +1467,22 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 
 #### 端点详情
 
+**GET /api/v1/air-ground/situation** （需 OBSERVER 角色）
+- 响应: 200 -
+  `{surveillanceDevices: [{id,name,vendor,ip,port,status,capabilities,rtspUrl,lastHeartbeatMs}],
+    droneStatuses: [{sysid,online,lat,lon,alt,batteryPct,batteryKnown,missionPhase}],
+    coordinationTasks: [{coordinationId,alarmEventId,planId,phase,status,name,startTimeMs,droneIds}],
+    alarmEvents: [...], meshTopology: {nodeCount,linkCount,coverageRate}, unacknowledgedAlarmCount, generatedAtMs}`
+- `droneStatuses` 取自机队注册表（`gateway.DeviceRegistry.all()`），**不是**编排计划的副产品：
+  这里曾经是一个恒空的 `return List.of()`，导致指挥面板的"空中单位"与 mesh 拓扑恒零。
+- `batteryPct` 是**夹取后的展示值**：未上报（`-1`）会被夹成 0，与"真的 0%"同形。
+  要区分两者必须读 `batteryKnown`——平均电量等算术已按该标志过滤。
+- `lat/lon/alt`：遥测未上报时按 DTO 约定给 0（`Double.NaN` 不透传，避免非法 JSON 字面量）。
+- `coordinationTasks` 按 `startTimeMs` **倒序**（最新在前）；展示层自己截断，后端不限 5 条。
+- 前端消费方：`gcs-web/src/components/UnifiedCommandPanel.jsx` 的"空地协同态势"三列。
+  契约测试 `gcs-web/test/unifiedCommandWiring.test.jsx` 钉住"这三列读的就是上面这几个键名"
+  （此前前端读的是 `aerialUnits|drones|groundUnits|groundPersonnel`，与后端对不上，三列永远显示"暂无"）。
+
 **POST /api/v1/air-ground/recon** （需 OPERATOR 角色）
 - 请求体: `{eventType:"MOTION"|"INTRUSION"|"FIRE"|"DOOR"|"CUSTOM", severity:"INFO"|"WARN"|"CRITICAL", sourceDeviceId:String, sourceDeviceName:String, description:String, lat:double, lon:double, alt:double, timestampMs?:long}`
 - 响应: 200 - `{planId:long, status:"RUNNING"|"FAILED", eventId, timestamp}`；400 - 参数非法；503 - 编排服务不可用
@@ -2342,7 +2358,12 @@ curl -X POST -H "Authorization: Bearer <token>" \
 
 **GET /api/v1/geofence/intercept/logs**
 - 查询参数: `sysid` (Integer, 可选) - 按无人机过滤
-- 响应: 200 - `{items: [{sysid, command, lat, lon, verdict, reason?, zoneInfo?, timestampMs}], total}`
+- 响应: 200 - `{items: [{sysid, command, lat, lon, verdict, reason?, zoneInfo?, timestampMs}], total, maxLogs, evictedCount}`
+- **`items` 是进程内环形缓冲，不是历史档案**：上限由 `aerofleet.geofence.intercept.log-max-size`
+  决定（默认 1000），超出丢最旧；`evictedCount` 给出"本进程内已经丢了多少条"。
+  重启即清零，跨重启的拦截证据目前**没有落库通路**（已登记
+  `docs/persistence-and-dead-surface-audit.md` §3.2）。客户端若需要完整审计链，
+  必须自行周期采集，不能把 `total` 读成"历史总数"。
 
 **curl 示例**:
 ```bash

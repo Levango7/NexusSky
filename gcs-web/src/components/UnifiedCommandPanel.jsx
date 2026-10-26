@@ -1568,10 +1568,10 @@ export default function UnifiedCommandPanel() {
             {/* 地面人员/设备位置 */}
             <div>
               <div style={{ fontSize: 9, color: 'var(--ok)', fontWeight: 'bold', marginBottom: 2 }}>地面单位</div>
-              {(airGroundSituation.groundUnits || airGroundSituation.groundPersonnel || []).length === 0 ? (
+              {(airGroundSituation.surveillanceDevices || airGroundSituation.groundUnits || airGroundSituation.groundPersonnel || []).length === 0 ? (
                 <div className="empty-hint">暂无地面单位</div>
               ) : (
-                (airGroundSituation.groundUnits || airGroundSituation.groundPersonnel || []).slice(0, 5).map((u, i) => (
+                (airGroundSituation.surveillanceDevices || airGroundSituation.groundUnits || airGroundSituation.groundPersonnel || []).slice(0, 5).map((u, i) => (
                   <div key={u.id || i} style={{
                     fontSize: 9, color: 'var(--dim)', padding: '2px 4px',
                     borderBottom: '1px solid var(--line-2)',
@@ -1589,10 +1589,10 @@ export default function UnifiedCommandPanel() {
             {/* 空中无人机状态 */}
             <div>
               <div style={{ fontSize: 9, color: 'var(--cyan)', fontWeight: 'bold', marginBottom: 2 }}>空中单位</div>
-              {(airGroundSituation.aerialUnits || airGroundSituation.drones || []).length === 0 ? (
+              {(airGroundSituation.droneStatuses || airGroundSituation.aerialUnits || airGroundSituation.drones || []).length === 0 ? (
                 <div className="empty-hint">暂无空中单位</div>
               ) : (
-                (airGroundSituation.aerialUnits || airGroundSituation.drones || []).slice(0, 5).map((u, i) => {
+                (airGroundSituation.droneStatuses || airGroundSituation.aerialUnits || airGroundSituation.drones || []).slice(0, 5).map((u, i) => {
                   const sysid = u.sysid || u.id || i
                   const status = String(u.status || u.state || (u.online ? 'ONLINE' : 'OFFLINE')).toUpperCase()
                   const statusColor = DRONE_STATUS_COLOR[status] || (u.online ? 'var(--ok)' : 'var(--dim)')
