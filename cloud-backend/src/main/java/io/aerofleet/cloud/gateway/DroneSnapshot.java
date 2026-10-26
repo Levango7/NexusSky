@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.gateway;
 
+import java.util.List;
+
 /**
  * Aggregated state of one drone, updated from incoming MAVLink messages.
  * All fields are volatile: the UDP receive thread writes, HTTP/WS threads read.
@@ -122,6 +124,24 @@ public final class DroneSnapshot {
     public volatile int thermalHotspotCount = -1;
     /** 最近一帧 THERMAL_DATA 的到达时刻（epoch ms）；0 = 从未上报。 */
     public volatile long thermalUpdatedAtMs;
+
+    // --- M3 热成像逐点坐标（THERMAL_HOTSPOT 30064，2026-10-26，P2 #19 条件③）---
+    /** 最近一帧逐点热源；空 = 从未上报 30064（或机型未升级到该版本）。 */
+    public volatile List<ThermalHotspot> thermalHotspots = List.of();
+    /** 最近一帧 30064 的 truncated 标志：false 时 cloud 侧热点数应与 30012 的 hotspotCount 一致。 */
+    public volatile boolean thermalHotspotsTruncated;
+
+    /**
+     * 单个热点的解算结果（P2 #19 条件③）。
+     *
+     * <p>u/v 是热成像像素坐标（合成场景 32×24，见 drone-sim
+     * {@code VirtualDrone#synthesizeThermalScene}）；lat/lon 是云端
+     * {@code GeolocationSolver} 反投影出的地面坐标。<b>lat/lon 为 null 表示当时
+     * 无法解算</b>（快照缺 GPS/高度/姿态、或射线朝天打不到地）——面板必须如实说
+     * "无法解算"，不能拿 NaN/0 冒充坐标。
+     */
+    public record ThermalHotspot(int u, int v, double tempC, Double lat, Double lon) {
+    }
 
     // --- mission progress (MISSION_CURRENT) ---
     public volatile int missionSeq = -1;

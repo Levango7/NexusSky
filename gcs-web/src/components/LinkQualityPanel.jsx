@@ -63,6 +63,12 @@ function formatBandwidth(kbps) {
  * <p>参数的权威校验在 link-sim 侧：越界/互斥会返回 400，面板原样显示后端原因。
  * 丢包滑块是<b>独立随机丢包</b>（uniform），应用后会替换画像的 GE 突发模型，
  * 界面上用 dropModel 标记说清楚。
+ *
+ * <p><b>安全画像分支</b>（P2 #20 收官，2026-10-26）：链路是 SIGNING_TAMPER /
+ * SIGNING_UNSIGNED 时（控制面 mode === "security"），十元组参数一个都不存在，
+ * 于是十元组滑块整套不渲染，只留 tamperRate 一个真滑块；签名剥离是动作全命中
+ * （检测到签名帧必剥），无概率可调，刻意不给它控件。stats 里的 dropped 恒 0 是
+ * 事实：篡改/剥离后的帧全都照发（否则对端 CRC 阶段就丢帧，模拟不出验签失败）。
  */
 export default function LinkQualityPanel() {
   const [fleet, setFleet] = useState([])
@@ -82,6 +88,9 @@ export default function LinkQualityPanel() {
   const [busy, setBusy] = useState(false)
   // 用户正在拖滑块时，轮询回来的值不能覆盖表单（否则滑块会"弹回去"）。
   const dirtyRef = useRef(false)
+  // 安全画像唯一可调参数（篡改概率，0-100% 展示口径）。链路是安全画像时
+  // 十元组滑块一个都不渲染——没有参数可改却摆六个 0 值滑块，就是假控件。
+  const [tamperPct, setTamperPct] = useState(0)
 
   const bestLinkOf = (item) => {
     if (!item) return null
@@ -126,6 +135,9 @@ export default function LinkQualityPanel() {
       setControl(data)
       if (!dirtyRef.current) {
         setForm(formFromControl(data))
+        if (data.mode === 'security') {
+          setTamperPct(Math.round((data.security?.tamperRate ?? 0) * 100))
+        }
       }
       setProfileChoice((prev) => prev || (data.profile || '').split('/')[0])
       setControlError(null)
@@ -236,6 +248,10 @@ export default function LinkQualityPanel() {
       setControl(data)
       dirtyRef.current = false
       setForm(formFromControl(data))
+      if (data.mode === 'security') {
+        // 响应回填：服务器是权威（含 clamp/拒绝），滑块的"当前值"必须来自它
+        setTamperPct(Math.round((data.security?.tamperRate ?? 0) * 100))
+      }
       setProfileChoice((data.profile || '').split('/')[0])
       setControlError(null)
     } catch (e) {
@@ -255,9 +271,13 @@ export default function LinkQualityPanel() {
   const currentScore = current?.overallScore ?? 0
   const linkColor = getLinkColor(currentScore)
   const online = !!control
+  // 安全画像（SIGNING_TAMPER/SIGNING_UNSIGNED）：控制面只有 tamperRate 一个参数，
+  // 十元组（延迟/抖动/丢包/带宽/分区）在链路上根本不存在。下面的渲染按此分支。
+  const securityMode = control?.mode === 'security'
   const up = control?.uplink
   const down = control?.downlink
   const profiles = control?.profiles || []
+  const secStats = up?.stats
 
   return (
     <div className="page">
@@ -334,7 +354,11 @@ export default function LinkQualityPanel() {
               border: '1px solid var(--border)',
             }}
           >
-            {online ? `在线 · ${control.mode} · 丢包模型 ${up?.dropModel || 'ge'}` : '离线'}
+            {online
+              ? (securityMode
+                ? `在线 · security · 安全画像 ${control.security?.kind || ''}`
+                : `在线 · ${control.mode} · 丢包模型 ${up?.dropModel || 'ge'}`)
+              : '离线'}
           </span>
         </div>
 
@@ -346,76 +370,121 @@ export default function LinkQualityPanel() {
           </p>
         )}
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: 'var(--dim)' }}>画像</span>
-          <select
-            value={profileChoice}
-            disabled={!online || busy}
-            onChange={(e) => setProfileChoice(e.target.value)}
-            style={{ padding: '4px 8px', fontSize: 12, background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4 }}
-          >
-            {profiles.map((p) => <option key={p} value={p}>{p}</option>)}
-            {profiles.length === 0 && <option value="">--</option>}
-          </select>
-          <button
-            className="btn sm"
-            disabled={!online || busy || !profileChoice}
-            onClick={() => applyPatch({ profile: profileChoice })}
-          >
-            切换画像
-          </button>
-          <button className="btn sm" disabled={!online || busy} onClick={() => applyPatch({ reset: true })}>
-            恢复画像默认
-          </button>
-          <span style={{ fontSize: 10, color: 'var(--dim)' }}>
-            上行 {up?.stats ? `fwd ${up.stats.forwarded} / drop ${up.stats.dropped} (${up.stats.dropPct.toFixed(1)}%) / ${up.stats.avgDelayMs}ms` : '--'}
-            {' · '}
-            下行 {down?.stats ? `fwd ${down.stats.forwarded} / drop ${down.stats.dropped}` : '--'}
-          </span>
-        </div>
+        {!securityMode && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: 'var(--dim)' }}>画像</span>
+            <select
+              value={profileChoice}
+              disabled={!online || busy}
+              onChange={(e) => setProfileChoice(e.target.value)}
+              style={{ padding: '4px 8px', fontSize: 12, background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4 }}
+            >
+              {profiles.map((p) => <option key={p} value={p}>{p}</option>)}
+              {profiles.length === 0 && <option value="">--</option>}
+            </select>
+            <button
+              className="btn sm"
+              disabled={!online || busy || !profileChoice}
+              onClick={() => applyPatch({ profile: profileChoice })}
+            >
+              切换画像
+            </button>
+            <button className="btn sm" disabled={!online || busy} onClick={() => applyPatch({ reset: true })}>
+              恢复画像默认
+            </button>
+            <span style={{ fontSize: 10, color: 'var(--dim)' }}>
+              上行 {up?.stats ? `fwd ${up.stats.forwarded} / drop ${up.stats.dropped} (${up.stats.dropPct.toFixed(1)}%) / ${up.stats.avgDelayMs}ms` : '--'}
+              {' · '}
+              下行 {down?.stats ? `fwd ${down.stats.forwarded} / drop ${down.stats.dropped}` : '--'}
+            </span>
+          </div>
+        )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 16px' }}>
-          <SliderRow
-            label="基准延迟" value={form?.delayMs ?? 0} min={0} max={2000} step={5}
-            disabled={!online || busy} onChange={(v) => setField('delayMs', v)}
-            display={`${Math.round(form?.delayMs ?? 0)} ms`}
-          />
-          <SliderRow
-            label="抖动" value={form?.jitterMs ?? 0} min={0} max={1000} step={5}
-            disabled={!online || busy} onChange={(v) => setField('jitterMs', v)}
-            display={`${Math.round(form?.jitterMs ?? 0)} ms`}
-          />
-          <SliderRow
-            label="丢包（独立随机）" value={form?.dropPct ?? 0} min={0} max={100} step={0.5}
-            disabled={!online || busy} onChange={(v) => setField('dropPct', v)}
-            display={`${(form?.dropPct ?? 0).toFixed(1)} %`}
-          />
-          <SliderRow
-            label="带宽" value={form?.bandwidthKbps ?? 0} min={0} max={100000} step={100}
-            disabled={!online || busy} onChange={(v) => setField('bandwidthKbps', v)}
-            display={formatBandwidth(form?.bandwidthKbps ?? 0)}
-          />
-          <SliderRow
-            label="分区周期" value={form?.partitionCycleSec ?? 0} min={0} max={120} step={0.5}
-            disabled={!online || busy} onChange={(v) => setField('partitionCycleSec', v)}
-            display={form?.partitionCycleSec ? `${form.partitionCycleSec.toFixed(1)} s` : '关闭'}
-          />
-          <SliderRow
-            label="分区黑洞窗口" value={form?.partitionDownSec ?? 0} min={0} max={60} step={0.5}
-            disabled={!online || busy || !form?.partitionCycleSec}
-            onChange={(v) => setField('partitionDownSec', v)}
-            display={form?.partitionDownSec ? `${form.partitionDownSec.toFixed(1)} s` : '0 s'}
-          />
-        </div>
+        {!securityMode && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 16px' }}>
+            <SliderRow
+              label="基准延迟" value={form?.delayMs ?? 0} min={0} max={2000} step={5}
+              disabled={!online || busy} onChange={(v) => setField('delayMs', v)}
+              display={`${Math.round(form?.delayMs ?? 0)} ms`}
+            />
+            <SliderRow
+              label="抖动" value={form?.jitterMs ?? 0} min={0} max={1000} step={5}
+              disabled={!online || busy} onChange={(v) => setField('jitterMs', v)}
+              display={`${Math.round(form?.jitterMs ?? 0)} ms`}
+            />
+            <SliderRow
+              label="丢包（独立随机）" value={form?.dropPct ?? 0} min={0} max={100} step={0.5}
+              disabled={!online || busy} onChange={(v) => setField('dropPct', v)}
+              display={`${(form?.dropPct ?? 0).toFixed(1)} %`}
+            />
+            <SliderRow
+              label="带宽" value={form?.bandwidthKbps ?? 0} min={0} max={100000} step={100}
+              disabled={!online || busy} onChange={(v) => setField('bandwidthKbps', v)}
+              display={formatBandwidth(form?.bandwidthKbps ?? 0)}
+            />
+            <SliderRow
+              label="分区周期" value={form?.partitionCycleSec ?? 0} min={0} max={120} step={0.5}
+              disabled={!online || busy} onChange={(v) => setField('partitionCycleSec', v)}
+              display={form?.partitionCycleSec ? `${form.partitionCycleSec.toFixed(1)} s` : '关闭'}
+            />
+            <SliderRow
+              label="分区黑洞窗口" value={form?.partitionDownSec ?? 0} min={0} max={60} step={0.5}
+              disabled={!online || busy || !form?.partitionCycleSec}
+              onChange={(v) => setField('partitionDownSec', v)}
+              display={form?.partitionDownSec ? `${form.partitionDownSec.toFixed(1)} s` : '0 s'}
+            />
+          </div>
+        )}
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
-          <button className="btn primary sm" disabled={!online || busy || !form} onClick={applyDamage}>
-            {busy ? '应用中…' : '应用损伤'}
-          </button>
-          <span style={{ fontSize: 10, color: 'var(--dim)' }}>
-            应用后双向生效（direction=both）；丢包滑块切换到独立随机模型，恢复画像默认即回到 GE 突发模型。
-          </span>
-        </div>
+        {!securityMode && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+            <button className="btn primary sm" disabled={!online || busy || !form} onClick={applyDamage}>
+              {busy ? '应用中…' : '应用损伤'}
+            </button>
+            <span style={{ fontSize: 10, color: 'var(--dim)' }}>
+              应用后双向生效（direction=both）；丢包滑块切换到独立随机模型，恢复画像默认即回到 GE 突发模型。
+            </span>
+          </div>
+        )}
+
+        {securityMode && (
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 10, lineHeight: 1.7 }}>
+              安全画像没有延迟/丢包/带宽/分区参数——本链路的基础损伤全部为 0，
+              十元组滑块在这里<b>一个都没有</b>（没有参数可改却摆满 0 值滑块，就是假控件）。
+              唯一真实可调的是<b>篡改概率 tamperRate</b>（仅 SIGNING_TAMPER 有意义）：
+              命中的 v2 签名帧会翻转签名字节，CRC 仍然有效、帧照发不误，对端走到验签才失败。
+              签名剥离（SIGNING_UNSIGNED）是<b>检测到签名帧必剥</b>，动作全命中、无概率可调，
+              因此刻意不给它滑块。
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <SliderRow
+                label="篡改概率 tamperRate" value={tamperPct} min={0} max={100} step={1}
+                disabled={!online || busy} onChange={(v) => { dirtyRef.current = true; setTamperPct(v) }}
+                display={`${tamperPct} %`}
+              />
+              <button
+                className="btn primary sm"
+                disabled={!online || busy}
+                onClick={() => applyPatch({ tamperRate: tamperPct / 100 })}
+              >
+                {busy ? '应用中…' : '应用篡改概率'}
+              </button>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 8, lineHeight: 1.7 }}>
+              {secStats
+                ? `上行 fwd ${secStats.forwarded} / 篡改 ${secStats.tampered} / 剥离 ${secStats.stripped}（安全动作占比 ${(secStats.tamperRatio * 100).toFixed(1)}%）`
+                : '--'}
+              {' · '}
+              {down?.stats
+                ? `下行 fwd ${down.stats.forwarded} / 篡改 ${down.stats.tampered} / 剥离 ${down.stats.stripped}`
+                : '--'}
+              <br />
+              dropped 恒为 0 是<b>事实</b>：篡改/剥离后的帧全都照发（否则对端在 CRC 阶段就整帧丢弃，
+              根本走不到验签失败，攻击也就模拟不出来了）。链路「少包」请看上面的实测质量评分。
+            </div>
+          </div>
+        )}
       </div>
 
       {loading && <div style={{ textAlign: 'center', padding: 20, color: 'var(--dim)' }}>加载链路数据…</div>}

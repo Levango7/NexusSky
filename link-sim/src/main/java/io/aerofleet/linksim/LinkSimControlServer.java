@@ -48,7 +48,12 @@ final class LinkSimControlServer {
     private static final String PATH = "/profile";
 
     private final HttpServer server;
-    private final LinkSimControl control;
+    /**
+     * 两条语义层任选其一：非安全画像走 {@link LinkSimControl}（十元组损伤），
+     * 安全画像走 {@link SecurityControl}（tamperRate）。二者对外 HTTP 契约同形，
+     * 前端/云端不必分支——区别只在"能调什么"，见两个类的注释。
+     */
+    private final Object control;
     private final ObjectMapper mapper = new ObjectMapper();
     private final ExecutorService executor;
 
@@ -57,6 +62,14 @@ final class LinkSimControlServer {
      * @throws IOException 绑定失败（端口占用等）
      */
     LinkSimControlServer(int port, LinkSimControl control) throws IOException {
+        this(port, (Object) control);
+    }
+
+    LinkSimControlServer(int port, SecurityControl control) throws IOException {
+        this(port, (Object) control);
+    }
+
+    private LinkSimControlServer(int port, Object control) throws IOException {
         this.control = control;
         this.server = HttpServer.create(
                 new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 0);
@@ -91,7 +104,8 @@ final class LinkSimControlServer {
                 return;
             }
             switch (ex.getRequestMethod()) {
-                case "GET" -> respond(ex, 200, control.view());
+                case "GET" -> respond(ex, 200, control instanceof LinkSimControl lc
+                        ? lc.view() : ((SecurityControl) control).view());
                 case "PATCH" -> handlePatch(ex);
                 default -> {
                     ex.getResponseHeaders().set("Allow", "GET, PATCH");
@@ -140,7 +154,8 @@ final class LinkSimControlServer {
         }
         Map<String, Object> body = mapper.convertValue(node, new TypeReference<>() {
         });
-        respond(ex, 200, control.patch(body));
+        respond(ex, 200, control instanceof LinkSimControl lc
+                ? lc.patch(body) : ((SecurityControl) control).patch(body));
     }
 
     private static long parseContentLength(HttpExchange ex) {

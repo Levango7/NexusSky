@@ -5,12 +5,57 @@ const POLL_MS = 3000
 const DEFAULT_THRESHOLD = 60
 
 /**
- * 热成像面板——机队热像读数（P2 #19，2026-10-24 接线后启用）。
+ * 逐点热源明细（P2 #19 条件③，2026-10-26）。
+ *
+ * <p>数据链：drone-sim 逐热点像素 (u,v,峰值温度) → THERMAL_HOTSPOT(30064) →
+ * cloud-backend 快照（{@code ThermalIngestListener} 用既有 GeolocationSolver 反投影）
+ * → GET /thermal/status 的 hotspots 段。
+ *
+ * <p>lat/lon 为 null 的语义是<b>"当时无法解算"</b>（云端快照缺 GPS/高度/姿态，
+ * 或射线朝天打不到地）——面板必须如实显示"无法解算"，不填 0/NaN 冒充坐标；
+ * 反投影用的位姿是"最新已知值"而非拍摄时刻值（30064 不带位姿，遥测固有限制，
+ * 见监听器注释），高速机动时误差会放大，这一点不藏在数据后面。
+ */
+function HotspotDetail({ hotspots, truncated }) {
+  if (!hotspots || hotspots.length === 0) {
+    return (
+      <div style={{ fontSize: 10, color: 'var(--dim)', padding: '2px 0' }}>
+        本机未上报逐点热源（THERMAL_HOTSPOT 30064）
+      </div>
+    )
+  }
+  return (
+    <div style={{ padding: '2px 0 8px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {hotspots.map((h, idx) => (
+        <span
+          key={`${h.u}-${h.v}-${idx}`}
+          className="chip mono"
+          title={`像素 (${h.u}, ${h.v})`}
+          style={{ fontSize: 10, background: 'rgba(255,140,26,0.12)', color: 'var(--warn)' }}
+        >
+          ({h.u},{h.v}) {Number(h.tempC).toFixed(1)}°C →{' '}
+          {h.lat != null && h.lon != null
+            ? `${Number(h.lat).toFixed(5)}, ${Number(h.lon).toFixed(5)}`
+            : '无法解算（缺位姿/高度）'}
+        </span>
+      ))}
+      {truncated && (
+        <span className="chip" style={{ fontSize: 10, background: 'rgba(255,93,93,0.15)', color: 'var(--crit)' }}>
+          热点超容量已截断（保留最热的）
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 热成像面板——机队热像读数（P2 #19，2026-10-24 接线后启用；条件③ 2026-10-26 收官）。
  *
  * <p>数据链：drone-sim 1Hz 合成温度场 → THERMAL_DATA(30012) → cloud-backend
  * {@code ThermalIngestListener} 写快照 → 本面板轮询 GET /api/v1/thermal/status。
- * 显示的是<b>机队聚合口径</b>（每机的温度统计五元组 + 热点数），不是逐点热力图——
- * 逐点经纬度需要图像→地理位姿解算，登记在 docs/todo.md P2 #19 恢复条件 ③。
+ * 每机显示<b>机队聚合口径</b>（温度统计五元组 + 热点数）+ <b>逐点热源坐标</b>
+ * （THERMAL_HOTSPOT 30064 → 云端 GeolocationSolver 反投影成 lat/lon，见
+ * {@link HotspotDetail} 的输入来源与"null = 无法解算"语义）。
  *
  * <p>历史包袱（诚实记录）：本面板此前是假功能——轮询不存在的端点永远 404，
  * 「历史回放」是前端随机扰动伪造的数据（P1 #12 移除）。现在的每一格都来自
@@ -94,30 +139,32 @@ export default function ThermalOverlayPanel() {
             <span>最近上报</span>
           </div>
           {items.map((it) => (
-            <div
-              key={it.sysid}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '60px 1fr 1fr 90px 1fr',
-                gap: 8,
-                fontSize: 12,
-                padding: '6px 0',
-                borderTop: '1px solid var(--line)',
-                alignItems: 'center',
-              }}
-            >
-              <span className="mono">#{it.sysid}</span>
-              <span className="mono" style={{ color: tempColor(it.tempMax), fontWeight: 600 }}>
-                {Number(it.tempMax).toFixed(1)}°C / {Number(it.tempMean).toFixed(1)}°C
-              </span>
-              <span className="mono" style={{ color: 'var(--dim)' }}>
-                {Number(it.tempMin).toFixed(1)}°C / σ{Number(it.tempStdDev).toFixed(1)}
-              </span>
-              <span className="mono">{it.hotspotCount}</span>
-              <span style={{ fontSize: 10, color: 'var(--dim)' }}>
-                {updatedAt ? `${Math.max(0, Math.round((updatedAt - it.updatedAtMs) / 1000))}s 前` : '--'}
-              </span>
-            </div>
+            <React.Fragment key={it.sysid}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '60px 1fr 1fr 90px 1fr',
+                  gap: 8,
+                  fontSize: 12,
+                  padding: '6px 0',
+                  borderTop: '1px solid var(--line)',
+                  alignItems: 'center',
+                }}
+              >
+                <span className="mono">#{it.sysid}</span>
+                <span className="mono" style={{ color: tempColor(it.tempMax), fontWeight: 600 }}>
+                  {Number(it.tempMax).toFixed(1)}°C / {Number(it.tempMean).toFixed(1)}°C
+                </span>
+                <span className="mono" style={{ color: 'var(--dim)' }}>
+                  {Number(it.tempMin).toFixed(1)}°C / σ{Number(it.tempStdDev).toFixed(1)}
+                </span>
+                <span className="mono">{it.hotspotCount}</span>
+                <span style={{ fontSize: 10, color: 'var(--dim)' }}>
+                  {updatedAt ? `${Math.max(0, Math.round((updatedAt - it.updatedAtMs) / 1000))}s 前` : '--'}
+                </span>
+              </div>
+              <HotspotDetail hotspots={it.hotspots} truncated={it.hotspotTruncated} />
+            </React.Fragment>
           ))}
         </div>
       )}
