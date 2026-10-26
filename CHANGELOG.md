@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 206 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 207 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,39 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 206 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 207 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — C4 收口：启动时从 flight_log 重建内存轨迹历史（ROADMAP:337，2026-10-26）
+
+### 之前的行为
+
+重启后 `FlightTrackStore` 只恢复每架机的**最后已知位置一个点**（DB last-known 表），
+前端实时轨迹是孤点；完整历史要等用户手动查历史 API——而 flight_log 里明明躺着当天遥测。
+
+### 交付
+
+- `FlightLogService.recentTrack(sysid, limit)`：最近 ≤limit 条轨迹点（升序），与 trackFor
+  同款双路——DB 路径用 Pageable **只取末尾 N 条**（id 倒序再反转；1 机 1 天 1Hz=8.6 万行，
+  不为 3600 点拉整天）、JSONL 路径当日不足逐日回看（至多 3 天）；启动钩子无请求上下文，
+  无租户过滤（TenantContext=null 本就全可见），内存侧的租户过滤仍在读取侧。
+- `FlightTrackStore.restoreTrackHistoryFromFlightLog()`（@PostConstruct，lastKnown 之后）：
+  每架已知机灌回最近 ≤maxPoints 点；与 lastKnown 时间重叠（ts≥）的跳过（lastKnown 是
+  权威快照）；容量照旧截尾。历史点是 gateway.TrackPoint 四元组（lat/lon/alt/ts），
+  速度/朝向置 0、电量置 -1（未知哨兵）——前端画线只用前四个。
+- **边界**：恢复对象是「已有 lastKnown 的机」（C4=PostgreSQL 主链路必然满足）；
+  纯 JSONL-only 模式（无 repository）启动时 tracks 为空、无人可恢复，历史由既有
+  trackFor/recentTrack API 按需提供——不为此扩 sysid 枚举面，账记在此。
+
+### 测试（5 例）
+
+JSONL 全链（真文件：10 历史+lastKnown ⇒ 11 点升序无重叠）/ 时间重叠过滤 /
+容量截尾（maxPoints=5 只留最新 5 点）/ DB 路径（Mockito：id 倒序反转 + lat 缺失行过滤）/
+无 FlightLogService 安全跳过。计数：cloud-backend 3088→3093、全仓 5250→5255。
 
 ## [Unreleased] — link-sim 控制面 413 早拒绝不消费请求体：CI 上三跑两挂的真竞态（2026-10-26）
 
