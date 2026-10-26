@@ -6,6 +6,8 @@ import io.aerofleet.cloud.alarm.AlarmEventStore;
 import io.aerofleet.cloud.alarm.AlarmLinkageEngine;
 import io.aerofleet.cloud.alarm.AlarmToOrchBridge;
 import io.aerofleet.cloud.api.service.EmergencyOrchService;
+import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.surveillance.OnvifClient;
 import io.aerofleet.cloud.surveillance.SurveillanceDevice;
 import io.aerofleet.cloud.surveillance.SurveillanceDeviceRegistry;
@@ -411,15 +413,78 @@ class AirGroundCoordinationServiceTest {
     }
 
     @Test
-    @DisplayName("AirGroundSituation.DroneStatus 电池百分比钳位")
+    @DisplayName("AirGroundSituation.DroneStatus 电池百分比钳位，且夹取不冒充\"有数\"")
     void droneStatusBatteryClamp() {
         AirGroundSituation.DroneStatus high = new AirGroundSituation.DroneStatus(
                 1, true, 39.9, 116.3, 100, 150, "EXECUTING");
         AirGroundSituation.DroneStatus low = new AirGroundSituation.DroneStatus(
                 2, true, 39.9, 116.3, 100, -10, "EXECUTING");
+        AirGroundSituation.DroneStatus real = new AirGroundSituation.DroneStatus(
+                3, true, 39.9, 116.3, 100, 55, "MISSION");
 
         assertThat(high.batteryPct).isEqualTo(100);
         assertThat(low.batteryPct).isEqualTo(0);
+        assertThat(real.batteryPct).isEqualTo(55);
+
+        // 夹取后的 0/100 与"真的 0%/100%"同形，所以可信度必须单独带出来：
+        // 否则一台没上报电量的机，会被面板读成"电量告急"，也会被平均电量算进去。
+        assertThat(high.isBatteryKnown()).isFalse();
+        assertThat(low.isBatteryKnown()).isFalse();
+        assertThat(real.isBatteryKnown()).isTrue();
+    }
+
+    @Test
+    @DisplayName("态势融合的空中单位来自机队注册表——不再是恒空列表")
+    void fusePullsDronesFromFleetRegistry() {
+        // 这条钉的是审计查出的假面：collectDroneStatuses() 曾经无条件 return List.of()，
+        // 于是面板的"空中单位"永远显示"暂无"，连带 mesh 节点数与覆盖率恒零。
+        DeviceRegistry fleet = new DeviceRegistry();
+        DroneSnapshot d7 = fleet.registerIfAbsent(7);
+        d7.online = true;
+        d7.lat = 39.9;
+        d7.lon = 116.3;
+        d7.relativeAlt = 80.0;
+        d7.battery = 55;
+        d7.mode = "MISSION";
+        DroneSnapshot d8 = fleet.registerIfAbsent(8);
+        d8.online = true;      // 位置与电量都没上报（NaN / -1 是真实初值）
+
+        AirGroundCoordinationService svc = new AirGroundCoordinationService(
+                orchService, null, null, null, null, null, null, null, fleet);
+
+        AirGroundSituation s = svc.fuseAirGroundSituation();
+
+        assertThat(s.getDroneStatuses()).hasSize(2);
+        AirGroundSituation.DroneStatus first = s.getDroneStatuses().stream()
+                .filter(d -> d.sysid == 7).findFirst().orElseThrow();
+        assertThat(first.online).isTrue();
+        assertThat(first.lat).isEqualTo(39.9);
+        assertThat(first.batteryPct).isEqualTo(55);
+        assertThat(first.batteryKnown).isTrue();
+        assertThat(first.missionPhase).isEqualTo("MISSION");
+
+        // 未上报的机：位置 NaN 必须落成 DTO 约定的 0（不能把 NaN 透传成非法 JSON），
+        // 电量 -1 夹成 0 但要标记为不可信。
+        AirGroundSituation.DroneStatus second = s.getDroneStatuses().stream()
+                .filter(d -> d.sysid == 8).findFirst().orElseThrow();
+        assertThat(second.lat).isZero();
+        assertThat(second.batteryPct).isZero();
+        assertThat(second.batteryKnown).isFalse();
+    }
+
+    @Test
+    @DisplayName("机队注册表缺席时才是空，且空列表要让 mesh 与在线数一起归零")
+    void fuseDegradesWhenFleetRegistryAbsent() {
+        // 九参构造器的最后一位传 null = 可选依赖未装配。这时"空"是降级，不是假面：
+        // 与上面那条一起，两种空才区分得开。
+        AirGroundCoordinationService svc = new AirGroundCoordinationService(
+                orchService, null, null, null, null, null, null, null, null);
+
+        AirGroundSituation s = svc.fuseAirGroundSituation();
+
+        assertThat(s.getDroneStatuses()).isEmpty();
+        assertThat(s.onlineDroneCount()).isZero();
+        assertThat(s.getMeshTopology().nodeCount).isZero();
     }
 
     @Test

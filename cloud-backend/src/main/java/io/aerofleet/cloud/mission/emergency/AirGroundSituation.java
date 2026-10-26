@@ -141,8 +141,15 @@ public final class AirGroundSituation {
         public final double lon;
         /** 当前海拔（米）。 */
         public final double alt;
-        /** 电池剩余百分比（0~100）。 */
+        /**
+         * 电池剩余百分比（0~100）。
+         * <p>
+         * 注意这是**夹取后的展示值**：未上报（负值）会被夹成 0，而 0 在遥测里是合法电量。
+         * 所以"这块电池到底有没有数"必须读 {@link #isBatteryKnown()}，不能靠 {@code batteryPct > 0} 反推。
+         */
         public final int batteryPct;
+        /** 电量是否真被上报过（{@code DroneSnapshot.battery} 初值是 -1=未知）。 */
+        public final boolean batteryKnown;
         /** 当前任务阶段描述。 */
         public final String missionPhase;
 
@@ -153,12 +160,18 @@ public final class AirGroundSituation {
             this.lat = lat;
             this.lon = lon;
             this.alt = alt;
+            // 夹取前判定可信度：负值=未上报，>100 是脏数据，两者都不该进"平均电量"这类算术
+            this.batteryKnown = batteryPct >= 0 && batteryPct <= 100;
             this.batteryPct = Math.max(0, Math.min(100, batteryPct));
             this.missionPhase = missionPhase == null ? "" : missionPhase;
         }
 
         public boolean isOnline() {
             return online;
+        }
+
+        public boolean isBatteryKnown() {
+            return batteryKnown;
         }
 
         @Override

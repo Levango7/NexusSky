@@ -19,7 +19,12 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * <p>
  * 灾害断网场景下，安防设备与云端失联时在本地缓存报警事件；
  * 网络恢复后通过 {@link #flushToStore(AlarmEventStore)} 批量上传到
- * {@link AlarmEventStore}，确保报警事件不丢失。
+ * {@link AlarmEventStore}。
+ * <p>
+ * <b>不丢的保证是有边界的，别读成"无条件不丢"</b>：缓存是进程内的，
+ * ① 断网期间累计超过上限时最旧的被驱逐（{@link #evictedCount()} 可事后核对数量），
+ * ② 尚未 flush 就重启，队列里的全部丢。这两条是设计取舍（宁可用内存换断网期间的
+ * 基本可用），但话术必须与之一致——原来这里写的是"确保报警事件不丢失"。
  * <p>
  * 线程安全：使用 {@link ConcurrentLinkedQueue} 存储离线报警事件，
  * 适用于多线程并发写入场景（如多个传感器同时触发报警）。
@@ -37,6 +42,16 @@ public class OfflineAlarmCache {
 
     private final ConcurrentLinkedQueue<OfflineAlarmEvent> queue = new ConcurrentLinkedQueue<>();
     private final int maxCacheSize;
+
+    /**
+     * 被容量驱逐掉的报警事件累计数（进程生命周期内单调递增）。
+     * <p>
+     * 为什么要有它：驱逐本来就打了 WARN 日志，但日志条数不能回答
+     * "这次断网到底丢了几条报警"——运维要的是一个可被采集、可比对的数，
+     * 不是"去翻日志数行数"。没有这个计数，"不丢失"这类话术连被证伪的入口都没有。
+     */
+    private final java.util.concurrent.atomic.AtomicLong evictedCount =
+            new java.util.concurrent.atomic.AtomicLong(0L);
 
     /** 报警事件存储（可为 null，降级模式）。 */
     @Autowired(required = false)
@@ -69,8 +84,9 @@ public class OfflineAlarmCache {
         while (queue.size() > maxCacheSize) {
             OfflineAlarmEvent evicted = queue.poll();
             if (evicted != null) {
-                log.warn("离线报警缓存超容量，驱逐最旧事件: deviceId={} timestampMs={}",
-                        evicted.deviceId, evicted.timestampMs);
+                evictedCount.incrementAndGet();
+                log.warn("离线报警缓存超容量，驱逐最旧事件: deviceId={} timestampMs={} evictedTotal={}",
+                        evicted.deviceId, evicted.timestampMs, evictedCount.get());
             }
         }
         log.debug("离线报警已缓存: deviceId={} eventType={} severity={} pendingCount={}",
@@ -155,14 +171,25 @@ public class OfflineAlarmCache {
     }
 
     /**
+     * 累计被容量驱逐掉的报警事件数（进程生命周期内单调递增，重启归零）。
+     * <p>
+     * 归零口径要跟着重启这条线走：本类不落盘，所以这个数只在当前进程内有意义
+     * （{@code docs/persistence-and-dead-surface-audit.md} §3.3 记的就是这条边界）。
+     */
+    public long evictedCount() {
+        return evictedCount.get();
+    }
+
+    /**
      * 获取缓存统计信息。
      *
-     * @return 统计 map（含 totalCount/oldestTimestampMs/newestTimestampMs）
+     * @return 统计 map（含 totalCount/maxCacheSize/evictedCount/oldestTimestampMs/newestTimestampMs）
      */
     public Map<String, Object> getCacheStats() {
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("totalCount", queue.size());
         stats.put("maxCacheSize", maxCacheSize);
+        stats.put("evictedCount", evictedCount.get());
 
         long oldest = Long.MAX_VALUE;
         long newest = Long.MIN_VALUE;

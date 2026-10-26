@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import UnifiedCommandPanel from '../src/components/UnifiedCommandPanel.jsx'
-import { emergencyOrch, disaster, listSurveillanceEvents, listSurveillanceDevices } from '../src/api.js'
+import { emergencyOrch, disaster, listSurveillanceEvents, listSurveillanceDevices, getAirGroundSituation } from '../src/api.js'
 
 /**
  * 接线缺口 #104 的三处（2026-10-17）。三处性质**不同**，台账上一视同仁记成
@@ -355,5 +355,72 @@ describe('#107 能力门控：前端按后端的能力位禁用 PTZ', () => {
     fireEvent.click(screen.getAllByText(/cam-alarm|报警设备/)[0])
     await waitFor(() => expect(screen.getByText(/没有 PTZ/)).toBeTruthy())
     expect(screen.getAllByTitle('设备不支持云台控制')[0].disabled).toBe(true)
+  })
+})
+
+/**
+ * 审计发现（`docs/persistence-and-dead-surface-audit.md` §3.1）：
+ * 「空地协同态势」这一格三列全为空，而且**不是因为没有数据**——
+ * 后端 `situationToMap` 早就在发 `surveillanceDevices` / `droneStatuses`，
+ * 而前端读的是 `groundUnits|groundPersonnel` / `aerialUnits|drones`，**键名对不上**；
+ * 第三列 `coordinationTasks` 后端根本没这个键。
+ * 加上原来的 mock 直接返回 `null`，任何键名错都不会让任何断言变红。
+ *
+ * 这几条把"后端真实键名必须被读到"钉住：改坏任一侧（后端改名 / 前端改读），这里就红。
+ */
+describe('空地态势三列必须读后端真实键名（#104 之后的键漂移）', () => {
+  const SITUATION = {
+    surveillanceDevices: [
+      { id: 'cam-east', name: '东门摄像头', status: 'active', online: true },
+    ],
+    droneStatuses: [
+      { sysid: 7, online: true, lat: 39.9, lon: 116.3, alt: 80, batteryPct: 55, batteryKnown: true, missionPhase: 'MISSION' },
+    ],
+    coordinationTasks: [
+      { coordinationId: 'AGC-1', name: '协同 AGC-1', status: 'ASSESSING', startTimeMs: 1, droneIds: [7] },
+    ],
+    alarmEvents: [],
+    meshTopology: { nodeCount: 1, linkCount: 0, coverageRate: 100 },
+    unacknowledgedAlarmCount: 0,
+  }
+
+  it('后端按真实键名返回时，三列都渲染出内容（不是"暂无"）', async () => {
+    getAirGroundSituation.mockResolvedValue(SITUATION)
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText('东门摄像头')).toBeTruthy())
+    expect(screen.getByText('UAV-7')).toBeTruthy()
+    expect(screen.getByText('协同 AGC-1')).toBeTruthy()
+    expect(screen.queryByText('暂无地面单位')).toBeNull()
+    expect(screen.queryByText('暂无空中单位')).toBeNull()
+    expect(screen.queryByText('暂无协同任务')).toBeNull()
+  })
+
+  it('后端返回空数组时才显示"暂无"——空态必须来自数据为空，不能来自键名错位', async () => {
+    getAirGroundSituation.mockResolvedValue({
+      ...SITUATION,
+      surveillanceDevices: [],
+      droneStatuses: [],
+      coordinationTasks: [],
+    })
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText('暂无空中单位')).toBeTruthy())
+    expect(screen.getByText('暂无地面单位')).toBeTruthy()
+    expect(screen.getByText('暂无协同任务')).toBeTruthy()
+  })
+
+  it('空中单位取 droneStatuses 后，sysid 与在线态原样出现在面板上', async () => {
+    getAirGroundSituation.mockResolvedValue({
+      ...SITUATION,
+      droneStatuses: [
+        { sysid: 9, online: false, lat: 0, lon: 0, alt: 0, batteryPct: 0, batteryKnown: false, missionPhase: 'UNKNOWN' },
+      ],
+    })
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText('UAV-9')).toBeTruthy())
+    // offline 且 batteryKnown=false：面板显示离线，而不是把"没上报"读成"电量 0%"
+    expect(screen.getByText('OFFLINE')).toBeTruthy()
   })
 })

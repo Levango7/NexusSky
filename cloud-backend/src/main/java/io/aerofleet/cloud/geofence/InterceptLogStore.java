@@ -11,7 +11,8 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 /**
  * 拦截日志存储：使用 {@link ConcurrentLinkedDeque} 存储拦截日志，支持并发追加与遍历。
  * <p>
- * 日志上限 {@value #MAX_LOGS} 条，超过时丢弃最旧记录。
+ * 日志上限默认 {@value #DEFAULT_MAX_LOGS} 条（可经 {@code aerofleet.geofence.intercept.log-max-size} 覆盖），
+ * 超过时丢弃最旧记录，丢弃条数由 {@link #evictedCount()} 累计。
  * <p>
  * 线程安全实现：所有操作通过 {@link ConcurrentLinkedDeque} 的原子方法保证。
  *
@@ -22,11 +23,50 @@ public class InterceptLogStore {
 
     private static final Logger log = LoggerFactory.getLogger(InterceptLogStore.class);
 
-    /** 拦截日志最大保留条数。 */
-    static final int MAX_LOGS = 1000;
+    /** 拦截日志最大保留条数的默认值（可由配置键覆盖，见构造函数）。 */
+    static final int DEFAULT_MAX_LOGS = 1000;
+
+    /**
+     * 拦截日志最大保留条数。
+     * <p>
+     * 原来这是硬编码常量，而 {@code application.properties:252} 同时写着
+     * {@code aerofleet.geofence.intercept.log-max-size=1000}——**没有一行代码读它**。
+     * 现在把它接上：键值真生效，默认值仍与文档一致。
+     */
+    private final int maxLogs;
+
+    /** 被容量丢弃的拦截日志累计数（进程生命周期内单调递增）。 */
+    private final java.util.concurrent.atomic.AtomicLong evictedCount =
+            new java.util.concurrent.atomic.AtomicLong(0L);
 
     /** 拦截日志（最新在队尾）。 */
     private final ConcurrentLinkedDeque<InterceptLog> logs = new ConcurrentLinkedDeque<>();
+
+    public InterceptLogStore() {
+        this(DEFAULT_MAX_LOGS);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public InterceptLogStore(
+            @org.springframework.beans.factory.annotation.Value(
+                    "${aerofleet.geofence.intercept.log-max-size:" + DEFAULT_MAX_LOGS + "}") int maxLogs) {
+        this.maxLogs = maxLogs > 0 ? maxLogs : DEFAULT_MAX_LOGS;
+    }
+
+    /** 当前生效的保留上限（配置键被非正值覆盖时回退默认值）。 */
+    public int maxLogs() {
+        return maxLogs;
+    }
+
+    /**
+     * 累计被容量丢掉的拦截日志条数。
+     * <p>
+     * 拦截记录是"平台拒绝过多少次越权命令"的证据；丢弃发生时如果只留一行 DEBUG，
+     * 事后没人知道证据少了多少，所以这个数要能被端点与指标读出去。
+     */
+    public long evictedCount() {
+        return evictedCount.get();
+    }
 
     /**
      * 记录一条拦截日志；超过上限时丢弃最旧记录。
@@ -35,8 +75,10 @@ public class InterceptLogStore {
      */
     public void record(InterceptLog logEntry) {
         logs.addLast(logEntry);
-        while (logs.size() > MAX_LOGS) {
-            logs.pollFirst();
+        while (logs.size() > maxLogs) {
+            if (logs.pollFirst() != null) {
+                evictedCount.incrementAndGet();
+            }
         }
         if (logEntry.getVerdict() == InterceptVerdict.Verdict.DENY) {
             log.warn("Intercept log: sysid={} command={} verdict=DENY reason={}",

@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 208 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 209 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,13 +30,103 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 208 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 209 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
 
+## [Unreleased] — 「空地协同态势」三列永远显示"暂无"：一半是恒空实现，一半是前后端键名对不上（2026-10-26）
+
+### 1. 为什么动：台账里那句"10+ 模块只存内存"从来没人逐模块核过
+
+用户要求把待办做扎实——「空话就落实」。于是对 `docs/todo.md` 的 P2 #15（内存态）与
+P2 #18（死枚举/空端点）跑了三路只读扫描（内存态清单 / 32 处恒空返回逐个追消费端 /
+139 个枚举声明 + 109 个配置键双向对账），产出
+**`docs/persistence-and-dead-surface-audit.md`**。本条记的是**其中已被落实的那部分**。
+
+粗数校正（原话是空的，现在是有口径的）：#15 实测 **必须落库 9 / 需产品定 10 / 可接受 11**，
+不是"10+"；"28 个迁移脚本建 34 张表"实为 **33 张**。
+
+### 2. 现场：一个面板的三列，两种坏法叠在一起
+
+`UnifiedCommandPanel` 的"空地协同态势"三列**永远**是"暂无地面单位 / 暂无空中单位 / 暂无协同任务"：
+
+- **空中单位**：后端 `AirGroundCoordinationService.collectDroneStatuses()` 方法体就是
+  `return List.of();`（注释自陈"简化实现"）。连带 `buildMeshTopology` 的节点数、覆盖率、
+  `avgBatteryPct` 全部恒零，而 HTTP 照旧 200。
+- **地面单位**：后端**早就在发**真数据（`situationToMap` 里的 `surveillanceDevices`），
+  前端读的却是 `groundUnits || groundPersonnel` —— **键名对不上，有数也显示不出**。
+- **协同任务**：记录一直好好存在服务的 `coordinationRecords` 里，但**没有读口**，
+  响应里也就没有 `coordinationTasks` 这个键。
+
+为什么长期没人发现：`gcs-web/test/unifiedCommandWiring.test.jsx` 把这个端点
+**mock 成 `null`** —— 键名怎么错、实现怎么空，都不会有任何断言变红。
+
+### 3. 修
+
+- `collectDroneStatuses()` 接机队注册表 `gateway.DeviceRegistry.all()`；注册表缺席（可选依赖）
+  才是空，并且留 WARN —— 让"空"至少能区分"真没有机"和"没接上"。构造器加第九位可选参数，
+  **旧八参重载保留**，既有测试一行没改。
+- 服务侧新增 `listCoordinationRecords()`（按 `startTimeMs` 倒序），控制器补发 `coordinationTasks`。
+- 前端三列改读后端**真实键名**（旧猜测留作兜底）。
+- 顺带处理一个夹取陷阱：`DroneStatus.batteryPct` 把未上报的 `-1` 夹成 `0`，
+  于是"没上报电量"会被读成"电量告急"，还会拉低编队平均电量。
+  新增 `batteryKnown`（在夹取**前**判定，构造器签名不变），`/situation` 带出该标志，
+  `avgBatteryPct` 按它过滤。
+
+### 4. 同批落实的两条死配置键（都在 geofence 上，正好是审计点名的）
+
+- `aerofleet.geofence.intercept.enabled` 是**假开关**：全仓没有任何代码读它，
+  真正生效的键是近义的 `aerofleet.geofence.restriction.intercept-enabled`
+  （`GeofenceInterceptService.java:62`）。运维把它改成 false 会以为硬拦截关了。⇒ 删除死键，原位留注释指向真键。
+- `aerofleet.geofence.intercept.log-max-size` **声称可调、实现是硬编码常量 1000**
+  ⇒ 真的接进 `InterceptLogStore`（非正值回退默认），并给 `/intercept/logs` 补
+  `maxLogs` 与 `evictedCount`——拦截记录是环形缓冲，"现在有几条"和"曾经丢了几条"必须一起给。
+- `OfflineAlarmCache` 类注释原话"**确保报警事件不丢失**"超出实现（500 上限 FIFO 驱逐 +
+  未 flush 前重启全丢）⇒ 注释改成写清两个丢失窗口的口径，并补 `evictedCount` 进
+  `getCacheStats()`（驱逐本来有 WARN，但没有可采集的数）。
+
+### 5. 验收（改坏⇒红）
+
+| 新增/改强 | 钉住什么 |
+|---|---|
+| `AirGroundCoordinationServiceTest.fusePullsDronesFromFleetRegistry` | 两架机进得来、字段逐项对、NaN 位置落 0；改回恒 `List.of()` 必红 |
+| `…Test.fuseDegradesWhenFleetRegistryAbsent` | 注册表缺席才是空，且 mesh 节点数一起归零 |
+| `…Test.droneStatusBatteryClamp`（扩展） | `150 / -10` ⇒ `batteryKnown=false`，`55` ⇒ true |
+| `InterceptLogStoreTest`（新，3 条） | 上限真由参数决定且保留最新三条 / 非正值回退默认 / 6 进 2 留 ⇒ `evictedCount=4` |
+| `OfflineAlarmCacheTest`（+2 条 + 扩展空态统计） | 驱逐 2 条必须报 2；`clear()` 不抹累计数 |
+| `AirGroundCoordinationControllerTest`（**新文件**，3 条） | `/situation` 必须发 `surveillanceDevices / droneStatuses / coordinationTasks / alarmEvents / meshTopology.nodeCount` 这些**前端真在读的键**；`batteryKnown` 属于对外契约的一部分；机数据来自注册表且 mesh 节点数随在线机数走。此前这个端点的响应形状**没有任何测试** |
+| `unifiedCommandWiring.test.jsx`（+3 条） | 后端真实键名三列都出数 / 空数组才是"暂无" / 离线机原样显示 |
+
+实测（全部为本机 `mvn -B -o clean test` + `npm run test:ci` 的产物，门禁逐格核对）：
+前端 **580/580，42 个测试文件**（`test/` 40 + `src/` 2）；Java **5260 / 0 失败 / 0 错误 / 0 跳过**
+（613 个测试类；`cloud-backend` 3088 → **3098**，净增 10 例）。
+`check-test-count-docs.py` **全部一致**、`check-repo-hygiene.py` 通过、
+`check-claimed-endpoint-count.py` 414=414 通过。
+
+**A/B 变异反证（4 个变异，每个只红它该红的那几条）**
+
+| 变异（把修复改坏） | 应变红的用例 | 实测 |
+|---|---|---|
+| `OfflineAlarmCache`：去掉 `evictedCount.incrementAndGet()` | `evictionIsCountable` / `clearKeepsCumulativeEvictedCount` | **恰好这 2 条红，其余 13 条不受影响** |
+| `collectDroneStatuses()`：改回 `return List.of()` | `fusePullsDronesFromFleetRegistry` / 控制器两条数据用例 | **恰好 3 条红**；`fuseDegradesWhenFleetRegistryAbsent` 按设计保持绿（它断言的就是空） |
+| `InterceptLogStore`：忽略注入上限、回到硬编码 | `capIsConfigurableNotHardcoded` / `evictionsAreCountable` | **恰好 2 条红** |
+| 前端面板：键名改回审计发现的错键 `aerialUnits\|drones` | 新增的"真实键名三列出数"与"sysid 原样显示" | **恰好 2 条红**，"空数组才是暂无"保持绿 |
+
+四次变异后全部逐个还原，并 `grep MUTATION-PROBE` 确认树里没留探针；
+还原后前端复跑 **17/17**、全 reactor **BUILD SUCCESS**。
+
+### 6. 本批没做的，以及为什么
+
+- §2.1 那 9 条"必须落库"每条要新表 + 实体 + 恢复路径，一批一条，不和"接通一个面板"混在一个 PR。
+- 死枚举/死 getter 的删除要逐个确认写入方（6 组是"只有测试在用"，删之前得先看谁在钉它），单列下一批。
+- `restriction.source-path` 与代码实际读的 `restriction-file` 键名漂移已查清但**未改**——
+  改名会让既有部署配置失效，需要一次带迁移说明的独立改动。
+
+
+---
 ## [Unreleased] — e2e-rtk 在慢 runner 上注入「看似没生效」的时序脆弱性修复（2026-10-26）
 
 ### 形态（master run 40240416165，#169 的 run 绿纯属运气）
@@ -57,6 +147,7 @@ e2e-rtk 三台机全 STANDALONE（R1/R2/R5-float 三断言挂）。根因不是�
   （默认 5s 由单测钉住；降级断言因此最多多等 ~7s）。
 - 本机 pwsh 5.1 实测（重建 jar）：ALL PASS 5/5。
 
+---
 ## [Unreleased] — NTRIP 服务层落地：定时拉流 → 切帧 → 分片 → 发 GPS_RTCM_DATA（GAPS §十.10-3，2026-10-26）
 
 ### 交付
@@ -89,6 +180,7 @@ e2e-rtk 三台机全 STANDALONE（R1/R2/R5-float 三断言挂）。根因不是�
 - drone-sim 不重组分片（每片到达即算「改正数在流」）——重组是飞控职责；
 - 未做 REST 状态端点 / 未做按机选发（租户/机巢粒度），后续按需加。
 
+---
 ## [Unreleased] — link-sim 控制面 413 早拒绝不消费请求体：CI 上三跑两挂的真竞态（2026-10-26）
 
 ### 形态（本批 #163/#170 的 CI 连续抓到）
