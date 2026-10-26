@@ -2016,3 +2016,43 @@ jobs:
           version: v3.14.4
       - name: 占位凭据门禁校验
         run: bash scripts/check-deploy-secrets.sh
+
+  # GAPS §二「docker-compose 完整性验证」的运行层收口。
+  #
+  # 2026-10-06 曾在干净环境手工跑通过一次（5 容器 healthy + 探活全绿），但**没有 CI 守卫**：
+  # 此后任何编排/镜像改动都没有回归。本机 Windows 的 host 网络不完整，无法稳定复跑；
+  # Linux runner 是唯一可复现环境。本 job 把「跑过一次」升级为「相关改动必须跑通」。
+  #
+  # 成本控制：5 容器 + 三镜像（Maven×2 + npm）构建约 10 分钟，不该让纯文档/纯测试 PR 付这个代价。
+  # PR 上只在改动触及**镜像内容**（编排/Dockerfile/pom/各模块 src/main/gcs-web 构建输入）时执行；
+  # push（master/tag）无条件执行。判定用 git diff --name-only，不引入第三方 paths-filter。
+  compose-smoke:
+    name: Compose smoke (up → health → down)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide scope (PR 仅在相关改动时执行)
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base='${{ github.event.pull_request.base.sha }}'
+          changed="$(git diff --name-only "$base"...HEAD)"
+          echo "changed files:"; printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '^(deploy/docker/|docker-compose[^/]*\.ya?ml$|Dockerfile|.*pom\.xml$|cloud-backend/src/main/|drone-sim/src/main/|mavlink-core/src/main/|gcs-web/src/|gcs-web/public/|gcs-web/package(-lock)?\.json|gcs-web/vite\.config\.|gcs-web/index\.html|gcs-web/nginx\.conf|scripts/compose-smoke\.sh$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compose smoke (build → up → health → down)
+        if: steps.scope.outputs.run == 'true'
+        run: bash scripts/compose-smoke.sh

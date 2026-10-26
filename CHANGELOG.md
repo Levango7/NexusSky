@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 207 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 208 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,35 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 207 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 208 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — docker-compose 运行层 smoke 进 CI（GAPS §二收口，2026-10-26）
+
+### 交付
+
+- 新增 `scripts/compose-smoke.sh`：`docker compose -f deploy/docker/docker-compose.yml
+  up -d --build`（三镜像多阶段构建，等价于 mvn package 三模块 + npm build）→ 轮询
+  `:28080/actuator/health` 直到 `{"status":"UP"}`（上限 180s）→ 校验 gcs-web `:23000/`
+  返回 200 且反代 `/actuator/health` 通 → 确认 drone-sim 处于 running →
+  无条件 `down -v --remove-orphans`。失败时先 dump `compose ps` 与 `logs --tail=200` 再拆栈。
+- 新增 CI job `compose-smoke`（`ubuntu-24.04`，timeout 45min）。PR 上仅当改动触及
+  `deploy/docker/`、`docker-compose*.yml`、`Dockerfile*`、`cloud-backend/`、`drone-sim/`、
+  `gcs-web/`、`mavlink-core/`、`pom.xml`、`ci.yml` 时执行（`git diff --name-only` 判定，
+  不引入第三方 paths-filter）；push（master/tag）与手动触发无条件执行。
+- 测试凭据内联导出（JWT ≥32 字节 / 加密密钥任意非空 / users `admin:...:ADMIN`），
+  **不落 `.env`**——仓库 hygiene 门禁禁止提交 `.env`。
+
+### 为什么
+
+2026-10-06 曾在干净环境手工跑通过一次（5 容器 healthy、`:28080/actuator/health`=UP、
+`:23000/`=200、反代探活=200），但**这次验证没有任何 CI 守卫**：此后任何编排/镜像改动
+都没有回归。本机 Windows 的 host 网络不完整，无法稳定复跑；Linux runner 是唯一可复现环境。
+本 job 把「跑过一次」升级为「每次相关改动都必须跑通」。
 
 ## [Unreleased] — NTRIP 服务层落地：定时拉流 → 切帧 → 分片 → 发 GPS_RTCM_DATA（GAPS §十.10-3，2026-10-26）
 
