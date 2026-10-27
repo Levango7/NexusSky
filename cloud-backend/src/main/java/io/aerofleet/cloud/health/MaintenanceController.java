@@ -52,9 +52,39 @@ public class MaintenanceController {
 
     private final PredictiveMaintenanceService predictionService;
 
-    /** 维护记录存储：id -> record（内存实现，后续可替换为 JPA）。 */
+    /** 维护记录存储：id -> record（repository 不可用时的内存后备）。 */
     private final Map<String, MaintenanceRecord> records = new ConcurrentHashMap<>();
     private final AtomicLong idSeq = new AtomicLong(1);
+
+    /**
+     * 维护记录持久化仓库（V30；审计 §2.1 第 3 条）。repository 缺失（纯单测构造）时
+     * 自动降级为内存语义——与 {@code ConflictAvoidanceService} 同款取舍。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MaintenanceRecordRepository repository;
+
+    /**
+     * 启动时把 id 序列对齐到库中最大 "m-N"——不做这一步，重启后 nextId 从 m-1 重来，
+     * 新记录会**覆盖**同 id 的旧记录（比"丢数据"更隐蔽的坑，审计 §5 Q5 同族）。
+     */
+    @jakarta.annotation.PostConstruct
+    void seedIdSequenceFromRepository() {
+        if (repository == null) {
+            return;
+        }
+        long max = 0;
+        for (MaintenanceRecordEntity e : repository.findAll()) {
+            String id = e.getId();
+            if (id != null && id.startsWith("m-")) {
+                try {
+                    max = Math.max(max, Long.parseLong(id.substring(2)));
+                } catch (NumberFormatException ignored) {
+                    // 自定义 id（POST 允许显式传入），不参与序列推进
+                }
+            }
+        }
+        idSeq.set(max + 1);
+    }
 
     public MaintenanceController(PredictiveMaintenanceService predictionService) {
         this.predictionService = predictionService;
@@ -72,11 +102,38 @@ public class MaintenanceController {
     public List<MaintenanceRecord> getRecords(
             @RequestParam(value = "sysid", required = false) Integer sysid,
             @RequestParam(value = "status", required = false) String status) {
+        if (repository != null) {
+            MaintenanceRecord.Status parsedStatus = status == null ? null : parseStatusOrNull(status);
+            if (status != null && parsedStatus == null) {
+                return List.of();   // 非法枚举：无匹配（与内存路径 filter 语义一致）
+            }
+            List<MaintenanceRecordEntity> entities;
+            if (sysid != null && status != null) {
+                entities = repository.findBySysidAndStatusOrderByIdAsc(sysid, parsedStatus);
+            } else if (sysid != null) {
+                entities = repository.findBySysidOrderByIdAsc(sysid);
+            } else if (status != null) {
+                entities = repository.findByStatusOrderByIdAsc(parsedStatus);
+            } else {
+                entities = repository.findAllByOrderByIdAsc();
+            }
+            return entities.stream().map(MaintenanceRecordEntity::toRecord)
+                    .collect(Collectors.toList());
+        }
         return records.values().stream()
                 .filter(r -> sysid == null || r.getSysid() == sysid)
                 .filter(r -> status == null || r.getStatus().name().equalsIgnoreCase(status))
                 .sorted(Comparator.comparing(MaintenanceRecord::getId))
                 .collect(Collectors.toList());
+    }
+
+    /** status 过滤参数解析：返回 null 表示"该参数匹配不到任何东西"（不合法枚举≠500）。 */
+    private static MaintenanceRecord.Status parseStatusOrNull(String status) {
+        try {
+            return MaintenanceRecord.Status.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**
@@ -113,7 +170,11 @@ public class MaintenanceController {
         if (body.getScheduledDate() == null) {
             body.setScheduledDate(LocalDate.now().plusDays(1));
         }
-        records.put(id, body);
+        if (repository != null) {
+            repository.save(MaintenanceRecordEntity.fromRecord(body));
+        } else {
+            records.put(id, body);
+        }
         log.info("Maintenance record created: id={} sysid={} component={} type={}",
                 id, body.getSysid(), body.getComponentType(), body.getMaintenanceType());
         return body;
@@ -135,7 +196,10 @@ public class MaintenanceController {
     @RequireRole(Role.OPERATOR)
     public MaintenanceRecord updateRecord(@PathVariable("id") String id,
                                            @RequestBody MaintenanceRecord body) {
-        MaintenanceRecord existing = records.get(id);
+        MaintenanceRecordEntity entity = repository != null ? repository.findById(id).orElse(null) : null;
+        MaintenanceRecord existing = repository != null
+                ? (entity != null ? entity.toRecord() : null)
+                : records.get(id);
         if (existing == null) {
             throw new NotFoundException("maintenance record not found: " + id);
         }
@@ -162,6 +226,10 @@ public class MaintenanceController {
             existing.setNotes(body.getNotes());
         }
         existing.setCost(body.getCost());
+        if (repository != null) {
+            entity.applyFrom(existing);
+            repository.save(entity);
+        }
         log.info("Maintenance record updated: id={} status={}", id, existing.getStatus());
         return existing;
     }
@@ -193,6 +261,16 @@ public class MaintenanceController {
     @Operation(summary = "获取维护计划", description = "返回 SCHEDULED 与 IN_PROGRESS 状态的维护记录，按计划时间升序排列。")
     @GetMapping("/schedule")
     public List<MaintenanceRecord> getSchedule() {
+        if (repository != null) {
+            List<MaintenanceRecord> all = new java.util.ArrayList<>();
+            all.addAll(repository.findByStatusOrderByIdAsc(MaintenanceRecord.Status.SCHEDULED)
+                    .stream().map(MaintenanceRecordEntity::toRecord).toList());
+            all.addAll(repository.findByStatusOrderByIdAsc(MaintenanceRecord.Status.IN_PROGRESS)
+                    .stream().map(MaintenanceRecordEntity::toRecord).toList());
+            all.sort(Comparator.comparing(
+                    r -> r.getScheduledDate() == null ? LocalDate.MAX : r.getScheduledDate()));
+            return all;
+        }
         return records.values().stream()
                 .filter(r -> r.getStatus() == MaintenanceRecord.Status.SCHEDULED
                         || r.getStatus() == MaintenanceRecord.Status.IN_PROGRESS)

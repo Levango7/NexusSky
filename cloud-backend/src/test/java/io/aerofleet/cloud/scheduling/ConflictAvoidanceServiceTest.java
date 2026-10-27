@@ -614,4 +614,29 @@ class ConflictAvoidanceServiceTest {
         assertThat(service.checkAllConflicts(null)).isEmpty();
         assertThat(service.checkAllConflicts(List.of())).isEmpty();
     }
+
+    // ------------------------------------------------------------------
+    // profile 钉扎（2026-10-27，审计 §5 Q1 定案）
+    // ------------------------------------------------------------------
+
+    /**
+     * 持久化开关此前**五个 profile 无一打开**（审计 §2.1 最后一条）——
+     * 往返能力已有测试（{@link #persistRoundTripAndRestore}），但生产从未启用。
+     * 本测试把「staging/prod 必须开着」钉住：谁把这两行删掉，这里直接红。
+     * dev/test 保持内存语义（hermetic），不在断言范围内。
+     */
+    @Test
+    @DisplayName("profile 钉扎：staging 与 prod 都必须打开 reservation.persist")
+    void stagingAndProdProfilesEnableReservationPersist() throws Exception {
+        for (String profile : new String[]{"application-staging.properties", "application-prod.properties"}) {
+            java.util.Properties props = new java.util.Properties();
+            try (java.io.InputStream in = getClass().getClassLoader().getResourceAsStream(profile)) {
+                assertThat(in).as("%s 必须存在", profile).isNotNull();
+                props.load(in);
+            }
+            assertThat(props.getProperty("aerofleet.scheduling.reservation.persist"))
+                    .as("%s 的 reservation.persist", profile)
+                    .isEqualTo("true");
+        }
+    }
 }

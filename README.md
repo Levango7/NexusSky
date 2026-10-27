@@ -724,7 +724,7 @@ NexusSky/
 ├── sdk-python/          Python 客户端 SDK
 ├── scripts/             start-all.cmd / e2e-smoke.sh / 90 个脚本（其中 44 个 e2e-*）
 ├── docker-compose.yml   Linux 下一键编排
-├── docs/                41 篇文档
+├── docs/                42 篇文档
 └── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）
 ```
 
@@ -742,10 +742,10 @@ NexusSky/
 | `mavlink-core` | 511 |
 | `drone-sim` | 1452 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3189 |
+| `cloud-backend` | 3202 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5351
+| **总计** | **5364
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
