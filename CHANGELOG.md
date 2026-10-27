@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 212 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 213 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,36 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 212 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 213 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — GAPS 清账批：HardwarePanel 旋翼契约对齐（§八.6）+ CHANGELOG 断条目排版归位（G-2）（2026-10-26）
+
+### ① HardwarePanel `{}` 当一台旋翼（GAPS §八.6，语义裁决后修复）
+
+裁决依据是**后端代码**不是猜：`/rotor/telemetry/{sysid}` 恒返回单台机的**扁平**旋翼视图
+（`HardwareDataController.rotorTelemetryView` 字段齐全；`RotorController.getTelemetry` 是
+`computeIfAbsent` 永不为 null）——既无 `{rotors:[...]}` 形状，也不可能返回 `{}`。
+旧写法 `rotor?.rotors || (rotor ? [rotor] : [])` 的前者是对不存在契约的死防御，
+后者会把任何 truthy 异形载荷当旋翼渲染成整行 `--`。修复：只有带契约键 `rotorIndex`
+的载荷才算一台旋翼（`!= null` 判——0 是合法值）。新增 `hardwarePanelRotors.test.jsx`
+5 例（契约形状恰一行 / 404 空态 / `{}` 空态 / `{rotors:[]}` 空态 / rotorIndex=0 不误杀）。
+
+### ② CHANGELOG P1 断条目排版归位（G-2，纯排版不改一字）
+
+2026-10-12 那条「外部评估报告 P1 续整改」的**标题在 11259 行、正文孤悬在 11427 行起**
+（两次解冲突各补一半，标记行已消但条目仍是断的；读者从标题往下看会以为那轮什么都没做）。
+本次把正文整段移到标题之下，顺带清掉三处 `---` 族残渣。
+
+### 账目
+
+- GAPS §九.2 的「commands 面缺 land」**经查已由 2026-10-24 提交连测试补齐**
+  （`DroneController:205` land case + `DroneControllerTest:185` 同源注释）——过期账，销账。
+- 前端用例 577 → 582（+5）。
 
 ## [Unreleased] — ONVIF 从模拟升级为 simulated/live 双后端：真实 SOAP + WS-Discovery，失败不回退猜地址（P2 #14 第一刀，2026-10-26）
 
