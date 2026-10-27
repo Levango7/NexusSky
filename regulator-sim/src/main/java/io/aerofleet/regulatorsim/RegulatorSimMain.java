@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory;
  * regulator-sim 启动入口：模拟 UOM 监管平台 HTTP API 的独立进程。
  *
  * <pre>
- * java -jar regulator-sim.jar [--port N] [--delay-ms N] [--error-rate F] [--error-status N] [--preset-file PATH] [--help]
+ * java -jar regulator-sim-<version>-shaded.jar [--port N] [--delay-ms N] [--error-rate F] [--error-status N] [--preset-file PATH] [--help]
  *   --port          HTTP 监听端口（默认 18080）
  *   --delay-ms      响应延迟毫秒（默认 0）
  *   --error-rate    随机错误率 0.0-1.0（默认 0.0）

@@ -108,6 +108,22 @@
 
 
 
+### 修复：regulator-sim 的 fat 主 artifact 污染下游 SLF4J（CI 红）
+
+本 PR 新增的 `UomSinkVsRegulatorSimContractTest` 让 cloud-backend **首次依赖** regulator-sim。
+该模块的 shade 此前没挂 classifier——早期 CHANGELOG 记的「link-sim/regulator-sim 无下游依赖，
+保持默认 fat 主 artifact」这个前提**已经失效**：fat 主 artifact 把内嵌的 `slf4j-simple` 类带进
+测试 classpath，而 `<exclusions>` 只能摘依赖坐标、摘不掉 jar 里的类。症状是
+`VideoFusionRecordingServiceTest` 的 logback 强制转换抛 ClassCastException，触发 Spring 上下文
+失败阈值缓存，最终 `Tests run: 3259, Errors: 125`，并连带 `Mutation baseline gate (surveillance)` 红。
+
+- **修法**：regulator-sim 的 fat jar 改为 `shaded` classifier 附属（主 artifact 回到 thin jar，
+  与 drone-sim 同形状）；`scripts/e2e-regulator.ps1` 的 jar 通配改为显式 `*-shaded.jar`（两处）；
+  两个入口注释同步 jar 名。
+- **验证**：`mvn -o -pl regulator-sim -am -DskipTests package` 产出 thin 30 KB + shaded 2.48 MB；
+  `VideoFusionRecordingServiceTest` / `TwinControllerTest` / `UomSinkVsRegulatorSimContractTest`
+  **13/13 通过**（修复前这三类全红）。
+
 ## [Unreleased] — 持久化 9/9 收官：配送六阶段上位（V36）+ 应急编排落库（V37）（2026-10-27）
 
 ### 做：审计 §2.1「必须落库」最后两条（9/9 全清）
