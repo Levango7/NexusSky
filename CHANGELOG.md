@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-27 共有 216 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-27 共有 217 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,37 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 216 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 217 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — 持久化 9/9 收官：配送六阶段上位（V36）+ 应急编排落库（V37）（2026-10-27）
+
+### 做：审计 §2.1「必须落库」最后两条（9/9 全清）
+
+- **配送六阶段上位**（#5 裁决落地，V36）：`delivery_task2` 加 phase + 位置五列；
+  tracker 写穿时**粗状态由六阶段派生**（`coarseOf`，单一写入点=二者永不漂移）；
+  重启读穿修掉"任务在库、状态 404"；存量回填只做无歧义映射（FAILED/ABORTED 行
+  **保持 NULL 不假造**——读穿对它们如实返回"无状态"，404 语义不被污染）。5 例。
+- **应急编排落库**（#8 裁决落地，V37）：`emergency_plan` 新表 + 整 Map 快照 JSON
+  （Jackson 对 Map 双向无损）；写穿于 start/abort/上报回调三处、读穿于 getPlan——
+  重启后编排进度与事件列表可查；planId 由 V35 sequence_counter 续号（两批衔接）。
+  4 例。
+
+### 顺带修：NtripClient 静默关闭的异常契约归一
+
+全量测试暴露 `NtripClientTest.handlesSilentClose` 偶发红——Windows 上 caster 静默关闭
+是 RST（SocketException），Linux 是干净 EOF：两种同语义（对端回应前关连接）却抛
+不同异常类型。修法：connect() 把 SocketException 归一为 NtripException（契约统一），
+不放宽测试。
+
+### 账目
+
+- **持久化 9/9 全部落地**（立项书 P1 收官）；计数：cloud-backend 3221→3230（+9），
+  全仓 5383→5392。V36/V37 迁移动用"真 jar+真 H2+真 Flyway"启动验证（36 迁移至 v37 + Started）。
 
 ## [Unreleased] — 四项决策拍板落账 + 单调序列 V35 落地（2026-10-27）
 

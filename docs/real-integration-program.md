@@ -14,6 +14,7 @@
 ## P1 · 持久化（能做的——审计 §2.1「必须落库」9 条）
 
 来源：`docs/persistence-and-dead-surface-audit.md` §2.1（每条带 `file:line` 与"重启丢什么"）。
+> **2026-10-27：9 条「必须落库」全部落地（9/9）**。
 
 | # | 模块 | 状态 |
 |---|---|---|
@@ -21,10 +22,10 @@
 | 2 | 维护记录 `MaintenanceController` | ✅ **2026-10-27 落库**（V30 `maintenance_records` + 实体/仓库 + id 序列从库续起防覆盖） |
 | 3 | 出警历史 `AutoDispatchService` | ✅ **2026-10-27 落库**（V31 `dispatch_history` + 启动恢复最新 500 + 同口径裁剪；容量语义不变） |
 | 4 | 测绘航线航点 `MappingController` | ✅ **2026-10-27 落库**（V34 `mapping_task.waypoints` + MappingWaypointCodec 显式映射 + 读穿；**契约裁决：任务存在⇒200+真实航点 / 从未规划⇒空数组 / 任务不存在⇒404**，三态唯一） |
-| 5 | 配送六阶段状态 `DeliveryStatusTracker` | 🔒 **决策已定：六阶段上位**（2026-10-27 用户拍板）——`delivery2` 表加 `phase` 列存六阶段，对外粗状态由六阶段派生（API 兼容不变），存量行映射回填。**实现待做**（下一批，迁移号 V36 起） |
+| 5 | 配送六阶段状态 `DeliveryStatusTracker` | ✅ **2026-10-27 落地**（V36）：`delivery_task2` 加 phase/位置五列；tracker 写穿时**粗状态由六阶段派生**（单一写入点=永不漂移）；重启读穿修掉"任务在库、状态 404"；存量回填只做无歧义映射（FAILED/ABORTED 保持 NULL 不假造） |
 | 6 | 空地协同记录 `AirGroundCoordinationService` | ✅ **2026-10-27 归档落库**（V33 + 写穿 ×2 [启动完成/总结前] + **读穿修掉总结后/重启后 GET report 404**；语义裁决：内存清理 ≠ 归档删除） |
 | 7 | 合规状态 `ComplianceStateManager` | ✅ **2026-10-27 落库**（V32 + 启动水合 + 写穿；**顺带修掉三个"声明了却从未写入"的 last* 时间戳**——RegulatorController 上报的永远是 0 的修复） |
-| 8 | 应急编排 `EmergencyOrchService` | 🔒 **决策已定：新表独立落库**（2026-10-27 用户拍板）——`emergency_plan` 存轻量场景描述（灾情中心/半径/状态/租户）；orch 域 `OrchestrationPlanEntity` 是带 steps/triggers 的重实体，语义不同不强塞。**实现待做**（下一批） |
+| 8 | 应急编排 `EmergencyOrchService` | ✅ **2026-10-27 落地**（V37）：`emergency_plan` 新表 + 整 Map 快照 JSON（Jackson 对 Map 双向无损）；写穿于 start/abort/上报回调三处、读穿于 getPlan——重启后编排进度与事件列表可查；planId 由 V35 sequence_counter 续号（两批衔接） |
 | 9 | 审计哈希链 dev 档 | 🔶 配置口径（prod 已 true；staging 缺覆盖行——审计 §5 Q2 待口径） |
 
 **验收标准（全批）**：新增迁移在 H2/Postgres 双跑；每条落库配"重启恢复"测试（第一批三条约 13 例为模板：
