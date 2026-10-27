@@ -158,22 +158,46 @@
 `SprayTaskEntity.java:246`、`DeliverySequenceEntity.java:182`、`GeofenceZoneEntity.java:197`
 为私有 JSON 解析器 / JPA `convertToEntityAttribute` / IO 降级。⇒ **合法空态，保留**。
 
-### 3.5 两处待定（不硬定性）
+### 3.5 两处待定（**2026-10-28 复核定性：都不是缺陷，不改代码**）
 
-* `vision/ExternalVisionSource.java:67`：`detect()` 元数据重载恒空，但类注释 `:36/:66` 已声明；
-  `CaptureService.java:343` 只在**抛异常**时回退 truth 源，**空数组不回退**且仍标
-  `source:"vision-source"`；`application.properties:212` 的 `aerofleet.vision.source` 是注释态。
-  卡点：只读审计判不了"真实部署里有没有人把 source 覆成 external" ⇒ 需要一次带该配置的手测。
-* `ai/DecisionMonitorController.java:47`：租户不匹配时返回 200 + 空数组而非 403/404。
-  卡点：这是**假面端点**问题还是**鉴权语义**问题，属另一条线（`feedback-api-contract-audit` 的五层里
-  属于"响应形状"那层）。
+* `vision/ExternalVisionSource.java` 的 `detect()` 元数据重载恒空——**spec 内的契约**：
+  注释原文「元数据级调用：无 JPEG 像素可用（外部源只走 jpeg 重载）」（`:66-67`）；失败语义
+  （spec N1）规定非 200 / 超时 / 非法 JSON / 单条字段非法 → WARN 并返回已解析部分
+  （全失败 = 空列表），**刻意不抛异常**（`:32-33`）。`CaptureService.detectFromExternal`
+  （`:267-293`）对空结果**不回退 truth 也正确**——回退到 `ProjectionVisionSource` 会在推理
+  服务宕机时**伪造检出**，正是本仓最反对的假面；`truth(fallback)` 标签（spec S1）只保留给
+  **异常**路径（`:283-289`），空结果如实标 `external` 并由 `ExternalVisionSource` 的 WARN 留痕。
+  `aerofleet.vision.source` 有代码内默认（`CaptureService:83` 的 `:truth`），base properties 的
+  注释态不构成死键（外部源由 `@ConditionalOnProperty(havingValue="external")` 条件装配）。
+  ⇒ **维持现状**。复核锚点：`ExternalVisionSource:32-33/:54-57/:64-92`、
+  `CaptureService:83/:154-164/:267-293`。
+* `ai/DecisionMonitorController.java:47` 租户不匹配返回 200 + 空数组而非 403/404——**换线裁决**：
+  属 `feedback-api-contract-audit` 的「响应形状」层；本仓同族（按租户过滤后返回空列表）
+  是既定形态，单点改 403 会造出两套鉴权语义。⇒ **维持现状**；要统一，整批按 API 契约审计处理。
 
-### 3.6 本轮**没扫**的同族（写清边界，免得被当成已核完）
+### 3.6 本轮**没扫**的同族（**2026-10-28 已扫清：零恒空面**）
 
-`getOrDefault(key, List.of())` 形态 **17 处**（如 `inspection/InspectionTaskService.java:193/199`、
-`edge/EdgeCoordinationService.java:33`、`api/service/SatLinkMonitorService.java:121`）不在上面的正则里；
-它们的 map **是否曾被写入**决定"恒空"还是"真数据"，本轮未读消费端。
-`vision/RadarController.java:96` 的 `targets` 是否只由 `RadarScanMsg` 填（sim 不发则恒空）未实测。
+- `getOrDefault(key, 集合默认值)`：全仓 main Java 实测 **14 处**（10 处 `List.of()/emptyList()`
+  + 4 处 `new ArrayList<>()/CopyOnWriteArrayList<>()`；审计当时报「17 处」是更宽的扫描口径）。
+  逐条读消费端与写入路径，**没有一处是恒空面**：
+
+  | 位置 | 写入路径 |
+  |---|---|
+  | `ai/DecisionMonitorService:33` | `computeIfAbsent` :21 记决策 |
+  | `api/service/SatLinkMonitorService:121` | `compute` :80 收卫星过境 |
+  | `edge/EdgeCoordinationService:33` | `computeIfAbsent` :21 |
+  | `inspection/InspectionTaskService:106/145/193/199` | `put` :75/76/77/162/167 |
+  | `orch/OrchestrationPlanService:569` | 局部依赖图 `put` :536（无依赖步骤走空表） |
+  | `scheduling/ConflictAvoidanceService:651` | `computeIfAbsent` :487（+ V26 重启水合 :99） |
+  | `vision/TargetTracker:130` | `computeIfAbsent` :85 |
+  | `mapping/MappingController:372` | `put` :164（V34 航点落库） |
+  | `mapping/MappingResultService:173` | `computeIfAbsent` :197 |
+  | `mapping/PhotoCaptureService:88/99` | `computeIfAbsent` :75 |
+
+- `vision/RadarController.java:96` 的 `targets`：由 `compute` :119 写入；drone-sim 在 FR-06
+  雷达扫描任务里**真实发送** `RadarScanMsg(30017)`/`RadarTargetMsg(30018)`
+  （`VirtualDrone:2472-2504`）⇒ 不是恒空面，「空」只出现在没跑雷达任务的场景（合法空态）。
+- 结论：§3.6 登记的两个同族不存在假面；本条**收口**，不再重复扫描。
 
 ---
 
@@ -237,14 +261,16 @@
 
 ## 6. 建议的门禁（这条审计的价值在于它不该再退回去）
 
-先说现状：`scripts/` 下 16 个 `check-*` 门禁**没有任何一个**看"实现体是不是恒空"
+先说现状（2026-10-26 审计当时的）：`scripts/` 下 16 个 `check-*` 门禁**没有任何一个**看"实现体是不是恒空"
 （`grep -l "emptyList\|List.of()" scripts/*.py` 零命中）。所以这类面只能靠人读——正是本仓一直在消灭的失效面。
 
-| 建议门禁 | 判据（可复算） | 验收姿势（沿用 `check-spi-coverage.py` 的四元账形状：接口/实现/未验/豁免） |
+**2026-10-28 更新：三条建议里两条已落地**（各带八情形离线自测进 CI repo-gates）：
+
+| 建议门禁 | 判据（可复算） | 状态 |
 |---|---|---|
-| `check-statefulness.py` | 对 §2.1 的 9 个域，逐个要求"存在 `@Entity`/`Repository`/迁移表 或 显式豁免登记" | 新增一条内存态业务字段而未登记 ⇒ 红；把已落库的域从豁免账删掉 ⇒ 绿 |
-| `check-dead-wiring.py`（恒空面） | 匹配"私有方法直接 `return List.of()` 且被 `@*Mapping` 调用链引用"；命中即要求注释含 `未实现` 或登记豁免 | 用 §3.1 那条作合成夹具自证（它现在就在，天然回归探针） |
-| profile 开关对账 | `@Value` 里带 `:false` 的 `*.persist*` 开关，若 prod/staging 都没覆盖 ⇒ 报告并列出 | 这条最便宜，先把"表建了但开关没人开"（§5.1）那类抓出来 |
+| `check-statefulness.py` | 对 §2.1 的 9 个域，逐个要求"锚点证据齐全（实体/仓库/迁移表/水合方法）或显式豁免登记（理由+到期日）" | ✅ **已落地**。四类红：证据不齐且无豁免 / 豁免已满足（棘轮只准拧紧）/ 豁免到期 / 锚点失明；无域可判 ⇒ exit 2（不许"没查到"冒充"没问题"）。当前账：**9 域全部证据齐全、豁免清零**——落地时只带两条豁免（V36/V37 在上游 PR），#186 合并、本分支 rebase 后门禁**当场把两条豁免判成「豁免可以撤销」**，按棘轮删账（这条自动抓账即它的第一次真实世界验收） |
+| `check-persist-switches.py`（profile 开关对账） | `@Value` 里 `:false` 默认的 `*.persist*` 开关，prod 与 staging **都**必须显式覆盖；显式关闭必须进豁免账 | ✅ **已落地**。当前账：4 个开关全部 `prod:true / staging:true`（含 §5.1 的空域预约与 #185 的审计链）。判据只盯出厂姿势（prod/staging），test/dev 不在内 |
+| `check-dead-wiring.py`（恒空面） | 匹配"私有方法直接 `return List.of()` 且被 `@*Mapping` 调用链引用"；命中即要求注释含 `未实现` 或登记豁免 | ⏸ **暂缓（写清原因）**：同文件一跳的文本级启发式误报面大，且 §3.1 修复后当前树零命中——做出来的第一版只能对着合成夹具证明自己"能拦"，拦不到任何真东西。**先由上面两条覆盖最贵的两档**（域级"没落库"+ 开关级"没打开"），恒空面与 §3.6 的未扫同族（**2026-10-28 已实测扫清：14 处集合默认值 getOrDefault 零恒空**，见 §3.6）一起评估更实的形式（编译级调用图或按端点契约的门禁）再上 |
 
 **不要**顺手做"内存态全部落库"的大重构：§2.3 那 11 条是设备镜像/快照，落库只会加写放大。
 按 §2.1 → §2.2 分档推进，每档一批带测试。
