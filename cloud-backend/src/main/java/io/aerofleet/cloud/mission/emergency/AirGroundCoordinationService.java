@@ -94,6 +94,27 @@ public class AirGroundCoordinationService {
     private final ConcurrentHashMap<String, CoordinationRecord> coordinationRecords = new ConcurrentHashMap<>();
 
     /**
+     * 归档仓库（V33；审计 §2.1 第 6 条）。语义裁决：**内存清理 ≠ 归档删除**——
+     * 内存仍按原口径清理（防 OOM），库行保留为归档，读路径在内存未命中时读穿
+     * （总结后/重启后 GET report 不再 404）。仓库缺失时退化为纯内存，行为如旧。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CoordinationRecordRepository recordRepository;
+
+    /** 写穿归档：异常只告警不抛——归档是旁路，不阻塞协同主链。 */
+    private void persistRecord(CoordinationRecord record) {
+        if (recordRepository == null) {
+            return;
+        }
+        try {
+            recordRepository.save(CoordinationRecordEntity.fromRecord(record));
+        } catch (Exception e) {
+            log.warn("Failed to archive coordination record ({}): {}",
+                    record.getCoordinationId(), e.getMessage());
+        }
+    }
+
+    /**
      * 构造空地协同服务。
      *
      * @param orchService         应急编排服务（必需）
@@ -418,6 +439,7 @@ public class AirGroundCoordinationService {
 
         log.info("空地协同：指挥流程已启动 coordinationId={} cmdId={} planId={}",
                 coordinationId, cmd.getId(), planId);
+        persistRecord(record);
         return record;
     }
 
@@ -520,6 +542,9 @@ public class AirGroundCoordinationService {
         pushProgress(coordinationId, "总结", "指挥报告已生成", record.getCmdId());
         log.info("空地协同：总结完成 coordinationId={}", coordinationId);
 
+        // 归档写穿（内存清理 ≠ 归档删除）：report 此刻已在 record 里，先落库再清内存
+        persistRecord(record);
+
         // 总结完成后清理该协同指挥记录，防止 coordinationRecords 无限增长导致 OOM
         coordinationRecords.remove(coordinationId);
         log.info("空地协同：已清理 CLOSED 状态记录 coordinationId={} remaining={}",
@@ -547,9 +572,27 @@ public class AirGroundCoordinationService {
     public CoordinationReport getCoordinationReport(String coordinationId) {
         CoordinationRecord record = coordinationRecords.get(coordinationId);
         if (record == null) {
-            return null;
+            // 内存未命中（总结后清理 / 重启）：读穿归档——这正是本笔修掉的 404
+            CoordinationRecord archived = readArchived(coordinationId);
+            return archived == null ? null : archived.getReport();
         }
         return record.getReport();
+    }
+
+    /** 读穿归档（未命中返回 null；坏行降级由实体层负责）。 */
+    private CoordinationRecord readArchived(String coordinationId) {
+        if (recordRepository == null) {
+            return null;
+        }
+        try {
+            return recordRepository.findById(coordinationId)
+                    .map(CoordinationRecordEntity::toRecord)
+                    .orElse(null);
+        } catch (Exception e) {
+            log.warn("Failed to read archived coordination record ({}): {}",
+                    coordinationId, e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -559,7 +602,8 @@ public class AirGroundCoordinationService {
      * @return 协同指挥记录；不存在返回 null
      */
     public CoordinationRecord getCoordinationRecord(String coordinationId) {
-        return coordinationRecords.get(coordinationId);
+        CoordinationRecord record = coordinationRecords.get(coordinationId);
+        return record != null ? record : readArchived(coordinationId);
     }
 
     /**
@@ -1152,6 +1196,17 @@ public class AirGroundCoordinationService {
         public long getAssessTimeMs() { return assessTimeMs; }
         public long getDeployTimeMs() { return deployTimeMs; }
         public long getExecuteTimeMs() { return executeTimeMs; }
+
+        /**
+         * 水合专用：恢复阶段历史时间戳（持久化恢复路径用）。
+         * <p>不能靠 {@link #setPhase} 重放——它会把对应阶段时间戳写成当前时刻，
+         * 把"当时的响应时效"替换成"重启后的时刻"，那正是审计要防的失真。
+         */
+        void restorePhaseTimestamps(long assessMs, long deployMs, long executeMs) {
+            this.assessTimeMs = assessMs;
+            this.deployTimeMs = deployMs;
+            this.executeTimeMs = executeMs;
+        }
 
         /** 返回阶段历史时间线。 */
         public List<String> getPhaseHistory() {

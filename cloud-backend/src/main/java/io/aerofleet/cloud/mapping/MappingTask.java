@@ -110,6 +110,18 @@ public class MappingTask {
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }
 
+    /**
+     * 航线航点（JSON 数组文本；V34，审计 §2.1 第 4 条）。
+     * <p>
+     * 序列化/反序列化走 {@link MappingWaypointCodec} 的显式字段映射；NULL=从未规划
+     * （与"规划了但是空航线"区分——API 层对两者都返回空数组，但库里保留原始事实）。
+     */
+    @Column(name = "waypoints")
+    private String waypoints;
+
+    public String getWaypoints() { return waypoints; }
+    public void setWaypoints(String waypoints) { this.waypoints = waypoints; }
+
     public MappingArea getArea() { return area; }
     public void setArea(MappingArea area) { this.area = area; }
 
