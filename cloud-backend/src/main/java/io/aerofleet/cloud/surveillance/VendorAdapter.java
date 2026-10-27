@@ -97,10 +97,10 @@ public interface VendorAdapter {
     /**
      * 本适配器的事件订阅是否真的接到设备。
      *
-     * <p>默认 {@code true}：既有适配器返回模拟句柄，SSE 端点行为保持不变。
-     * live ONVIF 必须覆写为 {@code false} —— 它的 {@code subscribeEvents}
-     * 会直接抛"未实现"，REST 层据此在建立 SSE <b>之前</b>返回 501，
-     * 而不是先回 200 再挂一条永远没有事件的流。
+     * <p>默认 {@code true}：模拟适配器返回模拟句柄，SSE 端点行为保持不变。
+     * live ONVIF 覆写为 {@code true}（PullPoint 真接到设备；订阅失败在建立 SSE 前回 502）。
+     * 只构造信令、没有传输层的适配器（GB28181）覆写为 {@code false}——REST 层据此在
+     * 建立 SSE <b>之前</b>返回 501，而不是先回 200 再挂一条永远没有事件的流。
      *
      * @return true 表示可建立订阅
      */

@@ -38,13 +38,15 @@ class OnvifLiveRoutingTest {
     }
 
     @Test
-    @DisplayName("live 适配器：来源是 ONVIF_GETSTREAM_URI（deviceVerified=true），事件订阅显式不可用")
+    @DisplayName("live 适配器：来源是 ONVIF_GETSTREAM_URI（deviceVerified=true），事件订阅声明为支持")
     void liveAdapter_reportsDeviceVerifiedOrigin() {
         OnvifVendorAdapter adapter = new OnvifVendorAdapter(liveClient());
 
         assertThat(adapter.streamUrlOrigin()).isEqualTo(StreamUrlOrigin.ONVIF_GETSTREAM_URI);
         assertThat(adapter.streamUrlOrigin().deviceVerified()).isTrue();
-        assertThat(adapter.supportsEventSubscription()).isFalse();
+        // live 走真实 PullPoint：适配器层声明"支持"，设备是否有 Events 服务
+        // 由 subscribeEvents 当场回答（失败会在建立 SSE 之前变成 5xx）
+        assertThat(adapter.supportsEventSubscription()).isTrue();
     }
 
     @Test

@@ -122,6 +122,18 @@ public class Gb28181Adapter implements VendorAdapter {
         return code;
     }
 
+    /**
+     * 国标报警订阅：**只构造 SUBSCRIBE 形状，SIP 传输未实现**，回调不会触发。
+     *
+     * <p>因此 {@link #supportsEventSubscription()} 返回 {@code false}——REST 的
+     * SSE 端点在建立流之前就回 501，而不是先回 200 再挂一条永远没有事件的流。
+     * 本方法保留给信令形状的契约测试；媒体面落地后再打开声明。
+     */
+    @Override
+    public boolean supportsEventSubscription() {
+        return false;
+    }
+
     /** 报警订阅：构造国标 SUBSCRIBE 形状，返回可注销的 handle。 */
     @Override
     public String subscribeEvents(SurveillanceDevice device, Consumer<String> callback) {

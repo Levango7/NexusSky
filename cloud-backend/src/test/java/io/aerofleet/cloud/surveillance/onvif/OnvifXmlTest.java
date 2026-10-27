@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -110,5 +112,44 @@ class OnvifXmlTest {
         assertThat(OnvifXml.descendants(null, "x")).isEmpty();
         assertThat(OnvifXml.firstChild(null, "x")).isNull();
         assertThat(OnvifXml.firstDescendant(null, "x")).isNull();
+    }
+
+    @Test
+    @DisplayName("localName：命名空间感知取 local name；非感知 DOM 退回去前缀")
+    void localName_handlesNamespacedAndNonNamespacedNodes() throws Exception {
+        Document namespaced = parse("<tev:Root xmlns:tev=\"urn:t\"><Child/></tev:Root>");
+        assertThat(OnvifXml.localName(namespaced.getDocumentElement())).isEqualTo("Root");
+
+        // 非命名空间感知的 DOM：getLocalName() 为 null，只能按 nodeName 去前缀。
+        // 设备固件/中间层若用非感知解析器重建过文档，就会走到这条路。
+        DocumentBuilderFactory plain = DocumentBuilderFactory.newInstance();
+        Document raw = plain.newDocumentBuilder().parse(new ByteArrayInputStream(
+                "<a:b><c/></a:b>".getBytes(StandardCharsets.UTF_8)));
+        assertThat(OnvifXml.localName(raw.getDocumentElement())).isEqualTo("b");
+        assertThat(OnvifXml.localName(raw.getDocumentElement().getFirstChild())).isEqualTo("c");
+    }
+
+    @Test
+    @DisplayName("serialize：保留命名空间与内容、不带 XML 声明；null 元素返回空串")
+    void serialize_keepsNamespaceAndContent() {
+        Document doc = parse("<tev:NotificationMessage xmlns:tev=\"urn:tev\">"
+                + "<tev:Topic>motion</tev:Topic></tev:NotificationMessage>");
+
+        String xml = OnvifXml.serialize(doc.getDocumentElement());
+        assertThat(xml).contains("NotificationMessage").contains("motion");
+        assertThat(xml).doesNotContain("<?xml");
+        assertThat(OnvifXml.serialize(null)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("parse：null 与外部实体 DOCTYPE 都拒绝（错误消息带上下文）")
+    void parse_nullAndExternalDoctype_rejected() {
+        assertThatThrownBy(() -> OnvifXml.parse(null, "ProbeMatch"))
+                .isInstanceOf(OnvifException.class)
+                .hasMessageContaining("empty ProbeMatch");
+        assertThatThrownBy(() -> OnvifXml.parse(("<!DOCTYPE foo [<!ENTITY xxe SYSTEM "
+                + "\"file:///etc/passwd\">]><a>&xxe;</a>").getBytes(StandardCharsets.UTF_8), "evil"))
+                .isInstanceOf(OnvifException.class)
+                .hasMessageContaining("failed to parse evil");
     }
 }

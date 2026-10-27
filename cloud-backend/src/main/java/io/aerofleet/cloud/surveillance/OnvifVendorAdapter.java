@@ -87,12 +87,13 @@ public final class OnvifVendorAdapter implements VendorAdapter {
     }
 
     /**
-     * live 模式下事件订阅尚未实现（WS-BaseNotification/PullPoint），
-     * 由 REST 层在建立 SSE 之前返回 501，不假装订阅成功。
+     * 两种模式都支持订阅：模拟模式回放内存事件表，live 模式走真实的
+     * WS-BaseNotification PullPoint（设备是否真的提供 Events 服务要等
+     * {@code subscribeEvents} 时才由设备回答——这里不预判设备能力）。
      */
     @Override
     public boolean supportsEventSubscription() {
-        return !onvifClient.isLive();
+        return true;
     }
 
     // ===== 内部工具方法 =====

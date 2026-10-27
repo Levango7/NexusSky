@@ -60,7 +60,7 @@
   骨架可先按 sim 形状写接口合同，字段以规范为准逐一对齐。
 - ⏸ 等待项：#1 确定对接主体（**用户侧行动项**）→ 拿到测试环境 → 真实联调 → C1/C2 边界改口径。
 
-## P4 · ONVIF PullPoint 事件订阅（能做的）
+## P4 · ONVIF PullPoint 事件订阅（已交付）
 
 来源：`docs/todo.md` #14 备注（#178 协议级 live 客户端落地时"事件面 live 下不假装（REST 先回 501）……
 ONVIF 事件订阅（PullPoint）另立"）。
@@ -69,12 +69,20 @@ ONVIF 事件订阅（PullPoint）另立"）。
   把厂商事件（移动侦测等）接入既有告警总线。
 - **验收**：simulated 模式行为不变（缺省路径）；live 模式下 REST 从 501 变为真实事件流；
   与 `SurveillanceController` 现有事件形状对齐（不得再造一套词汇）。
-- **状态**：立项（可做，需要 fictional ONVIF server 测试桩——#178 的测试已建了 SOAP 桩，可扩展）。
+- **状态**：✅ **2026-10-27 已交付（P2 #14 第二刀）**：`OnvifPullPointClient` 实现
+  `CreatePullPointSubscription`（PT1H）+ `PullMessages`（PT1S / 16 条），
+  `OnvifLiveBackend` 每订阅一条守护轮询线程、取消即停、连续 3 次失败摘除（不静默重连）；
+  REST 订阅失败在建立 SSE 前映射 **502**（原 501「未实现」），模拟模式行为不变。
+  边界：订阅到期不自动续期（设备以 Fault 拒绝后由上层重订）；只做 PullPoint，不做 Push；
+  事件载荷是原始 `NotificationMessage` XML，未做主题归一化。
 
 ## P5 · 厂商私有 SDK 与 GB28181 媒体面（等的——外部）
 
 - 海康/大华/宇视私有 SDK：需厂商授权 + 真设备（GAPS §三 已登记前置）。
 - GB28181 媒体面（SIP 传输 + RTP/PS）：形状层已交付；媒体面属生产阶段。
+  事件订阅面同步：`Gb28181Adapter.supportsEventSubscription()` 已改为 `false`
+  ——只构造 SUBSCRIBE 形状、没有 SIP 传输，REST 现在在建立 SSE 之前回 501
+  （此前是先回 200 再挂一条永远不会触发回调的空流）。
 - 机巢 MQTT 真实 transport：硬件到位再动（todo #17）。
 
 ---

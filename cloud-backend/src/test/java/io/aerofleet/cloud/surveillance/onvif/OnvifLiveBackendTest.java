@@ -36,12 +36,24 @@ class OnvifLiveBackendTest {
 
     private volatile boolean mediaPresent = true;
     private volatile boolean ptzPresent = true;
+    private volatile boolean eventsPresent = true;
     private volatile boolean imagingPresent = false;
     private volatile List<Profile> profiles = List.of(
             new Profile("profile_1", "Main"),
             new Profile("profile_2", "Sub"));
     private volatile String streamUri =
             "rtsp://127.0.0.1:8554/Streaming/Channels/101?transportmode=unicast";
+    /** 下一次 PullMessages 要发的通知（发过一次就清空，模拟设备侧队列）。 */
+    private volatile List<String> pendingNotifications = List.of();
+    /** 前 N 次 PullMessages 返回 SOAP Fault（用于验证重试语义）。 */
+    private final java.util.concurrent.atomic.AtomicInteger pullFailuresRemaining =
+            new java.util.concurrent.atomic.AtomicInteger();
+    /** 让 PullMessages 慢应答，验证取消订阅能打断在途请求。 */
+    private volatile boolean slowPull = false;
+    private final java.util.concurrent.atomic.AtomicInteger subscribeCount =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger pullCount =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     private final List<String> requests = new CopyOnWriteArrayList<>();
 
@@ -64,6 +76,8 @@ class OnvifLiveBackendTest {
         server.createContext("/onvif/device_service", ex -> handle(ex, "device"));
         server.createContext("/onvif/media", ex -> handle(ex, "media"));
         server.createContext("/onvif/ptz", ex -> handle(ex, "ptz"));
+        server.createContext("/onvif/events", this::handleEvents);
+        server.createContext("/onvif/subscription", this::handlePull);
         server.start();
     }
 
@@ -266,6 +280,180 @@ class OnvifLiveBackendTest {
                 .containsExactlyInAnyOrder("Device", "Media", "PTZ", "Events");
     }
 
+    // ===== 事件订阅 =====
+
+    @Test
+    @DisplayName("事件订阅：CreatePullPointSubscription → PullMessages 的通知真的进回调；取消后停止轮询")
+    void subscribeEvents_pullsNotificationsAndStopsOnUnsubscribe() throws Exception {
+        pendingNotifications = List.of(
+                "<tev:NotificationMessage>"
+                        + "<tev:Topic>tns1:RuleEngine/CellMotionDetector/Motion</tev:Topic>"
+                        + "<tev:Message><tt:Data>"
+                        + "<tt:SimpleItem Name=\"IsMotion\" Value=\"true\"/>"
+                        + "</tt:Data></tev:Message></tev:NotificationMessage>",
+                "<tev:NotificationMessage>"
+                        + "<tev:Topic>tns1:Device/Trigger/DigitalInput</tev:Topic>"
+                        + "<tev:Message><tt:Data>"
+                        + "<tt:SimpleItem Name=\"LogicalState\" Value=\"true\"/>"
+                        + "</tt:Data></tev:Message></tev:NotificationMessage>");
+
+        List<String> received = new CopyOnWriteArrayList<>();
+        java.util.concurrent.CountDownLatch twoEvents = new java.util.concurrent.CountDownLatch(2);
+        OnvifLiveBackend live = backend();
+        String handle = live.subscribeEvents("127.0.0.1", port, USER, PASS, payload -> {
+            received.add(payload);
+            twoEvents.countDown();
+        });
+
+        assertThat(live.activeSubscriptions()).isEqualTo(1);
+        assertThat(subscribeCount.get()).isEqualTo(1);
+        assertThat(twoEvents.await(2, java.util.concurrent.TimeUnit.SECONDS))
+                .as("两条通知应在 2s 内到达").isTrue();
+        assertThat(received.get(0)).contains("CellMotionDetector/Motion").contains("IsMotion");
+        assertThat(received.get(1)).contains("DigitalInput").contains("LogicalState");
+        assertThat(requests).anyMatch(r -> r.startsWith("events ") && r.contains("CreatePullPointSubscription"));
+        assertThat(requests).anyMatch(r -> r.startsWith("pull ") && r.contains("PullMessages"));
+
+        live.unsubscribeEvents(handle);
+        assertThat(live.activeSubscriptions()).isZero();
+        Thread.sleep(300);
+        int after = pullCount.get();
+        Thread.sleep(400);
+        assertThat(pullCount.get()).as("取消订阅后不应再拉取").isEqualTo(after);
+    }
+
+    @Test
+    @DisplayName("设备没有 Events 服务：订阅直接报错，不返回假句柄")
+    void subscribeEvents_withoutEventsService_throws() {
+        eventsPresent = false;
+        OnvifLiveBackend live = backend();
+
+        assertThatThrownBy(() -> live.subscribeEvents("127.0.0.1", port, USER, PASS, p -> {
+        }))
+                .isInstanceOf(OnvifException.class)
+                .hasMessageContaining("Events service");
+        assertThat(live.activeSubscriptions()).isZero();
+        assertThat(subscribeCount.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("未订阅时取消是幂等的（SSE 关闭路径不会二次报错）")
+    void unsubscribeEvents_unknownHandle_isNoOp() {
+        OnvifLiveBackend live = backend();
+
+        live.unsubscribeEvents(null);
+        live.unsubscribeEvents("onvif-unknown");
+
+        assertThat(live.activeSubscriptions()).isZero();
+    }
+
+    @Test
+    @DisplayName("设备瞬时 Fault：退避重试后仍交付通知（一次失败不丢整条订阅）")
+    void subscribeEvents_recoversFromTransientFault() throws Exception {
+        pullFailuresRemaining.set(1);
+        pendingNotifications = List.of("<tev:NotificationMessage>"
+                + "<tev:Topic>tns1:Device/Trigger/DigitalInput</tev:Topic>"
+                + "<tev:Message><tt:Data>"
+                + "<tt:SimpleItem Name=\"LogicalState\" Value=\"true\"/>"
+                + "</tt:Data></tev:Message></tev:NotificationMessage>");
+        java.util.concurrent.CountDownLatch delivered = new java.util.concurrent.CountDownLatch(1);
+        OnvifLiveBackend live = backend();
+        String handle = live.subscribeEvents("127.0.0.1", port, USER, PASS, payload -> {
+            if (payload.contains("DigitalInput")) {
+                delivered.countDown();
+            }
+        });
+
+        try {
+            assertThat(delivered.await(3, java.util.concurrent.TimeUnit.SECONDS))
+                    .as("瞬时 Fault 后应重试并交付通知").isTrue();
+            assertThat(pullCount.get()).isGreaterThanOrEqualTo(2);
+        } finally {
+            live.unsubscribeEvents(handle);
+        }
+        assertThat(live.activeSubscriptions()).isZero();
+    }
+
+    @Test
+    @DisplayName("轮询线程是 daemon：不会因为一条订阅把 JVM 拖住不退出")
+    void subscribeEvents_pollerThreadIsDaemon() throws Exception {
+        OnvifLiveBackend live = backend();
+        String handle = live.subscribeEvents("127.0.0.1", port, USER, PASS, payload -> {
+        });
+        try {
+            Thread poller = null;
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            while (poller == null && System.nanoTime() < deadline) {
+                poller = Thread.getAllStackTraces().keySet().stream()
+                        .filter(t -> t.getName().equals("onvif-events-" + handle))
+                        .findFirst().orElse(null);
+                if (poller == null) {
+                    Thread.sleep(20);
+                }
+            }
+            assertThat(poller).as("订阅后应有轮询线程").isNotNull();
+            assertThat(poller.isDaemon()).as("轮询线程必须是 daemon").isTrue();
+        } finally {
+            live.unsubscribeEvents(handle);
+        }
+    }
+
+    @Test
+    @DisplayName("连续 Fault 到上限：放弃订阅并从活跃表摘除（不会永远挂着假事件源）")
+    void subscribeEvents_givesUpAfterConsecutiveFaults() throws Exception {
+        pullFailuresRemaining.set(1000);
+        OnvifLiveBackend live = backend();
+        live.subscribeEvents("127.0.0.1", port, USER, PASS, payload -> {
+        });
+
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+        while (live.activeSubscriptions() > 0 && System.nanoTime() < deadline) {
+            Thread.sleep(50);
+        }
+        assertThat(live.activeSubscriptions()).as("放弃后应摘除订阅").isZero();
+        assertThat(pullCount.get()).as("恰好尝试 3 次，不再无限重试").isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("参数非法：后端自己就拒绝，不依赖门面兜底（空 IP / 空回调）")
+    void subscribeEvents_invalidArgs_rejectedByBackend() {
+        OnvifLiveBackend live = backend();
+
+        assertThatThrownBy(() -> live.subscribeEvents("", port, USER, PASS, p -> {
+        }))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ip");
+        assertThatThrownBy(() -> live.subscribeEvents("127.0.0.1", port, USER, PASS, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("callback");
+        assertThat(live.activeSubscriptions()).isZero();
+        assertThat(subscribeCount.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("取消订阅会打断在途 PullMessages：线程退出，不再发起后续轮询")
+    void unsubscribeEvents_interruptsInFlightPull() throws Exception {
+        slowPull = true;
+        OnvifLiveBackend live = backend();
+        String handle = live.subscribeEvents("127.0.0.1", port, USER, PASS, payload -> {
+        });
+
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        while (pullCount.get() == 0 && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertThat(pullCount.get()).as("订阅后应已发起第一次拉取").isPositive();
+
+        live.unsubscribeEvents(handle);
+        // 取消后把设备侧改快：线程若没被停住，下一轮失败重试会立刻表现为计数增长
+        slowPull = false;
+        Thread.sleep(2000);
+        int after = pullCount.get();
+        Thread.sleep(600);
+        assertThat(pullCount.get()).as("取消后不应再发起 PullMessages").isEqualTo(after);
+        assertThat(live.activeSubscriptions()).isZero();
+    }
+
     // ===== 设备端实现 =====
 
     private OnvifLiveBackend backend() {
@@ -321,7 +509,9 @@ class OnvifLiveBackendTest {
         if (ptzPresent) {
             xml.append("<tt:PTZ><tt:XAddr>").append(base).append("/onvif/ptz</tt:XAddr></tt:PTZ>");
         }
-        xml.append("<tt:Events><tt:XAddr>").append(base).append("/onvif/events</tt:XAddr></tt:Events>");
+        if (eventsPresent) {
+            xml.append("<tt:Events><tt:XAddr>").append(base).append("/onvif/events</tt:XAddr></tt:Events>");
+        }
         if (imagingPresent) {
             xml.append("<tt:Imaging><tt:XAddr>").append(base).append("/onvif/imaging</tt:XAddr></tt:Imaging>");
         }
@@ -348,7 +538,62 @@ class OnvifLiveBackendTest {
                 + " xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\""
                 + " xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\""
                 + " xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\""
+                + " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
+                + " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
                 + " xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
                 + "<s:Body>" + body + "</s:Body></s:Envelope>";
+    }
+
+    // ===== 事件订阅设备端 =====
+
+    private void handleEvents(HttpExchange exchange) throws java.io.IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        requests.add("events " + body);
+        subscribeCount.incrementAndGet();
+        send(exchange, envelope("<tev:CreatePullPointSubscriptionResponse>"
+                + "<tev:SubscriptionReference>"
+                + "<wsa:Address>" + base + "/onvif/subscription</wsa:Address>"
+                + "</tev:SubscriptionReference>"
+                + "<tev:CurrentTime>2026-10-27T08:00:00Z</tev:CurrentTime>"
+                + "<tev:TerminationTime>2026-10-27T09:00:00Z</tev:TerminationTime>"
+                + "</tev:CreatePullPointSubscriptionResponse>"));
+    }
+
+    private void handlePull(HttpExchange exchange) throws java.io.IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        requests.add("pull " + body);
+        pullCount.incrementAndGet();
+        if (slowPull) {
+            try {
+                Thread.sleep(1200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        if (pullFailuresRemaining.getAndDecrement() > 0) {
+            send(exchange, envelope("<s:Fault><s:Code><s:Value>s:Sender</s:Value></s:Code>"
+                    + "<s:Reason><s:Text xml:lang=\"en\">Transient failure</s:Text></s:Reason>"
+                    + "</s:Fault>"));
+            return;
+        }
+        List<String> pending = pendingNotifications;
+        pendingNotifications = List.of();
+        StringBuilder xml = new StringBuilder("<tev:PullMessagesResponse>")
+                .append("<tev:CurrentTime>2026-10-27T08:00:01Z</tev:CurrentTime>")
+                .append("<tev:TerminationTime>2026-10-27T09:00:00Z</tev:TerminationTime>");
+        for (String notification : pending) {
+            xml.append(notification);
+        }
+        xml.append("</tev:PullMessagesResponse>");
+        if (pending.isEmpty()) {
+            // 真实设备在没有事件时会按 Timeout=PT1S 等住；这里压 50ms 避免测试期空转
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        send(exchange, envelope(xml.toString()));
     }
 }
