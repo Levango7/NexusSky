@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 数据库升级演练：V1–V20 → V21–V29（在**真 PostgreSQL** 上）。
+# 数据库升级演练：V1–V20 → V21–HEAD（在**真 PostgreSQL** 上；HEAD 从迁移目录动态取）。
 #
 # 为什么需要它
 # ------------
@@ -59,7 +59,16 @@ BOOTSTRAP_PASSWORD="${BOOTSTRAP_PASSWORD:-DrillAdmin-Passw0rd!}"
 JWT_SECRET="${JWT_SECRET:-drill-only-jwt-secret-0123456789abcdefghi}"
 ENC_KEY="${ENC_KEY:-drill-only-encryption-key-0123456789abcdef}"
 OLD_VERSION="${OLD_VERSION:-20}"          # 演练的"老版本"停在哪一版
-NEW_VERSION="${NEW_VERSION:-29}"          # 演练的"新版本"到哪一版
+# 演练的"新版本"到哪一版 = 迁移目录里的最高版本号（本脚本语义就是"升到 HEAD"）。
+# 此前写死 29：加迁移的人不会记得改它，直到 CI 红——V30/V31 落地时被本演练当场抓住
+# （run 40443528046）。动态推导后，新增迁移无需再动这个脚本。
+HEAD_VERSION=$(ls cloud-backend/src/main/resources/db/migration 2>/dev/null \
+    | grep -oE '^V[0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1)
+if [ -z "${HEAD_VERSION:-}" ]; then
+  echo "找不到迁移目录或无 V 号迁移文件（前置不满足）" >&2
+  exit 2
+fi
+NEW_VERSION="${NEW_VERSION:-$HEAD_VERSION}"
 
 PASS=0
 FAIL=0
