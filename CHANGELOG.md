@@ -55,6 +55,10 @@
   Events 服务由 `subscribeEvents` 当场回答，不预判）。
 - `SurveillanceController`：订阅失败在建立 SSE **之前**映射 **502**
   （原来整片 501「未实现」）；501 仅保留给"适配器本身不支持"。
+- **同类"200 假成功"顺手收口**：`Gb28181Adapter.supportsEventSubscription()` 改为
+  `false`——它只构造 SUBSCRIBE 形状、**SIP 传输未实现，回调永远不会触发**，此前 REST
+  会先回 200 再挂一条空流。现在国标设备在建立 SSE 之前回 501（文案带 `GB28181`，
+  同时作为"路由确实落在国标适配器"的证据）。
 - **为什么是 Pull 不是 Push**：Push 要求设备能连回本服务，现场摄像头通常在独立视频
   网段、服务在 NAT 后——Push 地址设备到不了；PullPoint 只要求"本服务能连设备"，
   与取流同向。
@@ -74,7 +78,8 @@
 - `OnvifXmlTest` +3 例：`localName` 前缀回退、`serialize` 保留命名空间、`parse` 对 null/
   外部实体 DOCTYPE 拒绝；
 - 既有 3 例按新契约翻正：mode（订阅失败抛 `OnvifException` 而非"拒绝实现"）、
-  routing（live 声明支持）、controller（501 → 502）。
+  routing（live 声明支持）、controller（live 订阅失败 501 → 502）；另 1 例 GB28181
+  控制器用例从"200 + 空流"翻正为"501 + 文案带厂商名"（不新增用例，总数不变）。
 - **A/B 变异 3 个**（取消不 stop 轮询 / 通知元素名写错 / 去掉无 Events 服务检查）
   全部改坏⇒红、还原⇒绿。
 
