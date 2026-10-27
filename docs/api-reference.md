@@ -358,7 +358,7 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
 | POST | `/discover` | 发现子网内设备 | {subnet} | 200 {subnet,count,devices} / 400 / 502 |
 | POST | `/rapid-deploy` | 一键扫描子网并自动注册布控球设备 | {subnet,username?,password?} | 200 {subnet,count,results} / 400 / 502 |
 | POST | `/scan` | 仅扫描子网发现设备（不注册） | {subnet} | 200 {subnet,count,results} / 400 / 502 |
-| GET | `/devices/{id}/events` | 订阅设备事件（SSE，每 15 秒心跳，按厂商路由） | - | 200 text/event-stream / 404 |
+| GET | `/devices/{id}/events` | 订阅设备事件（SSE，每 15 秒心跳，按厂商路由） | - | 200 text/event-stream / 404 / 501 / 502 |
 | GET | `/events` | 查询全局安防事件列表（分页） | - | 200 {items,total,page,size} / 400 |
 
 #### 端点详情
@@ -369,10 +369,18 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
 - 响应: 200 - 设备详情（含能力信息与 totalCameras）；400 - 参数错误
 
 **GET /api/v1/surveillance/devices/{id}/events**
-- 语义: **按厂商路由**——订阅/退订经设备所属 VendorAdapter（ONVIF 复用 OnvifClient；
-  GB28181 构造国标 SUBSCRIBE 信令）。连接结束/超时/出错经同一适配器退订（handle 契约统一）
+- 语义: **按厂商路由**——订阅/退订经设备所属 VendorAdapter（ONVIF 模拟模式走模拟回调表，
+  live 模式走 WS-BaseNotification PullPoint；海康/大华/宇视目前是模拟实现）。
+  连接结束/超时/出错经同一适配器退订（handle 契约统一）
+- 前置检查在**建立 SSE 之前**完成——不先回 200 再挂一条永远没有事件的流：
+  - 适配器声明自己不实现事件订阅 → **501**（当前：GB28181——只构造国标 SUBSCRIBE 形状，
+    SIP 传输未实现，回调不会触发）；
+  - live ONVIF 订阅失败（设备无 Events 服务 / 鉴权被拒 / 连不上）→ **502**
 - 响应: 200 - SSE 流（`stream-established` 注释先行；每 15s `heartbeat` 注释；事件以
-  `surveillance-event` 事件推送）；设备不存在 → 200 + 流内错误终止（SSE 语义）
+  `surveillance-event` 事件推送，`data` 是设备原始通知——live ONVIF 为
+  `NotificationMessage` XML，未做主题归一化）；设备不存在 → 200 + 流内错误终止（SSE 语义）
+- live ONVIF 轮询：`PullMessages` 每秒一次、每次最多 16 条；连续 3 次失败后停止并记
+  ERROR、订阅从活跃表摘除（**不静默重连**）；订阅到期不自动续期
 
 **POST /api/v1/surveillance/devices/{id}/status** （需 OPERATOR 角色）
 - 请求体: `{status:"ONLINE"|"OFFLINE"|"FAULT"|"MAINTENANCE"}`

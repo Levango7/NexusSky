@@ -3,8 +3,8 @@ package io.aerofleet.cloud.surveillance;
 import io.aerofleet.cloud.surveillance.onvif.OnvifBackend;
 import io.aerofleet.cloud.surveillance.onvif.OnvifLiveBackend;
 import io.aerofleet.cloud.surveillance.onvif.OnvifPtzCommands;
+import io.aerofleet.cloud.surveillance.onvif.OnvifEventSource;
 import io.aerofleet.cloud.surveillance.onvif.OnvifSettings;
-import io.aerofleet.cloud.surveillance.onvif.OnvifUnsupportedException;
 import io.aerofleet.cloud.surveillance.onvif.OnvifValidation;
 import io.aerofleet.cloud.surveillance.onvif.SimulatedOnvifBackend;
 import org.slf4j.Logger;
@@ -34,10 +34,12 @@ import java.util.function.Consumer;
  *
  * <h2>事件订阅</h2>
  *
- * <p>事件面的真实实现（WS-BaseNotification / PullPoint）<b>尚未接入</b>。
- * 模拟模式下沿用内存回调表（{@link #simulateEvent} 可触发）；live 模式下
- * {@link #subscribeEvents} 抛 {@link OnvifUnsupportedException}，
- * 由 REST 层映射 501 —— 不返回一个"订阅成功但永远不会来事件"的句柄。
+ * <p>模拟模式沿用内存回调表（{@link #simulateEvent} 可触发）；live 模式走真实的
+ * WS-BaseNotification <b>PullPoint</b>：先向设备的 Events 服务
+ * {@code CreatePullPointSubscription} 拿订阅地址，再由后端轮询
+ * {@code PullMessages} 把通知推给回调。设备没有 Events 服务、或订阅被拒时
+ * {@link #subscribeEvents} 抛 {@code OnvifException}，REST 层映射 502 ——
+ * 不返回一个"订阅成功但永远不会来事件"的句柄。
  *
  * <h2>线程安全</h2>
  *
@@ -143,10 +145,11 @@ public class OnvifClient {
     }
 
     /**
-     * 事件订阅（WS-BaseNotification Subscribe）。
+     * 事件订阅。
      *
      * <p>simulated 下将 callback 注册到内存表（可用 {@link #simulateEvent} 触发）；
-     * live 下尚未实现，抛 {@link OnvifUnsupportedException}。
+     * live 下走设备侧 PullPoint 订阅（见 {@link #subscribeEvents} 类注释），
+     * 订阅失败抛 {@code OnvifException}。
      *
      * @param ip       设备 IP
      * @param port     ONVIF 端口
@@ -161,10 +164,8 @@ public class OnvifClient {
         if (callback == null) {
             throw new IllegalArgumentException("callback must not be null");
         }
-        if (backend.isLive()) {
-            throw new OnvifUnsupportedException(
-                    "ONVIF event subscription is not implemented in live mode "
-                            + "(WS-BaseNotification/PullPoint not wired); refusing to fake a subscription");
+        if (backend instanceof OnvifEventSource source) {
+            return source.subscribeEvents(ip, port, user, pass, callback);
         }
         String addr = ip + ":" + port;
         eventSubscribers.put(addr, callback);
@@ -182,9 +183,8 @@ public class OnvifClient {
         if (handle == null) {
             return;
         }
-        if (backend.isLive()) {
-            // live 模式从不产生句柄；这里保持幂等，避免 SSE 关闭路径二次报错
-            log.debug("Ignoring unsubscribe in live mode (no live subscription was created): {}", handle);
+        if (backend instanceof OnvifEventSource source) {
+            source.unsubscribeEvents(handle);
             return;
         }
         eventSubscribers.remove(handle);
@@ -209,6 +209,9 @@ public class OnvifClient {
 
     /** 当前活跃订阅数（用于监控与测试）。 */
     public int activeSubscriberCount() {
+        if (backend instanceof OnvifEventSource source) {
+            return source.activeSubscriptions();
+        }
         return eventSubscribers.size();
     }
 }

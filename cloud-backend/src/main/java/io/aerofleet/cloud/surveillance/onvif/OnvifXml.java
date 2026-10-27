@@ -8,7 +8,14 @@ import org.w3c.dom.NodeList;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
 import java.io.ByteArrayInputStream;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -149,6 +156,33 @@ public final class OnvifXml {
             if (node.getNodeType() == Node.ELEMENT_NODE) {
                 collect((Element) node, localName, out);
             }
+        }
+    }
+
+    /**
+     * 把元素序列化成 XML 字符串（带回命名空间声明）。
+     *
+     * <p>用于事件订阅：设备推来的 {@code NotificationMessage} 是任意结构的 XML，
+     * 解析成强类型只会把厂商私有的字段丢掉；这里原样序列化整段交给上层展示。
+     * 只做输出，不加载任何外部资源。
+     *
+     * @param element 待序列化的元素
+     * @return XML 文本（无 XML 声明）
+     */
+    public static String serialize(Element element) {
+        if (element == null) {
+            return "";
+        }
+        try {
+            TransformerFactory factory = TransformerFactory.newInstance();
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            Transformer transformer = factory.newTransformer();
+            transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+            StringWriter out = new StringWriter();
+            transformer.transform(new DOMSource(element), new StreamResult(out));
+            return out.toString();
+        } catch (TransformerException e) {
+            throw new OnvifException("failed to serialize XML: " + e.getMessage(), e);
         }
     }
 

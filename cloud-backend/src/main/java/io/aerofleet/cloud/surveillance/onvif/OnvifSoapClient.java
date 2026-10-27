@@ -62,6 +62,7 @@ public class OnvifSoapClient {
     private static final String NS_TRT = "http://www.onvif.org/ver10/media/wsdl";
     private static final String NS_TPTZ = "http://www.onvif.org/ver20/ptz/wsdl";
     private static final String NS_TT = "http://www.onvif.org/ver10/schema";
+    private static final String NS_TEV = "http://www.onvif.org/ver10/events/wsdl";
 
     private static final String PASSWORD_DIGEST_TYPE =
             "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest";
@@ -172,6 +173,7 @@ public class OnvifSoapClient {
                 + " xmlns:tds=\"" + NS_TDS + "\""
                 + " xmlns:trt=\"" + NS_TRT + "\""
                 + " xmlns:tptz=\"" + NS_TPTZ + "\""
+                + " xmlns:tev=\"" + NS_TEV + "\""
                 + " xmlns:tt=\"" + NS_TT + "\">"
                 + "<s:Header>"
                 + "<wsse:Security xmlns:wsse=\"" + NS_WSSE + "\" xmlns:wsu=\"" + NS_WSU

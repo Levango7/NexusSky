@@ -492,19 +492,28 @@ class SurveillanceControllerTest {
     // ===== GET /devices/{id}/events SSE 事件订阅（按厂商路由） =====
 
     @Test
-    @DisplayName("SSE 事件订阅按厂商路由：GB28181 设备经国标信令层建立订阅")
-    void subscribeEvents_gb28181Device_routesToGbAdapter() throws Exception {
+    @DisplayName("SSE 事件订阅按厂商路由：GB28181 在建立流之前回 501（SIP 传输未实现，不假装有事件）")
+    void subscribeEvents_gb28181Device_returns501NotFakeStream() throws Exception {
         String gbId = "34020000001321320001";
         mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody(gbId, "GB28181"))));
 
         // 此前直连 OnvifClient：国标设备的事件源语义错置（进 ONVIF 模拟回调表，
-        // 国标信令永远不触发）。路由后走 Gb28181Adapter（构造 SUBSCRIBE 信令返回 handle）
-        MvcResult result = mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/events"))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.request().asyncStarted())
-                .andReturn();
-        result.getRequest().getAsyncContext().complete();
+        // 国标信令永远不触发）。路由修好后走 Gb28181Adapter，但它只构造 SUBSCRIBE
+        // 形状、没有 SIP 传输，回调永远不会触发——再往后就是「先回 200 再挂空流」。
+        // 现在由适配器自己声明不支持，REST 在建立 SSE 之前回 501；
+        // 501 文案带厂商名，同时证明路由确实落在 GB28181 适配器上。
+        mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/events"))
+                .andExpect(status().isNotImplemented())
+                .andExpect(result -> {
+                    Throwable resolved = result.getResolvedException();
+                    assertThat(resolved)
+                            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+                    assertThat(resolved.getMessage())
+                            .contains("not implemented")
+                            .contains("GB28181");
+                });
     }
 
     @Test
@@ -1179,22 +1188,30 @@ class SurveillanceControllerTest {
     }
 
     @Test
-    @DisplayName("live ONVIF：事件订阅在建立 SSE 之前返回 501，不先回 200 再挂空流")
-    void subscribeEvents_liveOnvif_returns501BeforeOpeningStream() throws Exception {
+    @DisplayName("live ONVIF：设备侧订阅失败在建立 SSE 之前变成 502，不先回 200 再挂空流")
+    void subscribeEvents_liveOnvif_subscriptionFailureReturns502() throws Exception {
         io.aerofleet.cloud.surveillance.onvif.OnvifSettings live =
                 new io.aerofleet.cloud.surveillance.onvif.OnvifSettings();
         live.setMode(io.aerofleet.cloud.surveillance.onvif.OnvifSettings.Mode.LIVE);
+        live.setConnectTimeoutMs(300);
         OnvifClient liveClient = new OnvifClient(live);
         VendorAdapterRegistry liveRegistry = new VendorAdapterRegistry(
                 List.of(new OnvifVendorAdapter(liveClient)), live);
         SurveillanceController liveController = new SurveillanceController(
                 registry, liveClient, new RapidDeployService(liveClient, registry),
                 liveRegistry, alarmEventStore, mjpegStreamService);
+        // 端口 1 上没有 ONVIF 服务：订阅必定失败（连不上），用来验证失败面
         registry.register(new SurveillanceDevice("live-onvif-1", "live onvif",
-                SurveillanceDevice.Vendor.ONVIF, "127.0.0.1", 80, "admin", "pass"));
+                SurveillanceDevice.Vendor.ONVIF, "127.0.0.1", 1, "admin", "pass"));
         MockMvc liveMvc = MockMvcBuilders.standaloneSetup(liveController).build();
 
         liveMvc.perform(get("/api/v1/surveillance/devices/live-onvif-1/events"))
-                .andExpect(status().isNotImplemented());
+                .andExpect(status().isBadGateway())
+                .andExpect(result -> {
+                    Throwable resolved = result.getResolvedException();
+                    assertThat(resolved)
+                            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+                    assertThat(resolved.getMessage()).contains("event subscription failed");
+                });
     }
 }

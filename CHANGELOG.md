@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-27 共有 216 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-27 共有 217 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,65 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 216 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 217 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — ONVIF 事件订阅补齐：WS-BaseNotification PullPoint，取消即停、失败回 502（P2 #14 第二刀，2026-10-27）
+
+### 交付
+
+- `surveillance/onvif/OnvifPullPointClient`（新类）：`CreatePullPointSubscription`
+  （InitialTerminationTime=PT1H）→ `PullMessages`（Timeout=PT1S / MessageLimit=16）。
+  `NotificationMessage` **原样序列化**交出——厂商私有字段在 `Message` 里的结构千差万别，
+  强类型化只会把不认识的部分丢掉。
+- live 后端实现 `OnvifEventSource`：订阅成功才返回句柄；每个订阅一条守护轮询线程，
+  连续失败 3 次放弃并从表中摘除（**不静默重连**——那会让 UI 看起来仍有事件源）。
+- 轮询**决策**拆到 `OnvifEventPoller`（成功清零 / 失败计数 / 第 3 次放弃 / 坏回调不打死轮询）：
+  这些是纯逻辑，留在 `while (!stopped)` + 线程里只能靠"起线程 + sleep + 观察副作用"验证，
+  变异测试里会成片落成 TIMED_OUT；拆出来后每次 `pollOnce()` 都能同步断言。
+- `OnvifClient` 门面按 `backend instanceof OnvifEventSource` 分派；模拟模式行为不变。
+- `OnvifVendorAdapter.supportsEventSubscription()` 在 live 下改为 true（设备是否有
+  Events 服务由 `subscribeEvents` 当场回答，不预判）。
+- `SurveillanceController`：订阅失败在建立 SSE **之前**映射 **502**
+  （原来整片 501「未实现」）；501 仅保留给"适配器本身不支持"。
+- **同类"200 假成功"顺手收口**：`Gb28181Adapter.supportsEventSubscription()` 改为
+  `false`——它只构造 SUBSCRIBE 形状、**SIP 传输未实现，回调永远不会触发**，此前 REST
+  会先回 200 再挂一条空流。现在国标设备在建立 SSE 之前回 501（文案带 `GB28181`，
+  同时作为"路由确实落在国标适配器"的证据）。
+- **为什么是 Pull 不是 Push**：Push 要求设备能连回本服务，现场摄像头通常在独立视频
+  网段、服务在 NAT 后——Push 地址设备到不了；PullPoint 只要求"本服务能连设备"，
+  与取流同向。
+
+### 测试（新增 24 例）
+
+- `OnvifPullPointClientTest` 6 例：订阅地址/到期时间解析、缺 Address 报错、通知序列化、
+  请求参数有界（PT1S/16）、空响应当空列表、设备 Fault 带原因；
+- `OnvifLiveBackendTest` +8 例：真 HTTP 假设备端到端（订阅 → 两条通知进回调 →
+  取消后不再拉取）、无 Events 服务明确报错、未知句柄取消幂等、瞬时 Fault 退避重试后
+  仍交付、后端自身拒绝非法参数、取消订阅打断在途 `PullMessages`、轮询线程为 daemon、
+  连续 Fault 到上限后从活跃表摘除（恰好 3 次）；
+- `OnvifClientLiveEventsTest` 2 例：门面 → live 后端 → 假设备真实委派（句柄/计数/回调/
+  取消后停止拉取）、live 下非法参数在联网前拒绝；
+- `OnvifEventPollerTest` 5 例：全部通知按序交付、失败后成功清零、第 3 次失败放弃、
+  回调抛异常不打死轮询、重试等待被中断立即停止；
+- `OnvifXmlTest` +3 例：`localName` 前缀回退、`serialize` 保留命名空间、`parse` 对 null/
+  外部实体 DOCTYPE 拒绝；
+- 既有 3 例按新契约翻正：mode（订阅失败抛 `OnvifException` 而非"拒绝实现"）、
+  routing（live 声明支持）、controller（live 订阅失败 501 → 502）；另 1 例 GB28181
+  控制器用例从"200 + 空流"翻正为"501 + 文案带厂商名"（不新增用例，总数不变）。
+- **A/B 变异 3 个**（取消不 stop 轮询 / 通知元素名写错 / 去掉无 Events 服务检查）
+  全部改坏⇒红、还原⇒绿。
+
+### 边界
+
+- 订阅到期不自动续期（设备会以 Fault 拒绝）；轮询器连续失败 3 次后停止并记 ERROR，
+  由上层重新订阅——协议层不做"悄悄续命"的黑箱；
+- 只实现 PullPoint，不实现 Push（理由见上）与 WS-Eventing `Subscribe` 的推模式；
+- 事件载荷是原始 `NotificationMessage` XML（含厂商自定义字段），未做主题归一化。
 
 ## [Unreleased] — 四项决策拍板落账 + 单调序列 V35 落地（2026-10-27）
 
