@@ -84,6 +84,8 @@ jobs:
           python3 scripts/check-claimed-endpoint-count.py --self-test
           python3 scripts/check-frontend-endpoints.py --self-test
           python3 scripts/check-doc-counts.py --self-test
+          # P3 先行件：UOM 契约差异比对器（拿到规范前先把机械部分建好，9 情形自测）。
+          python3 scripts/uom-contract-diff.py --self-test
           # 变异验证的还原必须刷新时间戳，否则增量编译会继续用改坏的 .class
           # （2026-10-22 踩过，见 docs/agent-constraints.md 第 12 条）
           python3 scripts/mutate-verify.py --self-test
