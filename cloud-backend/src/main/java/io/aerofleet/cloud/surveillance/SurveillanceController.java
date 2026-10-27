@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
@@ -36,6 +38,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import io.aerofleet.cloud.surveillance.onvif.OnvifException;
 
 /**
  * 安防设备 REST API。
@@ -635,7 +638,9 @@ public class SurveillanceController {
     @Operation(summary = "订阅设备事件（SSE）", description = "每 15 秒发送心跳，事件触发时推送数据")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "SSE 流"),
-        @ApiResponse(responseCode = "404", description = "设备不存在")
+        @ApiResponse(responseCode = "404", description = "设备不存在"),
+        @ApiResponse(responseCode = "501", description = "该厂商适配器不支持设备事件订阅"),
+        @ApiResponse(responseCode = "502", description = "设备侧事件订阅失败（无 Events 服务 / 鉴权 / 不可达）")
     })
     @GetMapping("/devices/{id}/events")
     public SseEmitter subscribeEvents(@PathVariable("id") String id) {
@@ -645,7 +650,32 @@ public class SurveillanceController {
             emitter.completeWithError(new IllegalArgumentException("device " + id + " not found"));
             return emitter;
         }
+        // 适配器必须在建立 SSE 之前确认它能真的接到设备：live ONVIF 的 PullPoint
+        // 订阅失败（设备没有 Events 服务 / 拒绝鉴权 / 连不上）要在这里如实变成
+        // 5xx，而不是先回 200 再挂一条永远没有事件的流。
+        VendorAdapter adapter = vendorAdapterRegistry.getAdapter(d);
+        if (!adapter.supportsEventSubscription()) {
+            throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED,
+                    "event subscription for device " + id
+                            + " is not implemented by vendor adapter " + adapter.getVendor());
+        }
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        String handle;
+        try {
+            handle = adapter.subscribeEvents(d, payload -> {
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("surveillance-event")
+                            .data(payload));
+                } catch (Exception e) {
+                    log.debug("SSE send failed for device {}: {}", id, e.getMessage());
+                    emitter.completeWithError(e);
+                }
+            });
+        } catch (OnvifException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "event subscription failed for device " + id + ": " + e.getMessage(), e);
+        }
         // 建立即发一条注释：立即提交 SSE 响应头（200 + text/event-stream），
         // 客户端无需等待首个设备事件或 15s 心跳即可确认连接已建立
         try {
@@ -653,17 +683,6 @@ public class SurveillanceController {
         } catch (Exception e) {
             log.debug("SSE initial send failed for device {}: {}", id, e.getMessage());
         }
-        VendorAdapter adapter = vendorAdapterRegistry.getAdapter(d);
-        String handle = adapter.subscribeEvents(d, payload -> {
-            try {
-                emitter.send(SseEmitter.event()
-                        .name("surveillance-event")
-                        .data(payload));
-            } catch (Exception e) {
-                log.debug("SSE send failed for device {}: {}", id, e.getMessage());
-                emitter.completeWithError(e);
-            }
-        });
         // SSE 心跳：每 15 秒发送注释行，保持连接活跃
         ScheduledFuture<?> heartbeatFuture = sseScheduler.scheduleAtFixedRate(() -> {
             try {
@@ -827,10 +846,7 @@ public class SurveillanceController {
      * @return 脱敏后的 URL；输入为 null/空时原样返回
      */
     private static String maskRtspCredentials(String url) {
-        if (url == null || url.isEmpty()) {
-            return url;
-        }
-        return url.replaceFirst("(rtsp://[^@]+@)", "rtsp://***@");
+        return VendorRtspUrl.maskCredentials(url);
     }
 
     private static ResponseEntity<Map<String, Object>> badRequest(String message) {

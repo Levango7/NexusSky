@@ -83,4 +83,17 @@ public final class VendorRtspUrl {
         }
         return UriUtils.encodeUserInfo(raw, StandardCharsets.UTF_8);
     }
+
+    /**
+     * 脱敏：把 {@code rtsp://user:pass@host} 里的 userinfo 换成 {@code ***}。
+     *
+     * <p>用于日志与 REST 响应。live 模式下地址里的密码是真实设备凭据，
+     * 一旦被 INFO 日志记下来，日志系统就成了凭据存储。
+     */
+    public static String maskCredentials(String url) {
+        if (url == null || url.isEmpty()) {
+            return url;
+        }
+        return url.replaceFirst("(rtsp://)[^@/]+@", "$1***@");
+    }
 }

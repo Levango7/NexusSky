@@ -1,13 +1,17 @@
 package io.aerofleet.cloud.surveillance;
 
+import io.aerofleet.cloud.surveillance.onvif.OnvifBackend;
+import io.aerofleet.cloud.surveillance.onvif.OnvifLiveBackend;
+import io.aerofleet.cloud.surveillance.onvif.OnvifPtzCommands;
+import io.aerofleet.cloud.surveillance.onvif.OnvifEventSource;
+import io.aerofleet.cloud.surveillance.onvif.OnvifSettings;
+import io.aerofleet.cloud.surveillance.onvif.OnvifValidation;
+import io.aerofleet.cloud.surveillance.onvif.SimulatedOnvifBackend;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,21 +19,32 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.function.Consumer;
 
 /**
- * ONVIF 协议客户端（模拟实现，不依赖外部 ONVIF 库）。
- * <p>
- * ONVIF（Open Network Video Interface Forum）是海康威视、大华、宇视三大安防厂商
- * 共同支持的标准协议，覆盖：
+ * ONVIF 协议客户端（对外门面）。
+ *
+ * <h2>两种后端</h2>
+ *
  * <ul>
- *   <li>WS-Discovery：设备发现（UDP 多播 Probe）</li>
- *   <li>Device 服务：获取能力（GetCapabilities）</li>
- *   <li>Media 服务：获取 RTSP 流 URL（GetStreamUri）</li>
- *   <li>PTZ 服务：云台控制（ContinuousMove / Stop）</li>
- *   <li>Event 服务：事件订阅（WS-BaseNotification）</li>
+ *   <li><b>simulated</b>（默认，{@code aerofleet.onvif.mode=simulated}）：
+ *       离线预设结果，demo 与测试不依赖任何摄像头；流地址是<b>按规范推导</b>的，
+ *       对应 {@link StreamUrlOrigin#VENDOR_STANDARD_FORMAT}。</li>
+ *   <li><b>live</b>（{@code aerofleet.onvif.mode=live}）：真实 SOAP
+ *       （Device/Media/PTZ）+ WS-Discovery；流地址由设备 {@code GetStreamUri}
+ *       返回，对应 {@link StreamUrlOrigin#ONVIF_GETSTREAM_URI}，失败即报错。</li>
  * </ul>
- * <p>
- * 本实现为<b>模拟实现</b>，不发起真实 SOAP/UDP 请求，仅返回符合 ONVIF 协议语义
- * 的预设结果，便于上层业务在无真实设备环境下联调与测试。生产环境可替换为
- * 基于 onvif-java 库或 apache-cxf 的真实实现。
+ *
+ * <h2>事件订阅</h2>
+ *
+ * <p>模拟模式沿用内存回调表（{@link #simulateEvent} 可触发）；live 模式走真实的
+ * WS-BaseNotification <b>PullPoint</b>：先向设备的 Events 服务
+ * {@code CreatePullPointSubscription} 拿订阅地址，再由后端轮询
+ * {@code PullMessages} 把通知推给回调。设备没有 Events 服务、或订阅被拒时
+ * {@link #subscribeEvents} 抛 {@code OnvifException}，REST 层映射 502 ——
+ * 不返回一个"订阅成功但永远不会来事件"的句柄。
+ *
+ * <h2>线程安全</h2>
+ *
+ * <p>后端实现无状态（SOAP 客户端持有线程安全的 {@code HttpClient}）；
+ * 事件回调表使用 {@link ConcurrentHashMap}。
  */
 @Component
 public class OnvifClient {
@@ -39,46 +54,54 @@ public class OnvifClient {
     /** 默认 ONVIF 端口。 */
     public static final int DEFAULT_PORT = 80;
 
-    /** PTZ 支持的命令集合。 */
-    public static final Set<String> PTZ_COMMANDS = Collections.unmodifiableSet(
-            new LinkedHashSet<>(Arrays.asList(
-                    "up", "down", "left", "right", "zoomIn", "zoomOut", "stop")));
+    /** PTZ 支持的命令集合（单一事实源见 {@link OnvifPtzCommands}）。 */
+    public static final Set<String> PTZ_COMMANDS = OnvifPtzCommands.ALL;
 
-    /** 已订阅事件的设备回调表（设备地址 -> callback），用于模拟事件订阅。 */
+    private final OnvifBackend backend;
+
+    /** 已订阅事件的设备回调表（设备地址 -> callback），仅模拟模式使用。 */
     private final ConcurrentMap<String, Consumer<String>> eventSubscribers = new ConcurrentHashMap<>();
 
     /**
+     * 模拟客户端（测试与离线场景）。
+     *
+     * <p>Spring 容器不会用这个构造器：它注入了 {@link OnvifSettings} 的那个
+     * 构造器带 {@code @Autowired}。保留它是为了让 {@code new OnvifClient()}
+     * 继续等价于"默认配置的模拟后端"（既有单测即按此构造）。
+     */
+    public OnvifClient() {
+        this(new OnvifSettings());
+    }
+
+    @Autowired
+    public OnvifClient(OnvifSettings settings) {
+        this.backend = settings.isLive()
+                ? new OnvifLiveBackend(settings)
+                : new SimulatedOnvifBackend();
+        log.info("ONVIF client mode={}", settings.getMode());
+    }
+
+    /** 当前是否为真实协议后端。 */
+    public boolean isLive() {
+        return backend.isLive();
+    }
+
+    /**
      * WS-Discovery 设备发现。
-     * <p>
-     * 真实实现通过 UDP 多播发送 Probe 消息到 239.255.255.250:3702，
-     * 收集设备 ProbeMatch 应答。模拟实现根据子网返回预设设备列表。
+     *
+     * <p>simulated：按子网返回预设设备；live：向 {@code 239.255.255.250:3702}
+     * 与配置的单播目标发 Probe，解析 ProbeMatch（详见
+     * {@code OnvifDiscoveryClient}）。
      *
      * @param subnet 子网 CIDR，如 "192.168.1.0/24"
-     * @return 发现的设备列表（模拟实现返回预设设备）
+     * @return 发现的设备列表
      */
     public List<SurveillanceDevice> discoverDevices(String subnet) {
-        if (subnet == null || subnet.isBlank()) {
-            throw new IllegalArgumentException("subnet must not be blank");
-        }
-        log.info("WS-Discovery probe on subnet={} (simulated)", subnet);
-        // 模拟实现：根据子网第三段生成 3 个预设设备（海康/大华/宇视各一）
-        String prefix = extractPrefix(subnet);
-        List<SurveillanceDevice> devices = new ArrayList<>();
-        devices.add(newDevice("hik-" + prefix + "-100", "海康摄像头",
-                SurveillanceDevice.Vendor.HIKVISION, prefix + ".100", "admin", "hik12345"));
-        devices.add(newDevice("dahua-" + prefix + "-101", "大华摄像头",
-                SurveillanceDevice.Vendor.DAHUA, prefix + ".101", "admin", "dahua123"));
-        devices.add(newDevice("uniview-" + prefix + "-102", "宇视摄像头",
-                SurveillanceDevice.Vendor.UNIVIEW, prefix + ".102", "admin", "uniview123"));
-        log.info("Discovered {} devices on {}", devices.size(), subnet);
-        return devices;
+        return backend.discoverDevices(subnet);
     }
 
     /**
      * 获取设备能力（GetCapabilities）。
-     * <p>
-     * 真实实现通过 SOAP 调用 Device 服务 GetCapabilities，
-     * 返回 Media/PTZ/Event/Device 等服务端点。模拟实现返回标准能力集合。
      *
      * @param ip   设备 IP
      * @param port ONVIF 端口
@@ -87,59 +110,28 @@ public class OnvifClient {
      * @return 设备能力集合（如 "Media", "PTZ", "Events", "Device"）
      */
     public Set<String> getDeviceCapabilities(String ip, int port, String user, String pass) {
-        validateConnectionArgs(ip, port, user, pass);
-        log.info("GetCapabilities {}:{} (simulated)", ip, port);
-        // 模拟实现：统一返回标准能力集合。
-        //
-        // 此前这里写的是"PTZ / Imaging 仅在 port==80 时才有"—— 端口号和云台能力
-        // 之间没有任何真实关联，那是随手写的开关。但它有实际后果：能力位现在真的会
-        // 门控操作（见 SurveillanceController 的 PTZ / 取流端点），于是**注册在
-        // 非 80 端口的真实摄像头会被判成"不支持云台"并拒绝操作** —— 一个编造的
-        // 规则变成了真实的功能损失。
-        //
-        // 正确的做法是：模拟实现就声明它正在模拟的那套能力（PTZ 控制确实有模拟
-        // 路径），把"没有向设备确认"这件事记在别处（流地址那边已经用
-        // StreamUrlOrigin 如实标注了 deviceVerified=false），而不是让一个假的
-        // 否定项去拦真实用户操作。
-        Set<String> caps = new LinkedHashSet<>();
-        caps.add("Device");
-        caps.add("Media");
-        caps.add("Events");
-        caps.add("PTZ");
-        caps.add("Imaging");
-        return Collections.unmodifiableSet(caps);
+        return backend.getDeviceCapabilities(ip, port, user, pass);
     }
 
     /**
-     * 获取 RTSP 流 URL（GetStreamUri）。
-     * <p>
-     * 真实实现通过 Media 服务 GetStreamUri 获取 RTSP 地址，
-     * 凭据需携带 digest 认证。模拟实现拼接标准 RTSP URL。
+     * 获取 RTSP 流 URL（GetProfiles + GetStreamUri）。
+     *
+     * <p>live 模式下地址由设备返回并注入凭据（凭据编码见
+     * {@link VendorRtspUrl}）；失败抛异常，<b>不</b>退回猜测的地址。
      *
      * @param ip      设备 IP
      * @param port    ONVIF 端口
      * @param user    用户名
      * @param pass    密码
-     * @param channel 通道号（从 1 开始）
+     * @param channel 通道号（从 1 开始，按 GetProfiles 顺序映射）
      * @return RTSP 流 URL
      */
     public String getRtspUrl(String ip, int port, String user, String pass, int channel) {
-        validateConnectionArgs(ip, port, user, pass);
-        if (channel < 1) {
-            throw new IllegalArgumentException("channel must be >= 1");
-        }
-        log.info("GetStreamUri {}:{} channel={} (simulated)", ip, port, channel);
-        // 模拟实现：rtsp://user:pass@ip:554/Streaming/Channels/channel
-        // 凭据需 URL 编码，避免密码含 @ : / # ? 等特殊字符破坏 URL 结构
-        return VendorRtspUrl.format(user, pass, ip,
-                VendorRtspUrl.RTSP_PORT, "/Streaming/Channels/" + channel);
+        return backend.getRtspUrl(ip, port, user, pass, channel);
     }
 
     /**
      * PTZ 控制（ContinuousMove / Stop）。
-     * <p>
-     * 真实实现通过 PTZ 服务 ContinuousMove 发送速度向量，
-     * 或 Stop 停止当前运动。模拟实现仅记录日志。
      *
      * @param ip   设备 IP
      * @param port ONVIF 端口
@@ -149,21 +141,15 @@ public class OnvifClient {
      * @return 命令执行结果（"ok" 或错误消息）
      */
     public String ptzControl(String ip, int port, String user, String pass, String cmd) {
-        validateConnectionArgs(ip, port, user, pass);
-        if (cmd == null || !PTZ_COMMANDS.contains(cmd)) {
-            throw new IllegalArgumentException(
-                    "unsupported ptz command: " + cmd + ", supported: " + PTZ_COMMANDS);
-        }
-        log.info("PTZ {} -> {}:{} (simulated)", cmd, ip, port);
-        return "ok";
+        return backend.ptzControl(ip, port, user, pass, cmd);
     }
 
     /**
-     * 事件订阅（WS-BaseNotification Subscribe）。
-     * <p>
-     * 真实实现通过 Event 服务 Subscribe 注册消费端点，
-     * 设备会通过 Notify 推送事件到该端点。模拟实现将 callback 注册到内存表，
-     * 可通过 {@link #simulateEvent(String, String)} 触发回调。
+     * 事件订阅。
+     *
+     * <p>simulated 下将 callback 注册到内存表（可用 {@link #simulateEvent} 触发）；
+     * live 下走设备侧 PullPoint 订阅（见 {@link #subscribeEvents} 类注释），
+     * 订阅失败抛 {@code OnvifException}。
      *
      * @param ip       设备 IP
      * @param port     ONVIF 端口
@@ -174,9 +160,12 @@ public class OnvifClient {
      */
     public String subscribeEvents(String ip, int port, String user, String pass,
                                   Consumer<String> callback) {
-        validateConnectionArgs(ip, port, user, pass);
+        OnvifValidation.requireConnectionArgs(ip, port, user, pass);
         if (callback == null) {
             throw new IllegalArgumentException("callback must not be null");
+        }
+        if (backend instanceof OnvifEventSource source) {
+            return source.subscribeEvents(ip, port, user, pass, callback);
         }
         String addr = ip + ":" + port;
         eventSubscribers.put(addr, callback);
@@ -191,13 +180,19 @@ public class OnvifClient {
      * @param handle 订阅句柄（由 {@link #subscribeEvents} 返回）
      */
     public void unsubscribeEvents(String handle) {
-        if (handle == null) return;
+        if (handle == null) {
+            return;
+        }
+        if (backend instanceof OnvifEventSource source) {
+            source.unsubscribeEvents(handle);
+            return;
+        }
         eventSubscribers.remove(handle);
         log.info("Unsubscribed events for {}", handle);
     }
 
     /**
-     * 模拟向指定设备推送一个事件（仅用于测试与联调）。
+     * 模拟向指定设备推送一个事件（仅用于测试与联调；live 模式下无订阅表）。
      *
      * @param handle      订阅句柄
      * @param eventPayload 事件载荷字符串
@@ -214,36 +209,9 @@ public class OnvifClient {
 
     /** 当前活跃订阅数（用于监控与测试）。 */
     public int activeSubscriberCount() {
+        if (backend instanceof OnvifEventSource source) {
+            return source.activeSubscriptions();
+        }
         return eventSubscribers.size();
-    }
-
-    // ------------------------------------------------------------------
-
-    private static SurveillanceDevice newDevice(String id, String name,
-                                                SurveillanceDevice.Vendor vendor,
-                                                String ip, String user, String pass) {
-        return new SurveillanceDevice(id, name, vendor, ip, DEFAULT_PORT, user, pass);
-    }
-
-    /** 从 CIDR 提取前三段前缀，如 "192.168.1.0/24" -> "192.168.1"。 */
-    private static String extractPrefix(String subnet) {
-        String addr = subnet.contains("/") ? subnet.substring(0, subnet.indexOf('/')) : subnet;
-        int lastDot = addr.lastIndexOf('.');
-        return lastDot > 0 ? addr.substring(0, lastDot) : addr;
-    }
-
-    private static void validateConnectionArgs(String ip, int port, String user, String pass) {
-        if (ip == null || ip.isBlank()) {
-            throw new IllegalArgumentException("ip must not be blank");
-        }
-        if (port <= 0 || port > 65535) {
-            throw new IllegalArgumentException("port must be in [1, 65535]");
-        }
-        if (user == null || user.isBlank()) {
-            throw new IllegalArgumentException("user must not be blank");
-        }
-        if (pass == null || pass.isEmpty()) {
-            throw new IllegalArgumentException("pass must not be empty");
-        }
     }
 }

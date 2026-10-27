@@ -32,7 +32,14 @@ public class SimLoopbackGateway implements DockGateway {
     private final ObjectMapper mapper;
     private final DockProperties props;
     private final HttpClient http;
-    private final AtomicLong tidSeq = new AtomicLong(1);
+    private final AtomicLong tidSeq = new AtomicLong(0);
+
+    /**
+     * 单调序列发号器（V35；§5 Q4 裁决：机巢事务号跨重启单调）。缺失时走内存 tidSeq
+     * （纯单测语义不变）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private io.aerofleet.cloud.api.service.PersistentSequence sequence;
 
     public SimLoopbackGateway(ObjectMapper mapper, DockProperties props) {
         this.mapper = mapper;
@@ -49,7 +56,8 @@ public class SimLoopbackGateway implements DockGateway {
 
     @Override
     public DockReply sendCommand(String sn, DockCommand command, Map<String, Object> data) {
-        long tid = tidSeq.getAndIncrement();
+        Long issued = sequence != null ? sequence.next("dock_tid", 0) : null;
+        long tid = issued != null ? issued : tidSeq.incrementAndGet();
         long bid = System.currentTimeMillis();
         Map<String, Object> frame = new LinkedHashMap<>();
         frame.put("tid", tid);

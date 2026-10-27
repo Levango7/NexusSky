@@ -105,6 +105,77 @@ public class DeliveryTask2 {
         this.status = status;
     }
 
+    // ===== 六阶段细粒度（V36；P1#5 裁决：六阶段上位，粗状态由 tracker 单一写入点派生） =====
+
+    /** 细粒度阶段（DeliveryStatus.Phase；NULL=历史行且粗状态为 FAILED/ABORTED，不假造）。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "phase", length = 32)
+    private DeliveryStatus.Phase phase;
+
+    @Column(name = "current_lat")
+    private Double currentLat;
+
+    @Column(name = "current_lon")
+    private Double currentLon;
+
+    @Column(name = "remaining_distance_km")
+    private Double remainingDistanceKm;
+
+    @Column(name = "estimated_arrival_min")
+    private Double estimatedArrivalMin;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payload_condition", length = 32)
+    private DeliveryStatus.PayloadCondition payloadCondition;
+
+    public DeliveryStatus.Phase getPhase() {
+        return phase;
+    }
+
+    public void setPhase(DeliveryStatus.Phase phase) {
+        this.phase = phase;
+    }
+
+    public Double getCurrentLat() {
+        return currentLat;
+    }
+
+    public void setCurrentLat(Double currentLat) {
+        this.currentLat = currentLat;
+    }
+
+    public Double getCurrentLon() {
+        return currentLon;
+    }
+
+    public void setCurrentLon(Double currentLon) {
+        this.currentLon = currentLon;
+    }
+
+    public Double getRemainingDistanceKm() {
+        return remainingDistanceKm;
+    }
+
+    public void setRemainingDistanceKm(Double remainingDistanceKm) {
+        this.remainingDistanceKm = remainingDistanceKm;
+    }
+
+    public Double getEstimatedArrivalMin() {
+        return estimatedArrivalMin;
+    }
+
+    public void setEstimatedArrivalMin(Double estimatedArrivalMin) {
+        this.estimatedArrivalMin = estimatedArrivalMin;
+    }
+
+    public DeliveryStatus.PayloadCondition getPayloadCondition() {
+        return payloadCondition;
+    }
+
+    public void setPayloadCondition(DeliveryStatus.PayloadCondition payloadCondition) {
+        this.payloadCondition = payloadCondition;
+    }
+
     public double getSenderLat() {
         return senderLat;
     }

@@ -68,6 +68,42 @@ public class AutoDispatchService {
     /** 历史容量上限。 */
     private static final int HISTORY_CAPACITY = 500;
 
+    /**
+     * 出警历史持久化仓库（V31；审计 §2.1 第 4 条）。缺失（纯单测构造）时自动
+     * 降级为纯内存——与全仓其他 persist 开关同款取舍。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DispatchHistoryRepository historyRepository;
+
+    /**
+     * 启动恢复：把库中最新 {@link #HISTORY_CAPACITY} 条载回内存队列
+     * （最新在前，与运行时 addFirst 顺序一致）。db 为空或仓库缺失时安全跳过。
+     */
+    @jakarta.annotation.PostConstruct
+    void restoreHistoryFromRepository() {
+        if (historyRepository == null) {
+            return;
+        }
+        try {
+            List<DispatchRecord> restored = historyRepository
+                    .findAllByOrderByTriggerTimeDescDispatchIdDesc(
+                            org.springframework.data.domain.PageRequest.of(0, HISTORY_CAPACITY))
+                    .stream()
+                    .map(DispatchRecordEntity::toRecord)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
+            // restored 已是「最新在前」（trigger_time DESC）；deque 契约是头新尾旧
+            // （运行时 addFirst），正序 addLast ⇒ 与运行时顺序一致。
+            for (DispatchRecord r : restored) {
+                history.addLast(r);
+            }
+            if (!restored.isEmpty()) {
+                log.info("Restored {} dispatch history records from database", restored.size());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to restore dispatch history from database: {}", e.getMessage());
+        }
+    }
+
     public AutoDispatchService(DeviceRegistry deviceRegistry, FlightTrackStore trackStore) {
         this(deviceRegistry, trackStore, new AutoDispatchConfig());
     }
@@ -368,6 +404,33 @@ public class AutoDispatchService {
         history.addFirst(record);
         while (history.size() > HISTORY_CAPACITY) {
             history.pollLast();
+        }
+        persistDispatch(record);
+    }
+
+    /**
+     * 写穿 + 同口径裁剪：库与内存都只保留最新 {@link #HISTORY_CAPACITY} 条——
+     * 容量语义与内存时期完全一致，不发明新的留存策略（留存期属产品口径，
+     * 见 docs/real-integration-program.md 待定项）。仓库缺失或落库异常都不影响
+     * 出警主流程（历史是旁路，不是主链）。
+     */
+    private void persistDispatch(DispatchRecord record) {
+        if (historyRepository == null) {
+            return;
+        }
+        try {
+            historyRepository.save(DispatchRecordEntity.fromRecord(record));
+            long count = historyRepository.count();
+            if (count > HISTORY_CAPACITY) {
+                long excess = count - HISTORY_CAPACITY;
+                List<DispatchRecordEntity> oldest = historyRepository
+                        .findAllByOrderByTriggerTimeAscDispatchIdAsc(
+                                org.springframework.data.domain.PageRequest.of(0, (int) excess));
+                historyRepository.deleteAllInBatch(oldest);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to persist dispatch history (dispatchId={}): {}",
+                    record.getDispatchId(), e.getMessage());
         }
     }
 

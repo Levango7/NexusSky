@@ -57,6 +57,73 @@ public class EmergencyOrchService {
     private static final int ACTION_CANCEL = 4;
     /** planId 生成器。 */
     private final AtomicLong planIdGenerator = new AtomicLong(PLAN_ID_START);
+
+    /**
+     * 单调序列发号器（V35；§5 Q5 裁决：planId 跨重启单调——若它进过客户侧报表，
+     * 复用比丢数据更严重）。缺失时走内存 generator。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private PersistentSequence sequence;
+
+    /**
+     * 计划仓库（V37；P1#8 裁决：新表独立落库）。快照 = 计划 Map 整体 JSON
+     * （Jackson 对 Map&lt;String,Object&gt; 双向无损）；写穿于 start/abort/上报回调三处，
+     * 读穿于 getPlan 内存未命中时——重启后编排进度与事件列表可查。
+     * 仓库缺失（纯单测构造）时退化为纯内存。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private EmergencyPlanRepository planRepository;
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper PLAN_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** 写穿：快照 + 排查用列（status/tenant）一次写入。异常只告警（旁路不阻塞主链）。 */
+    private void persistPlan(long planId, Map<String, Object> plan) {
+        if (planRepository == null) {
+            return;
+        }
+        try {
+            EmergencyPlanEntity entity = planRepository.findById(planId)
+                    .orElseGet(() -> new EmergencyPlanEntity(planId));
+            entity.setTenantId(planTenantMap.get(planId));
+            Object status = plan.get("status");
+            entity.setStatus(status == null ? null : String.valueOf(status));
+            entity.setSnapshot(PLAN_MAPPER.writeValueAsString(plan));
+            entity.setUpdatedAt(java.time.Instant.now());
+            planRepository.save(entity);
+        } catch (Exception e) {
+            log.warn("编排计划写穿失败 planId={}：{}", planId, e.getMessage());
+        }
+    }
+
+    /** 读穿（重启/多实例）：快照重建 Map 并回填内存与租户映射。 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readThroughPlan(long planId) {
+        if (planRepository == null) {
+            return null;
+        }
+        try {
+            return planRepository.findById(planId)
+                    .map(entity -> {
+                        try {
+                            Map<String, Object> restored =
+                                    PLAN_MAPPER.readValue(entity.getSnapshot(), Map.class);
+                            plans.put(planId, restored);
+                            if (entity.getTenantId() != null) {
+                                planTenantMap.put(planId, entity.getTenantId());
+                            }
+                            return restored;
+                        } catch (Exception parse) {
+                            log.warn("编排计划快照解析失败 planId={}：{}", planId, parse.getMessage());
+                            return null;
+                        }
+                    })
+                    .orElse(null);
+        } catch (Exception e) {
+            log.warn("编排计划读穿失败 planId={}：{}", planId, e.getMessage());
+            return null;
+        }
+    }
     /** WebSocket 推送器（可为 null，测试场景）。 */
     private final EmergencyOrchPusher pusher;
     /** 事件发布器。 */
@@ -82,7 +149,8 @@ public class EmergencyOrchService {
      * @return planId
      */
     public long start(int scenarioType, int centerLat, int centerLon, int radius, List<Integer> droneIds) {
-        long planId = planIdGenerator.incrementAndGet();
+        Long issued = sequence != null ? sequence.next("orch_plan_id", PLAN_ID_START) : null;
+        long planId = issued != null ? issued : planIdGenerator.incrementAndGet();
         long now = System.currentTimeMillis();
         Map<String, Object> plan = newPlanMap(planId, scenarioType, centerLat, centerLon, radius,
                 droneIds, now);
@@ -91,6 +159,7 @@ public class EmergencyOrchService {
         if (tenantId != null) {
             planTenantMap.put(planId, tenantId);
         }
+        persistPlan(planId, plan);
         log.info("emergency plan started: planId={} scenario={} drones={} radius={}m",
                 planId, scenarioName(scenarioType), droneIds.size(), radius);
         pushPlan(planId, plan);
@@ -116,6 +185,7 @@ public class EmergencyOrchService {
         plan.put("timestamp", System.currentTimeMillis());
         addEvent(plan, "plan aborted");
         updatePhaseStatus(plan, phaseOf(plan), PHASE_STATUS_ABORTED); // ABORTED
+        persistPlan(planId, plan);
         log.info("emergency plan aborted: planId={}", planId);
         pushPlan(planId, plan);
         eventPublisher.publishEvent(new EmergencyEndEvent(this, planId));
@@ -129,7 +199,12 @@ public class EmergencyOrchService {
         if (!checkTenantAccess(planId)) {
             return null;
         }
-        return plans.get(planId);
+        Map<String, Object> plan = plans.get(planId);
+        if (plan != null) {
+            return plan;
+        }
+        // 内存未命中（重启/多实例）：读穿快照——修掉"planId 失效、进度不可查"
+        return readThroughPlan(planId);
     }
 
     /**
@@ -357,6 +432,7 @@ public class EmergencyOrchService {
         if (phase != oldPhase) {
             addEvent(plan, "phase " + oldPhase + "->" + phase + " status=" + phaseStatusName(phaseStatus));
         }
+        persistPlan(planId, plan);
         log.debug("emergency mission plan update: planId={} phase={} status={} cov={}%",
                 planId, phase, phaseStatus, coverageRate);
         pushPlan(planId, plan);

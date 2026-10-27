@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 211 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 219 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,259 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 211 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 219 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — 持久化 9/9 收官：配送六阶段上位（V36）+ 应急编排落库（V37）（2026-10-27）
+
+### 做：审计 §2.1「必须落库」最后两条（9/9 全清）
+
+- **配送六阶段上位**（#5 裁决落地，V36）：`delivery_task2` 加 phase + 位置五列；
+  tracker 写穿时**粗状态由六阶段派生**（`coarseOf`，单一写入点=二者永不漂移）；
+  重启读穿修掉"任务在库、状态 404"；存量回填只做无歧义映射（FAILED/ABORTED 行
+  **保持 NULL 不假造**——读穿对它们如实返回"无状态"，404 语义不被污染）。5 例。
+- **应急编排落库**（#8 裁决落地，V37）：`emergency_plan` 新表 + 整 Map 快照 JSON
+  （Jackson 对 Map 双向无损）；写穿于 start/abort/上报回调三处、读穿于 getPlan——
+  重启后编排进度与事件列表可查；planId 由 V35 sequence_counter 续号（两批衔接）。
+  4 例。
+
+### 顺带修：NtripClient 静默关闭的异常契约归一
+
+全量测试暴露 `NtripClientTest.handlesSilentClose` 偶发红——Windows 上 caster 静默关闭
+是 RST（SocketException），Linux 是干净 EOF：两种同语义（对端回应前关连接）却抛
+不同异常类型。修法：connect() 把 SocketException 归一为 NtripException（契约统一），
+不放宽测试。
+
+### 账目
+
+- **持久化 9/9 全部落地**（立项书 P1 收官）；计数：cloud-backend 3221→3230（+9），
+  全仓 5383→5392。V36/V37 迁移动用"真 jar+真 H2+真 Flyway"启动验证（36 迁移至 v37 + Started）。
+
+## [Unreleased] — ONVIF 事件订阅补齐：WS-BaseNotification PullPoint，取消即停、失败回 502（P2 #14 第二刀，2026-10-27）
+
+### 交付
+
+- `surveillance/onvif/OnvifPullPointClient`（新类）：`CreatePullPointSubscription`
+  （InitialTerminationTime=PT1H）→ `PullMessages`（Timeout=PT1S / MessageLimit=16）。
+  `NotificationMessage` **原样序列化**交出——厂商私有字段在 `Message` 里的结构千差万别，
+  强类型化只会把不认识的部分丢掉。
+- live 后端实现 `OnvifEventSource`：订阅成功才返回句柄；每个订阅一条守护轮询线程，
+  连续失败 3 次放弃并从表中摘除（**不静默重连**——那会让 UI 看起来仍有事件源）。
+- 轮询**决策**拆到 `OnvifEventPoller`（成功清零 / 失败计数 / 第 3 次放弃 / 坏回调不打死轮询）：
+  这些是纯逻辑，留在 `while (!stopped)` + 线程里只能靠"起线程 + sleep + 观察副作用"验证，
+  变异测试里会成片落成 TIMED_OUT；拆出来后每次 `pollOnce()` 都能同步断言。
+- `OnvifClient` 门面按 `backend instanceof OnvifEventSource` 分派；模拟模式行为不变。
+- `OnvifVendorAdapter.supportsEventSubscription()` 在 live 下改为 true（设备是否有
+  Events 服务由 `subscribeEvents` 当场回答，不预判）。
+- `SurveillanceController`：订阅失败在建立 SSE **之前**映射 **502**
+  （原来整片 501「未实现」）；501 仅保留给"适配器本身不支持"。
+- **同类"200 假成功"顺手收口**：`Gb28181Adapter.supportsEventSubscription()` 改为
+  `false`——它只构造 SUBSCRIBE 形状、**SIP 传输未实现，回调永远不会触发**，此前 REST
+  会先回 200 再挂一条空流。现在国标设备在建立 SSE 之前回 501（文案带 `GB28181`，
+  同时作为"路由确实落在国标适配器"的证据）。
+- **为什么是 Pull 不是 Push**：Push 要求设备能连回本服务，现场摄像头通常在独立视频
+  网段、服务在 NAT 后——Push 地址设备到不了；PullPoint 只要求"本服务能连设备"，
+  与取流同向。
+
+### 测试（新增 24 例）
+
+- `OnvifPullPointClientTest` 6 例：订阅地址/到期时间解析、缺 Address 报错、通知序列化、
+  请求参数有界（PT1S/16）、空响应当空列表、设备 Fault 带原因；
+- `OnvifLiveBackendTest` +8 例：真 HTTP 假设备端到端（订阅 → 两条通知进回调 →
+  取消后不再拉取）、无 Events 服务明确报错、未知句柄取消幂等、瞬时 Fault 退避重试后
+  仍交付、后端自身拒绝非法参数、取消订阅打断在途 `PullMessages`、轮询线程为 daemon、
+  连续 Fault 到上限后从活跃表摘除（恰好 3 次）；
+- `OnvifClientLiveEventsTest` 2 例：门面 → live 后端 → 假设备真实委派（句柄/计数/回调/
+  取消后停止拉取）、live 下非法参数在联网前拒绝；
+- `OnvifEventPollerTest` 5 例：全部通知按序交付、失败后成功清零、第 3 次失败放弃、
+  回调抛异常不打死轮询、重试等待被中断立即停止；
+- `OnvifXmlTest` +3 例：`localName` 前缀回退、`serialize` 保留命名空间、`parse` 对 null/
+  外部实体 DOCTYPE 拒绝；
+- 既有 3 例按新契约翻正：mode（订阅失败抛 `OnvifException` 而非"拒绝实现"）、
+  routing（live 声明支持）、controller（live 订阅失败 501 → 502）；另 1 例 GB28181
+  控制器用例从"200 + 空流"翻正为"501 + 文案带厂商名"（不新增用例，总数不变）。
+- **A/B 变异 3 个**（取消不 stop 轮询 / 通知元素名写错 / 去掉无 Events 服务检查）
+  全部改坏⇒红、还原⇒绿。
+
+### 边界
+
+- 订阅到期不自动续期（设备会以 Fault 拒绝）；轮询器连续失败 3 次后停止并记 ERROR，
+  由上层重新订阅——协议层不做"悄悄续命"的黑箱；
+- 只实现 PullPoint，不实现 Push（理由见上）与 WS-Eventing `Subscribe` 的推模式；
+- 事件载荷是原始 `NotificationMessage` XML（含厂商自定义字段），未做主题归一化。
+
+## [Unreleased] — 四项决策拍板落账 + 单调序列 V35 落地（2026-10-27）
+
+### 决策（用户逐项确认，选项与依据见 docs/real-integration-program.md）
+
+1. **配送词汇归一 → 六阶段上位**：`delivery2` 加 `phase` 列存六阶段，对外粗状态派生（API 兼容
+   不变），存量行映射回填——实现待做（下一批，V36 起）。
+2. **应急编排 → 新表独立落库**：`emergency_plan` 存轻量场景（orch 域 `OrchestrationPlanEntity`
+   是带 steps/triggers 的重实体，语义不同不强塞）——实现待做（下一批）。
+3. **单调序列 → 持久化续号**：✅ **本批已实现**（见下）。
+4. **审计链 staging → 打开**：✅ **本批已实现**（`aerofleet.audit.persist-to-db=true` + profile 钉）。
+
+### 实现：V35 `sequence_counter` + PersistentSequence
+
+- **机巢事务号 `dock_tid`**与**编排计划号 `orch_plan_id`** 重启后不再从头复用
+  （"ID 复用比丢数据更严重"的裁决落地）：`PersistentSequence.next(name, base)`
+  内存缓存 + 逐发写穿，首号 = base+1（与原内存语义逐位等价）；重启从
+  `max(base, 库中最后发出值)` 续起；库抖动 ⇒ WARN 降级（进程内仍单调，发号不阻塞主链）。
+- 消费方各留内存降级路径（`sequence==null` 时走原 AtomicLong）——纯单测语义不变。
+
+### 账目
+
+- 计数：cloud-backend 3215→3221（+6），全仓 5377→5383。
+- 立项书「待口径」四条拍板登记完毕；P1#5/#8 决策锁定（🔒）待实现。
+
+## [Unreleased] — 持久化第二批（6/9）：合规状态 / 空地协同归档 / 测绘航点（2026-10-27）
+
+### 做：审计 §2.1 的 4/6/7 三条
+
+- **合规状态落库**（第 7 条，V32，最优先的一条）：启动水合 + 写穿。
+  **重启后已激活设备不再回 UNVERIFIED**（丢的是合规叙事本身）。
+  顺带修掉三个"声明了却从未写入"的 last* 时间戳——RegulatorController 上报的
+  lastVerifyTime/lastActivationTime 此前**永远是 0**（只初始化再原样复制）；
+  现在按语义落点写入（→VERIFIED 记 lastVerifyTime、→ACTIVATED 记 lastActivationTime），
+  未发生保持 0 不假填充。
+- **空地协同归档**（第 6 条，V33）：**语义裁决：内存清理 ≠ 归档删除**——内存仍按原口径
+  清理防 OOM，库行保留为归档；**读穿修掉「总结后/重启后 GET report 一律 404」**
+  （审计点名的"事件时间线无处归档"）。复合对象（deployment/evaluation/report）
+  用显式字段映射做 JSON 往返（不可变类不给 Jackson 反射反序列化踩坑）。
+  水合专用 restorePhaseTimestamps：不能靠 setPhase 重放——它会把"当时的响应时效"
+  写成"重启后的时刻"，正是审计要防的失真。
+- **测绘航点落库**（第 4 条，V34）：**契约裁决：任务存在⇒200+真实航点 / 从未规划⇒空数组 /
+  任务不存在⇒404**，三态各自唯一（此前重启后 200+空数组与"本来没有航线"不可分）；
+  MappingWaypointCodec 显式映射 + 内存命中零反序列化。
+
+### 账目
+
+- 计数：cloud-backend 3202→3215（+13），全仓 5364→5377。
+- 立项书 P1 更新为 6/9；余 3 条（配送词汇归一 / 应急编排 / 审计链 staging 口径）+ tidSeq/planIdSeq 单调序列见 program 文档。
+
+## [Unreleased] — 持久化第一批（9 条中的 3 条）+ 真实化路径立项书（2026-10-27）
+
+### 做：审计 §2.1「必须落库」清单的第一批
+
+- **空域预约启用**（第 1 条）：持久化路径（`restorePersistedReservations` + V26/V27 表）
+  与往返测试早已建成，但**五个 profile 无一打开**——审计 §5 Q1 定案「未完成的上半截」：
+  staging/prod 打开 `reservation.persist`，并加 profile 钉测试（删回去即红）。
+- **维护记录落库**（第 3 条，V30 `maintenance_records`）：CRUD 全路径走库；
+  **id 序列启动时从库中最大 `m-N` 续起**——不做这步，重启后新记录会覆盖同 id 旧记录
+  （比"丢数据"更隐蔽）；无仓库时纯内存语义不变（6 例）。
+- **出警历史落库**（第 4 条，V31 `dispatch_history`）：真实 dispatch 主路径写穿 +
+  启动恢复最新 500 + **库与内存同口径裁剪**（不发明新留存策略）；落库异常不炸出警主链
+  （历史是旁路）；drones 快照存 JSON，坏数据降级空列表不炸历史读取（6 例）。
+
+### 立：`docs/real-integration-program.md`
+
+把散落的剩余项收成一个 program：P1 持久化（本条完成 3/9，余 6 条各带前置）、
+P2 SITL 首验（等一个 Linux/WSL 环境；后端零改动接真固件是全仓最高价值验证）、
+P3 UOM 联调（先行件=差异比对框架，可不等外部先做）、P4 ONVIF PullPoint（可做）、
+P5 厂商私有 SDK/GB28181 媒体面（等授权/硬件）。审计 §5 的口径问题原样转录为「待口径」十条。
+
+### 账目
+
+- 计数：cloud-backend 3189→3202（+13），全仓 5351→5364；docs 41→42 篇（README 目录树同步）。
+
+## [Unreleased] — GAPS 清账批：HardwarePanel 旋翼契约对齐（§八.6）+ CHANGELOG 断条目排版归位（G-2）（2026-10-26）
+
+### ① HardwarePanel `{}` 当一台旋翼（GAPS §八.6，语义裁决后修复）
+
+裁决依据是**后端代码**不是猜：`/rotor/telemetry/{sysid}` 恒返回单台机的**扁平**旋翼视图
+（`HardwareDataController.rotorTelemetryView` 字段齐全；`RotorController.getTelemetry` 是
+`computeIfAbsent` 永不为 null）——既无 `{rotors:[...]}` 形状，也不可能返回 `{}`。
+旧写法 `rotor?.rotors || (rotor ? [rotor] : [])` 的前者是对不存在契约的死防御，
+后者会把任何 truthy 异形载荷当旋翼渲染成整行 `--`。修复：只有带契约键 `rotorIndex`
+的载荷才算一台旋翼（`!= null` 判——0 是合法值）。新增 `hardwarePanelRotors.test.jsx`
+5 例（契约形状恰一行 / 404 空态 / `{}` 空态 / `{rotors:[]}` 空态 / rotorIndex=0 不误杀）。
+
+### ② CHANGELOG P1 断条目排版归位（G-2，纯排版不改一字）
+
+2026-10-12 那条「外部评估报告 P1 续整改」的**标题在 11259 行、正文孤悬在 11427 行起**
+（两次解冲突各补一半，标记行已消但条目仍是断的；读者从标题往下看会以为那轮什么都没做）。
+本次把正文整段移到标题之下，顺带清掉三处 `---` 族残渣。
+
+### 账目
+
+- GAPS §九.2 的「commands 面缺 land」**经查已由 2026-10-24 提交连测试补齐**
+  （`DroneController:205` land case + `DroneControllerTest:185` 同源注释）——过期账，销账。
+- 前端用例 577 → 582（+5）。
+
+## [Unreleased] — ONVIF 从模拟升级为 simulated/live 双后端：真实 SOAP + WS-Discovery，失败不回退猜地址（P2 #14 第一刀，2026-10-26）
+
+### 交付
+
+- `surveillance/onvif/**`（新包，11 个类）：`OnvifBackend` 接口 + `SimulatedOnvifBackend`
+  （升级前的全部行为逐字迁移）+ `OnvifLiveBackend`（真实协议）+ `OnvifSoapClient`
+  + `OnvifDiscoveryClient` + `OnvifXml` / `OnvifValidation` / `OnvifPtzCommands`
+  / `OnvifSettings` / `OnvifException` / `OnvifUnsupportedException`。
+- **live 侧发真实 SOAP**（无第三方库，JDK `HttpClient` + DOM）：
+  Device `GetCapabilities`、Media `GetProfiles` + `GetStreamUri`、
+  PTZ `ContinuousMove` / `Stop`；WS-Security `UsernameToken` +
+  `PasswordDigest = Base64(SHA1(nonce 原始字节 || created || password))`。
+- **WS-Discovery**：向 `239.255.255.250:3702` 发 `Probe`（`dn:NetworkVideoTransmitter`），
+  解析 `ProbeMatch`（XAddrs / Scopes / EndpointReference）；另支持**单播目标**
+  （`discovery-unicast-targets`，现场常丢多播），`subnet` 在 live 下只做 IPv4 CIDR
+  **结果过滤**（链路本地协议没有"扫网段"能力，非 CIDR 记 WARN 不过滤）。
+- **口径（不许含糊）**：默认 `aerofleet.onvif.mode=simulated`，demo 与现有
+  `OnvifClientTest` 行为不变；`live` 下取流地址由设备给出并标
+  `StreamUrlOrigin.ONVIF_GETSTREAM_URI`（`deviceVerified=true`）；
+  **SOAP 失败不回退**成按规范猜的 `rtsp://`；设备返回非 RTSP 的 MediaUri 直接报错。
+- **live 路由**：`aerofleet.onvif.mode=live` 时海康/大华/宇视统一路由到 ONVIF 适配器
+  （三家私有 SDK 适配器仍是模拟实现，不能拿"未向设备确认"的地址冒充真实取流）；
+  模拟模式路由完全不变。
+- **事件面不假装**：live 下 `subscribeEvents` 抛 `OnvifUnsupportedException`，
+  `VendorAdapter.supportsEventSubscription()` 由 ONVIF live 覆写为 false，
+  REST 在建立 SSE **之前**返回 501（不是先 200 再挂一条永不来事件的流）。
+- **安全**：XML 解析禁 DOCTYPE / 外部实体 / XInclude，响应体 2 MB 上限，
+  `HttpClient.Redirect.NEVER`，异常与日志不含密码/nonce/digest；
+  `VendorRtspUrl.maskCredentials` 成为唯一脱敏点，`SurveillanceController` 与
+  `RapidDeployService` 共用（后者此前 INFO 日志会打印带凭据的 RTSP URL）。
+- **配置面**：`aerofleet.onvif.*` 十项（mode / 连接与读超时 / 发现窗口 /
+  响应体上限 / device-service-path / discovery-username+password / 单播目标 /
+  多播开关），全部有代码默认值，未改 `application.properties`。
+
+### 测试（新增 41 例）
+
+- `OnvifSoapClientTest` 14 例：digest 已知答案（期望值由 Python hashlib 独立算出）、
+  假设备**独立重算** digest、固定时钟/nonce、HTTP 500/300、SOAP Fault、DOCTYPE 拒绝、
+  响应超限与恰限、snippet 300/301 双向边界、真实 nonce 源互异非全零、不可达；
+- `OnvifLiveBackendTest` 18 例：真 `HttpServer` 假固件——能力按 XAddr 映射、
+  通道号→ProfileToken、凭据 RFC 3986 注入、端口 0/缺省→554、非 RTSP/空 profiles/
+  无 Media 服务报错、device-service-path 空白/null/无斜杠回退、PTZ 速度向量与 Stop
+  逐字段断言；
+- `OnvifDiscoveryClientTest` 16 例 + `OnvifDiscoveryClientIpv4CidrTest` 5 例：
+  真 `DatagramSocket` 收 ProbeMatch、名称 %-解码、subnet 过滤、空白 subnet、
+  缺凭据报错、零发送报错（诊断含 disabled）、空主机目标不发本机、65535 上限端口可用、
+  XAddr 端口 0→80、主机名不参与过滤、无 Scopes/空 Address 兜底、scopes 全文厂商判定、
+  64 台后停止收包；CIDR 的 0/255 八位组与 /0、/32 前缀边界；
+- `OnvifSettingsTest` 5 例默认值契约 + `OnvifXmlTest` 8 例（内部子集 DOCTYPE 拒绝、
+  localName 无前缀回退、转义、文本归一、顺序）；
+- `OnvifClientModeTest` 4 例 + `OnvifLiveRoutingTest` 4 例 + 控制器 501 1 例 +
+  `RtspUrlCredentialTest` mask 脱敏 2 例
+  （上列用例数为各类当前**累计**数，其中既有 52 例控制器用例不含在"新增"里：
+  新增 = 当前 163 − 原有 122 = 41）。
+- **变异收口（三轮 PIT，surveillance 包 809→1103 变异体）**：0.9087/0.9214 →
+  0.9376/0.9487 → **0.9419/0.9529**（杀掉 636→891）；5 处生产小重构消灭
+  不可按契约测试的存活；地板显式下调 0.95/0.96 → **0.94/0.95**，23 条新存活与
+  4 条新超时逐条定性（详见 docs/mutation-testing.md 第五轮），棘轮性质不变。
+- 全量：`mvn -B -o clean test` **5351 例** / vitest **580 例** / 端点 **414** /
+  Python SDK **27 例**；A/B 变异 4 个（凭据注入 / nonce 用 Base64 文本 /
+  live 路由 / 501 前置门禁）均改坏⇒红、还原⇒绿。
+
+### 边界
+
+- 事件订阅（WS-BaseNotification / PullPoint）**未实现**，live 下明确 501；
+- 只实现明文 HTTP 的 ONVIF 服务：发现阶段跳过 `https` XAddr（需要 TLS
+  信任配置，不能把 https 当 http 去连）；
+- 通道号按 `GetProfiles` 返回顺序 1-based 映射（ONVIF 无"通道"概念）；
+- PTZ 使用第一个 Media Profile（既有 `OnvifClient.ptzControl` 无通道参数）；
+- 海康/大华/宇视私有 SDK 与 GB28181 媒体面仍是模拟实现（本条只收 ONVIF 协议级）。
 
 ## [Unreleased] — C4 收口：启动时从 flight_log 重建内存轨迹历史（ROADMAP:337，2026-10-26）
 
@@ -204,6 +451,28 @@ Address already in use`。逐条查下来都是测试自己 `bind` 的固定端�
 | `grep` 复核 | 目标文件里只剩对端地址与 `--port=` 解析断言，无固定本地 bind |
 
 **计数口径：纯端口改造，没有新增/删除用例，Java 总数不变。**
+## [Unreleased] — docker-compose 根编排首次可起 + Linux CI smoke job（GAPS §二 收口，2026-10-26）
+
+### 设计阶段就抓到的真缺口
+
+根编排（host 网络 + 挂载 jar）自 D4 写下后**从未被 compose up 实测过**（本机 Windows
+跑不了 host 网络，配置审查≠编排能起）。为 smoke job 做设计复核时当场确认裸跑必崩：
+prod profile 打 `localhost:5432`（编排里没有库）+ `jwt-secret` 空串（过不了 ≥32 字节
+强度校验）+ `SPRING_DATASOURCE_PASSWORD` 无缺省。
+
+### 交付
+
+- `docker-compose.yml`：补 `postgres:15-alpine`（host 网络直通 5432，Flyway V1..V29）
+  与 `redis:7-alpine`（6379，`/actuator/health` 的硬依赖——缺它 health 恒 503，首跑实测）
+  两个服务；后端补齐 5 个 prod 必填环境变量（jwt×2 / users / encryption.key / datasource
+  password），注释写明生产必须覆盖。
+- `scripts/check-compose-smoke.sh`：up → 三断言（后端 /actuator/health 200；
+  drone-sim 打出 "listening on UDP"——判定面是容器日志不是 compose 回显，编排注释
+  既有口径；四容器 Running 且 RestartCount=0——崩溃重启不算过）→ down，失败自动
+  dump 日志尾部。
+- `ci.yml` 新增 **compose-smoke job**（ubuntu-24.04，硬门禁语义：脚本退非零即红）：
+  runner 上先 `mvn -pl drone-sim,cloud-backend -am package -DskipTests` 产出挂载 jar。
+- 首轮 smoke 的判定结果会如实写回 GAPS §二（跑得过=收口；跑不过=下一个真缺口）。
 
 ## [Unreleased] — e2e-rtk 在慢 runner 上注入「看似没生效」的时序脆弱性修复（2026-10-26）
 

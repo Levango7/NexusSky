@@ -142,7 +142,13 @@ export default function HardwarePanel({ drones = [] }) {
   const updRadar = (k) => (e) => setRadarForm({ ...radarForm, [k]: e.target.value })
 
   const targets = radarTargets?.targets || []
-  const rotors = rotor?.rotors || (rotor ? [rotor] : [])
+  // 后端契约（HardwareDataController.rotorTelemetryView + RotorController.getTelemetry
+  // 的 computeIfAbsent）：恒返回单台机的**扁平**旋翼视图（sysid/rotorIndex/rpm/...），
+  // 从不返回 {rotors:[...]}、永不为 {}。旧写法 `rotor?.rotors || (rotor ? [rotor] : [])`
+  // 的前者是对不存在契约的死防御，且任何 truthy 的异形载荷（如 {rotors:[]}）都会经
+  // fallback 把 {} 当一台旋翼渲染成整行 --（GAPS §八.6，2026-10-26 裁决：按真实契约
+  // 对齐——只有带契约键 rotorIndex 的载荷才算一台旋翼）。
+  const rotors = rotor && rotor.rotorIndex != null ? [rotor] : []
 
   return (
     <div style={{ display: 'flex', height: '100%', minHeight: 0 }}>

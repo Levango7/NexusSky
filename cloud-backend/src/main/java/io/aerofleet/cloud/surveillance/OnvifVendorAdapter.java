@@ -75,6 +75,27 @@ public final class OnvifVendorAdapter implements VendorAdapter {
         return onvifClient.getDeviceCapabilities(device.ip, device.port, device.username, device.password);
     }
 
+    /**
+     * live 模式下流地址由设备 {@code GetStreamUri} 返回，是<b>唯一</b>可如实声明
+     * {@code deviceVerified=true} 的来源；模拟模式仍按规范推导（未验证）。
+     */
+    @Override
+    public StreamUrlOrigin streamUrlOrigin() {
+        return onvifClient.isLive()
+                ? StreamUrlOrigin.ONVIF_GETSTREAM_URI
+                : StreamUrlOrigin.VENDOR_STANDARD_FORMAT;
+    }
+
+    /**
+     * 两种模式都支持订阅：模拟模式回放内存事件表，live 模式走真实的
+     * WS-BaseNotification PullPoint（设备是否真的提供 Events 服务要等
+     * {@code subscribeEvents} 时才由设备回答——这里不预判设备能力）。
+     */
+    @Override
+    public boolean supportsEventSubscription() {
+        return true;
+    }
+
     // ===== 内部工具方法 =====
 
     private static void validateDevice(SurveillanceDevice device) {
