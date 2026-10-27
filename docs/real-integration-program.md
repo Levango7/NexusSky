@@ -27,8 +27,13 @@
 | 8 | 应急编排 `EmergencyOrchService` | ⬜ 待做；`orch/entity/OrchestrationPlanEntity` 存在但属另一域——先定"复用还是新表" |
 | 9 | 审计哈希链 dev 档 | 🔶 配置口径（prod 已 true；staging 缺覆盖行——审计 §5 Q2 待口径） |
 
-**验收标准（全批）**：新增迁移在 H2/Postgres 双跑；每条落库配"重启恢复"测试（本轮三条约 13 例为模板：
+**验收标准（全批）**：新增迁移在 H2/Postgres 双跑；每条落库配"重启恢复"测试（第一批三条约 13 例为模板：
 写穿断言 + 启动恢复顺序 + 异常降级不炸主链 + 无仓库纯内存语义不变）；计数门禁同步。
+
+**续接点（2026-10-27 第二批后）**：余 3 条 = #5 配送（前置：先解 `delivery2` 与 `DeliveryStatusTracker`
+两套状态词汇的归一方向，属设计决策）、#8 应急编排（前置：定 `OrchestrationPlanEntity` 复用还是新表）、
+#9 audit 链 staging 口径（待产品）。另两条单调序列（tidSeq / planIdSeq，§5 Q4/Q5）建议随 #5/#8 一起做——
+都是"重启后 ID/序号复用比丢数据更隐蔽"的同族。迁移号已用到 V34，下一批从 **V35** 起。
 
 ## P2 · SITL 首次真实验证（能做的——但需一个 Linux 环境）
 
