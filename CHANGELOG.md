@@ -46,9 +46,22 @@
   **已实现**：四个操作 + API Key/HMAC 签名 + 退避重试 + 4xx 终态 + 脱敏，
   `UomReportSinkContractTest` 8 例在册；剩余只是"按真实 API 文档逐字段对齐"（等外部 #1）。
 
+### 顺带：UomReportSink ↔ MockUomServer 跨模块契约（P3 先行件第一步）
+
+- **发现的缺口**：`e2e-regulator.ps1` 全链走 `sink-type=sim`，**真**上报实现 `UomReportSink`
+  只在自带的假 UOM 里验过线格式——两个"假 UOM"各测各的，真实现与仓内带激活状态机的
+  `MockUomServer` 从未对话过。真实 UOM 还没接（等外部 #1），这是仓内能先做的最强验证。
+- **新测试** `UomSinkVsRegulatorSimContractTest` 5 例：`MockUomServer` 以 `--port 0`
+  起在 ephemeral 端口，真 HTTP 驱动真 sink——实名三态 + 脱敏 / 激活→遥测→注销全链与
+  records 落账 / 未实名不可激活且 4xx 终态不重试 / 幂等（同 ID）/ 成功路径每端点恰 1 次。
+  跨模块测试依赖（cloud-backend → regulator-sim，test 范围、排除 slf4j-simple）
+  照 drone-sim 既有先例；根 pom 的 dependencyManagement 补管理条目。
+- **A/B**：把 telemetry 的 `serialNo` 字段名改成 `serial` ⇒ 测试红（sim 拿不到序列号）；
+  还原 ⇒ 绿。契约从此钉住，字段漂移不再无声。
+
 ### 账目
 
-- README 脚本数 90→92（`check-doc-counts.py` 实测口径）；测试计数不变。
+- README 脚本数 90→92（`check-doc-counts.py` 实测口径）；测试计数 +5（见上）。
 - 两条门禁的 `--self-test` 与真检查都进 `ci.yml` repo-gates job（自测覆盖门禁要求）。
 - **A/B（真树改坏⇒红、还原⇒绿）**：拿掉 staging 里 `reservation.persist=true` 一行 ⇒ persist 门禁
   红并点名「staging 未覆盖」；摘掉 `ComplianceStateEntity` 的 `@Entity` ⇒ 状态性门禁红并点名

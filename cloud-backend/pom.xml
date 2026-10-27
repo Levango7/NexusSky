@@ -33,6 +33,21 @@
         </exclusion>
       </exclusions>
     </dependency>
+    <!-- 复用 regulator-sim 的 MockUomServer（带激活状态机的标准假 UOM），让**真**上报实现
+         （UomReportSink）与它对话——此前两个"假 UOM"各测各的，真实现从未对该状态机说过话。
+         slf4j-simple 同 drone-sim 的理由必须排除（双绑定会"单跑能过全量挂"）。
+         test 范围：只有测试要用它，不进运行时依赖。 -->
+    <dependency>
+      <groupId>io.aerofleet</groupId>
+      <artifactId>aerofleet-regulator-sim</artifactId>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>slf4j-simple</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
