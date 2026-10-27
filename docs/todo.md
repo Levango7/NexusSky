@@ -36,7 +36,7 @@
 
 | # | 条目 | 现状 | 备注 |
 |---|---|---|---|
-| 14 | **厂商 SDK 全是桩** | 海康/大华/宇视/GB28181 适配器都是模拟实现，媒体面未实现 | ONVIF **协议级**优先（`gb28181-invite://` 这类描述性标识不能当可播流） |
+| 14 | **厂商 SDK 全是桩** | ~~ONVIF 纯模拟~~ **2026-10-26 协议级落地**：`OnvifClient` 拆 simulated/live 双后端——live 走真实 SOAP（GetCapabilities / GetProfiles+GetStreamUri / PTZ ContinuousMove+Stop，WS-Security PasswordDigest）与 WS-Discovery（多播+单播目标）；默认 `aerofleet.onvif.mode=simulated` 行为不变。取流地址来源标 `ONVIF_GETSTREAM_URI`（deviceVerified=true），SOAP 失败不回退猜地址；事件面 live 下**不假装**（REST 先回 501，WS-BaseNotification 未接）。海康/大华/宇视**私有 SDK** 与 GB28181 媒体面仍是模拟实现 | 剩余：私有 SDK 真实现 + GB28181 媒体面（`gb28181-invite://` 这类描述性标识不能当可播流）；ONVIF 事件订阅（PullPoint）另立 |
 | 15 | **10+ 个模块只存内存** | 业务模块的产出没落库，重启即失 | 逐个模块列出"落库缺什么" ⇒ **2026-10-26 审计成稿**：`docs/persistence-and-dead-surface-audit.md` §2 实测 **必须落库 9 / 需产品定 10 / 可接受 11**（"10+"这个粗数被校正），每条带 `file:line` 与"重启丢什么"；§5 列出 8 个必须产品口径才能定的问题。**未开工的就是这 9 条落库本身** |
 | 16 | **UOM `sink-type` 未落地** | 默认 Noop | 机巢/监管上报的真实去向 |
 | 17 | **机巢只有 sim** | 机巢 MQTT 未接 | 硬件到位再动 |

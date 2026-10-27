@@ -194,7 +194,7 @@ public class RapidDeployService {
         registry.register(newDevice);
 
         log.info("Device deployed: id={} ip={} vendor={} rtspUrl={}",
-                newDeviceId, ip, vendorName, rtspUrl);
+                newDeviceId, ip, vendorName, VendorRtspUrl.maskCredentials(rtspUrl));
         return DeployResult.success(newDeviceId, ip, vendorName,
                 "discovered and registered", rtspUrl);
     }
