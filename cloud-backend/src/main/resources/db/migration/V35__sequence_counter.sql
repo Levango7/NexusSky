@@ -12,5 +12,5 @@ CREATE TABLE sequence_counter (
     name       VARCHAR(64) PRIMARY KEY,
     -- 列名不用 ``value``：H2 2.x 把它当保留字，迁移在 ``value BIGINT`` 处直接
     -- 语法错误（CI run 4047 系列 e2e 全红抓到的）。last_value = 最后发出值。
-    last_value BIGINT NOT NULL
+    seq_value BIGINT NOT NULL
 );

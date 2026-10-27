@@ -17,7 +17,7 @@ public class SequenceCounterEntity {
     @Column(name = "name", length = 64)
     private String name;
 
-    @Column(name = "last_value", nullable = false)
+    @Column(name = "seq_value", nullable = false)
     private long value;
 
     protected SequenceCounterEntity() {
