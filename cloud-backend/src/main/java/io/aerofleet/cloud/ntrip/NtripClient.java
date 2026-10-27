@@ -112,6 +112,13 @@ public final class NtripClient implements AutoCloseable {
             } catch (IOException ignored) {
                 // 关闭失败不掩盖原始异常
             }
+            // 契约归一（2026-10-27）：caster 静默关闭在 Windows 上是 RST（SocketException
+            // "Connection reset"）而不是干净 EOF——两种语义都是"对端在回应前关了连接"，
+            // 调用方（重连循环/测试）应看到同一个 NtripException，而不是随平台/时序
+            // 随机挑异常类型（NtripClientTest.handlesSilentClose 在全量跑里偶发红即此）。
+            if (e instanceof java.net.SocketException && !(e instanceof NtripException)) {
+                throw new NtripException("caster 未返回任何响应（连接被重置：" + e.getMessage() + "）");
+            }
             throw e;
         }
     }
