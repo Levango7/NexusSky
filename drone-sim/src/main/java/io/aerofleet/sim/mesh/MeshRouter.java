@@ -63,11 +63,6 @@ public final class MeshRouter implements AutoCloseable {
         }
     }
 
-    /** 拓扑事件类型（供 WebSocket 推送）。 */
-    public enum TopologyEvent {
-        NODE_JOINED, NODE_LEFT, LINK_UP, LINK_DOWN, ROUTE_CHANGED
-    }
-
     /** 缓存的待发送数据（按需建路：RREQ 发出后等待 RREP 回传）。 */
     private record PendingSend(int targetSysid, byte[] payload, long createdAtMs) {}
 
