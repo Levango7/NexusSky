@@ -59,6 +59,30 @@
 - **A/B**：把 telemetry 的 `serialNo` 字段名改成 `serial` ⇒ 测试红（sim 拿不到序列号）；
   还原 ⇒ 绿。契约从此钉住，字段漂移不再无声。
 
+### 修 CI：UOM 跨模块契约改子进程 + ONVIF 停止语义改硬信号（2026-10-28）
+
+- **SLF4J 双绑定（CI 上 125 个用例崩）**：把 regulator-sim 作 cloud-backend 测试依赖时，
+  它的 **shade fat jar（内含 slf4j-simple）**进了测试类路径——CI 上 SimpleLogger 赢了
+  provider 之争，`VideoFusionRecordingServiceTest` 等访问 Logback 的用例 ClassCast 崩
+  （本仓既有 pom 注释恰警告过"provider 顺序敏感导致单跑能过全量挂"）。
+  **治本修法**（`c922d409`，与 drone-sim 同形状）：fat jar 改挂 `shaded` classifier 附属、
+  主 artifact 保持 thin jar——内嵌 slf4j-simple 再也进不了下游类路径；`e2e-regulator`
+  的通配随改 `*-shaded.jar`。跨模块契约测试保持 in-JVM（thin artifact 下依赖安全，
+  已实测 `VideoFusionRecordingServiceTest` 等 13/13）。（本 PR 一度另试"子进程跑真 fat jar"，
+  rebase 后统一采用 classifier 修法——更简、且修的是根因而不是消费端。）
+- **surveillance 变异门禁 CI↔本地 1.1pp 波动**：同一份代码本机 937 杀/47 存活（0.9417），
+  CI 925/59（0.9296）——根因是新增 ONVIF 用例里"睡一觉再断言不再发生"的**窗口式负断言**
+  在慢机上变弱（漏杀）。改成**线程终止**硬信号：取消/放弃订阅后断言 `onvif-events-<handle>`
+  线程在期限内消失（在途慢应答 3s、期限 1s，与机器快慢无关）。A/B：去掉
+  `thread.interrupt()` ⇒ 红；还原 ⇒ 绿。
+- **诊断投资**：变异 job 增 `Upload mutation reports`（`if: always()`，留存 7 天）——
+  门禁只打汇总数字，出红时看不到"哪些变异体翻了"；上传后可直接逐条对比。
+- **复跑撞到的第二个坑**：同分支两次本机 PIT 给出 939/45 与 928/56——差异在 **m2**：
+  旧 fat `regulator-sim` jar（含 slf4j-simple）被 PIT 的 minion 类路径吃进去，
+  `VideoFusionRecordingServiceTest` 等测试在 minion 崩→被排除→11 个变异体**假存活**。
+  刷新 m2 到薄 artifact 后回到 **939/45（0.9437/0.9543）**。判据与细节见
+  `docs/mutation-testing.md` 补记——"本机突然掉分"先查 m2 旧 artifact，别急着改代码。
+
 ### 账目
 
 - README 脚本数 90→92（`check-doc-counts.py` 实测口径）；测试计数 +5（见上）。

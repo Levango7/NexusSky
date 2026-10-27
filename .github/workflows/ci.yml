@@ -1665,6 +1665,18 @@ jobs:
           fi
           python3 scripts/check-mutation-baseline.py \
             --report cloud-backend/target/pit-reports/mutations.xml
+      - name: Upload mutation reports (diagnosis input on failure)
+        # 2026-10-28 加：CI↔本地曾出现 1.1pp 波动（同一份代码：本机 937 杀 / CI 925 杀），
+        # 门禁只打印汇总数字，看不出"哪些变异体翻了"。报告 XML 上传后，出红可逐条对比存活清单。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pit-reports
+          path: |
+            cloud-backend/target/pit-reports/mutations.xml
+            cloud-backend/target/pit-reports-surveillance/mutations.xml
+          if-no-files-found: warn
+          retention-days: 7
       - name: Mutation baseline gate (surveillance)
         run: |
           if [ ! -f cloud-backend/target/pit-reports-surveillance/mutations.xml ]; then

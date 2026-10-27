@@ -49,6 +49,7 @@ class OnvifLiveBackendTest {
     private final java.util.concurrent.atomic.AtomicInteger pullFailuresRemaining =
             new java.util.concurrent.atomic.AtomicInteger();
     /** 让 PullMessages 慢应答，验证取消订阅能打断在途请求。 */
+    /** 慢应答：3s —— 给"取消必须打断在途请求"留出与 CI 抖动无关的判据余量（见 awaitPollerThreadGone）。 */
     private volatile boolean slowPull = false;
     private final java.util.concurrent.atomic.AtomicInteger subscribeCount =
             new java.util.concurrent.atomic.AtomicInteger();
@@ -316,9 +317,10 @@ class OnvifLiveBackendTest {
 
         live.unsubscribeEvents(handle);
         assertThat(live.activeSubscriptions()).isZero();
-        Thread.sleep(300);
+        // 硬信号：轮询线程必须退出（比"睡一觉再数数"的环境无关；CI 慢机也不会漏杀）
+        awaitPollerThreadGone(handle, 2_000);
         int after = pullCount.get();
-        Thread.sleep(400);
+        Thread.sleep(200);
         assertThat(pullCount.get()).as("取消订阅后不应再拉取").isEqualTo(after);
     }
 
@@ -403,7 +405,7 @@ class OnvifLiveBackendTest {
     void subscribeEvents_givesUpAfterConsecutiveFaults() throws Exception {
         pullFailuresRemaining.set(1000);
         OnvifLiveBackend live = backend();
-        live.subscribeEvents("127.0.0.1", port, USER, PASS, payload -> {
+        String handle = live.subscribeEvents("127.0.0.1", port, USER, PASS, payload -> {
         });
 
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
@@ -412,6 +414,28 @@ class OnvifLiveBackendTest {
         }
         assertThat(live.activeSubscriptions()).as("放弃后应摘除订阅").isZero();
         assertThat(pullCount.get()).as("恰好尝试 3 次，不再无限重试").isEqualTo(3);
+        // 硬信号：放弃即线程退出——"不放弃"的变异会让线程一直活着，慢机上也躲不过
+        awaitPollerThreadGone(handle, 3_000);
+    }
+
+    /**
+     * 等轮询线程消失（名字 = {@code onvif-events-<handle>}）。
+     *
+     * <p>为什么用线程终止而不是"睡一觉再数拉取次数"：窗口式负断言在 CI 慢机上会变弱——
+     * 变异体（如"取消不置停止位"）可能来不及在窗口内再拉一次，于是漏杀。线程是否活着
+     * 是硬信号，与机器快慢无关（2026-10-28 CI↔本地 1.1pp 波动后按此改造）。
+     */
+    private static void awaitPollerThreadGone(String handle, long timeoutMs) throws InterruptedException {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadline) {
+            boolean alive = Thread.getAllStackTraces().keySet().stream()
+                    .anyMatch(t -> t.getName().equals("onvif-events-" + handle));
+            if (!alive) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("轮询线程在 " + timeoutMs + "ms 内没有退出：onvif-events-" + handle);
     }
 
     @Test
@@ -445,11 +469,13 @@ class OnvifLiveBackendTest {
         assertThat(pullCount.get()).as("订阅后应已发起第一次拉取").isPositive();
 
         live.unsubscribeEvents(handle);
+        // 硬信号：打断在途请求后线程应快速退出。设备侧慢应答还挂着（3s），没有 interrupt
+        // 的变异只能等它睡完才退 ⇒ 1s 期限必红；有 interrupt 则毫秒级退出（与机器快慢无关）。
+        awaitPollerThreadGone(handle, 1_000);
         // 取消后把设备侧改快：线程若没被停住，下一轮失败重试会立刻表现为计数增长
         slowPull = false;
-        Thread.sleep(2000);
         int after = pullCount.get();
-        Thread.sleep(600);
+        Thread.sleep(400);
         assertThat(pullCount.get()).as("取消后不应再发起 PullMessages").isEqualTo(after);
         assertThat(live.activeSubscriptions()).isZero();
     }
@@ -565,7 +591,7 @@ class OnvifLiveBackendTest {
         pullCount.incrementAndGet();
         if (slowPull) {
             try {
-                Thread.sleep(1200);
+                Thread.sleep(3000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
