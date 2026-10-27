@@ -1179,22 +1179,30 @@ class SurveillanceControllerTest {
     }
 
     @Test
-    @DisplayName("live ONVIF：事件订阅在建立 SSE 之前返回 501，不先回 200 再挂空流")
-    void subscribeEvents_liveOnvif_returns501BeforeOpeningStream() throws Exception {
+    @DisplayName("live ONVIF：设备侧订阅失败在建立 SSE 之前变成 502，不先回 200 再挂空流")
+    void subscribeEvents_liveOnvif_subscriptionFailureReturns502() throws Exception {
         io.aerofleet.cloud.surveillance.onvif.OnvifSettings live =
                 new io.aerofleet.cloud.surveillance.onvif.OnvifSettings();
         live.setMode(io.aerofleet.cloud.surveillance.onvif.OnvifSettings.Mode.LIVE);
+        live.setConnectTimeoutMs(300);
         OnvifClient liveClient = new OnvifClient(live);
         VendorAdapterRegistry liveRegistry = new VendorAdapterRegistry(
                 List.of(new OnvifVendorAdapter(liveClient)), live);
         SurveillanceController liveController = new SurveillanceController(
                 registry, liveClient, new RapidDeployService(liveClient, registry),
                 liveRegistry, alarmEventStore, mjpegStreamService);
+        // 端口 1 上没有 ONVIF 服务：订阅必定失败（连不上），用来验证失败面
         registry.register(new SurveillanceDevice("live-onvif-1", "live onvif",
-                SurveillanceDevice.Vendor.ONVIF, "127.0.0.1", 80, "admin", "pass"));
+                SurveillanceDevice.Vendor.ONVIF, "127.0.0.1", 1, "admin", "pass"));
         MockMvc liveMvc = MockMvcBuilders.standaloneSetup(liveController).build();
 
         liveMvc.perform(get("/api/v1/surveillance/devices/live-onvif-1/events"))
-                .andExpect(status().isNotImplemented());
+                .andExpect(status().isBadGateway())
+                .andExpect(result -> {
+                    Throwable resolved = result.getResolvedException();
+                    assertThat(resolved)
+                            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+                    assertThat(resolved.getMessage()).contains("event subscription failed");
+                });
     }
 }

@@ -1,7 +1,6 @@
 package io.aerofleet.cloud.surveillance;
 
 import io.aerofleet.cloud.surveillance.onvif.OnvifSettings;
-import io.aerofleet.cloud.surveillance.onvif.OnvifUnsupportedException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -35,15 +34,14 @@ class OnvifClientModeTest {
     }
 
     @Test
-    @DisplayName("live：事件订阅抛 OnvifUnsupportedException，不返回假句柄")
-    void liveMode_subscribeEvents_throws() {
+    @DisplayName("live：事件订阅真的连设备；连不上就抛错，不返回假句柄")
+    void liveMode_subscribeEvents_failsInsteadOfFaking() {
         OnvifClient client = liveClient();
 
-        assertThat(client.isLive()).isTrue();
-        assertThatThrownBy(() -> client.subscribeEvents("127.0.0.1", 80, "admin", "p", payload -> {
+        assertThatThrownBy(() -> client.subscribeEvents("127.0.0.1", 1, "admin", "p", payload -> {
         }))
-                .isInstanceOf(OnvifUnsupportedException.class)
-                .hasMessageContaining("refusing to fake");
+                .isInstanceOf(io.aerofleet.cloud.surveillance.onvif.OnvifException.class)
+                .hasMessageContaining("cannot reach");
         assertThat(client.activeSubscriberCount()).isZero();
     }
 

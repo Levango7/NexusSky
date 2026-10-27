@@ -12,7 +12,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * 真实 ONVIF 后端（SOAP 到设备，无第三方库）。
@@ -46,7 +50,7 @@ import java.util.Set;
  * 客户端惯例把凭据注入 userinfo，编码复用 {@link VendorRtspUrl#format}
  * （RFC 3986，不是表单编码）。日志与异常里不打印带凭据的地址。
  */
-public class OnvifLiveBackend implements OnvifBackend {
+public class OnvifLiveBackend implements OnvifBackend, OnvifEventSource {
 
     private static final Logger log = LoggerFactory.getLogger(OnvifLiveBackend.class);
 
@@ -55,15 +59,24 @@ public class OnvifLiveBackend implements OnvifBackend {
     private final OnvifSettings settings;
     private final OnvifSoapClient soap;
     private final OnvifDiscoveryClient discovery;
+    private final OnvifPullPointClient pullPoint;
+    /** 活跃事件订阅：句柄 → 轮询器。 */
+    private final Map<String, Poller> pollers = new ConcurrentHashMap<>();
 
     public OnvifLiveBackend(OnvifSettings settings) {
         this(settings, new OnvifSoapClient(settings), new OnvifDiscoveryClient(settings));
     }
 
     OnvifLiveBackend(OnvifSettings settings, OnvifSoapClient soap, OnvifDiscoveryClient discovery) {
+        this(settings, soap, discovery, new OnvifPullPointClient(soap));
+    }
+
+    OnvifLiveBackend(OnvifSettings settings, OnvifSoapClient soap,
+                     OnvifDiscoveryClient discovery, OnvifPullPointClient pullPoint) {
         this.settings = settings;
         this.soap = soap;
         this.discovery = discovery;
+        this.pullPoint = pullPoint;
     }
 
     @Override
@@ -199,6 +212,52 @@ public class OnvifLiveBackend implements OnvifBackend {
     }
 
     // ------------------------------------------------------------------
+    // 事件订阅（WS-BaseNotification PullPoint）
+
+    @Override
+    public String subscribeEvents(String ip, int port, String user, String pass,
+                                  Consumer<String> callback) {
+        OnvifValidation.requireConnectionArgs(ip, port, user, pass);
+        if (callback == null) {
+            throw new IllegalArgumentException("callback must not be null");
+        }
+        Endpoints endpoints = endpoints(ip, port, user, pass);
+        if (endpoints.events() == null) {
+            // 设备没声明 Events 服务：订阅是不可能成功的，这里直接说清楚，
+            // 而不是返回一个永远不会有事件的句柄
+            throw new OnvifException("device " + ip + ":" + port
+                    + " does not expose an Events service (GetCapabilities has no Events/XAddr)");
+        }
+        OnvifPullPointClient.Subscription subscription =
+                pullPoint.subscribe(endpoints.events(), user, pass);
+        String handle = "onvif-" + ip + "-" + port + "-" + UUID.randomUUID();
+        Poller poller = new Poller(handle, subscription.address(), user, pass, callback);
+        pollers.put(handle, poller);
+        poller.start();
+        log.info("Subscribed events {}:{} handle={} termination={}",
+                ip, port, handle, subscription.terminationTime());
+        return handle;
+    }
+
+    @Override
+    public void unsubscribeEvents(String handle) {
+        if (handle == null) {
+            return;
+        }
+        Poller poller = pollers.remove(handle);
+        if (poller == null) {
+            return;
+        }
+        poller.stop();
+        log.info("Unsubscribed events {}", handle);
+    }
+
+    @Override
+    public int activeSubscriptions() {
+        return pollers.size();
+    }
+
+    // ------------------------------------------------------------------
 
     private Endpoints endpoints(String ip, int port, String user, String pass) {
         String deviceUrl = deviceServiceUrl(ip, port);
@@ -289,5 +348,52 @@ public class OnvifLiveBackend implements OnvifBackend {
     }
 
     private record Profile(String token, String name) {
+    }
+
+    /**
+     * 单个订阅的轮询线程（决策逻辑在 {@link OnvifEventPoller}，可同步测试）。
+     *
+     * <p>停止语义：{@link #stop()} 只置标志 + 打断阻塞，线程在下一轮退出；
+     * 不在设备侧做显式 Unsubscribe（订阅会随 TerminationTime 过期）。
+     */
+    private final class Poller implements Runnable {
+
+        private final String handle;
+        private final OnvifEventPoller poller;
+        private volatile boolean stopped;
+        private Thread thread;
+
+        private Poller(String handle, String address, String user, String pass,
+                       Consumer<String> callback) {
+            this.handle = handle;
+            this.poller = new OnvifEventPoller(handle,
+                    () -> pullPoint.pull(address, user, pass), callback);
+        }
+
+        private void start() {
+            thread = new Thread(this, "onvif-events-" + handle);
+            thread.setDaemon(true);
+            thread.start();
+        }
+
+        private void stop() {
+            stopped = true;
+            if (thread != null) {
+                thread.interrupt();
+            }
+        }
+
+        @Override
+        public void run() {
+            try {
+                while (!stopped) {
+                    if (!poller.pollOnce()) {
+                        return;
+                    }
+                }
+            } finally {
+                pollers.remove(handle);
+            }
+        }
     }
 }

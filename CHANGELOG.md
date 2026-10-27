@@ -37,6 +37,54 @@
 
 
 
+## [Unreleased] — ONVIF 事件订阅补齐：WS-BaseNotification PullPoint，取消即停、失败回 502（P2 #14 第二刀，2026-10-27）
+
+### 交付
+
+- `surveillance/onvif/OnvifPullPointClient`（新类）：`CreatePullPointSubscription`
+  （InitialTerminationTime=PT1H）→ `PullMessages`（Timeout=PT1S / MessageLimit=16）。
+  `NotificationMessage` **原样序列化**交出——厂商私有字段在 `Message` 里的结构千差万别，
+  强类型化只会把不认识的部分丢掉。
+- live 后端实现 `OnvifEventSource`：订阅成功才返回句柄；每个订阅一条守护轮询线程，
+  连续失败 3 次放弃并从表中摘除（**不静默重连**——那会让 UI 看起来仍有事件源）。
+- 轮询**决策**拆到 `OnvifEventPoller`（成功清零 / 失败计数 / 第 3 次放弃 / 坏回调不打死轮询）：
+  这些是纯逻辑，留在 `while (!stopped)` + 线程里只能靠"起线程 + sleep + 观察副作用"验证，
+  变异测试里会成片落成 TIMED_OUT；拆出来后每次 `pollOnce()` 都能同步断言。
+- `OnvifClient` 门面按 `backend instanceof OnvifEventSource` 分派；模拟模式行为不变。
+- `OnvifVendorAdapter.supportsEventSubscription()` 在 live 下改为 true（设备是否有
+  Events 服务由 `subscribeEvents` 当场回答，不预判）。
+- `SurveillanceController`：订阅失败在建立 SSE **之前**映射 **502**
+  （原来整片 501「未实现」）；501 仅保留给"适配器本身不支持"。
+- **为什么是 Pull 不是 Push**：Push 要求设备能连回本服务，现场摄像头通常在独立视频
+  网段、服务在 NAT 后——Push 地址设备到不了；PullPoint 只要求"本服务能连设备"，
+  与取流同向。
+
+### 测试（新增 24 例）
+
+- `OnvifPullPointClientTest` 6 例：订阅地址/到期时间解析、缺 Address 报错、通知序列化、
+  请求参数有界（PT1S/16）、空响应当空列表、设备 Fault 带原因；
+- `OnvifLiveBackendTest` +8 例：真 HTTP 假设备端到端（订阅 → 两条通知进回调 →
+  取消后不再拉取）、无 Events 服务明确报错、未知句柄取消幂等、瞬时 Fault 退避重试后
+  仍交付、后端自身拒绝非法参数、取消订阅打断在途 `PullMessages`、轮询线程为 daemon、
+  连续 Fault 到上限后从活跃表摘除（恰好 3 次）；
+- `OnvifClientLiveEventsTest` 2 例：门面 → live 后端 → 假设备真实委派（句柄/计数/回调/
+  取消后停止拉取）、live 下非法参数在联网前拒绝；
+- `OnvifEventPollerTest` 5 例：全部通知按序交付、失败后成功清零、第 3 次失败放弃、
+  回调抛异常不打死轮询、重试等待被中断立即停止；
+- `OnvifXmlTest` +3 例：`localName` 前缀回退、`serialize` 保留命名空间、`parse` 对 null/
+  外部实体 DOCTYPE 拒绝；
+- 既有 3 例按新契约翻正：mode（订阅失败抛 `OnvifException` 而非"拒绝实现"）、
+  routing（live 声明支持）、controller（501 → 502）。
+- **A/B 变异 3 个**（取消不 stop 轮询 / 通知元素名写错 / 去掉无 Events 服务检查）
+  全部改坏⇒红、还原⇒绿。
+
+### 边界
+
+- 订阅到期不自动续期（设备会以 Fault 拒绝）；轮询器连续失败 3 次后停止并记 ERROR，
+  由上层重新订阅——协议层不做"悄悄续命"的黑箱；
+- 只实现 PullPoint，不实现 Push（理由见上）与 WS-Eventing `Subscribe` 的推模式；
+- 事件载荷是原始 `NotificationMessage` XML（含厂商自定义字段），未做主题归一化。
+
 ## [Unreleased] — 四项决策拍板落账 + 单调序列 V35 落地（2026-10-27）
 
 ### 决策（用户逐项确认，选项与依据见 docs/real-integration-program.md）
