@@ -2,6 +2,7 @@ package io.aerofleet.cloud.geofence;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -40,6 +41,10 @@ import java.util.List;
  * }</pre>
  * <p>
  * source 字段标记为文件路径，以区分其他数据源。
+ * <p>
+ * 路径来源优先级：{@code aerofleet.geofence.restriction.source-path}（文档键，非空即用）→
+ * {@code aerofleet.geofence.restriction-file}（旧键，默认 {@code restrictions.json}）。
+ * 两者同时设置且不一致时以 source-path 为准并打 WARN。
  *
  * @see RestrictionDataSource
  * @see RestrictionZone
@@ -53,9 +58,31 @@ public class LocalFileRestrictionSource implements RestrictionDataSource {
     @Value("${aerofleet.geofence.restriction-file:restrictions.json}")
     private String filePath;
 
+    /**
+     * 文档键 {@code aerofleet.geofence.restriction.source-path} 的绑定对象。
+     * <p>
+     * 该键此前只绑定、从未被读者使用（操作员设了也不生效）；现在由本来源优先读取。
+     * 直接 new 出来做单测时为 null，此时回退 {@link #filePath}。
+     */
+    @Autowired(required = false)
+    private RestrictionSourceConfig sourceConfig;
+
+    /** 生效路径：source-path（文档键）优先，空则回退 restriction-file（旧键）。 */
+    private String effectivePath() {
+        String configured = sourceConfig == null ? null : sourceConfig.getSourcePath();
+        if (configured != null && !configured.isBlank()) {
+            if (!configured.equals(filePath)) {
+                log.warn("限飞区文件以 aerofleet.geofence.restriction.source-path={} 为准"
+                        + "（aerofleet.geofence.restriction-file={} 是旧键；两者不一致）", configured, filePath);
+            }
+            return configured;
+        }
+        return filePath;
+    }
+
     @Override
     public String getSourceId() {
-        return filePath;
+        return effectivePath();
     }
 
     @Override
@@ -271,11 +298,12 @@ public class LocalFileRestrictionSource implements RestrictionDataSource {
      * 解析文件路径：支持 classpath: 前缀和绝对/相对路径。
      */
     private Path resolveFilePath() {
-        if (filePath.startsWith("classpath:")) {
-            String resourcePath = filePath.substring("classpath:".length());
+        String effective = effectivePath();
+        if (effective.startsWith("classpath:")) {
+            String resourcePath = effective.substring("classpath:".length());
             // 尝试从工作目录加载
             return Path.of(resourcePath);
         }
-        return Path.of(filePath);
+        return Path.of(effective);
     }
 }
