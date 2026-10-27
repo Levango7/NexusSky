@@ -639,4 +639,21 @@ class ConflictAvoidanceServiceTest {
                     .isEqualTo("true");
         }
     }
+
+    /**
+     * §5 Q2 裁决（2026-10-27 拍板）：staging 必须打开审计链落库——不打开的话
+     * prod 的落库路径就"从未被任何非生产环境验证过"，风险不对称。同被钉住的
+     * 还有 reservation.persist（见上一个用例）。
+     */
+    @Test
+    @DisplayName("profile 钉扎：staging 必须打开 audit.persist-to-db")
+    void stagingProfileEnablesAuditPersistence() throws Exception {
+        java.util.Properties props = new java.util.Properties();
+        try (java.io.InputStream in = getClass().getClassLoader()
+                .getResourceAsStream("application-staging.properties")) {
+            assertThat(in).isNotNull();
+            props.load(in);
+        }
+        assertThat(props.getProperty("aerofleet.audit.persist-to-db")).isEqualTo("true");
+    }
 }

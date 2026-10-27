@@ -57,6 +57,13 @@ public class EmergencyOrchService {
     private static final int ACTION_CANCEL = 4;
     /** planId 生成器。 */
     private final AtomicLong planIdGenerator = new AtomicLong(PLAN_ID_START);
+
+    /**
+     * 单调序列发号器（V35；§5 Q5 裁决：planId 跨重启单调——若它进过客户侧报表，
+     * 复用比丢数据更严重）。缺失时走内存 generator。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private PersistentSequence sequence;
     /** WebSocket 推送器（可为 null，测试场景）。 */
     private final EmergencyOrchPusher pusher;
     /** 事件发布器。 */
@@ -82,7 +89,8 @@ public class EmergencyOrchService {
      * @return planId
      */
     public long start(int scenarioType, int centerLat, int centerLon, int radius, List<Integer> droneIds) {
-        long planId = planIdGenerator.incrementAndGet();
+        Long issued = sequence != null ? sequence.next("orch_plan_id", PLAN_ID_START) : null;
+        long planId = issued != null ? issued : planIdGenerator.incrementAndGet();
         long now = System.currentTimeMillis();
         Map<String, Object> plan = newPlanMap(planId, scenarioType, centerLat, centerLon, radius,
                 droneIds, now);

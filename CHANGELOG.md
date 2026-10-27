@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-27 共有 215 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-27 共有 216 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,36 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 215 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 216 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — 四项决策拍板落账 + 单调序列 V35 落地（2026-10-27）
+
+### 决策（用户逐项确认，选项与依据见 docs/real-integration-program.md）
+
+1. **配送词汇归一 → 六阶段上位**：`delivery2` 加 `phase` 列存六阶段，对外粗状态派生（API 兼容
+   不变），存量行映射回填——实现待做（下一批，V36 起）。
+2. **应急编排 → 新表独立落库**：`emergency_plan` 存轻量场景（orch 域 `OrchestrationPlanEntity`
+   是带 steps/triggers 的重实体，语义不同不强塞）——实现待做（下一批）。
+3. **单调序列 → 持久化续号**：✅ **本批已实现**（见下）。
+4. **审计链 staging → 打开**：✅ **本批已实现**（`aerofleet.audit.persist-to-db=true` + profile 钉）。
+
+### 实现：V35 `sequence_counter` + PersistentSequence
+
+- **机巢事务号 `dock_tid`**与**编排计划号 `orch_plan_id`** 重启后不再从头复用
+  （"ID 复用比丢数据更严重"的裁决落地）：`PersistentSequence.next(name, base)`
+  内存缓存 + 逐发写穿，首号 = base+1（与原内存语义逐位等价）；重启从
+  `max(base, 库中最后发出值)` 续起；库抖动 ⇒ WARN 降级（进程内仍单调，发号不阻塞主链）。
+- 消费方各留内存降级路径（`sequence==null` 时走原 AtomicLong）——纯单测语义不变。
+
+### 账目
+
+- 计数：cloud-backend 3215→3221（+6），全仓 5377→5383。
+- 立项书「待口径」四条拍板登记完毕；P1#5/#8 决策锁定（🔒）待实现。
 
 ## [Unreleased] — 持久化第二批（6/9）：合规状态 / 空地协同归档 / 测绘航点（2026-10-27）
 

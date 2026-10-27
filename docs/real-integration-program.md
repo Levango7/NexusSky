@@ -21,10 +21,10 @@
 | 2 | 维护记录 `MaintenanceController` | ✅ **2026-10-27 落库**（V30 `maintenance_records` + 实体/仓库 + id 序列从库续起防覆盖） |
 | 3 | 出警历史 `AutoDispatchService` | ✅ **2026-10-27 落库**（V31 `dispatch_history` + 启动恢复最新 500 + 同口径裁剪；容量语义不变） |
 | 4 | 测绘航线航点 `MappingController` | ✅ **2026-10-27 落库**（V34 `mapping_task.waypoints` + MappingWaypointCodec 显式映射 + 读穿；**契约裁决：任务存在⇒200+真实航点 / 从未规划⇒空数组 / 任务不存在⇒404**，三态唯一） |
-| 5 | 配送六阶段状态 `DeliveryStatusTracker` | ⬜ 待做，**先解词汇冲突**：库内 `delivery2` 是 `PENDING/IN_PROGRESS`，tracker 是另一套六阶段词表——两套词汇并存时直接落库会造出更难拆的债 |
+| 5 | 配送六阶段状态 `DeliveryStatusTracker` | 🔒 **决策已定：六阶段上位**（2026-10-27 用户拍板）——`delivery2` 表加 `phase` 列存六阶段，对外粗状态由六阶段派生（API 兼容不变），存量行映射回填。**实现待做**（下一批，迁移号 V36 起） |
 | 6 | 空地协同记录 `AirGroundCoordinationService` | ✅ **2026-10-27 归档落库**（V33 + 写穿 ×2 [启动完成/总结前] + **读穿修掉总结后/重启后 GET report 404**；语义裁决：内存清理 ≠ 归档删除） |
 | 7 | 合规状态 `ComplianceStateManager` | ✅ **2026-10-27 落库**（V32 + 启动水合 + 写穿；**顺带修掉三个"声明了却从未写入"的 last* 时间戳**——RegulatorController 上报的永远是 0 的修复） |
-| 8 | 应急编排 `EmergencyOrchService` | ⬜ 待做；`orch/entity/OrchestrationPlanEntity` 存在但属另一域——先定"复用还是新表" |
+| 8 | 应急编排 `EmergencyOrchService` | 🔒 **决策已定：新表独立落库**（2026-10-27 用户拍板）——`emergency_plan` 存轻量场景描述（灾情中心/半径/状态/租户）；orch 域 `OrchestrationPlanEntity` 是带 steps/triggers 的重实体，语义不同不强塞。**实现待做**（下一批） |
 | 9 | 审计哈希链 dev 档 | 🔶 配置口径（prod 已 true；staging 缺覆盖行——审计 §5 Q2 待口径） |
 
 **验收标准（全批）**：新增迁移在 H2/Postgres 双跑；每条落库配"重启恢复"测试（第一批三条约 13 例为模板：
@@ -81,10 +81,11 @@ ONVIF 事件订阅（PullPoint）另立"）。
 ## 待口径（产品/外部决定；扫描器与 agent 不替产品决定——审计 §5 原样转录）
 
 1. 空域预约开关缺 profile 覆盖——**已于 2026-10-27 定案为"未完成的上半截"并启用**（staging/prod）。
-2. `audit.persist-to-db` 在 staging 缺覆盖行：预发该不该跑落库通路？（不打开 ⇒ prod 落库路径从未被非生产验证过）
+2. `audit.persist-to-db` 在 staging——**已拍板：staging 打开**（2026-10-27，用户确认；理由：不打开则 prod
+   落库路径从未被任何非生产环境验证过，风险不对称。已实现 + profile 钉测试）。
 3. UOM 上报计数 + `sink-type` 默认 Noop：对外话术里"上报 UOM"要不要继续写？（与 P3 联动）
-4. 机巢事务号 `tidSeq` 是否要求跨重启单调？
-5. `planIdSeq`：若 planId 进过客户侧报表，重启 ID 复用比"丢数据"更严重——是否需要持久化序列？
+4. 机巢事务号 `tidSeq`——**已拍板：持久化续号**（2026-10-27，用户确认；`sequence_counter` 表 V35 已实现）。
+5. `planIdSeq`——**已拍板：持久化续号**（同上；"ID 复用比丢数据更严重"成立，已随 V35 实现）。
 6. `FormationKeeper.correctionCount` 是否算考核/计费依据？
 7. 告警离线缓存"上限 500 + 重启丢未上传"接受为产品语义，还是做非易失暂存？
 8. `/air-ground/situation` 键名以哪侧为准？（#177 已把三列落实，键名口径如仍有分歧在此登记）
