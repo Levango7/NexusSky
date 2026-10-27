@@ -1,6 +1,6 @@
 # NexusSky 变更日志
 
-## [Unreleased] — 审计收口批：§6 两条门禁落地 + §3.5/§3.6 复核定性（2026-10-28）
+## [Unreleased] — 审计与文档收口批：§6 两条门禁落地 + §3.5/§3.6 复核 + 三处「已完成仍标待做」漂移订正（2026-10-28）
 
 ### 交付
 
@@ -29,6 +29,22 @@
 - **§3.6 未扫同族扫清**：`getOrDefault(key, 集合默认值)` 全仓 main Java 实测 **14 处**，
   逐条读消费端与写入路径，**零恒空面**；`RadarController.targets` 由 `compute` 写入且 drone-sim
   在 FR-06 真发 30017/30018。§3.5/§3.6 各带锚点重写为定性结论（§6 里对 §3.6 的引用同步）。
+
+### 顺带订正：三处「已完成却仍标待做」（只读复核 + 文档）
+
+本仓文档反复吃同一个亏：**做完了但正文没跟着改**（ROADMAP 同节自述已滞后四次）。
+本次按「文件:行号或测试类名」逐条复核并订正：
+
+- **ROADMAP C4 ①**「真正没恢复的是完整轨迹历史……需从 `flight_log` 重建」——**早已闭合**
+  （#174）：`FlightTrackStore.java:115-169` 启动时 `restoreTrackHistoryFromFlightLog()`
+  （JSONL/DB 两路、重叠过滤、容量截尾），`FlightTrackStoreRestoreTest` 5 例钉住；
+  剩余边界（纯 JSONL-only 无 lastKnown 可锚）按测试类 javadoc 原文登记。同节「给后来者」
+  更新为**四次滞后**。
+- **`docs/todo.md` #15**「未开工的就是这 9 条落库本身」——**9/9 全清**（V26/V27 启用 →
+  V30–V37；审计链 staging 同批打开），并指向 `check-statefulness.py` 的机械账。
+- **`docs/real-integration-program.md` P3**「`UomReportSink` 真实现骨架 + 契约测试 ⬜」——
+  **已实现**：四个操作 + API Key/HMAC 签名 + 退避重试 + 4xx 终态 + 脱敏，
+  `UomReportSinkContractTest` 8 例在册；剩余只是"按真实 API 文档逐字段对齐"（等外部 #1）。
 
 ### 账目
 

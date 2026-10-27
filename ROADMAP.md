@@ -331,8 +331,16 @@
      `FlightTrackStore` 按 `PERSIST_INTERVAL` 节流落库、`@PreDestroy` 兜底、
      `@PostConstruct` 启动加载——**这条链是通的**（`C4TelemetryRestoreTest` 4 例钉住）。
      `mode`/`armed`/`protocol` 三个飞行态字段 V25 起也已落库并恢复
-     （`DeviceFlightStateRestoreTest` 4 例）。**真正没恢复的是完整轨迹历史**
-     （`FlightTrackStore` 的有界内存 deque，默认 3600 点），需从 `flight_log` 重建。
+     （`DeviceFlightStateRestoreTest` 4 例）。**完整轨迹历史也已重建（2026-10-26 起闭合，#174）**：
+     启动时 `FlightTrackStore.loadLastKnownPositions()` 末尾调
+     `restoreTrackHistoryFromFlightLog()`，把每架已知机最近 ≤`maxPoints` 点从
+     `flight_log` 灌回内存 deque（JSONL/DB 两路由 `FlightLogService.recentTrack` 统一处理；
+     与 lastKnown 重叠的 ts ≥ 的点跳过、容量照旧截尾）——锚点
+     `FlightTrackStore.java:115-169`，5 例钉住（`FlightTrackStoreRestoreTest`：
+     JSONL 全链 / 重叠过滤 / 容量截尾 / DB 倒序反转 / 无 service 安全跳过）。
+     **剩余边界（已知、非缺陷）**：纯 JSONL-only 模式（无 repository）启动时无
+     lastKnown 可锚、不枚举 sysid 恢复——历史由 `trackFor`/`recentTrack` 按需提供
+     （测试类 javadoc 已声明）。
      两个非显而易见行为：落库是**异步**的（`BatchedWriteQueue`，50 条/200ms）；
      恢复值**最多滞后一个节流周期**。已知局限：kill -9/OOM 不经历离线转换，
      最近一次 mode/armed 会丢。
@@ -363,8 +371,10 @@
      与用户侧「确定 UOM 对接主体」并行。GB 46750 过渡期 deadline（2026-11-01）
      针对真实运行航空器，本系统无真机在飞故不构成违约事件，不为赶日期做假动作。
 
-  > **给后来者**：这一节曾三次滞后于代码（2026-10-06 的 C1-C5 全部"待做"实则均已
-  > 实现、本次 ① ②）。读它做计划前请先按文中给出的**文件:行号或测试类名**核一遍。
+  > **给后来者**：这一节曾**四次**滞后于代码（2026-10-06 的 C1-C5 全部"待做"实则均已
+  > 实现；2026-10-10 修订的 ① ②；2026-10-28 复核发现 ① 的"完整轨迹历史需从 flight_log
+  > 重建"实则早已闭合——#174 建的 `restoreTrackHistoryFromFlightLog` 就是照着这行写的，
+  > 但正文没跟着更新）。读它做计划前请先按文中给出的**文件:行号或测试类名**核一遍。
 
 ### F 系列 — 付费场景核心（P1）
 
