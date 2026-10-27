@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-26 共有 211 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-26 共有 212 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,36 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 211 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 212 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — GAPS 清账批：HardwarePanel 旋翼契约对齐（§八.6）+ CHANGELOG 断条目排版归位（G-2）（2026-10-26）
+
+### ① HardwarePanel `{}` 当一台旋翼（GAPS §八.6，语义裁决后修复）
+
+裁决依据是**后端代码**不是猜：`/rotor/telemetry/{sysid}` 恒返回单台机的**扁平**旋翼视图
+（`HardwareDataController.rotorTelemetryView` 字段齐全；`RotorController.getTelemetry` 是
+`computeIfAbsent` 永不为 null）——既无 `{rotors:[...]}` 形状，也不可能返回 `{}`。
+旧写法 `rotor?.rotors || (rotor ? [rotor] : [])` 的前者是对不存在契约的死防御，
+后者会把任何 truthy 异形载荷当旋翼渲染成整行 `--`。修复：只有带契约键 `rotorIndex`
+的载荷才算一台旋翼（`!= null` 判——0 是合法值）。新增 `hardwarePanelRotors.test.jsx`
+5 例（契约形状恰一行 / 404 空态 / `{}` 空态 / `{rotors:[]}` 空态 / rotorIndex=0 不误杀）。
+
+### ② CHANGELOG P1 断条目排版归位（G-2，纯排版不改一字）
+
+2026-10-12 那条「外部评估报告 P1 续整改」的**标题在 11259 行、正文孤悬在 11427 行起**
+（两次解冲突各补一半，标记行已消但条目仍是断的；读者从标题往下看会以为那轮什么都没做）。
+本次把正文整段移到标题之下，顺带清掉三处 `---` 族残渣。
+
+### 账目
+
+- GAPS §九.2 的「commands 面缺 land」**经查已由 2026-10-24 提交连测试补齐**
+  （`DroneController:205` land case + `DroneControllerTest:185` 同源注释）——过期账，销账。
+- 前端用例 577 → 582（+5）。
 
 ## [Unreleased] — C4 收口：启动时从 flight_log 重建内存轨迹历史（ROADMAP:337，2026-10-26）
 
@@ -11258,7 +11282,41 @@ Java 4694 → **4700**（cloud-backend 2643 → 2649），前端 247 → **292**
 
 ## [Unreleased] — 外部评估报告 P1 续整改：WS 两个并发/计数缺陷 + 租户隔离两处漏滤（2026-10-12）
 
----
+> 同一份外部评估报告的 P1 项里，挑出**有明确代码证据、属本仓可自行闭合**的四项修掉。
+
+> 每项都配回归测试，其中两项做了变异验证（改回旧行为立刻转红）。
+
+
+
+| # | 交付 | 内容 |
+
+|---|---|---|
+
+| ① | **WS 连接限流双重扣减** | 被拒连接在拒绝处扣一次、连接关闭时 `afterConnectionClosed` 又按同一 IP/租户扣一次 → 计数只减不增，限流随时间漂移成"形同虚设"。现扣减只发生在关闭路径一处，拒绝路径不再预扣（日志同步改为报"现活跃含本次"） |
+
+| ② | **WS 同会话并发发送无同步** | `dispatch` 对同一会话 `sendMessage` 未加锁，而遥测/调度/告警帧来自不同线程 → 并发写同一条连接会帧交错或抛 IllegalStateException（客户端表现=偶发断连/半包 JSON）。现按会话加锁；日志说明与 Spring `ConcurrentWebSocketSessionDecorator` 内部同一把监视器 |
+
+| ③ | **机巢（dock）三处租户漏滤** | `register` 把 tenantId 硬编码 null ⇒ 机巢永远"未归属"，任一租户的 OBSERVER 在列表里看到全部机巢含位置；`list()` 无过滤；`get()/recentLog()` 不判可见性。现：注册时归属当前写入方租户（`getWritableTenantId()`，哨兵不会被落库）、列表走 `findByTenantIdOrderById`、越权 ID 与"不存在"同一应答（不制造探测面）。口径与 `AlarmEventStore.isVisibleTo()` 对齐 |
+
+| ④ | **AI 决策端点两处漏滤** | `GET /api/v1/ai/decisions` 直接回全量分桶、`/decisions/{sysid}` 不判归属。现按 `DeviceRegistry.tenantOf(sysid)` 过滤：租户会话只看本租户设备，未归属设备只对全局管理员可见 |
+
+
+
+**测试**：`TelemetryWsConcurrencyTest` +2（限流只扣一次 / 同会话发送互斥，**变异验证**：去掉 synchronized 即红）、
+
+`DockTenantIsolationTest` +7（归属写入/列表过滤/全局可见/NO_ACCESS 看不到/越权同不存在/本租户可取，
+
+**变异验证**：去掉列表过滤即红）、`DecisionMonitorTenantIsolationTest` +4（单机/全量/全局/未归属四种域）。
+
+全 reactor BUILD SUCCESS；Java 4681 → **4694**（cloud-backend 2630 → 2643）；前端 245 不变；门禁与自测全绿。
+
+
+
+**仍开（有意不动）**：`AdaptiveRouter` 整套从未被实例化（commadapt 决策层是死代码，接线需先定 owner）；
+
+mavlink-core 三项（未知 incompat 位、签名时间戳竞态、UDP 回调吞异常）属另一 agent 域；
+
+sdk-python 0 单测；前端 WS 重连无退避/无节流、主轨迹不实时、DockPanel 绕过统一 API 层。
 
 ---
 
@@ -11420,53 +11478,6 @@ Java 4672 → **4675**（`cloud-backend` 2623 → **2626**，+3）
 
 ---
 
-
-
-
-
-> 同一份外部评估报告的 P1 项里，挑出**有明确代码证据、属本仓可自行闭合**的四项修掉。
-
-> 每项都配回归测试，其中两项做了变异验证（改回旧行为立刻转红）。
-
-
-
-| # | 交付 | 内容 |
-
-|---|---|---|
-
-| ① | **WS 连接限流双重扣减** | 被拒连接在拒绝处扣一次、连接关闭时 `afterConnectionClosed` 又按同一 IP/租户扣一次 → 计数只减不增，限流随时间漂移成"形同虚设"。现扣减只发生在关闭路径一处，拒绝路径不再预扣（日志同步改为报"现活跃含本次"） |
-
-| ② | **WS 同会话并发发送无同步** | `dispatch` 对同一会话 `sendMessage` 未加锁，而遥测/调度/告警帧来自不同线程 → 并发写同一条连接会帧交错或抛 IllegalStateException（客户端表现=偶发断连/半包 JSON）。现按会话加锁；日志说明与 Spring `ConcurrentWebSocketSessionDecorator` 内部同一把监视器 |
-
-| ③ | **机巢（dock）三处租户漏滤** | `register` 把 tenantId 硬编码 null ⇒ 机巢永远"未归属"，任一租户的 OBSERVER 在列表里看到全部机巢含位置；`list()` 无过滤；`get()/recentLog()` 不判可见性。现：注册时归属当前写入方租户（`getWritableTenantId()`，哨兵不会被落库）、列表走 `findByTenantIdOrderById`、越权 ID 与"不存在"同一应答（不制造探测面）。口径与 `AlarmEventStore.isVisibleTo()` 对齐 |
-
-| ④ | **AI 决策端点两处漏滤** | `GET /api/v1/ai/decisions` 直接回全量分桶、`/decisions/{sysid}` 不判归属。现按 `DeviceRegistry.tenantOf(sysid)` 过滤：租户会话只看本租户设备，未归属设备只对全局管理员可见 |
-
-
-
-**测试**：`TelemetryWsConcurrencyTest` +2（限流只扣一次 / 同会话发送互斥，**变异验证**：去掉 synchronized 即红）、
-
-`DockTenantIsolationTest` +7（归属写入/列表过滤/全局可见/NO_ACCESS 看不到/越权同不存在/本租户可取，
-
-**变异验证**：去掉列表过滤即红）、`DecisionMonitorTenantIsolationTest` +4（单机/全量/全局/未归属四种域）。
-
-全 reactor BUILD SUCCESS；Java 4681 → **4694**（cloud-backend 2630 → 2643）；前端 245 不变；门禁与自测全绿。
-
-
-
-**仍开（有意不动）**：`AdaptiveRouter` 整套从未被实例化（commadapt 决策层是死代码，接线需先定 owner）；
-
-mavlink-core 三项（未知 incompat 位、签名时间戳竞态、UDP 回调吞异常）属另一 agent 域；
-
-sdk-python 0 单测；前端 WS 重连无退避/无节流、主轨迹不实时、DockPanel 绕过统一 API 层。
-
-
-
----
-
----
-
----
 
 ## [Unreleased] — 两件"让沉默变红灯"的守卫：SPI 可验证性（35 个适配器实现里 9 个零测试引用）+ 状态板生成器（2026-10-12）
 
