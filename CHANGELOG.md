@@ -559,8 +559,8 @@ P5 厂商私有 SDK/GB28181 媒体面（等授权/硬件）。审计 §5 的口�
 - `LocalFileRestrictionSourceTest` 新增 2 条：文档键胜出 / 空值回退旧键，8/8 绿；
   A/B 变异各杀且只杀目标用例：忽略 `sourceConfig` ⇒ 恰好第一条红；去掉 `isBlank` 兜底 ⇒
   恰好第二条红；还原后 `grep MUTATION-PROBE` 无残留。
-- 全 reactor `mvn -B -o test`：Java **5276** 用例 / 0 失败 / 0 错误 / 0 跳过
-  （615 个测试类；`cloud-backend` 3112 → **3114**）。前端未动，仍 **580**。
+- 全 reactor `mvn -B -o clean test`（rebase 到 `3839d7aa` 后）：Java **5418** 用例 / 0 失败 /
+  0 错误 / 0 跳过（634 个测试类；`cloud-backend` 3254 → **3256**）。前端未动，仍 **585**。
 - 删类后全仓 `grep`：`AccessSelectionStrategy` / `SearchLightPattern` 零残留，
   `TopologyEvent` 只命中真实的 `MeshTopologyService.MeshTopologyEvent`。
 - 十份口径文档按实测重驱动；仓门（卫生 / 测试计数 / 端点计数 / 自测覆盖 / 前端端点 /
