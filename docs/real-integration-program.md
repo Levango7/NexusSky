@@ -20,10 +20,10 @@
 | 1 | 空域预约 `ConflictAvoidanceService` | ✅ **2026-10-27 启用**（staging/prod profile 打开 `reservation.persist`；持久化路径与往返测试早已建成，此前五个 profile 无一打开——审计 §5 Q1 定案「未完成的上半截」） |
 | 2 | 维护记录 `MaintenanceController` | ✅ **2026-10-27 落库**（V30 `maintenance_records` + 实体/仓库 + id 序列从库续起防覆盖） |
 | 3 | 出警历史 `AutoDispatchService` | ✅ **2026-10-27 落库**（V31 `dispatch_history` + 启动恢复最新 500 + 同口径裁剪；容量语义不变） |
-| 4 | 测绘航线航点 `MappingController` | ⬜ 待做：`mapping_task` 表补航点列（或子表）；**顺带定 API 契约**——重启后 200+空数组 vs 404 的语义二选一（见审计 §2.1 第 1 行） |
+| 4 | 测绘航线航点 `MappingController` | ✅ **2026-10-27 落库**（V34 `mapping_task.waypoints` + MappingWaypointCodec 显式映射 + 读穿；**契约裁决：任务存在⇒200+真实航点 / 从未规划⇒空数组 / 任务不存在⇒404**，三态唯一） |
 | 5 | 配送六阶段状态 `DeliveryStatusTracker` | ⬜ 待做，**先解词汇冲突**：库内 `delivery2` 是 `PENDING/IN_PROGRESS`，tracker 是另一套六阶段词表——两套词汇并存时直接落库会造出更难拆的债 |
-| 6 | 空地协同记录 `AirGroundCoordinationService` | ⬜ 待做：六阶段协同记录 + 指挥报告落库（与 #5/#4 同批做，三个都是"任务在库、过程不在库"形态） |
-| 7 | 合规状态 `ComplianceStateManager` | ⬜ 待做，**优先级应最高**（丢了破坏合规叙事：已激活设备重启回 UNVERIFIED；类注释自陈"C4 持久化后切换为 Repository 实现"——切换没做）；表需含 SN 绑定关系 |
+| 6 | 空地协同记录 `AirGroundCoordinationService` | ✅ **2026-10-27 归档落库**（V33 + 写穿 ×2 [启动完成/总结前] + **读穿修掉总结后/重启后 GET report 404**；语义裁决：内存清理 ≠ 归档删除） |
+| 7 | 合规状态 `ComplianceStateManager` | ✅ **2026-10-27 落库**（V32 + 启动水合 + 写穿；**顺带修掉三个"声明了却从未写入"的 last* 时间戳**——RegulatorController 上报的永远是 0 的修复） |
 | 8 | 应急编排 `EmergencyOrchService` | ⬜ 待做；`orch/entity/OrchestrationPlanEntity` 存在但属另一域——先定"复用还是新表" |
 | 9 | 审计哈希链 dev 档 | 🔶 配置口径（prod 已 true；staging 缺覆盖行——审计 §5 Q2 待口径） |
 

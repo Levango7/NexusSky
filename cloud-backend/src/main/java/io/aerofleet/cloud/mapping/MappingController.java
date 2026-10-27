@@ -162,6 +162,9 @@ public class MappingController {
         // 规划航线
         List<MappingWaypoint> waypoints = planRouteForTask(task);
         waypointsByTask.put(taskId, waypoints);
+        // 落库（V34）：航点此前只在内存，重启后 200+空数组与"本来没有航线"不可分。
+        // 内存缓存保留为快路径；未命中（重启）从任务行读穿。
+        task.setWaypoints(MappingWaypointCodec.encode(waypoints));
         task.setStatus(MappingTask.Status.PLANNING);
         taskRepository.save(task);
 
@@ -224,7 +227,9 @@ public class MappingController {
         MappingTask task = requireTask(id);
         Map<String, Object> detail = taskSummary(task);
         detail.put("area", areaToMap(task.getArea()));
-        detail.put("waypoints", waypointsByTask.getOrDefault(id, new ArrayList<>()));
+        List<MappingWaypoint> detailWaypoints = waypointsByTask.get(id);
+        detail.put("waypoints", detailWaypoints != null
+                ? detailWaypoints : MappingWaypointCodec.decode(task.getWaypoints()));
         return detail;
     }
 
@@ -302,8 +307,14 @@ public class MappingController {
     })
     @GetMapping("/tasks/{id}/waypoints")
     public List<MappingWaypoint> getWaypoints(@PathVariable("id") String id) {
-        requireTask(id);
-        return waypointsByTask.getOrDefault(id, new ArrayList<>());
+        MappingTask task = requireTask(id);
+        List<MappingWaypoint> cached = waypointsByTask.get(id);
+        if (cached != null) {
+            return cached;
+        }
+        // 内存未命中（重启/多实例）：从任务行读穿——契约裁决：任务存在 ⇒ 200 + 真实航点；
+        // 任务不存在 ⇒ 404（requireTask）；列 NULL（从未规划）⇒ 空数组。
+        return MappingWaypointCodec.decode(task.getWaypoints());
     }
 
     /**
