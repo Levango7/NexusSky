@@ -71,6 +71,10 @@ services:
       - AEROFLEET_SECURITY_ALLOWED_ORIGINS=http://localhost:3000
       - AEROFLEET_JWT_SECRET=${AEROFLEET_JWT_SECRET:?AEROFLEET_JWT_SECRET is required (>=32 chars)}
       - AEROFLEET_USERS=${AEROFLEET_USERS:?AEROFLEET_USERS is required (username:password[:ROLE])}
+      # DB 模式（本编排用 postgres）登录走 UserRepository，AEROFLEET_USERS 只是"无库降级"；
+      # 库里种子 admin 已被 V20 停用，**不配本项则 admin 无法登录**（2026-10-28 试用机冒烟
+      # 实测发现；compose-smoke 只探 /actuator/health 所以一直没暴露）。>=8 字符。
+      - AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD=${AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD:-}
       # 凭据加密密钥（AES-GCM，保护安防设备 ONVIF 口令与 webhook secret）：
       # prod 无缺省 fail-fast（application-prod.properties:25），未注入即启动失败
       - AEROFLEET_ENCRYPTION_KEY=${AEROFLEET_ENCRYPTION_KEY:?AEROFLEET_ENCRYPTION_KEY is required}

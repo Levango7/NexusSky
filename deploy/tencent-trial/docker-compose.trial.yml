@@ -1,0 +1,184 @@
+# NexusSky 试用机精简编排（腾讯云 CVM 2核2G / 3Mbps，1 个月免费试用）
+#
+# 与 deploy/docker/docker-compose.yml（通用生产编排）的差异：
+#   - 镜像取自 ghcr.io/levango7/nexussky/*（CI 在 master 推送时发布；试用机不做任何构建）
+#   - 全 bridge 网络：MAVLink 链路是"收到谁的回谁"（cloud-backend 主动向 drone-sim
+#     发 GCS 心跳，双方各自从入站帧学习回程地址），不需要 host 网络或广播
+#   - 内存全部显式限额 + JVM 显式堆（2G 物理机，见下表），日志轮转收紧
+#   - 对外只放行 gcs-web 的 ${WEB_PORT:-80}；cloud-backend 8080 / MAVLink UDP 都不发布
+#
+# 内存账（limit 是上限，不是占用；实测 RSS 预计值见括号）：
+#   postgres 384M(~120) + redis 128M(~15) + cloud-backend 896M(~550) +
+#   drone-sim 384M(~300) + gcs-web 96M(~15) + 宿主/Docker(~300) ≈ 1.9G 上限 / ~1.3G 实测
+#   宿主侧再配 2G swap（bootstrap-vm.sh 自动创建）——够用，但别在机上再跑别的重活。
+name: nexussky-trial
+
+services:
+  # ===== PostgreSQL：prod profile 硬依赖（Flyway 迁移在此真实执行）=====
+  postgres:
+    image: postgres:15-alpine
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - max_connections=60
+      - -c
+      - max_wal_size=256MB
+    environment:
+      - POSTGRES_DB=aerofleet_prod
+      - POSTGRES_USER=aerofleet
+      # 与 cloud-backend 的 SPRING_DATASOURCE_PASSWORD 同源（单一真相：.env）
+      - POSTGRES_PASSWORD=${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD is required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aerofleet -d aerofleet_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.6", memory: 384M }
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+
+  # ===== Redis：缓存 + /actuator/health 硬依赖（缺它 health 恒 503）=====
+  # 试用机语义：纯缓存，关持久化（--save ""），LRU 驱逐上限 96M。
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.2", memory: 128M }
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+
+  # ===== 云端后端：REST + WebSocket + MAVLink 网关（prod 口径）=====
+  cloud-backend:
+    image: ghcr.io/levango7/nexussky/cloud-backend:${IMAGE_TAG:-latest}
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - TZ=Asia/Shanghai
+      # 2 vCPU / 2G 机专用 JVM 参数：SerialGC（低开销）、显式堆、限制 metaspace。
+      # 镜像 ENTRYPOINT 是 `java $JAVA_OPTS -jar app.jar`，此处覆盖镜像默认的
+      # "-XX:+UseG1GC -XX:MaxRAMPercentage=75"（后者按容器 limit 算堆，1G limit
+      # 会要 768M 堆，2G 机上太贪）。OOM 即退出交给 restart 策略兜底。
+      - JAVA_OPTS=-XX:+UseSerialGC -Xms256m -Xmx640m -XX:MaxMetaspaceSize=192m -Xss512k -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8
+      # ===== 安全（全部 fail-fast：缺一即拒绝启动，见 deploy/docker/docker-compose.yml 注释）=====
+      - AEROFLEET_SECURITY_DEV_MODE=false
+      - AEROFLEET_SECURITY_JWT_SECRET=${AEROFLEET_SECURITY_JWT_SECRET:?AEROFLEET_SECURITY_JWT_SECRET is required (>=32 chars)}
+      - AEROFLEET_JWT_SECRET=${AEROFLEET_JWT_SECRET:?AEROFLEET_JWT_SECRET is required (>=32 chars)}
+      - AEROFLEET_SECURITY_ALLOWED_ORIGINS=${AEROFLEET_SECURITY_ALLOWED_ORIGINS:-http://localhost}
+      - AEROFLEET_USERS=${AEROFLEET_USERS:?AEROFLEET_USERS is required (username:password[:ROLE])}
+      # prod（DB 模式）登录走 UserRepository，AEROFLEET_USERS 只是"无库降级"；
+      # 而库里的种子 admin 已被 V20 停用（历史哈希不可用）——DB 模式下管理员口令的
+      # **唯一正路**是本行 bootstrap 引导（AdminBootstrapRunner 启动时创建/重置 ADMIN，
+      # 要求 >=8 字符）。deploy.sh 生成 .env 时会与 AEROFLEET_USERS 用同一口令，
+      # 保证哪条路径生效都能登录。
+      - AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD=${AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD:?AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD is required (>=8 chars, DB-mode admin)}
+      - AEROFLEET_ENCRYPTION_KEY=${AEROFLEET_ENCRYPTION_KEY:?AEROFLEET_ENCRYPTION_KEY is required}
+      - AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY=${AEROFLEET_SECURITY_DEVICE_INGEST_API_KEY:-}
+      # ===== 数据源 / Redis =====
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/aerofleet_prod
+      - SPRING_DATASOURCE_USERNAME=aerofleet
+      - SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD is required}
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+      - SPRING_FLYWAY_ENABLED=true
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
+      # ===== MAVLink 链路 =====
+      # 关键一行：后端主动把 GCS 心跳发到 drone-sim:14540，sim 收到后学会回程，
+      # 遥测/命令链路在 bridge 网络内自动双向打通（两边都是"回给最后说话的人"）。
+      - AEROFLEET_DRONE_HOST=drone-sim
+      - AEROFLEET_DRONE_PORT=14540
+      # 签名默认关（与 prod 出厂值一致）；打开时 drone-sim 需同 key（见 README「真机对接」）
+      - MAVLINK_SIGNING_ENABLED=${MAVLINK_SIGNING_ENABLED:-false}
+      - MAVLINK_SIGNING_REJECT_UNSIGNED=${MAVLINK_SIGNING_REJECT_UNSIGNED:-true}
+      - MAVLINK_SIGNING_SECRET_KEY=${MAVLINK_SIGNING_SECRET_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # 覆盖镜像内置 HEALTHCHECK：小内存机首启要跑 Flyway + 全量 Spring 上下文，
+    # 实测本地 ~90s、2C2G 试用机更慢——窗口给足，别让 compose 依赖门在起步阶段判死。
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 90s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1.2", memory: 896M }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ===== 无人机模拟器：让公网 demo 有活数据（可去掉，见 README）=====
+  # 启动形态说明（实测踩过两次坑）：
+  #  1) 镜像 ENTRYPOINT 是 `sh -c "java $JAVA_OPTS -jar app.jar"`——若用 command:[...]
+  #     传参，参数会成为 sh -c 的**位置参数被吞掉**（实测 /proc/1/cmdline 可见
+  #     `--sysid=1 --port=14540` 根本没到 java；只是恰好等于默认值才没出事）。
+  #     故这里**整串覆盖 entrypoint**（不要 command）。
+  #  2) $$JAVA_OPTS：compose 在解析期会吃掉单个 $（config 时报
+  #     "The JAVA_OPTS variable is not set"），$$ 才是容器内可见的字面 $JAVA_OPTS。
+  drone-sim:
+    image: ghcr.io/levango7/nexussky/drone-sim:${IMAGE_TAG:-latest}
+    entrypoint: ["sh", "-c", "exec java $$JAVA_OPTS -jar app.jar --sysid=1 --port=14540"]
+    environment:
+      - TZ=Asia/Shanghai
+      - JAVA_OPTS=-XX:+UseSerialGC -Xms128m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+ExitOnOutOfMemoryError
+    # 刻意 **不** depends_on cloud-backend：sim 启动后只等对方先说话（后端 1Hz GCS 心跳），
+    # 自己先起完全无害；反过来令 sim 等后端 healthy 会造成鸡生蛋——后端 MAVLink 发现线程
+    # 在启动时解析 drone-sim 失败后会把未解析地址记死（实测：容器后起也不恢复），
+    # 必须重启后端才能连上。让 sim 与后端并行启动即根除（实测首启零人工干预打通）。
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 384M }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "2" }
+
+  # ===== Web 地面站：Nginx 静态 + /api /ws 反代（唯一对外入口）=====
+  gcs-web:
+    image: ghcr.io/levango7/nexussky/gcs-web:${IMAGE_TAG:-latest}
+    environment:
+      # 同编排内直连服务名（nginx 模板经 envsubst 渲染上游）
+      - NS_BACKEND_HOST=cloud-backend
+      - NS_BACKEND_PORT=8080
+    ports:
+      # 容器内非 root nginx 监听 8080；宿主端口用 WEB_PORT 覆盖（默认 80）
+      - "${WEB_PORT:-80}:8080"
+    depends_on:
+      cloud-backend:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.3", memory: 96M }
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+
+volumes:
+  pgdata:

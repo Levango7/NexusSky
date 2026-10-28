@@ -1,5 +1,30 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 腾讯云 2C2G 试用机部署包 + 两处 compose 登录缺口修复（2026-10-28）
+
+为 CVM 2核2G3M 免费试用档落的"公网 pre-staging"部署包：`deploy/tencent-trial/`
+（compose + .env 模板 + bootstrap-vm.sh + deploy.sh + README；镜像直拉 ghcr，机上零构建、
+只对外放行 80、全 bridge 网络、内存限额 + JVM 显式堆、2G swap、到期 purge 清单）。
+本地 Docker Desktop 全流程冒烟通过（首启一把过、登录、登记、演示飞行），暴露并修掉三个真问题：
+
+- **prod 模式登录 401（跨 compose 的通用缺口）**：DB 模式下登录走 UserRepository，
+  `AEROFLEET_USERS` 只是"无库降级"，而库内种子 admin 已被 V20 停用——DB 模式管理员口令
+  的唯一正路是 `aerofleet.security.bootstrap-admin-password`（AdminBootstrapRunner 启动引导）。
+  **顺手修了 `deploy/docker/docker-compose.yml` 与根 `docker-compose.yml` 的同一缺口**
+  （二者此前同样登录不了；compose-smoke 只探 /actuator/health 所以从未暴露）。
+- **MAVLink 发现的"鸡生蛋"**：drone-sim 若 depends_on 后端 healthy，则后端启动时解析不到
+  `drone-sim` 会把未解析地址记死（容器后起也不恢复）→ 串行启动反而永远连不上。改为 sim 与
+  后端并行启动（sim 本就只等对方先说话），实测首启零人工干预打通。
+- **`sh -c` 吞参 + compose `$` 插值**（同一形态踩两次）：`command:` 传给以 `sh -c` 为
+  ENTRYPOINT 的镜像会变成位置参数被吞掉（`/proc/1/cmdline` 实证 `--sysid=1` 没到 java）；
+  compose 解析期还会吃掉单个 `$`。范例修正 = `entrypoint: ["sh","-c","exec java $$JAVA_OPTS ..."]`。
+
+试用机专属事实（详见 `deploy/tencent-trial/README.md`）：五容器本地实测 RSS 合计 ~589M；
+prod 白名单（`device-whitelist-enabled=true`）下陌生 sysid 被丢弃——deploy.sh 自动
+`POST /api/v1/devices/1`（幂等）登记 Drone-1 并绑租户 1；drone-sim 开箱 STANDBY 待命，
+README「演示飞行」一段 curl 实测起飞→航点→自动返航降落；ghcr 拉取慢有 docker save/load 预案。
+
+
 ## [Unreleased] — 三处「tcp:// 仍开放」的漂移订正（self-consistency，2026-10-28）
 
 ### 修：文档与已落地代码互相矛盾
@@ -46,7 +71,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 226 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 227 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -72,7 +97,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 226 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 227 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

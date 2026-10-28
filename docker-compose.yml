@@ -51,6 +51,9 @@ services:
       - AEROFLEET_SECURITY_JWT_SECRET=compose-dev-secret-0123456789abcdef0123456789abcdef
       - AEROFLEET_JWT_SECRET=compose-dev-secret-0123456789abcdef0123456789abcdef
       - "AEROFLEET_USERS=admin:compose-dev-password:ADMIN"
+      # DB 模式（本编排带 postgres）下登录走 UserRepository，AEROFLEET_USERS 只是降级路径；
+      # 库里种子 admin 已停用（V20）——不配本项则 admin 登录必 401（2026-10-28 实测）。
+      - AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD=compose-dev-password
       - AEROFLEET_ENCRYPTION_KEY=compose-dev-encryption-key-0123456789abcdef
       # 与上面 postgres 服务的 POSTGRES_PASSWORD 对齐（prod profile 打 localhost:5432）
       - SPRING_DATASOURCE_PASSWORD=aerofleet_dev_password
