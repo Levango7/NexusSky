@@ -345,6 +345,9 @@ public class DroneCommandService {
      * Full mission upload state machine for one drone. Items must already be
      * translated to MISSION_ITEM_INT payloads ({@link #toMissionItems}).
      *
+     * <p>对 ArduPilot 目标会先经 {@link #withArduPilotHomeSlot}：AP 把任务索引 0
+     * 保留给 HOME，写入索引 0 的条目会被固件静默丢弃。
+     *
      * @throws CommandException on timeout or negative MISSION_ACK
      */
     public MissionUploadResult uploadMission(int sysid, List<MissionItemInt> items) {
@@ -352,6 +355,7 @@ public class DroneCommandService {
         if (items.isEmpty()) {
             return MissionUploadResult.failure("mission has no items");
         }
+        List<MissionItemInt> wireItems = withArduPilotHomeSlot(target, items);
         long deadline = System.currentTimeMillis() + MISSION_TIMEOUT_MS;
 
         // Phase 1: announce the count. target_system MUST be the drone's real
@@ -368,7 +372,7 @@ public class DroneCommandService {
                     throw new TimeoutException();
                 }
                 if (now >= nextAnnounce) {
-                    send(target, new MissionCountMsg(items.size(), target, TARGET_COMP,
+                    send(target, new MissionCountMsg(wireItems.size(), target, TARGET_COMP,
                             MavEnums.MAV_MISSION_TYPE_MISSION, 0));
                     nextAnnounce = now + 2_500;
                 }
@@ -390,8 +394,8 @@ public class DroneCommandService {
             pendings.removeMissionRequest(target, e);
             return MissionUploadResult.failure("interrupted");
         }
-        log.info("Mission upload to sysid={} started: {} items, first requested seq={}",
-                target, items.size(), firstSeq);
+        log.info("Mission upload to sysid={} started: {} wire items ({} user items), first requested seq={}",
+                target, wireItems.size(), items.size(), firstSeq);
 
         // Phase 2: serve requested items. Drone drives the exchange (may ask
         // out of order); waiters for BOTH response kinds are armed up-front so
@@ -404,7 +408,7 @@ public class DroneCommandService {
             int expectedSeq = firstSeq;
             long nextResend = System.currentTimeMillis();
             while (true) {
-                if (expectedSeq < 0 || expectedSeq >= items.size()) {
+                if (expectedSeq < 0 || expectedSeq >= wireItems.size()) {
                     throw new CommandException(
                             "drone requested invalid seq " + expectedSeq, -1);
                 }
@@ -412,7 +416,7 @@ public class DroneCommandService {
                 if (now >= nextResend) {
                     // Loss recovery: (re)send the current item every 2.5s until
                     // the drone asks for the next one or finalizes the ACK.
-                    send(target, items.get(expectedSeq));
+                    send(target, wireItems.get(expectedSeq));
                     sent++;
                     nextResend = now + 2_500;
                 }
@@ -429,7 +433,7 @@ public class DroneCommandService {
                     reqFuture2 = pendings.expectMissionRequest(target);
                     nextResend = System.currentTimeMillis();
                 } else if (resp instanceof MissionAckMsg ack) {
-                    return finishMission(ack, sent, items.size());
+                    return finishMission(ack, sent, wireItems.size(), items.size());
                 }
                 // resp == null: resend window reached without a reply, loop
             }
@@ -486,14 +490,54 @@ public class DroneCommandService {
         return null; // window elapsed without a response: caller resends/gives up
     }
 
-    private MissionUploadResult finishMission(MissionAckMsg ack, int sent, int total) {
+    private MissionUploadResult finishMission(MissionAckMsg ack, int sent, int wireTotal, int userTotal) {
         if (ack.type == MavEnums.MAV_MISSION_ACCEPTED) {
-            log.info("Mission accepted: {} of {} items uploaded", sent, total);
-            return MissionUploadResult.ok(total);
+            log.info("Mission accepted: {} of {} wire items uploaded ({} user items)",
+                    sent, wireTotal, userTotal);
+            // API 口径回的是用户条目数：ArduPilot 的 home 占位槽是协议实现细节，
+            // 不该出现在「已上传 N 个航点」里。
+            return MissionUploadResult.ok(userTotal);
         }
         log.warn("Mission rejected: MAV_MISSION_RESULT={} after {} items", ack.type, sent);
         return MissionUploadResult.rejected(ack.type,
                 "drone rejected mission with MAV_MISSION_RESULT=" + ack.type);
+    }
+
+    /**
+     * ArduPilot 把任务索引 0 保留给 HOME：AP_Mission 对写入索引 0 的条目直接忽略
+     * （「Writing index zero is not allowed, it must be home」），真正命令从索引 1
+     * 起（AP_MISSION_FIRST_REAL_COMMAND=1）。真机 SITL 实测：上传 [takeoff, rtl]
+     * 读回 [home, rtl]——放在 seq 0 的首条命令被静默丢弃；单点任务（如语音 FLY_TO）
+     * 在 AP 上等于没传。PX4 无此约定。
+     *
+     * <p>对 ArduPilot 目标前置一个 home 占位项（内容会被固件自身的 home 覆盖，用
+     * 当前遥测位置填 x/y/lat 只为读回时直观），用户条目整体后移一位。
+     * autopilot 未知（-1）或非 AP 时原样返回。
+     */
+    List<MissionItemInt> withArduPilotHomeSlot(int target, List<MissionItemInt> items) {
+        DroneSnapshot snap = registry.get(target);
+        if (snap == null || snap.autopilot != MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA) {
+            return items;
+        }
+        List<MissionItemInt> wire = new ArrayList<>(items.size() + 1);
+        wire.add(new MissionItemInt(target, TARGET_COMP, 0,
+                MavEnums.MAV_FRAME_GLOBAL, MavEnums.MAV_CMD_NAV_WAYPOINT, 0, 0,
+                0f, 0f, 0f, 0f,
+                toE7(snap.lat), toE7(snap.lon),
+                Double.isFinite(snap.amslAlt) ? (float) snap.amslAlt : 0f,
+                MavEnums.MAV_MISSION_TYPE_MISSION));
+        for (int i = 0; i < items.size(); i++) {
+            MissionItemInt it = items.get(i);
+            wire.add(new MissionItemInt(it.targetSystem, it.targetComponent, i + 1,
+                    it.frame, it.command, it.current, it.autocontinue,
+                    it.param1, it.param2, it.param3, it.param4,
+                    it.x, it.y, it.z, it.missionType));
+        }
+        return wire;
+    }
+
+    private static int toE7(double degrees) {
+        return Double.isFinite(degrees) ? (int) Math.round(degrees * 1e7) : 0;
     }
 
     // =====================================================================

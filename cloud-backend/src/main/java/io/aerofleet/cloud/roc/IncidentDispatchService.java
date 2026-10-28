@@ -117,7 +117,9 @@ public class IncidentDispatchService {
             double distM = haversineM(s.lat, s.lon, lat, lon);
             double battery = s.battery < 0 ? 0 : s.battery / 100.0;
             double distScore = 1.0 / (1.0 + distM / 1000.0);   // 距离越近越高（1km 处 0.5）
-            double idleScore = "MISSION".equals(s.mode) ? 0 : 1;
+            // 任务执行中的模式：PX4 心跳解出 "MISSION"，ArduPilot 解出 "AUTO"（见
+            // TelemetrySnapshotListener 按固件分派的口径），两种都算不空闲。
+            double idleScore = ("MISSION".equals(s.mode) || "AUTO".equals(s.mode)) ? 0 : 1;
             double score = W_DISTANCE * distScore + W_BATTERY * battery + W_IDLE * idleScore;
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("sysid", sysid);

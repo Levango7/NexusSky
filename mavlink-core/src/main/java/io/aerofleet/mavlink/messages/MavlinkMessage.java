@@ -38,6 +38,7 @@ public abstract class MavlinkMessage {
 
     /** 从帧解码为具体消息；payload 短于所需字段时抛异常。 */
     public static MavlinkMessage decode(MavlinkFrame frame) {
+        frame = withZeroPaddedPayload(frame);
         switch (frame.getMessageId()) {
             case Heartbeat.ID:
                 return Heartbeat.decode(frame);
@@ -236,6 +237,36 @@ public abstract class MavlinkMessage {
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }
+    }
+
+    /**
+     * MAVLink v2 允许发送方裁掉 payload 尾部的全零字节（线上 LEN 小于消息的完整
+     * 长度），接收方必须把缺的字节视作 0。真实固件（ArduPilot / PX4 的 C 库）默认
+     * 就会裁剪：例如 MISSION_ACK{type=MAV_MISSION_ACCEPTED} 的 type / mission_type /
+     * opaque_id 全为 0，整帧 payload 只剩 [target_system, target_component] 两个字节
+     * ——按固定偏移直读就会越界。实测（SITL 首验）：ACCEPTED 的 ack 被裁到 2 字节
+     * 越界丢弃，而 ERROR{type=1} 的 ack 尾部非零得以保留、被误当成上传结果。
+     * <p>
+     * 帧解析层刻意不做补零（CRC、签名验证、转发都必须按原始线上字节处理），补零
+     * 放在解码入口这一层：每个字段解码器可安全按固定偏移读取；同时
+     * {@link MavlinkFrame#getPayloadLength()} 仍返回线上长度，各解码器用它判断
+     * “可选字段是否真的在线上”的语义不变（缺字节补零后读出 0，与发送方省略默认值
+     * 的意图一致）。
+     */
+    private static MavlinkFrame withZeroPaddedPayload(MavlinkFrame frame) {
+        byte[] payload = frame.getPayload();
+        if (payload == null) {
+            return frame;
+        }
+        int fullLength = MavlinkMessageInfo.lengthOf(frame.getMessageId());
+        if (fullLength <= payload.length) {
+            return frame;
+        }
+        byte[] padded = Arrays.copyOf(payload, fullLength);
+        return new MavlinkFrame(frame.getPayloadLength(), frame.getIncompatibilityFlags(),
+                frame.getCompatibilityFlags(), frame.getSequence(), frame.getSystemId(),
+                frame.getComponentId(), frame.getMessageId(), padded, frame.getCrc(),
+                frame.getLinkId(), frame.getTimestamp(), frame.getSignature());
     }
 
     /** 组装为可发送帧（自动查 CRC_EXTRA，v2 格式）。 */

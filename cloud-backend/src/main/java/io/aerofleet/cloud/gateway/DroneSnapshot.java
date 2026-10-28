@@ -24,8 +24,11 @@ public final class DroneSnapshot {
     public volatile int customMode;             // HEARTBEAT custom_mode (PX4 nav state)
     public volatile int baseMode;              // MAV_MODE_FLAG bits
     public volatile int systemStatus;          // MAV_STATE
+    /** HEARTBEAT.autopilot（MAV_AUTOPILOT：3=ArduPilotMega，12=PX4），-1 = 尚未收到心跳。
+     *  模式标签口径与任务协议差异（ArduPilot 保留任务槽 0）都按它分派。 */
+    public volatile int autopilot = -1;
     public volatile boolean armed;             // derived from baseMode SAFETY_ARMED bit
-    public volatile String mode = "UNKNOWN";   // derived flight-mode label
+    public volatile String mode = "UNKNOWN";   // derived flight-mode label (autopilot 分派口径)
 
     // --- battery (SYS_STATUS) ---
     public volatile int battery = -1;          // %

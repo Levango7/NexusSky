@@ -81,17 +81,22 @@ class RidIngestServiceTest {
     class DecodeFailure {
 
         /**
-         * 生产可达的畸形帧：msgId=12900 已登记、CRC 正确，但 payload 只有 3 字节
-         * （OPEN_DRONE_ID_BASIC_ID.LEN=22）。解码器 {@code b.get(uasId)} 读越界，
-         * 抛 {@link java.nio.BufferUnderflowException}。
+         * MAVLink2 尾零裁剪的合法帧：发送方可省略 payload 尾部的全零字节（C 参考
+         * 实现 {@code _mav_trim_payload} 默认如此），接收方必须按零填充解读。
+         * 3 字节 BASIC_ID = idType/uaType + 空 uasId——实际链路里 uasId 不足 20
+         * 字节时被裁成这样是常态。
          * <p>
-         * 这条用例会先让帧真的过一遍 {@link MavlinkParser}，证明它不是"造出来的"
-         * ——若哪天解析器开始按 LEN 补齐/拒绝短帧，{@code assertNotNull} 会先红，
-         * 提醒这条用例的前提变了。
+         * 修复历史：解码入口曾不做零填充，这类帧读越界抛
+         * {@link java.nio.BufferUnderflowException}，被 catch 后整帧丢弃。SITL
+         * 首验中同一根因让 MISSION_ACK(ACCEPTED)（尾部 type/mission_type/opaque_id
+         * 全零被裁到 2 字节）解码越界丢弃，任务上传永远"看不到成功"，2.5s 后重发
+         * 收到的 ERROR ack 被误判为最终结果。
+         * <p>
+         * 这条用例会先让帧真的过一遍 {@link MavlinkParser}，证明它不是"造出来的"。
          */
         @Test
-        @DisplayName("截短 payload 的已登记 RID 帧：不抛异常、不更新状态、不推送")
-        void onFrame_truncatedPayload_doesNotThrow() {
+        @DisplayName("截短 payload（尾零裁剪）的 RID 帧：零填充解码、不抛异常、正常入库")
+        void onFrame_truncatedPayload_zeroFills() {
             MavlinkFrame frame = truncatedBasicIdFrame(3);
 
             // 前置：确认这帧真的能过 CRC（也就是真的能从网络到达 onFrame）
@@ -99,10 +104,16 @@ class RidIngestServiceTest {
             assertThat(frame.getMessageId()).isEqualTo(OpenDroneIdBasicId.ID);
             assertThat(frame.getPayloadLength()).isLessThan(OpenDroneIdBasicId.LEN);
 
-            service.onFrame(frame);   // 修复前：这里抛 BufferUnderflowException
+            service.onFrame(frame);   // 修复前：这里抛 BufferUnderflowException 且整帧被丢弃
 
-            assertThat(stateManager.get(1)).isNull();
-            verify(wsHandler, never()).pushRidUpdate(Mockito.anyInt(), Mockito.any());
+            // 尾零裁剪帧按规范零填充解码：idType=0、uaType=0、uasId 空——与含零尾的
+            // 全长帧语义相同，正常入库。
+            RidSnapshot snapshot = stateManager.get(1);
+            assertThat(snapshot).as("零填充解码后应生成 RID 快照").isNotNull();
+            assertThat(snapshot.basicId()).isNotNull();
+            assertThat(snapshot.basicId().idType()).isZero();
+            assertThat(snapshot.basicId().uaType()).isZero();
+            assertThat(snapshot.basicId().uasId()).isEmpty();
         }
 
         @Test

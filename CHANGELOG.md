@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 222 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 223 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,56 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 222 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 223 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — ArduPilot SITL 首验：三个真机协议兼容修复（2026-10-28）
+
+第一次把 cloud-backend 接到**真实固件**（ArduPilot Copter SITL，WSL2 本机），跑通完整飞行闭环
+（任务上传 → ARM → 起飞 → 航点 → RTL → 降落 → 自动 disarm，轨迹 200 点），抓出并修复三个
+「drone-sim 测不出来」的协议/显示问题，全部带现场证据与回归测试：
+
+- **修复①：MAVLink2 尾零裁剪致 MISSION_ACK 解码崩溃**（mavlink-core）。v2 允许发送方裁掉
+  payload 尾部全零字节（ArduPilot 的 C 库默认这么做）：上传成功的 ACCEPTED 被裁到 2 字节
+  payload，解码按定义长度直读越界 → 帧被静默丢弃 → GCS 永远"看不到"成功，2.5s 重发后收到
+  ERROR（type=1，尾字节非零未裁）被误判为拒绝——**每次上传必"失败"**。修复：
+  `MavlinkMessage.decode` 入口按消息定义长度零填充（wire 长度语义与 CRC/签名/转发所见字节
+  均不变）。回归：`MissionTrailingZeroPayloadTest`（4 例，用 SITL 抓包原文逐字节复现）。
+- **修复②：ArduPilot 任务槽 0 被 HOME 占用，首条命令静默丢失**（cloud-backend）。AP_Mission
+  对写入索引 0 的条目直接忽略（"Writing index zero is not allowed, it must be home"），真实
+  命令从索引 1 起（`AP_MISSION_FIRST_REAL_COMMAND=1`）。实测：上传 [takeoff, rtl] 读回
+  [home, rtl]——takeoff 没了；**单点任务（语音 FLY_TO / 一键派飞形态）在 AP 上等于没传**。
+  修复：`DroneCommandService.withArduPilotHomeSlot` 对 ArduPilot 目标前置 home 占位项、用户
+  条目整体后移一位（按 `HEARTBEAT.autopilot` 分派，PX4/drone-sim 路径不变）；
+  `MissionUploadResult.uploaded` 保持"用户条目数"口径（home 槽是协议实现细节）。
+  测试：`ArduPilotMissionUploadTest`（mock 网关驱动全握手：AP 线上 3 条/API 报 2 条、PX4
+  回归不变、NaN 位置退化、入参不被修改）。
+- **修复③：飞行模式标签按固件口径分派**（cloud-backend）。custom_mode 一直按 PX4 nav_state
+  表硬解：ArduCopter 进 GUIDED（custom_mode=4）被解成 **"RTL"**——地面站显示与实际模式危险
+  错位（同场首验解开的历史悬案）。修复：`TelemetrySnapshotListener.modeLabel(autopilot,
+  customMode)` 按 `HEARTBEAT.autopilot` 分派，AP 用 ArduCopter 模式表（取自
+  `ArduCopter/mode.h`，28 个模式），其余保持 PX4 口径；`DroneSnapshot` 新增 `autopilot`
+  字段；`IncidentDispatchService` 空闲判据补 "AUTO"（AP 的任务模式名）。测试：
+  `FlightModeLabelTest`（GUIDED=4 回归 + 常用模式 + PX4 不变 + onHeartbeat 落库）。
+
+同场首验产出**差异记录**（8 条差异 + 4 条无差异，`docs/sitl-integration.md` §11.2）与
+**遗留立项 P2-F1**：AP 地面派飞序列适配——AUTO 下 arm 被拒（"Auto mode not armable"）+
+AUTO 从地面启动要求任务 TAKEOFF 开头（"init failed"），"arm → 单点任务 → start" 流程
+（`IncidentDispatchService.dispatch` 等）在 AP 实机上会失败；候选 A（过渡：任务前置
+TAKEOFF + arm 前切 GUIDED）/ B（目标：GUIDED+TAKEOFF+DO_REPOSITION 惯用法），推荐 B
+目标 + A 过渡（`docs/real-integration-program.md` P2 已挂账）。另修正 `docs/sitl-integration.md`
+两处与实测相反的文档口径（拉取变体原文写「PX4 回 43 / AP 回 51」，实测 AP 用 legacy
+MISSION_REQUEST(40)、drone-sim 用 51）。
+
+验证与计数：本分支已 rebase 到 #191 合入后的 master，合并树全 reactor 全绿——
+**5438 用例 / 0 失败**（本批 +13：mavlink-core 515→519、cloud-backend 3259→3268）；
+`docs/sitl-integration.md` §5 清单逐项打勾并加 `[AP-实测]/[离线]/[仿真]` 证据图例；
+10 份口径文档计数已按实测同步。顺带修复 #191 合入时「结构说明+版本索引」块随新节
+被复制成 4 份的排版残留（恢复单份，本文件小节计数刷到 223）。
 
 ## [Unreleased] — 审计与文档收口批：§6 两条门禁落地 + §3.5/§3.6 复核 + 三处「已完成仍标待做」漂移订正（2026-10-28）
 
@@ -137,38 +181,6 @@
 
 
 
-> **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 222 个 `[Unreleased]` 小节，自 v1.0.5
-> （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
-
-> 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
-
-
-
-## 版本索引
-
-
-
-| 版本 | 发布日期 | commit 数 | 关键交付 | 代码差异 |
-
-|---|---|---|---|---|
-
-| **v1.0.7** | 2026-10-21 | 22 | e2e 十批全转硬门禅（B2 十脚本观察接入 → 五 job 转硬门禅 → 断言聚合真判红 → roc / mjpeg / phone-camera 相继接入）+ 变异测试入场（PIT 审出 4 处安全行为没人盯：限流 / XFF 信任 / 密钥掩码 / 口令哈希；基线 0.8201→0.8448）+ 挖出三处「以为有人守、其实没人守」（变异门禅自身假绿、185 行 docker-compose e2e 从未在 CI 跑过、CHANGELOG 小节计数漂移）+ 4 个真 bug（Redis 硬依赖 / 状态板冻 8 天 / 哈希链断链 / vite high 公告）；0 破坏性变更；CI 37 success + 1 skipped（run 39598501784，tag run 39608087044） | [compare v1.0.6...v1.0.7](https://github.com/Levango7/NexusSky/compare/v1.0.6...v1.0.7) |
-| **v1.0.6** | 2026-10-19 | 115 | 安防取流六连救活（/events 真实事件、能力声明门控、取流面板播放、MJPEG 出口、RTSP 凭据编码、HLS 断流）+ gcs-web 前端诚实性清算（55 处「声明了却没人用」系列）；C5 签名 posture 变代码门禁；0 破坏性变更；CI 30 success + 1 skipped（run 39228507697，tag run 39231095908） | [compare v1.0.5...v1.0.6](https://github.com/Levango7/NexusSky/compare/v1.0.5...v1.0.6) |
-
-| **v1.0.5** | 2026-10-12 | 139 | 安防 B1–B5 全线（PTZ 厂商路由、GB28181 事件订阅、设备四态+多通道、FAILED 态+失败重试、空域预约闭环）；C5 签名改逐帧单调时间戳，修高帧率遥测被误判重放；2 项破坏性变更（license 模块 5→7、AlarmTrigger.alarmId）；CI 18 job 全绿（run 38152795212） | [compare v1.0.4...v1.0.5](https://github.com/Levango7/NexusSky/compare/v1.0.4...v1.0.5) |
-
-| **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
-
-| **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
-
-| **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-
-| **[Unreleased]** | 累积中 | — | 222 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
-
-
----
 
 
 
@@ -210,38 +222,6 @@
 
 
 
-> **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 222 个 `[Unreleased]` 小节，自 v1.0.5
-> （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
-
-> 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
-
-
-
-## 版本索引
-
-
-
-| 版本 | 发布日期 | commit 数 | 关键交付 | 代码差异 |
-
-|---|---|---|---|---|
-
-| **v1.0.7** | 2026-10-21 | 22 | e2e 十批全转硬门禅（B2 十脚本观察接入 → 五 job 转硬门禅 → 断言聚合真判红 → roc / mjpeg / phone-camera 相继接入）+ 变异测试入场（PIT 审出 4 处安全行为没人盯：限流 / XFF 信任 / 密钥掩码 / 口令哈希；基线 0.8201→0.8448）+ 挖出三处「以为有人守、其实没人守」（变异门禅自身假绿、185 行 docker-compose e2e 从未在 CI 跑过、CHANGELOG 小节计数漂移）+ 4 个真 bug（Redis 硬依赖 / 状态板冻 8 天 / 哈希链断链 / vite high 公告）；0 破坏性变更；CI 37 success + 1 skipped（run 39598501784，tag run 39608087044） | [compare v1.0.6...v1.0.7](https://github.com/Levango7/NexusSky/compare/v1.0.6...v1.0.7) |
-| **v1.0.6** | 2026-10-19 | 115 | 安防取流六连救活（/events 真实事件、能力声明门控、取流面板播放、MJPEG 出口、RTSP 凭据编码、HLS 断流）+ gcs-web 前端诚实性清算（55 处「声明了却没人用」系列）；C5 签名 posture 变代码门禁；0 破坏性变更；CI 30 success + 1 skipped（run 39228507697，tag run 39231095908） | [compare v1.0.5...v1.0.6](https://github.com/Levango7/NexusSky/compare/v1.0.5...v1.0.6) |
-
-| **v1.0.5** | 2026-10-12 | 139 | 安防 B1–B5 全线（PTZ 厂商路由、GB28181 事件订阅、设备四态+多通道、FAILED 态+失败重试、空域预约闭环）；C5 签名改逐帧单调时间戳，修高帧率遥测被误判重放；2 项破坏性变更（license 模块 5→7、AlarmTrigger.alarmId）；CI 18 job 全绿（run 38152795212） | [compare v1.0.4...v1.0.5](https://github.com/Levango7/NexusSky/compare/v1.0.4...v1.0.5) |
-
-| **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
-
-| **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
-
-| **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-
-| **[Unreleased]** | 累积中 | — | 222 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
-
-
----
 
 ## [Unreleased] — ArduPilotAdapter：tcp:// 不再 UDP 顶替，未实现前缀明确拒绝（2026-10-28）
 
@@ -264,38 +244,6 @@
 
 
 
-> **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 222 个 `[Unreleased]` 小节，自 v1.0.5
-> （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
-
-> 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
-
-
-
-## 版本索引
-
-
-
-| 版本 | 发布日期 | commit 数 | 关键交付 | 代码差异 |
-
-|---|---|---|---|---|
-
-| **v1.0.7** | 2026-10-21 | 22 | e2e 十批全转硬门禅（B2 十脚本观察接入 → 五 job 转硬门禅 → 断言聚合真判红 → roc / mjpeg / phone-camera 相继接入）+ 变异测试入场（PIT 审出 4 处安全行为没人盯：限流 / XFF 信任 / 密钥掩码 / 口令哈希；基线 0.8201→0.8448）+ 挖出三处「以为有人守、其实没人守」（变异门禅自身假绿、185 行 docker-compose e2e 从未在 CI 跑过、CHANGELOG 小节计数漂移）+ 4 个真 bug（Redis 硬依赖 / 状态板冻 8 天 / 哈希链断链 / vite high 公告）；0 破坏性变更；CI 37 success + 1 skipped（run 39598501784，tag run 39608087044） | [compare v1.0.6...v1.0.7](https://github.com/Levango7/NexusSky/compare/v1.0.6...v1.0.7) |
-| **v1.0.6** | 2026-10-19 | 115 | 安防取流六连救活（/events 真实事件、能力声明门控、取流面板播放、MJPEG 出口、RTSP 凭据编码、HLS 断流）+ gcs-web 前端诚实性清算（55 处「声明了却没人用」系列）；C5 签名 posture 变代码门禁；0 破坏性变更；CI 30 success + 1 skipped（run 39228507697，tag run 39231095908） | [compare v1.0.5...v1.0.6](https://github.com/Levango7/NexusSky/compare/v1.0.5...v1.0.6) |
-
-| **v1.0.5** | 2026-10-12 | 139 | 安防 B1–B5 全线（PTZ 厂商路由、GB28181 事件订阅、设备四态+多通道、FAILED 态+失败重试、空域预约闭环）；C5 签名改逐帧单调时间戳，修高帧率遥测被误判重放；2 项破坏性变更（license 模块 5→7、AlarmTrigger.alarmId）；CI 18 job 全绿（run 38152795212） | [compare v1.0.4...v1.0.5](https://github.com/Levango7/NexusSky/compare/v1.0.4...v1.0.5) |
-
-| **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
-
-| **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
-
-| **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
-
-| **[Unreleased]** | 累积中 | — | 222 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
-
-
----
 
 ## [Unreleased] — 持久化 9/9 收官：配送六阶段上位（V36）+ 应急编排落库（V37）（2026-10-27）
 
