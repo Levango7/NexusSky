@@ -23,6 +23,10 @@
 prod 白名单（`device-whitelist-enabled=true`）下陌生 sysid 被丢弃——deploy.sh 自动
 `POST /api/v1/devices/1`（幂等）登记 Drone-1 并绑租户 1；drone-sim 开箱 STANDBY 待命，
 README「演示飞行」一段 curl 实测起飞→航点→自动返航降落；ghcr 拉取慢有 docker save/load 预案。
+- **compose smoke 补登录断言（本批）**：`scripts/check-compose-smoke.sh` 新增第 4 项——
+  DB 模式 bootstrap admin 真登录（`POST /api/v1/auth/login` 期望 200 且含 token），
+  把上文「只探 /actuator/health 所以从未暴露」的缺口变成每轮 CI 门禁；凭据可用
+  `COMPOSE_SMOKE_ADMIN_USER` / `COMPOSE_SMOKE_ADMIN_PASSWORD` 覆盖。
 
 
 ## [Unreleased] — 三处「tcp:// 仍开放」的漂移订正（self-consistency，2026-10-28）
