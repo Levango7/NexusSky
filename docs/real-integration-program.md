@@ -47,7 +47,22 @@
   `tcp://` 目前实为 UDP 顶替，接 SITL 前先把这个谎修了或明确降级）。
 - **验收**：`docs/sitl-integration.md` §5 兼容性验证清单逐项打勾；产出一份"真实固件 vs drone-sim
   行为差异"记录（哪怕结论是"没有差异"也要写）。
-- **状态**：立项（等环境）。一旦有 Linux 盒子/愿意在 WSL2 上装 SITL 工具链，这是**全仓最高价值的验证**。
+- **状态**：✅ **2026-10-28 已首验（ArduPilot Copter SITL，WSL2 本机）**。完整闭环全绿
+  （连接→任务上传→起飞→航点→RTL→降落→自动 disarm，轨迹 200 点），§5 清单逐项打勾并加
+  `[AP-实测]/[离线]/[仿真]` 证据图例；差异记录（8 条差异 + 4 条无差异）见
+  `docs/sitl-integration.md` §11.2。首验抓出并修复**三个真机协议兼容问题**：
+  ① v2 尾零裁剪致 MISSION_ACK 解码崩溃（上传永远"失败"）② AP 任务槽 0=HOME 致首条命令
+  静默丢失（单点任务等于没传）③ 模式标签 PX4 口径硬解致 GUIDED 误显示 RTL。共 +13 回归测试
+  （`MissionTrailingZeroPayloadTest` / `ArduPilotMissionUploadTest` / `FlightModeLabelTest`）。
+- **遗留 P2-F1（真机接入前必须闭环）**：**AP 地面派飞序列适配**——AP 两条硬契约叠加：
+  ⑥ AUTO 模式下 arm 被拒（"Auto mode not armable"，需先切 GUIDED）；⑦ AUTO 从地面启动要求
+  任务首条命令是 TAKEOFF（"init failed"），单点"去某点"任务起不来。现
+  "arm → 单点任务 → start" 流程（`IncidentDispatchService.dispatch` 等）在 AP 实机上会失败。
+  候选 **A（过渡）**：任务侧前置 `NAV_TAKEOFF`（取首条航点 alt）+ arm 前按需切 GUIDED；
+  候选 **B（目标形态）**：`GUIDED + TAKEOFF + DO_REPOSITION(192)` 惯用法（Mission Planner
+  "Fly To" 同款），不传任务。**推荐 B 目标 + A 过渡**（待拍板）。**验收 = 同一 dispatch 场景
+  在 AP SITL 从地面全自动完成**。详见 `docs/sitl-integration.md` §11.3。
+- **附带口径**：`tcp://` 实为 UDP 顶替的问题本次未触及（全程 UDP），该口径仍开放。
 
 ## P3 · UOM 真实联调（等的——外部依赖）
 

@@ -20,6 +20,8 @@
 7. [NexusSky 扩展消息（30000-30063）](#7-nexussky-扩展消息420-30063)
 8. [常见问题和解决方案](#8-常见问题和解决方案)
 9. [已知边界与限制](#9-已知边界与限制)
+10. [PX4 SITL 协议兼容性验证](#10-px4-sitl-协议兼容性验证)
+11. [ArduPilot SITL 首验实录（2026-10-28）](#11-ardupilot-sitl-首验实录2026-10-28)
 
 ---
 
@@ -164,15 +166,16 @@ sim_vehicle.py -v ArduCopter --no-mavproxy \
 
 ### 3.3 ArduPilot 与 PX4 的 MAVLink 差异
 
-| 差异点              | PX4                          | ArduPilot                     |
+| 差异点              | PX4 / drone-sim              | ArduPilot                     |
 |---------------------|------------------------------|-------------------------------|
-| 心跳 custom_mode    | PX4 nav_state 枚举            | ArduPilot flight mode 枚举     |
-| MISSION_REQUEST     | 回 msgId=43（legacy）         | 回 msgId=51（MISSION_REQUEST_INT）|
-| MISSION_START(300)  | 部分版本 UNSUPPORTED          | 支持                          |
+| 心跳 custom_mode    | PX4 nav_state 枚举            | ArduCopter 模式枚举（编号与 PX4 完全不同；`modeLabel()` 按 `HEARTBEAT.autopilot` 分派，见 §11.2-③）|
+| 任务项拉取请求       | MISSION_REQUEST_INT(51)（drone-sim 实测）| legacy MISSION_REQUEST(**40**)（2026-10-28 AP SITL 实测；双 waiter 兼容层吸收。原表写「PX4 回 43 / AP 回 51」与实测相反，已按证据改正）|
+| 任务槽 0            | 普通任务条目                  | **保留给 HOME**：写入索引 0 被固件忽略，真实命令从索引 1 起（`withArduPilotHomeSlot` 前置占位，见 §11.2-②）|
+| MISSION_START(300)  | 部分版本 UNSUPPORTED          | 支持（实测接受；任务不满足 AUTO 地面启动契约时按 `MAV_RESULT=4` 拒绝，见 §11.2-⑥）|
 | 参数协议            | PARAM_SET/PARAM_VALUE         | 同                            |
 | 命令确认             | COMMAND_ACK                   | 同                            |
 
-NexusSky cloud-backend 的兼容层已处理上述差异（见 [§4.3](#43-兼容层)）。
+NexusSky cloud-backend 的兼容层已处理上述差异（见 [§4.3](#43-兼容层)）；逐条现场验证见 [§11](#11-ardupilot-sitl-首验实录2026-10-28)。
 
 ---
 
@@ -218,10 +221,12 @@ cloud-backend `UdpGateway` + `TelemetryIngestService` 已实现以下兼容处�
 
 | 差异点              | PX4 / ArduPilot 行为           | NexusSky 兼容层                   |
 |---------------------|--------------------------------|-----------------------------------|
-| 任务拉取请求        | PX4 回 `MISSION_REQUEST`(43)   | PendingAcks 双消息 ID 登记 waiter  |
+| 任务拉取请求        | drone-sim 回 `MISSION_REQUEST_INT`(51)；AP 实测回 `MISSION_REQUEST`(40) | PendingAcks 双消息 ID（40+51）登记 waiter |
 | MISSION_COUNT 目标  | 拒绝 broadcast(0)              | `targetSystem()` 从注册表取真实 sysid |
 | MISSION_START(300)  | 部分版本 UNSUPPORTED           | 回退 `DO_SET_MODE`(176) auto 模式  |
-| 心跳 custom_mode    | PX4 nav_state / AP flight mode | `px4NavStateLabel()` 已映射        |
+| 任务槽 0（AP）      | AP 忽略写入索引 0 的条目（保留给 HOME）| `withArduPilotHomeSlot` 前置 home 占位、用户条目后移（按 `HEARTBEAT.autopilot` 分派）|
+| 尾零裁剪（v2）      | AP 的 C 库裁掉 payload 尾部全零   | 解码入口按消息定义长度零填充（wire 长度语义不变）|
+| 心跳 custom_mode    | PX4 nav_state / ArduCopter 两套枚举 | `modeLabel()` 按 `HEARTBEAT.autopilot` 分派两种表 |
 | GCS 心跳             | 需先收到才回包                  | 1Hz 周期 GCS 心跳（QGC 风格）       |
 | 路由老化             | 多机替换场景                    | 5min 静默路由自动剔除（D3）         |
 
@@ -229,35 +234,40 @@ cloud-backend `UdpGateway` + `TelemetryIngestService` 已实现以下兼容处�
 
 ## 5. 兼容性验证清单
 
+> **图例**：`[AP-实测]` = 2026-10-28 ArduPilot Copter SITL 真机首验（见 [§11](#11-ardupilot-sitl-首验实录2026-10-28)）；
+> `[仿真]` = drone-sim e2e 回归；`[离线]` = `mavlink-compatibility-check.py` 自检。
+
 ### 5.1 SITL 联调 PASS 标准
 
-- [ ] **设备上线**：PX4/AP 心跳被识别为 Drone-1，mode=MANUAL → Standby
-- [ ] **任务上传**：PX4 用 MISSION_REQUEST 拉取，双 waiter 生效
-- [ ] **ARM** → PX4 状态机进 ARMED（遥测 armed=true）
-- [ ] **开始任务** → PX4 进 MISSION 模式（custom_mode=3），飞机沿航点飞
-- [ ] **RTL** → PX4 返航降落
-- [ ] **轨迹** 200 点留存
+- [x] **设备上线**：心跳被识别为 Drone-1，遥测/模式标签正常 `[AP-实测]`（AP 启动态显示 STABILIZE；`mode=MANUAL → Standby` 为 PX4 口径措辞）
+- [x] **任务上传**：拉取请求双 waiter 生效 `[AP-实测]`（AP 实际回 legacy `MISSION_REQUEST(40)`，见 §11.2-④）
+- [x] **ARM** → 状态机进 ARMED（遥测 armed=true）`[AP-实测]`（须先切可 arm 模式，见 §11.2-⑥）
+- [x] **开始任务** → 沿航点飞 `[AP-实测]`（AP 进 AUTO，custom_mode=3；任务须 TAKEOFF 开头，见 §11.2-⑥）
+- [x] **RTL** → 返航降落、自动 disarm `[AP-实测]`
+- [x] **轨迹** 200 点留存 `[AP-实测]`
 
 ### 5.2 MAVLink 协议兼容验证
 
-- [ ] **标准消息解码**：HEARTBEAT / SYS_STATUS / ATTITUDE / GLOBAL_POSITION_INT / GPS_RAW_INT / VFR_HUD
-- [ ] **任务协议**：MISSION_COUNT / MISSION_ITEM_INT / MISSION_REQUEST / MISSION_ACK 往返
-- [ ] **命令协议**：COMMAND_LONG / COMMAND_ACK
-- [ ] **v1/v2 兼容**：v1 帧（STX=0xFE）与 v2 帧（STX=0xFD）混合流自动识别
-- [ ] **CRC 校验**：所有帧 CRC-16/X.25 校验通过
-- [ ] **扩展消息**：30000-30063 全部 51 条编解码一致（含可变长度消息）
+- [x] **标准消息解码**：HEARTBEAT / SYS_STATUS / ATTITUDE / GLOBAL_POSITION_INT / GPS_RAW_INT / VFR_HUD `[AP-实测]`
+- [x] **任务协议**：MISSION_COUNT / MISSION_ITEM_INT / MISSION_REQUEST / MISSION_ACK 往返 `[AP-实测]`
+- [x] **命令协议**：COMMAND_LONG / COMMAND_ACK `[AP-实测]`（arm / start / set_mode 全走 ACK 往返）
+- [x] **v1/v2 兼容**：v1 帧（STX=0xFE）与 v2 帧（STX=0xFD）混合流自动识别 `[离线]`（本次 AP 流为纯 v2）
+- [x] **CRC 校验**：所有帧 CRC-16/X.25 校验通过 `[AP-实测]`（含尾零裁剪帧解码回归，见 §11.2-①）
+- [x] **扩展消息**：30000-30063 全部 51 条编解码一致（含可变长度消息）`[离线]`+`[仿真]`
 
 ### 5.3 NexusSky 扩展消息验证
 
-- [ ] **M2 喷洒物流**（30003-30006）：SPRAY_STATUS / SPRAY_COMMAND / GRIPPER_COMMAND / PAYLOAD_STATUS
-- [ ] **M0b 环境气象**（30001-30002）：ENVIRONMENT_ALERT / ENVIRONMENT_STATUS
-- [ ] **M3 感知成像**（30010-30014）：OBSTACLE_REPORT / MULTISPECTRAL_DATA / THERMAL_DATA / DEPTH_DATA / VISION_DETECTION
-- [ ] **M4 硬件抽象**（30017-30021）：RADAR_SCAN / RADAR_TARGET / ROTOR_TELEMETRY / LIDAR_DATA / IMU_DATA
-- [ ] **M5 Mesh 自愈**（30030-30034）：含可变长度 MESH_NEIGHBOR_TABLE
-- [ ] **M6 移动基站**（30035-30038）
-- [ ] **M7 星-空-地中继**（30039-30041）
-- [ ] **M8 地形适配**（30042-30044）：含 3 条可变长度消息
-- [ ] **M9-M13**（30045-30056）：应急编排 / 多机协同 / 自主决策 / 边缘融合 / 数字孪生
+> SITL 固件不会发出私有扩展消息（30000-30063），该组由 drone-sim e2e 与离线自检覆盖——`[仿真]`/`[离线]` 口径同 §5.2 图例。
+
+- [x] **M2 喷洒物流**（30003-30006）：SPRAY_STATUS / SPRAY_COMMAND / GRIPPER_COMMAND / PAYLOAD_STATUS `[仿真]`
+- [x] **M0b 环境气象**（30001-30002）：ENVIRONMENT_ALERT / ENVIRONMENT_STATUS `[仿真]`
+- [x] **M3 感知成像**（30010-30014）：OBSTACLE_REPORT / MULTISPECTRAL_DATA / THERMAL_DATA / DEPTH_DATA / VISION_DETECTION `[仿真]`
+- [x] **M4 硬件抽象**（30017-30021）：RADAR_SCAN / RADAR_TARGET / ROTOR_TELEMETRY / LIDAR_DATA / IMU_DATA `[仿真]`
+- [x] **M5 Mesh 自愈**（30030-30034）：含可变长度 MESH_NEIGHBOR_TABLE `[仿真]`
+- [x] **M6 移动基站**（30035-30038）`[仿真]`
+- [x] **M7 星-空-地中继**（30039-30041）`[仿真]`
+- [x] **M8 地形适配**（30042-30044）：含 3 条可变长度消息 `[仿真]`
+- [x] **M9-M13**（30045-30056）：应急编排 / 多机协同 / 自主决策 / 边缘融合 / 数字孪生 `[仿真]`
 
 ---
 
@@ -623,6 +633,69 @@ ALL PX4 SITL TESTS PASSED
 | SITL 60s 内未就绪 | PX4 未编译或编译不完整 | `cd ~/PX4-Autopilot && make px4_sitl_default` |
 | 心跳未收到 | WSL2 网络不通 / 端口未开放 | 检查 WSL2 NAT 模式，确认 localhost 互通 |
 | ARM 失败 | GPS 未解锁 / Pre-arm 检查未通过 | 等待 GPS 3D fix 或设 `COM_ARM_WO_GPS=1` |
-| 任务上传失败 | PX4 用 MISSION_REQUEST(43) 拉取 | cloud-backend 已兼容双消息 ID（43+51） |
+| 任务上传失败 | 固件拉取变体不一：drone-sim 用 MISSION_REQUEST_INT(51)，AP 实测用 legacy MISSION_REQUEST(40) | cloud-backend 已兼容双消息 ID（40+51）；AP 另注意任务槽 0=HOME（§11.2-②） |
 | ARM 后立即 RTL | Datalink failsafe 触发 | cloud-backend GCS 心跳维持链路，或调大 `NAV_DLLC_ACT` |
 | 遥测为空 | SITL 未起飞 / 位置数据未积累 | 先 ARM + start_mission，等待 5s 后查询 |
+
+---
+
+## 11. ArduPilot SITL 首验实录（2026-10-28）
+
+**P2「SITL 首次真实验证」的验收记录**：首次以真实固件（ArduPilot Copter，非本仓模拟器）
+对接 cloud-backend，走通"连接 → 任务上传 → 起飞 → 航点 → RTL → 降落"最小闭环，并逐项
+产出真固件与 drone-sim 的行为差异。环境：WSL2 Ubuntu 内 `sim_vehicle.py -v ArduCopter
+--no-rebuild --out=udp:127.0.0.1:14550`（sysid=1），cloud-backend dev profile 监听 14550、
+飞行日志目录独立。复现要点：`POST /api/v1/drones/1/mission`（`{"items":[...]}`）→
+`POST /api/v1/drones/1/commands`（`{"type":"arm"|"start_mission"|"rtl"|"raw", ...}`）→
+`GET /api/v1/drones/1/mission`（读回）与 `GET /api/v1/drones/1/track`（轨迹）。
+
+### 11.1 闭环结果与传统验证手段的覆盖对照
+
+| 步骤 | 结果 | 证据 |
+|------|------|------|
+| 设备上线 | ✅ 心跳注册为 Drone-1，`autopilot=3` 存档，模式按 ArduCopter 表显示 | `/api/v1/drones/1` 遥测全字段（attitude/GPS/VFR_HUD 等）非空 |
+| 任务上传（4 条 / 2 条 / 1 条） | ✅ 三种形状全部 `{"status":"ok"}` | 2 条用户条目 → 读回 3 条（含 home 槽）；1 条单点 → 读回 2 条（修复②前单点任务等于没传） |
+| ARM | ✅（可 arm 模式下）armed=true | STATUSTEXT "Arming motors" |
+| 开始任务 | ✅ 进 AUTO，爬升到 20.0m，按序执行 | STATUSTEXT "Mission: 1 Takeoff"、"Mission: 2 RTL" |
+| RTL / 降落 | ✅ 返航→降高 20→0→触地→自动 disarm | "SIM Hit ground"、"Disarming motors"，armed=false |
+| 轨迹 | ✅ 200 点留存 | `/api/v1/drones/1/track` |
+| 模式标签 | ✅ STABILIZE / AUTO / GUIDED 全部解对 | DO_SET_MODE GUIDED 后显示 "GUIDED"（修复③前显示 "RTL"——危险错位） |
+| 尾零裁剪回归 | ✅ 被裁的 ACCEPTED 帧（2 字节 payload）正常解码 | 上传不再 2.5s 后被 ERROR 误判为拒绝（修复①前每次上传必"失败"） |
+
+> 复现脚本为一次性联调脚本（未入仓）。命令即 §11 开头的三条 curl；判定全绿的标准
+> 同 §5.1（armed→relAlt→降落→track）。
+
+### 11.2 真实固件 vs drone-sim 行为差异记录
+
+逐条对照 drone-sim（PX4 口径）与 ArduPilot Copter 真机实测。①-③ 为本轮修复项（已带回归
+测试落地）；④-⑦ 为固件契约差异，⑤-⑦ 属工作流适配、已立项（见 §11.3）。
+
+| # | 差异点 | drone-sim | ArduPilot 实测 | 处置 |
+|---|--------|-----------|----------------|------|
+| ① | MAVLink v2 尾零裁剪 | 本仓编码全长发送，不裁 | C 库裁掉 payload 尾部全零字节：ACCEPTED 的 MISSION_ACK 被裁到 2 字节 | **已修**：解码入口按消息定义长度零填充（wire 长度语义不变）；`MissionTrailingZeroPayloadTest` 用抓包原文回归 |
+| ② | 任务槽 0 | 普通条目，从 seq 0 执行 | **保留给 HOME**，写入被忽略（"must be home"），命令从 seq 1 起（`AP_MISSION_FIRST_REAL_COMMAND=1`） | **已修**：`withArduPilotHomeSlot` 前置 home 占位；实测上传 [takeoff,rtl] 读回 [home,takeoff,rtl] 并完整执行 |
+| ③ | custom_mode 枚举 | PX4 nav_state（3=MISSION，4=RTL） | ArduCopter 枚举（3=AUTO，4=GUIDED，6=RTL…） | **已修**：`modeLabel()` 按 `HEARTBEAT.autopilot` 分派两套表；修复前 GUIDED 误显示 RTL |
+| ④ | 任务项拉取变体 | 发 MISSION_REQUEST_INT(51) | 发 legacy MISSION_REQUEST(**40**) | 兼容层（双 waiter）本就吸收，无改动；本文档原文写反，已按实测改正 |
+| ⑤ | MISSION_CURRENT 计数口径 | `total` = 任务条目数 | 读回 3 条（含 home）/ 遥测 `missionTotal=2`（不含 home） | 仅口径差异，记录不处理（前端进度条按遥测字段走） |
+| ⑥ | arm 的模式约束 | 任意模式可 arm | **AUTO 下 arm 被拒**：STATUSTEXT "Arm: Auto mode not armable"（任务非 TAKEOFF 开头时）；切 GUIDED 后 arm 成功 | 立项 P2-F1（§11.3） |
+| ⑦ | AUTO 地面启动约束 | 无（sim 直接起飞/执行） | **要求任务首条命令 = TAKEOFF**：否则 MISSION_START(300) 回 `MAV_RESULT=4`，回退 DO_SET_MODE(176) 回 `MAV_RESULT=2`，STATUSTEXT "Mode change to Auto failed: init failed"；单点"去某点"任务从地面起不来 | 立项 P2-F1（§11.3） |
+| ⑧ | COMMAND_LONG TAKEOFF | 接受 | 非 GUIDED 模式被拒（`MAV_RESULT=4`）；GUIDED 下接受 | 并入 P2-F1（"去某点"惯用法的组成部分） |
+
+**无差异项**（同样记录在案）：任务上传的 2.5s 丢包重发恢复在 AP 上工作正常；COMMAND_ACK
+接受/拒绝语义一致；遥测解码字段（位置/姿态/电量/GPS）逐项对上；GCS 1Hz 心跳维持链路未触发
+任何 failsafe。
+
+### 11.3 遗留项
+
+**P2-F1 · ArduPilot 地面派飞序列适配**（影响 `IncidentDispatchService.dispatch` 等
+"arm → 单点任务 → start" 流程在 AP 上的可用性——两条硬契约叠加：⑥ AUTO 不可 arm、
+⑦ AUTO 地面启动须 takeoff 开头；现状在 AP 实机上会失败）。
+
+- 候选方案 A（过渡）：任务侧适配——对 AP 目标且计划地面启动时，在 home 槽后前置一条
+  `NAV_TAKEOFF`（高度取首条航点 alt），保持现有任务模型；dispatch 前若机体停在 AUTO，
+  先 `DO_SET_MODE(GUIDED)` 再 arm。
+- 候选方案 B（目标形态）：惯用法侧适配——AP 生态的"去某点"用 `GUIDED + TAKEOFF +
+  DO_REPOSITION(192)` 表达（Mission Planner "Fly To" 同款），不传任务；需要新命令语义、
+  驻留/返航行为定义与 e2e 覆盖。
+- 建议：B 为目标形态、A 为过渡；**验收 = 同一 dispatch 场景在 AP SITL 上从地面全自动完成
+  （arm → 起飞 → 到点 → 驻留 → 返航）**。优先级：与 P2 剩余项同级，真机接入前必须闭环。

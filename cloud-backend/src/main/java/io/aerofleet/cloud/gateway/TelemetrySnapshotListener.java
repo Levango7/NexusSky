@@ -52,12 +52,61 @@ public class TelemetrySnapshotListener {
         s.customMode = hb.customMode;
         s.baseMode = hb.baseMode;
         s.systemStatus = hb.systemStatus;
+        s.autopilot = hb.autopilot;
         s.armed = (hb.baseMode & MAV_MODE_FLAG_SAFETY_ARMED) != 0;
-        s.mode = px4NavStateLabel(hb.customMode);
+        s.mode = modeLabel(hb.autopilot, hb.customMode);
         if (!s.online) {
             s.online = true;
             log.info("Drone back online: sysid={}", sysid);
         }
+    }
+
+    /**
+     * 按固件口径翻译 custom_mode。两种固件用的是完全不同的枚举，硬解会出危险误报：
+     * 真机 SITL 实测 ArduCopter 进 GUIDED（custom_mode=4）被 PX4 表解成 "RTL"。
+     * autopilot 未知（-1，尚未收到心跳）时保持历史 PX4 口径。
+     */
+    static String modeLabel(int autopilot, int customMode) {
+        return autopilot == MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA
+                ? arduCopterModeLabel(customMode)
+                : px4NavStateLabel(customMode);
+    }
+
+    /**
+     * ArduCopter flight-mode labels（custom_mode of an ArduPilot copter heartbeat，
+     * 取自 ArduCopter/mode.h 的 mode 编号）。注意 ArduPlane/Rover 编号不同，
+     * 车队当前只有多旋翼，机型的专用表等接入再补。
+     */
+    static String arduCopterModeLabel(int customMode) {
+        return switch (customMode) {
+            case 0 -> "STABILIZE";
+            case 1 -> "ACRO";
+            case 2 -> "ALT_HOLD";
+            case 3 -> "AUTO";
+            case 4 -> "GUIDED";
+            case 5 -> "LOITER";
+            case 6 -> "RTL";
+            case 7 -> "CIRCLE";
+            case 9 -> "LAND";
+            case 11 -> "DRIFT";
+            case 13 -> "SPORT";
+            case 14 -> "FLIP";
+            case 15 -> "AUTOTUNE";
+            case 16 -> "POSHOLD";
+            case 17 -> "BRAKE";
+            case 18 -> "THROW";
+            case 19 -> "AVOID_ADSB";
+            case 20 -> "GUIDED_NOGPS";
+            case 21 -> "SMART_RTL";
+            case 22 -> "FLOWHOLD";
+            case 23 -> "FOLLOW";
+            case 24 -> "ZIGZAG";
+            case 25 -> "SYSTEMID";
+            case 26 -> "AUTOROTATE";
+            case 27 -> "AUTO_RTL";
+            case 28 -> "TURTLE";
+            default -> "UNKNOWN";
+        };
     }
 
     /** PX4 main-nav-state labels (custom_mode of a PX4 heartbeat). */
