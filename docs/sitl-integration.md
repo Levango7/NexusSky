@@ -677,9 +677,9 @@ ALL PX4 SITL TESTS PASSED
 | ③ | custom_mode 枚举 | PX4 nav_state（3=MISSION，4=RTL） | ArduCopter 枚举（3=AUTO，4=GUIDED，6=RTL…） | **已修**：`modeLabel()` 按 `HEARTBEAT.autopilot` 分派两套表；修复前 GUIDED 误显示 RTL |
 | ④ | 任务项拉取变体 | 发 MISSION_REQUEST_INT(51) | 发 legacy MISSION_REQUEST(**40**) | 兼容层（双 waiter）本就吸收，无改动；本文档原文写反，已按实测改正 |
 | ⑤ | MISSION_CURRENT 计数口径 | `total` = 任务条目数 | 读回 3 条（含 home）/ 遥测 `missionTotal=2`（不含 home） | 仅口径差异，记录不处理（前端进度条按遥测字段走） |
-| ⑥ | arm 的模式约束 | 任意模式可 arm | **AUTO 下 arm 被拒**：STATUSTEXT "Arm: Auto mode not armable"（任务非 TAKEOFF 开头时）；切 GUIDED 后 arm 成功 | 立项 P2-F1（§11.3） |
-| ⑦ | AUTO 地面启动约束 | 无（sim 直接起飞/执行） | **要求任务首条命令 = TAKEOFF**：否则 MISSION_START(300) 回 `MAV_RESULT=4`，回退 DO_SET_MODE(176) 回 `MAV_RESULT=2`，STATUSTEXT "Mode change to Auto failed: init failed"；单点"去某点"任务从地面起不来 | 立项 P2-F1（§11.3） |
-| ⑧ | COMMAND_LONG TAKEOFF | 接受 | 非 GUIDED 模式被拒（`MAV_RESULT=4`）；GUIDED 下接受 | 并入 P2-F1（"去某点"惯用法的组成部分） |
+| ⑥ | arm 的模式约束 | 任意模式可 arm | **AUTO 下 arm 被拒**：STATUSTEXT "Arm: Auto mode not armable"（任务非 TAKEOFF 开头时）；切 GUIDED 后 arm 成功 | **已修**（P2-F1 方案 A）：`DroneCommandService.arm` 对 AP+AUTO 先 `DO_SET_MODE(custom=4)` 再 arm；`ArduPilotGroundArmTest` 5 例钉住命令序列 |
+| ⑦ | AUTO 地面启动约束 | 无（sim 直接起飞/执行） | **要求任务首条命令 = TAKEOFF**：否则 MISSION_START(300) 回 `MAV_RESULT=4`，回退 DO_SET_MODE(176) 回 `MAV_RESULT=2`，STATUSTEXT "Mode change to Auto failed: init failed"；单点"去某点"任务从地面起不来 | **已修**（P2-F1 方案 A）：**地面**（`landedState`=ON_GROUND；**armed ≠ 空中**——dispatch 先 arm 再上传，见 §11.3）AP 任务在 home 槽后自动前置 `NAV_TAKEOFF`（alt=首条用户项，≤0 兜底 10m）；`ArduPilotMissionUploadTest` +7 例（含全握手线上形状与"arm 后仍在地面"回归） |
+| ⑧ | COMMAND_LONG TAKEOFF | 接受 | 非 GUIDED 模式被拒（`MAV_RESULT=4`）；GUIDED 下接受 | 方案 A 的 arm 前切 GUIDED 使该命令可用；惯用法 B（GUIDED+DO_REPOSITION，不传任务）仍立项待触发 |
 
 **无差异项**（同样记录在案）：任务上传的 2.5s 丢包重发恢复在 AP 上工作正常；COMMAND_ACK
 接受/拒绝语义一致；遥测解码字段（位置/姿态/电量/GPS）逐项对上；GCS 1Hz 心跳维持链路未触发
@@ -689,13 +689,27 @@ ALL PX4 SITL TESTS PASSED
 
 **P2-F1 · ArduPilot 地面派飞序列适配**（影响 `IncidentDispatchService.dispatch` 等
 "arm → 单点任务 → start" 流程在 AP 上的可用性——两条硬契约叠加：⑥ AUTO 不可 arm、
-⑦ AUTO 地面启动须 takeoff 开头；现状在 AP 实机上会失败）。
+⑦ AUTO 地面启动须 takeoff 开头）。**方案 A 已落地并 SITL 验收（2026-10-29）；方案 B 立项待触发。**
 
-- 候选方案 A（过渡）：任务侧适配——对 AP 目标且计划地面启动时，在 home 槽后前置一条
-  `NAV_TAKEOFF`（高度取首条航点 alt），保持现有任务模型；dispatch 前若机体停在 AUTO，
-  先 `DO_SET_MODE(GUIDED)` 再 arm。
-- 候选方案 B（目标形态）：惯用法侧适配——AP 生态的"去某点"用 `GUIDED + TAKEOFF +
-  DO_REPOSITION(192)` 表达（Mission Planner "Fly To" 同款），不传任务；需要新命令语义、
-  驻留/返航行为定义与 e2e 覆盖。
-- 建议：B 为目标形态、A 为过渡；**验收 = 同一 dispatch 场景在 AP SITL 上从地面全自动完成
-  （arm → 起飞 → 到点 → 驻留 → 返航）**。优先级：与 P2 剩余项同级，真机接入前必须闭环。
+- **已落地（方案 A）**：`DroneCommandService` 两处线上适配——
+  ① `arm`：对 AP 且当前 AUTO 的目标先 `DO_SET_MODE(custom=4 GUIDED)` 再 arm
+  （非 AP/非 AUTO 目标一字节不变；切换未获确认不吞错，仍发 arm 由固件如实拒绝）；
+  ② `withArduPilotGroundTakeoff`：对**尚在地面**的 AP 目标在 home 槽后前置
+  `NAV_TAKEOFF`（高度取首条航点 alt，≤0 兜底 10m），保持现有任务模型、用户条目原样后移。
+  地面判据 = `landedState`（1=ON_GROUND；2..4=空中）优先、`relativeAlt>1m` 兜底——
+  **armed ≠ 空中**：dispatch 是"先 arm 再上传"，上传时刻已 armed 而机体在地面；
+  首版用 `armed` 判空中被本轮 SITL 验收抓回重做（回归钉子
+  `ArduPilotMissionUploadTest.groundTakeoff_insertedWhenArmedButStillOnGround`）。
+- **验收（同一 dispatch 场景从地面全自动完成）`[AP-实测]` 2026-10-29**，SITL `-I1` +
+  独立后端实例（未扰 ZCode 会话）：置 AUTO → arm（"从 AUTO 切 GUIDED 后再 arm"，
+  COMMAND_ACK(400) ACCEPTED）→ 上传单点任务（"地面任务前置 TAKEOFF"，读回
+  `[home, takeoff(50m), wp(50m,hold30)]`）→ `MISSION_START(300)` ACCEPTED →
+  爬升 7.2→20.3→33.4→47.2→50.0m → 到点驻留 30s → `rtl` 返航降落（全部 COMMAND_ACK
+  attempt 1 接受）。
+- **修复前对照（红）**：主树旧代码同一场景实测——AUTO 下 arm 被拒 `MAV_RESULT=4`；
+  手工切 GUIDED 绕过 arm 后读回只有 `[home, wp]`（无 TAKEOFF），`start` 回
+  `MAV_RESULT=4 → 回退 2`，固件侧实录 "Mode change to Auto failed: init failed"。
+- **方案 B（目标形态，立项待触发）**：惯用法侧适配——AP 生态的"去某点"用
+  `GUIDED + TAKEOFF + DO_REPOSITION(192)` 表达（Mission Planner "Fly To" 同款），
+  不传任务；需要新命令语义、驻留/返航行为定义与 e2e 覆盖。与 A 并存、互不冲突，
+  待真实需求触发时立项。

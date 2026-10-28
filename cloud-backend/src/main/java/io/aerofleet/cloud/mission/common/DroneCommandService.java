@@ -54,6 +54,23 @@ public class DroneCommandService {
     /** Target component 1 = autopilot on the drone side. */
     private static final int TARGET_COMP = 1;
 
+    /**
+     * ArduCopter GUIDED 的 custom_mode 编号（DO_SET_MODE param2；param1=1 custom-mode 使能）。
+     * 与 {@code TelemetrySnapshotListener} 的 ArduCopter 模式表 `case 4 -> "GUIDED"` 同源，
+     * 证据见 docs/sitl-integration.md §11（P2-F1：AUTO 下 arm 被拒 ⇒ 必须先进 GUIDED）。
+     */
+    static final int ARDUPILOT_GUIDED_MODE_ID = 4;
+
+    /** AP 地面启动任务自动补 TAKEOFF 的兜底高度（首条用户项 alt ≤ 0 时用）。 */
+    static final float DEFAULT_TAKEOFF_ALT_M = 10f;
+
+    /** MAV_LANDED_STATE（EXTENDED_SYS_STATE）：1=ON_GROUND、2=IN_AIR（3=TAKEOFF、4=LANDING）。 */
+    private static final int LANDED_STATE_ON_GROUND = 1;
+    private static final int LANDED_STATE_IN_AIR = 2;
+
+    /** landedState 未知时判定"仍在地面"的海拔阈值（relativeAlt 超过它即视为空中）。 */
+    private static final double AIRBORNE_ALT_M = 1.0;
+
     private final UdpGateway gateway;
     private final PendingAcks pendings;
     private final io.aerofleet.cloud.gateway.DeviceRegistry registry;
@@ -126,7 +143,29 @@ public class DroneCommandService {
         return Math.max(-1000, Math.min(1000, v));
     }
 
+    /**
+     * Arm。对 **ArduPilot 且当前处于 AUTO** 的目标先切 GUIDED 再 arm——
+     * SITL 实录音："Auto mode not armable"（AUTO 下 arm 必被拒），切 GUIDED 后成功
+     * （docs/sitl-integration.md §11.2-⑥，P2-F1 方案 A）。非 AP / 非 AUTO 目标行为不变。
+     *
+     * <p>切换只做一次、失败不吞：切未获确认仍继续 arm，让固件如实拒绝（错误语义不打折）。
+     */
     public int arm(int sysid) {
+        int target = resolveTarget(sysid);
+        DroneSnapshot snap = registry.get(target);
+        if (snap != null
+                && snap.autopilot == MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA
+                && "AUTO".equals(snap.mode)) {
+            try {
+                command(target, MavEnums.MAV_CMD_DO_SET_MODE,
+                        MavEnums.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, ARDUPILOT_GUIDED_MODE_ID,
+                        0, 0, 0, 0, 0);
+                log.info("ArduPilot sysid={} 从 AUTO 切 GUIDED 后再 arm（P2-F1 方案 A）", target);
+            } catch (CommandException e) {
+                log.warn("ArduPilot sysid={} 切 GUIDED 未获确认（{}）——仍尝试 arm，由固件如实拒绝",
+                        target, e.getMessage());
+            }
+        }
         return command(sysid, MavEnums.MAV_CMD_COMPONENT_ARM_DISARM, 1, 0, 0, 0, 0, 0, 0);
     }
 
@@ -345,8 +384,9 @@ public class DroneCommandService {
      * Full mission upload state machine for one drone. Items must already be
      * translated to MISSION_ITEM_INT payloads ({@link #toMissionItems}).
      *
-     * <p>对 ArduPilot 目标会先经 {@link #withArduPilotHomeSlot}：AP 把任务索引 0
-     * 保留给 HOME，写入索引 0 的条目会被固件静默丢弃。
+     * <p>对 ArduPilot 目标会先经两道线上适配：{@link #withArduPilotHomeSlot}（索引 0 保留给
+     * HOME）与 {@link #withArduPilotGroundTakeoff}（**地面**任务必须以 TAKEOFF 开头，
+     * 否则 AUTO 地面启动 init 失败——SITL 实录见 §11.2-⑦，P2-F1 方案 A）。
      *
      * @throws CommandException on timeout or negative MISSION_ACK
      */
@@ -356,6 +396,7 @@ public class DroneCommandService {
             return MissionUploadResult.failure("mission has no items");
         }
         List<MissionItemInt> wireItems = withArduPilotHomeSlot(target, items);
+        wireItems = withArduPilotGroundTakeoff(target, wireItems);
         long deadline = System.currentTimeMillis() + MISSION_TIMEOUT_MS;
 
         // Phase 1: announce the count. target_system MUST be the drone's real
@@ -534,6 +575,77 @@ public class DroneCommandService {
                     it.x, it.y, it.z, it.missionType));
         }
         return wire;
+    }
+
+    /**
+     * ArduPilot **地面启动**约束（P2-F1 方案 A）：AUTO 从地面启动要求任务首条命令是
+     * {@code NAV_TAKEOFF}，否则 MISSION_START 回 {@code MAV_RESULT=4}、回退 DO_SET_MODE
+     * 回 {@code 2}，STATUSTEXT "Mode change to Auto failed: init failed"——单点"去某点"
+     * 任务从地面起不来（SITL 实录 §11.2-⑦）。对**尚在地面**（判据 {@link #isOnGround}——
+     * **armed ≠ 空中**：dispatch 先 arm 再上传，上传时已 armed 但仍在地面）的 AP 目标，
+     * 若首条用户命令不是 TAKEOFF，在 home 槽之后插入一条 TAKEOFF，高度取首条用户项
+     * 的 alt（≤0 时兜底 {@link #DEFAULT_TAKEOFF_ALT_M}），frame 随首条用户项
+     * （相对高任务保持相对口径）。用户条目顺序与字段原样保留，仅整体后移一位。
+     *
+     * <p>已在空中（landedState=2..4，或状态未知时 relativeAlt 超阈值）替换任务**不插**：
+     * 该约束只针对地面启动，插入反而扰动在途任务。
+     * 非 AP / autopilot 未知 / 未注册目标 / 空任务原样返回；入参不被修改。
+     *
+     * @param wire 已经过 {@link #withArduPilotHomeSlot} 的线上列表（AP 目标首项即 home 槽）
+     */
+    List<MissionItemInt> withArduPilotGroundTakeoff(int target, List<MissionItemInt> wire) {
+        DroneSnapshot snap = registry.get(target);
+        if (snap == null
+                || snap.autopilot != MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA
+                || wire.size() < 2) {          // 无用户条目（或尚未加 home 槽）：没有可起飞的目标点
+            return wire;
+        }
+        if (!isOnGround(snap)) {
+            return wire;                       // 已在空中：替换任务不插
+        }
+        MissionItemInt head = wire.get(1);     // AP 目标上 home 槽必在索引 0
+        if (head.command == MavEnums.MAV_CMD_NAV_TAKEOFF) {
+            return wire;                       // 用户自带 TAKEOFF：不重复插
+        }
+        float alt = head.z;
+        if (!Float.isFinite(alt) || alt <= 0f) {
+            log.warn("ArduPilot sysid={} 地面任务首条航点 alt={} 非法，TAKEOFF 兜底 {}m",
+                    target, alt, DEFAULT_TAKEOFF_ALT_M);
+            alt = DEFAULT_TAKEOFF_ALT_M;
+        }
+        log.info("ArduPilot sysid={} 地面任务前置 TAKEOFF（alt={}m，P2-F1 方案 A）", target, alt);
+        List<MissionItemInt> out = new ArrayList<>(wire.size() + 1);
+        for (int i = 0; i < wire.size(); i++) {
+            if (i == 1) {
+                out.add(new MissionItemInt(target, TARGET_COMP, 1,
+                        head.frame, MavEnums.MAV_CMD_NAV_TAKEOFF, 0, 0,
+                        0f, 0f, 0f, 0f, head.x, head.y, alt, MavEnums.MAV_MISSION_TYPE_MISSION));
+            }
+            MissionItemInt it = wire.get(i);
+            out.add(new MissionItemInt(it.targetSystem, it.targetComponent, i == 0 ? 0 : i + 1,
+                    it.frame, it.command, it.current, it.autocontinue,
+                    it.param1, it.param2, it.param3, it.param4,
+                    it.x, it.y, it.z, it.missionType));
+        }
+        return out;
+    }
+
+    /**
+     * 目标是否**仍在地面**（决定是否注入地面启动 TAKEOFF 前置）。判据优先级：
+     * ① {@code landedState} 有效（MAV_LANDED_STATE 1..4）：1=ON_GROUND 为地面；
+     * 2..4（IN_AIR/TAKEOFF/LANDING）为空中；
+     * ② 未知（-1=未收到 EXTENDED_SYS_STATE / 0=UNDEFINED）时用 {@code relativeAlt}
+     * 兜底：超过 {@link #AIRBORNE_ALT_M} 视为空中，NaN 视为未知按地面处理
+     * （地面启动约束宁多插一条 TAKEOFF，不因遥测缺口跳过——正是 SITL 抓回的错误）。
+     */
+    private static boolean isOnGround(DroneSnapshot snap) {
+        if (snap.landedState == LANDED_STATE_ON_GROUND) {
+            return true;
+        }
+        if (snap.landedState >= LANDED_STATE_IN_AIR && snap.landedState <= 4) {
+            return false;
+        }
+        return !(snap.relativeAlt > AIRBORNE_ALT_M);
     }
 
     private static int toE7(double degrees) {

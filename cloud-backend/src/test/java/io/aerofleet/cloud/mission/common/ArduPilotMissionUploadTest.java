@@ -177,8 +177,140 @@ class ArduPilotMissionUploadTest {
     }
 
     // ------------------------------------------------------------------
+    // 地面启动 TAKEOFF 前置（P2-F1 方案 A）
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("AP 地面任务：home 槽后、首条用户项前插 TAKEOFF（高度=首条航点 alt，frame 随航点）")
+    void groundTakeoff_insertedBetweenHomeAndFirstUserItem() {
+        DroneSnapshot s = registry.registerIfAbsent(1);
+        s.autopilot = MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA;
+        s.landedState = 1;   // ON_GROUND
+
+        List<MissionItemInt> wire = svc.withArduPilotGroundTakeoff(1,
+                svc.withArduPilotHomeSlot(1, List.of(dispatchWaypoint(50f))));
+
+        assertThat(wire).hasSize(3);
+        assertThat(wire.get(0).command).isEqualTo(MavEnums.MAV_CMD_NAV_WAYPOINT);   // home 槽
+        assertThat(wire.get(1).command).isEqualTo(MavEnums.MAV_CMD_NAV_TAKEOFF);
+        assertThat(wire.get(1).frame).isEqualTo(MavEnums.MAV_FRAME_GLOBAL_RELATIVE_ALT);
+        assertThat(wire.get(1).z).isEqualTo(50f);
+        assertThat(wire.get(1).seq).isEqualTo(1);
+        assertThat(wire.get(2).command).isEqualTo(MavEnums.MAV_CMD_NAV_WAYPOINT);
+        assertThat(wire.get(2).z).isEqualTo(50f);
+        assertThat(wire.get(2).seq).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("arm 后仍在地面（armed=true + ON_GROUND）：照插——armed ≠ 空中（SITL 抓回的回归）")
+    void groundTakeoff_insertedWhenArmedButStillOnGround() {
+        DroneSnapshot s = registry.registerIfAbsent(1);
+        s.autopilot = MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA;
+        s.armed = true;       // dispatch：先 arm 再上传——上传时已 armed
+        s.landedState = 1;    // …但机体仍在地面（MAV_LANDED_STATE=ON_GROUND）
+
+        List<MissionItemInt> wire = svc.withArduPilotHomeSlot(1, List.of(dispatchWaypoint(50f)));
+        List<MissionItemInt> out = svc.withArduPilotGroundTakeoff(1, wire);
+
+        assertThat(out).hasSize(3);
+        assertThat(out.get(1).command).isEqualTo(MavEnums.MAV_CMD_NAV_TAKEOFF);
+        assertThat(out.get(1).z).isEqualTo(50f);
+    }
+
+    @Test
+    @DisplayName("已在空中：替换任务不插——landedState=IN_AIR 与 relativeAlt 兜底都识别")
+    void groundTakeoff_skippedWhenInAir() {
+        DroneSnapshot s = registry.registerIfAbsent(1);
+        s.autopilot = MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA;
+        List<MissionItemInt> wire = svc.withArduPilotHomeSlot(1, List.of(dispatchWaypoint(50f)));
+
+        s.landedState = 2;    // IN_AIR
+        assertThat(svc.withArduPilotGroundTakeoff(1, wire)).isSameAs(wire);
+
+        s.landedState = -1;   // 未收到 EXTENDED_SYS_STATE：relativeAlt 兜底判空中
+        s.relativeAlt = 30.0;
+        assertThat(svc.withArduPilotGroundTakeoff(1, wire)).isSameAs(wire);
+
+        s.relativeAlt = 0.0;  // 兜底回落判地面：插
+        assertThat(svc.withArduPilotGroundTakeoff(1, wire)).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("首条用户项已是 TAKEOFF：不重复插（线上仍是 home+takeoff+…）")
+    void groundTakeoff_skippedWhenUserAlreadyStartsWithTakeoff() {
+        DroneSnapshot s = registry.registerIfAbsent(1);
+        s.autopilot = MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA;
+        s.landedState = 1;
+
+        List<MissionItemInt> wire = svc.withArduPilotHomeSlot(1, userItems());
+        assertThat(svc.withArduPilotGroundTakeoff(1, wire)).isSameAs(wire);
+    }
+
+    @Test
+    @DisplayName("PX4 / autopilot 未知 / 未注册目标：原样返回")
+    void groundTakeoff_skippedForNonArduPilot() {
+        DroneSnapshot s = registry.registerIfAbsent(1);
+        s.autopilot = MavEnums.MAV_AUTOPILOT_PX4;
+        List<MissionItemInt> wire = List.of(dispatchWaypoint(50f));
+        assertThat(svc.withArduPilotGroundTakeoff(1, wire)).isSameAs(wire);
+
+        s.autopilot = -1;   // 尚未收到心跳
+        assertThat(svc.withArduPilotGroundTakeoff(1, wire)).isSameAs(wire);
+
+        assertThat(svc.withArduPilotGroundTakeoff(9, wire)).isSameAs(wire);   // 未注册目标
+    }
+
+    @Test
+    @DisplayName("首条航点 alt ≤ 0：TAKEOFF 兜底默认高度，不插 0 高度")
+    void groundTakeoff_altFallbackWhenNonPositive() {
+        DroneSnapshot s = registry.registerIfAbsent(1);
+        s.autopilot = MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA;
+        s.landedState = 1;
+
+        List<MissionItemInt> wire = svc.withArduPilotGroundTakeoff(1,
+                svc.withArduPilotHomeSlot(1, List.of(dispatchWaypoint(0f))));
+
+        assertThat(wire.get(1).command).isEqualTo(MavEnums.MAV_CMD_NAV_TAKEOFF);
+        assertThat(wire.get(1).z).isEqualTo(DroneCommandService.DEFAULT_TAKEOFF_ALT_M);
+        assertThat(wire.get(2).z).isEqualTo(0f);   // 用户项字段原样保留
+    }
+
+    @Test
+    @DisplayName("AP 地面全握手（先 arm 后上传：armed+ON_GROUND）：线上 [home, takeoff, wp]，API 回报 1 条")
+    void upload_arduPilotGroundDispatch_prependsTakeoffOnWire() throws Exception {
+        DroneSnapshot s = registry.registerIfAbsent(1);
+        s.autopilot = MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA;
+        s.armed = true;        // 镜像真实 dispatch 顺序：arm 先于上传
+        s.landedState = 1;     // 仍在地面
+        s.lat = -35.3632622;
+        s.lon = 149.1652375;
+        s.amslAlt = 584.08;
+        s.online = true;
+
+        MissionUploadResult result = runFullHandshake(List.of(dispatchWaypoint(50f)));
+
+        assertThat(result.status()).isEqualTo("ok");
+        assertThat(result.uploaded()).isEqualTo(1);        // API 口径 = 用户条目数
+        List<MissionItemInt> items = capturedItems();
+        assertThat(items).hasSize(3);
+        assertThat(items.get(0).command).isEqualTo(MavEnums.MAV_CMD_NAV_WAYPOINT);   // home 槽
+        assertThat(items.get(1).command).isEqualTo(MavEnums.MAV_CMD_NAV_TAKEOFF);    // 前置起飞
+        assertThat(items.get(1).z).isEqualTo(50f);
+        assertThat(items.get(2).command).isEqualTo(MavEnums.MAV_CMD_NAV_WAYPOINT);   // 派飞目标点
+        assertThat(items.get(2).z).isEqualTo(50f);
+    }
+
+    // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
+
+    /** 派飞形态的单点任务项（GLOBAL_RELATIVE_ALT；与 IncidentDispatchService.dispatch 同构）。 */
+    private MissionItemInt dispatchWaypoint(float alt) {
+        return new MissionItemInt(1, 0, 0,
+                MavEnums.MAV_FRAME_GLOBAL_RELATIVE_ALT, MavEnums.MAV_CMD_NAV_WAYPOINT,
+                0, 0, 30f, 0f, 0f, 0f, -353632622, 1491652375, alt,
+                MavEnums.MAV_MISSION_TYPE_MISSION);
+    }
 
     private List<MissionItemInt> userItems() {
         return svc.toMissionItems(List.of(
