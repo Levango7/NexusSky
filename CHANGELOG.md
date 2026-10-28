@@ -46,7 +46,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 225 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 226 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -72,7 +72,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 225 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 226 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
@@ -533,6 +533,40 @@ P5 厂商私有 SDK/GB28181 媒体面（等授权/硬件）。审计 §5 的口�
 - 通道号按 `GetProfiles` 返回顺序 1-based 映射（ONVIF 无"通道"概念）；
 - PTZ 使用第一个 Media Profile（既有 `OnvifClient.ptzControl` 无通道参数）；
 - 海康/大华/宇视私有 SDK 与 GB28181 媒体面仍是模拟实现（本条只收 ONVIF 协议级）。
+
+---
+
+## [Unreleased] — P2 #18 余项：死类型/死访问器收口 + restriction.source-path 键名接线（2026-10-26）
+
+### 之前的行为
+
+- `docs/persistence-and-dead-surface-audit.md` §4.2 已列出 3 个确认死类型与死访问器，
+  但当时标"未复核"、未动手；6 组"只有测试在用"的常量也悬着，没人能说清删了会不会破契约。
+- `aerofleet.geofence.restriction.source-path` 只被 `@ConfigurationProperties` 绑定、
+  从未被读者使用：操作员按文档设了也不生效（真正读的是旧键 `restriction-file`）。
+
+### 交付
+
+| 项 | 做法 | 边界 |
+|---|---|---|
+| 死类型 | 删 `AccessSelectionStrategy`（整类）、`SearchLightPattern`（整类，含 SOS 时间线）、`MeshRouter.TopologyEvent`（嵌套类）；`BuzzerPattern` javadoc 不再引用被删类型 | 真推送早已是 `MeshTopologyService.MeshTopologyEvent`，无行为变化 |
+| 死访问器 | 删 `CommAdaptConfig` 5 个零调用 getter（读方统一走 `snapshot()`）；`DockProperties` 只删 `schedulePollMs` 字段/getter/setter | **口径校正**：审计原报 Dock 4 个死 getter，复核后 3 个在用（`DockService.java:75-76` 温度阈值、`DockMetricsService.java:59` 回溯窗口），只删 1 个；配置键 `aerofleet.dock.schedule-poll-ms` 仍被 `UnattendedScheduler` 的 `@Scheduled` 消费 |
+| 键名漂移 | `LocalFileRestrictionSource.effectivePath()`：`restriction.source-path` 非空优先，空则回退旧键 `restriction-file`；两键同时配置且不一致时打 WARN 指明以哪个为准；`getSourceId()` 与解析路径共用同一入口 | `application.properties` 默认 `source-path=`（空）⇒ 默认行为不变；测试里直接 `new`（无 Spring 注入）自动回退旧键 |
+| 保留判定 | `TriggerType.EMERGENCY_START/END`（请求体 + `@Enumerated(STRING)` 落库）与 6 组"只有测试在用"常量（GroundCover / PayloadCondition.DAMAGED / ModelType.OSGB·TILES_3D / TerrainZoneType.OPEN_FIELD / WorkOrderStateMachine.DISPATCH·RESOLVE / LightPattern.BLINK·BREATHE·CHASE）逐条给出生产或对外契约引用，登记为**不许当债清** | 见审计 §10.2；`TriggerType` 另记一条功能缺口：**可存不可触发**（`TriggerManager` 只评估 STEP_COMPLETE/TIMER），属产品口径问题，本批不擅自删值 |
+
+### 验证
+
+- `LocalFileRestrictionSourceTest` 新增 2 条：文档键胜出 / 空值回退旧键，8/8 绿；
+  A/B 变异各杀且只杀目标用例：忽略 `sourceConfig` ⇒ 恰好第一条红；去掉 `isBlank` 兜底 ⇒
+  恰好第二条红；还原后 `grep MUTATION-PROBE` 无残留。
+- 全 reactor `mvn -B -o clean test`（rebase 到 `0f78c991` 后）：Java **5440** 用例 / 0 失败 /
+  0 错误 / 0 跳过（639 个测试类；`cloud-backend` 3268 → **3270**）。前端未动，仍 **585**。
+- 删类后全仓 `grep`：`AccessSelectionStrategy` / `SearchLightPattern` 零残留，
+  `TopologyEvent` 只命中真实的 `MeshTopologyService.MeshTopologyEvent`。
+- 十份口径文档按实测重驱动；仓门（卫生 / 测试计数 / 端点计数 / 自测覆盖 / 前端端点 /
+  目录计数 / 回退式 diff / MAVLink 兼容 / 变异自测）全过。无破坏性变更。
+
+---
 
 ## [Unreleased] — C4 收口：启动时从 flight_log 重建内存轨迹历史（ROADMAP:337，2026-10-26）
 

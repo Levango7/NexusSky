@@ -208,6 +208,40 @@ class LocalFileRestrictionSourceTest {
     }
 
     // ------------------------------------------------------------------
+    // 配置键优先级（restriction.source-path vs restriction-file）
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("testSourcePathKeyWins: 文档键 source-path 非空 → 用它而不是旧键 restriction-file")
+    void testSourcePathKeyWins() throws Exception {
+        Path documented = tempDir.resolve("from-source-path.json");
+        Files.writeString(documented, VALID_JSON);
+        Path legacy = tempDir.resolve("from-legacy-key.json");
+        Files.writeString(legacy, "[]");
+
+        LocalFileRestrictionSource source = new LocalFileRestrictionSource();
+        setFilePath(source, legacy.toString());
+        setSourceConfig(source, documented.toString());
+
+        assertThat(source.getSourceId()).isEqualTo(documented.toString());
+        assertThat(source.fetch()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("testBlankSourcePathFallsBack: 文档键为空 → 回退旧键 restriction-file")
+    void testBlankSourcePathFallsBack() throws Exception {
+        Path legacy = tempDir.resolve("legacy.json");
+        Files.writeString(legacy, VALID_JSON);
+
+        LocalFileRestrictionSource source = new LocalFileRestrictionSource();
+        setFilePath(source, legacy.toString());
+        setSourceConfig(source, "");
+
+        assertThat(source.getSourceId()).isEqualTo(legacy.toString());
+        assertThat(source.fetch()).hasSize(2);
+    }
+
+    // ------------------------------------------------------------------
     // 辅助方法
     // ------------------------------------------------------------------
 
@@ -216,5 +250,14 @@ class LocalFileRestrictionSourceTest {
         var field = LocalFileRestrictionSource.class.getDeclaredField("filePath");
         field.setAccessible(true);
         field.set(source, path);
+    }
+
+    /** 通过反射注入 sourceConfig（模拟 Spring 的 @Autowired(required=false)）。 */
+    private void setSourceConfig(LocalFileRestrictionSource source, String sourcePath) throws Exception {
+        RestrictionSourceConfig config = new RestrictionSourceConfig();
+        config.setSourcePath(sourcePath);
+        var field = LocalFileRestrictionSource.class.getDeclaredField("sourceConfig");
+        field.setAccessible(true);
+        field.set(source, config);
     }
 }

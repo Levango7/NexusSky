@@ -348,3 +348,63 @@
 属于一批一批的独立改动，不能和"接通一个恒空面板"混在一个 PR 里；
 §4.2 的死枚举/死 getter 删除要逐个确认写入方（有 6 组只有测试在用），单列下一批。
 
+---
+
+## 10. P2 #18 余项落实（2026-10-26，本批）
+
+### 10.1 本批删除（删前反证 + 验收）
+
+| 符号 | 删前反证（命中面） | 验收 |
+|---|---|---|
+| `drone-sim/.../celltower/AccessSelectionStrategy.java`（整类 + 3 常量） | 类名、3 个裸常量、`FR-TERM-03`（docs 查无）、前端字面量——全仓只命中自身文件 | 全 reactor 编译通过，全量测试无引用失败 |
+| `drone-sim/.../SearchLightPattern.java`（整类 + `brightnessAt` + SOS 时间线） | 类名/方法名/4 常量只命中自身；唯一提及是 `BuzzerPattern` javadoc 的 `{@code SearchLightPattern.SOS_MORSE}`，已改写为文字（三短三长三短），不再指向被删类型 | 同上 |
+| `drone-sim/.../mesh/MeshRouter.java` 的嵌套 `TopologyEvent`（5 常量） | 5 个常量名全仓只命中自身；真正推送用的是 `MeshTopologyService.MeshTopologyEvent` | 同上 |
+| `commadapt/CommAdaptConfig.java` 5 个 getter | 5 个 getter 名零调用；真实读路径是 `snapshot()`（组合读一致性，见类注释） | 同上；`CommAdaptConfig` 的 setter 仍被配置端点/测试使用，未动 |
+| `dock/DockProperties.java` 的 `schedulePollMs` 字段 + getter/setter | `props.getSchedulePollMs()` 零调用；**配置键本身仍在用**（见 §10.3） | 同上 |
+
+### 10.2 复核结论：TriggerType 与 6 组"只有测试在用"——保留，不删
+
+判据从"有没有调用"换成"**是不是对外契约或生产语义的一部分**"：以下每一组都能指出生产侧消费点。
+
+| 符号 | 生产/契约侧真引用 | 结论 |
+|---|---|---|
+| `TriggerType.EMERGENCY_START/END` | `TriggerRequest.type`（`OrchestrationController.java:318,321`）→ `POST /plans` 请求体（同文件 `:61,73`）→ `@Enumerated(STRING)` 落库（`ConditionTriggerEntity.java:37-39`） | **保留**：删常量＝客户端发送即 400、历史行反序列化失败。**但补一条缺口**：`TriggerManager` 只评估 `STEP_COMPLETE`/`TIMER`（`:148,:173`），`EMERGENCY_*` **可存不可触发**；这属于 §5 的"要产品口径"问题，不是死码 |
+| `GroundCover`（3 常量） | 生产方法签名 `SimulatedMultispectralSource.synthesizeBands(..., GroundCover[][])`（`:95`）；三个常量都是生产 `switch` 分支（`:104,:108,:112`） | **保留**：删任一常量都会破坏穷尽 switch |
+| `DeliveryStatus.PayloadCondition.DAMAGED` | `GET /tasks/{id}/status` 响应体字段（`DeliveryController2.java:257-259`）的取值域；生产只写 `NORMAL`（`DeliveryStatusTracker.java:55`），`DAMAGED` 仅测试写 | **保留**：响应枚举收窄＝对外契约变更；注明"当前无生产写入方"。**校正**：§4.2 原写"前端色表消费 DAMAGED"有误——`gcs-web` 里 `payloadCondition` 零命中，`EmergencyOrchPanel.jsx:55`/`UnifiedCommandPanel.jsx:74` 的 `DAMAGED` 是**无人机状态**色，与负载状况无关 |
+| `CityModel.ModelType.OSGB/TILES_3D` | `POST /api/v1/city/models` 的 `@RequestBody CityModel`（`CityModelController.java:60-63`）；JSON 契约由 `CityModelControllerTest.java:61,76` 钉住 | **保留**：请求枚举取值域 |
+| `TerrainZoneType.OPEN_FIELD` | 生产保守默认：`fromCode` 非法 code 返回它（`TerrainZoneType.java:51`）、`fromTerrainType` 的 `default` 分支（同文件 `:75`） | **保留**：删它没有合法兜底值 |
+| `WorkOrderStateMachine.Transition.DISPATCH/RESOLVE` | 生产迁移表 `ALLOWED`（`WorkOrderStateMachine.java:27,29`）与目标状态映射（`:35,:37`） | **保留**：工单状态机的边本身 |
+| `LightPattern.BLINK/BREATHE/CHASE` | 生产按 ordinal 取值 `LightPattern.values()[pattern]`（`LedState.java:51-53`）、按 name 回显（`VirtualDrone.java:2003-2004`）；`brightnessAt` 的 switch 分支（`LightPattern.java:35-37`）；SDK 文档已把 `"pattern": "BLINK"` 写成调用示例（`docs/sdk-reference.md:165`） | **保留**：wire/文档双重契约 |
+
+### 10.3 口径校正（原审计数字为什么改）
+
+1. **`DockProperties` 原报"4 个死 getter"→ 实际 1 个**：`getTempWarnC/getTempCritC` 在
+   `DockService.java:75-76` 判温度告警/FAULT，`getMetricsRollupDays` 在 `DockMetricsService.java:59`
+   决定日结回溯窗口；本批只删 `schedulePollMs`。
+   注意删的是"Java 字段重复绑定"而**不是配置键**：`aerofleet.dock.schedule-poll-ms` 仍被
+   `UnattendedScheduler.java:72` 的 `@Scheduled(fixedDelayString=...)` 消费。
+2. 因此 §4.1 的"12 个死 getter"口径应为 **≤9**；本批核实 6 个（CommAdapt 5 + Dock 1），
+   其余未复核，不下结论。
+3. `DeliveryStatus.DAMAGED` 的前端证据更正，见 §10.2 对应行。
+
+### 10.4 配置键名漂移收口（`restriction.source-path`）
+
+- 原问题（§4.2）：properties 提供 `aerofleet.geofence.restriction.source-path`，代码实际只读旧键
+  `aerofleet.geofence.restriction-file`。
+- 落实：`LocalFileRestrictionSource` 可选注入 `RestrictionSourceConfig`；`effectivePath()` 语义＝
+  **source-path 非空则优先**（文档键），否则回退旧键；两者同时配置且不一致时打 WARN 指明以哪个为准。
+  `getSourceId()` 与 `resolveFilePath()` 都走同一入口。
+- 验收：`LocalFileRestrictionSourceTest` 新增 `testSourcePathKeyWins` / `testBlankSourcePathFallsBack`
+  （8/8 绿）；A/B 变异：忽略 `sourceConfig` ⇒ 恰好第一条红，去掉 `isBlank` 兜底 ⇒ 恰好第二条红；
+  还原后 `grep MUTATION-PROBE` 无残留。
+
+### 10.5 本批验证口径（本机实测）
+
+- 全 reactor `mvn -B -o clean test`（rebase 到 `0f78c991` 后）：Java **5440** 用例 / 0 失败 /
+  0 错误 / 0 跳过（639 个测试类；`cloud-backend` 3268 → **3270**）。前端未动，仍 **585**。
+- 十份口径文档按实测重驱动（README / ROADMAP / whitepaper / sales-pitch-deck / pricing-strategy /
+  demo-scenarios / customer-onboarding-guide / competitive-analysis /
+  low-altitude-economy-demand-research / product-brief）；`check-test-count-docs.py` 一致。
+- 仓门全过：卫生（CHANGELOG 小节 223 → **224**）/ 测试计数 / 端点计数 / 自测覆盖 / 前端端点 /
+  目录计数 / 回退式 diff / MAVLink 兼容自测 / 变异自测。
+

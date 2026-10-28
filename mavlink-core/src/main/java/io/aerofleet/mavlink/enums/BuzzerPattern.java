@@ -46,7 +46,7 @@ public enum BuzzerPattern {
     /**
      * SOS 摩斯码时间线判断：在给定时刻 t（0~6s 周期内）蜂鸣器是否鸣响。
      * <p>
-     * 时间线与 {@code SearchLightPattern.SOS_MORSE} 一致：
+     * 时间线与搜救灯的 SOS 模式一致（三短三长三短）：
      * 三短(0.2s ON + 0.2s OFF) × 3 + 词间隔(0.4s OFF) +
      * 三长(0.6s ON + 0.2s OFF) × 3 + 词间隔(0.4s OFF) +
      * 三短(0.2s ON + 0.2s OFF) × 3 + 循环间隔(1.0s OFF)

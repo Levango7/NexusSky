@@ -30,9 +30,6 @@ public class DockProperties {
     private double tempWarnC = 55;
     private double tempCritC = 70;
 
-    /** 无人值守调度轮询间隔（ms）。 */
-    private long schedulePollMs = 30000;
-
     /** 单次无人值守任务的飞行超时（min），超时判 FAILED 并尝试关门。 */
     private int unattendedFlightTimeoutMin = 30;
 
@@ -53,8 +50,6 @@ public class DockProperties {
     public void setTempWarnC(double tempWarnC) { this.tempWarnC = tempWarnC; }
     public double getTempCritC() { return tempCritC; }
     public void setTempCritC(double tempCritC) { this.tempCritC = tempCritC; }
-    public long getSchedulePollMs() { return schedulePollMs; }
-    public void setSchedulePollMs(long schedulePollMs) { this.schedulePollMs = schedulePollMs; }
     public int getUnattendedFlightTimeoutMin() { return unattendedFlightTimeoutMin; }
     public void setUnattendedFlightTimeoutMin(int v) { this.unattendedFlightTimeoutMin = v; }
     public int getMetricsRollupDays() { return metricsRollupDays; }

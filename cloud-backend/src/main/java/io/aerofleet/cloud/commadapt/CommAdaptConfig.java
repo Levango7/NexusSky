@@ -55,18 +55,10 @@ public class CommAdaptConfig {
         this.minStableTimeMs = minStableTimeMs;
     }
 
-    public int getSwitchThreshold() {
-        return switchThreshold;
-    }
-
     public void setSwitchThreshold(int switchThreshold) {
         synchronized (configLock) {
             this.switchThreshold = switchThreshold;
         }
-    }
-
-    public int getFailoverThreshold() {
-        return failoverThreshold;
     }
 
     public void setFailoverThreshold(int failoverThreshold) {
@@ -75,28 +67,16 @@ public class CommAdaptConfig {
         }
     }
 
-    public long getDetectionIntervalMs() {
-        return detectionIntervalMs;
-    }
-
     public void setDetectionIntervalMs(long detectionIntervalMs) {
         synchronized (configLock) {
             this.detectionIntervalMs = detectionIntervalMs;
         }
     }
 
-    public boolean isAutoSwitchEnabled() {
-        return autoSwitchEnabled;
-    }
-
     public void setAutoSwitchEnabled(boolean autoSwitchEnabled) {
         synchronized (configLock) {
             this.autoSwitchEnabled = autoSwitchEnabled;
         }
-    }
-
-    public long getMinStableTimeMs() {
-        return minStableTimeMs;
     }
 
     public void setMinStableTimeMs(long minStableTimeMs) {
