@@ -36,9 +36,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("夹爪装配语义：--actuators 后应立即可用（GRAB 不得被拒）")
 class GripperActuatorWiringTest {
 
-    /** 独立端口，避开 Lifecycle(24700+) / Budget(24590+) / Dispatch(24750+) 测试段。 */
-    private static final int PORT_WITH = 24790;
-    private static final int PORT_WITHOUT = 24791;
     private static final int GCS_COMP = 190;
     private static final int ACK_TIMEOUT_MS = 3000;
 
@@ -47,10 +44,9 @@ class GripperActuatorWiringTest {
      *
      * @return MAV_RESULT 值；未收到 ACK 视为 UNSUPPORTED 以便断言失败可读
      */
-    private int grabViaUdp(int port) throws Exception {
-        boolean withActuators = port == PORT_WITH;
+    private int grabViaUdp(boolean withActuators) throws Exception {
         List<String> args = new ArrayList<>(List.of(
-                "--port=" + port, "--failsafe=off"));
+                "--port=0", "--failsafe=off"));
         if (withActuators) {
             args.add("--actuators");
         }
@@ -67,7 +63,7 @@ class GripperActuatorWiringTest {
                     0f, 0f, 0f);
             byte[] frame = cmd.toFrame(VirtualDrone.GCS_SYSID, GCS_COMP, 0).encodeV2();
             gcs.send(new DatagramPacket(frame, frame.length,
-                    InetAddress.getLoopbackAddress(), port));
+                    InetAddress.getLoopbackAddress(), drone.getLocalPort()));
 
             CommandAck ack = awaitAck(gcs, MavEnums.MAV_CMD_NEXUS_GRIPPER_CONTROL);
             return ack == null ? MavEnums.MAV_RESULT_UNSUPPORTED : ack.result;
@@ -77,7 +73,7 @@ class GripperActuatorWiringTest {
     @Test
     @DisplayName("装配 actuators 后 GRAB 必须被接受（DENIED=夹爪没 enable，UNSUPPORTED=没装配）")
     void grabIsAcceptedWhenActuatorsAssembled() throws Exception {
-        int result = grabViaUdp(PORT_WITH);
+        int result = grabViaUdp(true);
         assertThat(result)
                 .as("装配 --actuators 后夹爪应已通电，GRAB 必须 MAV_RESULT_ACCEPTED(0)。"
                         + "返回 2(DENIED)=夹爪未 enable（2026-10-07 修复前的缺陷）；"
@@ -88,7 +84,7 @@ class GripperActuatorWiringTest {
     @Test
     @DisplayName("对照组：未装配 actuators 时必须是 UNSUPPORTED（与 DENIED 区分开）")
     void grabIsUnsupportedWithoutActuators() throws Exception {
-        int result = grabViaUdp(PORT_WITHOUT);
+        int result = grabViaUdp(false);
         assertThat(result)
                 .as("未装配执行机构应回 UNSUPPORTED —— 必须能与'装配了但没 enable'的 DENIED 区分，"
                         + "否则排查时分不清是没装配还是没通电")

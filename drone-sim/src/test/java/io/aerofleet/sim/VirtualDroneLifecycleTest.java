@@ -21,8 +21,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p>策略说明：
  * <ul>
  *   <li>{@code tickOnce()} 是 private 方法，通过反射调用以单元测试方式验证 tick 逻辑</li>
- *   <li>每个测试用独立 UDP 端口（{@link #BASE_PORT} + offset）避免冲突</li>
- *   <li>用 {@code SimConfig.parse("--port=XXXX")} 构造配置，failsafe=off 避免干扰</li>
+ *   <li>每个测试用 {@code --port=0}（内核分配 ephemeral 端口），并发进程不抢同一端口</li>
+ *   <li>failsafe=off 避免链路失败保护干扰断言</li>
  *   <li>try-with-resources 验证 AutoCloseable 语义</li>
  * </ul>
  *
@@ -32,12 +32,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @DisplayName("VirtualDrone: 生命周期管理 (start/tickOnce/close/AutoCloseable)")
 class VirtualDroneLifecycleTest {
 
-    /** 基础端口：高端口区避免与默认 14540 或其他测试冲突。 */
-    private static final int BASE_PORT = 24700;
-
-    /** 构造指定端口的 SimConfig（failsafe=off 简化测试）。 */
-    private SimConfig config(int port) {
-        return SimConfig.parse(new String[]{"--port=" + port, "--failsafe=off"});
+    /** 构造 SimConfig：--port=0 由内核分配端口（failsafe=off 简化测试）。 */
+    private SimConfig config() {
+        return SimConfig.parse(new String[]{"--port=0", "--failsafe=off"});
     }
 
     /** 反射调用 private tickOnce()，解包 InvocationTargetException 后抛出原始异常。 */
@@ -60,7 +57,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("1. 构造后状态为 INIT（未启动）")
     void constructor_stateIsInit() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 1))) {
+        try (VirtualDrone drone = new VirtualDrone(config())) {
             assertThat(drone.state()).isEqualTo(FlightState.INIT);
         }
     }
@@ -70,7 +67,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("2. start() 后状态变为 STANDBY")
     void start_stateBecomesStandby() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 2))) {
+        try (VirtualDrone drone = new VirtualDrone(config())) {
             drone.start();
             assertThat(drone.state()).isEqualTo(FlightState.STANDBY);
         }
@@ -81,7 +78,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("3. tickOnce() 在未启动（INIT）时调用不崩溃")
     void tickOnce_beforeStart_noCrash() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 3))) {
+        try (VirtualDrone drone = new VirtualDrone(config())) {
             // state=INIT，未 start，tickOnce 应能正常运行（physics.tick + 遥测发送）
             assertThatCode(() -> invokeTickOnce(drone))
                     .as("INIT 状态下 tickOnce 不应崩溃")
@@ -94,7 +91,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("4. tickOnce() 在 start() 后正常推进状态（不抛异常）")
     void tickOnce_afterStart_advancesState() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 4))) {
+        try (VirtualDrone drone = new VirtualDrone(config())) {
             drone.start();
             // start 后 scheduler 会自动 tick，但手动反射调一次验证不崩溃
             assertThatCode(() -> invokeTickOnce(drone))
@@ -108,7 +105,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("5. tickOnce() 连续调用 N 次不崩溃（稳定性）")
     void tickOnce_multipleCalls_stable() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 5))) {
+        try (VirtualDrone drone = new VirtualDrone(config())) {
             drone.start();
             for (int i = 0; i < 20; i++) {
                 invokeTickOnce(drone);
@@ -122,7 +119,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("6. close() 后状态不再变化（保持最后状态）")
     void close_stateFrozen() throws Exception {
-        VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 6));
+        VirtualDrone drone = new VirtualDrone(config());
         drone.start();
         assertThat(drone.state()).isEqualTo(FlightState.STANDBY);
         drone.close();
@@ -133,7 +130,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("7. close() 后 tickOnce() 不崩溃（无 peer 时 send 静默返回）")
     void close_thenTickOnce_noCrash() throws Exception {
-        VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 7));
+        VirtualDrone drone = new VirtualDrone(config());
         drone.start();
         drone.close();
         // close 后 transport 已关闭，但测试中无 GCS peer 发包（lastPeer=null），
@@ -147,7 +144,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("8. close() 幂等：多次调用不报错")
     void close_idempotent() throws Exception {
-        VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 8));
+        VirtualDrone drone = new VirtualDrone(config());
         drone.start();
         assertThatCode(() -> {
             drone.close();
@@ -162,7 +159,7 @@ class VirtualDroneLifecycleTest {
     @DisplayName("9. AutoCloseable：try-with-resources 自动关闭不抛异常")
     void autoCloseable_tryWithResources() throws Exception {
         assertThatCode(() -> {
-            try (VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 9))) {
+            try (VirtualDrone drone = new VirtualDrone(config())) {
                 drone.start();
                 assertThat(drone.state()).isEqualTo(FlightState.STANDBY);
             }
@@ -174,7 +171,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("10. 完整生命周期：start → tickOnce ×N → close")
     void fullLifecycle_startTickClose() throws Exception {
-        VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 10));
+        VirtualDrone drone = new VirtualDrone(config());
         assertThat(drone.state()).isEqualTo(FlightState.INIT);
 
         drone.start();
@@ -195,7 +192,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("11. 双重 start() 不崩溃（幂等或追加 scheduler 任务）")
     void doubleStart_noCrash() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(config(BASE_PORT + 11))) {
+        try (VirtualDrone drone = new VirtualDrone(config())) {
             drone.start();
             assertThat(drone.state()).isEqualTo(FlightState.STANDBY);
             // 二次 start：状态仍为 STANDBY，不抛异常
@@ -211,9 +208,9 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("12. close() 释放 UDP 端口（可重新绑定）")
     void close_releasesUdpPort() throws Exception {
-        int port = BASE_PORT + 12;
-        VirtualDrone drone = new VirtualDrone(config(port));
+        VirtualDrone drone = new VirtualDrone(config());
         drone.start();
+        int port = drone.getLocalPort();
         drone.close();
 
         // close 后端口应可重新绑定。
@@ -253,8 +250,7 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("13. 并发 start/close 线程安全（竞态异常可接受）")
     void concurrentStartClose_threadSafe() throws Exception {
-        int port = BASE_PORT + 13;
-        VirtualDrone drone = new VirtualDrone(config(port));
+        VirtualDrone drone = new VirtualDrone(config());
 
         int threads = 6;
         CountDownLatch latch = new CountDownLatch(threads);
@@ -300,13 +296,14 @@ class VirtualDroneLifecycleTest {
     @Test
     @DisplayName("14. transport() 返回非 null 且端口正确")
     void transport_returnsValidTransport() throws Exception {
-        int port = BASE_PORT + 14;
-        try (VirtualDrone drone = new VirtualDrone(config(port))) {
+        try (VirtualDrone drone = new VirtualDrone(config())) {
             assertThat(drone.transport())
                     .as("transport() 应返回非 null")
                     .isNotNull();
+            int port = drone.getLocalPort();
+            assertThat(port).as("--port=0 应被内核分配为真实端口").isGreaterThan(1023);
             assertThat(drone.transport().getLocalPort())
-                    .as("transport 端口应与配置一致")
+                    .as("VirtualDrone 与 transport 应报告同一绑定端口")
                     .isEqualTo(port);
         }
     }

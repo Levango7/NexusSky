@@ -37,8 +37,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("MAV_CMD_DO_REPOSITION(192)：编队引导命令的机载派发 + 真飞到位守卫")
 class RepositionCommandDispatchTest {
 
-    /** 独立端口：Lifecycle 24700+ / Budget 24590+ / Nexus 私有区命令 24750。 */
-    private static final int DRONE_PORT = 24760;
     private static final int AUTOPILOT_COMP = 1;
     private static final long ACK_TIMEOUT_MS = 5_000;
     /** 到位轮询上限：44m 斜线 + 20m 爬升（2m/s）≈ 15s，留足余量。 */
@@ -53,7 +51,7 @@ class RepositionCommandDispatchTest {
     @Test
     @DisplayName("未解锁拒绝 → 解锁后接受 → 飞机飞到目标经纬高并保持")
     void repositionGuidesVehicleToTarget() throws Exception {
-        runOnPort(DRONE_PORT, gcs -> {
+        runDrone(gcs -> {
             // 1) 未 armed：必须拒绝（否则停在地上的飞机会被一条命令"召唤"走）
             send(gcs, reposition(HOME_LAT + 0.0004, HOME_LON, 20f));
             assertThat(awaitAck(gcs, MavEnums.MAV_CMD_DO_REPOSITION))
@@ -79,7 +77,7 @@ class RepositionCommandDispatchTest {
     @Test
     @DisplayName("lat/lon 传 0,0 只改高度：水平位置保持")
     void repositionZeroLatLonOnlyChangesAltitude() throws Exception {
-        runOnPort(DRONE_PORT + 1, gcs -> {
+        runDrone(gcs -> {
             arm(gcs);
             send(gcs, reposition(0.0, 0.0, 18f));
             assertThat(awaitAck(gcs, MavEnums.MAV_CMD_DO_REPOSITION))
@@ -94,7 +92,7 @@ class RepositionCommandDispatchTest {
     @Test
     @DisplayName("经纬度越界：拒绝而不是飞向 2500km 外的解析点")
     void repositionOutOfRangeRejected() throws Exception {
-        runOnPort(DRONE_PORT + 2, gcs -> {
+        runDrone(gcs -> {
             arm(gcs);
             send(gcs, reposition(95.0, 0.0, 20f));
             assertThat(awaitAck(gcs, MavEnums.MAV_CMD_DO_REPOSITION))
@@ -104,14 +102,14 @@ class RepositionCommandDispatchTest {
     }
 
     /** 起一架与参考点同 home 的 drone-sim（--failsafe=off：不让链路失败保护干扰断言）。 */
-    private void runOnPort(int port, DroneCase body) throws Exception {
+    private void runDrone(DroneCase body) throws Exception {
         SimConfig config = SimConfig.parse(new String[]{
-                "--port=" + port, "--failsafe=off",
+                "--port=0", "--failsafe=off",
                 "--lat=" + HOME_LAT, "--lon=" + HOME_LON});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
-            gcs.connect(InetAddress.getLoopbackAddress(), port);
+            gcs.connect(InetAddress.getLoopbackAddress(), drone.getLocalPort());
             body.run(gcs);
         }
     }

@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-27 共有 218 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 219 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,7 +30,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 218 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 219 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
@@ -400,6 +400,57 @@ P2 #18（死枚举/空端点）跑了三路只读扫描（内存态清单 / 32 �
 
 
 ---
+## [Unreleased] — 测试里的固定 UDP 端口：两个会话同时跑全 reactor 就撞 BindException（2026-10-27）
+
+### 1. 现场：红的原因不在这次改动里
+
+本机两个会话并发跑全量回归时，`drone-sim` 在 24780 / 24805 抛 `BindException:
+Address already in use`。逐条查下来都是测试自己 `bind` 的固定端口：24750 被 7 个用例复用、
+24700 复用 7 次、24590 复用 6 次。CI 的 runner 是专享的，所以这些数字在 CI 上从来没红过——
+和 #162（regulator-sim 19090 被别的项目容器占用）是同一类问题；#162 当时明确写了
+「不去动别人那批能跑的写法」，现在它真的在共享开发机上咬人了。
+
+### 2. 口径更正：grep 的 21 个类里只有 15 个真会 bind
+
+`grep -rln "24[0-9][0-9][0-9]"` 命中 21 个测试类，逐文件核后：
+
+- **真会 bind 的 15 个**：`cloud-backend` 3（`UdpGatewayTest` 的 24 个网关端口 + 占位反例、
+  `EnvOverrideE2ETest`、`DeliveryPayloadQueryE2ETest`）；`drone-sim` 12（AdaptivePathExecution /
+  GripperActuatorWiring / MissionUploadAckTarget / MissionUploadSession / NexusCommandDispatch /
+  ObstacleSourceWiring / RepositionCommandDispatch / ThermalDataEmission / ThermalHotspotEmission /
+  VirtualDroneBudgetIntegration / VirtualDroneLifecycle / VirtualDroneRtkCeiling）。
+- **排除 6 个**：三个 `UdpGatewaySigning*Test` 的 24698/24699 只是**对端地址、不 bind**
+  （本地端口本来就用 probe 探测）；`SensorActuatorWiringTest` / `SimConfigBooleanFlagTest`
+  只断言 `--port=` 解析、不起 socket；`TwinControllerTest` 的 424242 是孪生 ID。
+
+### 3. 修：绑 0 号端口，端口从对象本身读回
+
+- `VirtualDrone` 补 `getLocalPort()`（`UdpMavlinkTransport` 早有同名访问器）；测试 `--port=0`
+  起机后读回真实端口再发帧。
+- `UdpGateway` 侧改成 `new UdpGateway(0, ...)` + `getLocalPort()`；占用反例改成先 bind 一个
+  ephemeral 占位 socket，再把**它的**端口交给网关/飞机，语义不变。
+- `VirtualDroneLifecycleTest` 的「close 后端口可重绑」改成重绑**实际分配的那个端口**（轮询逻辑不动）。
+
+### 4. 顺带挖出并修掉一个 master 级多上下文缺陷：测试全都想绑 14550
+
+跑 targeted 组合时 `DecisionMonitorControllerTest` / `EdgeCoordinationControllerTest` /
+`SchedulingControllerTest` 全部 `Failed to load ApplicationContext`，根因是
+`udpGateway` 绑定默认 `aerofleet.udp-port=14550`：**不同配置的 `@SpringBootTest` 上下文会同时存活**，
+后创建的那个必然 `BindException`。在 master（`7d101fb0`）上用同样三个类复现 **17 个 error**，
+证明与本次端口改造无关。修法是 `cloud-backend/src/test/resources/application.properties`
+加 `aerofleet.udp-port=0`（仓内多处用例本来就按这个约定单独覆盖）；三个类同跑恢复
+**17/17 绿**。
+
+### 5. 验收
+
+| 载体 | 结果 |
+|---|---|
+| `mvn -o test`（rebase 到 `704af756` 后全仓） | mavlink-core **511** / drone-sim **1452** / link-sim **139** / cloud-backend **3112** / regulator-sim **41** / sdk-java **19** = **5274**，0 失败 0 错误 |
+| 并发反证：另起进程占住 72 个旧固定端口（含第三方已占用的 24805） | 15 个改造类 **92/92 全绿、零 BindException** |
+| 三个多上下文类同跑（master 上 17 error） | **17/17 绿** |
+| `grep` 复核 | 目标文件里只剩对端地址与 `--port=` 解析断言，无固定本地 bind |
+
+**计数口径：纯端口改造，没有新增/删除用例，Java 总数不变。**
 ## [Unreleased] — docker-compose 根编排首次可起 + Linux CI smoke job（GAPS §二 收口，2026-10-26）
 
 ### 设计阶段就抓到的真缺口

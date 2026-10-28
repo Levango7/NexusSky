@@ -43,8 +43,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("NexusSky MAV_CMD 30080-30087：机载 switch 派发真实 UDP 往返守卫")
 class NexusCommandDispatchTest {
 
-    /** 独立端口，避开 Lifecycle(24700+) 与 Budget(24590+) 测试段。 */
-    private static final int DRONE_PORT = 24750;
     /** 机载组件 ID（MAVLink 惯例自动驾驶仪=1）。 */
     private static final int AUTOPILOT_COMP = 1;
     /** 每条命令等待 ACK 的最长时间。 */
@@ -88,7 +86,7 @@ class NexusCommandDispatchTest {
         // 布尔开关 2026-10-04 解析加固后裸写安全（BOOLEAN_FLAGS 集合，不吞后续 token）；
         // --failsafe=off 仍需显式赋值（它是带值开关）。
         SimConfig config = SimConfig.parse(new String[]{
-                "--port=" + DRONE_PORT, "--failsafe=off", "--env", "--actuators"});
+                "--port=0", "--failsafe=off", "--env", "--actuators"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             // 雷达/气动默认不装配，handler 会以 UNSUPPORTED 短路——先注入模拟实现。
@@ -105,7 +103,7 @@ class NexusCommandDispatchTest {
                         p.p1(), p.p2(), p.p3(), p.p4(), p.p5(), p.p6(), p.p7());
                 byte[] frame = cmd.toFrame(VirtualDrone.GCS_SYSID,
                         AUTOPILOT_COMP, seq++).encodeV2();
-                gcs.send(new DatagramPacket(frame, frame.length, droneAddr, DRONE_PORT));
+                gcs.send(new DatagramPacket(frame, frame.length, droneAddr, drone.getLocalPort()));
 
                 CommandAck ack = awaitAckFor(gcs, p.id());
                 if (ack == null || ack.result == MavEnums.MAV_RESULT_UNSUPPORTED) {

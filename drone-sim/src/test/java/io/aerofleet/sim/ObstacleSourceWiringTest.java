@@ -45,9 +45,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("M3 避障接线：obstacle 场景 → 超声波 → 30010 真链路")
 class ObstacleSourceWiringTest {
 
-    /** 独立端口段，避开 Gripper(24790+) / Budget(24590+) / Dispatch(24750+) / Lifecycle(24700+)。 */
-    private static final int PORT_WITH = 24820;
-    private static final int PORT_WITHOUT = 24821;
     private static final int GCS_COMP = 190;
     private static final int REPORT_TIMEOUT_MS = 4000;
 
@@ -56,9 +53,9 @@ class ObstacleSourceWiringTest {
      *
      * @return 收到的 ObstacleReportMsg；超时返回 null
      */
-    private ObstacleReportMsg awaitObstacleReport(int port, String scenarioSpec) throws Exception {
+    private ObstacleReportMsg awaitObstacleReport(String scenarioSpec) throws Exception {
         List<String> args = new ArrayList<>(List.of(
-                "--budget=toy", "--port=" + port, "--failsafe=off"));
+                "--budget=toy", "--port=0", "--failsafe=off"));
         if (scenarioSpec != null) {
             args.add("--scenario=" + scenarioSpec);
         }
@@ -73,7 +70,7 @@ class ObstacleSourceWiringTest {
             byte[] hb = new Heartbeat(0, 2, 6, 0, MavEnums.MAV_STATE_ACTIVE)
                     .toFrame(VirtualDrone.GCS_SYSID, GCS_COMP, 0).encodeV2();
             gcs.send(new DatagramPacket(hb, hb.length,
-                    InetAddress.getLoopbackAddress(), port));
+                    InetAddress.getLoopbackAddress(), drone.getLocalPort()));
 
             // 30010 走 5Hz 分频，最多等 REPORT_TIMEOUT_MS
             long deadline = System.currentTimeMillis() + REPORT_TIMEOUT_MS;
@@ -109,7 +106,7 @@ class ObstacleSourceWiringTest {
     @DisplayName("有障碍场景：30010 必须报真实威胁等级与距离（修复前恒为 NONE/MAX_VALUE）")
     void obstacleScenarioProducesRealThreatOnTheWire() throws Exception {
         // 机头正前方 0.3m —— toy 模式阈值 safety=2.0 / emergency=0.5 ⇒ CRITICAL
-        ObstacleReportMsg report = awaitObstacleReport(PORT_WITH, "obstacle:0:9999:0.3:0");
+        ObstacleReportMsg report = awaitObstacleReport("obstacle:0:9999:0.3:0");
 
         assertThat(report).as("应在超时前收到一帧 ObstacleReportMsg(30010)").isNotNull();
         assertThat(report.threat)
@@ -127,7 +124,7 @@ class ObstacleSourceWiringTest {
     @Timeout(30)
     @DisplayName("对照组：无障碍场景时 30010 必须是 NONE —— 必须能与'接了线但没障碍'区分")
     void noObstacleScenarioStillReportsNone() throws Exception {
-        ObstacleReportMsg report = awaitObstacleReport(PORT_WITHOUT, null);
+        ObstacleReportMsg report = awaitObstacleReport(null);
 
         assertThat(report).as("即使无障碍事件也必须上报 30010（此时读数是满量程）").isNotNull();
         assertThat(report.threat)

@@ -21,21 +21,18 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class VirtualDroneBudgetIntegrationTest {
 
-    /** 基础端口（高端口避免与默认 14540 或其他测试冲突）。 */
-    private static final int BASE_PORT = 24590;
-
     /**
-     * 构造指定 budget 模式 + 端口的 SimConfig。
+     * 构造指定 budget 模式的 SimConfig（--port=0 由内核分配，避免并发进程撞端口）。
      * budgetMode=null 时不添加 --budget 参数（完整版，既有行为不变）。
      */
-    private SimConfig configWithBudget(String budgetMode, int port) {
+    private SimConfig configWithBudget(String budgetMode) {
         if (budgetMode == null) {
             return SimConfig.parse(new String[]{
-                    "--port=" + port, "--failsafe=off"
+                    "--port=0", "--failsafe=off"
             });
         }
         return SimConfig.parse(new String[]{
-                "--budget=" + budgetMode, "--port=" + port, "--failsafe=off"
+                "--budget=" + budgetMode, "--port=0", "--failsafe=off"
         });
     }
 
@@ -44,7 +41,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：自动装配 UltrasonicSource 作为 DepthSource")
     void toyMode_assemblesUltrasonicAsDepthSource() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             assertEquals(BudgetMode.TOY, drone.getBudgetMode());
             assertNotNull(drone.getUltrasonicSource(),
                     "toy 模式应自动实例化 UltrasonicSource");
@@ -60,7 +57,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：自动装配 ObstacleDetector 使用超声波避障")
     void toyMode_assemblesObstacleDetectorWithUltrasonic() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT + 1))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             assertNotNull(drone.getObstacleDetector(),
                     "toy 模式应自动装配 ObstacleDetector");
             // 验证 ObstacleDetector 的阈值（safety=2.0, emergency=0.5）
@@ -72,7 +69,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：自动装配 BudgetThermalSource 替代高端热成像")
     void toyMode_assemblesBudgetThermalSource() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT + 2))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             assertNotNull(drone.getBudgetThermalSource(),
                     "toy 模式应自动实例化 BudgetThermalSource");
             assertNotNull(drone.getThermalSource(),
@@ -87,7 +84,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：自动装配 OpticalFlowSource 辅助定位")
     void toyMode_assemblesOpticalFlowSource() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT + 3))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             assertNotNull(drone.getOpticalFlowSource(),
                     "toy 模式应自动实例化 OpticalFlowSource（无 GPS 环境定位）");
         }
@@ -96,7 +93,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：setDepthSource 被忽略（超声波强制使用）")
     void toyMode_setDepthSource_ignored() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT + 4))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             UltrasonicSource original = drone.getUltrasonicSource();
             // 尝试注入一个不同的 DepthSource（应被忽略）
             UltrasonicSource another = new UltrasonicSource(6.0, 4);
@@ -109,7 +106,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：setObstacleDetector 被忽略（超声波检测器强制使用）")
     void toyMode_setObstacleDetector_ignored() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT + 5))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             ObstacleDetector original = drone.getObstacleDetector();
             // 尝试注入一个不同的 ObstacleDetector（应被忽略）
             ObstacleDetector another = new ObstacleDetector(new UltrasonicSource(), 3.0, 1.0);
@@ -124,7 +121,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("standard 模式：自动装配 UltrasonicSource 作为 DepthSource（双冗余避障）")
     void standardMode_assemblesUltrasonicAsDepthSource() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard", BASE_PORT + 10))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard"))) {
             assertEquals(BudgetMode.STANDARD, drone.getBudgetMode());
             assertNotNull(drone.getUltrasonicSource(),
                     "standard 模式应自动实例化 UltrasonicSource");
@@ -138,7 +135,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("standard 模式：自动装配 ObstacleDetector 使用超声波避障")
     void standardMode_assemblesObstacleDetectorWithUltrasonic() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard", BASE_PORT + 11))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard"))) {
             assertNotNull(drone.getObstacleDetector(),
                     "standard 模式应自动装配 ObstacleDetector");
             assertEquals(2.0, drone.getObstacleDetector().safetyDistanceM(), 0.001);
@@ -149,7 +146,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("standard 模式：自动装配 BudgetThermalSource 替代高端热成像")
     void standardMode_assemblesBudgetThermalSource() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard", BASE_PORT + 12))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard"))) {
             assertNotNull(drone.getBudgetThermalSource(),
                     "standard 模式应自动实例化 BudgetThermalSource");
             assertNotNull(drone.getThermalSource(),
@@ -162,7 +159,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("standard 模式：不实例化 OpticalFlowSource（保留 GPS 定位）")
     void standardMode_noOpticalFlowSource() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard", BASE_PORT + 13))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard"))) {
             assertNull(drone.getOpticalFlowSource(),
                     "standard 模式保留 GPS 定位，不需要 OpticalFlowSource");
         }
@@ -171,7 +168,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("standard 模式：setDepthSource 允许注入高端 DepthSource 作为补充（双冗余）")
     void standardMode_setDepthSource_allowed() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard", BASE_PORT + 14))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard"))) {
             // standard 模式允许注入高端 DepthSource 作为补充
             UltrasonicSource supplementary = new UltrasonicSource(6.0, 4);
             drone.setDepthSource(supplementary);
@@ -187,7 +184,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("advanced 模式：不实例化任何丐版传感器")
     void advancedMode_noBudgetSensors() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("advanced", BASE_PORT + 20))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("advanced"))) {
             assertEquals(BudgetMode.ADVANCED, drone.getBudgetMode());
             assertNull(drone.getUltrasonicSource(),
                     "advanced 模式不实例化 UltrasonicSource");
@@ -201,7 +198,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("advanced 模式：depthSource/obstacleDetector/thermalSource 默认 null（行为不变）")
     void advancedMode_sensorsDefaultNull() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("advanced", BASE_PORT + 21))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("advanced"))) {
             assertNull(drone.getDepthSource(),
                     "advanced 模式 depthSource 默认 null（等待外部注入高端传感器）");
             assertNull(drone.getObstacleDetector(),
@@ -214,7 +211,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("advanced 模式：setDepthSource/setObstacleDetector 正常工作")
     void advancedMode_settersWorkNormally() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("advanced", BASE_PORT + 22))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("advanced"))) {
             UltrasonicSource src = new UltrasonicSource();
             ObstacleDetector detector = new ObstacleDetector(src, 3.0, 1.0);
             drone.setDepthSource(src);
@@ -231,7 +228,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("null 模式（完整版）：丐版传感器全部不实例化；热像源为高端 Simulated（P2 #19 装配）")
     void nullMode_noBudgetSensors() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget(null, BASE_PORT + 30))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget(null))) {
             assertNull(drone.getBudgetMode(), "null 模式 budgetMode 为 null");
             assertNull(drone.getUltrasonicSource());
             assertNull(drone.getBudgetThermalSource());
@@ -252,7 +249,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("null 模式（完整版）：setter 正常工作（既有行为不变）")
     void nullMode_settersWorkNormally() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget(null, BASE_PORT + 31))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget(null))) {
             UltrasonicSource src = new UltrasonicSource();
             drone.setDepthSource(src);
             assertSame(src, drone.getDepthSource(),
@@ -265,7 +262,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：超声波 + ObstacleDetector 避障检测正常工作")
     void toyMode_ultrasonicObstacleDetection_works() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT + 40))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             UltrasonicSource ultrasonic = drone.getUltrasonicSource();
             ObstacleDetector detector = drone.getObstacleDetector();
             assertNotNull(ultrasonic);
@@ -290,7 +287,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：BudgetThermalSource 热成像分析正常工作")
     void toyMode_budgetThermalAnalysis_works() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT + 41))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             BudgetThermalSource thermal = drone.getBudgetThermalSource();
             assertNotNull(thermal);
 
@@ -309,7 +306,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：OpticalFlowSource 光流定位正常工作")
     void toyMode_opticalFlowPositioning_works() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT + 42))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             OpticalFlowSource opticalFlow = drone.getOpticalFlowSource();
             assertNotNull(opticalFlow);
 
@@ -327,7 +324,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("standard 模式：超声波 + ObstacleDetector 避障检测正常工作")
     void standardMode_ultrasonicObstacleDetection_works() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard", BASE_PORT + 50))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard"))) {
             UltrasonicSource ultrasonic = drone.getUltrasonicSource();
             ObstacleDetector detector = drone.getObstacleDetector();
             assertNotNull(ultrasonic);
@@ -346,7 +343,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("standard 模式：BudgetThermalSource 热点检测正常工作")
     void standardMode_budgetThermalHotspot_works() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard", BASE_PORT + 51))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("standard"))) {
             BudgetThermalSource thermal = drone.getBudgetThermalSource();
             assertNotNull(thermal);
 
@@ -361,7 +358,7 @@ class VirtualDroneBudgetIntegrationTest {
     @Test
     @DisplayName("toy 模式：DepthSource 接口方法（depthMap/nearestObstacle/pointCloudStats）正常工作")
     void toyMode_depthSourceInterfaceMethods_work() throws Exception {
-        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy", BASE_PORT + 60))) {
+        try (VirtualDrone drone = new VirtualDrone(configWithBudget("toy"))) {
             DepthSource depthSource = drone.getDepthSource();
             assertNotNull(depthSource);
 

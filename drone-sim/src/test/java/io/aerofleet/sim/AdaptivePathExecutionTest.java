@@ -46,8 +46,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("M11 ADAPT_PATH 执行级：任务改写 + ADAPTIVE_PATH(30052) 真实下发")
 class AdaptivePathExecutionTest {
 
-    /** 独立端口，避开 Lifecycle(24700+)/Dispatch(24750+) 测试段。 */
-    private static final int DRONE_PORT = 24780;
+    /** 实际绑定端口（--port=0 由内核分配，测试读回后发给飞机）。 */
+    private int dronePort;
     private static final int AUTOPILOT_COMP = 1;
     private static final long FRAME_TIMEOUT_MS = 8_000;
 
@@ -59,10 +59,11 @@ class AdaptivePathExecutionTest {
     @DisplayName("Z 字形任务执行 ADAPT_PATH：尾部插点改写（total 3→更大）且 30052 公告真实新航点")
     void adaptPathRewritesMissionTailAndAnnounces() throws Exception {
         // 裸写布尔开关在 SimConfig 加固（2026-10-04）后安全：不吞 token、可作末参数
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--autonomy-exec"});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0", "--autonomy-exec"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
+            dronePort = drone.getLocalPort();
             InetAddress addr = InetAddress.getLoopbackAddress();
             int[] seq = {0};
 
@@ -108,10 +109,11 @@ class AdaptivePathExecutionTest {
     @Test
     @DisplayName("复合任务尾（Z 字形 + 拍照 + RTL）：头部航点段照常平滑，拍照/RTL 项原样保留仅重编 seq")
     void compoundTailAdaptsPrefixAndPreservesNonWaypoints() throws Exception {
-        SimConfig config = SimConfig.parse(new String[]{"--port=" + DRONE_PORT, "--autonomy-exec"});
+        SimConfig config = SimConfig.parse(new String[]{"--port=0", "--autonomy-exec"});
         try (VirtualDrone drone = new VirtualDrone(config);
              DatagramSocket gcs = new DatagramSocket()) {
             drone.start();
+            dronePort = drone.getLocalPort();
             InetAddress addr = InetAddress.getLoopbackAddress();
             int[] seq = {0};
 
@@ -227,7 +229,7 @@ class AdaptivePathExecutionTest {
 
     private void send(DatagramSocket gcs, InetAddress addr, int[] seq, MavlinkMessage msg) throws Exception {
         byte[] frame = msg.toFrame(VirtualDrone.GCS_SYSID, AUTOPILOT_COMP, seq[0]++).encodeV2();
-        gcs.send(new DatagramPacket(frame, frame.length, addr, DRONE_PORT));
+        gcs.send(new DatagramPacket(frame, frame.length, addr, dronePort));
     }
 
     /** 阻塞等待指定 msgId 的帧并解码；超时抛断言失败。 */

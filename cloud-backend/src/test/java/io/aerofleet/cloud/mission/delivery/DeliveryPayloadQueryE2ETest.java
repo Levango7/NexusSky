@@ -45,10 +45,6 @@ import static org.mockito.Mockito.when;
 @DisplayName("DeliveryController 端到端：REST → 真 UDP → 机载 handlePayloadQuery → 回传 30006")
 class DeliveryPayloadQueryE2ETest {
 
-    /** 云端网关绑定端口（避开 EnvOverrideE2E 的 24840/24841 与既有测试段）。 */
-    private static final int GATEWAY_PORT = 24850;
-    /** 机载 VirtualDrone 绑定端口。 */
-    private static final int DRONE_PORT = 24851;
     private static final int DRONE_SYSID = 1;
     private static final long WAIT_MS = 15_000;
 
@@ -71,13 +67,13 @@ class DeliveryPayloadQueryE2ETest {
             }
         };
         TelemetryIngestService ingest = new TelemetryIngestService(publisher);
-        gateway = new UdpGateway(GATEWAY_PORT, "127.0.0.1", DRONE_PORT, "",
-                "127.0.0.1", false, 100, ingest, pendings);
-
+        // 先起机载（--port=0 由内核分配端口），网关的主动发现目标指向它
         // --actuators：gripper 非空，handlePayloadQuery 才不是 UNSUPPORTED（30085 的机载前置）
         drone = new VirtualDrone(SimConfig.parse(new String[]{
-                "--port=" + DRONE_PORT, "--failsafe=off", "--actuators"}));
+                "--port=0", "--failsafe=off", "--actuators"}));
         drone.start();
+        gateway = new UdpGateway(0, "127.0.0.1", drone.getLocalPort(), "",
+                "127.0.0.1", false, 100, ingest, pendings);
 
         DeviceRegistry registry = new DeviceRegistry();
         registry.provision(DRONE_SYSID, null);
@@ -103,7 +99,7 @@ class DeliveryPayloadQueryE2ETest {
                 drone.close();
             }
         } finally {
-            // 同 EnvOverrideE2ETest：drone.close() 抛异常不能阻断网关端口（24850）释放，
+            // 同 EnvOverrideE2ETest：drone.close() 抛异常不能阻断网关端口释放，
             // 否则下一个用例 setUp 构造网关时 BindException。
             drone = null;
             if (gateway != null) {
