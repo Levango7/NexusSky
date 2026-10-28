@@ -11,10 +11,11 @@
 
 1. **真机未验证。** 飞控侧目前由软件模拟器（`drone-sim`）代替。硬件适配层
    （`mavlink-core/.../hardware/`）有 PX4 / ArduPilot 适配器且能建立 UDP 链路，但：
-   串口 `serial://` **未实现**（`ArduPilotAdapter.java:94-97` 直接 `return false`，
-   需要 jSerialComm 之类的库）；`tcp://` 前缀实际打开的是 **UDP** 套接字
-   （`:88`，代码注释 `:81/:87` 已自陈是骨架期用 UDP 顶替）。PX4 SITL 脚本已写好
-   但从未运行过。**所有「对接 PX4/ArduPilot」的说法目前只到协议层自洽，不等于飞过真机。**
+   串口 `serial://` **未实现**（`ArduPilotAdapter` 直接 `return false`，需要 jSerialComm
+   之类的库）；`tcp://` 曾以 UDP 顶替，2026-10-28 起改为**明确拒绝 + 指路**（SITL 侧加
+   `--out=udp:` 后用 `udp://`；真实 TCP 链路属生产阶段）。PX4 SITL 脚本已写好但从未运行过；
+   **ArduPilot SITL 已于 2026-10-28 首验**（#192，抓出 3 个固件差异并修复）——但那仍是
+   模拟环境，**不等于飞过真机**。**所有「对接 PX4/ArduPilot」的实机说法仍只到协议层自洽。**
 2. **「边缘 AI 推理」不是模型推理。** 全仓无任何 ML 运行时（ONNX / TensorFlow /
    PyTorch / OpenCV 均无）。感知链路的默认数据源是**模拟器真值**，不是从像素做检测。
    我们做的是确定性的经典算法 + 一条**已就绪的接缝**：可切到真实像素的 BlobDetector，
