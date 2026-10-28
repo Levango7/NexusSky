@@ -46,7 +46,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 225 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 226 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -72,7 +72,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 225 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 226 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
@@ -559,8 +559,8 @@ P5 厂商私有 SDK/GB28181 媒体面（等授权/硬件）。审计 §5 的口�
 - `LocalFileRestrictionSourceTest` 新增 2 条：文档键胜出 / 空值回退旧键，8/8 绿；
   A/B 变异各杀且只杀目标用例：忽略 `sourceConfig` ⇒ 恰好第一条红；去掉 `isBlank` 兜底 ⇒
   恰好第二条红；还原后 `grep MUTATION-PROBE` 无残留。
-- 全 reactor `mvn -B -o clean test`（rebase 到 `3839d7aa` 后）：Java **5418** 用例 / 0 失败 /
-  0 错误 / 0 跳过（634 个测试类；`cloud-backend` 3254 → **3256**）。前端未动，仍 **585**。
+- 全 reactor `mvn -B -o clean test`（rebase 到 `0f78c991` 后）：Java **5440** 用例 / 0 失败 /
+  0 错误 / 0 跳过（639 个测试类；`cloud-backend` 3268 → **3270**）。前端未动，仍 **585**。
 - 删类后全仓 `grep`：`AccessSelectionStrategy` / `SearchLightPattern` 零残留，
   `TopologyEvent` 只命中真实的 `MeshTopologyService.MeshTopologyEvent`。
 - 十份口径文档按实测重驱动；仓门（卫生 / 测试计数 / 端点计数 / 自测覆盖 / 前端端点 /

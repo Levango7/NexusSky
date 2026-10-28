@@ -400,11 +400,11 @@
 
 ### 10.5 本批验证口径（本机实测）
 
-- 全 reactor `mvn -B -o clean test`（rebase 到 `3839d7aa` 后）：Java **5418** 用例 / 0 失败 /
-  0 错误 / 0 跳过（634 个测试类；`cloud-backend` 3254 → **3256**）。前端未动，仍 **585**。
+- 全 reactor `mvn -B -o clean test`（rebase 到 `0f78c991` 后）：Java **5440** 用例 / 0 失败 /
+  0 错误 / 0 跳过（639 个测试类；`cloud-backend` 3268 → **3270**）。前端未动，仍 **585**。
 - 十份口径文档按实测重驱动（README / ROADMAP / whitepaper / sales-pitch-deck / pricing-strategy /
   demo-scenarios / customer-onboarding-guide / competitive-analysis /
   low-altitude-economy-demand-research / product-brief）；`check-test-count-docs.py` 一致。
-- 仓门全过：卫生（CHANGELOG 小节 218 → **219**）/ 测试计数 / 端点计数 / 自测覆盖 / 前端端点 /
+- 仓门全过：卫生（CHANGELOG 小节 223 → **224**）/ 测试计数 / 端点计数 / 自测覆盖 / 前端端点 /
   目录计数 / 回退式 diff / MAVLink 兼容自测 / 变异自测。
 
