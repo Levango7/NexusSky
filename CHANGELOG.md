@@ -1,10 +1,29 @@
 # NexusSky 变更日志
 
+## [Unreleased] — ArduPilotAdapter：tcp:// 不再 UDP 顶替，未实现前缀明确拒绝（2026-10-28）
+
+### 修：文档点名的「这个谎」
+
+- `docs/real-integration-program.md` P2 曾写「`tcp://` 目前实为 UDP 顶替，接 SITL 前先把
+  这个谎修了或明确降级」——本笔按 `serial://` 同款处理：**明确拒绝 + 指路**。
+  `ArduPilotAdapter.connect("tcp://…")` 如实返回 false，并给出可执行指引（给 SITL 加
+  `--out=udp:<host>:<port>` 后改用 `udp://`；真实 TCP 链路属生产阶段，需 `TcpMavlinkTransport`）。
+- **为什么不保留「UDP 顶替」**：ArduPilot SITL 的 TCP 默认口（5760）**不收 UDP**——顶替对
+  真实场景必然静默失败，比明确拒绝更糟（"先回 200 再挂空流"同族）。
+- 同步订正三处对外声明：`HardwareAdapter` / `HardwareAdapterFactory` 的 javadoc 与工厂日志；
+  `serial://` 的指路语不再把 `tcp://` 说成可用。
+- 新测试 `ArduPilotAdapterConnectSchemeTest` 4 例：tcp/serial/未知前缀明确拒绝、
+  `udp://` 仍可用（回归）；**A/B**：把拒绝改成"假装成功" ⇒ 红、还原 ⇒ 绿。
+
+### 账目
+
+- mavlink-core 511→515（+4），全仓 5416→5420；计数文档按实测刷新。
+
 
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-27 共有 218 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 219 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,7 +49,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 218 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 219 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

@@ -15,7 +15,8 @@ import java.util.List;
  * 连接字符串格式约定：
  * <ul>
  *   <li>udp://127.0.0.1:14540 — UDP 连接（PX4 SITL 默认端口）</li>
- *   <li>tcp://127.0.0.1:5760 — TCP 连接（ArduPilot SITL 默认端口）</li>
+ *   <li>tcp://127.0.0.1:5760 — **未实现**：工厂按前缀建 ArduPilotAdapter，但 `connect` 会
+ *       **明确拒绝**（曾以 UDP 顶替，而 SITL 的 TCP 口不收 UDP——不做静默降级）</li>
  *   <li>serial://COM3:57600 — 串口连接（Windows）</li>
  *   <li>serial:///dev/ttyUSB0:57600 — 串口连接（Linux）</li>
  *   <li>sim:// — 模拟连接（无需真实硬件）</li>

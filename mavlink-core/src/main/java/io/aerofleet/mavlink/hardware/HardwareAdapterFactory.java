@@ -13,12 +13,14 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * 连接字符串前缀映射规则：
  * <ul>
  *   <li>udp:// → Px4Adapter（PX4 SITL 默认使用 UDP）</li>
- *   <li>tcp:// → ArduPilotAdapter（ArduPilot SITL 默认使用 TCP）</li>
+ *   <li>tcp:// → ArduPilotAdapter（**仅建实例**；ArduPilot SITL 默认 TCP 口未被支持——
+ *       `connect(tcp://...)` 明确拒绝，不做 UDP 静默顶替）</li>
  *   <li>serial:// → ArduPilotAdapter（串口连接通常用于真机）</li>
  *   <li>sim:// → SimulatedHardwareAdapter（纯模拟，无需硬件）</li>
  * </ul>
  * <p>
- * 对于 tcp:// 连接，可通过参数显式指定 PX4 或 ArduPilot。
+ * 也可通过参数显式指定类型与连接串（如 {@code create("ArduPilot", "udp://...")}）。
+ * 注意 {@code tcp://} 只保证建出实例，{@code connect} 会明确拒绝（见上）。
  */
 @Component
 public final class HardwareAdapterFactory implements DisposableBean {
@@ -57,7 +59,7 @@ public final class HardwareAdapterFactory implements DisposableBean {
         }
 
         if (connectionUrl.startsWith("tcp://")) {
-            log.info("创建 ArduPilotAdapter（TCP 连接）");
+            log.info("创建 ArduPilotAdapter（tcp:// 连接串——TCP 传输未实现，connect 将明确拒绝）");
             return track(new ArduPilotAdapter());
         }
 

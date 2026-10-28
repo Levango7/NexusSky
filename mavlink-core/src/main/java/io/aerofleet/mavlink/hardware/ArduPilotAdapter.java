@@ -78,22 +78,17 @@ public class ArduPilotAdapter implements HardwareAdapter {
                 transport.enablePeerDiscovery(target, () -> buildHeartbeat());
 
             } else if (connectionUrl.startsWith("tcp://")) {
-                // TCP 连接：当前骨架使用 UDP 传输层模拟，后续替换为 TCP 传输
-                String addrPart = connectionUrl.substring("tcp://".length());
-                String[] parts = addrPart.split(":");
-                String host = parts[0];
-                int port = parts.length > 1 ? Integer.parseInt(parts[1]) : 5760;
-
-                // 骨架阶段：ArduPilot SITL 也支持 UDP，先用 UDP 连接
-                transport = new UdpMavlinkTransport(0);
-                transport.addFrameListener(this::handleFrame);
-
-                InetSocketAddress target = new InetSocketAddress(host, port);
-                transport.enablePeerDiscovery(target, () -> buildHeartbeat());
+                // 2026-10-28 改正：这里**曾**用 UDP 顶替 tcp://（"骨架阶段先用 UDP"）——
+                // 那是个谎：ArduPilot SITL 的 TCP 默认口（5760）根本不收 UDP，拿它连真 SITL
+                // 必然静默失败。按 serial:// 同款处理：**明确拒绝 + 指路**，不做静默降级。
+                log.error("TCP 传输未实现（tcp:// 曾以 UDP 顶替，但 ArduPilot SITL 的 TCP 口不收 UDP）：{}。"
+                        + "请给 SITL 加 UDP 输出（sim_vehicle.py --out=udp:<host>:<port>）后改用 udp://；"
+                        + "真实 TCP 链路属生产阶段（需 TcpMavlinkTransport）", connectionUrl);
+                return false;
 
             } else if (connectionUrl.startsWith("serial://")) {
                 // 串口连接：需要 jSerialComm 或类似库，骨架阶段暂不支持
-                log.error("串口连接暂未实现，请使用 udp:// 或 tcp:// 连接");
+                log.error("串口连接暂未实现，请使用 udp:// 连接（tcp:// 亦未实现，见上）");
                 return false;
             } else {
                 log.error("不支持的连接格式: {}", connectionUrl);
