@@ -3,6 +3,7 @@ package io.aerofleet.cloud.api.dto;
 import io.aerofleet.cloud.gateway.AlertEntry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.TrackPoint;
+import io.aerofleet.mavlink.messages.ExtendedSysState;
 
 import java.util.HashMap;
 import java.util.List;
@@ -73,6 +74,13 @@ public final class DroneViews {
         m.put("missionSeq", s.missionSeq);
         m.put("missionTotal", s.missionTotal);
         m.put("missionState", s.missionState);
+        // 飞行阶段真值（EXTENDED_SYS_STATE）：-1 = 尚未收到该消息；名称取自协议层，
+        // 未定义/未知保持 null，由 UI 决定措辞（不在协议层替 UI 定口径）。
+        m.put("landedState", s.landedState);
+        m.put("landedStateName", ExtendedSysState.landedStateName(s.landedState));
+        // 固件版本（AUTOPILOT_VERSION）：0 / null = 尚未收到。
+        m.put("flightSwVersion", s.flightSwVersion);
+        m.put("firmwareVersion", s.firmwareVersion);
         m.put("lastHeartbeat", s.lastHeartbeatMs);
         return m;
     }
