@@ -1,5 +1,37 @@
 # NexusSky 变更日志
 
+## [Unreleased] — AP 地面派飞序列适配：arm 前切 GUIDED + 地面任务前置 TAKEOFF（P2-F1 方案 A，2026-10-29）
+
+### 修：AP 实机上「arm → 单点任务 → start」必失败（两条固件硬契约叠加）
+
+ArduPilot 两条实测硬契约（docs/sitl-integration.md §11.2-⑥⑦）：AUTO 下 arm 被拒
+（"Arm: Auto mode not armable"）；AUTO 从地面启动要求任务首条命令是 `NAV_TAKEOFF`，
+否则 `MISSION_START(300)` 回 `MAV_RESULT=4`、回退 `DO_SET_MODE(176)` 回
+`MAV_RESULT=2`（STATUSTEXT "init failed"）。两条叠加让现有派飞流程
+（`IncidentDispatchService.dispatch` / `AutoDispatchService`）在 AP 真机上从地面起不来。
+
+- `DroneCommandService.arm`：AP 目标且当前 AUTO 时先 `DO_SET_MODE(custom=4 GUIDED)`
+  再 arm——非 AP/非 AUTO 目标一字节不变；切换未获确认不吞错，仍发 arm 由固件如实拒绝；
+- `DroneCommandService.uploadMission` 新增线上适配 `withArduPilotGroundTakeoff`：
+  **尚在地面**的 AP 目标在 home 槽后自动前置 `NAV_TAKEOFF`（高度取首条用户项，
+  ≤0 兜底 10m），用户条目整体后移一位；地面判据 = `landedState`（1=ON_GROUND；
+  2..4=空中）优先、`relativeAlt>1m` 兜底；
+- **SITL 验收抓回的回归**：首版用 `armed` 判空中——但 dispatch 是"先 arm 再上传"，
+  上传时刻已 armed 而机体在地面，TAKEOFF 前置被错误跳过、`start` 仍失败。
+  改用 `landedState` 后同一场景全绿；回归钉子
+  `ArduPilotMissionUploadTest.groundTakeoff_insertedWhenArmedButStillOnGround`；
+- 测试：`ArduPilotGroundArmTest`（新，5 例钉 arm 命令序列）+ `ArduPilotMissionUploadTest`
+  +7 例（含全握手线上形状 `[home, takeoff, wp]`）；变异 A/B 3 个变异改坏⇒红、还原⇒绿；
+- 验收：AP SITL（-I1 独立实例）同一 dispatch 场景从地面全自动完成——置 AUTO → arm
+  （切 GUIDED、COMMAND_ACK ACCEPTED）→ 上传（读回含 TAKEOFF）→ `MISSION_START` ACCEPTED
+  → 爬升至 50m → 到点驻留 30s → `rtl` 返航降落；修复前旧代码同场景红对照
+  （AUTO arm 被拒 / start "init failed"）。详见 `docs/sitl-integration.md` §11.3。
+- 顺带订正一处"已完成仍标待做"漂移：`docs/real-integration-program.md` P3「差异比对框架」
+  bullet 由 ⬜ 改 ✅——#191 已交付 `uom-contract-diff.py` + 手册，程序文档当时漏刷。
+
+方案 B（`GUIDED + DO_REPOSITION` 不传任务，Mission Planner "Fly To" 同款）立项待
+真实需求触发，与 A 并存、互不冲突。
+
 ## [Unreleased] — 腾讯云 2C2G 试用机部署包 + 两处 compose 登录缺口修复（2026-10-28）
 
 为 CVM 2核2G3M 免费试用档落的"公网 pre-staging"部署包：`deploy/tencent-trial/`
@@ -27,7 +59,6 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
   DB 模式 bootstrap admin 真登录（`POST /api/v1/auth/login` 期望 200 且含 token），
   把上文「只探 /actuator/health 所以从未暴露」的缺口变成每轮 CI 门禁；凭据可用
   `COMPOSE_SMOKE_ADMIN_USER` / `COMPOSE_SMOKE_ADMIN_PASSWORD` 覆盖。
-
 
 ## [Unreleased] — 三处「tcp:// 仍开放」的漂移订正（self-consistency，2026-10-28）
 
@@ -75,7 +106,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 227 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 228 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -101,7 +132,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 227 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 228 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

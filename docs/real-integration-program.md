@@ -55,14 +55,15 @@
   ① v2 尾零裁剪致 MISSION_ACK 解码崩溃（上传永远"失败"）② AP 任务槽 0=HOME 致首条命令
   静默丢失（单点任务等于没传）③ 模式标签 PX4 口径硬解致 GUIDED 误显示 RTL。共 +13 回归测试
   （`MissionTrailingZeroPayloadTest` / `ArduPilotMissionUploadTest` / `FlightModeLabelTest`）。
-- **遗留 P2-F1（真机接入前必须闭环）**：**AP 地面派飞序列适配**——AP 两条硬契约叠加：
+- **P2-F1（真机接入前必须闭环）**：**AP 地面派飞序列适配**——AP 两条硬契约叠加：
   ⑥ AUTO 模式下 arm 被拒（"Auto mode not armable"，需先切 GUIDED）；⑦ AUTO 从地面启动要求
-  任务首条命令是 TAKEOFF（"init failed"），单点"去某点"任务起不来。现
-  "arm → 单点任务 → start" 流程（`IncidentDispatchService.dispatch` 等）在 AP 实机上会失败。
-  候选 **A（过渡）**：任务侧前置 `NAV_TAKEOFF`（取首条航点 alt）+ arm 前按需切 GUIDED；
-  候选 **B（目标形态）**：`GUIDED + TAKEOFF + DO_REPOSITION(192)` 惯用法（Mission Planner
-  "Fly To" 同款），不传任务。**推荐 B 目标 + A 过渡**（待拍板）。**验收 = 同一 dispatch 场景
-  在 AP SITL 从地面全自动完成**。详见 `docs/sitl-integration.md` §11.3。
+  任务首条命令是 TAKEOFF（"init failed"），单点"去某点"任务起不来。原
+  "arm → 单点任务 → start" 流程（`IncidentDispatchService.dispatch` 等）在 AP 实机上必失败。
+  **方案 A 已落地并 SITL 验收（2026-10-29）**：`DroneCommandService` 对 AP+AUTO 先切
+  GUIDED 再 arm、对地面任务在 home 槽后前置 `NAV_TAKEOFF`（判据 `landedState`，
+  armed ≠ 空中）；红/绿对照与验收记录见 `docs/sitl-integration.md` §11.3。
+  **方案 B（目标形态）已立项待触发**：`GUIDED + TAKEOFF + DO_REPOSITION(192)` 惯用法
+  （Mission Planner "Fly To" 同款），不传任务；无阻塞需求，与 A 并存。
 - **附带口径**：`tcp://` 的 UDP 顶替已在 2026-10-28 修掉（改为**明确拒绝 + 指路**，
   `ArduPilotAdapter.connect`）——本次首验全程 UDP，未经过该路径；口径已闭合，不再挂"仍开放"。
 
@@ -70,9 +71,12 @@
 
 来源：`docs/decisions-2026-10-26.md` 决策二（就绪清单五项已登记）。本项目 track 的是**仓内可先行件**：
 
-- ⬜ **差异比对框架**（先行件，不等外部）：以公开的 UOM 接口规范为输入，把 `regulator-sim`
-  六端点的请求/响应逐字段建对照表（列：字段 / sim 形状 / 规范形状 / 差异 / 风险），
-  产出 `docs/uom-contract-diff.md` 骨架 + `scripts/` 下可复跑的比对器（对捕获的真实响应回放）。
+- ✅ **差异比对框架（先行件，机械部分已交付——#191）**：把 `regulator-sim` 六端点的请求/响应
+  与规范逐字段建对照表（列：字段 / 规范形状 / 差异 / 风险）的**比对器与手册已入库**：
+  `scripts/uom-contract-diff.py`（六类差异、退出码 0/1/2、9 情形自测）+
+  `docs/uom-contract-diff.md`（`spec.json` + `captures/` 两个输入；捕获源可为真实环境或
+  `regulator-sim` sim 基线回放）。**剩余**：等 #1 拿到规范与测试环境后填输入跑一次——
+  语义裁决（"字段该不该有"）不自动化，留人工对照。
 - ✅ **`UomReportSink` 已实现 + 契约测试**（2026-10-28 复核订正：不是"待写骨架"——
   `UomReportSink.java` 四个操作齐全（verify 查询串 / activate / cancel / telemetry 请求体）、
   API Key + HMAC-SHA256 签名头（`METHOD\nPATH\nTS\nBODY` Base64）、指数退避重试 +
