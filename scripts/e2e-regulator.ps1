@@ -24,7 +24,13 @@
 #
 # 前置：JDK 17 + Maven（自动构建缺失 jar）
 
-param([switch]$SkipBuild)
+param(
+    [switch]$SkipBuild,
+    # 上报通道：sim（SimReportSink，默认）/ uom（UomReportSink——**生产用的真实现**）。
+    # 2026-10-28 加：此前全链只跑 sim 通道，真实现只有单测/跨模块契约测试；
+    # uom 腿把"后端真的按 sink-type=uom 装起来"这条配置/装配链路也钉进 CI。
+    [ValidateSet('sim', 'uom')][string]$SinkType = 'sim'
+)
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
@@ -326,23 +332,52 @@ if (-not $regulatorUp) {
 # ============================================================
 # 2. 启动 cloud-backend（sink-type=sim）
 # ============================================================
-Step '启动 cloud-backend（sink-type=sim, dev profile）'
+Step "启动 cloud-backend（sink-type=$SinkType, dev profile）"
 
 $backendLog = Join-Path $TempDir "regulator-e2e-backend.log"
 if (Test-Path $backendLog) { Remove-Item $backendLog -Force }
 
-$backendProc = Start-Process -FilePath $java -ArgumentList @(
+# 上报通道参数按 SinkType 分派（显式数组拼接——PS 5.1 的 -ArgumentList 不接受嵌套子表达式数组，
+# 2026-10-28 实测：`@(..., $(if ...), ...)` 会抛 CannotConvertArgument）。
+$sinkArgs = if ($SinkType -eq 'uom') {
+    # 真实现（UomReportSink）指向同一个 MockUomServer——字段名与状态机语义同源，
+    # 本腿多验的是**装配链**：条件 Bean 选型 / uom-base-url / API Key 与 HMAC 签名头
+    # （sim 侧不校验签名；但 uom-base-url 写错、Bean 没装上，这里立刻全链失败）。
+    @(
+        '--aerofleet.regulator.sink-type=uom',
+        "--aerofleet.regulator.uom-base-url=http://localhost:$RegulatorPort",
+        '--aerofleet.regulator.api-key=e2e-uom-key',
+        '--aerofleet.regulator.signing-key=e2e-uom-signing-key'
+    )
+} else {
+    @(
+        '--aerofleet.regulator.sink-type=sim',
+        "--aerofleet.regulator.sim-base-url=http://localhost:$RegulatorPort"
+    )
+}
+
+# 每轮独立内存库：dev profile 默认是**文件型** H2（jdbc:h2:file:./data/aerofleet），
+# 而 #182/#185 之后合规状态（V32）会落库、跨重启保留——于是同一台机器上**连跑两轮 e2e**
+# 时，上一轮 FR-34 注销过的 sysid=2 会以 CANCELLED 状态把下一轮 FR-31 顶死
+# （2026-10-28 本机实测：uom 腿过了、紧接着 sim 腿 FR-31~34 全红，status 响应里带着
+# 上一轮的 lastVerifyTime）。CI 上两条腿在同一个 runner 连跑，同样会撞。
+# 用带随机后缀的 in-mem 库隔离每轮（Flyway 启动时全新迁移；SITL 的 backend 同款做法）。
+$dbName = 'regulator-e2e-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+
+$backendArgs = @(
     '-Dregulator-e2e=true',   # 命令行留痕：Stop-E2eStaleProcesses 按它精确清残留
     '-jar', $backendJar.FullName,
     "--server.port=$BackendPort",
     '--spring.profiles.active=dev',
-    "--aerofleet.regulator.sink-type=sim",
-    "--aerofleet.regulator.sim-base-url=http://localhost:$RegulatorPort",
+    "--spring.datasource.url=jdbc:h2:mem:$dbName;DB_CLOSE_DELAY=-1"
+) + $sinkArgs + @(
     "--aerofleet.regulator.telemetry-report-interval=$TelemetryIntervalSec",
     "--aerofleet.drone-port=$DronePort",
     "--aerofleet.security.rbac-enabled=false",
     '--aerofleet.security.dev-mode=true'
-) -PassThru -RedirectStandardOutput $backendLog
+)
+
+$backendProc = Start-Process -FilePath $java -ArgumentList $backendArgs -PassThru -RedirectStandardOutput $backendLog
 Register-Cleanup { Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue }
 Info "cloud-backend PID=$($backendProc.Id), log=$backendLog"
 

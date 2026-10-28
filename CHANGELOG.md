@@ -1,10 +1,34 @@
 # NexusSky 变更日志
 
+## [Unreleased] — e2e-regulator 增 uom 通道腿：后端真按 sink-type=uom 装起来（2026-10-28）
+
+### 交付
+
+- **`scripts/e2e-regulator.ps1` 增 `-SinkType sim|uom`**（默认 sim，行为不变）：uom 腿把后端以
+  `sink-type=uom`（**真 `UomReportSink`**）+ `uom-base-url` + API Key/HMAC 签名键装配起来，
+  FR-31~40 同一套断言全量跑。补上的正是"两个假 UOM 各测各的"里剩下的**装配链**
+  （条件 Bean 选型 / URL / 凭据）——字段与状态机语义此前已由跨模块契约测试钉住。
+- **顺手修一个跨运行状态污染（对 CI 是必需前置）**：dev profile 是**文件型 H2**，而合规状态
+  （V32）跨重启保留——同一台机器连跑两轮 e2e 时，上一轮 FR-34 注销过的 sysid 会以 CANCELLED
+  把下一轮 FR-31 顶死（本机实测：uom 腿过后 sim 腿 FR-31~34 全红，status 响应里带着上一轮的
+  `lastVerifyTime`）。改为**每轮独立 in-mem 库**（随机后缀 + Flyway 全新迁移）；
+  **CI 上两条腿同 runner 连跑同样会撞，所以这个修复是本 PR 的前提而不是附赠**。
+- `ci.yml`：e2e-regulator job 增第二条腿 `-SinkType uom`（同端口环境变量）。
+
+### 验证（本机实测）
+
+- `-SinkType uom`：**38 PASS / 0 FAIL**（含 FR-40 的「4xx 终态不重试 + 500 退避」精确计数，
+  uom sink 下 403 恰 1 次、500 仍 4 次/7s 退避——与断言语义一致）。
+- `-SinkType sim`（默认）：回归 **PASS**。
+- 本机避让：8080 被常驻服务占用、18099 被 SITL 会话占用 ⇒ 用 `AF_BACKEND_PORT=18097`
+  （脚本既有 env 口径）。
+- 计数不变（e2e 脚本不进 surefire 计数）。
+
 
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 223 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 224 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,7 +54,7 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 223 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 224 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
