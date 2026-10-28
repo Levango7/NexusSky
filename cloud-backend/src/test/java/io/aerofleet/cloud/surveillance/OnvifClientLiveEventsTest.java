@@ -115,11 +115,26 @@ class OnvifClientLiveEventsTest {
 
         client.unsubscribeEvents(handle);
         assertThat(client.activeSubscriberCount()).isZero();
-        // 给在途请求一个收尾窗口，之后不应再出现新的 PullMessages
-        Thread.sleep(300);
+        // 硬信号：轮询线程必须退出（与 OnvifLiveBackendTest 同口径——"睡一觉再数数"的
+        // 窗口式负断言在 CI 慢机上会漏杀变异体，2026-10-28 实测 1.1pp 波动后统一改掉）
+        awaitPollerThreadGone(handle, 2_000);
         int after = pullCount.get();
-        Thread.sleep(400);
+        Thread.sleep(200);
         assertThat(pullCount.get()).as("取消订阅后门面不应再拉取").isEqualTo(after);
+    }
+
+    /** 等 {@code onvif-events-<handle>} 线程消失；超时即断言失败（不静默）。 */
+    private static void awaitPollerThreadGone(String handle, long timeoutMs) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadline) {
+            boolean alive = Thread.getAllStackTraces().keySet().stream()
+                    .anyMatch(t -> t.getName().equals("onvif-events-" + handle));
+            if (!alive) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("轮询线程在 " + timeoutMs + "ms 内没有退出：onvif-events-" + handle);
     }
 
     @Test

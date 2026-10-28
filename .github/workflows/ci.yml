@@ -84,6 +84,11 @@ jobs:
           python3 scripts/check-claimed-endpoint-count.py --self-test
           python3 scripts/check-frontend-endpoints.py --self-test
           python3 scripts/check-doc-counts.py --self-test
+          # 审计 §6 的两条门禁（2026-10-28 落地）：持久化状态性 / persist 开关 profile 对账。
+          python3 scripts/check-statefulness.py --self-test
+          python3 scripts/check-persist-switches.py --self-test
+          # P3 先行件：UOM 契约差异比对器（拿到规范前先把机械部分建好，9 情形自测）。
+          python3 scripts/uom-contract-diff.py --self-test
           # 变异验证的还原必须刷新时间戳，否则增量编译会继续用改坏的 .class
           # （2026-10-22 踩过，见 docs/agent-constraints.md 第 12 条）
           python3 scripts/mutate-verify.py --self-test
@@ -106,6 +111,16 @@ jobs:
       # 这道门禁把「前端在调一个不存在的东西」变成会红的 CI 步骤。
       - name: Frontend endpoint contract gate
         run: python3 scripts/check-frontend-endpoints.py
+      # 审计 §6 第一条：§2.1「必须落库」九域，要么有持久化证据、要么豁免登记（理由+到期日）。
+      # 真事：这类债回退不响——改回纯内存、迁移表被删、水合调用被摘，编译/启动/测试可能
+      # 全绿，只有重启后数据没了才知道。
+      - name: Persistence statefulness gate
+        run: python3 scripts/check-statefulness.py
+      # 审计 §6 第三条：`:false` 默认的 persist 开关必须在 prod/staging 都有显式覆盖。
+      # 真事（审计 §5.1）：空域预约的表/往返测试/水合全建好了，五个 profile 没有一个打开
+      # 那个开关，代码躺了很久没有任何东西会红；审计链 staging 是第二例（#185 才补）。
+      - name: Persist switch profile accounting gate
+        run: python3 scripts/check-persist-switches.py
       # 下面两个是 2026-10-20 被「自测覆盖门禁」当场抓出来的：它们的 --self-test
       # 从来没在 CI 里跑过（mavlink 编解码一致性 / SITL 离线自检，都是离线的、很快）。
       - name: MAVLink codec self-test (offline)
@@ -1666,9 +1681,14 @@ jobs:
       # 看不到**具体是哪些变异体**在 CI 上存活（2026-10-22 就卡在这里：
       # 本地杀掉 427、CI 杀掉 424，3 个变异体漂移，没有报告无法定位）。
       - name: Upload PIT reports (always)
+        # overwrite: true（2026-10-28 补）——job 重跑（重试/重新排队）时同名 artifact 已存在，
+        # upload-artifact@v4 会以 409 直接把 job 判红。实测：门禁两条分数都过，红在上传这一步。
+        # （同日还踩过它的兄弟坑：我一度以为没有这个步骤、又加了一个同名上传——两处同名必 409，
+        #   已删重复。看 ci.yml 改动前先 grep `name: pit-reports` 数一遍，别重蹈。）
         if: always()
         uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: pit-reports
           path: |
             cloud-backend/target/pit-reports/mutations.xml

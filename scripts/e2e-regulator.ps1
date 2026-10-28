@@ -1,4 +1,4 @@
-﻿# 监管合规端到端验证脚本（C1-T16）
+# 监管合规端到端验证脚本（C1-T16）
 #
 # 依据：design.md §监管合规 + spec.md FR-31~FR-39
 # 场景：regulator-sim + cloud-backend + drone-sim 全链路监管合规验证
@@ -225,7 +225,7 @@ Info "Java: $java"
 # ---- 前置检查：jar 存在 ----
 Step '前置检查（jar 存在、端口可用）'
 
-$regulatorJar = Get-ChildItem (Join-Path $Root 'regulator-sim/target/*regulator-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+$regulatorJar = Get-ChildItem (Join-Path $Root 'regulator-sim/target/*regulator-sim*-shaded.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
 $backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend/target/*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
 $droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim/target/*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
 
@@ -246,7 +246,7 @@ if (-not ($regulatorOk -and $backendOk -and $droneSimOk)) {
     Info '部分 jar 缺失，自动构建...'
     Build-Jars
     # 重新检测
-    $regulatorJar = Get-ChildItem (Join-Path $Root 'regulator-sim/target/*regulator-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
+    $regulatorJar = Get-ChildItem (Join-Path $Root 'regulator-sim/target/*regulator-sim*-shaded.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
     $backendJar = Get-ChildItem (Join-Path $Root 'cloud-backend/target/*cloud-backend*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
     $droneSimJar = Get-ChildItem (Join-Path $Root 'drone-sim/target/*drone-sim*.jar') -ErrorAction SilentlyContinue | Select-Object -First 1
     $regulatorOk = $null -ne $regulatorJar

@@ -37,7 +37,7 @@
 | # | 条目 | 现状 | 备注 |
 |---|---|---|---|
 | 14 | **厂商 SDK 全是桩** | ~~ONVIF 纯模拟~~ **2026-10-26 协议级落地**：`OnvifClient` 拆 simulated/live 双后端——live 走真实 SOAP（GetCapabilities / GetProfiles+GetStreamUri / PTZ ContinuousMove+Stop，WS-Security PasswordDigest）与 WS-Discovery（多播+单播目标）；默认 `aerofleet.onvif.mode=simulated` 行为不变。取流地址来源标 `ONVIF_GETSTREAM_URI`（deviceVerified=true），SOAP 失败不回退猜地址；事件面 **2026-10-27 补齐**（WS-BaseNotification PullPoint：`CreatePullPointSubscription` + `PullMessages` 轮询，取消即停；设备无 Events 服务/订阅被拒时 REST 回 **502**，不造假句柄）。海康/大华/宇视**私有 SDK** 与 GB28181 媒体面仍是模拟实现 | 剩余：私有 SDK 真实现 + GB28181 媒体面（`gb28181-invite://` 这类描述性标识不能当可播流）。GB28181 事件订阅**已明确 501**（只构造 SUBSCRIBE 形状、SIP 传输未实现，此前会先回 200 再挂空流） |
-| 15 | **10+ 个模块只存内存** | 业务模块的产出没落库，重启即失 | 逐个模块列出"落库缺什么" ⇒ **2026-10-26 审计成稿**：`docs/persistence-and-dead-surface-audit.md` §2 实测 **必须落库 9 / 需产品定 10 / 可接受 11**（"10+"这个粗数被校正），每条带 `file:line` 与"重启丢什么"；§5 列出 8 个必须产品口径才能定的问题。**未开工的就是这 9 条落库本身** |
+| 15 | **10+ 个模块只存内存** | 业务模块的产出没落库，重启即失 | 逐个模块列出"落库缺什么" ⇒ **2026-10-26 审计成稿**：`docs/persistence-and-dead-surface-audit.md` §2 实测 **必须落库 9 / 需产品定 10 / 可接受 11**（"10+"这个粗数被校正），每条带 `file:line` 与"重启丢什么"；§5 列出 8 个必须产品口径才能定的问题。**2026-10-27 已 9/9 全清**（V26/V27 空域预约启用 → V30 维护记录 → V31 出警历史 → V32 合规状态 → V33 空地协同归档 → V34 测绘航点 → V35 单调序列 → V36 配送六阶段 → V37 应急编排；审计链 staging 同批打开），每条配「重启恢复」测试；`scripts/check-statefulness.py` 把九域钉成机械账（审计 §6） |
 | 16 | **UOM `sink-type` 未落地** | 默认 Noop | 机巢/监管上报的真实去向 |
 | 17 | **机巢只有 sim** | 机巢 MQTT 未接 | 硬件到位再动 |
 | 18 | **死枚举 / 空端点** | 审计期发现的历史遗留 | 需要一次全仓扫描确认清单 ⇒ **2026-10-26 扫描完成**（同上文档 §3/§4）：139 个枚举声明 + 109 个配置键双向对账，**恒空返回 32 处**中确认假面 1 处（空地协同"空中单位"，本批已修）、死配置键 6 个（本批处理 3 个）、确认死枚举/getter 若干**尚未删**（6 组是"只有测试在用"，删前先确认谁在钉它）。反向缺口也记了：2 个键被代码读取但 properties 里根本没有 |

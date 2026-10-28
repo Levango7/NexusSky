@@ -56,8 +56,13 @@
 - ⬜ **差异比对框架**（先行件，不等外部）：以公开的 UOM 接口规范为输入，把 `regulator-sim`
   六端点的请求/响应逐字段建对照表（列：字段 / sim 形状 / 规范形状 / 差异 / 风险），
   产出 `docs/uom-contract-diff.md` 骨架 + `scripts/` 下可复跑的比对器（对捕获的真实响应回放）。
-- ⬜ `UomReportSink` 真实现骨架 + 契约测试（SPI 门禁会把"未验"账顶出来）——**需要先有规范细节**，
-  骨架可先按 sim 形状写接口合同，字段以规范为准逐一对齐。
+- ✅ **`UomReportSink` 已实现 + 契约测试**（2026-10-28 复核订正：不是"待写骨架"——
+  `UomReportSink.java` 四个操作齐全（verify 查询串 / activate / cancel / telemetry 请求体）、
+  API Key + HMAC-SHA256 签名头（`METHOD\nPATH\nTS\nBODY` Base64）、指数退避重试 +
+  4xx 终态不重试（429 除外）、姓名脱敏；`UomReportSinkContractTest` 8 例在册
+  （线格式 / 签名可被平台方复算 / 不配签名键不发头 / 403 终态 / 503 重试 / 429 重试 /
+  脱敏 / 未知状态→ERROR））。**剩余**：字段名、枚举、错误码按**真实 API 文档**逐一对齐
+  （等 #1）——当前形状是本仓按 sim 约定的，不是规范原文。
 - ⏸ 等待项：#1 确定对接主体（**用户侧行动项**）→ 拿到测试环境 → 真实联调 → C1/C2 边界改口径。
 
 ## P4 · ONVIF PullPoint 事件订阅（已交付）

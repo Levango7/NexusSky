@@ -94,6 +94,12 @@
             <phase>package</phase>
             <goals><goal>shade</goal></goals>
             <configuration>
+              <!-- fat jar 挂 shaded classifier 附属：主 artifact 保持 thin jar。
+                   2026-10-28：cloud-backend 的跨模块契约测试开始依赖本模块，
+                   fat 主 artifact 会把内嵌的 slf4j-simple 类带进下游测试 classpath，
+                   与 logback 双绑定（单跑能过、全量必挂）。与 drone-sim 同形状。 -->
+              <shadedArtifactAttached>true</shadedArtifactAttached>
+              <shadedClassifierName>shaded</shadedClassifierName>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <mainClass>io.aerofleet.regulatorsim.RegulatorSimMain</mainClass>

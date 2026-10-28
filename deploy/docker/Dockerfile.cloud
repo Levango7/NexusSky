@@ -34,6 +34,10 @@ COPY mavlink-core/src ./mavlink-core/src
 COPY drone-sim/src ./drone-sim/src
 COPY link-sim/src ./link-sim/src
 COPY cloud-backend/src ./cloud-backend/src
+# regulator-sim 的 src 也要进构建上下文：cloud-backend 的跨模块契约测试
+# （UomSinkVsRegulatorSimContractTest，2026-10-28）编译期依赖 io.aerofleet.regulatorsim.*；
+# 只拷 pom 不拷 src 会让 `-DskipTests`（仍编译测试）在 testCompile 阶段红。
+COPY regulator-sim/src ./regulator-sim/src
 
 # -am 同时构建依赖模块（mavlink-core）；BuildKit 缓存挂载加速重复构建
 RUN --mount=type=cache,target=/root/.m2 \
