@@ -1144,6 +1144,15 @@ jobs:
         run: pwsh -NoProfile -File scripts/e2e-regulator.ps1 -SkipBuild
         env:
           AF_BACKEND_PORT: 18099
+      # 第二条腿：**真** UomReportSink（生产用的上报实现）对同一个 MockUomServer。
+      # 此前全链只跑 sim 通道，真实现只有单测 + 跨模块契约测试——本腿把"后端真按
+      # sink-type=uom 装起来"的装配链（条件 Bean / uom-base-url / API Key 与签名键）
+      # 也钉进 CI。脚本已改每轮独立 in-mem 库：两条腿同 runner 连跑不带状态
+      # （2026-10-28 实测：文件型 H2 会让上一轮注销过的 sysid 顶死下一轮）。
+      - name: e2e-regulator uom 通道（真 UomReportSink 对 MockUomServer）
+        run: pwsh -NoProfile -File scripts/e2e-regulator.ps1 -SkipBuild -SinkType uom
+        env:
+          AF_BACKEND_PORT: 18099
       - name: Clean leftovers between scripts
         if: always()
         run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'regulator-e2e','dock-e2e','route-templates-e2e','AF-ROUTE-01','defect-e2e','AF-DEFECT-01' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
