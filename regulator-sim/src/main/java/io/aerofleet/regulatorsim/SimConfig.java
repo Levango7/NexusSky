@@ -4,7 +4,7 @@ package io.aerofleet.regulatorsim;
  * regulator-sim 启动配置：由命令行参数解析而来。
  *
  * <pre>
- * java -jar regulator-sim.jar [--port N] [--delay-ms N] [--error-rate F] [--error-status N] [--preset-file PATH] [--help]
+ * java -jar regulator-sim-<version>-shaded.jar [--port N] [--delay-ms N] [--error-rate F] [--error-status N] [--preset-file PATH] [--help]
  *   --port          HTTP 监听端口（默认 18080）
  *   --delay-ms      响应延迟毫秒（默认 0）
  *   --error-rate    随机错误率 0.0-1.0（默认 0.0）

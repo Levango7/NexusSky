@@ -519,6 +519,39 @@ P2 #14 第二刀把 live ONVIF 的事件面从 501 变成真实现（`CreatePull
 棘轮性质不变：0.94/0.95 是实测 0.9417/0.9522 按 2 位向下取整口径所得，
 任何 >0.1pp 的回退仍会红。
 
+### 2026-10-28 补记：CI↔本地 1.1pp 波动的定位与修复
+
+同一份 surveillance 代码三次量化：本机 937 杀/47 存活（0.9417）、CI master 合并 run
+936/48（0.9407）、CI 同 PR 的另一次 run 925/59（0.9296）——**CI 自己的两次也差 1.1pp**，
+超过 2 位小数口径预留的 ~0.3pp 余量。定位过程：超时数两次都是 11（排除超时假象）→
+拿 master run 的日志做对照（936/48 勉强过线）→ 判定为**窗口式负断言在慢机上变弱**：
+新增 ONVIF 用例里"取消后睡 300ms 再数拉取次数、断言不再增长"这类断言，在 CI 负载下
+变异体（取消不打断在途请求）来不及在窗口内再拉一次 ⇒ 漏杀。
+
+修复：取消/放弃订阅后改断言 `onvif-events-<handle>` **线程终止**（在途慢应答 3s、
+期限 1s——没有 interrupt 的变异只能等它睡完，与机器快慢无关）；`OnvifLiveBackendTest`
+与 `OnvifClientLiveEventsTest` 各一处。**A/B**：去掉 `thread.interrupt()` ⇒ 红、还原 ⇒ 绿。
+修后本机复跑 **939 杀/45 存活（0.9437/0.9543）**，超时仍 11（未引入新超时），
+杀掉 +2 恰为 `Poller.stop` 的两个变异（`thread != null` 取反与 interrupt 删除）。
+
+**教训（坑候选）**：负断言要绑**硬信号**（线程终止、计数终点、状态摘除），
+别绑**时间窗口**——窗口宽度是环境变量，门禁的判据不该是环境变量。
+另：PIT 报告上传 **2026-10-22 就有**（`always()`/14 天）——本轮修 CI 时我漏看了它、又加了一个
+同名上传，两处 `name: pit-reports` 在同一 job 里 409，把它判红（**门禁两条分数其实都过**）。
+修法：删重复 + 给原步骤补 `overwrite: true`（job 重跑时同名 artifact 已存在同样 409）。
+教训：**动 ci.yml 前先 `grep 'name: <artifact>'` 数一遍再动手**。
+
+**复跑时撞到的第二个坑（值得单列）**：同一分支先后两次本机 PIT 给出 939/45 与 928/56——
+差异不在代码，在 **m2**。本地仓库里躺着一个 2026-10-06 装的**旧 fat `regulator-sim` jar**
+（内嵌 slf4j-simple）。PIT 的 minion 类路径吃的是 **m2 解析出的 artifact**（不是 reactor 的
+`target/classes`）：SimpleLogger 在 minion 里赢了 provider 之争，`VideoFusionRecordingServiceTest`
+等一批测试在 minion 崩掉 → 被 PIT 排除 → 它们本来能杀的 11 个变异体（`RapidDeployService` 6 /
+`Gb28181Adapter` 3 / `VideoFusionRecordingService` 2）变成**假存活**。刷新 m2 到新薄 artifact
+（`c922d409` 之后的主 artifact）再跑，回到 **939/45**。
+**判据**：给下游模块新增依赖后，先在**干净 m2**（或本模块先 `install` 一遍）上复跑 PIT——
+"本机突然掉分"先查 m2 里的旧 artifact，别急着改代码。CI 变异 job 的 `install` 步骤
+每轮都会刷新 m2，所以这个坑在 CI 上表现为"只在依赖变化那几轮出现"。
+
 ## 基线
 
 - `scripts/mutation-baseline.json` —— security 包（由门禁读）。

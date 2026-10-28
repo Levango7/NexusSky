@@ -4,7 +4,7 @@
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-28 共有 219 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 222 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -30,12 +30,272 @@
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 219 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 222 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
 
 
+
+## [Unreleased] — 审计与文档收口批：§6 两条门禁落地 + §3.5/§3.6 复核 + 三处「已完成仍标待做」漂移订正（2026-10-28）
+
+### 交付
+
+- **`scripts/check-statefulness.py`**：审计 §2.1「必须落库」九域的四元账（证据/豁免/违规/无法判定），
+  照 `check-spi-coverage.py` 的豁免形状——四类红：证据不齐且无豁免 / **豁免已满足（棘轮只准拧紧）** /
+  豁免到期 / 锚点失明；**无域可判 ⇒ exit 2**（"没查到"不许冒充"没问题"）。当前账：
+  **9 域全部证据齐全、豁免清零**。落地时仅有的两条豁免（#186 在途的 V36/V37）在 #186 合并、
+  本分支 rebase 后**由门禁当场判成「豁免可以撤销」**——按棘轮删账（这正是它要抓的：
+  落库了没人收紧账；把这条自动抓账当成本门禁的第一次真实世界验收）。八情形离线自测。
+- **`scripts/check-persist-switches.py`**：`:false` 默认的 `*.persist*` 开关，prod 与 staging
+  **都**必须有显式覆盖——审计 §5.1「表建了、开关没人开」（空域预约躺了很久）与 #185
+  「审计链 staging 打开」两个真坑的机械版；显式关闭（拍板保持关）必须进豁免（理由+到期日）。
+  当前账：4/4 对齐（audit / device-registry / flightlog / reservation）。八情形离线自测。
+- **为什么拆两条而不是一条**：域级（"这个域根本没落库"）与开关级（"落库了但没人开"）是两种失效，
+  混一条会丢分辨力——前者回退靠改代码，后者回退靠改配置，红的时候要能一眼看出是哪种。
+- **`check-dead-wiring.py`（恒空面）暂缓**，原因写进审计 §6：文本级"同文件一跳"启发式误报面大、
+  且 §3.1 修复后当前树零命中，先由上面两条覆盖最贵的两档，与 §3.6 未扫同族一起评估更实的形式
+  （编译级调用图 / 按端点契约的门禁）再上。
+
+### 顺带收口：§3.5/§3.6 复核（只读证据，零代码改动）
+
+- **§3.5 两条都不是缺陷**：`ExternalVisionSource` 的元数据重载恒空是 spec 契约（只走 jpeg 重载）；
+  `CaptureService.detectFromExternal` 对空结果不回退 truth 是**正确**的——回退会在推理服务宕机时
+  伪造检出，`truth(fallback)` 标签只留给异常路径（spec S1）。`DecisionMonitorController` 的
+  「租户不匹配 200+空」属 API 契约层的整批裁决，不在本审计单点改。
+- **§3.6 未扫同族扫清**：`getOrDefault(key, 集合默认值)` 全仓 main Java 实测 **14 处**，
+  逐条读消费端与写入路径，**零恒空面**；`RadarController.targets` 由 `compute` 写入且 drone-sim
+  在 FR-06 真发 30017/30018。§3.5/§3.6 各带锚点重写为定性结论（§6 里对 §3.6 的引用同步）。
+
+### 顺带订正：三处「已完成却仍标待做」（只读复核 + 文档）
+
+本仓文档反复吃同一个亏：**做完了但正文没跟着改**（ROADMAP 同节自述已滞后四次）。
+本次按「文件:行号或测试类名」逐条复核并订正：
+
+- **ROADMAP C4 ①**「真正没恢复的是完整轨迹历史……需从 `flight_log` 重建」——**早已闭合**
+  （#174）：`FlightTrackStore.java:115-169` 启动时 `restoreTrackHistoryFromFlightLog()`
+  （JSONL/DB 两路、重叠过滤、容量截尾），`FlightTrackStoreRestoreTest` 5 例钉住；
+  剩余边界（纯 JSONL-only 无 lastKnown 可锚）按测试类 javadoc 原文登记。同节「给后来者」
+  更新为**四次滞后**。
+- **`docs/todo.md` #15**「未开工的就是这 9 条落库本身」——**9/9 全清**（V26/V27 启用 →
+  V30–V37；审计链 staging 同批打开），并指向 `check-statefulness.py` 的机械账。
+- **`docs/real-integration-program.md` P3**「`UomReportSink` 真实现骨架 + 契约测试 ⬜」——
+  **已实现**：四个操作 + API Key/HMAC 签名 + 退避重试 + 4xx 终态 + 脱敏，
+  `UomReportSinkContractTest` 8 例在册；剩余只是"按真实 API 文档逐字段对齐"（等外部 #1）。
+
+### 顺带：UomReportSink ↔ MockUomServer 跨模块契约（P3 先行件第一步）
+
+- **发现的缺口**：`e2e-regulator.ps1` 全链走 `sink-type=sim`，**真**上报实现 `UomReportSink`
+  只在自带的假 UOM 里验过线格式——两个"假 UOM"各测各的，真实现与仓内带激活状态机的
+  `MockUomServer` 从未对话过。真实 UOM 还没接（等外部 #1），这是仓内能先做的最强验证。
+- **新测试** `UomSinkVsRegulatorSimContractTest` 5 例：`MockUomServer` 以 `--port 0`
+  起在 ephemeral 端口，真 HTTP 驱动真 sink——实名三态 + 脱敏 / 激活→遥测→注销全链与
+  records 落账 / 未实名不可激活且 4xx 终态不重试 / 幂等（同 ID）/ 成功路径每端点恰 1 次。
+  跨模块测试依赖（cloud-backend → regulator-sim，test 范围、排除 slf4j-simple）
+  照 drone-sim 既有先例；根 pom 的 dependencyManagement 补管理条目。
+- **A/B**：把 telemetry 的 `serialNo` 字段名改成 `serial` ⇒ 测试红（sim 拿不到序列号）；
+  还原 ⇒ 绿。契约从此钉住，字段漂移不再无声。
+
+### 修 CI：UOM 跨模块契约改子进程 + ONVIF 停止语义改硬信号（2026-10-28）
+
+- **SLF4J 双绑定（CI 上 125 个用例崩）**：把 regulator-sim 作 cloud-backend 测试依赖时，
+  它的 **shade fat jar（内含 slf4j-simple）**进了测试类路径——CI 上 SimpleLogger 赢了
+  provider 之争，`VideoFusionRecordingServiceTest` 等访问 Logback 的用例 ClassCast 崩
+  （本仓既有 pom 注释恰警告过"provider 顺序敏感导致单跑能过全量挂"）。
+  **治本修法**（`c922d409`，与 drone-sim 同形状）：fat jar 改挂 `shaded` classifier 附属、
+  主 artifact 保持 thin jar——内嵌 slf4j-simple 再也进不了下游类路径；`e2e-regulator`
+  的通配随改 `*-shaded.jar`。跨模块契约测试保持 in-JVM（thin artifact 下依赖安全，
+  已实测 `VideoFusionRecordingServiceTest` 等 13/13）。（本 PR 一度另试"子进程跑真 fat jar"，
+  rebase 后统一采用 classifier 修法——更简、且修的是根因而不是消费端。）
+- **surveillance 变异门禁 CI↔本地 1.1pp 波动**：同一份代码本机 937 杀/47 存活（0.9417），
+  CI 925/59（0.9296）——根因是新增 ONVIF 用例里"睡一觉再断言不再发生"的**窗口式负断言**
+  在慢机上变弱（漏杀）。改成**线程终止**硬信号：取消/放弃订阅后断言 `onvif-events-<handle>`
+  线程在期限内消失（在途慢应答 3s、期限 1s，与机器快慢无关）。A/B：去掉
+  `thread.interrupt()` ⇒ 红；还原 ⇒ 绿。
+- **报告上传的坑与修**：PIT 报告上传**早已在**（2026-10-22，`always()`/14 天）——我一度漏看、
+  又加了一个同名上传 ⇒ 两处 `name: pit-reports` 在 job 内 409，把 job 判红（**门禁两条分数
+  其实都过**：security 0.9501/0.9529、surveillance 0.9427/0.9533）。修：删重复 + 给原步骤补
+  `overwrite: true`（job 重跑时同名 artifact 已存在也会 409）。教训记进 `docs/mutation-testing.md`：
+  **动 ci.yml 前先 `grep 'name: <artifact>'` 数一遍**。
+- **复跑撞到的第二个坑**：同分支两次本机 PIT 给出 939/45 与 928/56——差异在 **m2**：
+  旧 fat `regulator-sim` jar（含 slf4j-simple）被 PIT 的 minion 类路径吃进去，
+  `VideoFusionRecordingServiceTest` 等测试在 minion 崩→被排除→11 个变异体**假存活**。
+  刷新 m2 到薄 artifact 后回到 **939/45（0.9437/0.9543）**。判据与细节见
+  `docs/mutation-testing.md` 补记——"本机突然掉分"先查 m2 旧 artifact，别急着改代码。
+
+### 账目
+
+- README 脚本数 90→92（`check-doc-counts.py` 实测口径）；测试计数 +5（见上）。
+- 两条门禁的 `--self-test` 与真检查都进 `ci.yml` repo-gates job（自测覆盖门禁要求）。
+- **A/B（真树改坏⇒红、还原⇒绿）**：拿掉 staging 里 `reservation.persist=true` 一行 ⇒ persist 门禁
+  红并点名「staging 未覆盖」；摘掉 `ComplianceStateEntity` 的 `@Entity` ⇒ 状态性门禁红并点名
+  「证据未命中 + 缺证据且无豁免」。两个还原后都回绿。
+  （踩到一条：`@Entity` 改成 `@EntityX` 不算改坏——`@Entity` 是它的子串，正则照样命中；
+  真树 A/B 的价值就在这，夹具自测不会替你想出这种坑。）
+- **第三次验收（真实事件）**：#186 合并后 rebase 本分支，门禁立刻把两条豁免判成「可以撤销」
+  （V36/V37 证据已出现）——照设计删账、`EXEMPT` 清零，9/9 全证据通过。
+
+
+
+> **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
+
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 222 个 `[Unreleased]` 小节，自 v1.0.5
+> （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
+
+> 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
+
+
+
+## 版本索引
+
+
+
+| 版本 | 发布日期 | commit 数 | 关键交付 | 代码差异 |
+
+|---|---|---|---|---|
+
+| **v1.0.7** | 2026-10-21 | 22 | e2e 十批全转硬门禅（B2 十脚本观察接入 → 五 job 转硬门禅 → 断言聚合真判红 → roc / mjpeg / phone-camera 相继接入）+ 变异测试入场（PIT 审出 4 处安全行为没人盯：限流 / XFF 信任 / 密钥掩码 / 口令哈希；基线 0.8201→0.8448）+ 挖出三处「以为有人守、其实没人守」（变异门禅自身假绿、185 行 docker-compose e2e 从未在 CI 跑过、CHANGELOG 小节计数漂移）+ 4 个真 bug（Redis 硬依赖 / 状态板冻 8 天 / 哈希链断链 / vite high 公告）；0 破坏性变更；CI 37 success + 1 skipped（run 39598501784，tag run 39608087044） | [compare v1.0.6...v1.0.7](https://github.com/Levango7/NexusSky/compare/v1.0.6...v1.0.7) |
+| **v1.0.6** | 2026-10-19 | 115 | 安防取流六连救活（/events 真实事件、能力声明门控、取流面板播放、MJPEG 出口、RTSP 凭据编码、HLS 断流）+ gcs-web 前端诚实性清算（55 处「声明了却没人用」系列）；C5 签名 posture 变代码门禁；0 破坏性变更；CI 30 success + 1 skipped（run 39228507697，tag run 39231095908） | [compare v1.0.5...v1.0.6](https://github.com/Levango7/NexusSky/compare/v1.0.5...v1.0.6) |
+
+| **v1.0.5** | 2026-10-12 | 139 | 安防 B1–B5 全线（PTZ 厂商路由、GB28181 事件订阅、设备四态+多通道、FAILED 态+失败重试、空域预约闭环）；C5 签名改逐帧单调时间戳，修高帧率遥测被误判重放；2 项破坏性变更（license 模块 5→7、AlarmTrigger.alarmId）；CI 18 job 全绿（run 38152795212） | [compare v1.0.4...v1.0.5](https://github.com/Levango7/NexusSky/compare/v1.0.4...v1.0.5) |
+
+| **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
+
+| **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
+
+| **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
+
+| **[Unreleased]** | 累积中 | — | 222 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+
+
+---
+
+
+
+### 修复：regulator-sim 的 fat 主 artifact 污染下游 SLF4J（CI 红）
+
+本 PR 新增的 `UomSinkVsRegulatorSimContractTest` 让 cloud-backend **首次依赖** regulator-sim。
+该模块的 shade 此前没挂 classifier——早期 CHANGELOG 记的「link-sim/regulator-sim 无下游依赖，
+保持默认 fat 主 artifact」这个前提**已经失效**：fat 主 artifact 把内嵌的 `slf4j-simple` 类带进
+测试 classpath，而 `<exclusions>` 只能摘依赖坐标、摘不掉 jar 里的类。症状是
+`VideoFusionRecordingServiceTest` 的 logback 强制转换抛 ClassCastException，触发 Spring 上下文
+失败阈值缓存，最终 `Tests run: 3259, Errors: 125`，并连带 `Mutation baseline gate (surveillance)` 红。
+
+- **修法**：regulator-sim 的 fat jar 改为 `shaded` classifier 附属（主 artifact 回到 thin jar，
+  与 drone-sim 同形状）；`scripts/e2e-regulator.ps1` 的 jar 通配改为显式 `*-shaded.jar`（两处）；
+  两个入口注释同步 jar 名。
+- **验证**：`mvn -o -pl regulator-sim -am -DskipTests package` 产出 thin 30 KB + shaded 2.48 MB；
+  `VideoFusionRecordingServiceTest` / `TwinControllerTest` / `UomSinkVsRegulatorSimContractTest`
+  **13/13 通过**（修复前这三类全红）。
+
+## [Unreleased] — P3 先行件：UOM 契约差异比对框架（2026-10-28）
+
+### 交付
+
+- **`scripts/uom-contract-diff.py`**：把「规范形状」与「实捕获」逐字段对照出表的比对器——
+  差异六类（缺失/多出/类型不符/状态码非预期/规范端点无捕获/捕获引用未知端点），
+  退出码 0/1/**2**（"没得比"不许冒充"没问题"）；**9 情形离线自测**进 CI。
+- **`docs/uom-contract-diff.md`**：使用手册（两个输入的 schema、runbook、注意事项）+
+  六端点清单（锚点 `MockUomServer`）+ **当前状态**：规范侧待填（等外部 #1），sim 侧
+  已被 `UomReportSink` / `UomSinkVsRegulatorSimContractTest` 两处钉住（本页刻意**不重复抄
+  字段**，避免出现第二份会漂移的手抄）。
+- **为什么现在做**：`docs/decisions-2026-10-26.md` 决策二把 #3「差异比对」点名为
+  **仓内可先行、不依赖外部**的活——先把机械部分建好，拿到 API 文档后填 `spec.json`、
+  落 captures，一条命令出差异表；不临场手抄、不靠记忆对字段。
+
+### 账目
+
+- 新增脚本 1（README 脚本计数按实测刷新）、新增文档 1（docs 篇数按实测刷新）；
+  测试计数不变。
+
+
+
+> **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
+
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 222 个 `[Unreleased]` 小节，自 v1.0.5
+> （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
+
+> 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
+
+
+
+## 版本索引
+
+
+
+| 版本 | 发布日期 | commit 数 | 关键交付 | 代码差异 |
+
+|---|---|---|---|---|
+
+| **v1.0.7** | 2026-10-21 | 22 | e2e 十批全转硬门禅（B2 十脚本观察接入 → 五 job 转硬门禅 → 断言聚合真判红 → roc / mjpeg / phone-camera 相继接入）+ 变异测试入场（PIT 审出 4 处安全行为没人盯：限流 / XFF 信任 / 密钥掩码 / 口令哈希；基线 0.8201→0.8448）+ 挖出三处「以为有人守、其实没人守」（变异门禅自身假绿、185 行 docker-compose e2e 从未在 CI 跑过、CHANGELOG 小节计数漂移）+ 4 个真 bug（Redis 硬依赖 / 状态板冻 8 天 / 哈希链断链 / vite high 公告）；0 破坏性变更；CI 37 success + 1 skipped（run 39598501784，tag run 39608087044） | [compare v1.0.6...v1.0.7](https://github.com/Levango7/NexusSky/compare/v1.0.6...v1.0.7) |
+| **v1.0.6** | 2026-10-19 | 115 | 安防取流六连救活（/events 真实事件、能力声明门控、取流面板播放、MJPEG 出口、RTSP 凭据编码、HLS 断流）+ gcs-web 前端诚实性清算（55 处「声明了却没人用」系列）；C5 签名 posture 变代码门禁；0 破坏性变更；CI 30 success + 1 skipped（run 39228507697，tag run 39231095908） | [compare v1.0.5...v1.0.6](https://github.com/Levango7/NexusSky/compare/v1.0.5...v1.0.6) |
+
+| **v1.0.5** | 2026-10-12 | 139 | 安防 B1–B5 全线（PTZ 厂商路由、GB28181 事件订阅、设备四态+多通道、FAILED 态+失败重试、空域预约闭环）；C5 签名改逐帧单调时间戳，修高帧率遥测被误判重放；2 项破坏性变更（license 模块 5→7、AlarmTrigger.alarmId）；CI 18 job 全绿（run 38152795212） | [compare v1.0.4...v1.0.5](https://github.com/Levango7/NexusSky/compare/v1.0.4...v1.0.5) |
+
+| **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
+
+| **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
+
+| **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
+
+| **[Unreleased]** | 累积中 | — | 222 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+
+
+---
+
+## [Unreleased] — ArduPilotAdapter：tcp:// 不再 UDP 顶替，未实现前缀明确拒绝（2026-10-28）
+
+### 修：文档点名的「这个谎」
+
+- `docs/real-integration-program.md` P2 曾写「`tcp://` 目前实为 UDP 顶替，接 SITL 前先把
+  这个谎修了或明确降级」——本笔按 `serial://` 同款处理：**明确拒绝 + 指路**。
+  `ArduPilotAdapter.connect("tcp://…")` 如实返回 false，并给出可执行指引（给 SITL 加
+  `--out=udp:<host>:<port>` 后改用 `udp://`；真实 TCP 链路属生产阶段，需 `TcpMavlinkTransport`）。
+- **为什么不保留「UDP 顶替」**：ArduPilot SITL 的 TCP 默认口（5760）**不收 UDP**——顶替对
+  真实场景必然静默失败，比明确拒绝更糟（"先回 200 再挂空流"同族）。
+- 同步订正三处对外声明：`HardwareAdapter` / `HardwareAdapterFactory` 的 javadoc 与工厂日志；
+  `serial://` 的指路语不再把 `tcp://` 说成可用。
+- 新测试 `ArduPilotAdapterConnectSchemeTest` 4 例：tcp/serial/未知前缀明确拒绝、
+  `udp://` 仍可用（回归）；**A/B**：把拒绝改成"假装成功" ⇒ 红、还原 ⇒ 绿。
+
+### 账目
+
+- mavlink-core 511→515（+4），全仓 5416→5420；计数文档按实测刷新。
+
+
+
+> **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
+
+> 最新在最上方，不按版本分节。截至 2026-10-28 共有 222 个 `[Unreleased]` 小节，自 v1.0.5
+> （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
+
+> 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
+
+
+
+## 版本索引
+
+
+
+| 版本 | 发布日期 | commit 数 | 关键交付 | 代码差异 |
+
+|---|---|---|---|---|
+
+| **v1.0.7** | 2026-10-21 | 22 | e2e 十批全转硬门禅（B2 十脚本观察接入 → 五 job 转硬门禅 → 断言聚合真判红 → roc / mjpeg / phone-camera 相继接入）+ 变异测试入场（PIT 审出 4 处安全行为没人盯：限流 / XFF 信任 / 密钥掩码 / 口令哈希；基线 0.8201→0.8448）+ 挖出三处「以为有人守、其实没人守」（变异门禅自身假绿、185 行 docker-compose e2e 从未在 CI 跑过、CHANGELOG 小节计数漂移）+ 4 个真 bug（Redis 硬依赖 / 状态板冻 8 天 / 哈希链断链 / vite high 公告）；0 破坏性变更；CI 37 success + 1 skipped（run 39598501784，tag run 39608087044） | [compare v1.0.6...v1.0.7](https://github.com/Levango7/NexusSky/compare/v1.0.6...v1.0.7) |
+| **v1.0.6** | 2026-10-19 | 115 | 安防取流六连救活（/events 真实事件、能力声明门控、取流面板播放、MJPEG 出口、RTSP 凭据编码、HLS 断流）+ gcs-web 前端诚实性清算（55 处「声明了却没人用」系列）；C5 签名 posture 变代码门禁；0 破坏性变更；CI 30 success + 1 skipped（run 39228507697，tag run 39231095908） | [compare v1.0.5...v1.0.6](https://github.com/Levango7/NexusSky/compare/v1.0.5...v1.0.6) |
+
+| **v1.0.5** | 2026-10-12 | 139 | 安防 B1–B5 全线（PTZ 厂商路由、GB28181 事件订阅、设备四态+多通道、FAILED 态+失败重试、空域预约闭环）；C5 签名改逐帧单调时间戳，修高帧率遥测被误判重放；2 项破坏性变更（license 模块 5→7、AlarmTrigger.alarmId）；CI 18 job 全绿（run 38152795212） | [compare v1.0.4...v1.0.5](https://github.com/Levango7/NexusSky/compare/v1.0.4...v1.0.5) |
+
+| **v1.0.4** | 2026-10-06 | 140 | sdk-java Java 版本兼容修复（对外交付：此前构建出的 SDK 字节码为 Java 17） | [compare v1.0.3...v1.0.4](https://github.com/Levango7/NexusSky/compare/v1.0.3...v1.0.4) |
+
+| **v1.0.3** | 2026-09-26 | 1 | 修 jitpack.yml BOM 字符问题（v1.0.4 进一步修复 Java 兼容根因） | [compare v1.0.2...v1.0.3](https://github.com/Levango7/NexusSky/compare/v1.0.2...v1.0.3) |
+
+| **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
+
+| **[Unreleased]** | 累积中 | — | 222 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+
+
+---
 
 ## [Unreleased] — 持久化 9/9 收官：配送六阶段上位（V36）+ 应急编排落库（V37）（2026-10-27）
 
