@@ -42,6 +42,8 @@ import io.aerofleet.mavlink.enums.ScanMode;
 import io.aerofleet.mavlink.security.MavlinkSigner;
 import io.aerofleet.mavlink.security.SigningKeyManager;
 import io.aerofleet.mavlink.security.TimestampTracker;
+import io.aerofleet.mavlink.messages.AutopilotVersion;
+import io.aerofleet.mavlink.messages.ExtendedSysState;
 import io.aerofleet.sim.ai.AdaptivePathResult;
 import io.aerofleet.sim.ai.AdaptivePathStrategy;
 import io.aerofleet.sim.ai.FusedDecision;
@@ -1736,6 +1738,14 @@ public final class VirtualDrone implements AutoCloseable {
             sendSystemTime();
             sendRadioStatus();
             sendLedStatus();
+            // 飞行阶段 / 固件版本（2026-10-29 接线）：此前 sim 从不发 245/148，
+            // 后端 landedState 恒 -1、flightSwVersion 恒 0，GCS 的「起飞中/降落中」只能靠
+            // HEARTBEAT.custom_mode 猜（各固件口径还不同）。
+            sendExtendedSysState();
+            if (!autopilotVersionSent) {
+                autopilotVersionSent = true;
+                sendAutopilotVersion();
+            }
             // M0b 环境状态上报（FR-24，1Hz）：envModel 启用时下传 ENVIRONMENT_STATUS
             if (envModel != null && envEnabled) {
                 sendEnvironmentStatus();
@@ -1796,6 +1806,52 @@ public final class VirtualDrone implements AutoCloseable {
     // ------------------------------------------------------------------
     // individual telemetry messages
     // ------------------------------------------------------------------
+
+    /** 模拟器上报的固件版本（PX4 口径 major.minor.patch = 1.14.7）。 */
+    static final int FLIGHT_SW_VERSION = (1 << 24) | (14 << 16) | 7;
+
+    /** AUTOPILOT_VERSION 只发一次：真机在启动/被请求时上报，周期重发没有信息增量。 */
+    private boolean autopilotVersionSent;
+
+    /** 爬升率超过该值判「起飞中」，低于相反数判「降落中」（m/s）。 */
+    private static final double CLIMB_THRESHOLD_MS = 0.5;
+
+    /** 无爬升率且相对高度低于该值判「地面」（m）。 */
+    private static final double GROUND_ALT_M = 0.5;
+
+    /**
+     * EXTENDED_SYS_STATE（1Hz）：飞行阶段的与机型无关真值（MAV_LANDED_STATE）。
+     * <p>
+     * 判据只看「是否上锁 / 爬升率 / 相对高度」，刻意不读 custom_mode——那正是这条消息
+     * 存在的意义：换固件也不用改映射。
+     */
+    private void sendExtendedSysState() throws IOException {
+        send(new ExtendedSysState(ExtendedSysState.VTOL_UNDEFINED,
+                landedStateFor(state, physics.alt(), physics.vz())));
+    }
+
+    /** AUTOPILOT_VERSION（启动后一次）：固件版本与能力位，回答「这是哪版固件」。 */
+    private void sendAutopilotVersion() throws IOException {
+        send(new AutopilotVersion(0L, 0L, FLIGHT_SW_VERSION, 0, 0, 0, 0, 0,
+                null, null, null, null));
+    }
+
+    /** 飞行状态 → MAV_LANDED_STATE 的纯映射（单测直接钉边界）。 */
+    static int landedStateFor(FlightState s, double relAlt, double climb) {
+        if (s == FlightState.CRASHED || !s.armed()) {
+            return ExtendedSysState.LANDED_ON_GROUND;
+        }
+        if (climb > CLIMB_THRESHOLD_MS) {
+            return ExtendedSysState.LANDED_TAKEOFF;
+        }
+        if (climb < -CLIMB_THRESHOLD_MS) {
+            return ExtendedSysState.LANDED_LANDING;
+        }
+        if (relAlt <= GROUND_ALT_M) {
+            return ExtendedSysState.LANDED_ON_GROUND;
+        }
+        return ExtendedSysState.LANDED_IN_AIR;
+    }
 
     private void sendHeartbeat() throws IOException {
         send(new Heartbeat(state.px4NavState(), MavEnums.MAV_TYPE_QUADROTOR, MavEnums.MAV_AUTOPILOT_PX4,
