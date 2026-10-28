@@ -43,8 +43,9 @@
 - **目标**：后端**零改动**接上真实飞控固件（ArduPilot SITL 优先——有预编译二进制，比 PX4 全工具链轻），
   走通"连接 → 任务上传 → 起飞 → 航点 → RTL"最小闭环。
 - **前置**：一台 Linux/WSL2（本机 Windows 直跑不了）；ArduPilot `sim_vehicle.py` 或 PX4 SITL；
-  与 `docs/sitl-integration.md` §4 的对接配置核对（端口 14550/14540、udp/tcp 差异——注意
-  `tcp://` 目前实为 UDP 顶替，接 SITL 前先把这个谎修了或明确降级）。
+  与 `docs/sitl-integration.md` §4 的对接配置核对（端口 14550/14540、udp/tcp 差异——
+  `tcp://` 的 UDP 顶替已修：2026-10-28 起**明确拒绝 + 指路**（`ArduPilotAdapter`），
+  SITL 一律走 `--out=udp:<host>:<port>` + `udp://`）。
 - **验收**：`docs/sitl-integration.md` §5 兼容性验证清单逐项打勾；产出一份"真实固件 vs drone-sim
   行为差异"记录（哪怕结论是"没有差异"也要写）。
 - **状态**：✅ **2026-10-28 已首验（ArduPilot Copter SITL，WSL2 本机）**。完整闭环全绿
@@ -62,7 +63,8 @@
   候选 **B（目标形态）**：`GUIDED + TAKEOFF + DO_REPOSITION(192)` 惯用法（Mission Planner
   "Fly To" 同款），不传任务。**推荐 B 目标 + A 过渡**（待拍板）。**验收 = 同一 dispatch 场景
   在 AP SITL 从地面全自动完成**。详见 `docs/sitl-integration.md` §11.3。
-- **附带口径**：`tcp://` 实为 UDP 顶替的问题本次未触及（全程 UDP），该口径仍开放。
+- **附带口径**：`tcp://` 的 UDP 顶替已在 2026-10-28 修掉（改为**明确拒绝 + 指路**，
+  `ArduPilotAdapter.connect`）——本次首验全程 UDP，未经过该路径；口径已闭合，不再挂"仍开放"。
 
 ## P3 · UOM 真实联调（等的——外部依赖）
 
