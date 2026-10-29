@@ -17,6 +17,53 @@
 - **测试**：`FlightPhaseReportTest`（7 例，映射边界）、`DroneViewsFlightInfoTest`（3 例，
   外露口径）、`telemetryPanel.test.jsx`（3 例，展示口径）。
 
+## [Unreleased] — 漂移清算批：删掉两个不存在的端点 + 回填 M11/M12/M13 与审计/台账的过时口径（2026-10-29）
+
+### 修（对外文档）：SDK 参考与集成指南公开了两个**从未实现**的端点
+
+`docs/sdk-reference.md` §十 与 `docs/integration-guide.md` §7.2 一直写着
+`GET /api/v1/sat/providers` 与 `POST /api/v1/sat/providers/{type}/connect`，并注明
+"预留占位、返回 501"。**实况：这两个端点从未实现，调用得到的是 404**
+（`SatLinkController` 只暴露 `/api/v1/sat-link/*` 九个只读端点；
+三家 provider 是 Java 层占位类，`connect()` 抛 `UnsupportedOperationException`）。
+
+- 两处均已改写为**实际端点表**（status / passes / routes / strategy / constellation 等），
+  并明确写出"**没有** provider 连接 REST 面"，同时保留三家体制/波段信息供规划参考。
+- 这是本仓最不该出现的一类失真：文档承诺的接口客户调不通，且错误码也不同（404 vs 501）。
+
+### 修：里程碑状态与 ROADMAP/代码互相矛盾
+
+`docs/` 下三份对外材料仍停留在 2026-10-02 口径，与 ROADMAP 和代码冲突：
+
+| 位置 | 原口径（过时） | 现口径（已核对代码） |
+|---|---|---|
+| `whitepaper.md` §2.3 | M11 "不执行动作" | `AutonomyExecutor` 执行级已接线（`--autonomy-exec` 默认关闭、failsafe 永远优先）、`ADAPT_PATH` 任务改写可用 |
+| `whitepaper.md` §2.4 | M12 "库能力、尚未接入生产链路" | `EdgeInferenceRunner` 2Hz 出 30053 + 逐目标 30014，`VirtualDrone:181` 装配 |
+| `whitepaper.md` §2.5 | M13 "`syncTwin` 无生产调用方、孪生状态为空" | `TwinSyncListener` 订阅 30054 融合态喂 `syncTwin`（`:100/:132`）并广播 30055 |
+| `whitepaper.md` 技术指标行 | "M11 未接线、M12/M13 部分接线" | 三者均已接线（边界见 ROADMAP） |
+| `sales-pitch-deck.md` ×4 处 | 同上 | 同上 |
+| `PRODUCT-POSITIONING.md` | "边缘 AI / 数字孪生实时同步尚未接入生产链路" | 均已接线 |
+
+佐证不止于读码：本机 SITL 运行日志持续输出 `Twin synced: sysid=1 drift=0.0m`（M13 链路在跑）。
+
+### 修：审计报告与两处台账的结论未回填
+
+- `docs/persistence-and-dead-surface-audit.md`：§0 第 1/4 条、§2.1、§3.1 记的是**基线
+  （2026-10-26）当时**的坏法。已加复核批注并就地订正，明确"正文是历史叙述，现状看 §9/§10"；
+  §2.1 九域**已全部落库**（V26–V37 + Repository + 启动水合 + 写穿/读穿），
+  机械证据 `scripts/check-statefulness.py`：域 9 / 证据齐全 9 / 豁免 0 / **违规 0**。
+- `docs/real-integration-program.md` P2 第 9 项：staging **已有** `audit.persist-to-db=true`
+  （`application-staging.properties:66`）与空域预约开关（`:63`），`check-persist-switches.py` 4/4 对齐。
+- `docs/todo.md` #18 结尾"剩余项＝§2.1 的 9 条落库"已销账。
+
+### 订正（本批自查抓到的自身错误）
+
+`#198` 把 `aerofleet.regulator.sink-type` 的默认值写成"默认 `sim`；`none` 才装 Noop"——**错的**。
+`NoopReportSink` 是 `havingValue="none", matchIfMissing=true`，`Sim`/`Uom` 都没有 `matchIfMissing`，
+且该键**无任何 profile 覆盖** ⇒ **键缺失时装的就是 Noop**（`RegulatorConfig.sinkType` 字段默认
+`"sim"` 只是 bean 字段，不参与 `@ConditionalOnProperty` 判定）。todo #16 已按代码语义订正，
+并记下行动项："若要默认 sim，需在 profile 显式覆盖键"。
+
 ## [Unreleased] — 同族收口：AP `takeoff` 的模式约束实测 + 「不做模式适配」决策钉住（2026-10-29）
 
 ### 加：`takeoff` 的 AP 模式约束实测矩阵 + 决策钉子（4 例）
@@ -143,7 +190,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 230 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 231 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -169,7 +216,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 230 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 231 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

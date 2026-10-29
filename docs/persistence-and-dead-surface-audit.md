@@ -13,9 +13,17 @@
 
 ## 0. 结论摘要（按"客户当场问得出"排序）
 
-1. **空地协同面板的"空中单位"是两层坏叠在一起**：后端 `collectDroneStatuses()` **恒空**
-   （`return List.of()`，注释自陈"简化实现"），而**即使补上真数据，前端也拿不到**——
-   后端吐 `droneStatuses`，前端读 `aerialUnits || drones`，键名对不上。
+> **⚠️ 2026-10-29 复核**：本节与 §2.1/§3.1/§3.3/§4.2 记的是**审计基线（master `a78a8c92`，
+> 2026-10-26）当时的状态**。下列第 1、2 两条已在后续批次修掉（#177 三列落库 + §9 记录的
+> 恒空/键名修复；V34 航线落库），**正文保留的是历史叙述，不是当前事实**——
+> 读现状请看 §9/§10 与 `scripts/check-statefulness.py`（9/9 证据齐全、0 违规）。
+
+1. **空地协同面板的"空中单位"是两层坏叠在一起**（**已修，2026-10-26 #177**）：后端
+   `collectDroneStatuses()` 当时恒空（`return List.of()`，注释自陈"简化实现"），且
+   后端吐 `droneStatuses`、前端读 `aerialUnits || drones`，键名也对不上。
+   **现状**：`AirGroundCoordinationService:1009` 已从 `DeviceRegistry` 真实取数（空返回只剩
+   降级路径）；`AirGroundCoordinationController:395` 吐 `droneStatuses`；
+   前端 `UnifiedCommandPanel.jsx:1592` 已把 `droneStatuses` 纳入读取链。
 2. **重启后"航线没了"看起来像"航线是空的"**：`GET /mapping/tasks/{id}/waypoints` 先查库确认任务存在，
    再从内存 map `getOrDefault(id, new ArrayList<>())` 取值 ⇒ 返回 **200 + 空数组**；
    而 API 文档把 404 定义为"任务不存在"，所以客户端**无法区分"航线丢了"与"本来就没航线"**，
@@ -23,9 +31,12 @@
 3. **拦截决策日志被对外承诺，实现是内存环形队列**：`GET /intercept/logs` 在 API 文档里是契约，
    实现是 `ConcurrentLinkedDeque` + `MAX_LOGS=1000` + 超限丢最旧，零写库点；
    而**同一条围栏链上的"越界事件"是有表的**（`geofence_breach_event`）。
-4. **#15 的真实形状不是"不能落库"，是"开关默认关"**：三个 `persist` 开关在 base profile 全 false；
-   其中 `aerofleet.audit.persist-to-db` **在 staging 没有覆盖行**（prod 有）⇒ 预发环境验不到审计落库通路。
-   更极端的一例：空域预约的**实体和迁移表都已就绪**，但五个 profile 里没有任何一处把开关打开。
+4. **#15 的真实形状不是"不能落库"，是"开关默认关"**（**已闭合，2026-10-29 复核**）：
+   当时三个 `persist` 开关在 base profile 全 false，`audit.persist-to-db` 在 staging 缺覆盖行，
+   空域预约的实体与迁移表就绪但无 profile 打开。
+   **现状**：prod/staging **四个开关全部对齐 true**（`application-staging.properties:34/57/63/66`；
+   `application-prod.properties:35/87/93/96`），由 `scripts/check-persist-switches.py` 钉住
+   （4 开关 / 4 对齐 / 0 违规）。
 5. **粗数被校正**：台账写的"10+ 个模块只存内存"实测为**必须落库 9 条 / 需产品定 10 条 / 可接受 11 条**；
    "28 个迁移脚本建 34 张表"实为 **33 张**（去重表名计数）；"33 处恒空返回"实为 **32 处 + 1 处三目写法**。
 
@@ -46,6 +57,13 @@
 ## 2. P2 #15：内存态清单与定级
 
 ### 2.1 必须落库（对外承诺了持久性，或丢了破坏合规叙事）
+
+> **⚠️ 2026-10-29 复核：本表九条已全部落库**——"落库现状"列的 `no`/`partial` 是**审计当天
+> （2026-10-26）的状态**。V26/V27（空域预约）、V30（维护记录）、V31（出警历史）、V32（合规状态）、
+> V33（协同记录）、V34（测绘航点）、V35（序列）、V36（配送六阶段）、V37（应急编排）均已建表，
+> 且各域都有 Repository + 启动水合 + 写穿/读穿。
+> **机械证据**：`python scripts/check-statefulness.py` → 域 9 / 证据齐全 9 / 豁免 0 / **违规 0**。
+> 下表保留原文，作为"当时为什么是债"的记录。
 
 | `file:line` | 存的是什么 | 落库现状 | 重启丢什么 | 证据（另一处锚点） | 主会话复核 |
 |---|---|---|---|---|---|
@@ -87,7 +105,14 @@
 
 ## 3. P2 #18：恒空面与对外承诺不符
 
-### 3.1 空地协同"空中单位"——假面 + 键名漂移（**主会话已逐行验证**）
+### 3.1 空地协同"空中单位"——假面 + 键名漂移（**已修复：2026-10-26 #177，2026-10-29 复核**）
+
+> **现状**：`collectDroneStatuses()` 已从 `gateway.DeviceRegistry` 真实取数
+> （`AirGroundCoordinationService.java:1009`；`:999` 的注释自陈"这里曾经是 `return List.of();`"）；
+> `AirGroundCoordinationController.java:395` 已吐 `droneStatuses`
+> （并补了此前缺失的 `coordinationTasks` 读口）；
+> 前端 `UnifiedCommandPanel.jsx:1592` 已改为 `droneStatuses || aerialUnits || drones`。
+> 下方保留的是**审计当时的坏法**，作为"两层坏叠在一起"的案例记录。
 
 * 后端恒空：`mission/emergency/AirGroundCoordinationService.java:919`
   ```java
