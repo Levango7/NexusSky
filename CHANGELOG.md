@@ -1,5 +1,50 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P2 #18 续批：配置键与死访问器的**完整**对账（8 个假开关删除 + 新门禁 + 12 个死访问器）（2026-10-30）
+
+### 现场
+
+`docs/persistence-and-dead-surface-audit.md` §4.1 当年写着「12 个死 getter / 6 个死配置键」，
+但它**从来不是全仓清点的结果**——那是节选表里几条的加总。上一批（PR #188，已合 `ae7ebc43`）
+只核实了其中 6 个访问器。本批按可复算口径重扫，把两笔账一次结清。
+
+### 交付
+
+| 项 | 做法 | 为什么这么做 |
+|---|---|---|
+| **8 个假开关（删）** | 删除 `aerofleet.plugins.{payload.spray, payload.gripper, transport.mavlink-udp, ai.rtl, ai.avoid, ai.adapt-path, route.astar, route.rrt}.enabled`，原位注释写清证据与去处 | 三段证据缺一不可：① 唯一读者 `spi/PluginConfig` 在 **main+test 零注入点**；② 四个插件接口 `PayloadPlugin`/`TransportPlugin`/`RoutePlannerPlugin`/`DecisionStrategyPlugin` **零实现类** ⇒ `PluginRegistry` 构造拿到空列表；③ 于是改任何一个键**没有任何东西会红，也没有任何东西变化**。沿用 §9 里 `aerofleet.geofence.intercept.enabled` 的先例：删键 + 注释指向真相，而不是留个"看起来可调"的旋钮 |
+| **新门禁 `scripts/check-config-keys.py`** | 反向对账：`src/main/resources` 里声明的每个 `aerofleet.*` 键必须有真实读者（`@Value` / `Environment` / `@ConditionalOnProperty(prefix,name)` / `@ConfigurationProperties` 字段宽松绑定 / 动态前缀），带理由+到期日的豁免账（**当前为空**）与 10 情形离线自测，已接进 CI `repo-gates` 的自测步与独立步 | 文档→代码那条（`check-doc-config-keys.py`）已经在了，缺的是反方向：配置里躺着的键没人读，运维改了不响。**动态前缀要成立，声称枚举它的那个类必须自身可达**——这条前提校验就是本批抓出来的洞：旧白名单写着"PluginConfig 会动态枚举"，没人核过，实测为假 |
+| **撤销假前提白名单** | `check-doc-config-keys.py` 的 `DYNAMIC_PREFIXES` 去掉 `aerofleet.plugins.` 一条，原位注明撤销理由与去处 | 留着它等于允许文档继续承诺一组没人实现的开关。撤销后该门禁自测 4/4、真实仓库仍绿 |
+| **12 个死访问器（删）** | 全仓重扫得 **224 个"声明文件外零引用"的 public getter**，分四类：174 随响应出网 / 10 属性名见于文档·前端 / 27 只有测试在用 / 13 真死候选。真死候选里**删 12**（`GnssSimulator.getReportedAlt/getReceiver/getBaseStation`、`CrossZoneRelayPolicy.getAllowedRelayTypes`、`DisasterZoneManager.getRelayPolicy`、`GeoBoundary.getVertices`、`DynamicReconfigurator` 四个阈值 getter、`PriorityTask.getSubmitTimeMs/getPreemptedTaskId`），**留 2** | 删的 12 个：字段本身在类内仍被使用，只是访问器零调用 ⇒ 删除零行为变更。**留的 2 个**：`AdaptiveHysteresis.getHysteresisMs()` 同文件 `:75/:122` 两处内部调用（扫描器"除本文件外零引用"的口径把它误抬成候选）；`PluginConfig.getDisabledPlugins()` 随整个插件框架留给架构裁决，单点删它没有意义 |
+| **分类器自己的两处假阳性（写进文档）** | `GnssSimulator.getReceiver()` 的"文档证据"其实是 `deploy/monitoring/alertmanager.yml` 里 Prometheus 的 `receiver:`；`AdaptiveRouteMetric.getW3()` 的"前端证据"是 SVG 字符串里的 `http://www.w3.org` | 前者改判为死访问器并删除，后者经读代码确认在测试里被断言 4 次 ⇒ 改归"只有测试在用"保留。**不把假阳性写出来，这份文档就会替一个错的判据背书** |
+| **框架空壳不擅删** | `spi/` 包 12 类 / 1266 行（零实现、零外部引用）原样保留，登记为审计 §5 第 9 条的架构裁决：补实现接真 vs 删空壳 | 「可插拔」是对外能力话术，删与留都不该由清理批次替产品决定。审计基线与判据已备好，owner 一句话就能动 |
+| **§4 口径作废重出** | 审计新增 §11：`12 个死 getter` 与 `6 个死配置键` 两个数**作废**，改为实测 `224 零外部引用 / 13 真死`、`69 声明键 / 8 假开关`；反向缺口按"无默认值即启动失败"口径实测 **0**（宽口径 24 个键出厂值只写在代码里，登记为遗留） | 同一份文档里"当年节选的数"和"实测的数"必须分得开；§10.3 那句「12 应为 ≤9」也一并作废 |
+
+### 验证
+
+- 全 reactor `mvn -B -o clean test`：**5466 / 0 失败 / 0 错误 / 0 跳过**（643 个测试类；
+  分模块 cloud-backend 3296 / drone-sim 1452 / link-sim 139 / mavlink-core 519 /
+  regulator-sim 41 / sdk-java 19）。本批**零测试增删** ⇒ 10 份口径文档无需改数（门禁实测"全部一致"）。
+  第 12 个删除单独复跑 `mvn -o -pl drone-sim -am test`：**1452 / 0 失败**。
+- 新门禁：`--self-test` **10/10**；真实仓库首跑即通过（69 个声明键全部有读者），
+  并打印一条降级提示（插件前缀读者不可达）。
+  A/B 变异：往 properties 掺一个 `aerofleet.plugins.probe.enabled=true` ⇒ 门禁 rc=1 并**点名该键**；
+  还原 ⇒ rc=0，且 `grep` 确认树中无探针残留。
+- 删除类改动的验收形状：**编译 + 全量测试**（死访问器没有任何用例会因删除而变红，
+  这本身就是要写清的事——见审计 §11.4），零引用面由扫描器复算。
+- 其余八门禁（卫生 / 测试计数 / 端点计数 / 自测覆盖 / 前端端点 / 目录计数 / 回退式 diff /
+  MAVLink 兼容 / 变异自测）全过；`check-doc-config-keys.py` 撤白名单后仍绿。
+- 无对外行为变更：properties 只删了**没人读**的键；`spi/` 框架代码一行未动。
+
+### 遗留（写清为什么本批不做）
+
+1. 24 个"代码内默认、properties 未声明"的键要不要统一显式化（运维可见性 vs 多一份同步账）——等口径。
+2. `spi/` 插件框架的补实现/删除裁决（审计 §5 第 9 条）。
+3. 「随响应出网」这条判据是**过近似**（类名在控制器文件里出现过就算），174 个里可能混有真死者；
+   收紧需要编译级调用图，与 §6 里 `check-dead-wiring.py` 暂缓是同一个原因。
+
+---
+
 ## [Unreleased] — 缓存键门禁自己失明：`java-level` 的恢复键与 warm 键永不同源（2026-10-29）
 
 ### 修（CI）：一条门禁因"缓存永不命中 → 冷下载 → Maven Central 429"而红，而守卫看不见它
@@ -388,7 +433,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 237 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-30 共有 238 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -414,7 +459,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 237 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 238 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
