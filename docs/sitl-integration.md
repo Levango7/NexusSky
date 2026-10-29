@@ -706,6 +706,11 @@ ALL PX4 SITL TESTS PASSED
   `[home, takeoff(50m), wp(50m,hold30)]`）→ `MISSION_START(300)` ACCEPTED →
   爬升 7.2→20.3→33.4→47.2→50.0m → 到点驻留 30s → `rtl` 返航降落（全部 COMMAND_ACK
   attempt 1 接受）。
+- **独立复验（ZCode 实例，master `d2522e1c`，2026-10-29 晚）`[AP-实测]`**：同场景在另一套
+  SITL 实例（`-I0`/14550 + 后端 18099，与上条验收用的 `-I1` 实例互不相干）从零重放，全部通过——
+  预置"地面 + AUTO + 未 arm"起手，上传单点任务读回 `[home, takeoff(30m), wp(30m)]`；
+  arm（自动切 GUIDED）ACCEPTED；`start_mission` 进 AUTO；t+18s 爬升至 30.0m、北飞 ~56m 到点
+  驻留；手发 `rtl` 返航降落自动 disarm。固件侧实录 `Mission: 1 Takeoff` / `Mission: 2 WP`。
 - **修复前对照（红）**：主树旧代码同一场景实测——AUTO 下 arm 被拒 `MAV_RESULT=4`；
   手工切 GUIDED 绕过 arm 后读回只有 `[home, wp]`（无 TAKEOFF），`start` 回
   `MAV_RESULT=4 → 回退 2`，固件侧实录 "Mode change to Auto failed: init failed"。
