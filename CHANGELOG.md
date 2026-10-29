@@ -1,5 +1,19 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P2-F1 独立复验：第二套 SITL 实例重放"地面派飞"全场景（2026-10-29）
+
+对 #197（P2-F1 方案 A：AP+AUTO 先切 GUIDED 再 arm；地面任务前置 `NAV_TAKEOFF`）做**独立复验**——
+在该批验收者所用实例之外，用 ZCode 会话的 SITL 实例（`-I0`/14550 + 独立后端 18099）与
+master 构建，从零重放"同一 dispatch 场景从地面全自动完成"：预置"地面 + AUTO + 未 arm"
+（修复前的必失败组合）→ 上传单点任务读回 `[home, takeoff(30m), wp(30m)]` →
+arm（自动切 GUIDED）ACCEPTED → `start_mission` 进 AUTO → t+18s 爬升 30.0m、北飞 ~56m
+到点驻留 → `rtl` 返航降落自动 disarm；固件侧实录 `Mission: 1 Takeoff` / `Mission: 2 WP`。
+证据并入 `docs/sitl-integration.md` §11.3（独立复验条目）。纯验证/文档批次，零代码与测试增量。
+
+同期协作过程（板面记录）：跨会话 SITL 进程误杀事故已按 PID 恢复并复核（车体 home / 参数 /
+遥测持续正常）——两套实例各自独立，复验互不串场。
+
+
 ## [Unreleased] — 修 `GET /api/v1/flightlog` 落库路径「整天取回再截尾」（2026-10-29）
 
 ### 修：DB 查询路径把 `LIMIT` 下推到 SQL，租户条件一起下推
@@ -327,7 +341,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 235 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 236 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -353,7 +367,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 235 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 236 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
