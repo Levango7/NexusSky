@@ -1,5 +1,43 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 新增「文档配置键」门禁 + 客户指南 8 个假模块开关修正（2026-10-29）
+
+### 修（客户文档）：8 个「模块开关」根本不存在，客户照着配静默无效
+
+`docs/customer-onboarding-guide.md` §5.6 原文让客户"按合同选型，在 `application.properties`
+中配置模块启用/禁用"，并列出：
+
+```
+aerofleet.modules.mesh.enabled / emergency.enabled / scheduling.enabled / relay.enabled /
+twin.enabled / surveillance.enabled / formation.enabled / spray.enabled
+```
+
+**全仓 grep 无任何读取点，`application.properties` 也无定义**——配了不会生效，
+而客户会以为"已按合同关掉某模块"，实际模块仍然开着。**真实裁剪机制是 License 的模块清单**
+（`LicenseModuleMap` 路径→模块映射 + `LicenseInterceptor` 校验；权威清单
+`LicenseService.ALL_MODULES`：`core` / `fleet` / `mesh` / `orch` / `emergency` / `network` / `advanced`）。
+
+已按真实机制重写该节，并保留一条明确订正说明（"此前列的 8 个键在本仓不存在"）。
+
+> 这类失真比"路径写错"更隐蔽：路径错了立刻 404；**配置键错了静默无效**，没有任何信号。
+
+### 加：`scripts/check-doc-config-keys.py`（文档配置表里的键必须真被读取）
+
+口径（刻意写死）：
+- 只认**表格行**形态 `| `aerofleet.x.y` | … |`——这是文档在"承诺一个配置项"的明确信号；
+  正文顺口提到的键（如度量名 `aerofleet.signing.unsigned`）不扫，避免误报；
+- 键算"存在"的五种情形：properties 定义 / `@Value` 读取 / `@ConditionalOnProperty`
+  （含 `prefix`）拼全名 / 落在某个 `@ConfigurationProperties(prefix)` 下 / 命中动态前缀白名单
+  （`aerofleet.plugins.*`，由 `PluginConfig` 按前缀枚举——白名单每条都要写理由）；
+- 同时扫 `cloud-backend` 与 `drone-sim`（后者有 `System.getProperty` 之类）；
+- 历史/规划文档不扫（CHANGELOG 里的是度量名与历史记录）；键名按 Spring 宽松绑定归一
+  （大小写、`_`/`-`）。
+
+自测 4 情形（`@Value` / 已定义 / 前缀覆盖 / 条件装配 → 绿；伪键 → 红；正文提及 → 豁免）；
+**A/B 实测**：把这次真实的 8 个假模块开关回放到文档里 ⇒ 门禁红并逐个点名；还原 ⇒ 绿。
+
+CI 接线：自测步骤 + repo-gates 新增 `Doc config key gate`。
+
 ## [Unreleased] — 新增「文档端点存在性」门禁 + 修 12 篇文档里写错的 14 个路径（2026-10-29）
 
 ### 加：`scripts/check-doc-endpoints.py`（文档自己写出的端点必须在代码里存在）
@@ -217,7 +255,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 231 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 232 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -243,7 +281,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 231 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 232 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
