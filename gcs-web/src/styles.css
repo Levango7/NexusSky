@@ -42,6 +42,33 @@ body {
 /* ---------- 顶栏 ---------- */
 .gcs-root { display: flex; flex-direction: column; height: 100vh; }
 
+/* API 失败提示条：多数面板把失败兜底成"暂无数据"，这一条是唯一的异常信号。
+   放在顶栏上方（不遮挡操作），8s 自动消失，也可手动关闭。 */
+.api-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: #3a1d1d;
+  border-bottom: 1px solid #8b2f2f;
+  color: #ffb4b4;
+  font-size: 12px;
+  flex: none;
+}
+.api-error-text { flex: 1 1 auto; word-break: break-all; }
+.api-error-close {
+  flex: none;
+  background: transparent;
+  border: 1px solid #8b2f2f;
+  color: #ffb4b4;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.api-error-close:hover { background: #5a2b2b; }
+
 .topbar {
   min-height: 54px; flex: none;
   display: flex; align-items: center; justify-content: space-between;

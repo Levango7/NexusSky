@@ -38,6 +38,7 @@ import MappingPanel from './components/MappingPanel.jsx'
 import VoiceCmdPanel from './components/VoiceCmdPanel.jsx'
 import CityTwinPanel from './components/CityTwinPanel.jsx'
 import AiDecisionPanel from './components/AiDecisionPanel.jsx'
+import ApiErrorBanner from './components/ApiErrorBanner.jsx'
 import FleetOpsPanel from './components/FleetOpsPanel.jsx'
 import DeliveryPanel from './components/DeliveryPanel.jsx'
 import ShowPanel from './components/ShowPanel.jsx'
@@ -186,6 +187,7 @@ export default function App() {
 
   return (
     <div className="gcs-root">
+      <ApiErrorBanner />
       <header className="topbar">
         <div className="brand">
           <svg className="brand-mark" width="26" height="26" viewBox="0 0 26 26" role="img" aria-label="NexusSky 标志">

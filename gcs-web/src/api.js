@@ -65,6 +65,29 @@ export class TimeoutError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 15000
 
+/**
+ * 全局 API 失败信号。
+ *
+ * 为什么需要：gcs-web 里有 80+ 处 `.catch(() => [])` / `.catch(() => null)`——
+ * 请求失败会变成"空数据"，界面显示"暂无数据"，**没有任何异常信号**（devtools 里也没有）。
+ * 本仓 2026-10-21 就因此吃过亏：前端调了 12 个不存在的端点，404 被静默吞掉，面板永远空。
+ * 端点存在性现在有门禁了，但"失败要有人知道"这件事没有出口。
+ *
+ * 这里只发一个 window 事件（不改变既有 catch 行为），由 `ApiErrorBanner` 订阅并提示。
+ * 调用方主动取消（AbortError，非超时）不算失败，不发信号。
+ */
+export const API_ERROR_EVENT = 'nexus-api-error'
+
+export function reportApiError(url, message, status) {
+  const detail = { url, message: message || '请求失败', status: status || 0, at: Date.now() }
+  try {
+    window.dispatchEvent(new CustomEvent(API_ERROR_EVENT, { detail }))
+  } catch {
+    // 非浏览器环境（node 测试未注入 window）忽略
+  }
+  return detail
+}
+
 // jsonFetch 会自动附带 Authorization: Bearer，所以 url 一旦被外部值带出本前端，
 // 等于把令牌送到别的宿主（CodeQL js/request-forgery #1）。只放行同源 /api/v1/ 路径。
 const API_PREFIX = '/api/v1/'
@@ -116,8 +139,15 @@ async function jsonFetch(rawUrl, options = {}) {
     // 只有"超时引发的 abort"才算 TimeoutError。调用方主动取消要原样抛 AbortError，
     // 否则用户点了取消，界面上报的是"请求超时（15000ms）"。
     if (e && e.name === 'AbortError' && timedOut) {
-      throw new TimeoutError(timeout)
+      const timeoutError = new TimeoutError(timeout)
+      reportApiError(url, timeoutError.message, 0)
+      throw timeoutError
     }
+    // 调用方主动取消不是失败：不发全局信号（否则用户每切一次面板就弹一条错误）。
+    if (e && e.name === 'AbortError') {
+      throw e
+    }
+    reportApiError(url, (e && e.message) || '网络请求失败', 0)
     throw e
   } finally {
     clearTimeout(timer)
@@ -147,7 +177,10 @@ async function jsonFetch(rawUrl, options = {}) {
     // 后端错误形状有两套：较早的 {error:"..."}，以及 doc/link-sim 的
     // {status:"error", result:"..."}。只认 error 会把后者显示成 "HTTP 400"，
     // 把真正的原因（"delayMs 越界"）丢掉。
-    throw new Error((body && (body.error || body.result || body.message)) || `HTTP ${res.status}`)
+    const message = (body && (body.error || body.result || body.message)) || `HTTP ${res.status}`
+    // 401 走上面的认证过期通路（有自己的 UI），不重复报全局错误。
+    reportApiError(url, message, res.status)
+    throw new Error(message)
   }
   return body
 }
