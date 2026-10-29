@@ -17,6 +17,26 @@
 - **测试**：`FlightPhaseReportTest`（7 例，映射边界）、`DroneViewsFlightInfoTest`（3 例，
   外露口径）、`telemetryPanel.test.jsx`（3 例，展示口径）。
 
+## [Unreleased] — 同族收口：AP `takeoff` 的模式约束实测 + 「不做模式适配」决策钉住（2026-10-29）
+
+### 加：`takeoff` 的 AP 模式约束实测矩阵 + 决策钉子（4 例）
+
+`docs/sitl-integration.md` §11.2-⑧ 只记着"非 GUIDED 被拒"，处置列停在"arm 前切 GUIDED 使该
+命令可用"——那只是**间接**（arm 恰好切了 GUIDED）。本轮用 AP SITL 把矩阵实测清楚并钉死决策：
+
+- **实测矩阵**（`[AP-实测]` 2026-10-29，同一 SITL 实例）：地面+AUTO+未 arm → 拒
+  `MAV_RESULT=4`；arm（自动切 GUIDED）后 → **接受并爬升**（14.2m）；空中+AUTO → 拒
+  （非 GUIDED）；空中+GUIDED → 仍拒（**已起飞状态**不接受）；另测得 **armed 且在地面时
+  `DO_SET_MODE(AUTO)` 本身也被拒**（与 ⑦ 的 init failed 同族，此前未记录）。
+- **决策：`takeoff` 不做模式适配**——① F1 的 `arm` 已保证 AP 起飞前在 GUIDED（产品流可用）；
+  ② 空中切 GUIDED 会**静默打断任务**，副作用大于收益；③ 未 arm 应由 `arm` 显式完成
+  （独立入口 + 围栏拦截链），不由 takeoff 代做。
+- `ArduPilotTakeoffModeTest`（新，4 例）钉住：任何模式 / arm 状态下 takeoff 只发**一条**
+  `NAV_TAKEOFF`，不切模式、不代 arm；变异 A/B 已验证（给 takeoff 加模式切换 ⇒ 红、还原 ⇒ 绿）。
+- 文档：§11.2-⑦ 补"armed 地面切 AUTO 也拒"、§11.2-⑧ 补全实测矩阵与决策、§11.3 增"同族收口"条。
+- 计数：全 reactor **5456 全绿**（cloud-backend 3286，本批 +4）；22 处口径文档已同步
+  （5452→5456 / 3282→3286）；本文件小节 228→229。
+
 ## [Unreleased] — AP 地面派飞序列适配：arm 前切 GUIDED + 地面任务前置 TAKEOFF（P2-F1 方案 A，2026-10-29）
 
 ### 修：AP 实机上「arm → 单点任务 → start」必失败（两条固件硬契约叠加）
@@ -123,7 +143,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 229 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 230 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -149,7 +169,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 229 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 230 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
