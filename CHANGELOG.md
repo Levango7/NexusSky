@@ -1,5 +1,52 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 缓存键门禁自己失明：`java-level` 的恢复键与 warm 键永不同源（2026-10-29）
+
+### 修（CI）：一条门禁因"缓存永不命中 → 冷下载 → Maven Central 429"而红，而守卫看不见它
+
+master push run `40794626496` 的 `Java Level Gate (bytecode vs declaration)` 红在
+
+```
+[ERROR] Non-resolvable import POM: … spring-boot-dependencies:pom:3.5.16 (absent):
+        Could not transfer … HTTP Status: 429
+```
+
+同一次运行里该 job 的缓存恢复步打印 `Cache not found for input keys: Linux-m2-1c24aa8b…`。
+两行合起来就是根因：
+
+| 站点 | 键 |
+|---|---|
+| `maven-warm`（保存者） | `mvn-${os}-${hash}-v2` |
+| `java-level`（恢复者） | `${os}-m2-${hash}` |
+
+**两套键永不可能命中** ⇒ 该 job 每次运行都从中央仓冷下载整个 reactor ⇒ 在共享 runner IP 上
+撞 429 ⇒ **门禁一次都没跑成，却被记成"门禁失败"**（红因离改动点极远，看起来像代码回归）。
+
+更值得记的是**守卫为什么没拦住**：`scripts/ci-maven-cache-key.sh` 用 `key:\s+mvn-` **前缀**
+匹配站点，`${os}-m2-` 不以 `mvn-` 开头 ⇒ 18 处站点只扫到 17 处，那 17 处全对 ⇒ 打印
+`OK: maven 缓存键 17 处同源`。与 `COORDINATION.md` 第五节同款：
+**一个"匹配不到就不管"的校验器不是门禁，是装饰。**
+
+修法：
+
+- `java-level` 恢复键改为规范值并补 `restore-keys`（与其余 17 处一致）；
+- 守卫改按**语义标记**识别站点：只要 `key:` 行的值里带 `hashFiles('**/pom.xml')`，它就是在
+  缓存 maven 本地仓库，必须等于规范值——**不管前缀长什么样**；
+- 守卫另加两道自证：**站点数下限**（18；删 job 导致覆盖面缩水必须显式下调）、
+  **`restore-keys` 代次检查**（键对了但 restore 指向上一代，同样读到空缓存）；
+- 守卫补 `--self-test`（5 情形：干净 / 前缀漂移 / 空目录判失明 / 覆盖面缩水 / restore 代次漂移），
+  并接进 CI——`maven-warm` 现在**先自测再判**（守卫自己坏了时，"同源"两个字一文不值）。
+
+A/B 实测：把 `java-level` 的键改回 `${os}-m2-…` ⇒ 守卫 rc=1 并点名 `./ci.yml` 与实得值；
+还原 ⇒ rc=0。守卫可见站点 17→**18**。
+
+顺带把守卫从"每行一次命令替换"改成纯参数展开：本机（Windows）一次 `$(...)` ≈0.9s 的 fork
+开销，18 站点 × 2 处 = 36 次 fork ⇒ 单次检查 **38s**、自测直接跑不完（被超时杀掉）；
+改后 **5.8s**，且两类站点共用一次 `grep`（原两次进程替换 = 8 个 fork）。
+另：`mvn -version` 的工具链留痕改为**只在判红时**取——它要拉一个 JVM（本机 22s），
+挂在成功路径上纯属浪费。
+
+无测试/端点/脚本计数变化（未新增脚本文件，未改 Java 与前端用例数）。
 ## [Unreleased] — P2-F1 独立复验：第二套 SITL 实例重放"地面派飞"全场景（2026-10-29）
 
 对 #197（P2-F1 方案 A：AP+AUTO 先切 GUIDED 再 arm；地面任务前置 `NAV_TAKEOFF`）做**独立复验**——
@@ -341,7 +388,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 236 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 237 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -367,7 +414,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 236 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 237 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

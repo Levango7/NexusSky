@@ -224,10 +224,21 @@ jobs:
         with:
           python-version: '3.12'
       - name: Restore Maven local repository (warmed by maven-warm)
+        # 键必须与 maven-warm 保存的完全同源。此前这里写的是
+        #   ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        # 而 maven-warm 存的是 mvn-${os}-${hash}-v2 —— 两套键**永不可能命中**，
+        # 本 job 每次运行都从中央仓冷下载整个 reactor，在共享 runner IP 上撞 429：
+        # master push run 40794626496 的 "Java Level Gate" 就是红在
+        #   Could not transfer ... HTTP Status: 429
+        # 而同一次运行的缓存恢复步打印 "Cache not found for input keys: Linux-m2-…"。
+        # 门禁其实一次都没跑成，却被记成"门禁失败"。守卫 ci-maven-cache-key.sh 当时
+        # 看不见这一处（旧实现只匹配 `key:\s+mvn-` 前缀），已同批改为按语义标记识别。
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
+          restore-keys: |
+            mvn-${{ runner.os }}-
       - name: Compile all modules
         # 经 ci-mvn-retry.sh：命中"取件类"失败时先由 runner 自己回查中央仓并把状态码打进日志，
         # 再重试一次；测试失败/编译错误一律不重试。缘由见该脚本头部（本 job 曾在 2026-10-13
@@ -259,7 +270,10 @@ jobs:
       # 本作业先于全部 maven job 运行：冷缓存时成为唯一保存者（完整 m2）；
       # 命中时以离线构建校验缓存完整性（-o 下任何缺失立刻失败而非静默回源）。
       - name: Check cache key sites are consistent
-        run: bash scripts/ci-maven-cache-key.sh
+        # 先自测再判：守卫自己坏了（匹配式过期/被改窄）时，"同源"两个字一文不值。
+        # 2026-10-29 就栽在这里——旧实现只匹配 `key:\s+mvn-` 前缀，`java-level` 的
+        # `${{ runner.os }}-m2-…` 不在扫描面内，18 处站点报成 17 处全对。
+        run: bash scripts/ci-maven-cache-key.sh --self-test && bash scripts/ci-maven-cache-key.sh
       - name: Restore Maven local repository
         id: mvn-cache
         uses: actions/cache@v4
