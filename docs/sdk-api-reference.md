@@ -166,15 +166,11 @@ SDK 在内部自动添加此 Header，无需手动设置。
 |---|---|---|
 | `sysid` | `int` | 无人机系统 ID |
 
-### POST /api/v1/drones/{sysid}/mission/clear
+### 清除任务（**无独立端点**）
 
-清除指定无人机的航点任务。
-
-**路径参数**：
-
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `sysid` | `int` | 无人机系统 ID |
+**没有** `POST /api/v1/drones/{sysid}/mission/clear`（此前本节把它写成存在的端点，实际从未实现）。
+当前语义：**上传一份新任务会整份替换机载任务**（`MISSION_COUNT` 重新握手），
+读回用 `GET /api/v1/drones/{sysid}/mission`；若要"清空"，上传一条单点 RTL/LAND 任务即可。
 
 ---
 
@@ -186,15 +182,16 @@ SDK 在内部自动添加此 Header，无需手动设置。
 
 **响应数据**：飞行日志条目列表。
 
-### GET /api/v1/flightlog/{logId}
+### GET /api/v1/flightlog/track
 
-获取指定飞行日志的详情。
+查询（按当前/指定 sysid 的）航迹点位。**没有** `GET /api/v1/flightlog/{logId}` 这样的"单条日志详情"
+端点——真实面只有 `GET /api/v1/flightlog?day=...`（列表）与 `GET /api/v1/flightlog/track`（航迹）。
 
-**路径参数**：
+**查询参数**：
 
 | 参数 | 类型 | 说明 |
 |---|---|---|
-| `logId` | `string` | 日志 ID |
+| `sysid` | `int` | 可选，无人机系统 ID |
 
 ---
 

@@ -39,7 +39,18 @@ public class RegulatorConfig {
     /** 遥测上报周期最大值（秒）。 */
     private static final int MAX_TELEMETRY_REPORT_INTERVAL = 300;
 
-    /** 上报通道类型：uom / sim / none。 */
+    /**
+     * 上报通道类型：uom / sim / none。
+     *
+     * <p><b>注意：本字段默认值不是"运行时默认通道"。</b>通道由
+     * {@code @ConditionalOnProperty} 决定——{@link NoopReportSink} 是
+     * {@code havingValue="none", matchIfMissing=true}，即**配置键缺失时装的是 Noop**，
+     * 不是 sim（{@code SimReportSink} / {@code UomReportSink} 都是精确 {@code havingValue}）。
+     * 要真正启用 sim/uom，必须在 profile 里显式写
+     * {@code aerofleet.regulator.sink-type=sim|uom}（e2e 就是显式传的）。
+     *
+     * <p>2026-10-29 记：曾把这里误读成"默认 sim"，据此把台账写错——字段默认值 ≠ 条件装配结果。
+     */
     private String sinkType = "sim";
 
     /** UOM 平台基础 URL。 */
