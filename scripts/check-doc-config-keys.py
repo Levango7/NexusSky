@@ -58,7 +58,10 @@ SCAN_DOCS = (
 # 动态读取的键前缀：代码用 Environment 按前缀枚举，静态解析看不到。
 # 每条都要写清为什么，否则就是"把门禁自己关掉"。
 DYNAMIC_PREFIXES = (
-    ("aerofleet.plugins.", "PluginConfig 按 aerofleet.plugins.{category}.{type}.enabled 动态枚举"),
+    # 2026-10-30 撤销 aerofleet.plugins. 这条白名单（审计 §11.2）：它的理由是
+    # "PluginConfig 按前缀动态枚举"，但实测 PluginConfig 全仓**零注入点**、四个插件接口
+    # **零实现**，前缀下的 8 个键已随本批从 application.properties 删除。
+    # 白名单的前提必须可核——这条由 scripts/check-config-keys.py 反向盯（读者不可达即判红）。
 )
 
 ROW = re.compile(r"^\|\s*`(aerofleet\.[A-Za-z0-9_.\-]+)`\s*\|")
