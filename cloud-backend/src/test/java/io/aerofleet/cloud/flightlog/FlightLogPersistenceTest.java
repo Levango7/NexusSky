@@ -404,6 +404,51 @@ class FlightLogPersistenceTest {
         assertThat(flightLogService.query(LocalDate.now(), "telemetry", 62, 0)).hasSize(1);
     }
 
+    @Test
+    @DisplayName("query(limit>0) 把租户与条数一起下推：别的租户更新的行不会挤掉本租户的名额")
+    void queryPushesTenantAndLimitDown() {
+        LocalDate today = LocalDate.now();
+        Instant dayStart = today.atStartOfDay(ZoneId.systemDefault()).toInstant();
+        // 租户 1 的 5 行在前，租户 2 的 5 行在后（时间更新）——故意让"全局最新 N 行"都属于别的租户
+        for (int i = 1; i <= 5; i++) {
+            saveTelemetryRow(63, dayStart.plus(i, ChronoUnit.MINUTES), i, 1);
+        }
+        for (int i = 6; i <= 10; i++) {
+            saveTelemetryRow(63, dayStart.plus(i, ChronoUnit.MINUTES), i, 2);
+        }
+
+        TenantContext.setTenantId(1);
+        try {
+            List<Map<String, Object>> scoped = flightLogService.query(today, "telemetry", 63, 3);
+            assertThat(scoped).extracting(m -> m.get("relativeAlt"))
+                    .as("租户 1 自己的最新 3 条；若先全局取 3 条再过滤，会因最新 3 条都属于租户 2 而空手而归")
+                    .containsExactly(3.0, 4.0, 5.0);
+        } finally {
+            TenantContext.clear();
+        }
+
+        List<Map<String, Object>> global = flightLogService.query(today, "telemetry", 63, 3);
+        assertThat(global).extracting(m -> m.get("relativeAlt"))
+                .as("全局管理员仍取全局最新 3 条")
+                .containsExactly(8.0, 9.0, 10.0);
+    }
+
+    @Test
+    @DisplayName("query(limit>0) 的 type/sysid 为空时仍能下推分页（空条件不参与过滤）")
+    void queryPaginatesWithNullFilters() {
+        LocalDate today = LocalDate.now();
+        Instant dayStart = today.atStartOfDay(ZoneId.systemDefault()).toInstant();
+        saveTelemetryRow(64, dayStart.plus(1, ChronoUnit.MINUTES), 1.0);
+        saveTelemetryRow(64, dayStart.plus(2, ChronoUnit.MINUTES), 2.0);
+        saveTelemetryRow(64, dayStart.plus(3, ChronoUnit.MINUTES), 3.0);
+
+        List<Map<String, Object>> rows = flightLogService.query(today, null, null, 2);
+
+        assertThat(rows).extracting(m -> m.get("relativeAlt"))
+                .as("两个过滤条件都为 null 时，分页与排序仍必须成立")
+                .containsExactly(2.0, 3.0);
+    }
+
     /** 造一行可控的最小遥测快照（位置/电量都给出，避免 nanToNull 干扰断言）。 */
     private static DroneSnapshot telemetrySnapshot(int sysid) {
         DroneSnapshot s = new DroneSnapshot(sysid);
@@ -419,6 +464,11 @@ class FlightLogPersistenceTest {
 
     /** 直接落一行可控时间的遥测（写入侧节流与时刻口径都不参与排序测试）。 */
     private void saveTelemetryRow(int sysid, Instant ts, double relativeAlt) {
+        saveTelemetryRow(sysid, ts, relativeAlt, null);
+    }
+
+    /** 同上，并显式指定租户归属（{@code null}=未归属，仅全局管理员可见）。 */
+    private void saveTelemetryRow(int sysid, Instant ts, double relativeAlt, Integer tenantId) {
         FlightLogEntity e = new FlightLogEntity();
         e.setTimestamp(ts);
         e.setType("telemetry");
@@ -426,6 +476,7 @@ class FlightLogPersistenceTest {
         e.setLat(39.9);
         e.setLon(116.4);
         e.setRelativeAlt(relativeAlt);
+        e.setTenantId(tenantId);
         flightLogRepository.save(e);
     }
 

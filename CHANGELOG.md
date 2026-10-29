@@ -47,6 +47,31 @@ A/B 实测：把 `java-level` 的键改回 `${os}-m2-…` ⇒ 守卫 rc=1 并点
 挂在成功路径上纯属浪费。
 
 无测试/端点/脚本计数变化（未新增脚本文件，未改 Java 与前端用例数）。
+## [Unreleased] — 修 `GET /api/v1/flightlog` 落库路径「整天取回再截尾」（2026-10-29）
+
+### 修：DB 查询路径把 `LIMIT` 下推到 SQL，租户条件一起下推
+
+`FlightLogService.query()` 在 `persist-to-db=true` 时原本是四条「整天全量」查询 + 内存
+`subList` 截尾。`flight_log` 每个遥测点一行（1 机 1 天 1Hz ≈ **8.6 万行**），
+一次 `GET /api/v1/flightlog?limit=200` 会把整天数据拖进堆再只留 200 条。
+同文件的 JSONL 路径**早已**用定长环形缓冲解决（注释就写着 8.6 万行不能全量读），
+DB 路径一直没有对齐——`persist-to-db` 默认 `false`，演示与 CI 都碰不到。
+
+- 新增 `FlightLogRepository.findNewestFirst(...)`：`ORDER BY timestamp DESC, id DESC`
+  取前 N 条，`LIMIT` 下推数据库；
+- **租户、类型、sysid 三个过滤条件与分页一起下推**。租户不能留在内存里过滤：
+  先按全局取最新 N 行、再筛本租户，最新 N 行恰好都属于别的租户时会少返甚至空手而归；
+- 服务端把结果反转成旧→新，对外契约不变（末尾=最新，与 JSONL 路径同口径）；
+- `limit<=0` 仍表示「当天全部」（HTTP 入口 `FlightLogController` / `EnvAlertController`
+  都收口到 [1, 5000]，内部语义保留）。
+
+测试 +5 例：3 例单测钉「下推形状」（`limit>0` 只调 `findNewestFirst`、绝不碰四条全量查询；
+租户为 null 走全局口径；`limit<=0` 不调分页查询）+ 2 例 H2 集成测试
+（别的租户更新的行不会挤掉本租户名额；`type`/`sysid` 为空时仍能下推分页）。
+变异 A/B：把下推改回整天全量取回 ⇒ 单测红；还原 ⇒ 绿（实测通过）。
+
+全 reactor **5466 单测全绿**（5461→5466，cloud-backend 3291→3296）；22 处口径文档已同步。
+
 ## [Unreleased] — 修 `GET /api/v1/audit/logs` 缺省返回全表（2026-10-29）
 
 ### 修：不带 `limit` 的审计查询会整表加载
@@ -349,7 +374,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 235 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 236 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -375,7 +400,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 235 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 236 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

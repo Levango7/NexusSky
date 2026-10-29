@@ -25,6 +25,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -361,6 +362,11 @@ public class FlightLogService {
     /**
      * Read events of one type (or all) for a day, optionally filtered by
      * sysid, limited to the most recent {@code limit} entries.
+     * <p>
+     * {@code limit > 0} 时"最新 N 条"由数据库截取（LIMIT + 租户条件一起下推）；
+     * {@code limit <= 0} 表示"当天全部"，仍走全量查询——HTTP 入口
+     * （{@code FlightLogController} / {@code EnvAlertController}）都会把 limit
+     * 收口到 [1, 5000]，所以"全部"只对内部调用可见。
      */
     public List<Map<String, Object>> query(LocalDate day, String type, Integer sysid, int limit) {
         // DB 查询路径：persistToDb && repository 可用时优先从数据库查询
@@ -368,6 +374,22 @@ public class FlightLogService {
             try {
                 Instant start = day.atStartOfDay(ZoneId.systemDefault()).toInstant();
                 Instant end = day.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant();
+                Integer tenantId = TenantContext.getEffectiveTenantId();
+
+                if (limit > 0) {
+                    // 最新 N 条下推 SQL：1 机 1 天 1Hz ≈ 8.6 万行，先全量取回再 subList
+                    // 等于把整天数据拖进堆（JSONL 路径已用环形缓冲解决，此处对齐）。
+                    // 租户条件必须一起下推：否则"全局最新 N 行"被租户过滤后可能不够 N 条。
+                    List<FlightLogEntity> newest = new ArrayList<>(flightLogRepository.findNewestFirst(
+                            start, end, tenantId, type, sysid,
+                            org.springframework.data.domain.PageRequest.of(0, limit)));
+                    Collections.reverse(newest);   // 查询是"最新在前"，对外契约是旧→新（末尾=最新）
+                    return newest.stream()
+                            .filter(e -> isVisibleTo(e.getTenantId(), tenantId))
+                            .map(FlightLogEntity::toMap)
+                            .collect(Collectors.toList());
+                }
+
                 List<FlightLogEntity> entities;
                 if (type != null && sysid != null) {
                     entities = flightLogRepository
@@ -379,17 +401,10 @@ public class FlightLogService {
                 } else {
                     entities = flightLogRepository.findByTimestampBetweenOrderByTimestampAscIdAsc(start, end);
                 }
-                Integer tenantId = TenantContext.getEffectiveTenantId();
-                List<Map<String, Object>> out = entities.stream()
+                return entities.stream()
                         .filter(e -> isVisibleTo(e.getTenantId(), tenantId))
                         .map(FlightLogEntity::toMap)
                         .collect(Collectors.toList());
-                // 取末尾 = 最新 N 条：JSONL 路径按追加顺序天然如此，DB 路径靠
-                // 查询的 ORDER BY timestamp, id 保证同一口径。
-                if (limit > 0 && out.size() > limit) {
-                    return out.subList(out.size() - limit, out.size());
-                }
-                return out;
             } catch (Exception e) {
                 log.warn("flight log DB query failed, falling back to JSONL: {}", e.getMessage());
                 // 回退到 JSONL 路径
