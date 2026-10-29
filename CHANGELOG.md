@@ -47,6 +47,29 @@ A/B 实测：把 `java-level` 的键改回 `${os}-m2-…` ⇒ 守卫 rc=1 并点
 挂在成功路径上纯属浪费。
 
 无测试/端点/脚本计数变化（未新增脚本文件，未改 Java 与前端用例数）。
+## [Unreleased] — 修 `GET /api/v1/audit/logs` 缺省返回全表（2026-10-29）
+
+### 修：不带 `limit` 的审计查询会整表加载
+
+`GET /api/v1/audit/logs` 在 `limit` 缺省（或 `limit<=0`）时走 `auditService.findAll()`。
+落库模式（`aerofleet.audit.persist-to-db=true`，合规部署的必要姿态）下那是
+`findAllByOrderByIdDesc()` —— **整张 `audit_log` 表**读进堆再序列化。而该表是只增表
+（每个 POST/PUT/DELETE/PATCH 一行，`AuditInterceptor` 无条件落），且
+`aerofleet.audit.retention-days` 默认 **0（永不删除）**：单机演示跑内存模式（上限 1000 条）
+永远看不出来，落库跑几个月后一次不带 limit 的查询就能把堆打满；更糟的是调用方
+从参数上看不出自己在请求全量（`GET /api/v1/audit/logs` 与 `?limit=0` 等价于全表）。
+
+- **缺省 200、上限 5000、非正数按 1**，与 `FlightLogController` / `EnvAlertController`
+  的既有口径一致（全仓统一 `Math.max(1, Math.min(MAX, limit))`）；
+- **删除"0/负数 = 全部"的旧语义**——那正是整表加载的入口；
+- `auditService.findAll()` 保留（`verifyChain`、单测仍在用），只是**控制器不再调用它**；
+- `docs/api-reference.md` 的"默认全部"同步订正为缺省/上限与前因。
+
+测试 +5 例（`AuditControllerTest`）：缺省走 `findRecent(200)` 且 **绝不再调 `findAll()`** ·
+显式 limit 透传 · 超大 limit 收敛到 5000 · 0/负数收敛到 1 · 返回体字段映射不变。
+变异 A/B：把控制器改回旧实现（缺省 `findAll()`）⇒ 测试红；还原 ⇒ 绿（实测通过）。
+
+全 reactor **5461 单测全绿**（5456→5461，cloud-backend 3286→3291）；22 处口径文档已同步。
 
 ## [Unreleased] — 前端「请求失败静默无信号」补齐：全局错误事件 + 顶栏提示条（2026-10-29）
 
@@ -326,7 +349,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 234 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 235 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -352,7 +375,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 234 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 235 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
