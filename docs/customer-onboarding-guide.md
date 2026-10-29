@@ -494,18 +494,28 @@ kubectl get svc
 
 ### 5.6 模块配置与裁剪
 
-根据合同选型，在 `application.properties` 中配置模块启用/禁用：
+根据合同选型裁剪模块。**真实机制是 License 的模块清单**（不是 properties 开关）：
 
-| 配置项 | 说明 | 默认值 |
-|---|---|---|
-| `aerofleet.modules.mesh.enabled` | Mesh 自愈组网 (M5) | true |
-| `aerofleet.modules.emergency.enabled` | 应急任务编排 (M9) | true |
-| `aerofleet.modules.scheduling.enabled` | 集群智能调度 (M10) | true |
-| `aerofleet.modules.relay.enabled` | 多层级通信中继 (M6+M7) | true |
-| `aerofleet.modules.twin.enabled` | 数字孪生与预测 (M13) | false |
-| `aerofleet.modules.surveillance.enabled` | 空地一体化应急指挥 (4a) | false |
-| `aerofleet.modules.formation.enabled` | 编队表演 (M1) | false |
-| `aerofleet.modules.spray.enabled` | 喷洒/物流执行机构 (M2) | false |
+- 请求路径 → 模块的映射收敛在 `LicenseModuleMap`（`core` / `fleet` / …），由 `LicenseInterceptor` 校验；
+  未在 License 模块清单里的模块，其 REST 路径会被拦（返回模块未授权）。
+- 因此"启用/禁用某模块"= **在签发 License 时选择模块**，不是在 `application.properties` 里配开关。
+
+| 模块 | 说明 |
+|---|---|
+| `core` | 协议接入 / 机队注册 / 遥测 / 任务 |
+| `fleet` | 编队 / 喷洒 / 配送等机队执行面 |
+| `mesh` | Mesh 自愈组网 |
+| `orch` | 集群调度 / 编排 |
+| `emergency` | 应急任务编排 |
+| `network` | 通信中继 / 网络面 |
+| `advanced` | 数字孪生 / 智能决策等高级能力 |
+
+（`LicenseService.ALL_MODULES` 是唯一权威清单；新增模块必须同时登记 `LicenseModuleMap` 的路径映射。）
+
+> **⚠️ 订正（2026-10-29）**：本节此前列出的 8 个 `aerofleet.modules.<name>.enabled` 配置项
+> **在本仓代码里不存在**（`grep` 全仓无读取点，`application.properties` 也无定义），
+> 照着配不会生效——曾让客户以为"已按合同关掉某模块"，实际模块仍然开着。
+> 现在按真实机制（License 模块清单）表述；若将来要做运行期开关，需另立实现 + 门禁。
 
 ### 5.7 集成对接
 
