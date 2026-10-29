@@ -235,19 +235,26 @@ NexusSky 为三类真实卫星体制预留了统一接入点，当前为占位�
 | 铱星 | `IRIDIUM` | L | 2.4 kbps | 1500 ms | `IridiumSatLinkProvider` |
 | 星链 | `STARLINK` | Ku/Ka | 100 Mbps | 20 ms | `StarlinkSatLinkProvider` |
 
-### 7.2 预留 REST 端点
+### 7.2 卫星链路监控端点（已实现）
 
 ```bash
-# 列出可用卫星提供商
-curl http://localhost:8080/api/v1/sat/providers \
+# 列出所有卫星链路状态
+curl http://localhost:8080/api/v1/sat-link/status \
   -H "Authorization: Bearer <token>"
 
-# 连接卫星（当前返回 501 Not Implemented）
-curl -X POST http://localhost:8080/api/v1/sat/providers/TIANTONG/connect \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"satId": "TIANTONG-1"}'
+# 单星链路状态 / 过境计划 / 路由历史 / 切换策略 / 星座视图
+curl http://localhost:8080/api/v1/sat-link/status/STARLINK-1   -H "Authorization: Bearer <token>"
+curl http://localhost:8080/api/v1/sat-link/passes              -H "Authorization: Bearer <token>"
+curl http://localhost:8080/api/v1/sat-link/routes              -H "Authorization: Bearer <token>"
+curl http://localhost:8080/api/v1/sat-link/strategy            -H "Authorization: Bearer <token>"
+curl http://localhost:8080/api/v1/sat-link/constellation       -H "Authorization: Bearer <token>"
 ```
+
+> **注意（2026-10-29 订正）**：此前本节示例写的是 `GET /api/v1/sat/providers` 与
+> `POST /api/v1/sat/providers/{type}/connect`——**这两个端点从未实现**，调用会 404。
+> 目前**没有**"列出 provider / 连接卫星"的 REST 面；三家 provider 类在 Java 层是占位
+> （`connect()` 抛 `UnsupportedOperationException`），真实卫星接入待后续版本。
+> 可用的只有上表的**只读监控**端点；数据在仿真下来自 `SimulatedSatLinkProvider`。
 
 ### 7.3 仿真卫星链路监控
 

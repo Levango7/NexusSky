@@ -546,8 +546,9 @@ java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
 
 - 本白皮书所列能力**均已实现并通过 e2e 回归**（详见 README.md 与各
   `scripts/e2e-*.ps1`），但**仅在模拟器与 link-sim 损伤链路下验证**。
-  其中「边缘 AI / 数字孪生实时同步」为库或服务形态，**尚未接入生产链路**；
-  「自主决策」已接线为 **advisory**（1Hz 评估 + STATUSTEXT 建议，不执行动作）
+  其中「边缘 AI / 数字孪生实时同步」**均已接入生产链路**（`EdgeInferenceRunner` 2Hz 出
+  30053/30014；`TwinSyncListener` 30054→`syncTwin`→30055，2026-10-04 接线）；
+  「自主决策」为 **advisory + 执行级**（`--autonomy-exec` 默认关闭、failsafe 永远优先）
   （见 README「已知边界」与 ROADMAP 状态标注）。
 - 真机集群验证、真机气动、真机多机协同调度**尚未完成**，是商用落地
   的 P0 项。

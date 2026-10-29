@@ -301,38 +301,37 @@
 
 ---
 
-## 十、卫星接入 API（预留）
+## 十、卫星接入（预留说明 + 现有链路端点）
 
-> **注意**：以下接口为真实卫星接入预留占位，当前实现抛出 `UnsupportedOperationException`。
-> 仿真环境请使用 `SimulatedSatLinkProvider`，卫星链路监控请使用 `/api/v1/sat-link/*` 端点。
+> **重要**：本仓**没有** `/api/v1/sat/providers` 端点（此前本节示例误记为存在）。
+> 卫星链路监控请用**已实现**的 `/api/v1/sat-link/*`（见下）；三家的 provider 仍是占位实现
+> （`TiantongSatLinkProvider` / `IridiumSatLinkProvider` / `StarlinkSatLinkProvider` 的
+> 连接相关方法抛 `UnsupportedOperationException`），真实卫星接入待后续版本。
 
-### GET /api/v1/sat/providers
-列出可用卫星提供商及体制信息。
+### 已实现：`/api/v1/sat-link/*`（只读监控面）
 
-**响应：**
-```json
-[
-  {"type": "TIANTONG", "label": "天通", "band": "S", "status": "PLACEHOLDER"},
-  {"type": "IRIDIUM", "label": "铱星", "band": "L", "status": "PLACEHOLDER"},
-  {"type": "STARLINK", "label": "星链", "band": "Ku/Ka", "status": "PLACEHOLDER"}
-]
-```
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/sat-link/status` | 所有卫星链路状态 |
+| GET | `/api/v1/sat-link/status/{satId}` | 单星链路状态 |
+| GET | `/api/v1/sat-link/passes` | 所有过境计划 |
+| GET | `/api/v1/sat-link/passes/{satId}` | 单星过境计划 |
+| GET | `/api/v1/sat-link/routes` | 最近路由决策历史 |
+| GET | `/api/v1/sat-link/strategy` | 当前切换策略 |
+| PUT | `/api/v1/sat-link/strategy` | 设置切换策略（运行时） |
+| GET | `/api/v1/sat-link/constellation` | 星座视图 |
 
-### POST /api/v1/sat/providers/{type}/connect
-连接指定体制的卫星链路。`{type}` 取值：`TIANTONG` / `IRIDIUM` / `STARLINK`。
+### 预留（**无对应 REST 端点**）：provider 连接
 
-> **当前状态**：所有 provider 的 `connect()` 方法抛出 `UnsupportedOperationException`，
-> 返回 HTTP 501（Not Implemented）。真实卫星接入待后续版本实现。
+三家体制与波段信息（仅供规划参考，调用会抛 `UnsupportedOperationException`）：
 
-**请求：**
-```json
-{"satId": "TIANTONG-1"}
-```
+| type | 体制 | 波段 |
+|---|---|---|
+| `TIANTONG` | 天通 | S |
+| `IRIDIUM` | 铱星 | L |
+| `STARLINK` | 星链 | Ku/Ka |
 
-**响应（当前）：**
-```json
-{"error": "真实卫星接入尚未实现，请使用 SimulatedSatLinkProvider", "status": 501}
-```
+> 仿真环境请直接用 `SimulatedSatLinkProvider`——它是唯一可跑的实现。
 
 ---
 
