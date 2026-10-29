@@ -63,7 +63,15 @@
   GUIDED 再 arm、对地面任务在 home 槽后前置 `NAV_TAKEOFF`（判据 `landedState`，
   armed ≠ 空中）；红/绿对照与验收记录见 `docs/sitl-integration.md` §11.3。
   **方案 B（目标形态）已立项待触发**：`GUIDED + TAKEOFF + DO_REPOSITION(192)` 惯用法
-  （Mission Planner "Fly To" 同款），不传任务；无阻塞需求，与 A 并存。
+  （Mission Planner "Fly To" 同款），不传任务；无阻塞需求，与 A 并存；**其命令地基已由
+  P2-F2 铺平**（下条）。
+- **P2-F2（带位置命令 COMMAND_INT 契约）**：**2026-10-30 已落地**——AP 对携带经纬度的命令
+  强制 INT 报文（DO_REPOSITION 用 COMMAND_LONG 一律 `MAV_RESULT=8` COMMAND_INT_ONLY，
+  与模式无关），而全栈缺 `CommandInt(75)` → 编队修正/队形机动在真机上 100% 静默失效。
+  修法：新增 `CommandInt`（与 pymavlink 官方帧逐字节一致）+ `command()` 自动路由
+  `COMMAND_INT_REQUIRED` + sim 入站 INT；SITL 修复前/后对照（非 GUIDED `8`→`2`、
+  GUIDED `8`→ACCEPTED+飞行）见 `docs/sitl-integration.md` §11.2-⑨、§11.3。
+  **这是"sim 测不出"家族第 4 例**（前 3 例：尾零裁剪 / 任务槽 0=HOME / 模式枚举）。
 - **附带口径**：`tcp://` 的 UDP 顶替已在 2026-10-28 修掉（改为**明确拒绝 + 指路**，
   `ArduPilotAdapter.connect`）——本次首验全程 UDP，未经过该路径；口径已闭合，不再挂"仍开放"。
 

@@ -225,6 +225,7 @@ cloud-backend `UdpGateway` + `TelemetryIngestService` 已实现以下兼容处�
 | MISSION_COUNT 目标  | 拒绝 broadcast(0)              | `targetSystem()` 从注册表取真实 sysid |
 | MISSION_START(300)  | 部分版本 UNSUPPORTED           | 回退 `DO_SET_MODE`(176) auto 模式  |
 | 任务槽 0（AP）      | AP 忽略写入索引 0 的条目（保留给 HOME）| `withArduPilotHomeSlot` 前置 home 占位、用户条目后移（按 `HEARTBEAT.autopilot` 分派）|
+| 带位置命令报文格式   | drone-sim 收 LONG/INT 双口径 | AP **强制 COMMAND_INT**（LONG→`MAV_RESULT=8`）| `command()` 按 `COMMAND_INT_REQUIRED` 集合自动路由（P2-F2）|
 | 尾零裁剪（v2）      | AP 的 C 库裁掉 payload 尾部全零   | 解码入口按消息定义长度零填充（wire 长度语义不变）|
 | 心跳 custom_mode    | PX4 nav_state / ArduCopter 两套枚举 | `modeLabel()` 按 `HEARTBEAT.autopilot` 分派两种表 |
 | GCS 心跳             | 需先收到才回包                  | 1Hz 周期 GCS 心跳（QGC 风格）       |
@@ -681,6 +682,8 @@ ALL PX4 SITL TESTS PASSED
 | ⑦ | AUTO 地面启动约束 | 无（sim 直接起飞/执行） | **要求任务首条命令 = TAKEOFF**：否则 MISSION_START(300) 回 `MAV_RESULT=4`，回退 DO_SET_MODE(176) 回 `MAV_RESULT=2`，STATUSTEXT "Mode change to Auto failed: init failed"；单点"去某点"任务从地面起不来。**同族补充（2026-10-29 实测）**：**armed 且在地面**时 `DO_SET_MODE(AUTO)` 本身也被拒（同属 init failed） | **已修**（P2-F1 方案 A）：**地面**（`landedState`=ON_GROUND；**armed ≠ 空中**——dispatch 先 arm 再上传，见 §11.3）AP 任务在 home 槽后自动前置 `NAV_TAKEOFF`（alt=首条用户项，≤0 兜底 10m）；`ArduPilotMissionUploadTest` +7 例（含全握手线上形状与"arm 后仍在地面"回归） |
 | ⑧ | COMMAND_LONG TAKEOFF | **只查 armed**（任意模式都接受） | **2026-10-29 实测矩阵**：地面+AUTO+未 arm → 拒 `MAV_RESULT=4`；arm（自动切 GUIDED）后 → **接受并爬升**；空中+AUTO → 拒（非 GUIDED）；空中+GUIDED → 仍拒（**已起飞状态**不接受） | **已闭环**（P2-F1）：产品流"arm（自动进 GUIDED）→ takeoff"实测可用；**takeoff 刻意不做模式适配**——空中切 GUIDED 会静默打断任务、未 arm 不该由 takeoff 代做（arm 走独立入口 + 拦截链）。该决策由 `ArduPilotTakeoffModeTest` 4 例钉住；惯用法 B（GUIDED+DO_REPOSITION，不传任务）仍立项待触发 |
 
+| ⑨ | 带位置命令的报文格式（DO_REPOSITION） | LONG 可（sim 双口径都收） | **强制 COMMAND_INT**：LONG → 拒 `MAV_RESULT=8`（COMMAND_INT_ONLY，与模式无关）；INT+非 GUIDED → `2`（DENIED，模式约束）；INT+GUIDED → ACCEPTED 并飞到位（**1e-7 度级精度**） | **已闭环**（P2-F2，2026-10-30）：`command()` 对 `COMMAND_INT_REQUIRED` 集合自动路由；此前编队修正/队形机动在 AP 上 100% 静默失效。回归：`CommandIntTest`（pymavlink 官方帧逐字节）/ `CommandIntRoutingTest` / sim INT 入站测试 |
+
 **无差异项**（同样记录在案）：任务上传的 2.5s 丢包重发恢复在 AP 上工作正常；COMMAND_ACK
 接受/拒绝语义一致；遥测解码字段（位置/姿态/电量/GPS）逐项对上；GCS 1Hz 心跳维持链路未触发
 任何 failsafe。
@@ -718,7 +721,20 @@ ALL PX4 SITL TESTS PASSED
   产品流"arm（自动进 GUIDED）→ takeoff"实测**接受并爬升**；**`takeoff` 刻意不做模式适配**
   （空中切 GUIDED 会静默打断任务；未 arm 应由 `arm` 显式完成、走围栏拦截链），
   该决策由 `ArduPilotTakeoffModeTest`（4 例）钉住，变异 A/B 已验证（加模式切换 ⇒ 红）。
+- **P2-F2 · 带位置命令 COMMAND_INT 契约（已落地，2026-10-30）`[AP-实测]`**：
+  `FormationKeeper` 偏差修正与 `FormationService` 队形机动的 `DO_REPOSITION` 在 AP 真机上
+  **完全不工作**——AP 对携带经纬度的命令**强制 INT 报文**，LONG 一律回 `MAV_RESULT=8`
+  （COMMAND_INT_ONLY；与模式无关——非 GUIDED 与 GUIDED 悬停中结果相同）。而全栈缺这条消息
+  → 又一例"sim 测不出"（drone-sim 两种口径都收）。修法：新增
+  `CommandInt(75, LEN=35, CRC=158)`（编码与 pymavlink 官方打包帧**逐字节一致**）+
+  `command()` 对 `COMMAND_INT_REQUIRED` 集合自动路由（p5/p6→x/y×1e7、
+  frame=GLOBAL_RELATIVE_ALT_INT）+ sim 入站 INT 支持——**单一收口点**，REST raw 与编队的
+  所有调用方同时受益。**SITL 复验（同一实例同一脚本，修复前后对照）**：非 GUIDED 态
+  `8`→`2`（"格式不认"变"模式不对"，两层约束分离清晰）；GUIDED 悬停态 `8`→**ACCEPTED +
+  爬 25m / 北飞 ~50m / 精确悬停**（落点 -35.362812 与**线上 int32 目标逐位一致**——
+  1e-7 度刻度内的到位，float 口径下做不到的精度）。
+  此落地同时把**方案 B 的地基铺平**（"去某点"惯用法所需的 DO_REPOSITION 真机可用）。
 - **方案 B（目标形态，立项待触发）**：惯用法侧适配——AP 生态的"去某点"用
   `GUIDED + TAKEOFF + DO_REPOSITION(192)` 表达（Mission Planner "Fly To" 同款），
   不传任务；需要新命令语义、驻留/返航行为定义与 e2e 覆盖。与 A 并存、互不冲突，
-  待真实需求触发时立项。
+  待真实需求触发时立项；**其命令地基（DO_REPOSITION 真机可用）已由 P2-F2 落地**。

@@ -94,6 +94,8 @@ public final class MavEnums {
     public static final int MAV_FRAME_LOCAL_NED = 1;
     public static final int MAV_FRAME_MISSION = 2;
     public static final int MAV_FRAME_GLOBAL_RELATIVE_ALT = 3;
+    /** COMMAND_INT 口径的相对高全局坐标系（x/y 为 lat/lon*1e7）。 */
+    public static final int MAV_FRAME_GLOBAL_RELATIVE_ALT_INT = 6;
 
     // ---- MAV_MISSION_RESULT ----
     public static final int MAV_MISSION_ACCEPTED = 0;

@@ -58,6 +58,11 @@ public final class MavlinkMessageInfo {
         // msgId=143 官方为 SCALED_PRESSURE3，本项目未实现，故不登记。
         // （此前误把 MISSION_REQUEST_LIST 登记在 143 上，而官方 143 是 SCALED_PRESSURE3，
         //   同时官方 MISSION_REQUEST_LIST 是 43、官方 MISSION_REQUEST 是 40 —— 三个 id 串了位。）
+        // 2026-10-30 补：带经纬度的命令必须走 INT 口径——ArduPilot 对 DO_REPOSITION 用
+        // COMMAND_LONG 发送一律回 MAV_RESULT=8（COMMAND_INT_ONLY；AP SITL 实测见
+        // docs/sitl-integration.md §11.2-⑨）。LEN=35（含 current/autocontinue），
+        // CRC_EXTRA=158（pymavlink 官方打包逐字节核验，见 CommandIntTest）。
+        INFOS[75]  = new Info(35, 158);   // COMMAND_INT
         INFOS[76]  = new Info(33, 152);   // COMMAND_LONG
         INFOS[77]  = new Info(10, 143);   // COMMAND_ACK
         INFOS[242] = new Info(60, 104);   // HOME_POSITION

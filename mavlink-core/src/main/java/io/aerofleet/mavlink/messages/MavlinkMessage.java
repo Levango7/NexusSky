@@ -93,6 +93,8 @@ public abstract class MavlinkMessage {
                 return GpsRtcmData.decode(frame);
             case MissionItemInt.ID:
                 return MissionItemInt.decode(frame);
+            case CommandInt.ID:
+                return CommandInt.decode(frame);
             case CommandLong.ID:
                 return CommandLong.decode(frame);
             case CommandAck.ID:

@@ -9,6 +9,7 @@ import io.aerofleet.cloud.gateway.UdpGateway;
 import io.aerofleet.cloud.telemetry.PendingAcks;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.CommandAck;
+import io.aerofleet.mavlink.messages.CommandInt;
 import io.aerofleet.mavlink.messages.CommandLong;
 import io.aerofleet.mavlink.messages.MavlinkMessage;
 import io.aerofleet.mavlink.messages.MissionAckMsg;
@@ -202,8 +203,22 @@ public class DroneCommandService {
     }
 
     /**
-     * Send one COMMAND_LONG to a specific drone and wait for its COMMAND_ACK.
+     * 必须用 COMMAND_INT 发送的命令（携带经纬度、需要 1e-7 度级精度）。
+     * <p>真机契约：ArduPilot 对 {@code MAV_CMD_DO_REPOSITION} 用 COMMAND_LONG 发送一律回
+     * {@code MAV_RESULT=8}（COMMAND_INT_ONLY）——AP SITL 实测，非 GUIDED 与 GUIDED 悬停中
+     * 两种状态下结果相同，是报文格式要求而非模式问题（docs/sitl-integration.md §11.2-⑨）。
+     * 此前编队修正/队形机动因此在该固件上完全不工作。今后同类"带位置命令"在此登记。
+     */
+    private static final java.util.Set<Integer> COMMAND_INT_REQUIRED =
+            java.util.Set.of(MavEnums.MAV_CMD_DO_REPOSITION);
+
+    /**
+     * Send one command to a specific drone and wait for its COMMAND_ACK.
      * Retries once on timeout or non-accepted result.
+     *
+     * <p>默认走 COMMAND_LONG；{@link #COMMAND_INT_REQUIRED} 中的命令自动改走 COMMAND_INT
+     * （p5/p6 作为 lat/lon 转 x/y*1e7、p7 作为相对高 z，frame=GLOBAL_RELATIVE_ALT_INT）——
+     * 单一收口点：REST raw 与编队等所有调用方都由此受益，无需各自记得换报文格式。
      *
      * @return MAV_RESULT accepted by the drone
      */
@@ -223,13 +238,33 @@ public class DroneCommandService {
             // ALLOW：继续正常下发路径
         }
 
+        // 带位置命令改走 COMMAND_INT（一次性转换，失败即抛，不消耗重试）
+        CommandInt intMsg = null;
+        if (COMMAND_INT_REQUIRED.contains(mavCommand)) {
+            if (!Float.isFinite(p5) || !Float.isFinite(p6)) {
+                throw new CommandException("command " + mavCommand
+                        + " requires finite lat/lon (lat=" + p5 + ", lon=" + p6 + ")", -1);
+            }
+            // toIntExact：溢出抛 ArithmeticException 而非静默截断（纬度 |p*1e7| ≤ 9e8 < 2^31，
+            // 纵深防御与 IncidentDispatchService 同款）。
+            intMsg = new CommandInt(target, TARGET_COMP,
+                    MavEnums.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, mavCommand, 0, 0,
+                    p1, p2, p3, p4,
+                    Math.toIntExact(Math.round(p5 * 1e7)), Math.toIntExact(Math.round(p6 * 1e7)), p7);
+            log.info("Command {} to sysid={} routed as COMMAND_INT (geo payload, frame=REL_ALT_INT)",
+                    mavCommand, target);
+        }
+
         for (int attempt = 1; attempt <= ACK_RETRIES; attempt++) {
             var future = pendings.expectCommandAck(mavCommand, target);
             try {
                 CommandAck ack;
                 try {
-                    gateway.send(target, new CommandLong(target, TARGET_COMP, mavCommand, 0,
-                            p1, p2, p3, p4, p5, p6, p7)
+                    MavlinkMessage outMsg = intMsg != null
+                            ? intMsg
+                            : new CommandLong(target, TARGET_COMP, mavCommand, 0,
+                                    p1, p2, p3, p4, p5, p6, p7);
+                    gateway.send(target, outMsg
                             .toFrame(UdpGateway.GCS_SYSID, UdpGateway.GCS_COMPID,
                                     nextSeq()));
                 } catch (IOException e) {
