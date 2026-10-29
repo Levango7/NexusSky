@@ -1,5 +1,32 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P2-F2：DO_REPOSITION 必须 COMMAND_INT——编队命令在 AP 真机 100% 静默失效的修复（2026-10-30）
+
+**"sim 测不出"家族第 4 例，真机现场挖出并闭环**：ArduPilot 对携带经纬度的命令**强制 COMMAND_INT
+报文**——`DO_REPOSITION` 用 COMMAND_LONG 发送一律回 `MAV_RESULT=8`（COMMAND_INT_ONLY；AP SITL
+实测，非 GUIDED 与 GUIDED 悬停中结果相同，与模式无关）。而全栈缺这条消息、也没意识到格式契约，
+于是 `FormationKeeper` 偏差修正与 `FormationService` 队形机动在 AP 实机上**完全不工作**
+（只打 WARN、`correctionCount` 空涨——恰是待口径 #6 那枚计数器）；drone-sim 两种口径都收，
+所以 e2e 全绿掩盖至今。
+
+- **mavlink-core**：新增 `CommandInt(75, LEN=35, CRC=158)`——编码与 **pymavlink 官方打包帧
+  逐字节一致**（`CommandIntTest` 含全 35 字节与尾零裁剪 33 字节双向量）；注册表/decode 分派/
+  `MAV_FRAME_GLOBAL_RELATIVE_ALT_INT` 一并补齐。
+- **cloud-backend**：`command()` 对 `COMMAND_INT_REQUIRED` 集合（当前 = DO_REPOSITION）
+  **自动路由 COMMAND_INT**（p5/p6→x/y×1e7、frame=GLOBAL_RELATIVE_ALT_INT；NaN 经纬度快速拒绝，
+  不消耗重试）——单一收口点，REST raw 与编队全部调用方同时受益，调用方零改动。
+- **drone-sim**：入站 COMMAND_INT 支持（x/y 还原为度复用 LONG 处理链），新回归用例
+  "INT 口径同效：同样被接受并真飞到位"。
+- **SITL 复验（同一实例同一脚本，修复前/后对照）`[AP-实测]`**：非 GUIDED 态 `8`→`2`
+  （"格式不认"变"模式不对"，两层约束分离清晰）；GUIDED 悬停态 `8`→**ACCEPTED + 爬 25m /
+  北飞 ~50m / 悬停**，落点与线上 int32 目标**逐位一致**（1e-7 度刻度——float 口径做不到的精度）。
+  文档并入 `docs/sitl-integration.md` §11.2-⑨ / §11.3；立项书 P2-F2 条目落定，方案 B 的
+  命令地基就此铺平。
+
+计数：本批 +8 测试（mavlink-core 519→523、cloud-backend 3296→3299、drone-sim 1452→1453），
+全仓 **5466→5474**；全 reactor 全绿；10 份口径文档同步。
+
+
 ## [Unreleased] — P2 #18 续批：配置键与死访问器的**完整**对账（8 个假开关删除 + 新门禁 + 12 个死访问器）（2026-10-30）
 
 ### 现场
@@ -433,7 +460,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-30 共有 238 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-30 共有 239 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -459,7 +486,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 238 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 239 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
