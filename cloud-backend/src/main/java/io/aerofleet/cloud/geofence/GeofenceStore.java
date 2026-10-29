@@ -5,10 +5,13 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collections;
 
 import java.util.List;
 import java.util.Map;
@@ -89,13 +92,21 @@ public class GeofenceStore {
             }
         }
 
-        // 加载越界事件（按时间升序，最多 MAX_BREACH_HISTORY 条）
+        // 加载越界事件：只取最新的 MAX_BREACH_HISTORY 条（LIMIT 下推数据库）。
+        // 该表是只增的（没有保留/清理任务），旧实现 findAll() 把整张表读进堆再排序，
+        // 最后只留 1000 条——与 flightlog/audit 的"全量取回再截尾"是同一类问题；
+        // 越界事件积累几年后，重启会先卡在这一次全表扫描上。
         if (breachEventRepository != null) {
             try {
-                List<GeofenceBreachEventEntity> breachEntities = breachEventRepository.findAll();
-                breachEntities.sort((a, b) -> Long.compare(a.getTimestampMs(), b.getTimestampMs()));
+                List<GeofenceBreachEventEntity> newest = breachEventRepository.findAll(
+                        PageRequest.of(0, MAX_BREACH_HISTORY,
+                                Sort.by(Sort.Direction.DESC, "timestampMs", "id")))
+                        .getContent();
+                // 数据库按"最新在前"返回；deque 需要旧→新追加
+                List<GeofenceBreachEventEntity> ascending = new ArrayList<>(newest);
+                Collections.reverse(ascending);
                 int loaded = 0;
-                for (GeofenceBreachEventEntity entity : breachEntities) {
+                for (GeofenceBreachEventEntity entity : ascending) {
                     try {
                         breachHistory.addLast(entity.toEvent());
                         loaded++;
@@ -104,7 +115,7 @@ public class GeofenceStore {
                                 entity.getId(), e.getMessage());
                     }
                 }
-                // 超过上限时丢弃最旧记录
+                // 超过上限时丢弃最旧记录（仓储异常返回超量时的兜底）
                 while (breachHistory.size() > MAX_BREACH_HISTORY) {
                     breachHistory.pollFirst();
                 }
