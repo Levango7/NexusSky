@@ -130,24 +130,4 @@ public class DynamicReconfigurator {
                 "terrain changed at grid (" + gridX + "," + gridY
                         + "), partial replan for affected sub-region");
     }
-
-    /** @return 心跳超时阈值（ms）。 */
-    public long getHeartbeatTimeoutMs() {
-        return heartbeatTimeoutMs;
-    }
-
-    /** @return 低电量阈值（%）。 */
-    public int getLowBatteryThreshold() {
-        return lowBatteryThreshold;
-    }
-
-    /** @return 危急电量阈值（%）。 */
-    public int getCriticalBatteryThreshold() {
-        return criticalBatteryThreshold;
-    }
-
-    /** @return 覆盖下降触发全量重规划阈值。 */
-    public double getCoverageDeclineReplanThreshold() {
-        return coverageDeclineReplanThreshold;
-    }
 }

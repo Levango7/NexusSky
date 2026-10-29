@@ -180,23 +180,7 @@ public final class GnssSimulator {
         return simLonDeg + ThreadLocalRandom.current().nextDouble(-1, 1) * noiseRadius / (111320.0 * cosLat);
     }
 
-    public double getReportedAlt() {
-        if (spoofingActive) {
-            return simAltM;
-        }
-        double noiseRadius = currentPositionAccuracyM;
-        return simAltM + ThreadLocalRandom.current().nextDouble(-1, 1) * noiseRadius;
-    }
-
     public List<GnssSatellite> getSatellites() {
         return satellites;
-    }
-
-    public GnssReceiver getReceiver() {
-        return receiver;
-    }
-
-    public RtkBaseStation getBaseStation() {
-        return baseStation;
     }
 }

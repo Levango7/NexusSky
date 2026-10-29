@@ -85,13 +85,6 @@ public final class CrossZoneRelayPolicy {
         return !isAllowed(relayType);
     }
 
-    /**
-     * 获取允许的跨区中继类型集合（不可变）。
-     */
-    public Set<RelayType> getAllowedRelayTypes() {
-        return allowedRelayTypes;
-    }
-
     @Override
     public String toString() {
         return "CrossZoneRelayPolicy{allowed=" + allowedRelayTypes + "}";
