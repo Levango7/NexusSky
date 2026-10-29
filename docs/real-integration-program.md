@@ -26,7 +26,7 @@
 | 6 | 空地协同记录 `AirGroundCoordinationService` | ✅ **2026-10-27 归档落库**（V33 + 写穿 ×2 [启动完成/总结前] + **读穿修掉总结后/重启后 GET report 404**；语义裁决：内存清理 ≠ 归档删除） |
 | 7 | 合规状态 `ComplianceStateManager` | ✅ **2026-10-27 落库**（V32 + 启动水合 + 写穿；**顺带修掉三个"声明了却从未写入"的 last* 时间戳**——RegulatorController 上报的永远是 0 的修复） |
 | 8 | 应急编排 `EmergencyOrchService` | ✅ **2026-10-27 落地**（V37）：`emergency_plan` 新表 + 整 Map 快照 JSON（Jackson 对 Map 双向无损）；写穿于 start/abort/上报回调三处、读穿于 getPlan——重启后编排进度与事件列表可查；planId 由 V35 sequence_counter 续号（两批衔接） |
-| 9 | 审计哈希链 dev 档 | 🔶 配置口径（prod 已 true；staging 缺覆盖行——审计 §5 Q2 待口径） |
+| 9 | 审计哈希链 dev 档 | ✅ **已闭合（2026-10-29 复核）**：prod/staging 均 `audit.persist-to-db=true`（`application-staging.properties:66`）；空域预约开关同样已开（`application-staging.properties:63`），`check-persist-switches.py` 4/4 对齐 |
 
 **验收标准（全批）**：新增迁移在 H2/Postgres 双跑；每条落库配"重启恢复"测试（第一批三条约 13 例为模板：
 写穿断言 + 启动恢复顺序 + 异常降级不炸主链 + 无仓库纯内存语义不变）；计数门禁同步。
