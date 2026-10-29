@@ -343,13 +343,12 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
                 // 同一会话可能被多个线程同时广播（遥测帧 + 调度帧 + 告警帧来源不同）。
                 // WebSocketSession 不是线程安全的：并发 sendMessage 会帧交错/抛
                 // IllegalStateException（客户端表现=偶发断连或半包 JSON）。
-                // 本类唯一发送入口是 dispatch()，互斥由下方「按会话加锁」提供。
-                // 注：本仓未引入 Spring 的 ConcurrentWebSocketSessionDecorator
-                // （WebSocketConfig 只 addHandler，无 setDecoratorFactory），故装饰器
-                // 层面没有第二把锁——独占性完全靠这把 synchronized (s) 保证（见 GAPS §十五）。
-                synchronized (s) {
-                    s.sendMessage(msg);
-                }
+                // 本类唯一发送入口是 dispatch()。同会话发送的互斥不再由本类加锁，
+                // 而由 WebSocketConfig 套上的 ConcurrentWebSocketSessionDecorator 内部 flushLock 提供
+                // （取代原先的 synchronized(s)）。该装饰器同时在「首帧阻塞超过 sendTimeLimit 或缓冲堆积
+                // 超过 bufferSizeLimit」时抛 SessionLimitExceededException 并主动断开会话，
+                // 防止慢客户端（连上但不读/慢读数据）占住调度线程——见 GAPS §十五。异常在此被捕获并移出会话集。
+                s.sendMessage(msg);
             } catch (Exception e) {
                 log.debug("WS send failed to {}: {}", s.getId(), e.getMessage());
                 sessions.remove(s.getId());
