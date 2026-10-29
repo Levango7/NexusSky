@@ -12,8 +12,11 @@
 `@Scheduled` 调度线程——8 线程池被几条卡死连接拖垮即全局停摆（见 GAPS §十五）。
 
 本次改动：
-- `WebSocketConfig.setDecoratorFactory` 为每个连接套
-  `ConcurrentWebSocketSessionDecorator(session, sendTimeLimit, bufferSizeLimit)`；
+- `WebSocketConfig` 把 `telemetryWebSocketHandler` 包进一层 `WebSocketHandlerDecorator`
+  （作用域只限 `/ws/telemetry`，不污染 STOMP 等其他端点），在 `afterConnectionEstablished` 时
+  为每个连接套 `ConcurrentWebSocketSessionDecorator(session, sendTimeLimit, bufferSizeLimit)`；
+  （注：最初误写成 `WebSocketHandlerRegistration.setDecoratorFactory`——该方法并不存在，导致
+  cloud-backend 编译失败、CI 两个 job 红，已在后续提交修正为该 handler 级装饰器写法。）
 - `dispatch()` 移除手工 `synchronized (s)`，互斥改由装饰器内部 `flushLock` 提供（等价保证，且
   额外带超时/缓冲保护）；
 - 装饰器超限抛 `SessionLimitExceededException`，被既有 `catch (Exception)` 捕获并移出会话集；
