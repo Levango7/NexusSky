@@ -678,8 +678,8 @@ ALL PX4 SITL TESTS PASSED
 | ④ | 任务项拉取变体 | 发 MISSION_REQUEST_INT(51) | 发 legacy MISSION_REQUEST(**40**) | 兼容层（双 waiter）本就吸收，无改动；本文档原文写反，已按实测改正 |
 | ⑤ | MISSION_CURRENT 计数口径 | `total` = 任务条目数 | 读回 3 条（含 home）/ 遥测 `missionTotal=2`（不含 home） | 仅口径差异，记录不处理（前端进度条按遥测字段走） |
 | ⑥ | arm 的模式约束 | 任意模式可 arm | **AUTO 下 arm 被拒**：STATUSTEXT "Arm: Auto mode not armable"（任务非 TAKEOFF 开头时）；切 GUIDED 后 arm 成功 | **已修**（P2-F1 方案 A）：`DroneCommandService.arm` 对 AP+AUTO 先 `DO_SET_MODE(custom=4)` 再 arm；`ArduPilotGroundArmTest` 5 例钉住命令序列 |
-| ⑦ | AUTO 地面启动约束 | 无（sim 直接起飞/执行） | **要求任务首条命令 = TAKEOFF**：否则 MISSION_START(300) 回 `MAV_RESULT=4`，回退 DO_SET_MODE(176) 回 `MAV_RESULT=2`，STATUSTEXT "Mode change to Auto failed: init failed"；单点"去某点"任务从地面起不来 | **已修**（P2-F1 方案 A）：**地面**（`landedState`=ON_GROUND；**armed ≠ 空中**——dispatch 先 arm 再上传，见 §11.3）AP 任务在 home 槽后自动前置 `NAV_TAKEOFF`（alt=首条用户项，≤0 兜底 10m）；`ArduPilotMissionUploadTest` +7 例（含全握手线上形状与"arm 后仍在地面"回归） |
-| ⑧ | COMMAND_LONG TAKEOFF | 接受 | 非 GUIDED 模式被拒（`MAV_RESULT=4`）；GUIDED 下接受 | 方案 A 的 arm 前切 GUIDED 使该命令可用；惯用法 B（GUIDED+DO_REPOSITION，不传任务）仍立项待触发 |
+| ⑦ | AUTO 地面启动约束 | 无（sim 直接起飞/执行） | **要求任务首条命令 = TAKEOFF**：否则 MISSION_START(300) 回 `MAV_RESULT=4`，回退 DO_SET_MODE(176) 回 `MAV_RESULT=2`，STATUSTEXT "Mode change to Auto failed: init failed"；单点"去某点"任务从地面起不来。**同族补充（2026-10-29 实测）**：**armed 且在地面**时 `DO_SET_MODE(AUTO)` 本身也被拒（同属 init failed） | **已修**（P2-F1 方案 A）：**地面**（`landedState`=ON_GROUND；**armed ≠ 空中**——dispatch 先 arm 再上传，见 §11.3）AP 任务在 home 槽后自动前置 `NAV_TAKEOFF`（alt=首条用户项，≤0 兜底 10m）；`ArduPilotMissionUploadTest` +7 例（含全握手线上形状与"arm 后仍在地面"回归） |
+| ⑧ | COMMAND_LONG TAKEOFF | **只查 armed**（任意模式都接受） | **2026-10-29 实测矩阵**：地面+AUTO+未 arm → 拒 `MAV_RESULT=4`；arm（自动切 GUIDED）后 → **接受并爬升**；空中+AUTO → 拒（非 GUIDED）；空中+GUIDED → 仍拒（**已起飞状态**不接受） | **已闭环**（P2-F1）：产品流"arm（自动进 GUIDED）→ takeoff"实测可用；**takeoff 刻意不做模式适配**——空中切 GUIDED 会静默打断任务、未 arm 不该由 takeoff 代做（arm 走独立入口 + 拦截链）。该决策由 `ArduPilotTakeoffModeTest` 4 例钉住；惯用法 B（GUIDED+DO_REPOSITION，不传任务）仍立项待触发 |
 
 **无差异项**（同样记录在案）：任务上传的 2.5s 丢包重发恢复在 AP 上工作正常；COMMAND_ACK
 接受/拒绝语义一致；遥测解码字段（位置/姿态/电量/GPS）逐项对上；GCS 1Hz 心跳维持链路未触发
@@ -709,6 +709,10 @@ ALL PX4 SITL TESTS PASSED
 - **修复前对照（红）**：主树旧代码同一场景实测——AUTO 下 arm 被拒 `MAV_RESULT=4`；
   手工切 GUIDED 绕过 arm 后读回只有 `[home, wp]`（无 TAKEOFF），`start` 回
   `MAV_RESULT=4 → 回退 2`，固件侧实录 "Mode change to Auto failed: init failed"。
+- **同族收口（⑧ `COMMAND_LONG TAKEOFF`）`[AP-实测]` 2026-10-29**：矩阵见 §11.2-⑧——
+  产品流"arm（自动进 GUIDED）→ takeoff"实测**接受并爬升**；**`takeoff` 刻意不做模式适配**
+  （空中切 GUIDED 会静默打断任务；未 arm 应由 `arm` 显式完成、走围栏拦截链），
+  该决策由 `ArduPilotTakeoffModeTest`（4 例）钉住，变异 A/B 已验证（加模式切换 ⇒ 红）。
 - **方案 B（目标形态，立项待触发）**：惯用法侧适配——AP 生态的"去某点"用
   `GUIDED + TAKEOFF + DO_REPOSITION(192)` 表达（Mission Planner "Fly To" 同款），
   不传任务；需要新命令语义、驻留/返航行为定义与 e2e 覆盖。与 A 并存、互不冲突，
