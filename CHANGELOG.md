@@ -1,5 +1,50 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修：慢客户端阻塞占住调度线程——给 /ws/telemetry 套上 ConcurrentWebSocketSessionDecorator（2026-10-30）
+
+### 修（WebSocket，运行时行为变更）：用装饰器取代手工 `synchronized(s)`，并加发送时限/缓冲上限
+
+`TelemetryWebSocketHandler.dispatch()` 原先靠 `synchronized (s)` 串行化同会话发送。但这把锁也
+**屏蔽了 Spring 装饰器的限流检查**：装饰器只在「另一线程正持有 flushLock 时」才执行
+`checkSessionLimits()`（发送时长超 `sendTimeLimit` 或缓冲超 `bufferSizeLimit` 即抛
+`SessionLimitExceededException`）。有 `synchronized (s)` 在，单会话发送永远串行、检查永不触发，于是
+「客户端连上但不读/慢读数据」的慢客户端会让 `sendMessage` 阻塞直到 TCP RST，期间一直占住某个
+`@Scheduled` 调度线程——8 线程池被几条卡死连接拖垮即全局停摆（见 GAPS §十五）。
+
+本次改动：
+- `WebSocketConfig` 把 `telemetryWebSocketHandler` 包进一层 `WebSocketHandlerDecorator`
+  （作用域只限 `/ws/telemetry`，不污染 STOMP 等其他端点），在 `afterConnectionEstablished` 时
+  为每个连接套 `ConcurrentWebSocketSessionDecorator(session, sendTimeLimit, bufferSizeLimit)`；
+  （注：最初误写成 `WebSocketHandlerRegistration.setDecoratorFactory`——该方法并不存在，导致
+  cloud-backend 编译失败、CI 两个 job 红，已在后续提交修正为该 handler 级装饰器写法。）
+- `dispatch()` 移除手工 `synchronized (s)`，互斥改由装饰器内部 `flushLock` 提供（等价保证，且
+  额外带超时/缓冲保护）；
+- 装饰器超限抛 `SessionLimitExceededException`，被既有 `catch (Exception)` 捕获并移出会话集；
+- 新增配置键 `aerofleet.ws.send-time-limit-ms`（默认 5000）与 `aerofleet.ws.buffer-size-limit`
+  （默认 524288=512KB），可按网络环境调参。
+
+回归：`TelemetryWsSlowClientDisconnectTest`（装饰器契约 + handler 断连后移出会话集）；
+既有 `TelemetryWsConcurrencyTest` 改为走装饰器路径，仍验证同会话发送互斥。
+
+> 背景与量化见 `.coord/GAPS.md` §十五。
+
+## [Unreleased] — 修：`TelemetryWebSocketHandler` 注释声称的「装饰器同锁」并不存在（2026-10-30）
+
+### 修（诚实性，零行为变更）：删掉一行误导注释
+
+`TelemetryWebSocketHandler.dispatch()` 的加锁处注释称「按会话加锁，与 Spring 的
+`ConcurrentWebSocketSessionDecorator` 内部用同一把监视器」。全仓 grep 证实：该装饰器
+**只在这一行注释里出现**；当时 `WebSocketConfig` 只 `addHandler`、无 `setDecoratorFactory`。
+即所谓「同一把监视器」并不存在——A 档时实际互斥只靠 `synchronized (s)`（该锁后来在同日 B 档被
+装饰器的 `flushLock` 取代，见上方条目）。
+
+本修改**不改变任何运行时行为**：注释只把「为什么安全」的理由从假的改成真的，并指明
+独占性完全由这把锁保证。既存并发互斥测试 `TelemetryWsConcurrencyTest`（`synchronized`
+互斥语义）继续有效，无端点 / 测试计数变化。
+
+> 背景与量化见 `.coord/GAPS.md` §十五。慢客户端阻塞的**真**修复（引入装饰器 +
+> `sendTimeLimit`/`bufferSizeLimit`）属运行时行为变更，已在上方《引入装饰器…》节落地（B 档）。
+
 ## [Unreleased] — 缓存键门禁自己失明：`java-level` 的恢复键与 warm 键永不同源（2026-10-29）
 
 ### 修（CI）：一条门禁因"缓存永不命中 → 冷下载 → Maven Central 429"而红，而守卫看不见它
@@ -388,7 +433,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 237 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 239 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -414,7 +459,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 237 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 239 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
