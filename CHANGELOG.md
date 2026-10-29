@@ -17,6 +17,50 @@
 - **测试**：`FlightPhaseReportTest`（7 例，映射边界）、`DroneViewsFlightInfoTest`（3 例，
   外露口径）、`telemetryPanel.test.jsx`（3 例，展示口径）。
 
+## [Unreleased] — 新增「文档端点存在性」门禁 + 修 12 篇文档里写错的 14 个路径（2026-10-29）
+
+### 加：`scripts/check-doc-endpoints.py`（文档自己写出的端点必须在代码里存在）
+
+#201 修掉了 `/api/v1/sat/providers*` 这类"文档写了、代码没有"的失真。既然能出现一次，就说明
+**缺一道机械信号**：本仓已有「端点数声称」门禁与「前端调用契约」门禁，却**没有任何门禁看文档
+自己写出来的路径**——于是文档可以长期承诺一个客户调不通的接口。
+
+继续扫，又抓出 **14 个写错的路径 / 12 篇文档**（全部按 Controller 实际映射核对）：
+
+| 文档写成 | 真实 |
+|---|---|
+| `/api/v1/satlink/*`（README、PRODUCT-POSITIONING） | `/api/v1/sat-link/*` |
+| `/api/v1/env/alerts`（README） | `/api/v1/env-alerts` |
+| `POST /formation/create`、`POST /formation/{id}/takeoff` | `POST /formation`、`POST /formation/{id}/command`（`type=TAKEOFF`） |
+| `POST /spray/task`、`POST /auth/users`、`POST /auth/keys`、`GET /telemetry/...` | `POST /spray`、`/users`、`/mavlink/signing/keys`、`/drones/{sysid}/telemetry` |
+| `POST /drones/{sysid}/mission/clear`、`GET /flightlog/{logId}` | **无此端点**（已改成说明 + 真实替代） |
+| `/mesh/max-hops`、`/mesh/adjust-max-hops` | **无 REST 端点**（`DynamicMaxHops` 在 drone-sim 机载侧） |
+| `/api/v1/missions`（sitl 清单） | `/api/v1/drones/{sysid}/mission` |
+
+> 其中 `spray/status/{id}`、`delivery/sequence/{id}` 在代码注释里早已写明"**前端手里没有 ID，
+> 于是去调并不存在的端点**，404 又被 `.catch(() => null)` 吞掉"——前端侧修了、文档侧没跟上。
+> 这正是本仓"声明≠行为"主线的又一个面。
+
+**新门禁的口径**（刻意写死）：
+- 只认 `@RestController`；类级 base 取类声明前最后一个 `@RequestMapping`；方法级兼容
+  `"x"` / `value="/x"` / **裸注解**（路径全在类级——`EnvAlertController` 就是这种，第一版漏了它）；
+- 匹配用 `{var} → [^/]+`，**不猜**文档里哪段是 ID（否则 `sat-link` / `city-twin` / `max-hops`
+  这类合法连字符路径会被误吞）；文档只写父级或写 `...` 都算存在；
+- 只扫 12 篇「当前口径」文档；**规划/历史文档不扫**（ROADMAP / todo / commercialization-plan /
+  审计报告）——它们本来就允许写"将来要有"的接口，扫了只会逼人写假注释；
+- 行 **±2 行**内出现「未实现/不存在/没有/从未/预留/规划…」时豁免（诚实注释常把路径与
+  "均不存在"分写两行，逐行判定会把已在说真话的地方判红——实测踩到过）；
+- 3 情形离线自测（存在→绿 / 不存在→红 / 否定语境→豁免）+ **A/B 实测**（加假端点⇒红、还原⇒绿）。
+
+CI 接线：自测步骤 + repo-gates 新增 `Doc endpoint existence gate`。
+
+### 顺带：把"字段默认值 ≠ 条件装配结果"钉在代码上
+
+`RegulatorConfig.sinkType` 字段默认 `"sim"`，但 `NoopReportSink` 是
+`havingValue="none", matchIfMissing=true`、`Sim`/`Uom` 都是精确 `havingValue` ⇒
+**配置键缺失时装的是 Noop**。此前（#198）把字段默认值误读成运行时默认值，导致台账口径写错，
+已在 #201 订正；这里把坑写进 `sinkType` 的 javadoc，避免后人再踩（纯注释，无行为变化）。
+
 ## [Unreleased] — 漂移清算批：删掉两个不存在的端点 + 回填 M11/M12/M13 与审计/台账的过时口径（2026-10-29）
 
 ### 修（对外文档）：SDK 参考与集成指南公开了两个**从未实现**的端点
@@ -190,7 +234,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 231 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 232 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -216,7 +260,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 231 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 232 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

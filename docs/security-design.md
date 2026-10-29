@@ -160,12 +160,12 @@ public Result createTask(@RequestBody TaskRequest req) { ... }
 | 操作语义 | 角色 | 示例端点 |
 |---|---|---|
 | 设备实时控制 | OPERATOR | `POST /api/v1/drones/{sysid}/commands`、`POST /api/v1/drones/{sysid}/joystick` |
-| 任务管理 | OPERATOR | `POST /api/v1/spray/task`、`POST /api/v1/formation/create`、`POST /api/v1/delivery/...` |
+| 任务管理 | OPERATOR | `POST /api/v1/spray`、`POST /api/v1/formation`、`POST /api/v1/formation/{id}/command`（type=TAKEOFF）、`POST /api/v1/delivery` |
 | 应急操作 | OPERATOR | `POST /api/v1/emergency/...`、`POST /api/v1/autodispatch/trigger` |
 | 系统配置 | ADMIN | `PUT /api/v1/sat-link/strategy`、`POST /api/v1/celltowers/{sysid}/config` |
-| 用户/租户管理 | ADMIN | `POST /api/v1/auth/users`、`POST /api/v1/tenants` |
+| 用户/租户管理 | ADMIN | `POST /api/v1/users`、`POST /api/v1/tenants` |
 | 审计日志 | ADMIN | `GET /api/v1/audit/...` |
-| 纯查询 GET | 不加注解 | `GET /api/v1/drones`、`GET /api/v1/telemetry/...` |
+| 纯查询 GET | 不加注解 | `GET /api/v1/drones`、`GET /api/v1/drones/{sysid}/telemetry` |
 
 ### 2.5 前端角色显示
 
@@ -276,7 +276,8 @@ RBAC 默认拒绝后，四条上报腿（`POST /api/v1/edge/results`、`/loRa/al
 `/offline-alarm/batch-upload` 与 `/flush`、`/alarms/events`）要求 `OPERATOR`。而生产模式下
 它们本来就 over `anyRequest().authenticated()`（`SecurityConfig.java:76`）——匿名上报一直是
 401，问题不是"这轮改坏了"，而是**仓库里从来没有发放凭据的路径**：唯一发 `X-API-Key` 的调用方
-是 sdk-java 的 `NexusSkyClient`，而铸 key 的 `POST /api/v1/auth/keys` 又要求 `ADMIN`，
+是 sdk-java 的 `NexusSkyClient`，而铸 key 的 `GET /api/v1/mavlink/signing/keys` 与
+`POST /api/v1/mavlink/signing/keys/{sysid}/rotate` 又要求 `ADMIN`，
 新部署会卡在"先要有账号才能发凭据、先要有凭据才能上报"。
 
 引导手法与 `AdminBootstrapRunner` 同构：

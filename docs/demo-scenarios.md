@@ -173,7 +173,7 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 | 1 | 启动编队演示 | `scripts\e2e-formation.ps1` | 后端 + 3台 drone-sim(sysid=1/2/3) 自启动 |
 | 2 | 等待3机上线 | `GET /api/v1/drones` | 3 架飞机均 online=true |
 | 3 | 创建编队 | `POST /api/v1/formation` (members=[1,2,3], shape=LINE, spacing=5m) | 200 + formationId + state=FORMING |
-| 4 | 起飞到位 | `POST /api/v1/formation/{id}/takeoff` (alt=10m) | 3机起飞，state→STABLE |
+| 4 | 起飞到位 | `POST /api/v1/formation/{id}/command` (type=TAKEOFF, alt=10m) | 3机起飞，state→STABLE |
 | 5 | 队形变换 | `POST /api/v1/formation/{id}/transition` (shape=CIRCLE) | state=TRANSITIONING→STABLE |
 | 6 | 灯光同步 | `POST /api/v1/formation/{id}/lights` (pattern=RAINBOW) | 3机灯光状态更新 |
 | 7 | 查看灯光 | `GET /api/v1/formation/{id}/lights` | 反映 RAINBOW 状态 |

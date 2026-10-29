@@ -87,6 +87,8 @@ jobs:
           # 审计 §6 的两条门禁（2026-10-28 落地）：持久化状态性 / persist 开关 profile 对账。
           python3 scripts/check-statefulness.py --self-test
           python3 scripts/check-persist-switches.py --self-test
+          # 文档端点存在性（2026-10-29 落地）：文档里写出的 /api/v1 路径必须在 Controller 里真实存在。
+          python3 scripts/check-doc-endpoints.py --self-test
           # P3 先行件：UOM 契约差异比对器（拿到规范前先把机械部分建好，9 情形自测）。
           python3 scripts/uom-contract-diff.py --self-test
           # 变异验证的还原必须刷新时间戳，否则增量编译会继续用改坏的 .class
@@ -111,6 +113,13 @@ jobs:
       # 这道门禁把「前端在调一个不存在的东西」变成会红的 CI 步骤。
       - name: Frontend endpoint contract gate
         run: python3 scripts/check-frontend-endpoints.py
+      # 文档自己写出来的每个 /api/v1 路径，后端都必须真的有。
+      # 2026-10-29 实测：sdk-reference/integration-guide 公开了 /api/v1/sat/providers*
+      # （从未实现，调用是 404 而非文档说的 501）、README/PRODUCT-POSITIONING 写 satlink
+      # （真实是 sat-link）、demo-scenarios 写 formation/{id}/takeoff 与 spray/status/{id}
+      # （均不存在）……端点数门禁与前端契约门禁都管不到「文档里的路径」这一面。
+      - name: Doc endpoint existence gate
+        run: python3 scripts/check-doc-endpoints.py
       # 审计 §6 第一条：§2.1「必须落库」九域，要么有持久化证据、要么豁免登记（理由+到期日）。
       # 真事：这类债回退不响——改回纯内存、迁移表被删、水合调用被摘，编译/启动/测试可能
       # 全绿，只有重启后数据没了才知道。

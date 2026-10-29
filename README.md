@@ -374,7 +374,7 @@ ARM → startMission → 逐站拍照 → 逐站逆解算定位 → 喂跟踪器
 引入环境模型（温度/湿度/天气/风力）与告警引擎 `EnvAlertEngine`（温度/湿度/
 风力/能见度阈值告警），通过 `EnvironmentAlert`(30001)/`EnvironmentStatus`(30002)
 MAVLink 消息下发。风偏修正与雨衰叠加进入链路损伤模型；REST 端点
-`/api/v1/env/alerts` 暴露告警查询。
+`/api/v1/env-alerts` 暴露告警查询。
 
 ### M1 — 编队表演
 
@@ -425,7 +425,7 @@ Config/Handover/GroundTerminalRegister），REST `/api/v1/celltowers/*`，
 
 LEO 卫星 + HAPS 高空平台 + Mesh 三层级中继（`HierarchicalRouter`/`LeoConstellation`/
 `HapsRelayNode`），支持卫星过境窗口预测、层级路由决策、链路切换。MAVLink 消息 30039–30041
-（SatLinkStatus/SatPassSchedule/HierarchicalRouteDecision），REST `/api/v1/satlink/*`，
+（SatLinkStatus/SatPassSchedule/HierarchicalRouteDecision），REST `/api/v1/sat-link/*`，
 前端 `SatLinkPanel.jsx` 可视化中继链路。
 
 ### M8 — 复杂地形适配
@@ -722,7 +722,7 @@ NexusSky/
 ├── gcs-web/             React GCS（59 个 .jsx 组件文件，其中 19 个已有直测）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
-├── scripts/             start-all.cmd / e2e-smoke.sh / 93 个脚本（其中 44 个 e2e-*）
+├── scripts/             start-all.cmd / e2e-smoke.sh / 94 个脚本（其中 44 个 e2e-*）
 ├── docker-compose.yml   Linux 下一键编排
 ├── docs/                43 篇文档
 └── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）
