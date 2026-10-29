@@ -1265,7 +1265,9 @@ curl -X POST -H "Authorization: Bearer <old-token>" \
 #### 端点详情
 
 **GET /api/v1/audit/logs** （需 ADMIN 角色）
-- 查询参数: `limit` (Integer, 可选) - 最大返回条数，默认全部
+- 查询参数: `limit` (Integer, 可选) - 最大返回条数，缺省 **200**、上限 **5000**（非正数按 1 处理）。
+  **不提供"取全部"入口**：`audit_log` 是只增表（每个写请求一行），且 `aerofleet.audit.retention-days`
+  默认 0（永不删除），全表返回会把整张表读进堆再序列化
 - 响应: 200 - 审计日志列表，每条含 `{timestamp, userId, action, target, detail, ip, prevHash, entryHash}`；
   `entryHash` = SHA-256(prevHash + 时间戳毫秒 + 各字段)，`prevHash` 指向上一条的 `entryHash`（首条为 64 个 0）
 

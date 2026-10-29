@@ -20,8 +20,16 @@ import java.util.Map;
  * <p>
  * 支持参数：
  * <ul>
- *   <li>{@code limit} — 返回最近 N 条（默认全部）</li>
+ *   <li>{@code limit} — 返回最近 N 条，缺省 {@value #DEFAULT_LIMIT}、上限 {@value #MAX_LIMIT}</li>
  * </ul>
+ * <p>
+ * <b>没有"默认全部"</b>：{@code aerofleet.audit.persist-to-db=true}（合规部署的必要姿态）时，
+ * {@code findAll()} 走的是 {@code findAllByOrderByIdDesc()} —— <b>整张 audit_log 表</b>；
+ * 而该表是只增表（每个写请求一行），且 {@code aerofleet.audit.retention-days} 默认为 0（永不删除）。
+ * 旧实现缺省即走 {@code findAll()}：单机演示（内存模式，上限 1000 条）看不出来，
+ * 一旦落库跑上几个月，一次不带 limit 的查询就能把堆打满。
+ * 口径与 {@link io.aerofleet.cloud.api.controller.FlightLogController} 一致（缺省 200、上限 5000），
+ * 但本端点不提供"取全部"的入口。
  * <p>
  * RBAC 通过 {@link RequireRole} 注解声明，当 {@code aerofleet.security.rbac-enabled=true}
  * 且非 dev-mode 时由 {@link io.aerofleet.cloud.security.RoleInterceptor} 拦截校验。
@@ -29,6 +37,12 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/audit")
 public class AuditController {
+
+    /** 未传 {@code limit} 时的返回条数。 */
+    static final int DEFAULT_LIMIT = 200;
+
+    /** 单次查询最多返回的条数（防止一次请求把整表读进堆）。 */
+    static final int MAX_LIMIT = 5000;
 
     private final AuditService auditService;
 
@@ -41,23 +55,35 @@ public class AuditController {
      * <p>
      * GET /api/v1/audit/logs?limit=100
      *
-     * @param limit 最大返回条数（可选，默认全部）
-     * @return 审计日志列表
+     * @param limit 最大返回条数（可选；缺省 {@value #DEFAULT_LIMIT}，上限 {@value #MAX_LIMIT}，
+     *              非正数按 1 处理）。<b>不会</b>返回全表。
+     * @return 审计日志列表（最新在前）
      */
     @GetMapping("/logs")
     @RequireRole(Role.ADMIN)
     public ResponseEntity<List<Map<String, Object>>> getLogs(
             @RequestParam(value = "limit", required = false) Integer limit) {
 
-        List<AuditLog> logs = (limit != null && limit > 0)
-                ? auditService.findRecent(limit)
-                : auditService.findAll();
+        List<AuditLog> logs = auditService.findRecent(boundedLimit(limit));
 
         List<Map<String, Object>> result = logs.stream()
                 .map(this::toJson)
                 .toList();
 
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * 把外部传入的 {@code limit} 收口到 [1, {@value #MAX_LIMIT}]；缺省取 {@value #DEFAULT_LIMIT}。
+     * <p>
+     * 不保留"0 或负数 = 全部"的旧语义：那正是把整表读进堆的入口，且调用方从参数上看不出
+     * 自己在请求全量。
+     */
+    static int boundedLimit(Integer limit) {
+        if (limit == null) {
+            return DEFAULT_LIMIT;
+        }
+        return Math.max(1, Math.min(MAX_LIMIT, limit));
     }
 
     /**
