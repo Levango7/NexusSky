@@ -1,5 +1,22 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 飞行阶段 / 固件版本打通到 GCS（2026-10-29）
+
+`EXTENDED_SYS_STATE`(245) 与 `AUTOPILOT_VERSION`(148) 此前只在 `mavlink-core` /
+`cloud-backend` 侧有解码与落库，**drone-sim 从不发送、`DroneViews` 也不外露** ⇒ 模拟器里
+`landedState` 恒 -1、固件版本恒 0，GCS 上「起飞中 / 降落中」只能靠 `HEARTBEAT.custom_mode`
+猜（custom_mode 是固件相关的导航状态，PX4 与 ArduPilot 对同一数字解释不同）。三刀补齐：
+
+- **sim 生产**：1Hz 发 245（`landedStateFor()`：未解锁/坠机=地面、爬升 >0.5=起飞中、
+  下降 <-0.5=降落中、贴地=地面、其余=空中——判据刻意不读 custom_mode）；启动后发一次
+  148（1.14.7）。
+- **后端外露**：`/api/v1/drones/{sysid}/telemetry`（及 WS `telemetry`/`detail` 帧）新增
+  `landedState` / `landedStateName` / `flightSwVersion` / `firmwareVersion`；未上报时保持
+  `-1` / `0` / `null` 哨兵，不冒充真实读数。
+- **GCS 展示**：`TelemetryPanel` 增「阶段」「固件」两格，未知一律「未知」/「--」。
+- **测试**：`FlightPhaseReportTest`（7 例，映射边界）、`DroneViewsFlightInfoTest`（3 例，
+  外露口径）、`telemetryPanel.test.jsx`（3 例，展示口径）。
+
 ## [Unreleased] — 新增「文档端点存在性」门禁 + 修 12 篇文档里写错的 14 个路径（2026-10-29）
 
 ### 加：`scripts/check-doc-endpoints.py`（文档自己写出的端点必须在代码里存在）
@@ -217,7 +234,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 231 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-29 共有 232 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -243,7 +260,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 231 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 232 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
