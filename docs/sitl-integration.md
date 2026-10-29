@@ -322,7 +322,7 @@ python3 scripts/mavlink-compatibility-check.py --list-messages
 4. MAVLink 端到端往返（Python → cloud-backend）
 5. HEARTBEAT 上线验证（REST API `/api/v1/drones`）
 6. GLOBAL_POSITION_INT 遥测路由验证（`/api/v1/drones/{id}/track`）
-7. MISSION_ITEM_INT 任务管理验证（`/api/v1/missions`）
+7. MISSION_ITEM_INT 任务管理验证（`/api/v1/drones/{sysid}/mission`）
 8. NexusSky 扩展消息编解码验证
 9. SITL 联调验证（日志事件检查）
 

@@ -264,40 +264,22 @@
 ### GET /api/v1/mesh/links
 获取所有链路及质量分级（A-B 与 B-A 合并）。
 
-### POST /api/v1/mesh/adjust-max-hops
-根据当前网络节点数动态调整 MAX_HOPS（FR-18）。
+### 网络规模与 MAX_HOPS（**drone-sim 内部算法，无 REST 端点**）
 
-**请求：**
-```json
-{"nodeCount": 35}
-```
+`DynamicMaxHops` 是 **drone-sim 机载侧**的路由参数计算（`drone-sim/src/main/java/io/aerofleet/sim/mesh/`），
+**cloud-backend 没有对应的 REST 端点**——此前这里写的 `POST /api/v1/mesh/adjust-max-hops`、
+`GET /api/v1/mesh/max-hops` 从未实现（调用是 404）。
 
-**响应：**
-```json
-{
-  "previousMaxHops": 15,
-  "currentMaxHops": 20,
-  "nodeCount": 35,
-  "networkScale": "MEDIUM",
-  "adjusted": true
-}
-```
+云端可查的 mesh 面只有 `MeshController`（`/api/v1/mesh`）：
+`GET /topology`、`GET /topology/{sysid}`、`GET /routes/{sysid}`、`GET /neighbors/{sysid}`、`GET /links`。
 
-**动态调整规则（`DynamicMaxHops`）：**
+**动态调整规则（sim 侧算法，供参考）：**
 
 | 网络规模 | 节点数 | MAX_HOPS |
 |---|---|---|
 | SMALL | ≤ 20 | 15 |
 | MEDIUM | 21-50 | 20 |
 | LARGE | > 50 | 25（绝对上限 30） |
-
-### GET /api/v1/mesh/max-hops
-查询当前生效的 MAX_HOPS 值。
-
-**响应：**
-```json
-{"currentMaxHops": 20, "nodeCount": 35, "networkScale": "MEDIUM"}
-```
 
 ---
 

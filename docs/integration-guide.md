@@ -196,19 +196,20 @@ java -jar drone-sim.jar --mesh-dynamic-max-hops true
 
 未启用时（默认），MAX_HOPS 保持静态值 15（`--mesh-max-hops` 参数可覆盖默认值）。
 
-**REST API 查询与调整：**
+**查询（只有监控面；MAX_HOPS 调整无 REST 端点）：**
 
 ```bash
-# 查询当前 MAX_HOPS
-curl http://localhost:8080/api/v1/mesh/max-hops \
-  -H "Authorization: Bearer <token>"
-
-# 动态调整 MAX_HOPS（需 ADMIN 角色）
-curl -X POST http://localhost:8080/api/v1/mesh/adjust-max-hops \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"nodeCount": 35}'
+# mesh 拓扑 / 路由 / 邻居 / 链路（MeshController 的真实端点集）
+curl http://localhost:8080/api/v1/mesh/topology            -H "Authorization: Bearer <token>"
+curl http://localhost:8080/api/v1/mesh/topology/1          -H "Authorization: Bearer <token>"
+curl http://localhost:8080/api/v1/mesh/routes/1            -H "Authorization: Bearer <token>"
+curl http://localhost:8080/api/v1/mesh/neighbors/1         -H "Authorization: Bearer <token>"
+curl http://localhost:8080/api/v1/mesh/links               -H "Authorization: Bearer <token>"
 ```
+
+> **注意（2026-10-29 订正）**：此前这里写的 `GET /api/v1/mesh/max-hops` 与
+> `POST /api/v1/mesh/adjust-max-hops` **从未实现**（调用 404）。`DynamicMaxHops`
+> 是 **drone-sim 机载侧**的算法（`drone-sim/.../sim/mesh/`），云端没有调整开关。
 
 ### 6.2 其他 Mesh CLI 参数
 

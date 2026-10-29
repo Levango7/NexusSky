@@ -87,7 +87,7 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
     （`HierarchicalRouter` / `LeoConstellation` / `HapsRelayNode`），
     支持卫星过境窗口预测、层级路由决策、链路切换。
 - **协议**：MAVLink 消息 30035–30038（基站）、30039–30041（星地中继）。
-- **接口**：REST `/api/v1/celltowers/*`、`/api/v1/satlink/*`。
+- **接口**：REST `/api/v1/celltowers/*`、`/api/v1/sat-link/*`。
 - **实现状态**：模型与算法已实现，e2e 在 link-sim 损伤链路下跑通；
   Starlink 画像（25s 通 / 2.5s 黑洞，9.6% 丢包）下完整任务流 PASS。
 - **边界**：未对接真实卫星过境数据源；基站载荷为软件模型，未在真实
