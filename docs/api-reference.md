@@ -157,7 +157,8 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 - 查询参数: `day` (String, 可选, YYYY-MM-DD, 默认今天), `type` (String, 可选, telemetry|alert|mission|connectivity), `sysid` (int, 可选), `limit` (int, 默认 200, 上限 5000)
 - 响应: 200 - 日志条目列表
 - 顺序: 按时间**升序**；`limit` 取的是最新的 N 条而不是最旧的 N 条
-  （JSONL 天然如此，`persist-to-db=true` 走 DB 时靠 `ORDER BY timestamp, id` 保证同一口径）
+  （JSONL 用定长环形缓冲；`persist-to-db=true` 时把租户过滤与 `LIMIT` 一起下推 SQL，
+  不再把整天数据取回内存再截尾）
 - 保留: `aerofleet.flightlog.retention-days`（默认 30）每天 03:30 由 `FlightLogRetentionJob`
   删除更早的 `flight_log` 行与 JSONL 文件；`<=0` 关闭清理
 
