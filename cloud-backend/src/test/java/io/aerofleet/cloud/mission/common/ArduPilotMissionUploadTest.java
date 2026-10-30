@@ -176,6 +176,23 @@ class ArduPilotMissionUploadTest {
         assertThat(items.get(1).command).isEqualTo(MavEnums.MAV_CMD_NAV_RETURN_TO_LAUNCH);
     }
 
+    @Test
+    @DisplayName("PX4 全握手线上项：位置=6、RTL=2、autocontinue=1（修复前全 3/0，PX4 整单被拒/到点即停）")
+    void upload_px4_wireItemsNormalized() throws Exception {
+        DroneSnapshot s = registry.registerIfAbsent(1);
+        s.autopilot = MavEnums.MAV_AUTOPILOT_PX4;
+        s.online = true;
+
+        MissionUploadResult result = runFullHandshake(userItems());
+
+        assertThat(result.status()).isEqualTo("ok");
+        List<MissionItemInt> items = capturedItems();
+        assertThat(items.get(0).frame).isEqualTo(MavEnums.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT);
+        assertThat(items.get(1).frame).isEqualTo(MavEnums.MAV_FRAME_MISSION);
+        // autocontinue：PX4 置 0 时到点即停（SITL 实测起飞后悬停不奔航点）
+        assertThat(items).allSatisfy(it -> assertThat(it.autocontinue).isEqualTo(1));
+    }
+
     // ------------------------------------------------------------------
     // 地面启动 TAKEOFF 前置（P2-F1 方案 A）
     // ------------------------------------------------------------------

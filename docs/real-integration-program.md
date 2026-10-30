@@ -55,6 +55,11 @@
   ① v2 尾零裁剪致 MISSION_ACK 解码崩溃（上传永远"失败"）② AP 任务槽 0=HOME 致首条命令
   静默丢失（单点任务等于没传）③ 模式标签 PX4 口径硬解致 GUIDED 误显示 RTL。共 +13 回归测试
   （`MissionTrailingZeroPayloadTest` / `ArduPilotMissionUploadTest` / `FlightModeLabelTest`）。
+- **✅ 第二固件也已首验（PX4 v1.13 SIH，2026-10-30）**：同闭环全绿（连接→任务上传→
+  起飞 20m→航点→RTL→降落自动 disarm），差异记录（7 条）见 `docs/sitl-integration.md` §12.2。
+  首验抓出并修复 **custom_mode 打包字（P2-F3）**与 **任务项线上形态（P2-F4：帧硬校验 +
+  autocontinue）** 两族兼容问题（后两族 AP/sim 都不管——"sim 测不出"家族第 5/6 例），
+  另立 P2-F5/F6 两条链路级候选（限速饥饿 / 多链路路由钉定）。
 - **P2-F1（真机接入前必须闭环）**：**AP 地面派飞序列适配**——AP 两条硬契约叠加：
   ⑥ AUTO 模式下 arm 被拒（"Auto mode not armable"，需先切 GUIDED）；⑦ AUTO 从地面启动要求
   任务首条命令是 TAKEOFF（"init failed"），单点"去某点"任务起不来。原
@@ -72,6 +77,27 @@
   `COMMAND_INT_REQUIRED` + sim 入站 INT；SITL 修复前/后对照（非 GUIDED `8`→`2`、
   GUIDED `8`→ACCEPTED+飞行）见 `docs/sitl-integration.md` §11.2-⑨、§11.3。
   **这是"sim 测不出"家族第 4 例**（前 3 例：尾零裁剪 / 任务槽 0=HOME / 模式枚举）。
+- **P2-F3（PX4 custom_mode 打包字）**：**2026-10-30 已落地**——真 PX4 心跳的
+  `custom_mode` 是 `(main_mode<<16)|(sub_mode<<24)` 打包字（地面待命 `0x03040000`=
+  AUTO/LOITER），而 `modeLabel` 按 sim 的历史裸值表解码 → 真机恒 "UNKNOWN"。
+  修法：按打包字解码（v1.13 对 AUTO_READY 等 nav_state 打包为 0 的编码缺口如实 UNKNOWN）；
+  **sim 同批对齐发打包字**（删历史裸值表，单一口径）。证据：PX4 SITL 首验
+  `docs/sitl-integration.md` §12.2-①；回归：`FlightModeLabelTest` 8 例 +
+  sim `FlightStateModeWordTest` 3 例。
+- **P2-F4（任务项线上形态规范化）**：**2026-10-30 已落地**——PX4 两条任务项硬契约：
+  ① 帧硬校验（带坐标帧只收「位置命令」，RTL 用 frame=3 → **整单**被拒
+  `MAV_MISSION_UNSUPPORTED=3`）；② `autocontinue` 被真正消费（置 0 时到点即停——
+  SITL 实测起飞到 20m 后悬停 150s 不奔航点）。AP 两条都不管、sim 也不消费 ⇒
+  全栈长期发 `frame=3 + autocontinue=0` 在 PX4 上 100% 失败。修法：
+  `normalizeMissionItems` 单一收口点（无坐标命令→frame=2、相对高 3→6、
+  autocontinue 一律 1），覆盖 REST 任务/事件派飞/出警派飞全路径。
+  证据：§12.2-②③（含 tcpdump 逐帧时序）；回归：`MissionItemNormalizationTest` 4 例 +
+  `ArduPilotMissionUploadTest` 线上项断言。
+- **附带口径（P2-F5/F6 候选，2026-10-30 上板）**：PX4 首验另暴露出两条链路级问题，
+  已立项待裁——**P2-F5 接收限速饥饿**（100 fps 默认限速无消息类优先级，高频流吃满桶、
+  MISSION_ACK/心跳成批被丢；SITL 4MB/s 场景 340k+ 条丢帧）、**P2-F6 多链路路由钉定**
+  （PX4 双 mavlink 实例同 sysid，last-seen 路由游走致任务传输跨实例 "No transfer"）。
+  详见 `docs/sitl-integration.md` §12.2-④⑤、§12.3。
 - **附带口径**：`tcp://` 的 UDP 顶替已在 2026-10-28 修掉（改为**明确拒绝 + 指路**，
   `ArduPilotAdapter.connect`）——本次首验全程 UDP，未经过该路径；口径已闭合，不再挂"仍开放"。
 

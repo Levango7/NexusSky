@@ -738,3 +738,57 @@ ALL PX4 SITL TESTS PASSED
   `GUIDED + TAKEOFF + DO_REPOSITION(192)` 表达（Mission Planner "Fly To" 同款），
   不传任务；需要新命令语义、驻留/返航行为定义与 e2e 覆盖。与 A 并存、互不冲突，
   待真实需求触发时立项；**其命令地基（DO_REPOSITION 真机可用）已由 P2-F2 落地**。
+
+---
+
+## 12. PX4 SITL 首验实录（2026-10-30）
+
+**P2「SITL 首次真实验证」的第二固件**：首次以 PX4（v1.13 源码构建，SIH 软件在环无头）
+对接 cloud-backend，走通"连接 → 任务上传 → 起飞 → 航点 → RTL → 降落"最小闭环，并逐项产出
+PX4 与 drone-sim / ArduPilot 的行为差异。环境：WSL2 Ubuntu 内
+`PX4_SIM_MODEL=sihsim_quadx ./bin/px4 -d -s etc/init.d-posix/rcS`（sysid=1），
+cloud-backend dev profile 监听 14550、`--aerofleet.drone-port=18570`（PX4 Normal 实例）、
+`--aerofleet.udp.max-frame-rate-per-sysid=20000`（见 §12.2-⑤）。复现要点与 AP 同：
+`POST /api/v1/drones/1/mission` → `POST /api/v1/drones/1/commands`（arm/start_mission/rtl）→
+`GET /api/v1/drones/1`（遥测/告警）与线级抓包（`tcpdump -i lo udp port 14550 or 18570`）。
+
+### 12.1 闭环结果
+
+| 步骤 | 结果 | 证据 |
+|------|------|------|
+| 设备上线 | ✅ 心跳注册为 Drone-1，`autopilot=12`（PX4） | 遥测全字段非空（Montreal 家坐标 45.467116,-73.757837） |
+| 模式标签 | ✅ `mode=HOLD`、`customMode=50593792`（0x03040000） | 打包字解码（§12.2-①）：地面待命 = AUTO/LOITER（QGC 里显示 "Hold"） |
+| 任务上传 | ✅ `{"uploaded":3}`；线级时序 `MISSION_COUNT(3)` → `REQUEST seq0` → `ITEM(22,f6)` → `REQUEST_INT 1` → `ITEM(16,f6)` → `REQUEST_INT 2` → `ITEM(20,**f2**)` → **`MISSION_ACK result=0`** | tcpdump 时序（`px4-mission-timeline.py` 逐帧解码）；上传前基线见 §12.2-② |
+| ARM | ✅ `COMMAND_ACK(400) result=0`，心跳 `armed=true base_mode=0x9D` | 地面+AUTO_LOITER 下 PX4 直接接受 arm（无 AP 那种 "Auto mode not armable" 约束） |
+| 开始任务 | ✅ `MISSION_START(300)` 原生 ACCEPTED（未触发 DO_SET_MODE 回退） | STATUSTEXT "Armed by external command"→"Takeoff to 20.0 meters above home" |
+| 飞行 | ✅ mode=`MISSION`（0x04040000）→ 爬升至 20.0m → 北飞 55m 航点 → 任务尾 RTL 返航降落自动 disarm | 遥测 relAlt 轨迹 + STATUSTEXT "Takeoff detected" / RTL / "Disarmed by landing" |
+| 修复前对照 | ❌→✅ 三层红：任务整单被拒（`MAV_MISSION_RESULT=3`，见 §12.2-②）→ ACK 被限速淹（`mission upload timed out`，340k 条丢帧，见 §12.2-⑤）→ 到点即停（autocontinue=0，见 §12.2-③） | 同一脚本 `px4-before.sh` / `px4-after.sh` 前后对照 |
+
+> 复现脚本为一轮联调脚本（未入仓）：先验三件套 + PX4 侧补丁（§12.2-⑥）在 `docs` 本段记全。
+
+### 12.2 真实固件 vs drone-sim 行为差异记录（PX4 侧）
+
+①-③ 为本轮修复项（已带回归测试落地）；④-⑦ 为固件/环境契约，处置见「处置」列。
+
+| # | 差异点 | drone-sim | PX4 v1.13 实测 | 处置 |
+|---|--------|-----------|----------------|------|
+| ① | custom_mode 编码 | 裸 nav_state 值 0..22（历史口径） | **打包字** `(main_mode<<16)\|(sub_mode<<24)`（px4_custom_mode.h 联合体）：地面待命 `0x03040000`=AUTO/LOITER、任务中 `0x04040000`=AUTO/MISSION、返航 `0x05040000`；v1.13 对 AUTO_READY 等 nav_state 打包为 **0**（编码缺口，不猜模式） | **已修**（P2-F3）：`modeLabel` 按打包字解码；**sim 同批对齐发打包字**（单一口径，删历史裸值表）；`FlightModeLabelTest` 8 例 + sim `FlightStateModeWordTest` 3 例钉住数值 |
+| ② | 任务项帧硬校验 | 帧随便填 | `parse_mavlink_mission_item`：带坐标帧（0/3/5/6）只收「位置命令」，**RTL(20) 用 frame=3 → 整单 `MAV_MISSION_UNSUPPORTED=3`**（且 PX4 随即中止传输，全任务作废）；无坐标命令必须 `MAV_FRAME_MISSION(2)` | **已修**（P2-F4）：`normalizeMissionItems` 单一收口点——无坐标命令→2、相对高 3→6（INT 规范编码）；覆盖 REST 任务/事件派飞/出警派飞全路径 |
+| ③ | `autocontinue` 位 | **不消费**（整列照飞） | **真正消费**（mission.cpp「switch to next waypoint if autocontinue flag set」）：置 0 时到点即停——SITL 实测起飞到 20m 后悬停 150s 不奔航点 | **已修**（P2-F4 同收口点）：所有任务项 `autocontinue=1`；停驻语义走 `param1`（NAV_WAYPOINT time_inside）。**又一条"sim 测不出"** |
+| ④ | mavlink 实例拓扑 | 单实例单端口 | PX4 SITL 一次起 4 个实例（Normal 18570→14550、Onboard 14580→14540、14280、Gimbal）；**任何实例被 GCS 主动握手后都会向该 GCS 回话**——后端 `drone-extra-ports=14580` 一配，两个同 sysid 实例同时喂路由表，**last-seen 路由在 18570/14580 间游走，任务传输跨实例即 `IGN MISSION_ITEM: No transfer`**（首轮失败实录） | **配置口径**：PX4 只配 Normal 实例端口（`--aerofleet.drone-port=18570`，**不要**加 14580）；产品侧「多链路路由钉定」立候选（§12.3） |
+| ⑤ | 链路帧率 | 数十 fps | SITL Normal 实例 4MB/s（≈8.6k fps 实测）；后端默认限速 100/s/机 → **ACCEPTED 的 MISSION_ACK 与心跳成批被丢**（单轮 340k+ 条 `Rate limit exceeded` 日志；上传必现 `timed out`，心跳停更致 armed 显示滞后） | **运行口径**：SITL 联调调高 `--aerofleet.udp.max-frame-rate-per-sysid`；产品侧「限速饥饿」立候选（§12.3） |
+| ⑥ | 环境构建口径 | — | SIH 必须 **`sih start` + `sensors start` 都起**（EKF2 需 sensors hub 汇聚 vehicle_imu，缺则 `ekf2 start failed(-1)`、arm 被拒 "angular velocity invalid"）；SITL 默认 lockstep 只由 `simulator` 模块驱动，SIH 场景须 `ENABLE_LOCKSTEP_SCHEDULER=no` 否则 hrt 时钟冻结（所有周期任务停摆） | **环境脚本口径**（本文档记录即闭环；PX4 侧补丁不入仓） |
+| ⑦ | MISSION_CURRENT 扩展字段 | `total`=任务条目数 | **`total` 恒 0**（v1.13 不用该扩展字段）；`seq` 有效 | 口径差异，记录不处理（前端进度条按 total=0 时退化为只显示 seq，另行评估） |
+
+### 12.3 遗留项
+
+- **P2-F5 · 接收限速对低频关键帧的饥饿（候选）**：`UdpGateway` 的单机滑动窗口限速
+  （默认 100 fps）按时间到即丢，无消息类优先级——高码率流（SITL 4MB/s；真机遥测突发/
+  日志下载同理）会在每个窗口开头吃满桶，**低频关键帧（MISSION_ACK/COMMAND_ACK/心跳）
+  被成批丢弃**，表现为"命令超时"而非"链路过载"。SITL 场景可调高配置绕过；产品面
+  修复方向 = 关键帧保底窗口或按 (sysid, msgid) 分层限速。证据：§12.2-⑤。
+- **P2-F6 · 多链路路由钉定（候选）**：`RouteTable` 按 sysid 记 last-seen 地址；
+  多链路（PX4 双实例、真机数传+机载双链路）下状态性交换（任务传输）可能跨链路，
+  在另一实例上表现为 "No transfer" 整单失败。修复方向 = 状态性交换绑定发起方地址
+  （mission 处理器记住请求来源，items 回发该地址），而非全局路由。证据：§12.2-④。
+

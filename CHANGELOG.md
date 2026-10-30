@@ -1,5 +1,49 @@
 # NexusSky 变更日志
 
+## [Unreleased] — PX4 SITL 首验：custom_mode 打包字（P2-F3）+ 任务项线上形态（P2-F4）两族修复（2026-10-30）
+
+**P2「第二固件首验」挖出并闭环两类真机协议兼容问题**：PX4 v1.13 SIH 上"连接 → 任务上传
+→ 起飞 → 航点 → RTL → 降落"闭环修复后全绿（tcpdump 逐帧时序 + 遥测轨迹实录）。
+两类问题 AP 与 drone-sim 都不管——**"sim 测不出"家族第 5/6 例**。
+
+- **P2-F3 · custom_mode 打包字**：真 PX4 心跳 `custom_mode = (main_mode<<16)|(sub_mode<<24)`
+  （地面待命 `0x03040000`=AUTO/LOITER、任务中 `0x04040000`、返航 `0x05040000`，SITL 实测），
+  而 `modeLabel` 按 sim 历史裸值表 0..22 解码 → 真机恒 `UNKNOWN`。
+  - **cloud-backend**：按打包字解码（v1.13 对 AUTO_READY 等 nav_state 打包为 0 的编码缺口
+    如实 UNKNOWN，不猜模式）；`FlightModeLabelTest` 用 SITL 实测值钉住。
+  - **drone-sim**：`FlightState.px4NavState` 同批对齐发打包字（删历史裸值表，单一口径）；
+    STANDBY/HOLD 都映射 AUTO_LOITER（真机无 RC 地面待命同值），"STANDBY" 不再是伪装模式；
+    `FlightStateModeWordTest` 钉住数值。
+- **P2-F4 · 任务项线上形态规范化**：PX4 任务解析两条硬契约——
+  ① **帧硬校验**：带坐标帧（0/3/5/6）只收「位置命令」，RTL(20) 用 frame=3 → **整单**
+  `MAV_MISSION_UNSUPPORTED=3` 且 PX4 随即中止传输；无坐标命令必须 `MAV_FRAME_MISSION(2)`；
+  ② **`autocontinue` 被真正消费**（mission.cpp「switch to next waypoint if autocontinue
+  flag set」）：置 0 时到点即停——SITL 实测起飞到 20m 后悬停 150s 不奔航点。
+  全栈热线（REST 任务/出警派飞/事件派飞）长期发 `frame=3 + autocontinue=0`，PX4 上 100% 失败。
+  - **cloud-backend**：`normalizeMissionItems` 单一收口点——无坐标命令→2、相对高 3→6
+    （INT 报文规范编码）、autocontinue 一律 1；home 占位槽（绝对高 frame=0）原样保留。
+  - 回归：`MissionItemNormalizationTest` + `ArduPilotMissionUploadTest` 线上项断言。
+- **SITL 验收（修复前/后同脚本对照）`[PX4-实测]`**：修复前三层红——任务整单被拒
+  （`result=3`）→ ACK 被限速淹（340k+ 条丢帧，上传必现 timed out）→ 到点即停。
+  修复后：`MISSION_COUNT(3)` → `REQUEST 0..2` → `ITEM(22,f6)/ITEM(16,f6)/ITEM(20,f2)` →
+  **`MISSION_ACK result=0`**（214ms）→ arm → `MISSION_START(300)` 原生 ACCEPTED →
+  起飞 20.0m → 北飞 55m 航点 → `mode=RTL`(0x05040000) → 爬 30m 返航 → 降落 → `Disarmed by
+  landing`（限速丢帧计数 0）。
+- **链路级候选上板（P2-F5/F6，待裁）**：① 接收限速（默认 100 fps/机）无消息类优先级，
+  高频流吃满桶致 MISSION_ACK/心跳成批被丢（SITL 4MB/s 场景单轮 340k+ 丢帧）；
+  ② PX4 双 mavlink 实例同 sysid，`drone-extra-ports` 一配则 last-seen 路由游走，
+  任务传输跨实例报 `No transfer` 整单失败。运行口径（只配 Normal 实例 18570、调高限速）
+  已入文档；产品面修复方向见 §12.3。
+- **e2e failsafe 断言随口径对齐**：`scripts/e2e-failsafe{-linux.sh,.ps1}` 的"自主落地"断言
+  由 `mode==STANDBY` 改为 `mode==HOLD`——sim 地面态标签已与真 PX4 同口径（AUTO/LOITER→HOLD），
+  CI 首跑即抓出该旧断言（本机复跑全绿：offline→RTL→HOLD+disarmed 三断言）。
+- 文档：`docs/sitl-integration.md` §12（首验实录 + 7 条差异 + 遗留项）；
+  `docs/real-integration-program.md` P2 段（P2-F3/F4 落地 + F5/F6 候选）。
+
+计数：本批 +9 测试（cloud-backend 3307→3313：模式标签 +1 / 任务项规范化 +4 / 上传线上项 +1；
+drone-sim 1453→1456：打包字 3 例），全仓 **5482→5491**（基数已含此前 #209/#213 的 +8）；
+全 reactor 全绿；10 份口径文档同步。
+
 ## [Unreleased] — 修 `FormationService` 启动恢复整表读堆：MAX 单行取 ID + 只加载未解散编队（2026-10-30）
 
 ### 修：`restoreFormations()` 不再 `findAll()` 整张只增表
@@ -525,7 +569,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-30 共有 241 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-30 共有 242 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -551,7 +595,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 241 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 242 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

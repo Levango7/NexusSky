@@ -64,7 +64,8 @@ public class TelemetrySnapshotListener {
     /**
      * 按固件口径翻译 custom_mode。两种固件用的是完全不同的枚举，硬解会出危险误报：
      * 真机 SITL 实测 ArduCopter 进 GUIDED（custom_mode=4）被 PX4 表解成 "RTL"。
-     * autopilot 未知（-1，尚未收到心跳）时保持历史 PX4 口径。
+     * PX4 的口径是打包字（见 {@link #px4NavStateLabel}）；autopilot 未知（-1，
+     * 尚未收到心跳）时同样按 PX4 打包字口径。
      */
     static String modeLabel(int autopilot, int customMode) {
         return autopilot == MavEnums.MAV_AUTOPILOT_ARDUPILOTMEGA
@@ -109,20 +110,41 @@ public class TelemetrySnapshotListener {
         };
     }
 
-    /** PX4 main-nav-state labels (custom_mode of a PX4 heartbeat). */
+    /**
+     * PX4 nav-state labels：真 PX4 的心跳把 {@code (main_mode << 16) | (sub_mode << 24)}
+     * 打包成 custom_mode（PX4 源码 px4_custom_mode.h 联合体 + mavlink_messages.cpp
+     * get_px4_custom_mode()；SITL 实测地面待命 = 0x03040000 = AUTO/LOITER）。
+     * <p>
+     * 此前这张表按裸值 0..22 查表（drone-sim 的历史口径），真 PX4 的打包字一个都
+     * 命中不了 → 恒 "UNKNOWN"。改为打包字解码后 sim 也同步发打包字（单一口径）。
+     * <p>
+     * 打包字有编码缺口要据实呈现：v1.13 的 get_px4_custom_mode() 对 AUTO_READY/
+     * UNUSED/RATTITUDE 等 nav_state 不填字段，data 保持 0——0 一律 UNKNOWN，
+     * 不猜测成某个具体模式。
+     */
     static String px4NavStateLabel(int customMode) {
-        return switch (customMode) {
-            case 0 -> "MANUAL";
-            case 1 -> "ALTITUDE";
-            case 2 -> "POSITION";
-            case 3 -> "MISSION";
-            case 4 -> "RTL";
-            case 5, 14, 15, 16, 17, 18, 19, 20, 21 -> "HOLD";
-            case 8 -> "ACRO";
-            case 9, 10, 11 -> "STABILIZED";
-            case 12 -> "DESCENT/LAND";
-            case 13 -> "STANDBY";
-            default -> "UNKNOWN";
+        int mainMode = (customMode >>> 16) & 0xFF;
+        int subMode = (customMode >>> 24) & 0xFF;
+        return switch (mainMode) {
+            case 1 -> "MANUAL";
+            case 2 -> "ALTITUDE";                     // PX4 称 ALTCTL
+            case 3 -> subMode == 1 ? "ORBIT" : "POSITION";   // POSCTL / POSCTL_ORBIT
+            case 4 -> switch (subMode) {              // AUTO 主模式看子模式
+                case 1 -> "AUTO_READY";
+                case 2, 10 -> "TAKEOFF";              // AUTO_TAKEOFF / VTOL_TAKEOFF
+                case 3 -> "HOLD";                     // AUTO_LOITER（QGC 里显示 "Hold"）
+                case 4 -> "MISSION";
+                case 5 -> "RTL";
+                case 6 -> "LAND";
+                case 8 -> "FOLLOW";
+                case 9 -> "PRECLAND";
+                default -> "AUTO";                    // 含 7（保留值，勿用）
+            };
+            case 5 -> "ACRO";
+            case 6 -> "OFFBOARD";
+            case 7 -> "STABILIZED";
+            case 8 -> "RATTITUDE";
+            default -> "UNKNOWN";                     // main=0（PX4 打包缺口）/ 未知
         };
     }
 

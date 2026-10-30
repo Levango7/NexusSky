@@ -68,14 +68,15 @@ for d in json.load(sys.stdin):
     echo "   [$((i*5))s] online=$online mode=$mode"
     [ "$online" = "False" ] && sawOffline=true
     [ "$online" = "True" ] && [ "$mode" = "RTL" ] && sawRtl=true
-    [ "$online" = "True" ] && [ "$mode" = "STANDBY" ] && [ "$armed" = "False" ] && [ $i -gt 14 ] && sawLanded=true
+    # 地面态标签：sim 与真 PX4 同口径（AUTO/LOITER→HOLD）；历史 STANDBY 已随 P2-F3 打包字对齐废弃
+    [ "$online" = "True" ] && [ "$mode" = "HOLD" ] && [ "$armed" = "False" ] && [ $i -gt 14 ] && sawLanded=true
     # 证据齐备即提前退出；真回归由 225s 封顶兜底（三项仍缺则判负）
     if [ "$sawOffline" = "true" ] && [ "$sawRtl" = "true" ] && [ "$sawLanded" = "true" ]; then break; fi
 done
 
 check "cloud flagged offline during blackout" "$sawOffline"
 check "vehicle self-RTL after failsafe (seen online as RTL)" "$sawRtl"
-check "vehicle landed by itself (STANDBY, disarmed)" "$sawLanded"
+check "vehicle landed by itself (HOLD, disarmed)" "$sawLanded"
 
 kill $SIM_PID 2>/dev/null
 if [ $Fail -eq 0 ]; then echo "ALL FAILSAFE TESTS PASSED"; exit 0

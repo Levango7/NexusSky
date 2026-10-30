@@ -213,6 +213,19 @@ public class DroneCommandService {
             java.util.Set.of(MavEnums.MAV_CMD_DO_REPOSITION);
 
     /**
+     * 无坐标任务命令登记表：这类命令的任务帧必须走 {@code MAV_FRAME_MISSION(2)}。
+     * <p>
+     * PX4 的任务解析对帧是硬校验（mavlink_mission.cpp parse_mavlink_mission_item）：
+     * 带坐标帧（0/3/5/6）进「位置命令」分支，命令不在位置列表里即整单回
+     * {@code MAV_MISSION_UNSUPPORTED}——RTL(20) 用 frame=3 上传因此在 PX4 上把
+     * **整个任务**打回（SITL 实测 MISSION_ACK result=3，且 PX4 随即中止传输）；
+     * ArduPilot 对无坐标命令根本不看帧。今后同类无坐标命令在此登记。
+     */
+    private static final java.util.Set<Integer> NO_COORDINATE_MISSION_CMDS = java.util.Set.of(
+            MavEnums.MAV_CMD_NAV_RETURN_TO_LAUNCH,
+            MavEnums.MAV_CMD_IMAGE_START_CAPTURE);
+
+    /**
      * Send one command to a specific drone and wait for its COMMAND_ACK.
      * Retries once on timeout or non-accepted result.
      *
@@ -432,6 +445,7 @@ public class DroneCommandService {
         }
         List<MissionItemInt> wireItems = withArduPilotHomeSlot(target, items);
         wireItems = withArduPilotGroundTakeoff(target, wireItems);
+        wireItems = normalizeMissionItems(wireItems);
         long deadline = System.currentTimeMillis() + MISSION_TIMEOUT_MS;
 
         // Phase 1: announce the count. target_system MUST be the drone's real
@@ -661,6 +675,44 @@ public class DroneCommandService {
                     it.frame, it.command, it.current, it.autocontinue,
                     it.param1, it.param2, it.param3, it.param4,
                     it.x, it.y, it.z, it.missionType));
+        }
+        return out;
+    }
+
+    /**
+     * 任务项规范化（单一收口点）：所有上传路径（REST 任务、事件派飞、出警派飞）
+     * 都从这里过一遍，改写为各固件共同接受的线上形态——
+     * <ul>
+     *   <li>无坐标命令（{@link #NO_COORDINATE_MISSION_CMDS}）→ {@code MAV_FRAME_MISSION(2)}：
+     *       PX4 硬校验要求，AP 不看帧但照存；</li>
+     *   <li>{@code MAV_FRAME_GLOBAL_RELATIVE_ALT(3)} → {@code ..._INT(6)}：语义相同
+     *       （都是相对高），但 MISSION_ITEM_INT 线上按规范应带 _INT 帧；</li>
+     *   <li>{@code autocontinue} 一律置 1：PX4 尊重该位（mission.cpp「switch to next
+     *       waypoint if autocontinue flag set」——置 0 则到点悬停不再前进，SITL 实测
+     *       起飞后停在 20m）；AP 与 drone-sim 都不消费该位，故历来自带 0 也全绿——
+     *       又一条"sim 测不出"。停驻语义走 {@code param1}（NAV_WAYPOINT time_inside），
+     *       不靠该位。</li>
+     * </ul>
+     * 绝对高项（frame=0/5）原样保留——AP home 占位槽 frame=0 带「绝对高」语义，
+     * 改成 6 会把 home 高度从 AMSL 变成相对高。入参不被修改；无需改写的项原引用返回。
+     */
+    static List<MissionItemInt> normalizeMissionItems(List<MissionItemInt> items) {
+        List<MissionItemInt> out = new ArrayList<>(items.size());
+        for (MissionItemInt it : items) {
+            int frame = NO_COORDINATE_MISSION_CMDS.contains(it.command)
+                    ? MavEnums.MAV_FRAME_MISSION
+                    : (it.frame == MavEnums.MAV_FRAME_GLOBAL_RELATIVE_ALT
+                            ? MavEnums.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT
+                            : it.frame);
+            boolean autocontinue = it.autocontinue != 0;
+            if (frame == it.frame && autocontinue) {
+                out.add(it);
+            } else {
+                out.add(new MissionItemInt(it.targetSystem, it.targetComponent, it.seq,
+                        frame, it.command, it.current, 1,
+                        it.param1, it.param2, it.param3, it.param4,
+                        it.x, it.y, it.z, it.missionType));
+            }
         }
         return out;
     }
