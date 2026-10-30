@@ -34,6 +34,9 @@
   ② PX4 双 mavlink 实例同 sysid，`drone-extra-ports` 一配则 last-seen 路由游走，
   任务传输跨实例报 `No transfer` 整单失败。运行口径（只配 Normal 实例 18570、调高限速）
   已入文档；产品面修复方向见 §12.3。
+- **e2e failsafe 断言随口径对齐**：`scripts/e2e-failsafe{-linux.sh,.ps1}` 的"自主落地"断言
+  由 `mode==STANDBY` 改为 `mode==HOLD`——sim 地面态标签已与真 PX4 同口径（AUTO/LOITER→HOLD），
+  CI 首跑即抓出该旧断言（本机复跑全绿：offline→RTL→HOLD+disarmed 三断言）。
 - 文档：`docs/sitl-integration.md` §12（首验实录 + 7 条差异 + 遗留项）；
   `docs/real-integration-program.md` P2 段（P2-F3/F4 落地 + F5/F6 候选）。
 
