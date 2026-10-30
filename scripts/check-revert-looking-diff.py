@@ -13,6 +13,12 @@
 所以按"numstat 的增删比"抓它。阈值取得很宽松（删 ≥ 200 行且新增 ≤ 删除的 15%），
 只抓明显的回退，不误伤正常重构。
 
+**2026-10-30 补一条排除**：**整文件删除**不算"疑似回退"（新增 0 行且 HEAD 里已无该路径）。
+理由：本门禁抓的是文件**内部**被静悄悄撤掉大半的形状；整文件删除在 diff 里是显眼的 `D`，
+删完还会在编译/引用面上裸奔，不需要靠增删比发现。不加这条排除，"按裁决删掉一个空壳"
+（如 cloud-backend 的 `spi/` 包）会被判成回退，门禁就开始惩罚正确行为。
+自测里第三种情形专门钉这条：整文件删除不误拦。
+
 用法：
     python scripts/check-revert-looking-diff.py [base]     # base 默认 origin/master
     python scripts/check-revert-looking-diff.py --self-test
@@ -37,6 +43,13 @@ def git(*args, cwd=None):
                           stderr=subprocess.DEVNULL).stdout.decode("utf-8", "replace")
 
 
+def _path_in_head(path, cwd=None):
+    """该路径在 HEAD 里还在不在。整文件删除与"文件内部被撤"是两种形状，见 check()。"""
+    r = subprocess.run(["git", "-C", cwd or ROOT, "cat-file", "-e", "HEAD:%s" % path],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return r.returncode == 0
+
+
 def check(base, cwd=None):
     """返回命中的 (path, add, del) 列表。"""
     if not git("rev-parse", "--verify", base, cwd=cwd).strip():
@@ -51,6 +64,12 @@ def check(base, cwd=None):
         if not add.isdigit() or not dele.isdigit():
             continue
         add, dele = int(add), int(dele)
+        # 整文件删除（新增 0 行且 HEAD 里已没有该路径）不算"疑似回退"：
+        # 本门禁抓的是**文件内部**被静悄悄撤掉大半的改动（2026-10-20 那两例都是文件还在、
+        # 内容被换回旧版）。整文件删除在 diff 里是一个显眼的 `D`，且删完就编译/引用面裸奔，
+        # 不需要靠增删比来发现；用同一条阈值去拦它只会把"按裁决删掉一个空壳"判成回退。
+        if add == 0 and not _path_in_head(path, cwd):
+            continue
         if dele >= MIN_DELETED and add <= dele * MAX_ADD_RATIO:
             hits.append((path, add, dele))
     return hits
@@ -89,7 +108,15 @@ def self_test():
         run("commit", "-qm", "normal")
         not_caught = len(check(base_sha, cwd=tmp)) == 0
         print("  [PASS] 正常追加不误拦" if not_caught else "  [FAIL] 正常追加被误拦")
-        return 0 if (caught and not_caught) else 1
+
+        # 情形 3：整文件删除（≠ 文件内部被撤）-> 不应判回退
+        run("checkout", "-q", base_sha, "--", "big.txt")
+        os.remove(os.path.join(tmp, "big.txt"))
+        run("add", "-A")
+        run("commit", "-qm", "delete whole file")
+        del_ok = len(check(base_sha, cwd=tmp)) == 0
+        print("  [PASS] 整文件删除不误拦" if del_ok else "  [FAIL] 整文件删除被误拦")
+        return 0 if (caught and not_caught and del_ok) else 1
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

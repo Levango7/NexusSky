@@ -62,6 +62,8 @@ DYNAMIC_PREFIXES = (
     # "PluginConfig 按前缀动态枚举"，但实测 PluginConfig 全仓**零注入点**、四个插件接口
     # **零实现**，前缀下的 8 个键已随本批从 application.properties 删除。
     # 白名单的前提必须可核——这条由 scripts/check-config-keys.py 反向盯（读者不可达即判红）。
+    # 同日晚些（审计 §12）：spi/ 那 13 个文件的框架本体已按 owner 裁决删除，接口形状留在
+    # docs/architecture-deepening-plan.md §2.3。这里留空元组，将来真有动态前缀读者再加。
 )
 
 ROW = re.compile(r"^\|\s*`(aerofleet\.[A-Za-z0-9_.\-]+)`\s*\|")
