@@ -31,6 +31,8 @@ public class Gb28181Adapter implements VendorAdapter {
                           @Value("${aerofleet.gb28181.sip-host:127.0.0.1:5060}") String sipHost) {
         this.catalogParser = catalogParser;
         this.signaling = new Gb28181Signaling(sipDomain, sipHost);
+        log.info("GB28181 接入配置: sip-domain={}, sip-host={}（改这两项后需重启；连不上先看这行）",
+                sipDomain, sipHost);
     }
 
     @Override

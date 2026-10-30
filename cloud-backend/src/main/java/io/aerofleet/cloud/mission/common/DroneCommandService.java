@@ -105,6 +105,10 @@ public class DroneCommandService {
         this.pendings = pendings;
         this.registry = registry;
         this.defaultTargetSysid = defaultTargetSysid;
+        // 部署相关键（审计 §12.5）：请求里没指明 sysid 时命令发给谁——启动时留一行，
+        // 换环境忘改时能从日志直接看出来，不用翻源码。
+        log.info("指令下行默认目标 sysid={}（aerofleet.drone-sysid；请求显式带 sysid 时以请求为准）",
+                defaultTargetSysid);
     }
 
     /**
