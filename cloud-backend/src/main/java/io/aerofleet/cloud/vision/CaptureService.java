@@ -49,6 +49,8 @@ public class CaptureService {
     private static final double HOME_LAT = 22.5907;
     private static final double HOME_LON = 113.9345;
     private static final double M_PER_DEG_LAT = 111_320.0;
+    /** sim-truth 单次请求的读取超时：连接超时只覆盖 TCP 握手，服务端接受连接后不响应会永久挂住调用线程。 */
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(3);
 
     private final DroneCommandService commands;
     private final DeviceRegistry registry;
@@ -241,11 +243,13 @@ public class CaptureService {
     }
 
     /** 拉取 sim 渲染 JPEG（pixels 与 external 路径共用），失败返回 null。 */
-    private byte[] fetchJpeg(long frameSeq) {
+    byte[] fetchJpeg(long frameSeq) {
         try {
             HttpResponse<byte[]> imgResp = http.send(
                     HttpRequest.newBuilder(URI.create(
-                            simTruthBase + "/camera/shots/" + frameSeq + ".jpg")).GET().build(),
+                            simTruthBase + "/camera/shots/" + frameSeq + ".jpg"))
+                            .timeout(REQUEST_TIMEOUT)
+                            .GET().build(),
                     HttpResponse.BodyHandlers.ofByteArray());
             if (imgResp.statusCode() != 200) {
                 log.warn("jpeg fetch {} -> {}", frameSeq, imgResp.statusCode());
@@ -484,9 +488,9 @@ public class CaptureService {
         return best == Double.MAX_VALUE ? -1 : best;
     }
 
-    private JsonNode getJson(String url) throws Exception {
+    JsonNode getJson(String url) throws Exception {
         HttpResponse<String> resp = http.send(
-                HttpRequest.newBuilder(URI.create(url)).GET().build(),
+                HttpRequest.newBuilder(URI.create(url)).timeout(REQUEST_TIMEOUT).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) {
             throw new IllegalStateException("sim truth HTTP " + resp.statusCode());
