@@ -1,5 +1,31 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修 ApiKey lastUsedAt 刷库事务边界：注解标在永不生效的一侧，刷库从未成功（2026-10-31）
+
+### 修：`ApiKeyRepository.updateLastUsedAt` 补 `@Transactional`，删掉调用方上永不生效的注解
+
+`ApiKeyLastUsedTracker` 把「每请求一次同步 UPDATE」降为「每 30s 每 Key 一次合并写」。
+但它的 `flush()` 标着 `@Transactional`，而周期刷写由构造期自建的
+`ScheduledExecutorService`（`this::safeFlush`）驱动、`@PreDestroy shutdown()` 也是自调用 ——
+两条路径都持有裸对象、绕过 Spring 代理，注解**永远不生效**；真正被调用的
+`updateLastUsedAt` 是 `@Modifying` JPQL 更新却**没有** `@Transactional`。后果：
+
+- 每次 UPDATE 都在无事务状态执行 ⇒ `TransactionRequiredException: Executing an update/delete query`；
+- 逐条 `try/catch` 把它吞成 WARN ⇒ **lastUsedAt 自合并写组件上线起从未刷库**，
+  且每周期每 Key 刷一条假告警（噪音掩盖真相的典型）。
+
+修法：事务边界下沉到仓库方法自己身上（逐 Key 独立提交，与既有「失败只丢该 Key」
+语义一致；若整批一个事务，PG 下一条失败会让后续语句全部报
+`current transaction is aborted`）；`flush()` 上永不生效的注解删除并注释说明原因，
+防止下一个读代码的人再被误导。本仓对此早有约定——`FlightLogRepository` /
+`AuditLogRepository` 的 `@Modifying` 清理方法都带库方法级事务，且在注释里写明了
+「调用方是定时任务，没有请求事务」，本方法正是唯一漏网。
+
+测试 +2 例（`ApiKeyLastUsedTransactionTest`，`@SpringBootTest` + 真 H2）：调度线程同款
+裸对象自调用路径 `flush()` 必须真正落盘、仓库定点 UPDATE 不依赖调用方事务。
+**A/B**：修复前实测红——裸调用抛 `TransactionRequiredException`、调度路径断言
+lastUsedAt 为 null；补注解后 2 例绿（已实测）。
+
 ## [Unreleased] — 待口径十条清空 + 只增表留存机制（五表 job，默认关闭）（2026-10-30）
 
 **口径账清空 + 只增表留存的最后半页，一批交付。**
@@ -716,7 +742,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-30 共有 247 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-31 共有 248 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -742,7 +768,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 247 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 248 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

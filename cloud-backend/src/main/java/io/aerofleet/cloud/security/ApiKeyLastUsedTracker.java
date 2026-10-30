@@ -5,7 +5,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Iterator;
@@ -60,8 +59,15 @@ public class ApiKeyLastUsedTracker {
         pending.merge(keyId, now, (oldVal, newVal) -> newVal.isAfter(oldVal) ? newVal : oldVal);
     }
 
-    /** 周期刷库：定点 UPDATE 每个 pending keyId 的 lastUsedAt，逐条移除防丢并发新记录。 */
-    @Transactional
+    /**
+     * 周期刷库：定点 UPDATE 每个 pending keyId 的 lastUsedAt，逐条移除防丢并发新记录。
+     * <p>
+     * 本方法**故意不标** {@code @Transactional}：它只会在调度线程（{@code this::safeFlush}）
+     * 与 {@code @PreDestroy} 里被自调用，Spring 代理被绕过，标了也不生效（历史教训：
+     * 此前唯一生效的路径其实是仓库方法缺注解，整批 UPDATE 无事务全被吞）。事务边界
+     * 在 {@link ApiKeyRepository#updateLastUsedAt} 上逐 Key 独立提交——与下方
+     * 「失败只丢该 Key」的 try/catch 语义一致。
+     */
     public void flush() {
         if (apiKeyRepository == null || pending.isEmpty()) {
             return;
