@@ -18,7 +18,7 @@ import java.util.Map;
  * 硬件状态 WebSocket 推送（M4 硬件抽象，FR-30/DFX 4.4）。
  * <p>
  * 1Hz @Scheduled 推送各机雷达扫描状态 + 动力遥测，
- * {@link TelemetryWebSocketHandler#tryBroadcastByDeviceOwner} 按设备归属定向投递adcast}（既有不变）。
+ * {@link TelemetryWebSocketHandler#tryBroadcastByDeviceOwner} 按设备归属定向投递（既有不变）。
  * <p>
  * 推送格式：
  * <pre>

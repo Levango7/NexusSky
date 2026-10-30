@@ -17,7 +17,7 @@ import java.util.Map;
 /**
  * 避障状态 WebSocket 推送（M3 感知成像增强，FR-30/DFX 4.4）。
  * <p>
- * 1Hz @Scheduled 推送各机避障状态，{@link TelemetryWebSocketHandler#tryBroadcastByDeviceOwner} 按设备归属定向投递adcast}（既有不变）。
+ * 1Hz @Scheduled 推送各机避障状态，{@link TelemetryWebSocketHandler#tryBroadcastByDeviceOwner} 按设备归属定向投递（既有不变）。
  * 推送格式：{"type":"obstacle","drones":[{"sysid":1,"threat":"HIGH",...},...]}
  */
 @Component

@@ -10,7 +10,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +18,7 @@ import java.util.Map;
  * 基站拓扑变化 WebSocket 推送（M6 移动基站载荷抽象，FR-NFER-OBS-02）。
  * <p>
  * 2Hz @Scheduled 检测拓扑变化，1 秒 debounce 抑制事件风暴，
- * {@link TelemetryWebSocketHandler#tryBroadcastByDeviceOwner} 按设备归属定向投递adcast}（既有不变）。
+ * {@link TelemetryWebSocketHandler#tryBroadcastByDeviceOwner} 按设备归属定向投递（既有不变）。
  * <p>
  * 推送格式：
  * <pre>
@@ -36,10 +35,10 @@ public class CellTowerPusher {
     private final CellTowerTopologyService topologyService;
     private final ObjectMapper mapper;
 
-    /** debounce 缓存：事件 key → 最近一次时间戳。 */
-    private final Map<String, Long> debounceCache = new HashMap<>();
     /** debounce 阈值（ms）。 */
     private static final long DEBOUNCE_MS = 1000;
+    /** debounce 窗口：事件 key → 最近一次时间戳，窗口外 key 由 prune 丢弃。 */
+    private final DebounceWindow debounce = new DebounceWindow(DEBOUNCE_MS);
 
     public CellTowerPusher(TelemetryWebSocketHandler handler,
                            CellTowerTopologyService topologyService,
@@ -63,15 +62,13 @@ public class CellTowerPusher {
             if (events.isEmpty()) {
                 return;
             }
-            // debounce：同一事件 1 秒内只推送最后一次
+            // debounce：同一事件 1 秒内只推送最后一次；先裁掉窗口外 key，避免 O(N²) 事件组合无限累积
             long now = System.currentTimeMillis();
+            debounce.prune(now);
             List<CellTowerTopologyService.CellTowerEvent> filtered = new ArrayList<>();
             for (CellTowerTopologyService.CellTowerEvent e : events) {
-                String key = eventKey(e);
-                Long lastSeen = debounceCache.get(key);
-                if (lastSeen == null || now - lastSeen > DEBOUNCE_MS) {
+                if (debounce.allow(eventKey(e), now)) {
                     filtered.add(e);
-                    debounceCache.put(key, now);
                 }
             }
             if (filtered.isEmpty()) {
@@ -121,5 +118,10 @@ public class CellTowerPusher {
     /** 事件去重 key。 */
     private static String eventKey(CellTowerTopologyService.CellTowerEvent e) {
         return e.type().name() + ":" + e.fromSysid() + ":" + e.toSysid();
+    }
+
+    /** 当前 debounce 窗口内 key 数（测试用：断言缓存有界，不随历史事件增长）。 */
+    int debounceCacheSize() {
+        return debounce.size();
     }
 }
