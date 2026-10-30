@@ -1,5 +1,39 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修 `FormationService` 启动恢复整表读堆：MAX 单行取 ID + 只加载未解散编队（2026-10-30）
+
+### 修：`restoreFormations()` 不再 `findAll()` 整张只增表
+
+`FormationService.restoreFormations()`（`@PostConstruct`）原来对**整张编队表**执行
+`findAll()`：逐行跳过 `DISSOLVED` 恢复活跃编队，并顺带扫出 `maxId` 续接
+`nextFormationId`。而 `formation` 是**只增表**——`dissolve()` 只把状态改成
+`DISSOLVED`（`FormationService.java:592-600`、`691-699`），不删行，全仓也没有
+保留/清理任务。每次重启都要把整表读进堆，再逐行跳过已解散行。
+
+与本日已修的 #205（audit 全表加载）、#206（flightlog 整天取回再截尾）、
+#209（geofence 越界事件整表加载）同族。**单独成 PR 的原因**：这里的 `findAll()`
+兼着算 `maxId`，而 `maxId` **必须包含已解散行**——`formation_id` 是主键，
+若只统计未解散行，重启后新编队会复用已解散行的 ID ⇒ 撞主键。简单换成
+"只查未解散"是错的。
+
+改动：
+
+- 新增 `FormationRepository.findMaxFormationId()`（`select max(e.formationId)`）：
+  只回 1 行、含已解散行，`nextFormationId` 由它续接；
+- 新增 `findRestorable(...)`：JPQL 显式 `where e.state is null or e.state <> :state`。
+  **不用派生查询 `findByStateNot`**：其 `state <> 'DISSOLVED'` 因 SQL 三值逻辑会把
+  `state IS NULL` 的脏行一并排除，而旧实现只跳过 DISSOLVED、null 状态行照样恢复；
+  本改动只应改变"取多少行"，不改变"哪些行算活跃"——口径与旧实现逐条对齐；
+- 运行时 `formations` 只装未解散编队；`members` 为空的防毒守卫原样保留。
+
+测试 +6 例：4 例单测（`FormationStartupRestoreTest`：只加载未解散且
+`never().findAll()`；`nextFormationId` 取含已解散行的 MAX；空库归 0；`members=null`
+脏行不毒死启动；仓储异常只告警）+ 2 例 H2 真库（`FormationRestoreQueryTest`）：
+`findMaxFormationId` 含已解散行；`findRestorable` 排除已解散、保留 `state IS NULL`
+脏行；空库 null/空。
+**双变异 A/B**：服务层改回 `findAll()` ⇒ 红；仓库层丢 NULL 兜底 ⇒ 红；还原 ⇒ 绿
+（实测通过）。
+
 ## [Unreleased] — 修 `GeofenceStore` 启动恢复把只增表全量读进内存（2026-10-29）
 
 ### 修：越界事件启动加载改为「只取最新 1000 条」（`LIMIT` 下推）
@@ -491,7 +525,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-30 共有 240 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-30 共有 241 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -517,7 +551,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 240 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 241 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
