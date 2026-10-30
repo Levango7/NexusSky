@@ -7,7 +7,7 @@
 
 - **声明进 base `application.properties`**（值等于代码默认 ⇒ 零行为变化）：`drone-host`、
   `drone-sysid`、`gb28181.sip-host`、`gb28181.sip-domain`、`sensing.base-lat`、`sensing.base-lon`、
-  `instance-id`。声明键 82 → **89**，`check-config-keys.py` 全绿。
+  `instance-id`。声明键 **87 → 94**（本批 +7；A 批落库时是 82→89，中间 #220 加了 5 个 retention 键），`check-config-keys.py` 全绿。
 - **文档**：`docs/deployment-guide.md` 新增 §3.3「部署相关键」表——每个键写清含义、出厂值，
   以及**改完在哪一行启动日志看见**（例如 `gb28181.sip-domain` 写错不会启动失败、只会连不上对端，
   所以要求以日志为准）。`instance-id` 走 `/actuator/prometheus` 的 `instance` 标签，不单独打日志。
@@ -16,10 +16,10 @@
   discovery 行、CounterDroneRadarSource 的 base 行、instance-id 的指标标签），文档里标明位置。
 - 审计 §12.5 原"未核"条目改写为已裁决 + 落实证据。
 
-验证：全 reactor `mvn -B -o clean test` 见下方（本批仅日志与配置声明，零测试增删）；
-13 道仓门全绿。
+验证：全 reactor `mvn -B -o clean test` **5515 / 0 失败 / 0 错误**（cloud-backend 3337；本批仅日志与配置声明，零测试增删）；
+16 道仓门全绿，含 `check-config-keys`（声明键 87 → 94）、`check-doc-counts`、`check-test-count-docs`。
 
-计数：本批 0 测试增删；`[Unreleased]` 小节 246 → **247**。
+计数：本批 0 测试增删；`[Unreleased]` 小节 247 → **248**。
 
 ## [Unreleased] — 待口径十条清空 + 只增表留存机制（五表 job，默认关闭）（2026-10-30）
 
@@ -88,10 +88,15 @@
 验证：全 reactor `mvn -B -o clean test` **5505 / 0 失败 / 0 错误**（六个模块全 SUCCESS；
 本批零测试增删，数字随基线 rebase 到最新 master 后重驱动）；门禁自测 `check-config-keys` 10/10、
 `check-doc-config-keys` 4/4、`list-unreferenced-getters` 7/7、`check-revert-looking-diff` 3/3；
-README 目录树脚本数 96 → **97**。裁决来路、复核记录与未核清单见
+README 目录树脚本数 96 → **97**（本批只 +1；rebase 到 `a9e62970` 后 #217 也各加了脚本，
+README 现值 99，由 `check-doc-counts` 实测核对）。裁决来路、复核记录与未核清单见
 `docs/persistence-and-dead-surface-audit.md` §12。
 
-计数：本批 **0** 测试增删；`[Unreleased]` 小节 245 → **2**。
+计数：本批 **0** 测试增删；`[Unreleased]` 小节 245 → **246**。
+
+> **2026-10-31 修正（带依据）**：这一行原写作 "245 → **2**"——数字被截断，不是口径变化。
+> 依据：#218 合入后的 master `5482b4b6` 实测 `^## [Unreleased]` = 246，其父提交 `a9e62970` = 245。
+
 ## [Unreleased] — 轨迹端点可选 limit + 空 catch 棘轮门禁（2026-10-31）
 
 ### 改：`GET /flightlog/track` 默认仍全天，新增 `limit` 取最新 N 点
@@ -736,7 +741,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-30 共有 247 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-31 共有 248 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -762,7 +767,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 247 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 248 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

@@ -694,4 +694,4 @@
   原先看不见的两处补了日志：`Gb28181Adapter` 构造时打 `sip-domain/sip-host`，
   `DroneCommandService` 构造时打默认目标 `sysid`（另三处本来就能看见：UdpGateway 的 discovery 行、
   CounterDroneRadarSource 的 base 行、instance-id 走 `/actuator/prometheus` 标签）。
-  验证：`check-config-keys` 声明键 82 → **89** 全有读者；全 reactor 回归见 CHANGELOG 该批小节。
+  验证：`check-config-keys` 声明键 87 → **94** 全有读者（本批 +7；A 批落库时是 82→89，中间 #220 加了 5 个 retention 键）；全 reactor 回归见 CHANGELOG 该批小节。
