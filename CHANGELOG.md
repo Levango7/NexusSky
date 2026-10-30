@@ -18,7 +18,9 @@
   `sensing.aggregate-ms` / `-proximity-alert-m` / `-track-ttl-ms`、`sim-truth-base`、`vision.source`，
   外加 `bootstrap-admin-password` 走 `${AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD:}`（不落明文）。
   **值与代码默认逐项比对：12/13 逐字节相等**，口令那 1 条是刻意偏差（env 未设 ⇒ 空 ⇒ 不引导，
-  与代码默认同义）。声明键 69 → **82**，`check-config-keys.py` 全绿；全仓 `containsProperty` /
+  与代码默认同义）。重测 30 个、§11.2 记 24 的差集已归因：旧扫描只认单行 `@Value`，
+  漏了 5 个 `@Scheduled(fixedDelayString=…)` 与 1 个跨行 `@Value`（逐条见审计 §12.2）；
+  三个基点的默认键集合相同，与 master 前进无关。声明键 69 → **82**，`check-config-keys.py` 全绿；全仓 `containsProperty` /
   `getProperty("aerofleet…")` 调用点为 0 ⇒ 不可能翻转任何 presence 分支，零行为变化。
   另外 17 个"只在代码里有默认值"的内部实现参数（容量、轮询间隔、线程池、设备指纹、
   GB28181 SIP 地址、失联搜索兜底常数）**故意不声明**——写进配置文件会被当成可调旋钮，

@@ -604,9 +604,36 @@
 
 ### 12.2 只在代码里有默认值的键：只声明 13 个
 
-- **重测**：按"`@Value("${k:default}")` 且 6 模块 `src/main/resources` 未声明"重扫，当前 **30 个**。
-  §11.2 记的是 24——**差 6 未逐条归因**（两次口径可能不同，master 期间也进过新键），
-  所以本批**不按 30 全量声明**，只按"文档/部署/前端点过名"筛。
+- **重测**：当前 **30 个**。§11.2 记的 24 已归因——**旧扫描只认单行 `@Value("${k:默认}")`**，
+  漏掉两类同等有效的读者形态，正好 6 个（在审计基线 `cce0f10d` 上复算：30 − 6 = 24）：
+  - `@Scheduled(fixedDelayString = "${k:默认}")` **5 个**：`comm-adapt.detection-interval-ms`
+    （`LinkQualityMonitor.java:41`）、`comm-adapt.evaluate-interval-ms`（`CommAdaptAdvisoryService.java:75`）、
+    `sensing.aggregate-ms`（`SensingTrackService.java:53`）、`health.check-interval-ms`
+    （`HealthMonitorService.java:333`）、`signing.posture.watchdog-interval-ms`（`SigningPostureService.java:182`）；
+  - **跨行书写**的 `@Value` **1 个**：`drone-sysid`（`DroneCommandService.java:102-103`，
+    `"${aerofleet.drone-sysid:1}"` 落在注解续行上，按行匹配的扫描器看不到它前面的 `@Value(`）。
+  **不是 master 前进带来的**：三个基点（`cce0f10d` / `c6676144` / `dd19dc74`）的"有代码内默认"键集合
+  完全相同（**79 个**），未声明集合也同为 **30**。复算方式：用 `git grep` 在任意提交上现扫
+  声明面（`*/src/main/resources/*`）与读者面（`*/src/main/java/*`），不检出工作区、不写临时文件。
+  本批仍**不按 30 全量声明**，只按"文档/部署/前端点过名"筛。声明 13 个后，仍只存在于代码里的为 **17 个**，
+  其中 **5 个**的读者仍是 `@Scheduled`/跨行 `@Value` 形态（`sensing.aggregate-ms` 已随本批声明）
+  ——将来若要扩大声明面，扫描器必须按"读者形态"而不是"单行注解"来认。
+
+  **剩下的 17 个逐条列在这里**（键 / 代码默认 / 读者位置），免得"17"变成又一个不可核的数：
+  - 内部调参 10 个：`audit.capacity`=1000（AuditService.java:91）、
+    `comm-adapt.detection-interval-ms`=5000（LinkQualityMonitor.java:41）、
+    `comm-adapt.evaluate-interval-ms`=5000（CommAdaptAdvisoryService.java:75）、
+    `device-registry.signing-verify-write-interval-seconds`=60（DeviceRegistry.java:187）、
+    `health.check-interval-ms`=5000（HealthMonitorService.java:333）、`orbit-pool-size`=2（OrbitJobManager.java:70）、
+    `signing.posture.watchdog-interval-ms`=30000（SigningPostureService.java:182）、
+    `tracking.max-points`=3600（FlightTrackStore.java:51）、
+    `tracking.search.default-wind-speed`=5.0（LostDroneAlertService.java:54）、
+    `tracking.search.min-radius`=50.0（LostDroneAlertService.java:50）。
+  - **部署相关 7 个**（这一类是本次盘点的新发现，见 §12.5）：`drone-host`=127.0.0.1（UdpGateway.java:151）、
+    `drone-sysid`=1（DroneCommandService.java:103）、`gb28181.sip-host`=127.0.0.1:5060 与
+    `gb28181.sip-domain`=00000000000000000001（Gb28181Adapter.java:30-31）、
+    `sensing.base-lat`=22.5907 / `sensing.base-lon`=113.9345（CounterDroneRadarSource.java:42-43）、
+    `instance-id`=unknown（MetricsConfig.java:33）。
 - **入选 13 个**（属性名在 `gcs-web/src` / `docs` / `deploy` 出现过）：
   `geofence.restriction-file`、`report.cost-per-hour`、
   `scheduling.reservation.auto-radius-m`、`scheduling.reservation.auto-window-ms`、`scheduling.retry.max`、
@@ -644,6 +671,21 @@
   （mavlink-core / drone-sim / link-sim / regulator-sim / cloud-backend / sdk-java）；
   本批零测试增删；数字在 rebase 到最新 master（`dd19dc74`）后重跑得到，不是沿用旧基线。
 - 仓门：`check-config-keys` 10/10 自测 + 实跑通过；`check-doc-config-keys` 4/4；
-  新脚本 7/7；`check-doc-counts` README scripts 96 → **97**；CHANGELOG 小节 238 → **239**。
-- 未核（如实登记）：① 24 → 30 的差集未逐条归因；② 47 个最暗候选**一个都没复核**，
-  本批不删任何 getter；③ 删 spi 对 Spring 启动的影响只做了编译级验证，没有起一次应用对比 bean 数。
+  新脚本 7/7；`check-doc-counts` README scripts 96 → **97**；CHANGELOG 小节 244 → **245**（rebase 后重驱动）。
+- 未核（如实登记）：① ~~24 → 30 的差集未逐条归因~~ → **已归因**（旧扫描只认单行 `@Value`，漏 5 个 `@Scheduled(fixedDelayString)` + 1 个跨行 `@Value`，逐条见 §12.2；三个基点集合一致，与 master 前进无关）；② 47 个最暗候选**一个都没复核**，
+  本批不删任何 getter；③ 删 spi 对 Spring 启动的影响只做了编译级验证，没有起一次应用对比 bean 数；
+  ④ 7 个部署相关键的声明口径未定（§12.5）。
+
+### 12.5 新发现：17 个里有 7 个其实是"部署相关"，不是内部参数
+
+本批声明口径是"文档/部署/前端点过名的才声明"。逐条核对剩下的 17 个时发现，其中 7 个虽然
+**没有任何文档提过**，但语义上明显随部署环境变化：`drone-host`/`drone-sysid`（UDP 网关与指令下发指向哪台机）、
+`gb28181.sip-host`/`sip-domain`（SIP 服务器与域）、`sensing.base-lat`/`base-lon`（反制雷达站址）、
+`instance-id`（metrics 标签）。它们之所以没进"13 个"，唯一原因是**文档没写**——
+这是文档缺口，不是"应该藏在代码里"。
+
+- **不改的原因**：改声明面属于口径变更，超出本批裁决；而且 `gb28181.sip-domain` 这类值
+  写进 base properties 后，运维改错会静默连不上对端（需要在文档里同步"怎么校验"）。
+- **建议的下一步（等 owner 一句话）**：A. 把这 7 个连同说明写进 `docs/` 的配置参考 + 声明进
+  properties（一批小 PR，含一条"改 host 后启动日志能看见"的可观测性检查）；
+  B. 只补文档、不声明（保持"代码内默认 + 环境变量覆盖"）；C. 维持现状，登记为已知缺口。
