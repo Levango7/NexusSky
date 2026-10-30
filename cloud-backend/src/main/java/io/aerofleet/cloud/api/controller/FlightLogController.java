@@ -43,13 +43,21 @@ public class FlightLogController {
         return flightLog.query(d, type, sysid, bounded);
     }
 
-    /** Persisted track of one drone for one day (from telemetry lines). */
+    /**
+     * Persisted track of one drone for one day (from telemetry lines).
+     * <p>
+     * {@code limit} omitted / 0 = the whole day (forensics contract, unchanged);
+     * {@code limit > 0} = the newest N points (still returned oldest→newest).
+     * The value is clamped to [0, 5000] for the same reason as the list endpoint.
+     */
     @GetMapping("/track")
     public List<Map<String, Object>> track(
             @RequestParam(value = "day", required = false) String day,
-            @RequestParam("sysid") int sysid) {
+            @RequestParam("sysid") int sysid,
+            @RequestParam(value = "limit", defaultValue = "0") int limit) {
         LocalDate d = day != null ? LocalDate.parse(day) : LocalDate.now();
-        return flightLog.trackFor(d, sysid).stream()
+        int bounded = Math.max(0, Math.min(5000, limit));
+        return flightLog.trackFor(d, sysid, bounded).stream()
                 .map(p -> Map.<String, Object>of("lat", p.lat, "lon", p.lon,
                         "alt", p.alt, "ts", p.ts))
                 .toList();

@@ -51,9 +51,13 @@ export default function useDrones() {
     // FlightTrackStore 的有界内存窗口，后端重启后那里只剩 loadLastKnownPositions()
     // 塞回的 1 个最后已知点，地图上的历史折线就没了；而 `/flightlog/track?day=`
     // 从 flight_log 出当天整条轨迹，不受重启影响（该端点早已存在，前端一直没用）。
+    // 传 limit=MAX_TRACK_POINTS：mergeTrack 本来就把合并结果截到最新 1500 点，
+    // 多拉的历史点只会被丢掉。最终可见输出与"拉全天再截断"逐点等价
+    // （比第 1500 新的点才可能进窗口，更旧的怎么算都进不来），但单机单日从
+    // 8.6 万点降到 1500 点。法证/导出仍可不传 limit 拿整天。
     // 单开一个 try：历史不可用只该少一段历史，不该把刚拿到的实时轨迹抹成空。
     try {
-      const stored = await api.getDayTrack(sysid)
+      const stored = await api.getDayTrack(sysid, undefined, MAX_TRACK_POINTS)
       setTrack((prev) => mergeTrack(prev, stored))
     } catch (e) {
       // flight_log 未开库 / 查询失败：保留实时轨迹，本函数不额外报错

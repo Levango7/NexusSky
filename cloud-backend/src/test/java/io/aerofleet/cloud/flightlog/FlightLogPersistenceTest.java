@@ -229,6 +229,24 @@ class FlightLogPersistenceTest {
                 .doesNotContain(0L);
     }
 
+    @Test
+    @DisplayName("trackFor(day,sysid,limit) 只取最新 N 条，仍按旧→新")
+    void trackForLimitKeepsNewestNFromDb() {
+        LocalDate today = LocalDate.now();
+        Instant dayStart = today.atStartOfDay(ZoneId.systemDefault()).toInstant();
+        for (int i = 0; i < 5; i++) {
+            saveTelemetryRow(21, dayStart.plus(i + 1, ChronoUnit.HOURS), i + 1.0);
+        }
+
+        assertThat(flightLogService.trackFor(today, 21))
+                .as("不传 limit 仍是当天全部（法证契约）")
+                .hasSize(5);
+        assertThat(flightLogService.trackFor(today, 21, 2))
+                .as("limit 取最新 N 条，但对外顺序仍是旧→新（末尾=最新）")
+                .extracting(p -> p.alt)
+                .containsExactly(4.0, 5.0);
+    }
+
     /** JSONL 回退路径同样不能把 ts 写成 0（它是 persistToDb=false 时的唯一读路径）。 */
     @Test
     @DisplayName("trackFor() 的 JSONL 路径 ts 也是真实时刻")
