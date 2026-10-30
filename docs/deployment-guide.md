@@ -138,6 +138,27 @@ aerofleet.license.enabled=true
 aerofleet.license.key=<Base64编码的License Key>
 ```
 
+### 3.3 部署相关键（换环境就要改的那一组）
+
+下面 7 个键**不是内部调参**，而是"这套部署连的是谁 / 在哪"。出厂值是单机/仿真的姿势，
+生产用 profile 或环境变量覆盖即可（键名不变，Spring 照常读取）。改完用**启动日志自证**，
+每一行都写明去哪看——别靠猜。
+
+| 配置项 | 出厂值 | 含义 | 改完在哪里看见 |
+|---|---|---|---|
+| `aerofleet.drone-host` | `127.0.0.1` | UDP 网关主动发现的目标主机（真机/仿真的地址） | 启动日志 `MAVLink UDP gateway listening …, discovery -> <地址>` |
+| `aerofleet.drone-sysid` | `1` | 请求未显式带 sysid 时的默认目标机 | 启动日志 `指令下行默认目标 sysid=…` |
+| `aerofleet.gb28181.sip-host` | `127.0.0.1:5060` | GB28181 SIP 信令对端 | 启动日志 `GB28181 接入配置: sip-domain=…, sip-host=…` |
+| `aerofleet.gb28181.sip-domain` | `00000000000000000001` | SIP 域（GB28181 标准为 20 位域编码） | 同上 |
+| `aerofleet.sensing.base-lat` | `22.5907` | 反制雷达站址纬度（模拟源的航迹基点） | 启动日志 `CounterDroneRadarSource (模拟) 就绪: base=(lat, lon)` |
+| `aerofleet.sensing.base-lon` | `113.9345` | 同上，经度 | 同上 |
+| `aerofleet.instance-id` | `unknown` | 指标公共标签 `instance`（多实例部署必改，否则 Prometheus 里聚成一个） | `/actuator/prometheus` 里的 `instance="…"` 标签 |
+
+> ⚠️ 这 7 个键**此前只写在代码默认值里**，配置文件里搜不到（审计 §12 / §12.5）。
+> 声明进 `application.properties` 不会改变行为（值等于代码默认），只是让运维能在配置里看见。
+> 其中 `gb28181.sip-domain` 必须 20 位数字串；写错不会启动失败，只会连不上对端——
+> 所以以启动日志那一行为准。
+
 ---
 
 ## 四、监控
