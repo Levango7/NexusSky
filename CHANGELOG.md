@@ -1,5 +1,30 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修 sim-truth HTTP 调用只连不读：3 处请求补 3s 读取超时（2026-10-30）
+
+### 修：`CaptureService` / `OrbitService` 的 `HttpRequest` 没有 timeout
+
+两个视觉服务都用 `HttpClient.newBuilder().connectTimeout(2s)`——**连接超时只覆盖
+TCP 握手**，请求本身没有 `HttpRequest.timeout(...)`。服务端接受连接后不响应
+（sidecar 卡死、反代挂住、响应半截），`http.send` 会一直阻塞：
+
+- `CaptureService.fetchJpeg()`：拍摄主路径每帧拉 sim 渲染 JPEG；
+- `CaptureService.getJson()`：拉 `/camera/shots`、`/targets` 真值；
+- `OrbitService.getJson()`：环绕任务逐点拉真值。
+
+调用方都是请求线程/任务线程，没有外层超时兜底 ⇒ 一个不响应的 sidecar 可以
+永久占住线程。同类出站调用（`MjpegStreamService` 4s、`OnvifSoapClient` 可配、
+`WebhookService` 10s、`NtripClient` 可配）都设了读超时，这三处是漏网。
+
+修法：两类各加 `REQUEST_TIMEOUT = Duration.ofSeconds(3)`，三个请求构建器补
+`.timeout(REQUEST_TIMEOUT)`。**只加超时，不改 URL/重试/降级语义**：
+`fetchJpeg` 失败仍返回 null，`getJson` 仍把异常抛给上层既有 catch。
+
+测试 +3 例（`SimTruthRequestTimeoutTest`）：本地 `HttpServer` 接受连接后
+8 秒不响应——`getJson` 必须抛 `HttpTimeoutException`，`fetchJpeg` 必须
+在 6 秒内返回 null（不得等到 8 秒服务端响应）。**A/B**：删掉三处
+`.timeout(REQUEST_TIMEOUT)` ⇒ 3 例红；还原 ⇒ 绿（已实测）。
+
 ## [Unreleased] — 修拓扑推送 debounce 缓存无界增长：按窗口裁剪过期 key（2026-10-30）
 
 ### 修：`CellTowerPusher` / `MeshTopologyPusher` 的 `debounceCache` 只增不减
@@ -592,7 +617,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-30 共有 243 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-30 共有 244 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -618,7 +643,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 243 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 244 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
