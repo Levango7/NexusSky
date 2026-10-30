@@ -1,5 +1,36 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修 `GeofenceStore` 启动恢复把只增表全量读进内存（2026-10-29）
+
+### 修：越界事件启动加载改为「只取最新 1000 条」（`LIMIT` 下推）
+
+`GeofenceStore.loadFromDb()` 在 `@PostConstruct` 阶段对 `geofence_breach_event`
+执行 `findAll()`，再在内存里按 `timestampMs` 排序，最后只保留最新的
+`MAX_BREACH_HISTORY`（1000）条。
+
+问题不在「留 1000 条」这个上限，而在**为了找出 1000 条把整张表读进堆**：
+
+- 该表是**只增表**——`recordBreach()` 只插入，全仓没有任何保留/清理任务
+  （数据保留策略只覆盖 `flight_log` 与 `audit_log`）；
+- 越界事件是「无人机飞错」级别的业务事件，长期积累到十万、百万行是常态；
+- 于是这笔账落在**每次启动**：应用还没开始接流量，先把整表 `SELECT` 进堆、
+  建 N 个实体对象、全量排序，然后丢掉 99.9%。表越大启动越慢，内存峰值越高；
+  一旦行数超过堆，就是启动即 OOM（重启也救不回来，因为重启还是要全量读）。
+
+改动：
+
+- `findAll(PageRequest.of(0, MAX_BREACH_HISTORY, Sort.by(DESC, "timestampMs", "id")))`
+  ——`LIMIT 1000` 与 `ORDER BY` 一起下推数据库，只传回要保留的那些行；
+- 排序用 `timestampMs DESC, id DESC`：`id` 消掉同毫秒并列的不确定性，
+  保证与旧实现「同时间戳按插入序保留较新者」的取舍一致；
+- 服务端反转成旧→新再 `addLast`，deque 的契约（末尾=最新）不变；
+- 历史表读取失败仍单独 `catch`，不影响围栏区域恢复。
+
+测试 +2 例（`GeofenceStorePersistenceTest`，15→17）：分页参数确实是
+`size=MAX_BREACH_HISTORY` 且按 `timestampMs DESC` 排序、绝不调用无参 `findAll()`；
+历史表抛异常时围栏区域照常恢复。
+变异 A/B：把分页调用改回整表 `findAll()` ⇒ 红；还原 ⇒ 绿（实测通过）。
+
 ## [Unreleased] — P2-F2：DO_REPOSITION 必须 COMMAND_INT——编队命令在 AP 真机 100% 静默失效的修复（2026-10-30）
 
 **"sim 测不出"家族第 4 例，真机现场挖出并闭环**：ArduPilot 对携带经纬度的命令**强制 COMMAND_INT
@@ -460,7 +491,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-30 共有 239 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-30 共有 240 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -486,7 +517,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 239 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 240 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
