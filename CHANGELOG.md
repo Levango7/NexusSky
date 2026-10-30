@@ -1,5 +1,45 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P2 #18 三条遗留的 owner 裁决落实：删 spi 空壳 + 13 个运维键声明 + report-only getter 清单（2026-10-30）
+
+三件互相独立的事，原本都挂在审计里"等口径"那一档（§5 第 9 条、§11.6），本批按 owner 裁决一次做完：
+
+- **删 `cloud-backend/.../spi/`（13 个文件 / 1266 行）**：零实现、零注入、零 `.java` 引用
+  （删前按 13 个类名逐个全仓反查；§5/§11 里写的"12 个类"是当时数错，实测 13 个文件，行数不变）。
+  它承诺的载荷 / 传输 / 决策 / 航线四类能力在 `drone-sim` 侧**都已真实交付**
+  （`PathPlanner` / `DecisionEngine` / `ObstacleAvoidanceStrategy` / M2 的 Actuator），
+  cloud 这套只是同名的第二套类型。接口形状仍留在 `docs/architecture-deepening-plan.md` §2.3–2.4，
+  真要开放第三方扩展时从那里重建；properties / `ci.yml` / `demo-scenarios.md` / `e2e-spray.sh`
+  里关于它的说明同步改写成"已删"。`check-config-keys.py` 同时去掉静态表 `DYNAMIC_PREFIX_CLAIMS`
+  （动态前缀改由代码现场扫"谁声称按前缀枚举"），少一处会漂移的手工账。
+- **13 个"文档点过名、properties 里却搜不到"的键声明进 base properties**：
+  `geofence.restriction-file`、`report.cost-per-hour`、`scheduling.reservation.auto-radius-m` /
+  `-auto-window-ms`、`scheduling.retry.max`、`security.bootstrap-admin-username` / `-tenant-id`、
+  `sensing.aggregate-ms` / `-proximity-alert-m` / `-track-ttl-ms`、`sim-truth-base`、`vision.source`，
+  外加 `bootstrap-admin-password` 走 `${AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD:}`（不落明文）。
+  **值与代码默认逐项比对：12/13 逐字节相等**，口令那 1 条是刻意偏差（env 未设 ⇒ 空 ⇒ 不引导，
+  与代码默认同义）。重测 30 个、§11.2 记 24 的差集已归因：旧扫描只认单行 `@Value`，
+  漏了 5 个 `@Scheduled(fixedDelayString=…)` 与 1 个跨行 `@Value`（逐条见审计 §12.2）；
+  三个基点的默认键集合相同，与 master 前进无关。声明键 69 → **82**，`check-config-keys.py` 全绿；全仓 `containsProperty` /
+  `getProperty("aerofleet…")` 调用点为 0 ⇒ 不可能翻转任何 presence 分支，零行为变化。
+  另外 17 个"只在代码里有默认值"的内部实现参数（容量、轮询间隔、线程池、设备指纹、
+  GB28181 SIP 地址、失联搜索兜底常数）**故意不声明**——写进配置文件会被当成可调旋钮，
+  实际调了要么没有语义、要么会让设备/对端对不上。
+- **新 `scripts/list-unreferenced-getters.py`（report-only，恒退 0）**：getter 判据是过近似
+  （Jackson 按 getter 定 JSON 字段名，"代码里没人调"≠"没人消费"），收紧需要编译级调用图，
+  而误报会把仓门变成"经常红但没人理"。所以只打印四档计数与最暗一档名单：有调用点 /
+  契约候选（属性名见于前端·文档·部署）/ 只有测试在用 / 零外引用候选；数调用点前先剥注释与
+  字符串字面量（§11.4 抓过"注释里的方法名当证据"的假阳性）。实测扫 1304 个 getter → 47 个最暗候选，
+  **本批一个都没删**；与 §11.3 的 13 不是同一口径（本脚本不算"随响应出网"那一档），不可直接比较。
+  自测 7 情形，已接 `repo-gates` 的自测步与独立报告步。
+
+验证：全 reactor `mvn -B -o clean test` **5505 / 0 失败 / 0 错误**（六个模块全 SUCCESS；
+本批零测试增删，数字随基线 rebase 到最新 master 后重驱动）；门禁自测 `check-config-keys` 10/10、
+`check-doc-config-keys` 4/4、`list-unreferenced-getters` 7/7、`check-revert-looking-diff` 3/3；
+README 目录树脚本数 96 → **97**。裁决来路、复核记录与未核清单见
+`docs/persistence-and-dead-surface-audit.md` §12。
+
+计数：本批 **0** 测试增删；`[Unreleased]` 小节 245 → **2**。
 ## [Unreleased] — 轨迹端点可选 limit + 空 catch 棘轮门禁（2026-10-31）
 
 ### 改：`GET /flightlog/track` 默认仍全天，新增 `limit` 取最新 N 点
@@ -644,7 +684,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-30 共有 245 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-30 共有 246 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -670,7 +710,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 245 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 246 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

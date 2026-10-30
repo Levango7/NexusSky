@@ -13,6 +13,9 @@
 ⇒ 运维把 `aerofleet.plugins.payload.spray.enabled=false` 改掉，**没有任何东西会红**，
 但他以为自己关掉了一个模块。这正是审计 §4.2 里 `aerofleet.geofence.intercept.enabled`
 那条"假开关"的同一形状，只是这次藏在"动态前缀"的幌子下面。
+（后续：`spi/` 那 13 个文件的框架本体已按 owner 裁决删除，接口形状留在
+`docs/architecture-deepening-plan.md` §2.3 —— 见审计 §12。上面这段是当初的发现过程，
+留着是为了说明这条门禁在防的是哪个形状，不是描述现在的代码。）
 
 `check-doc-config-keys.py` 管的是**反方向**（文档承诺的键代码认不认）。两条合起来
 才是双向对账：文档写了代码要有，代码不读的就别在配置里躺着。
@@ -38,7 +41,8 @@
 4. 键名比对大小写不敏感、`-`/`_`/`.` 归一（Spring relaxed binding 的口径），
    所以 `sink-type` 与 `sinkType` 视为同一个键。
 5. `EXEMPT` 是豁免账：每条必须带**理由 + 到期日**；到期即红（棘轮只准拧紧）。
-   当前账：**空**——8 个插件假开关已随本批删除，原位留了注释指向审计 §11.2。
+   当前账：**空**——8 个插件假开关已随本批删除，原位留了注释指向审计 §11.2；
+   同批之后 `spi/` 框架本体（13 个文件）也按 owner 裁决删除，见审计 §12。
 
 用法：
     python scripts/check-config-keys.py
@@ -59,10 +63,10 @@ MODULES = ["mavlink-core", "drone-sim", "link-sim", "cloud-backend", "regulator-
 # 豁免账：键（归一后） -> (理由, 到期日 YYYY-MM-DD)。棘轮只准拧紧，到期即红。
 EXEMPT = {}
 
-# 动态前缀：前缀 -> 承载该前缀的类名（读者可达性由代码实测，不轻信注释）
-DYNAMIC_PREFIX_CLAIMS = {
-    "aerofleet.plugins.": "PluginConfig",
-}
+# 动态前缀不再维护静态表：声称"按前缀枚举"的类由代码现场扫出（见 collect_readers），
+# 可达性也现算。原先这里写死 {"aerofleet.plugins.": "PluginConfig"}，而 PluginConfig 与
+# 整个 spi/ 框架已在 2026-10-30 的 owner 裁决中删除（审计 §12）——静态表本身就是又一处
+# "文档说有人读、代码里没人读"的漂移面，删掉它改由代码说话。
 
 PROP_KEY = re.compile(r"^\s*([A-Za-z0-9_.\-]+)\s*[:=]")
 VALUE_READ = re.compile(r'"\$\{([A-Za-z0-9_.\-]+)(?::[^}]*)?\}"')
@@ -141,7 +145,8 @@ def read_configs():
 
 
 def collect_readers():
-    """返回 (精确读取的归一键集合, 动态前缀成立集合, 诊断信息)。"""
+    """返回 (精确读取的归一键集合, 前缀绑定展开的键, 前缀集合, 可达的动态前缀,
+    诊断信息, 全部被声称的动态前缀)。"""
     exact = set()
     prefixes = set()
     bound = set()          # @ConfigurationProperties 前缀（该前缀下任意键都算被绑定读取）
@@ -203,7 +208,7 @@ def collect_readers():
         else:
             diag.append("动态前缀 %s 的读者 %s 在全仓不可达 ⇒ 该前缀不按『被读取』算"
                         % (pre, "/".join(sorted(classes))))
-    return exact, field_keys, prefixes, live_dyn, diag
+    return exact, field_keys, prefixes, live_dyn, diag, set(claims)
 
 
 def is_read(key, exact, field_keys, prefixes, live_dyn):
@@ -224,7 +229,7 @@ def check(root=None):
     declared, found_any = read_configs()
     if not found_any:
         return (["找不到任何 src/main/resources 下的配置文件（不许把『没查到』冒充『没问题』）"], {}, [])
-    exact, field_keys, prefixes, live_dyn, diag = collect_readers()
+    exact, field_keys, prefixes, live_dyn, diag, claimed_dyn = collect_readers()
     problems = []
     notices = []
     unread = []
@@ -247,10 +252,9 @@ def check(root=None):
         problems.append("properties 声明了但代码从不读取（假开关）：%s  <- %s" % (key, rel))
     # 动态前缀的读者不可达：只在**该前缀下真的声明了键**时才算违规（否则只是提示）。
     # 真事：本批删掉 8 个 aerofleet.plugins.*.enabled 之后，PluginConfig 仍不可达——
-    # 那是"框架没接线"的事实，但配置面已经不再骗人，所以这里降级为提示，
-    # 由审计 §11.2 与 §5 的架构裁决跟进去，不让门禁冒充它管得着的事。
-    dyn_declared = [k for k in seen if any(k.startswith(pre) for pre, cls in
-                                           DYNAMIC_PREFIX_CLAIMS.items())]
+    # 那是"框架没接线"的事实，但配置面已经不再骗人，所以这里只在还有人往该前缀下写键时
+    # 才判红，不让门禁冒充它管得着的事。声称的前缀从代码现算，不用静态表。
+    dyn_declared = [k for k in seen if any(k.startswith(pre) for pre in claimed_dyn)]
     for note in diag:
         if dyn_declared:
             problems.append(note)

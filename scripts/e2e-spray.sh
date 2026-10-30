@@ -12,7 +12,8 @@
 #   GET    /api/v1/delivery/{id}/payload  当前负载清单
 #   POST   /api/v1/delivery/{id}/payload/query  按需触发 MAV_CMD 30085 负载上报
 #
-# 注意：夹爪（gripper）在本仓没有 REST 端点，PayloadPlugin 是 SPI 内部接口，
+# 注意：夹爪（gripper）在本仓没有 REST 端点，PayloadPlugin 是 SPI 内部接口（该 spi/ 包
+#   已于 2026-10-30 整体删除，见审计 §12，结论不变），
 #   故原脚本的 /spray/gripper 断言已移除；夹爪的**机载**能力由本脚本的
 #   配送 START（MAV_CMD 30084 GRIPPER_CONTROL）覆盖。
 #

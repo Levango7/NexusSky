@@ -288,6 +288,15 @@
    关闭时的对外语义），**B. 删空壳**，把"可插拔"从声称里摘掉，等真有第三方插件再做。
    `docs/architecture-deepening-plan.md` 记的是 A 的排期，但**没人认领**——
    留在这儿的意思是：别让一具没人接的框架顶着"能力"的名字躺在主干里。
+   > **✅ 2026-10-30 裁决（owner 选"删空壳"，落实见 §12.1）**：走 B。
+   > 动手前复核两处：① 规模写错了——不是"12 个类"，`git ls-tree` 实测是 **13 个文件 / 1266 行**
+   > （`Waypoint` / `RoutePlanRequest` / `PluginContext` 这些 DTO 与枚举没计进"类"），
+   > 行数没错、结论没错；② 删除前按 13 个类名逐个全仓反查（`.java/.py/.yml/.properties/.md/.ts/.ps1/.sh`），
+   > **零 `.java` 引用**，命中的只剩 CHANGELOG 历史条目、properties/ci.yml 的取证注释、
+   > `docs/architecture-deepening-plan.md` 的设计正文、`demo-scenarios.md:283` 与
+   > `scripts/e2e-spray.sh:15` 两处"夹爪无 REST 端点"的说明——都已就地标注去向。
+   > 接口形状没有丢：`docs/architecture-deepening-plan.md` §2.3/§2.4 仍在，将来真要开放
+   > 第三方扩展，从那里重建即可。
 
 ---
 
@@ -479,6 +488,9 @@
   该白名单条目已撤销，原位留注释指向本节。
 - **框架本体没有删**：`spi/` 包里 12 个类 / 1266 行的插件框架仍在（零实现、零外部引用）。
   「补实现把它接真」还是「删掉空壳」是架构裁决，登记在 §5 第 9 条——不由扫描器替产品决定。
+  > **2026-10-30 当日追记**：这条裁决当天就回来了——owner 选「删空壳」，`spi/` 包已整体删除
+  > （**13 个文件**，本行的"12 个类"是当时数错，见 §5 第 9 条的复核）。原话留着不改，
+  > 是为了让读者看到"扫描器不替产品决定"这条纪律是真的走到了裁决那一步。落实见 §12.1。
 
 ### 11.3 死访问器：实测与四类定性
 
@@ -529,6 +541,7 @@
   （它落进"真死候选"是因为扫描按"除本文件外零引用"筛，没先扣掉同文件调用；已在本批纠正口径后仍保留）。
 - `cloud-backend/.../spi/PluginConfig.getDisabledPlugins()`——随整个插件框架一起留给 §5 第 9 条的
   架构裁决；单点删它既不省什么，又会让"框架还在"这件事更难看清。
+  （2026-10-30 追记：裁决已下——整个框架按 §12.1 删除，这个方法随之消失。）
 
 ### 11.5 本批验证
 
@@ -548,9 +561,131 @@
 
 ### 11.6 遗留（写清"为什么这批不做"）
 
+> **2026-10-30 同日状态**：三条都已由 owner 裁决并落实，见 **§12**。原文按留档规矩不改，
+> 只在每条后面补状态；其中第 1 条的数字在下一次实测中从 24 变成了 **30**（口径差别见 §12.2）。
+
 1. **24 个"代码内默认、properties 未声明"的键**：要不要统一声明进 `application.properties`，
    是运维可见性口径问题（声明了就多 24 行要跟代码同步的账），本批不动，等口径。
+   ⇒ **已裁决**：只把文档/部署/前端点过名的 13 个声明进 properties，其余保持代码内默认（§12.2）。
 2. **`spi/` 插件框架 12 类 / 1266 行空壳**：补实现还是删，见 §5 第 9 条。
+   ⇒ **已裁决：删**（实测 13 个文件，§12.1）。
 3. **「随响应出网」这条判据是过近似**：174 个里可能混有真死的访问器。要收紧需要编译级调用图
    （或按端点响应 schema 逐个核），与 §6 里 `check-dead-wiring.py` 暂缓是同一个原因——
    **文本级启发式在这里已经到能力边界**，宁可把它登记成"已知弱点"也不假装它精确。
+   ⇒ **已裁决：不收紧**，改为加一条 **report-only**（只提示、恒退 0）的零外引用 getter 清单，
+   让"新写出的死访问器"至少看得见（§12.3）。
+
+---
+
+## 12. P2 #18 三条遗留的 owner 裁决与落实（2026-10-30）
+
+> 来路：§5 第 9 条（spi 框架）与 §11.6 三条遗留。用户在两条路上都选了"最小可信"那一侧：
+> **该删的删干净、该看不见的才不声明、判据不够硬就不判红**。三件事互相独立，可拆 PR。
+
+### 12.1 `spi/` 插件框架：删（方案 B）
+
+- **规模更正**：§5/§11 里写的"12 个类"实测是 **13 个文件 / 1266 行**
+  （`git ls-tree -r origin/master -- .../spi | wc -l` = 13；行数 1266 不变）。
+  少算的是 `Waypoint` / `RoutePlanRequest` 这类 DTO 与枚举——"类"这个词当时是按"主要类型"数的。
+- **删前复核**（按 13 个类名逐个全仓反查，`.java/.py/.yml/.properties/.md/.ts/.ps1/.sh`）：
+  **零 `.java` 引用**；命中项只有 ① CHANGELOG 历史条目（不删，历史就是历史）
+  ② properties / `ci.yml` 里的取证注释 ③ `docs/architecture-deepening-plan.md` §2.3–2.4 的设计正文
+  ④ `demo-scenarios.md:283` 与 `scripts/e2e-spray.sh:15` 两处"夹爪无 REST 端点"的说明。
+- **改了哪些面**：删 13 个文件；properties 注释改写成"键删了、框架也删了、形状在哪"；
+  `check-config-keys.py` 去掉静态表 `DYNAMIC_PREFIX_CLAIMS`（改由代码现场扫"谁声称按前缀枚举"，
+  少一处会漂移的手工账）；`check-doc-config-keys.py` 注释追记；`ci.yml` 注释追记；两处文档就地加日期说明。
+- **为什么删**：它承诺的四类能力（载荷 / 传输 / 决策 / 航线）在 `drone-sim` 侧**都已真实交付**
+  （`PathPlanner` / `DecisionEngine` / `ObstacleAvoidanceStrategy` / ROADMAP M2 的 Actuator），
+  cloud 这套只是同名的第二套类型且零消费者；ROADMAP 的 M0–M13 也没有"第三方插件生态"里程碑。
+- **形状留档**：`docs/architecture-deepening-plan.md` §2.3（四份 SPI 定义）与 §2.4（注册中心设计）
+  原样保留——将来真要开放扩展，从那里重建，成本是重写而不是重新设计。
+- **验收**：`mvn -o test-compile` 通过；全 reactor 回归见 §12.4。删除类没有用例会因此变红，
+  能给的证据仍是"编译 + 全量测试 + 零引用面复算"（与 §11.5 同形）。
+
+### 12.2 只在代码里有默认值的键：只声明 13 个
+
+- **重测**：当前 **30 个**。§11.2 记的 24 已归因——**旧扫描只认单行 `@Value("${k:默认}")`**，
+  漏掉两类同等有效的读者形态，正好 6 个（在审计基线 `cce0f10d` 上复算：30 − 6 = 24）：
+  - `@Scheduled(fixedDelayString = "${k:默认}")` **5 个**：`comm-adapt.detection-interval-ms`
+    （`LinkQualityMonitor.java:41`）、`comm-adapt.evaluate-interval-ms`（`CommAdaptAdvisoryService.java:75`）、
+    `sensing.aggregate-ms`（`SensingTrackService.java:53`）、`health.check-interval-ms`
+    （`HealthMonitorService.java:333`）、`signing.posture.watchdog-interval-ms`（`SigningPostureService.java:182`）；
+  - **跨行书写**的 `@Value` **1 个**：`drone-sysid`（`DroneCommandService.java:102-103`，
+    `"${aerofleet.drone-sysid:1}"` 落在注解续行上，按行匹配的扫描器看不到它前面的 `@Value(`）。
+  **不是 master 前进带来的**：三个基点（`cce0f10d` / `c6676144` / `dd19dc74`）的"有代码内默认"键集合
+  完全相同（**79 个**），未声明集合也同为 **30**。复算方式：用 `git grep` 在任意提交上现扫
+  声明面（`*/src/main/resources/*`）与读者面（`*/src/main/java/*`），不检出工作区、不写临时文件。
+  本批仍**不按 30 全量声明**，只按"文档/部署/前端点过名"筛。声明 13 个后，仍只存在于代码里的为 **17 个**，
+  其中 **5 个**的读者仍是 `@Scheduled`/跨行 `@Value` 形态（`sensing.aggregate-ms` 已随本批声明）
+  ——将来若要扩大声明面，扫描器必须按"读者形态"而不是"单行注解"来认。
+
+  **剩下的 17 个逐条列在这里**（键 / 代码默认 / 读者位置），免得"17"变成又一个不可核的数：
+  - 内部调参 10 个：`audit.capacity`=1000（AuditService.java:91）、
+    `comm-adapt.detection-interval-ms`=5000（LinkQualityMonitor.java:41）、
+    `comm-adapt.evaluate-interval-ms`=5000（CommAdaptAdvisoryService.java:75）、
+    `device-registry.signing-verify-write-interval-seconds`=60（DeviceRegistry.java:187）、
+    `health.check-interval-ms`=5000（HealthMonitorService.java:333）、`orbit-pool-size`=2（OrbitJobManager.java:70）、
+    `signing.posture.watchdog-interval-ms`=30000（SigningPostureService.java:182）、
+    `tracking.max-points`=3600（FlightTrackStore.java:51）、
+    `tracking.search.default-wind-speed`=5.0（LostDroneAlertService.java:54）、
+    `tracking.search.min-radius`=50.0（LostDroneAlertService.java:50）。
+  - **部署相关 7 个**（这一类是本次盘点的新发现，见 §12.5）：`drone-host`=127.0.0.1（UdpGateway.java:151）、
+    `drone-sysid`=1（DroneCommandService.java:103）、`gb28181.sip-host`=127.0.0.1:5060 与
+    `gb28181.sip-domain`=00000000000000000001（Gb28181Adapter.java:30-31）、
+    `sensing.base-lat`=22.5907 / `sensing.base-lon`=113.9345（CounterDroneRadarSource.java:42-43）、
+    `instance-id`=unknown（MetricsConfig.java:33）。
+- **入选 13 个**（属性名在 `gcs-web/src` / `docs` / `deploy` 出现过）：
+  `geofence.restriction-file`、`report.cost-per-hour`、
+  `scheduling.reservation.auto-radius-m`、`scheduling.reservation.auto-window-ms`、`scheduling.retry.max`、
+  `security.bootstrap-admin-username` / `-password` / `-tenant-id`、
+  `sensing.aggregate-ms`、`sensing.proximity-alert-m`、`sensing.track-ttl-ms`、
+  `sim-truth-base`、`vision.source`。
+- **值与代码默认逐项比对**：12/13 逐字节相等；唯一不同的 `bootstrap-admin-password` 是刻意的——
+  properties 里写 `${AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD:}`，env 未设时解析为空 = 与代码默认
+  "空值不引导"同义，且不把口令写进仓库。这条偏差写在这里，免得下次有人"对齐"成明文。
+- **刻意不声明的 17 个**：容量、内部轮询/校验间隔、线程池大小、仿真侧设备指纹
+  （`drone-host` / `drone-sysid` / `sensing.base-lat|lon`）、GB28181 SIP 地址、失联搜索兜底常数
+  （`tracking.search.*`）。写进配置文件会被当成可调旋钮，而其中一部分调了会让设备/对端对不上——
+  这属于 §11.2 修掉的那种"看起来可调"的另一面。
+- **新增声明的副作用检查**：全仓 `containsProperty(...)` / `getProperty("aerofleet...")` 调用点为 0，
+  所以"声明一个此前缺失的键"不可能翻转任何 presence 分支；值又全部等于代码默认 ⇒ 零行为变化。
+- **门禁**：`check-config-keys.py` 实测声明键 69 → **82**，全部有真实读者，通过。
+
+### 12.3 getter 判据：不收紧，改 report-only 清单
+
+- **裁决理由**：判据是过近似（Jackson 按 getter 定 JSON 字段名，"代码里没人调"≠"没人消费"）；
+  收紧到编译级调用图要 2–3 天且收益不确定，而误报会把仓门变成"经常红但没人理"。
+- **落地**：新脚本 `scripts/list-unreferenced-getters.py`，**恒退 0**，只打印四档计数与最暗一档名单：
+  有调用点 / 契约候选（属性名见于前端·文档·部署）/ 只有测试在用 / 零外引用候选。
+  注释与字符串字面量先剥掉再数调用点（§11.4 抓过"注释里的方法名当证据"的假阳性）。
+- **实测（本批树）**：扫 1304 个 public 无参 getter → 有调用点 1104 / 契约候选 79 / 只有测试在用 74 /
+  零外引用候选 **47**。**这 47 与 §11.3 的 13 不可直接比较**：本脚本不算"随响应出网"那一档，
+  序列化的会被留在最暗一档里（更保守但更暗）；反过来"属性名出现在 docs"的口径更宽，会把一些
+  真死的挡在最暗档外。两个方向都朝"宁可漏报、不误删"偏。
+- **自测**：7 情形（四档归类、注释/字符串不算调用点、有候选仍退 0、`--strict` 才退 1）。
+- **CI**：进 `repo-gates` 的自测步 + 独立报告步；不加 `|| true`——脚本自身崩溃属于工具故障，应当响。
+
+### 12.4 验证与计数
+
+- 全 reactor `mvn -B -o clean test`：**5505 / 0 失败 / 0 错误**，六个模块全 SUCCESS
+  （mavlink-core / drone-sim / link-sim / regulator-sim / cloud-backend / sdk-java）；
+  本批零测试增删；数字在 rebase 到最新 master（`dd19dc74`）后重跑得到，不是沿用旧基线。
+- 仓门：`check-config-keys` 10/10 自测 + 实跑通过；`check-doc-config-keys` 4/4；
+  新脚本 7/7；`check-doc-counts` README scripts 96 → **97**；CHANGELOG 小节 244 → **245**（rebase 后重驱动）。
+- 未核（如实登记）：① ~~24 → 30 的差集未逐条归因~~ → **已归因**（旧扫描只认单行 `@Value`，漏 5 个 `@Scheduled(fixedDelayString)` + 1 个跨行 `@Value`，逐条见 §12.2；三个基点集合一致，与 master 前进无关）；② 47 个最暗候选**一个都没复核**，
+  本批不删任何 getter；③ 删 spi 对 Spring 启动的影响只做了编译级验证，没有起一次应用对比 bean 数；
+  ④ 7 个部署相关键的声明口径未定（§12.5）。
+
+### 12.5 新发现：17 个里有 7 个其实是"部署相关"，不是内部参数
+
+本批声明口径是"文档/部署/前端点过名的才声明"。逐条核对剩下的 17 个时发现，其中 7 个虽然
+**没有任何文档提过**，但语义上明显随部署环境变化：`drone-host`/`drone-sysid`（UDP 网关与指令下发指向哪台机）、
+`gb28181.sip-host`/`sip-domain`（SIP 服务器与域）、`sensing.base-lat`/`base-lon`（反制雷达站址）、
+`instance-id`（metrics 标签）。它们之所以没进"13 个"，唯一原因是**文档没写**——
+这是文档缺口，不是"应该藏在代码里"。
+
+- **不改的原因**：改声明面属于口径变更，超出本批裁决；而且 `gb28181.sip-domain` 这类值
+  写进 base properties 后，运维改错会静默连不上对端（需要在文档里同步"怎么校验"）。
+- **建议的下一步（等 owner 一句话）**：A. 把这 7 个连同说明写进 `docs/` 的配置参考 + 声明进
+  properties（一批小 PR，含一条"改 host 后启动日志能看见"的可观测性检查）；
+  B. 只补文档、不声明（保持"代码内默认 + 环境变量覆盖"）；C. 维持现状，登记为已知缺口。
