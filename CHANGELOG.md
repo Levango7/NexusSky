@@ -1,5 +1,28 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修拓扑推送 debounce 缓存无界增长：按窗口裁剪过期 key（2026-10-30）
+
+### 修：`CellTowerPusher` / `MeshTopologyPusher` 的 `debounceCache` 只增不减
+
+两个 2Hz `@Scheduled` 推送器各持一张 `HashMap<String, Long>` 做 1 秒 debounce，
+key 是「事件类型:源 sysid:目标 sysid」——机队 N 台时 key 空间是 **O(N²)**，
+而代码只 `put` 从不删除。缓存大小因此取决于**历史上见过的所有事件组合**，
+与「只保留最近 1 秒」的语义无关；机队越大、运行越久，涨得越快
+（1000 台时是「6 种事件 × 百万级组合」的量级）。
+
+修法：抽出包内 `DebounceWindow`（TTL + 裁剪），每次 `pushOnce` 先
+`prune(now)` 丢掉窗口外 key，再逐事件判重。判据与原内联逻辑逐条一致：
+窗口内抑制、`now - lastSeen == TTL` 仍抑制、只有 `> TTL` 才再次放行；
+被裁掉的 key 早已不在窗口内，因此**不改变任何推送行为**，只改变内存占用。
+
+顺带修复 5 个 pusher 的 Javadoc 截断残片（`定向投递adcast}（既有不变）` /
+`（satId 非机队设备）adcast}。`）——同一批文本损坏，句子已还原。
+
+测试 +7 例：`DebounceWindowTest` 5 例（窗口内抑制、TTL 边界仍抑制、裁剪只丢过期 key、
+100 轮 × 100 个不同 key 缓存不随历史增长、非法 TTL 拒绝）+
+`PusherDebounceCacheBoundedTest` 2 例（两个 pusher 真时钟过窗后，60 个旧 key
+被裁到只剩本轮 1 个）。**A/B**：删掉 pusher 的 `prune(now)` ⇒ 2 例红；还原 ⇒ 绿。
+
 ## [Unreleased] — PX4 SITL 首验：custom_mode 打包字（P2-F3）+ 任务项线上形态（P2-F4）两族修复（2026-10-30）
 
 **P2「第二固件首验」挖出并闭环两类真机协议兼容问题**：PX4 v1.13 SIH 上"连接 → 任务上传
@@ -569,7 +592,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-30 共有 242 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-30 共有 243 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -595,7 +618,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 242 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 243 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

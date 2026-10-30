@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * 卫星链路 WebSocket 推送（M7 星-空-地多层级中继）。
  * <p>
- * 2Hz @Scheduled 检测链路状态变化，{@link TelemetryWebSocketHandler#broadcastPublicInfra}（satId 非机队设备）adcast}。
+ * 2Hz @Scheduled 检测链路状态变化，{@link TelemetryWebSocketHandler#broadcastPublicInfra}（satId 非机队设备）。
  * 连接数为 0 时跳过（仿 MeshTopologyPusher 范式）。
  * <p>
  * 推送格式：
