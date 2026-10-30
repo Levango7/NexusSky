@@ -9,6 +9,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 
 /**
@@ -56,11 +57,27 @@ public class DeliveryTask2 {
     private Instant actualDeliveryTime;
     private double routeDistanceKm;
 
+    /**
+     * 创建时刻（V38）。由 {@link #onCreate()} 在首次入库时写入——
+     * {@link #startTime} 只在「启动配送」动作时才被设置，PENDING 行此前没有时间基准，
+     * 留存任务（{@code DeliveryTaskRetentionJob}）无从按龄裁剪。
+     * 存量行（V38 之前）保持 NULL，不伪造。
+     */
+    private Instant createdAt;
+
     /** 租户 ID（数据隔离）。 */
     @Column(name = "tenant_id")
     private Integer tenantId;
 
     public DeliveryTask2() {
+    }
+
+    /** 首次入库时补创建时刻（无论走哪个构造/装配路径，含 orchestration 适配器的无参路径）。 */
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
     }
 
     public DeliveryTask2(String id, Type type, Status status,
@@ -262,6 +279,14 @@ public class DeliveryTask2 {
 
     public void setActualDeliveryTime(Instant actualDeliveryTime) {
         this.actualDeliveryTime = actualDeliveryTime;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
     }
 
     public double getRouteDistanceKm() {
