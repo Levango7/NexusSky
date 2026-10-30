@@ -33,7 +33,7 @@
   **本批一个都没删**；与 §11.3 的 13 不是同一口径（本脚本不算"随响应出网"那一档），不可直接比较。
   自测 7 情形，已接 `repo-gates` 的自测步与独立报告步。
 
-验证：全 reactor `mvn -B -o clean test` **5501 / 0 失败 / 0 错误**（六个模块全 SUCCESS；
+验证：全 reactor `mvn -B -o clean test` **5505 / 0 失败 / 0 错误**（六个模块全 SUCCESS；
 本批零测试增删，数字随基线 rebase 到最新 master 后重驱动）；门禁自测 `check-config-keys` 10/10、
 `check-doc-config-keys` 4/4、`list-unreferenced-getters` 7/7、`check-revert-looking-diff` 3/3；
 README 目录树脚本数 96 → **97**。裁决来路、复核记录与未核清单见

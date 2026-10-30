@@ -667,7 +667,7 @@
 
 ### 12.4 验证与计数
 
-- 全 reactor `mvn -B -o clean test`：**5501 / 0 失败 / 0 错误**，六个模块全 SUCCESS
+- 全 reactor `mvn -B -o clean test`：**5505 / 0 失败 / 0 错误**，六个模块全 SUCCESS
   （mavlink-core / drone-sim / link-sim / regulator-sim / cloud-backend / sdk-java）；
   本批零测试增删；数字在 rebase 到最新 master（`dd19dc74`）后重跑得到，不是沿用旧基线。
 - 仓门：`check-config-keys` 10/10 自测 + 实跑通过；`check-doc-config-keys` 4/4；
