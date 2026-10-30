@@ -282,6 +282,9 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 > `GET /api/v1/delivery/sequence/{id}`、`POST /api/v1/spray/cancel`
 > **在仓内均不存在**（`PayloadPlugin` 是 SPI 内部接口，夹爪无 REST 端点），
 > 已按 `SprayController` / `DeliveryController` 的实际契约更正。
+> **2026-10-30 追记**：当年那个 `cloud-backend/.../spi/` 包（13 个文件、零实现零注入）
+> 已按 owner 裁决整体删除（审计 §12），所以"夹爪没有 REST 端点"这条结论**不变且更硬**了——
+> 现在连一个同名接口都没有，别照着旧文档去 `POST /spray/gripper`。
 
 #### 预期结果
 
