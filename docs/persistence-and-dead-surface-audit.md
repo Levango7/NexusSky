@@ -689,3 +689,9 @@
 - **建议的下一步（等 owner 一句话）**：A. 把这 7 个连同说明写进 `docs/` 的配置参考 + 声明进
   properties（一批小 PR，含一条"改 host 后启动日志能看见"的可观测性检查）；
   B. 只补文档、不声明（保持"代码内默认 + 环境变量覆盖"）；C. 维持现状，登记为已知缺口。
+- **✅ 2026-10-31 裁决：走 A，已落实**。7 个键按代码默认值声明进 base properties（零行为变化）；
+  `docs/deployment-guide.md` 新增 §3.3「部署相关键」表（值 / 含义 / **改完在哪一行启动日志看见**）；
+  原先看不见的两处补了日志：`Gb28181Adapter` 构造时打 `sip-domain/sip-host`，
+  `DroneCommandService` 构造时打默认目标 `sysid`（另三处本来就能看见：UdpGateway 的 discovery 行、
+  CounterDroneRadarSource 的 base 行、instance-id 走 `/actuator/prometheus` 标签）。
+  验证：`check-config-keys` 声明键 82 → **89** 全有读者；全 reactor 回归见 CHANGELOG 该批小节。

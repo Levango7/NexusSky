@@ -1,5 +1,26 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 部署相关键补齐：7 个"换环境就该改"的配置从代码默认值浮到配置文件 + 启动日志可见（2026-10-31）
+
+审计 §12.5 的裁决落实（owner 选 A：声明 + 补文档）。这 7 个键此前**只存在于代码默认值**里——
+改它们本来生效，但配置文件搜不到，换环境时只能翻源码：
+
+- **声明进 base `application.properties`**（值等于代码默认 ⇒ 零行为变化）：`drone-host`、
+  `drone-sysid`、`gb28181.sip-host`、`gb28181.sip-domain`、`sensing.base-lat`、`sensing.base-lon`、
+  `instance-id`。声明键 82 → **89**，`check-config-keys.py` 全绿。
+- **文档**：`docs/deployment-guide.md` 新增 §3.3「部署相关键」表——每个键写清含义、出厂值，
+  以及**改完在哪一行启动日志看见**（例如 `gb28181.sip-domain` 写错不会启动失败、只会连不上对端，
+  所以要求以日志为准）。`instance-id` 走 `/actuator/prometheus` 的 `instance` 标签，不单独打日志。
+- **补了两处原本不可见的启动日志**：`Gb28181Adapter` 构造时输出 `sip-domain/sip-host`；
+  `DroneCommandService` 构造时输出默认目标 `sysid`。另外三处本来就能看见（UdpGateway 的
+  discovery 行、CounterDroneRadarSource 的 base 行、instance-id 的指标标签），文档里标明位置。
+- 审计 §12.5 原"未核"条目改写为已裁决 + 落实证据。
+
+验证：全 reactor `mvn -B -o clean test` 见下方（本批仅日志与配置声明，零测试增删）；
+13 道仓门全绿。
+
+计数：本批 0 测试增删；`[Unreleased]` 小节 246 → **247**。
+
 ## [Unreleased] — 待口径十条清空 + 只增表留存机制（五表 job，默认关闭）（2026-10-30）
 
 **口径账清空 + 只增表留存的最后半页，一批交付。**
@@ -30,7 +51,6 @@
 
 计数：本批 +10 测试（cloud-backend 3327→3337），全仓 5505→5515（基数已含当日 #215/#216/#217 的 +14）；
 全 reactor 全绿；10 份口径文档同步。
-
 
 ## [Unreleased] — P2 #18 三条遗留的 owner 裁决落实：删 spi 空壳 + 13 个运维键声明 + report-only getter 清单（2026-10-30）
 
