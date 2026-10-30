@@ -163,8 +163,12 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
   删除更早的 `flight_log` 行与 JSONL 文件；`<=0` 关闭清理
 
 **GET /api/v1/flightlog/track**
-- 查询参数: `day` (String, 可选, 默认今天), `sysid` (int, 必填)
-- 响应: 200 - `[{lat,lon,alt,ts}, ...]`
+- 查询参数: `day` (String, 可选, 默认今天), `sysid` (int, 必填),
+  `limit` (int, 可选, 默认 0 = 当天**完整**轨迹; `>0` = 最新 N 点, 上限 5000)
+- 响应: 200 - `[{lat,lon,alt,ts}, ...]`，顺序始终为旧→新（`limit` 取的是末尾最新 N 点）
+- `limit` 省略/0 保证法证与遗失无人机搜索拿到**完整**轨迹；主地图只画最新
+  `MAX_TRACK_POINTS`(1500) 点，因此显式传 `limit=1500`，避免为 1500 点拉回
+  单机单日约 8.6 万行（DB 路径把租户过滤与 `LIMIT` 一起下推）
 
 **curl 示例**:
 ```bash

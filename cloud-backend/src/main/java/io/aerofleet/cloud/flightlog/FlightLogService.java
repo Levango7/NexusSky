@@ -519,15 +519,52 @@ public class FlightLogService {
     }
 
     /** Track points for a drone on a day, reconstructed from telemetry lines. */
-    public List<TrackPoint> trackFor(LocalDate day, int sysid) {        // DB 查询路径：persistToDb && repository 可用时优先从数据库查询
+    public List<TrackPoint> trackFor(LocalDate day, int sysid) {
+        return trackFor(day, sysid, 0);
+    }
+
+    /**
+     * Track points for a drone on a day, reconstructed from telemetry lines.
+     *
+     * <p>{@code limit <= 0} keeps the <b>whole day</b> (forensics / lost-drone search
+     * needs the complete trail; this is the historical default). {@code limit > 0}
+     * keeps the <b>newest N</b> points and still returns them oldest→newest, so the
+     * caller's polyline direction is unchanged.
+     *
+     * <p>Why the option exists: one drone at 1 Hz is ≈ 86k rows/day, while the live
+     * map only ever renders the latest 1500 ({@code mergeTrack}). Pulling the whole
+     * day just to drop 98% of it is pure waste, but capping unconditionally would
+     * remove the complete-trail guarantee from the endpoint's forensic use case.
+     *
+     * <p>On the DB path the tenant filter and the {@code LIMIT} are pushed down
+     * together via {@link FlightLogRepository#findNewestFirst}; filtering tenants in
+     * memory after a global "newest N" query would under-fill when the newest rows
+     * belong to another tenant.
+     *
+     * @param day   local day
+     * @param sysid drone id
+     * @param limit max points; {@code <= 0} = whole day
+     */
+    public List<TrackPoint> trackFor(LocalDate day, int sysid, int limit) {
+        // DB 查询路径：persistToDb && repository 可用时优先从数据库查询
         if (persistToDb && flightLogRepository != null) {
             try {
                 Instant start = day.atStartOfDay(ZoneId.systemDefault()).toInstant();
                 Instant end = day.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant();
-                List<FlightLogEntity> entities = flightLogRepository
-                        .findByTypeAndSysidAndTimestampBetweenOrderByTimestampAscIdAsc("telemetry", sysid, start, end);
                 Integer tenantId = TenantContext.getEffectiveTenantId();
-                List<TrackPoint> pts = new ArrayList<>();
+                List<FlightLogEntity> entities;
+                if (limit > 0) {
+                    // 最新 N 条下推 SQL（租户条件一起下推），再反转成对外契约的旧→新
+                    entities = new ArrayList<>(flightLogRepository.findNewestFirst(
+                            start, end, tenantId, "telemetry", sysid,
+                            org.springframework.data.domain.PageRequest.of(0, limit)));
+                    Collections.reverse(entities);
+                } else {
+                    entities = flightLogRepository
+                            .findByTypeAndSysidAndTimestampBetweenOrderByTimestampAscIdAsc(
+                                    "telemetry", sysid, start, end);
+                }
+                List<TrackPoint> pts = new ArrayList<>(entities.size());
                 for (FlightLogEntity e : entities) {
                     if (!isVisibleTo(e.getTenantId(), tenantId)) {
                         continue;
@@ -543,9 +580,10 @@ public class FlightLogService {
                 // 回退到 JSONL 路径
             }
         }
-        // JSONL 文件查询路径（默认或 DB 失败回退）
+        // JSONL 文件查询路径（默认或 DB 失败回退）。
+        // limit 直接交给 query()：它用定长环形缓冲只保留最新 N 行，不会先读整天再截尾。
         List<TrackPoint> pts = new ArrayList<>();
-        for (Map<String, Object> m : query(day, "telemetry", sysid, 0)) {
+        for (Map<String, Object> m : query(day, "telemetry", sysid, limit)) {
             Object lat = m.get("lat");
             Object lon = m.get("lon");
             if (lat == null || lon == null) {

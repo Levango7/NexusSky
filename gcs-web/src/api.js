@@ -243,14 +243,17 @@ export const api = {
     return jsonFetch(`${BASE}/flightlog${qs ? '?' + qs : ''}`)
   },
 
-  // 当日**库内**历史轨迹（重启安全）：GET /api/v1/flightlog/track?sysid=&day=
+  // 当日**库内**历史轨迹（重启安全）：GET /api/v1/flightlog/track?sysid=&day=&limit=
   // 与 getTrack / getFlightTrack 的区别：那两条吃 FlightTrackStore 的有界内存窗口
   // （默认 3600 点，且后端重启后只剩 loadLastKnownPositions 塞的 1 个点）；
   // 这条吃 flight_log，按操作员本地日返回 {lat,lon,alt,ts}，不受重启影响。
   // day 省略时由后端按当天解释，所以这里不能拼成 day=undefined。
-  getDayTrack: (sysid, day) => {
+  // limit：省略/0 = 当天完整轨迹（法证/遗失搜救要完整）；>0 = 最新 N 条（旧→新）。
+  // 主地图只画最新 MAX_TRACK_POINTS 点，所以它显式传 limit，后端不必为 1500 点拉整天。
+  getDayTrack: (sysid, day, limit) => {
     const qs = new URLSearchParams({ sysid })
     if (day != null) qs.set('day', day)
+    if (limit != null && limit > 0) qs.set('limit', String(limit))
     return jsonFetch(`${BASE}/flightlog/track?${qs}`)
   },
 

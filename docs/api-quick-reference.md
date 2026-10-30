@@ -15,7 +15,7 @@
 | POST | /api/v1/drones/{sysid}/mission | 上传航点任务（需 OPERATOR） |
 | POST | /api/v1/drones/{sysid}/commands | 发送飞行命令（需 OPERATOR） |
 | GET | /api/v1/flightlog | 查询飞行日志 |
-| GET | /api/v1/flightlog/track | 查询指定无人机某日轨迹 |
+| GET | /api/v1/flightlog/track | 查询指定无人机某日轨迹（`limit` 可选，默认全天） |
 
 ## 飞行追踪
 

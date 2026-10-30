@@ -1,0 +1,101 @@
+{
+  "_doc": "空 catch 豁免清单：file/comment 是匹配键（comment 为 catch 块内注释的空白归一化文本），reason 说明为何允许吞异常。新增空 catch 必须先写理由再登记；清单到期后逐条复核。",
+  "expires": "2027-06-30",
+  "entries": [
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/autodispatch/VoiceIntercomController.java",
+      "comment": "保持 0，使用默认值",
+      "reason": "音量/参数解析失败时保持默认 0，避免一个坏字段让整条配置不可用"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/flightlog/FlightLogService.java",
+      "comment": "skip malformed line",
+      "reason": "JSONL 单行损坏时跳过该行继续读，不能因一条坏数据丢掉当天其余轨迹"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/gateway/UdpGateway.java",
+      "comment": "route went dark: the heartbeat watchdog will age it out",
+      "reason": "UDP 路由被系统移除后由心跳看门狗自然老化，重建失败无需中断收包"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/health/MaintenanceController.java",
+      "comment": "自定义 id（POST 允许显式传入），不参与序列推进",
+      "reason": "显式传入的自定义 id 不参与序列推进，解析失败属预期输入分支"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/linksim/LinkSimControlClient.java",
+      "comment": "非 JSON 错误体：原样透传（截断，避免把大段 HTML 灌进日志/响应）",
+      "reason": "错误响应不是 JSON 时原样透传（已截断），不能让解析失败掩盖真实 HTTP 错误"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/mission/common/DroneCommandService.java",
+      "comment": "loop: re-announce until deadline",
+      "reason": "重发循环以截止时间为唯一退出条件，单次发送异常不应提前终止"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/mission/common/DroneCommandService.java",
+      "comment": "re-check ackFuture, keep waiting until the window ends",
+      "reason": "等待 ack 的窗口内重查 future，单次检查异常继续等到窗口结束"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/mission/emergency/EmergencyCommand.java",
+      "comment": "fall through",
+      "reason": "紧急命令按兜底分支继续执行，单条指令不支持不阻断整组"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/ntrip/NtripClient.java",
+      "comment": "关闭失败不掩盖原始异常",
+      "reason": "关闭失败不得覆盖 try-with-resources 正在抛出的原始异常"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/ntrip/NtripClient.java",
+      "comment": "关闭失败无需上报",
+      "reason": "关闭 NTRIP 流失败无需上报，避免收尾噪音掩盖主流程结果"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/surveillance/VideoFusionController.java",
+      "comment": "非数字且非设备 id —— 交给调用方回 404",
+      "reason": "路径参数既非数字也非设备 id 时交给调用方 404，解析异常即判定分支"
+    },
+    {
+      "file": "drone-sim/src/main/java/io/aerofleet/sim/TargetStateServer.java",
+      "comment": "fall through to JSON list",
+      "reason": "非数字路径回落到 JSON 列表分支"
+    },
+    {
+      "file": "link-sim/src/main/java/io/aerofleet/linksim/LinkSimControlServer.java",
+      "comment": "客户端已断开：没有也不需要补救",
+      "reason": "客户端断开（broken pipe/reset）是正常结束，无需补救"
+    },
+    {
+      "file": "link-sim/src/main/java/io/aerofleet/linksim/LinkSimMain.java",
+      "comment": "目标暂时不可达：丢弃该包（真实链路也是这样）",
+      "reason": "目标暂时不可达时丢包，与真实链路行为一致"
+    },
+    {
+      "file": "link-sim/src/main/java/io/aerofleet/linksim/RelayNode.java",
+      "comment": "接收异常：真实链路偶发，不中断循环",
+      "reason": "接收异常在真实链路偶发，不中断中继循环"
+    },
+    {
+      "file": "link-sim/src/main/java/io/aerofleet/linksim/RelayNode.java",
+      "comment": "目标暂时不可达：丢弃该包（FR 5.2.3-2，真实链路也是这样）",
+      "reason": "目标暂时不可达丢包（FR 5.2.3-2），与真实链路一致"
+    },
+    {
+      "file": "mavlink-core/src/main/java/io/aerofleet/mavlink/transport/UdpMavlinkTransport.java",
+      "comment": "单个监听器异常不拖垮收包循环",
+      "reason": "单个监听器抛异常不得拖垮收包循环，其余监听器继续"
+    },
+    {
+      "file": "mavlink-core/src/main/java/io/aerofleet/mavlink/transport/UdpMavlinkTransport.java",
+      "comment": "单个监听器异常不拖垮收包循环",
+      "reason": "单个监听器抛异常不得拖垮收包循环，其余监听器继续"
+    },
+    {
+      "file": "sdk-java/src/main/java/io/aerofleet/sdk/NexusSkyClient.java",
+      "comment": "响应体不是 JSON，使用默认错误消息",
+      "reason": "错误响应体不是 JSON 时使用默认错误消息，避免二次解析异常覆盖状态码"
+    }
+  ]
+}

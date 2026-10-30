@@ -94,6 +94,9 @@ jobs:
           # 配置键反向对账（2026-10-30 落地，审计 §11）：properties 里声明的键必须真的被代码读，
           # 且"动态前缀"的读者本身要可达——旧白名单就是栽在"注释说有人会枚举，其实没人注入"。
           python3 scripts/check-config-keys.py --self-test
+          # 空 catch 棘轮（2026-10-31 落地）：生产代码里去掉注释后没有语句的 catch，
+          # 必须命中豁免清单（文件+理由注释，带到期日）；裸空 catch 永远不能豁免。
+          python3 scripts/check-empty-catch.py --self-test
           # P3 先行件：UOM 契约差异比对器（拿到规范前先把机械部分建好，9 情形自测）。
           python3 scripts/uom-contract-diff.py --self-test
           # 变异验证的还原必须刷新时间戳，否则增量编译会继续用改坏的 .class
@@ -103,6 +106,10 @@ jobs:
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
         run: python3 scripts/check-selftest-coverage.py
+      # 生产代码里的空 catch 必须显式登记理由（棘轮）。真事：多处 best-effort 收尾
+      # 本身合理，但新增一处 `catch (Exception e) {}` 会静默吞掉请求线程的故障。
+      - name: Empty catch ratchet gate
+        run: python3 scripts/check-empty-catch.py
       # 文档里对外声称的端点数，必须等于代码里的实际数。
       # 2026-10-20 实测：同一件事在文档里有三个不同的数（358 / 345 / 345），而实测是 406。
       - name: Claimed endpoint count gate
