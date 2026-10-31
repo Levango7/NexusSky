@@ -308,13 +308,6 @@ public final class DisasterZoneManager {
         return relayPolicy.isRejected(relayType);
     }
 
-    /**
-     * 获取跨区中继策略。
-     */
-    public CrossZoneRelayPolicy getRelayPolicy() {
-        return relayPolicy;
-    }
-
     // ------------------------------------------------------------------
     // 灾区查询
     // ------------------------------------------------------------------

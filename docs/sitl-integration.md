@@ -225,6 +225,7 @@ cloud-backend `UdpGateway` + `TelemetryIngestService` 已实现以下兼容处�
 | MISSION_COUNT 目标  | 拒绝 broadcast(0)              | `targetSystem()` 从注册表取真实 sysid |
 | MISSION_START(300)  | 部分版本 UNSUPPORTED           | 回退 `DO_SET_MODE`(176) auto 模式  |
 | 任务槽 0（AP）      | AP 忽略写入索引 0 的条目（保留给 HOME）| `withArduPilotHomeSlot` 前置 home 占位、用户条目后移（按 `HEARTBEAT.autopilot` 分派）|
+| 带位置命令报文格式   | drone-sim 收 LONG/INT 双口径 | AP **强制 COMMAND_INT**（LONG→`MAV_RESULT=8`）| `command()` 按 `COMMAND_INT_REQUIRED` 集合自动路由（P2-F2）|
 | 尾零裁剪（v2）      | AP 的 C 库裁掉 payload 尾部全零   | 解码入口按消息定义长度零填充（wire 长度语义不变）|
 | 心跳 custom_mode    | PX4 nav_state / ArduCopter 两套枚举 | `modeLabel()` 按 `HEARTBEAT.autopilot` 分派两种表 |
 | GCS 心跳             | 需先收到才回包                  | 1Hz 周期 GCS 心跳（QGC 风格）       |
@@ -681,6 +682,8 @@ ALL PX4 SITL TESTS PASSED
 | ⑦ | AUTO 地面启动约束 | 无（sim 直接起飞/执行） | **要求任务首条命令 = TAKEOFF**：否则 MISSION_START(300) 回 `MAV_RESULT=4`，回退 DO_SET_MODE(176) 回 `MAV_RESULT=2`，STATUSTEXT "Mode change to Auto failed: init failed"；单点"去某点"任务从地面起不来。**同族补充（2026-10-29 实测）**：**armed 且在地面**时 `DO_SET_MODE(AUTO)` 本身也被拒（同属 init failed） | **已修**（P2-F1 方案 A）：**地面**（`landedState`=ON_GROUND；**armed ≠ 空中**——dispatch 先 arm 再上传，见 §11.3）AP 任务在 home 槽后自动前置 `NAV_TAKEOFF`（alt=首条用户项，≤0 兜底 10m）；`ArduPilotMissionUploadTest` +7 例（含全握手线上形状与"arm 后仍在地面"回归） |
 | ⑧ | COMMAND_LONG TAKEOFF | **只查 armed**（任意模式都接受） | **2026-10-29 实测矩阵**：地面+AUTO+未 arm → 拒 `MAV_RESULT=4`；arm（自动切 GUIDED）后 → **接受并爬升**；空中+AUTO → 拒（非 GUIDED）；空中+GUIDED → 仍拒（**已起飞状态**不接受） | **已闭环**（P2-F1）：产品流"arm（自动进 GUIDED）→ takeoff"实测可用；**takeoff 刻意不做模式适配**——空中切 GUIDED 会静默打断任务、未 arm 不该由 takeoff 代做（arm 走独立入口 + 拦截链）。该决策由 `ArduPilotTakeoffModeTest` 4 例钉住；惯用法 B（GUIDED+DO_REPOSITION，不传任务）仍立项待触发 |
 
+| ⑨ | 带位置命令的报文格式（DO_REPOSITION） | LONG 可（sim 双口径都收） | **强制 COMMAND_INT**：LONG → 拒 `MAV_RESULT=8`（COMMAND_INT_ONLY，与模式无关）；INT+非 GUIDED → `2`（DENIED，模式约束）；INT+GUIDED → ACCEPTED 并飞到位（**1e-7 度级精度**） | **已闭环**（P2-F2，2026-10-30）：`command()` 对 `COMMAND_INT_REQUIRED` 集合自动路由；此前编队修正/队形机动在 AP 上 100% 静默失效。回归：`CommandIntTest`（pymavlink 官方帧逐字节）/ `CommandIntRoutingTest` / sim INT 入站测试 |
+
 **无差异项**（同样记录在案）：任务上传的 2.5s 丢包重发恢复在 AP 上工作正常；COMMAND_ACK
 接受/拒绝语义一致；遥测解码字段（位置/姿态/电量/GPS）逐项对上；GCS 1Hz 心跳维持链路未触发
 任何 failsafe。
@@ -718,7 +721,77 @@ ALL PX4 SITL TESTS PASSED
   产品流"arm（自动进 GUIDED）→ takeoff"实测**接受并爬升**；**`takeoff` 刻意不做模式适配**
   （空中切 GUIDED 会静默打断任务；未 arm 应由 `arm` 显式完成、走围栏拦截链），
   该决策由 `ArduPilotTakeoffModeTest`（4 例）钉住，变异 A/B 已验证（加模式切换 ⇒ 红）。
+- **P2-F2 · 带位置命令 COMMAND_INT 契约（已落地，2026-10-30）`[AP-实测]`**：
+  `FormationKeeper` 偏差修正与 `FormationService` 队形机动的 `DO_REPOSITION` 在 AP 真机上
+  **完全不工作**——AP 对携带经纬度的命令**强制 INT 报文**，LONG 一律回 `MAV_RESULT=8`
+  （COMMAND_INT_ONLY；与模式无关——非 GUIDED 与 GUIDED 悬停中结果相同）。而全栈缺这条消息
+  → 又一例"sim 测不出"（drone-sim 两种口径都收）。修法：新增
+  `CommandInt(75, LEN=35, CRC=158)`（编码与 pymavlink 官方打包帧**逐字节一致**）+
+  `command()` 对 `COMMAND_INT_REQUIRED` 集合自动路由（p5/p6→x/y×1e7、
+  frame=GLOBAL_RELATIVE_ALT_INT）+ sim 入站 INT 支持——**单一收口点**，REST raw 与编队的
+  所有调用方同时受益。**SITL 复验（同一实例同一脚本，修复前后对照）**：非 GUIDED 态
+  `8`→`2`（"格式不认"变"模式不对"，两层约束分离清晰）；GUIDED 悬停态 `8`→**ACCEPTED +
+  爬 25m / 北飞 ~50m / 精确悬停**（落点 -35.362812 与**线上 int32 目标逐位一致**——
+  1e-7 度刻度内的到位，float 口径下做不到的精度）。
+  此落地同时把**方案 B 的地基铺平**（"去某点"惯用法所需的 DO_REPOSITION 真机可用）。
 - **方案 B（目标形态，立项待触发）**：惯用法侧适配——AP 生态的"去某点"用
   `GUIDED + TAKEOFF + DO_REPOSITION(192)` 表达（Mission Planner "Fly To" 同款），
   不传任务；需要新命令语义、驻留/返航行为定义与 e2e 覆盖。与 A 并存、互不冲突，
-  待真实需求触发时立项。
+  待真实需求触发时立项；**其命令地基（DO_REPOSITION 真机可用）已由 P2-F2 落地**。
+
+---
+
+## 12. PX4 SITL 首验实录（2026-10-30）
+
+**P2「SITL 首次真实验证」的第二固件**：首次以 PX4（v1.13 源码构建，SIH 软件在环无头）
+对接 cloud-backend，走通"连接 → 任务上传 → 起飞 → 航点 → RTL → 降落"最小闭环，并逐项产出
+PX4 与 drone-sim / ArduPilot 的行为差异。环境：WSL2 Ubuntu 内
+`PX4_SIM_MODEL=sihsim_quadx ./bin/px4 -d -s etc/init.d-posix/rcS`（sysid=1），
+cloud-backend dev profile 监听 14550、`--aerofleet.drone-port=18570`（PX4 Normal 实例）、
+`--aerofleet.udp.max-frame-rate-per-sysid=20000`（见 §12.2-⑤）。复现要点与 AP 同：
+`POST /api/v1/drones/1/mission` → `POST /api/v1/drones/1/commands`（arm/start_mission/rtl）→
+`GET /api/v1/drones/1`（遥测/告警）与线级抓包（`tcpdump -i lo udp port 14550 or 18570`）。
+
+### 12.1 闭环结果
+
+| 步骤 | 结果 | 证据 |
+|------|------|------|
+| 设备上线 | ✅ 心跳注册为 Drone-1，`autopilot=12`（PX4） | 遥测全字段非空（Montreal 家坐标 45.467116,-73.757837） |
+| 模式标签 | ✅ `mode=HOLD`、`customMode=50593792`（0x03040000） | 打包字解码（§12.2-①）：地面待命 = AUTO/LOITER（QGC 里显示 "Hold"） |
+| 任务上传 | ✅ `{"uploaded":3}`；线级时序 `MISSION_COUNT(3)` → `REQUEST seq0` → `ITEM(22,f6)` → `REQUEST_INT 1` → `ITEM(16,f6)` → `REQUEST_INT 2` → `ITEM(20,**f2**)` → **`MISSION_ACK result=0`** | tcpdump 时序（`px4-mission-timeline.py` 逐帧解码）；上传前基线见 §12.2-② |
+| ARM | ✅ `COMMAND_ACK(400) result=0`，心跳 `armed=true base_mode=0x9D` | 地面+AUTO_LOITER 下 PX4 直接接受 arm（无 AP 那种 "Auto mode not armable" 约束） |
+| 开始任务 | ✅ `MISSION_START(300)` 原生 ACCEPTED（未触发 DO_SET_MODE 回退） | STATUSTEXT "Armed by external command"→"Takeoff to 20.0 meters above home" |
+| 飞行 | ✅ mode=`MISSION`（0x04040000）→ 爬升至 20.0m → 北飞 55m 航点 → 任务尾 RTL 返航降落自动 disarm | 遥测 relAlt 轨迹 + STATUSTEXT "Takeoff detected" / RTL / "Disarmed by landing" |
+| 修复前对照 | ❌→✅ 三层红：任务整单被拒（`MAV_MISSION_RESULT=3`，见 §12.2-②）→ ACK 被限速淹（`mission upload timed out`，340k 条丢帧，见 §12.2-⑤）→ 到点即停（autocontinue=0，见 §12.2-③） | 同一脚本 `px4-before.sh` / `px4-after.sh` 前后对照 |
+
+> 复现脚本为一轮联调脚本（未入仓）：先验三件套 + PX4 侧补丁（§12.2-⑥）在 `docs` 本段记全。
+
+### 12.2 真实固件 vs drone-sim 行为差异记录（PX4 侧）
+
+①-③ 为本轮修复项（已带回归测试落地）；④-⑦ 为固件/环境契约，处置见「处置」列。
+
+| # | 差异点 | drone-sim | PX4 v1.13 实测 | 处置 |
+|---|--------|-----------|----------------|------|
+| ① | custom_mode 编码 | 裸 nav_state 值 0..22（历史口径） | **打包字** `(main_mode<<16)\|(sub_mode<<24)`（px4_custom_mode.h 联合体）：地面待命 `0x03040000`=AUTO/LOITER、任务中 `0x04040000`=AUTO/MISSION、返航 `0x05040000`；v1.13 对 AUTO_READY 等 nav_state 打包为 **0**（编码缺口，不猜模式） | **已修**（P2-F3）：`modeLabel` 按打包字解码；**sim 同批对齐发打包字**（单一口径，删历史裸值表）；`FlightModeLabelTest` 8 例 + sim `FlightStateModeWordTest` 3 例钉住数值 |
+| ② | 任务项帧硬校验 | 帧随便填 | `parse_mavlink_mission_item`：带坐标帧（0/3/5/6）只收「位置命令」，**RTL(20) 用 frame=3 → 整单 `MAV_MISSION_UNSUPPORTED=3`**（且 PX4 随即中止传输，全任务作废）；无坐标命令必须 `MAV_FRAME_MISSION(2)` | **已修**（P2-F4）：`normalizeMissionItems` 单一收口点——无坐标命令→2、相对高 3→6（INT 规范编码）；覆盖 REST 任务/事件派飞/出警派飞全路径 |
+| ③ | `autocontinue` 位 | **不消费**（整列照飞） | **真正消费**（mission.cpp「switch to next waypoint if autocontinue flag set」）：置 0 时到点即停——SITL 实测起飞到 20m 后悬停 150s 不奔航点 | **已修**（P2-F4 同收口点）：所有任务项 `autocontinue=1`；停驻语义走 `param1`（NAV_WAYPOINT time_inside）。**又一条"sim 测不出"** |
+| ④ | mavlink 实例拓扑 | 单实例单端口 | PX4 SITL 一次起 4 个实例（Normal 18570→14550、Onboard 14580→14540、14280、Gimbal）；**任何实例被 GCS 主动握手后都会向该 GCS 回话**——后端 `drone-extra-ports=14580` 一配，两个同 sysid 实例同时喂路由表，**last-seen 路由在 18570/14580 间游走，任务传输跨实例即 `IGN MISSION_ITEM: No transfer`**（首轮失败实录） | **配置口径**：PX4 只配 Normal 实例端口（`--aerofleet.drone-port=18570`，**不要**加 14580）；产品侧「多链路路由钉定」立候选（§12.3） |
+| ⑤ | 链路帧率 | 数十 fps | SITL Normal 实例 4MB/s（≈8.6k fps 实测）；后端默认限速 100/s/机 → **ACCEPTED 的 MISSION_ACK 与心跳成批被丢**（单轮 340k+ 条 `Rate limit exceeded` 日志；上传必现 `timed out`，心跳停更致 armed 显示滞后） | **运行口径**：SITL 联调调高 `--aerofleet.udp.max-frame-rate-per-sysid`；产品侧「限速饥饿」立候选（§12.3） |
+| ⑥ | 环境构建口径 | — | SIH 必须 **`sih start` + `sensors start` 都起**（EKF2 需 sensors hub 汇聚 vehicle_imu，缺则 `ekf2 start failed(-1)`、arm 被拒 "angular velocity invalid"）；SITL 默认 lockstep 只由 `simulator` 模块驱动，SIH 场景须 `ENABLE_LOCKSTEP_SCHEDULER=no` 否则 hrt 时钟冻结（所有周期任务停摆） | **环境脚本口径**（本文档记录即闭环；PX4 侧补丁不入仓） |
+| ⑦ | MISSION_CURRENT 扩展字段 | `total`=任务条目数 | **`total` 恒 0**（v1.13 不用该扩展字段）；`seq` 有效 | 口径差异，记录不处理（前端进度条按 total=0 时退化为只显示 seq，另行评估） |
+
+### 12.3 遗留项
+
+- **P2-F5 · 接收限速对低频关键帧的饥饿（~~候选~~ → **2026-10-31 已落地**）**：`UdpGateway`
+  的单机滑动窗口限速（默认 100 fps）按时间到即丢，无消息类优先级——高码率流（SITL 4MB/s；
+  真机遥测突发/日志下载同理）会在每个窗口开头吃满桶，**低频关键帧（MISSION_ACK/COMMAND_ACK/
+  心跳）被成批丢弃**，表现为"命令超时"而非"链路过载"。**落地**：限速器拆双预算——关键帧
+  （ACK/心跳/任务协议回执/STATUSTEXT）走独立小预算
+  `aerofleet.udp.max-critical-frame-rate-per-sysid`（默认 50/s，不占主窗口），非关键帧主窗口
+  语义不变；关键预算耗尽仍会丢（防滥用语义保留），配置 <=0 可回退旧行为。
+  回归：`UdpGatewayCriticalFrameRateTest` 4 例。证据：§12.2-⑤。
+- **P2-F6 · 多链路路由钉定（候选）**：`RouteTable` 按 sysid 记 last-seen 地址；
+  多链路（PX4 双实例、真机数传+机载双链路）下状态性交换（任务传输）可能跨链路，
+  在另一实例上表现为 "No transfer" 整单失败。修复方向 = 状态性交换绑定发起方地址
+  （mission 处理器记住请求来源，items 回发该地址），而非全局路由。证据：§12.2-④。
+

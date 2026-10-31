@@ -142,11 +142,6 @@ public class PriorityTask {
         return description;
     }
 
-    /** @return 提交时间（ms）。 */
-    public long getSubmitTimeMs() {
-        return submitTimeMs;
-    }
-
     /** @return 任务状态。 */
     public Status getStatus() {
         return status;
@@ -165,11 +160,6 @@ public class PriorityTask {
     /** @return 分配的无人机 id。 */
     public int getAssignedDroneId() {
         return assignedDroneId;
-    }
-
-    /** @return 被本任务抢占的前任务 id。 */
-    public long getPreemptedTaskId() {
-        return preemptedTaskId;
     }
 
     /** @return 任务上下文。 */

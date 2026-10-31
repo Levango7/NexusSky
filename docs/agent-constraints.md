@@ -114,6 +114,7 @@ CHANGELOG 里带进 3 处 `<<<<<<< HEAD` / `=======` / `>>>>>>> Stashed changes`
 - `python scripts/check-test-count-docs.py --reports-root <聚合目录> --frontend-json <报告>`（计数）
 - `python scripts/check-repo-hygiene.py`（卫生 + CHANGELOG 自洽）
 - `python scripts/check-selftest-coverage.py`（自测覆盖）
+- `python scripts/check-empty-catch.py`（生产代码空 catch 必须登记理由）
 - `python scripts/check-spi-coverage.py --self-test`（SPI 可验证性）
 
 ## 7. 切分支前没提交，`git reset --hard` 把活干抹了
@@ -308,6 +309,7 @@ git status                                    # 有没有别人的未提交改�
 git grep -nE '^(<<<<<<< |>>>>>>> )'            # 冲突标记
 python scripts/check-repo-hygiene.py           # 卫生 + CHANGELOG 自洽 + pom 可解析
 python scripts/check-selftest-coverage.py      # 自测是否都在 CI 里跑
+python scripts/check-empty-catch.py            # 空 catch 是否都有登记理由
 python scripts/check-test-count-docs.py --reports-root ... --frontend-json ...   # 计数
 mvn -B -o -q validate                          # 动过任何 pom 必跑（见第 13 条）
 ```

@@ -91,6 +91,15 @@ jobs:
           python3 scripts/check-doc-endpoints.py --self-test
           # 文档配置键（2026-10-29 落地）：配置表里的 aerofleet.* 键必须真的被代码读取或配置定义。
           python3 scripts/check-doc-config-keys.py --self-test
+          # 配置键反向对账（2026-10-30 落地，审计 §11）：properties 里声明的键必须真的被代码读，
+          # 且"动态前缀"的读者本身要可达——旧白名单就是栽在"注释说有人会枚举，其实没人注入"。
+          python3 scripts/check-config-keys.py --self-test
+          # 空 catch 棘轮（2026-10-31 落地）：生产代码里去掉注释后没有语句的 catch，
+          # 必须命中豁免清单（文件+理由注释，带到期日）；裸空 catch 永远不能豁免。
+          python3 scripts/check-empty-catch.py --self-test
+          # 零外引用 getter 清单（2026-10-30 落地，审计 §12.3）：**report-only**，恒退 0。
+          # 自测要证明两件事：四档归类正确 + "有候选也退 0"这条承诺本身。
+          python3 scripts/list-unreferenced-getters.py --self-test
           # P3 先行件：UOM 契约差异比对器（拿到规范前先把机械部分建好，9 情形自测）。
           python3 scripts/uom-contract-diff.py --self-test
           # 变异验证的还原必须刷新时间戳，否则增量编译会继续用改坏的 .class
@@ -100,6 +109,10 @@ jobs:
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
         run: python3 scripts/check-selftest-coverage.py
+      # 生产代码里的空 catch 必须显式登记理由（棘轮）。真事：多处 best-effort 收尾
+      # 本身合理，但新增一处 `catch (Exception e) {}` 会静默吞掉请求线程的故障。
+      - name: Empty catch ratchet gate
+        run: python3 scripts/check-empty-catch.py
       # 文档里对外声称的端点数，必须等于代码里的实际数。
       # 2026-10-20 实测：同一件事在文档里有三个不同的数（358 / 345 / 345），而实测是 406。
       - name: Claimed endpoint count gate
@@ -129,6 +142,20 @@ jobs:
       # 路径写错会 404；配置键写错**静默无效**，比路径更隐蔽。
       - name: Doc config key gate
         run: python3 scripts/check-doc-config-keys.py
+      # 与上一条**反向**：properties 里躺着的每个 aerofleet.* 键，代码都必须真的读它。
+      # 2026-10-30 实测：8 个 aerofleet.plugins.*.enabled 的唯一读者 PluginConfig 全仓零注入点、
+      # 四个插件接口零实现 ⇒ 运维改了不生效也不报错，还以为关掉了一个模块（审计 §11.2）。
+      # "动态前缀"要成立，声称枚举它的类必须可达；不可达时该前缀下的键一律按没人读判红。
+      # 后续批（审计 §12）把 spi/ 那 13 个文件的框架空壳也删了：键和读者一起消失，
+      # 这条门禁继续守"声明了没人读"这个形状本身。
+      - name: Config key reconciliation gate (properties → code)
+        run: python3 scripts/check-config-keys.py
+      # 审计 §12.3 的第三条裁决：getter 判据**不收紧**，改成只看得见、不判红的清单。
+      # 为什么不敢判红：这条判据是过近似的（Jackson 按 getter 定 JSON 字段名，"没人调"≠"没人消费"），
+      # 误报的代价是让仓门"经常红但没人理"，比没有更糟。恒退 0 是设计，不是偷懒。
+      # 这里不加 `|| true`：脚本自己崩了属于工具故障，要响——那正是上面 --self-test 在挡的东西。
+      - name: Unreferenced getter report (report-only, never red)
+        run: python3 scripts/list-unreferenced-getters.py
       # 审计 §6 第一条：§2.1「必须落库」九域，要么有持久化证据、要么豁免登记（理由+到期日）。
       # 真事：这类债回退不响——改回纯内存、迁移表被删、水合调用被摘，编译/启动/测试可能
       # 全绿，只有重启后数据没了才知道。

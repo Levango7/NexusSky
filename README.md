@@ -24,7 +24,7 @@
 
 | 模块 | 技术 | 职责 | 替换为真硬件时 |
 |---|---|---|---|
-| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30064，共 52 条），**519 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
+| `mavlink-core` | 纯 Java 17 | MAVLink v1/v2 二进制协议栈（帧/CRC/消息编解码/UDP 传输，标准消息 + M0a–P2 扩展消息 30000–30064，共 52 条），**523 个单测，CRC 与官方逐字节一致** | 不需要换——PX4 原生说 MAVLink |
 | `drone-sim` | 纯 Java 17 | 虚拟四轴：任务上传(Mission Protocol)、ARM/起飞/航点飞行/RTL 状态机、遥测 1-5Hz 广播 | 换成真飞控，UDP 端口不变 |
 | `cloud-backend` | Spring Boot 3.5 | MAVLink 设备网关、机队注册表、任务上传客户端、REST API（414 端点）、WebSocket 推送、JWT 安全认证、多租户隔离、应急编排引擎 | 不需要换 |
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 45 个功能面板（顶栏按 8 个业务域分组导航） | 不需要换 |
@@ -238,6 +238,7 @@ java -jar drone-sim\...jar --terrain hill:300:100:150:80 --fence -600,-600:600,-
 ```
 GET /api/v1/flightlog?day=2026-09-13&type=alert&sysid=1&limit=100
 GET /api/v1/flightlog/track?sysid=1            # 某日完整轨迹（从遥测行重建）
+GET /api/v1/flightlog/track?sysid=1&limit=1500 # 只要最新 1500 点（主地图用；默认仍全天）
 ```
 
 骨架阶段选 JSON Lines 而非 SQLite：零依赖、可 grep、可 git diff。现在两种模式
@@ -722,7 +723,7 @@ NexusSky/
 ├── gcs-web/             React GCS（59 个 .jsx 组件文件，其中 19 个已有直测）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
-├── scripts/             start-all.cmd / e2e-smoke.sh / 95 个脚本（其中 44 个 e2e-*）
+├── scripts/             start-all.cmd / e2e-smoke.sh / 99 个脚本（其中 44 个 e2e-*）
 ├── docker-compose.yml   Linux 下一键编排
 ├── docs/                43 篇文档
 └── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）
@@ -739,13 +740,13 @@ NexusSky/
 
 | 模块 | 单测数 |
 |---|---|
-| `mavlink-core` | 519 |
-| `drone-sim` | 1452 |
+| `mavlink-core` | 523 |
+| `drone-sim` | 1456 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3296 |
+| `cloud-backend` | 3343 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5466
+| **总计** | **5521
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
@@ -902,7 +903,7 @@ NexusSky/
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 595 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 598 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）+
   2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例 +

@@ -281,6 +281,22 @@
 6. `mission/formation/FormationKeeper.java:43 correctionCount`：队形修复次数是否算考核/计费依据。
 7. 告警离线缓存：接受"上限 500 + 重启丢未上传"作为产品语义，还是要真做非易失（磁盘溢出/落库暂存）？
 8. `/air-ground/situation` 的键名以哪侧为准（后端 `droneStatuses` vs 前端 `aerialUnits|drones`）。
+9. **`spi/` 插件框架要不要留**（2026-10-30 实测，见 §11.2/§11.4）：12 个类 / 1266 行的
+   `PluginRegistry` + `PluginConfig` + 4 个插件接口 + 上下文/元数据/生命周期，**零实现、零外部引用**；
+   它名下 8 个 `aerofleet.plugins.*.enabled` 假开关已随本批从 properties 删除。
+   两条路都能走：**A. 补实现把开关接进真实执行路径**（载荷/传输/决策/航线四处各一次判定 +
+   关闭时的对外语义），**B. 删空壳**，把"可插拔"从声称里摘掉，等真有第三方插件再做。
+   `docs/architecture-deepening-plan.md` 记的是 A 的排期，但**没人认领**——
+   留在这儿的意思是：别让一具没人接的框架顶着"能力"的名字躺在主干里。
+   > **✅ 2026-10-30 裁决（owner 选"删空壳"，落实见 §12.1）**：走 B。
+   > 动手前复核两处：① 规模写错了——不是"12 个类"，`git ls-tree` 实测是 **13 个文件 / 1266 行**
+   > （`Waypoint` / `RoutePlanRequest` / `PluginContext` 这些 DTO 与枚举没计进"类"），
+   > 行数没错、结论没错；② 删除前按 13 个类名逐个全仓反查（`.java/.py/.yml/.properties/.md/.ts/.ps1/.sh`），
+   > **零 `.java` 引用**，命中的只剩 CHANGELOG 历史条目、properties/ci.yml 的取证注释、
+   > `docs/architecture-deepening-plan.md` 的设计正文、`demo-scenarios.md:283` 与
+   > `scripts/e2e-spray.sh:15` 两处"夹爪无 REST 端点"的说明——都已就地标注去向。
+   > 接口形状没有丢：`docs/architecture-deepening-plan.md` §2.3/§2.4 仍在，将来真要开放
+   > 第三方扩展，从那里重建即可。
 
 ---
 
@@ -433,3 +449,243 @@
 - 仓门全过：卫生（CHANGELOG 小节 223 → **224**）/ 测试计数 / 端点计数 / 自测覆盖 / 前端端点 /
   目录计数 / 回退式 diff / MAVLink 兼容自测 / 变异自测。
 
+---
+
+## 11. P2 #18 续批：死访问器与配置键的**完整**对账（2026-10-30）
+
+### 11.1 为什么还得再来一批
+
+§4.1 当年那两个数（「12 个死 getter」「6 个死配置键」）是**扫描器粗筛之后的节选**，
+从来没有做过全仓清点；§10.3 只校了 `DockProperties` 一处。本批把两件事一次核到底：
+先按可复算的口径重扫，再逐条定性，最后把判据本身变成门禁。
+
+### 11.2 配置键：实测数字、假开关与落实
+
+- **口径**：只看 6 个模块 `src/main/resources` 下 `application*.properties` 与 `*.yml`
+  里声明的 `aerofleet.*` 键（含 profile 覆盖文件），去重后 **69 个**。
+  读者形态四类：`@Value("${k…}")` / `Environment.getProperty(k)`、
+  `@ConfigurationProperties(prefix)` 的字段（Spring 宽松绑定，`sinkType` ⇔ `sink-type`）、
+  `@ConditionalOnProperty(prefix,name)` 拼出的全名、以及"动态前缀枚举"。
+- **8 个假开关（本批删除）**：`aerofleet.plugins.{payload.spray, payload.gripper,
+  transport.mavlink-udp, ai.rtl, ai.avoid, ai.adapt-path, route.astar, route.rrt}.enabled`。
+  证据链三段，缺一不可：
+  1. 唯一读者 `spi/PluginConfig` 在 **main + test 全仓零注入点**——除自身文件外没有任何 `.java`
+     引用这个类名（`grep -rl "PluginConfig"` 去掉自身 = 0）；
+  2. 四个插件接口 `PayloadPlugin` / `TransportPlugin` / `RoutePlannerPlugin` /
+     `DecisionStrategyPlugin` **没有任何实现类**（`grep "implements <接口>"` 零命中）
+     ⇒ `PluginRegistry` 构造时拿到的是空列表；
+  3. ⇒ 运维把其中任何一个改成 `false`，**没有任何东西会红，也没有任何东西变化**。
+  处理沿用 §9 里 `aerofleet.geofence.intercept.enabled` 的先例：**删键 + 原位注释指向真相**，
+  properties 里现在写的是"这 8 个键曾是假开关、为什么删、框架在哪"。
+- **§4.2 那条「反向缺口：2 个键被代码读取但 properties 里根本没有」按危险口径实测为 0**。
+  危险口径 = `@Value("${aerofleet.*}")` **无默认值**且未声明——这种形状会在装配时直接启动失败，
+  实测 **0 个**。按"有代码内默认"的宽口径则是 **24 个**键（出厂值只写在代码里，
+  运维在配置文件里看不见）——属**可见性**问题而非缺陷，本批不动，登记为遗留（见 §11.6）。
+- **新门禁 `scripts/check-config-keys.py`**（本批落地，10 情形离线自测，已接进 CI `repo-gates`
+  的自测步与独立步）：盯「properties 声明但代码不读」，并且**要求动态前缀的读者自身可达**。
+  这条前提校验正是本批抓出来的洞：旧门禁 `check-doc-config-keys.py` 的动态白名单写着
+  「PluginConfig 按 `aerofleet.plugins.*` 动态枚举」，而这条前提**从没人核过**，实测为假。
+  该白名单条目已撤销，原位留注释指向本节。
+- **框架本体没有删**：`spi/` 包里 12 个类 / 1266 行的插件框架仍在（零实现、零外部引用）。
+  「补实现把它接真」还是「删掉空壳」是架构裁决，登记在 §5 第 9 条——不由扫描器替产品决定。
+  > **2026-10-30 当日追记**：这条裁决当天就回来了——owner 选「删空壳」，`spi/` 包已整体删除
+  > （**13 个文件**，本行的"12 个类"是当时数错，见 §5 第 9 条的复核）。原话留着不改，
+  > 是为了让读者看到"扫描器不替产品决定"这条纪律是真的走到了裁决那一步。落实见 §12.1。
+
+### 11.3 死访问器：实测与四类定性
+
+**方法（可复算）**：对 6 个模块 main 源码抽 `public get*/is*()` 声明，与一次建成的
+「`name(` 调用点索引」做集合差（不逐个 grep，避免口径漂移）。结果
+**224 个「除声明文件外零引用」的 public getter**：
+
+| 分类 | 数量 | 判据 | 本批处置 |
+|---|---|---|---|
+| 随响应出网 | 174 | 类名能从任一 `@RestController` 文件沿引用扩散到达 ⇒ getter 决定 JSON 字段，删了对外就少一个键 | **不删**。这条判据是**过近似**（只要类名在控制器里出现过就算），方向保守：宁可少删，不多删 |
+| 属性名出现在文档/前端 | 10 | 去掉 `get` 后的小写属性名在 `gcs-web` / `docs` / `deploy` 里出现 | 不删；其中 **2 条经逐条读代码确认是同名词碰撞**，见 §11.4 |
+| 只有测试在用 | 27 | 仅测试调用 | 不删（同 §10.2 判据：测试钉的是行为，删访问器等于拆自己的锚点） |
+| 真死候选 | 13 | 三条都不成立 | **删 12**、留 1（见 §11.4） |
+
+**对 §4.1 的校正**：「12 个死 getter」这个数**不存在过**——它不是全仓清点结果，而是当年节选表里
+`CommAdaptConfig`(5) + `DockProperties`(4) 等条目的加总。实测「零外部引用」面是 **224**，
+其中真死 **13**，本批删 **12**。§10.3 里我写的「12 个死 getter 口径应为 ≤9」同样偏小，一并作废。
+
+### 11.4 逐条处置（删 12 / 留 2）
+
+删除的 12 个访问器（字段本身在类内仍被读，只是访问器没人调；`@return` 注释一并摘掉）：
+
+| 位置（删除前） | 访问器 | 类内是否仍读该字段 |
+|---|---|---|
+| `sim/gnss/GnssSimulator.java:182` | `getReportedAlt()` | 派生值（spoof 只改 lat/lon，不改 alt）；外部只调 `getReportedLat/Lon` |
+| `sim/gnss/GnssSimulator.java:194` | `getReceiver()` | 是（类内 8 处直接用 `receiver`）——**它的"文档证据"是假阳性，见下** |
+| `sim/gnss/GnssSimulator.java:198` | `getBaseStation()` | 是（类内 8 处） |
+| `sim/mesh/CrossZoneRelayPolicy.java:91` | `getAllowedRelayTypes()` | 是（类内 9 处，`isAllowed`/`toString` 走字段） |
+| `sim/mesh/DisasterZoneManager.java:314` | `getRelayPolicy()` | 是（类内 9 处，判定走 `relayPolicy.isRejected(...)`） |
+| `sim/mesh/GeoBoundary.java:75` | `getVertices()` | 是（类内 16 处；外部只消费 `contains()` / `vertexCount()`） |
+| `sim/orch/DynamicReconfigurator.java:135` | `getHeartbeatTimeoutMs()` | 是（类内 6 处） |
+| `sim/orch/DynamicReconfigurator.java:140` | `getLowBatteryThreshold()` | 是（类内 13 处） |
+| `sim/orch/DynamicReconfigurator.java:145` | `getCriticalBatteryThreshold()` | 是（类内 9 处） |
+| `sim/orch/DynamicReconfigurator.java:150` | `getCoverageDeclineReplanThreshold()` | 是（类内 9 处） |
+| `sim/orch/PriorityTask.java:146` | `getSubmitTimeMs()` | 是（类内 6 处） |
+| `sim/orch/PriorityTask.java:171` | `getPreemptedTaskId()` | 是（类内 7 处） |
+
+**分类器自己的两处假阳性**（不写出来，这份文档就会给错的判据背书）：
+
+- `GnssSimulator.getReceiver()` 的"文档证据"是 `deploy/monitoring/alertmanager.yml` 里
+  Prometheus 的 `receiver:` 配置项，跟这个属性毫无关系 ⇒ 它其实是零引用访问器 ⇒ **已删**。
+- `AdaptiveRouteMetric.getW3()` 的"前端证据"是 `VideoFusionPanel.jsx` 里 SVG 字符串中的
+  `http://www.w3.org`（`w3` 同名）⇒ 读代码发现它在测试里被断言 4 次 ⇒ 归类改为**只有测试在用**，保留。
+
+保留的 2 个：
+
+- `sim/sat/AdaptiveHysteresis.getHysteresisMs()`——同文件 `:75` / `:122` 两处内部调用
+  （它落进"真死候选"是因为扫描按"除本文件外零引用"筛，没先扣掉同文件调用；已在本批纠正口径后仍保留）。
+- `cloud-backend/.../spi/PluginConfig.getDisabledPlugins()`——随整个插件框架一起留给 §5 第 9 条的
+  架构裁决；单点删它既不省什么，又会让"框架还在"这件事更难看清。
+  （2026-10-30 追记：裁决已下——整个框架按 §12.1 删除，这个方法随之消失。）
+
+### 11.5 本批验证
+
+- 全 reactor `mvn -B -o clean test`：**5466 用例 / 0 失败 / 0 错误 / 0 跳过**（643 个测试类；
+  cloud-backend 3296 / drone-sim 1452 / link-sim 139 / mavlink-core 519 / regulator-sim 41 /
+  sdk-java 19）。本批**零测试增删** ⇒ 10 份口径文档无需改数，`check-test-count-docs.py` 实测"全部一致"。
+  第 12 个删除（`GnssSimulator.getReceiver()`）单独复跑 `mvn -o -pl drone-sim -am test`：**1452 / 0 失败**。
+- 新门禁 `check-config-keys.py`：`--self-test` **10/10**；真实仓库首跑通过（69 个声明键全部有读者）。
+  A/B 变异：往 `application.properties` 掺一个 `aerofleet.plugins.probe.enabled=true`
+  ⇒ 门禁 rc=1 且**点名该键**；还原 ⇒ rc=0，`grep` 确认无探针残留。
+- `check-doc-config-keys.py` 撤销 `aerofleet.plugins.` 白名单后：自测 4/4、真实仓库仍绿
+  （可解析配置键 220 个 / 扫描 8 篇当前口径文档）。
+- 其余八门禁（卫生 / 测试计数 / 端点计数 / 自测覆盖 / 前端端点 / 目录计数 / 回退式 diff /
+  MAVLink 兼容自测 / 变异自测）全过。
+- **删除类改动的验收形状要说清**：死访问器没有任何用例会因删除而变红——"改坏⇒红"对它们不适用，
+  能给的证据只有**编译 + 全量测试 + 零引用面复算**。这条本身就是本批要登记的事实。
+
+### 11.6 遗留（写清"为什么这批不做"）
+
+> **2026-10-30 同日状态**：三条都已由 owner 裁决并落实，见 **§12**。原文按留档规矩不改，
+> 只在每条后面补状态；其中第 1 条的数字在下一次实测中从 24 变成了 **30**（口径差别见 §12.2）。
+
+1. **24 个"代码内默认、properties 未声明"的键**：要不要统一声明进 `application.properties`，
+   是运维可见性口径问题（声明了就多 24 行要跟代码同步的账），本批不动，等口径。
+   ⇒ **已裁决**：只把文档/部署/前端点过名的 13 个声明进 properties，其余保持代码内默认（§12.2）。
+2. **`spi/` 插件框架 12 类 / 1266 行空壳**：补实现还是删，见 §5 第 9 条。
+   ⇒ **已裁决：删**（实测 13 个文件，§12.1）。
+3. **「随响应出网」这条判据是过近似**：174 个里可能混有真死的访问器。要收紧需要编译级调用图
+   （或按端点响应 schema 逐个核），与 §6 里 `check-dead-wiring.py` 暂缓是同一个原因——
+   **文本级启发式在这里已经到能力边界**，宁可把它登记成"已知弱点"也不假装它精确。
+   ⇒ **已裁决：不收紧**，改为加一条 **report-only**（只提示、恒退 0）的零外引用 getter 清单，
+   让"新写出的死访问器"至少看得见（§12.3）。
+
+---
+
+## 12. P2 #18 三条遗留的 owner 裁决与落实（2026-10-30）
+
+> 来路：§5 第 9 条（spi 框架）与 §11.6 三条遗留。用户在两条路上都选了"最小可信"那一侧：
+> **该删的删干净、该看不见的才不声明、判据不够硬就不判红**。三件事互相独立，可拆 PR。
+
+### 12.1 `spi/` 插件框架：删（方案 B）
+
+- **规模更正**：§5/§11 里写的"12 个类"实测是 **13 个文件 / 1266 行**
+  （`git ls-tree -r origin/master -- .../spi | wc -l` = 13；行数 1266 不变）。
+  少算的是 `Waypoint` / `RoutePlanRequest` 这类 DTO 与枚举——"类"这个词当时是按"主要类型"数的。
+- **删前复核**（按 13 个类名逐个全仓反查，`.java/.py/.yml/.properties/.md/.ts/.ps1/.sh`）：
+  **零 `.java` 引用**；命中项只有 ① CHANGELOG 历史条目（不删，历史就是历史）
+  ② properties / `ci.yml` 里的取证注释 ③ `docs/architecture-deepening-plan.md` §2.3–2.4 的设计正文
+  ④ `demo-scenarios.md:283` 与 `scripts/e2e-spray.sh:15` 两处"夹爪无 REST 端点"的说明。
+- **改了哪些面**：删 13 个文件；properties 注释改写成"键删了、框架也删了、形状在哪"；
+  `check-config-keys.py` 去掉静态表 `DYNAMIC_PREFIX_CLAIMS`（改由代码现场扫"谁声称按前缀枚举"，
+  少一处会漂移的手工账）；`check-doc-config-keys.py` 注释追记；`ci.yml` 注释追记；两处文档就地加日期说明。
+- **为什么删**：它承诺的四类能力（载荷 / 传输 / 决策 / 航线）在 `drone-sim` 侧**都已真实交付**
+  （`PathPlanner` / `DecisionEngine` / `ObstacleAvoidanceStrategy` / ROADMAP M2 的 Actuator），
+  cloud 这套只是同名的第二套类型且零消费者；ROADMAP 的 M0–M13 也没有"第三方插件生态"里程碑。
+- **形状留档**：`docs/architecture-deepening-plan.md` §2.3（四份 SPI 定义）与 §2.4（注册中心设计）
+  原样保留——将来真要开放扩展，从那里重建，成本是重写而不是重新设计。
+- **验收**：`mvn -o test-compile` 通过；全 reactor 回归见 §12.4。删除类没有用例会因此变红，
+  能给的证据仍是"编译 + 全量测试 + 零引用面复算"（与 §11.5 同形）。
+
+### 12.2 只在代码里有默认值的键：只声明 13 个
+
+- **重测**：当前 **30 个**。§11.2 记的 24 已归因——**旧扫描只认单行 `@Value("${k:默认}")`**，
+  漏掉两类同等有效的读者形态，正好 6 个（在审计基线 `cce0f10d` 上复算：30 − 6 = 24）：
+  - `@Scheduled(fixedDelayString = "${k:默认}")` **5 个**：`comm-adapt.detection-interval-ms`
+    （`LinkQualityMonitor.java:41`）、`comm-adapt.evaluate-interval-ms`（`CommAdaptAdvisoryService.java:75`）、
+    `sensing.aggregate-ms`（`SensingTrackService.java:53`）、`health.check-interval-ms`
+    （`HealthMonitorService.java:333`）、`signing.posture.watchdog-interval-ms`（`SigningPostureService.java:182`）；
+  - **跨行书写**的 `@Value` **1 个**：`drone-sysid`（`DroneCommandService.java:102-103`，
+    `"${aerofleet.drone-sysid:1}"` 落在注解续行上，按行匹配的扫描器看不到它前面的 `@Value(`）。
+  **不是 master 前进带来的**：三个基点（`cce0f10d` / `c6676144` / `dd19dc74`）的"有代码内默认"键集合
+  完全相同（**79 个**），未声明集合也同为 **30**。复算方式：用 `git grep` 在任意提交上现扫
+  声明面（`*/src/main/resources/*`）与读者面（`*/src/main/java/*`），不检出工作区、不写临时文件。
+  本批仍**不按 30 全量声明**，只按"文档/部署/前端点过名"筛。声明 13 个后，仍只存在于代码里的为 **17 个**，
+  其中 **5 个**的读者仍是 `@Scheduled`/跨行 `@Value` 形态（`sensing.aggregate-ms` 已随本批声明）
+  ——将来若要扩大声明面，扫描器必须按"读者形态"而不是"单行注解"来认。
+
+  **剩下的 17 个逐条列在这里**（键 / 代码默认 / 读者位置），免得"17"变成又一个不可核的数：
+  - 内部调参 10 个：`audit.capacity`=1000（AuditService.java:91）、
+    `comm-adapt.detection-interval-ms`=5000（LinkQualityMonitor.java:41）、
+    `comm-adapt.evaluate-interval-ms`=5000（CommAdaptAdvisoryService.java:75）、
+    `device-registry.signing-verify-write-interval-seconds`=60（DeviceRegistry.java:187）、
+    `health.check-interval-ms`=5000（HealthMonitorService.java:333）、`orbit-pool-size`=2（OrbitJobManager.java:70）、
+    `signing.posture.watchdog-interval-ms`=30000（SigningPostureService.java:182）、
+    `tracking.max-points`=3600（FlightTrackStore.java:51）、
+    `tracking.search.default-wind-speed`=5.0（LostDroneAlertService.java:54）、
+    `tracking.search.min-radius`=50.0（LostDroneAlertService.java:50）。
+  - **部署相关 7 个**（这一类是本次盘点的新发现，见 §12.5）：`drone-host`=127.0.0.1（UdpGateway.java:151）、
+    `drone-sysid`=1（DroneCommandService.java:103）、`gb28181.sip-host`=127.0.0.1:5060 与
+    `gb28181.sip-domain`=00000000000000000001（Gb28181Adapter.java:30-31）、
+    `sensing.base-lat`=22.5907 / `sensing.base-lon`=113.9345（CounterDroneRadarSource.java:42-43）、
+    `instance-id`=unknown（MetricsConfig.java:33）。
+- **入选 13 个**（属性名在 `gcs-web/src` / `docs` / `deploy` 出现过）：
+  `geofence.restriction-file`、`report.cost-per-hour`、
+  `scheduling.reservation.auto-radius-m`、`scheduling.reservation.auto-window-ms`、`scheduling.retry.max`、
+  `security.bootstrap-admin-username` / `-password` / `-tenant-id`、
+  `sensing.aggregate-ms`、`sensing.proximity-alert-m`、`sensing.track-ttl-ms`、
+  `sim-truth-base`、`vision.source`。
+- **值与代码默认逐项比对**：12/13 逐字节相等；唯一不同的 `bootstrap-admin-password` 是刻意的——
+  properties 里写 `${AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD:}`，env 未设时解析为空 = 与代码默认
+  "空值不引导"同义，且不把口令写进仓库。这条偏差写在这里，免得下次有人"对齐"成明文。
+- **刻意不声明的 17 个**：容量、内部轮询/校验间隔、线程池大小、仿真侧设备指纹
+  （`drone-host` / `drone-sysid` / `sensing.base-lat|lon`）、GB28181 SIP 地址、失联搜索兜底常数
+  （`tracking.search.*`）。写进配置文件会被当成可调旋钮，而其中一部分调了会让设备/对端对不上——
+  这属于 §11.2 修掉的那种"看起来可调"的另一面。
+- **新增声明的副作用检查**：全仓 `containsProperty(...)` / `getProperty("aerofleet...")` 调用点为 0，
+  所以"声明一个此前缺失的键"不可能翻转任何 presence 分支；值又全部等于代码默认 ⇒ 零行为变化。
+- **门禁**：`check-config-keys.py` 实测声明键 69 → **82**，全部有真实读者，通过。
+
+### 12.3 getter 判据：不收紧，改 report-only 清单
+
+- **裁决理由**：判据是过近似（Jackson 按 getter 定 JSON 字段名，"代码里没人调"≠"没人消费"）；
+  收紧到编译级调用图要 2–3 天且收益不确定，而误报会把仓门变成"经常红但没人理"。
+- **落地**：新脚本 `scripts/list-unreferenced-getters.py`，**恒退 0**，只打印四档计数与最暗一档名单：
+  有调用点 / 契约候选（属性名见于前端·文档·部署）/ 只有测试在用 / 零外引用候选。
+  注释与字符串字面量先剥掉再数调用点（§11.4 抓过"注释里的方法名当证据"的假阳性）。
+- **实测（本批树）**：扫 1304 个 public 无参 getter → 有调用点 1104 / 契约候选 79 / 只有测试在用 74 /
+  零外引用候选 **47**。**这 47 与 §11.3 的 13 不可直接比较**：本脚本不算"随响应出网"那一档，
+  序列化的会被留在最暗一档里（更保守但更暗）；反过来"属性名出现在 docs"的口径更宽，会把一些
+  真死的挡在最暗档外。两个方向都朝"宁可漏报、不误删"偏。
+- **自测**：7 情形（四档归类、注释/字符串不算调用点、有候选仍退 0、`--strict` 才退 1）。
+- **CI**：进 `repo-gates` 的自测步 + 独立报告步；不加 `|| true`——脚本自身崩溃属于工具故障，应当响。
+
+### 12.4 验证与计数
+
+- 全 reactor `mvn -B -o clean test`：**5505 / 0 失败 / 0 错误**，六个模块全 SUCCESS
+  （mavlink-core / drone-sim / link-sim / regulator-sim / cloud-backend / sdk-java）；
+  本批零测试增删；数字在 rebase 到最新 master（`dd19dc74`）后重跑得到，不是沿用旧基线。
+- 仓门：`check-config-keys` 10/10 自测 + 实跑通过；`check-doc-config-keys` 4/4；
+  新脚本 7/7；`check-doc-counts` README scripts 96 → **97**；CHANGELOG 小节 244 → **245**（rebase 后重驱动）。
+- 未核（如实登记）：① ~~24 → 30 的差集未逐条归因~~ → **已归因**（旧扫描只认单行 `@Value`，漏 5 个 `@Scheduled(fixedDelayString)` + 1 个跨行 `@Value`，逐条见 §12.2；三个基点集合一致，与 master 前进无关）；② 47 个最暗候选**一个都没复核**，
+  本批不删任何 getter；③ 删 spi 对 Spring 启动的影响只做了编译级验证，没有起一次应用对比 bean 数；
+  ④ 7 个部署相关键的声明口径未定（§12.5）。
+
+### 12.5 新发现：17 个里有 7 个其实是"部署相关"，不是内部参数
+
+本批声明口径是"文档/部署/前端点过名的才声明"。逐条核对剩下的 17 个时发现，其中 7 个虽然
+**没有任何文档提过**，但语义上明显随部署环境变化：`drone-host`/`drone-sysid`（UDP 网关与指令下发指向哪台机）、
+`gb28181.sip-host`/`sip-domain`（SIP 服务器与域）、`sensing.base-lat`/`base-lon`（反制雷达站址）、
+`instance-id`（metrics 标签）。它们之所以没进"13 个"，唯一原因是**文档没写**——
+这是文档缺口，不是"应该藏在代码里"。
+
+- **不改的原因**：改声明面属于口径变更，超出本批裁决；而且 `gb28181.sip-domain` 这类值
+  写进 base properties 后，运维改错会静默连不上对端（需要在文档里同步"怎么校验"）。
+- **建议的下一步（等 owner 一句话）**：A. 把这 7 个连同说明写进 `docs/` 的配置参考 + 声明进
+  properties（一批小 PR，含一条"改 host 后启动日志能看见"的可观测性检查）；
+  B. 只补文档、不声明（保持"代码内默认 + 环境变量覆盖"）；C. 维持现状，登记为已知缺口。

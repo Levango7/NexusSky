@@ -45,6 +45,381 @@
 > 背景与量化见 `.coord/GAPS.md` §十五。慢客户端阻塞的**真**修复（引入装饰器 +
 > `sendTimeLimit`/`bufferSizeLimit`）属运行时行为变更，已在上方《引入装饰器…》节落地（B 档）。
 
+## [Unreleased] — P2-F5：接收限速拆双预算——关键帧（ACK/心跳/任务回执）洪泛下不再被淹（2026-10-31）
+
+**P2-F5 落地**（PX4 首验暴露的链路级候选，docs/sitl-integration.md §12.2-⑤）：单一滑动窗口下，
+高码率流（SITL 4MB/s ≈ 8.6k fps）在每秒开头把 100/s 预算吃光——**MISSION_ACK/COMMAND_ACK/
+心跳成批被丢**（单轮 340k+ 条「Rate limit exceeded」日志、任务上传必现超时、armed 显示滞后）。
+真机同理：遥测突发/日志下载都会挤占同一窗口。
+
+- **cloud-backend**：`UdpGateway` 限速器拆**双预算**——关键帧（COMMAND_ACK/MISSION_ACK/
+  MISSION_REQUEST legacy+INT/MISSION_COUNT/MISSION_REQUEST_LIST/HEARTBEAT/STATUSTEXT）走
+  独立小预算 `aerofleet.udp.max-critical-frame-rate-per-sysid`（**默认 50/s，不占主窗口**），
+  非关键帧的主窗口语义不变；关键预算自身耗尽仍会丢（防滥用语义保留）；配置 <=0 关闭豁免
+  （退回旧行为，可回退）；两条窗口同批清理（防泄漏口径不变）。
+- 回归：`UdpGatewayCriticalFrameRateTest` 4 例（洪泛下 ACK/心跳存活且主窗口语义不变 /
+  关键预算耗尽仍丢 / 豁免关闭回退 / 心跳同享预算）；`UdpGatewayTest` 的主窗口限速探针
+  （#21/#23）换非关键帧 GLOBAL_POSITION_INT——心跳自本批起受独立预算约束，原探针语义迁移。
+- 程序面：program 文档 P2-F5 条目落定（候选→已落地）；P2-F6（多链路路由钉定）复议暂缓
+  （改动面大、当前部署全单链路不受影响），设计草案留在 §12.3 欢迎认领。
+
+计数：本批 +4 测试（cloud-backend 3339→3343），全仓 5517→5521（基数已含当日 #219 的 +2）；全 reactor 全绿；10 份口径文档同步。
+
+
+## [Unreleased] — 修 ApiKey lastUsedAt 刷库事务边界：注解标在永不生效的一侧，刷库从未成功（2026-10-31）
+
+### 修：`ApiKeyRepository.updateLastUsedAt` 补 `@Transactional`，删掉调用方上永不生效的注解
+
+`ApiKeyLastUsedTracker` 把「每请求一次同步 UPDATE」降为「每 30s 每 Key 一次合并写」。
+但它的 `flush()` 标着 `@Transactional`，而周期刷写由构造期自建的
+`ScheduledExecutorService`（`this::safeFlush`）驱动、`@PreDestroy shutdown()` 也是自调用 ——
+两条路径都持有裸对象、绕过 Spring 代理，注解**永远不生效**；真正被调用的
+`updateLastUsedAt` 是 `@Modifying` JPQL 更新却**没有** `@Transactional`。后果：
+
+- 每次 UPDATE 都在无事务状态执行 ⇒ `TransactionRequiredException: Executing an update/delete query`；
+- 逐条 `try/catch` 把它吞成 WARN ⇒ **lastUsedAt 自合并写组件上线起从未刷库**，
+  且每周期每 Key 刷一条假告警（噪音掩盖真相的典型）。
+
+修法：事务边界下沉到仓库方法自己身上（逐 Key 独立提交，与既有「失败只丢该 Key」
+语义一致；若整批一个事务，PG 下一条失败会让后续语句全部报
+`current transaction is aborted`）；`flush()` 上永不生效的注解删除并注释说明原因，
+防止下一个读代码的人再被误导。本仓对此早有约定——`FlightLogRepository` /
+`AuditLogRepository` 的 `@Modifying` 清理方法都带库方法级事务，且在注释里写明了
+「调用方是定时任务，没有请求事务」，本方法正是唯一漏网。
+
+测试 +2 例（`ApiKeyLastUsedTransactionTest`，`@SpringBootTest` + 真 H2）：调度线程同款
+裸对象自调用路径 `flush()` 必须真正落盘、仓库定点 UPDATE 不依赖调用方事务。
+**A/B**：修复前实测红——裸调用抛 `TransactionRequiredException`、调度路径断言
+lastUsedAt 为 null；补注解后 2 例绿（已实测）。
+
+## [Unreleased] — 待口径十条清空 + 只增表留存机制（五表 job，默认关闭）（2026-10-30）
+
+**口径账清空 + 只增表留存的最后半页，一批交付。**
+
+- **待口径结项（#3/#6/#7/#8/#9/#10，用户逐条拍板，2026-10-30）**：
+  ① **UOM 话术**=维持诚实限定口径（扫描证实对外材料本就带"对端为模拟器/未与真实 UOM 平台
+  联调"限定，product-brief 统一为"真实联调待外部输入，P3"；**不做**演示默认切 SimReportSink
+  ——政府买家材料会被逐条对规范，假"上报成功"比"未联调"更易翻车）；
+  ② **correctionCount**=内部运行观测指标，不考核不计费（内存计数重启归零 + 全仓零消费——
+  计费前必须先有计量层：持久化 + 成功判据"到位且误差收敛" + 窗口/归一 + 审计）；
+  ③ **告警离线缓存**=接受现状语义（主存储 `AlarmEventStore` 已落库；会丢的仅"断网 + 未 flush +
+  重启"三条件叠加的 ≤500 条，`evictedCount` 可对账；落盘 spool 挂生产化清单 + 触发条件）；
+  ④ **/air-ground 键名**结项（前端别名回退已吸收，以代码现状为准）；
+  ⑤ **新表留存**=机制先行（见下，本批落地）；⑥ **delivery 词汇**结项（V36 已裁决 phase 权威）。
+  至此 program 待口径清单（十条）清空。
+- **只增表留存机制（五表，默认全部关闭）**：`geofence_breach_event` / `dispatch_history` /
+  `delivery_task2` / `emergency_plan` / `maintenance_records` 各配
+  `aerofleet.<域>.retention-days`（**默认 0=关闭，零行为变化**）+ 每日错峰清理任务
+  （02:00-03:00 五档，与 03:30/03:45 的飞行日志/审计清理错开——Boot 调度器单线程）。
+  判据各取最稳时间列：越界/出警=事件自身时刻（非空列）、配送=coalesce(created_at, start_time)、
+  应急编排=updated_at（活文档按最后触碰，推进中的编排不会被误删）、维护=created_at。
+  **配送表补 created_at（V38）**：此前 PENDING/未启动即中止的行无时间基准，`@PrePersist` 写入
+  （存量保持 NULL 不伪造——coalesce 回退 start_time，两皆 NULL 的存量行不裁）。
+  **编队表不动**：清理会让 MAX(formation_id) 回退致 ID 复用撞主键，前置=迁 sequence_counter（V35 同型）。
+  建议开启值入 properties 注释：越界 365 / 出警 365 / 配送 180 / 应急编排 365 / 维护 1095（合规向从宽）。
+- 回归：五表各 2 例（过龄删 + 默认关闭不动），五份测试**共享一份 Spring 上下文**
+  （@TestPropertySource 逐字节相同 → 上下文缓存，CI 只多一次 boot）。
+
+计数：本批 +10 测试（cloud-backend 3327→3337），全仓 5505→5515（基数已含当日 #215/#216/#217 的 +14）；
+全 reactor 全绿；10 份口径文档同步。
+
+
+## [Unreleased] — P2 #18 三条遗留的 owner 裁决落实：删 spi 空壳 + 13 个运维键声明 + report-only getter 清单（2026-10-30）
+
+三件互相独立的事，原本都挂在审计里"等口径"那一档（§5 第 9 条、§11.6），本批按 owner 裁决一次做完：
+
+- **删 `cloud-backend/.../spi/`（13 个文件 / 1266 行）**：零实现、零注入、零 `.java` 引用
+  （删前按 13 个类名逐个全仓反查；§5/§11 里写的"12 个类"是当时数错，实测 13 个文件，行数不变）。
+  它承诺的载荷 / 传输 / 决策 / 航线四类能力在 `drone-sim` 侧**都已真实交付**
+  （`PathPlanner` / `DecisionEngine` / `ObstacleAvoidanceStrategy` / M2 的 Actuator），
+  cloud 这套只是同名的第二套类型。接口形状仍留在 `docs/architecture-deepening-plan.md` §2.3–2.4，
+  真要开放第三方扩展时从那里重建；properties / `ci.yml` / `demo-scenarios.md` / `e2e-spray.sh`
+  里关于它的说明同步改写成"已删"。`check-config-keys.py` 同时去掉静态表 `DYNAMIC_PREFIX_CLAIMS`
+  （动态前缀改由代码现场扫"谁声称按前缀枚举"），少一处会漂移的手工账。
+- **13 个"文档点过名、properties 里却搜不到"的键声明进 base properties**：
+  `geofence.restriction-file`、`report.cost-per-hour`、`scheduling.reservation.auto-radius-m` /
+  `-auto-window-ms`、`scheduling.retry.max`、`security.bootstrap-admin-username` / `-tenant-id`、
+  `sensing.aggregate-ms` / `-proximity-alert-m` / `-track-ttl-ms`、`sim-truth-base`、`vision.source`，
+  外加 `bootstrap-admin-password` 走 `${AEROFLEET_SECURITY_BOOTSTRAP_ADMIN_PASSWORD:}`（不落明文）。
+  **值与代码默认逐项比对：12/13 逐字节相等**，口令那 1 条是刻意偏差（env 未设 ⇒ 空 ⇒ 不引导，
+  与代码默认同义）。重测 30 个、§11.2 记 24 的差集已归因：旧扫描只认单行 `@Value`，
+  漏了 5 个 `@Scheduled(fixedDelayString=…)` 与 1 个跨行 `@Value`（逐条见审计 §12.2）；
+  三个基点的默认键集合相同，与 master 前进无关。声明键 69 → **82**，`check-config-keys.py` 全绿；全仓 `containsProperty` /
+  `getProperty("aerofleet…")` 调用点为 0 ⇒ 不可能翻转任何 presence 分支，零行为变化。
+  另外 17 个"只在代码里有默认值"的内部实现参数（容量、轮询间隔、线程池、设备指纹、
+  GB28181 SIP 地址、失联搜索兜底常数）**故意不声明**——写进配置文件会被当成可调旋钮，
+  实际调了要么没有语义、要么会让设备/对端对不上。
+- **新 `scripts/list-unreferenced-getters.py`（report-only，恒退 0）**：getter 判据是过近似
+  （Jackson 按 getter 定 JSON 字段名，"代码里没人调"≠"没人消费"），收紧需要编译级调用图，
+  而误报会把仓门变成"经常红但没人理"。所以只打印四档计数与最暗一档名单：有调用点 /
+  契约候选（属性名见于前端·文档·部署）/ 只有测试在用 / 零外引用候选；数调用点前先剥注释与
+  字符串字面量（§11.4 抓过"注释里的方法名当证据"的假阳性）。实测扫 1304 个 getter → 47 个最暗候选，
+  **本批一个都没删**；与 §11.3 的 13 不是同一口径（本脚本不算"随响应出网"那一档），不可直接比较。
+  自测 7 情形，已接 `repo-gates` 的自测步与独立报告步。
+
+验证：全 reactor `mvn -B -o clean test` **5505 / 0 失败 / 0 错误**（六个模块全 SUCCESS；
+本批零测试增删，数字随基线 rebase 到最新 master 后重驱动）；门禁自测 `check-config-keys` 10/10、
+`check-doc-config-keys` 4/4、`list-unreferenced-getters` 7/7、`check-revert-looking-diff` 3/3；
+README 目录树脚本数 96 → **97**。裁决来路、复核记录与未核清单见
+`docs/persistence-and-dead-surface-audit.md` §12。
+
+计数：本批 **0** 测试增删；`[Unreleased]` 小节 245 → **2**。
+## [Unreleased] — 轨迹端点可选 limit + 空 catch 棘轮门禁（2026-10-31）
+
+### 改：`GET /flightlog/track` 默认仍全天，新增 `limit` 取最新 N 点
+
+原端点永远返回某日整天轨迹。1 机 1 天 1 Hz ≈ 8.6 万行，而主地图
+`mergeTrack` 只保留最新 1500 点——拉回 98% 后再丢。但法证/遗失无人机搜索
+确实需要完整轨迹，不能一刀切封顶，因此加可选参数：
+
+- `limit` 省略/`0`：保持当天**完整**轨迹（默认行为逐字节不变）；
+- `limit > 0`：取最新 N 点（上限 5000），返回顺序仍是旧→新；
+- DB 路径把租户过滤与 `LIMIT` 一起下推 `findNewestFirst`，不再全量取回再截尾；
+- JSONL 路径把 limit 交给既有环形缓冲，同样只保留最新 N 行；
+- 前端主地图显式传 `limit=MAX_TRACK_POINTS(1500)`：合并结果与原口径逐点等价，
+  但单机单日传输量从 8.6 万点降到 1500 点。
+
+测试 +4 例（DB mock 下推/默认全天、JSONL 最新 N、H2 真库最新 N），
+前端 +3 例（limit 透传、不传/0 不拼参数、hook 显式传 1500）。
+**A/B**：把 limit 分支打回「永远全天」⇒ 3 例红；还原 ⇒ 绿。
+
+### 加：空 catch 棘轮门禁（生产代码 19 处存量全部登记理由）
+
+`catch (Exception e) {}` 静默吞故障，评审很难逐条盯。新增
+`scripts/check-empty-catch.py`：扫描 `*/src/main/java/`，去掉注释后无语句的
+catch 必须命中 `scripts/empty-catch-exemptions.json`（文件 + 理由注释，带到期日），
+裸空 catch 永远不能豁免；登记失效/过期同样红。8 个合成夹具自测 + 真实仓库
+A/B（临时塞裸空 catch ⇒ 红，删除 ⇒ 绿）已过；CI `repo-gates` 增加自测与正式门禁。
+
+## [Unreleased] — 修 sim-truth HTTP 调用只连不读：3 处请求补 3s 读取超时（2026-10-30）
+
+### 修：`CaptureService` / `OrbitService` 的 `HttpRequest` 没有 timeout
+
+两个视觉服务都用 `HttpClient.newBuilder().connectTimeout(2s)`——**连接超时只覆盖
+TCP 握手**，请求本身没有 `HttpRequest.timeout(...)`。服务端接受连接后不响应
+（sidecar 卡死、反代挂住、响应半截），`http.send` 会一直阻塞：
+
+- `CaptureService.fetchJpeg()`：拍摄主路径每帧拉 sim 渲染 JPEG；
+- `CaptureService.getJson()`：拉 `/camera/shots`、`/targets` 真值；
+- `OrbitService.getJson()`：环绕任务逐点拉真值。
+
+调用方都是请求线程/任务线程，没有外层超时兜底 ⇒ 一个不响应的 sidecar 可以
+永久占住线程。同类出站调用（`MjpegStreamService` 4s、`OnvifSoapClient` 可配、
+`WebhookService` 10s、`NtripClient` 可配）都设了读超时，这三处是漏网。
+
+修法：两类各加 `REQUEST_TIMEOUT = Duration.ofSeconds(3)`，三个请求构建器补
+`.timeout(REQUEST_TIMEOUT)`。**只加超时，不改 URL/重试/降级语义**：
+`fetchJpeg` 失败仍返回 null，`getJson` 仍把异常抛给上层既有 catch。
+
+测试 +3 例（`SimTruthRequestTimeoutTest`）：本地 `HttpServer` 接受连接后
+8 秒不响应——`getJson` 必须抛 `HttpTimeoutException`，`fetchJpeg` 必须
+在 6 秒内返回 null（不得等到 8 秒服务端响应）。**A/B**：删掉三处
+`.timeout(REQUEST_TIMEOUT)` ⇒ 3 例红；还原 ⇒ 绿（已实测）。
+
+## [Unreleased] — 修拓扑推送 debounce 缓存无界增长：按窗口裁剪过期 key（2026-10-30）
+
+### 修：`CellTowerPusher` / `MeshTopologyPusher` 的 `debounceCache` 只增不减
+
+两个 2Hz `@Scheduled` 推送器各持一张 `HashMap<String, Long>` 做 1 秒 debounce，
+key 是「事件类型:源 sysid:目标 sysid」——机队 N 台时 key 空间是 **O(N²)**，
+而代码只 `put` 从不删除。缓存大小因此取决于**历史上见过的所有事件组合**，
+与「只保留最近 1 秒」的语义无关；机队越大、运行越久，涨得越快
+（1000 台时是「6 种事件 × 百万级组合」的量级）。
+
+修法：抽出包内 `DebounceWindow`（TTL + 裁剪），每次 `pushOnce` 先
+`prune(now)` 丢掉窗口外 key，再逐事件判重。判据与原内联逻辑逐条一致：
+窗口内抑制、`now - lastSeen == TTL` 仍抑制、只有 `> TTL` 才再次放行；
+被裁掉的 key 早已不在窗口内，因此**不改变任何推送行为**，只改变内存占用。
+
+顺带修复 5 个 pusher 的 Javadoc 截断残片（`定向投递adcast}（既有不变）` /
+`（satId 非机队设备）adcast}。`）——同一批文本损坏，句子已还原。
+
+测试 +7 例：`DebounceWindowTest` 5 例（窗口内抑制、TTL 边界仍抑制、裁剪只丢过期 key、
+100 轮 × 100 个不同 key 缓存不随历史增长、非法 TTL 拒绝）+
+`PusherDebounceCacheBoundedTest` 2 例（两个 pusher 真时钟过窗后，60 个旧 key
+被裁到只剩本轮 1 个）。**A/B**：删掉 pusher 的 `prune(now)` ⇒ 2 例红；还原 ⇒ 绿。
+
+## [Unreleased] — PX4 SITL 首验：custom_mode 打包字（P2-F3）+ 任务项线上形态（P2-F4）两族修复（2026-10-30）
+
+**P2「第二固件首验」挖出并闭环两类真机协议兼容问题**：PX4 v1.13 SIH 上"连接 → 任务上传
+→ 起飞 → 航点 → RTL → 降落"闭环修复后全绿（tcpdump 逐帧时序 + 遥测轨迹实录）。
+两类问题 AP 与 drone-sim 都不管——**"sim 测不出"家族第 5/6 例**。
+
+- **P2-F3 · custom_mode 打包字**：真 PX4 心跳 `custom_mode = (main_mode<<16)|(sub_mode<<24)`
+  （地面待命 `0x03040000`=AUTO/LOITER、任务中 `0x04040000`、返航 `0x05040000`，SITL 实测），
+  而 `modeLabel` 按 sim 历史裸值表 0..22 解码 → 真机恒 `UNKNOWN`。
+  - **cloud-backend**：按打包字解码（v1.13 对 AUTO_READY 等 nav_state 打包为 0 的编码缺口
+    如实 UNKNOWN，不猜模式）；`FlightModeLabelTest` 用 SITL 实测值钉住。
+  - **drone-sim**：`FlightState.px4NavState` 同批对齐发打包字（删历史裸值表，单一口径）；
+    STANDBY/HOLD 都映射 AUTO_LOITER（真机无 RC 地面待命同值），"STANDBY" 不再是伪装模式；
+    `FlightStateModeWordTest` 钉住数值。
+- **P2-F4 · 任务项线上形态规范化**：PX4 任务解析两条硬契约——
+  ① **帧硬校验**：带坐标帧（0/3/5/6）只收「位置命令」，RTL(20) 用 frame=3 → **整单**
+  `MAV_MISSION_UNSUPPORTED=3` 且 PX4 随即中止传输；无坐标命令必须 `MAV_FRAME_MISSION(2)`；
+  ② **`autocontinue` 被真正消费**（mission.cpp「switch to next waypoint if autocontinue
+  flag set」）：置 0 时到点即停——SITL 实测起飞到 20m 后悬停 150s 不奔航点。
+  全栈热线（REST 任务/出警派飞/事件派飞）长期发 `frame=3 + autocontinue=0`，PX4 上 100% 失败。
+  - **cloud-backend**：`normalizeMissionItems` 单一收口点——无坐标命令→2、相对高 3→6
+    （INT 报文规范编码）、autocontinue 一律 1；home 占位槽（绝对高 frame=0）原样保留。
+  - 回归：`MissionItemNormalizationTest` + `ArduPilotMissionUploadTest` 线上项断言。
+- **SITL 验收（修复前/后同脚本对照）`[PX4-实测]`**：修复前三层红——任务整单被拒
+  （`result=3`）→ ACK 被限速淹（340k+ 条丢帧，上传必现 timed out）→ 到点即停。
+  修复后：`MISSION_COUNT(3)` → `REQUEST 0..2` → `ITEM(22,f6)/ITEM(16,f6)/ITEM(20,f2)` →
+  **`MISSION_ACK result=0`**（214ms）→ arm → `MISSION_START(300)` 原生 ACCEPTED →
+  起飞 20.0m → 北飞 55m 航点 → `mode=RTL`(0x05040000) → 爬 30m 返航 → 降落 → `Disarmed by
+  landing`（限速丢帧计数 0）。
+- **链路级候选上板（P2-F5/F6，待裁）**：① 接收限速（默认 100 fps/机）无消息类优先级，
+  高频流吃满桶致 MISSION_ACK/心跳成批被丢（SITL 4MB/s 场景单轮 340k+ 丢帧）；
+  ② PX4 双 mavlink 实例同 sysid，`drone-extra-ports` 一配则 last-seen 路由游走，
+  任务传输跨实例报 `No transfer` 整单失败。运行口径（只配 Normal 实例 18570、调高限速）
+  已入文档；产品面修复方向见 §12.3。
+- **e2e failsafe 断言随口径对齐**：`scripts/e2e-failsafe{-linux.sh,.ps1}` 的"自主落地"断言
+  由 `mode==STANDBY` 改为 `mode==HOLD`——sim 地面态标签已与真 PX4 同口径（AUTO/LOITER→HOLD），
+  CI 首跑即抓出该旧断言（本机复跑全绿：offline→RTL→HOLD+disarmed 三断言）。
+- 文档：`docs/sitl-integration.md` §12（首验实录 + 7 条差异 + 遗留项）；
+  `docs/real-integration-program.md` P2 段（P2-F3/F4 落地 + F5/F6 候选）。
+
+计数：本批 +9 测试（cloud-backend 3307→3313：模式标签 +1 / 任务项规范化 +4 / 上传线上项 +1；
+drone-sim 1453→1456：打包字 3 例），全仓 **5482→5491**（基数已含此前 #209/#213 的 +8）；
+全 reactor 全绿；10 份口径文档同步。
+
+## [Unreleased] — 修 `FormationService` 启动恢复整表读堆：MAX 单行取 ID + 只加载未解散编队（2026-10-30）
+
+### 修：`restoreFormations()` 不再 `findAll()` 整张只增表
+
+`FormationService.restoreFormations()`（`@PostConstruct`）原来对**整张编队表**执行
+`findAll()`：逐行跳过 `DISSOLVED` 恢复活跃编队，并顺带扫出 `maxId` 续接
+`nextFormationId`。而 `formation` 是**只增表**——`dissolve()` 只把状态改成
+`DISSOLVED`（`FormationService.java:592-600`、`691-699`），不删行，全仓也没有
+保留/清理任务。每次重启都要把整表读进堆，再逐行跳过已解散行。
+
+与本日已修的 #205（audit 全表加载）、#206（flightlog 整天取回再截尾）、
+#209（geofence 越界事件整表加载）同族。**单独成 PR 的原因**：这里的 `findAll()`
+兼着算 `maxId`，而 `maxId` **必须包含已解散行**——`formation_id` 是主键，
+若只统计未解散行，重启后新编队会复用已解散行的 ID ⇒ 撞主键。简单换成
+"只查未解散"是错的。
+
+改动：
+
+- 新增 `FormationRepository.findMaxFormationId()`（`select max(e.formationId)`）：
+  只回 1 行、含已解散行，`nextFormationId` 由它续接；
+- 新增 `findRestorable(...)`：JPQL 显式 `where e.state is null or e.state <> :state`。
+  **不用派生查询 `findByStateNot`**：其 `state <> 'DISSOLVED'` 因 SQL 三值逻辑会把
+  `state IS NULL` 的脏行一并排除，而旧实现只跳过 DISSOLVED、null 状态行照样恢复；
+  本改动只应改变"取多少行"，不改变"哪些行算活跃"——口径与旧实现逐条对齐；
+- 运行时 `formations` 只装未解散编队；`members` 为空的防毒守卫原样保留。
+
+测试 +6 例：4 例单测（`FormationStartupRestoreTest`：只加载未解散且
+`never().findAll()`；`nextFormationId` 取含已解散行的 MAX；空库归 0；`members=null`
+脏行不毒死启动；仓储异常只告警）+ 2 例 H2 真库（`FormationRestoreQueryTest`）：
+`findMaxFormationId` 含已解散行；`findRestorable` 排除已解散、保留 `state IS NULL`
+脏行；空库 null/空。
+**双变异 A/B**：服务层改回 `findAll()` ⇒ 红；仓库层丢 NULL 兜底 ⇒ 红；还原 ⇒ 绿
+（实测通过）。
+
+## [Unreleased] — 修 `GeofenceStore` 启动恢复把只增表全量读进内存（2026-10-29）
+
+### 修：越界事件启动加载改为「只取最新 1000 条」（`LIMIT` 下推）
+
+`GeofenceStore.loadFromDb()` 在 `@PostConstruct` 阶段对 `geofence_breach_event`
+执行 `findAll()`，再在内存里按 `timestampMs` 排序，最后只保留最新的
+`MAX_BREACH_HISTORY`（1000）条。
+
+问题不在「留 1000 条」这个上限，而在**为了找出 1000 条把整张表读进堆**：
+
+- 该表是**只增表**——`recordBreach()` 只插入，全仓没有任何保留/清理任务
+  （数据保留策略只覆盖 `flight_log` 与 `audit_log`）；
+- 越界事件是「无人机飞错」级别的业务事件，长期积累到十万、百万行是常态；
+- 于是这笔账落在**每次启动**：应用还没开始接流量，先把整表 `SELECT` 进堆、
+  建 N 个实体对象、全量排序，然后丢掉 99.9%。表越大启动越慢，内存峰值越高；
+  一旦行数超过堆，就是启动即 OOM（重启也救不回来，因为重启还是要全量读）。
+
+改动：
+
+- `findAll(PageRequest.of(0, MAX_BREACH_HISTORY, Sort.by(DESC, "timestampMs", "id")))`
+  ——`LIMIT 1000` 与 `ORDER BY` 一起下推数据库，只传回要保留的那些行；
+- 排序用 `timestampMs DESC, id DESC`：`id` 消掉同毫秒并列的不确定性，
+  保证与旧实现「同时间戳按插入序保留较新者」的取舍一致；
+- 服务端反转成旧→新再 `addLast`，deque 的契约（末尾=最新）不变；
+- 历史表读取失败仍单独 `catch`，不影响围栏区域恢复。
+
+测试 +2 例（`GeofenceStorePersistenceTest`，15→17）：分页参数确实是
+`size=MAX_BREACH_HISTORY` 且按 `timestampMs DESC` 排序、绝不调用无参 `findAll()`；
+历史表抛异常时围栏区域照常恢复。
+变异 A/B：把分页调用改回整表 `findAll()` ⇒ 红；还原 ⇒ 绿（实测通过）。
+
+## [Unreleased] — P2-F2：DO_REPOSITION 必须 COMMAND_INT——编队命令在 AP 真机 100% 静默失效的修复（2026-10-30）
+
+**"sim 测不出"家族第 4 例，真机现场挖出并闭环**：ArduPilot 对携带经纬度的命令**强制 COMMAND_INT
+报文**——`DO_REPOSITION` 用 COMMAND_LONG 发送一律回 `MAV_RESULT=8`（COMMAND_INT_ONLY；AP SITL
+实测，非 GUIDED 与 GUIDED 悬停中结果相同，与模式无关）。而全栈缺这条消息、也没意识到格式契约，
+于是 `FormationKeeper` 偏差修正与 `FormationService` 队形机动在 AP 实机上**完全不工作**
+（只打 WARN、`correctionCount` 空涨——恰是待口径 #6 那枚计数器）；drone-sim 两种口径都收，
+所以 e2e 全绿掩盖至今。
+
+- **mavlink-core**：新增 `CommandInt(75, LEN=35, CRC=158)`——编码与 **pymavlink 官方打包帧
+  逐字节一致**（`CommandIntTest` 含全 35 字节与尾零裁剪 33 字节双向量）；注册表/decode 分派/
+  `MAV_FRAME_GLOBAL_RELATIVE_ALT_INT` 一并补齐。
+- **cloud-backend**：`command()` 对 `COMMAND_INT_REQUIRED` 集合（当前 = DO_REPOSITION）
+  **自动路由 COMMAND_INT**（p5/p6→x/y×1e7、frame=GLOBAL_RELATIVE_ALT_INT；NaN 经纬度快速拒绝，
+  不消耗重试）——单一收口点，REST raw 与编队全部调用方同时受益，调用方零改动。
+- **drone-sim**：入站 COMMAND_INT 支持（x/y 还原为度复用 LONG 处理链），新回归用例
+  "INT 口径同效：同样被接受并真飞到位"。
+- **SITL 复验（同一实例同一脚本，修复前/后对照）`[AP-实测]`**：非 GUIDED 态 `8`→`2`
+  （"格式不认"变"模式不对"，两层约束分离清晰）；GUIDED 悬停态 `8`→**ACCEPTED + 爬 25m /
+  北飞 ~50m / 悬停**，落点与线上 int32 目标**逐位一致**（1e-7 度刻度——float 口径做不到的精度）。
+  文档并入 `docs/sitl-integration.md` §11.2-⑨ / §11.3；立项书 P2-F2 条目落定，方案 B 的
+  命令地基就此铺平。
+
+计数：本批 +8 测试（mavlink-core 519→523、cloud-backend 3296→3299、drone-sim 1452→1453），
+全仓 **5466→5474**；全 reactor 全绿；10 份口径文档同步。
+
+
+## [Unreleased] — P2 #18 续批：配置键与死访问器的**完整**对账（8 个假开关删除 + 新门禁 + 12 个死访问器）（2026-10-30）
+
+### 现场
+
+`docs/persistence-and-dead-surface-audit.md` §4.1 当年写着「12 个死 getter / 6 个死配置键」，
+但它**从来不是全仓清点的结果**——那是节选表里几条的加总。上一批（PR #188，已合 `ae7ebc43`）
+只核实了其中 6 个访问器。本批按可复算口径重扫，把两笔账一次结清。
+
+### 交付
+
+| 项 | 做法 | 为什么这么做 |
+|---|---|---|
+| **8 个假开关（删）** | 删除 `aerofleet.plugins.{payload.spray, payload.gripper, transport.mavlink-udp, ai.rtl, ai.avoid, ai.adapt-path, route.astar, route.rrt}.enabled`，原位注释写清证据与去处 | 三段证据缺一不可：① 唯一读者 `spi/PluginConfig` 在 **main+test 零注入点**；② 四个插件接口 `PayloadPlugin`/`TransportPlugin`/`RoutePlannerPlugin`/`DecisionStrategyPlugin` **零实现类** ⇒ `PluginRegistry` 构造拿到空列表；③ 于是改任何一个键**没有任何东西会红，也没有任何东西变化**。沿用 §9 里 `aerofleet.geofence.intercept.enabled` 的先例：删键 + 注释指向真相，而不是留个"看起来可调"的旋钮 |
+| **新门禁 `scripts/check-config-keys.py`** | 反向对账：`src/main/resources` 里声明的每个 `aerofleet.*` 键必须有真实读者（`@Value` / `Environment` / `@ConditionalOnProperty(prefix,name)` / `@ConfigurationProperties` 字段宽松绑定 / 动态前缀），带理由+到期日的豁免账（**当前为空**）与 10 情形离线自测，已接进 CI `repo-gates` 的自测步与独立步 | 文档→代码那条（`check-doc-config-keys.py`）已经在了，缺的是反方向：配置里躺着的键没人读，运维改了不响。**动态前缀要成立，声称枚举它的那个类必须自身可达**——这条前提校验就是本批抓出来的洞：旧白名单写着"PluginConfig 会动态枚举"，没人核过，实测为假 |
+| **撤销假前提白名单** | `check-doc-config-keys.py` 的 `DYNAMIC_PREFIXES` 去掉 `aerofleet.plugins.` 一条，原位注明撤销理由与去处 | 留着它等于允许文档继续承诺一组没人实现的开关。撤销后该门禁自测 4/4、真实仓库仍绿 |
+| **12 个死访问器（删）** | 全仓重扫得 **224 个"声明文件外零引用"的 public getter**，分四类：174 随响应出网 / 10 属性名见于文档·前端 / 27 只有测试在用 / 13 真死候选。真死候选里**删 12**（`GnssSimulator.getReportedAlt/getReceiver/getBaseStation`、`CrossZoneRelayPolicy.getAllowedRelayTypes`、`DisasterZoneManager.getRelayPolicy`、`GeoBoundary.getVertices`、`DynamicReconfigurator` 四个阈值 getter、`PriorityTask.getSubmitTimeMs/getPreemptedTaskId`），**留 2** | 删的 12 个：字段本身在类内仍被使用，只是访问器零调用 ⇒ 删除零行为变更。**留的 2 个**：`AdaptiveHysteresis.getHysteresisMs()` 同文件 `:75/:122` 两处内部调用（扫描器"除本文件外零引用"的口径把它误抬成候选）；`PluginConfig.getDisabledPlugins()` 随整个插件框架留给架构裁决，单点删它没有意义 |
+| **分类器自己的两处假阳性（写进文档）** | `GnssSimulator.getReceiver()` 的"文档证据"其实是 `deploy/monitoring/alertmanager.yml` 里 Prometheus 的 `receiver:`；`AdaptiveRouteMetric.getW3()` 的"前端证据"是 SVG 字符串里的 `http://www.w3.org` | 前者改判为死访问器并删除，后者经读代码确认在测试里被断言 4 次 ⇒ 改归"只有测试在用"保留。**不把假阳性写出来，这份文档就会替一个错的判据背书** |
+| **框架空壳不擅删** | `spi/` 包 12 类 / 1266 行（零实现、零外部引用）原样保留，登记为审计 §5 第 9 条的架构裁决：补实现接真 vs 删空壳 | 「可插拔」是对外能力话术，删与留都不该由清理批次替产品决定。审计基线与判据已备好，owner 一句话就能动 |
+| **§4 口径作废重出** | 审计新增 §11：`12 个死 getter` 与 `6 个死配置键` 两个数**作废**，改为实测 `224 零外部引用 / 13 真死`、`69 声明键 / 8 假开关`；反向缺口按"无默认值即启动失败"口径实测 **0**（宽口径 24 个键出厂值只写在代码里，登记为遗留） | 同一份文档里"当年节选的数"和"实测的数"必须分得开；§10.3 那句「12 应为 ≤9」也一并作废 |
+
+### 验证
+
+- 全 reactor `mvn -B -o clean test`：**5466 / 0 失败 / 0 错误 / 0 跳过**（643 个测试类；
+  分模块 cloud-backend 3296 / drone-sim 1452 / link-sim 139 / mavlink-core 519 /
+  regulator-sim 41 / sdk-java 19）。本批**零测试增删** ⇒ 10 份口径文档无需改数（门禁实测"全部一致"）。
+  第 12 个删除单独复跑 `mvn -o -pl drone-sim -am test`：**1452 / 0 失败**。
+- 新门禁：`--self-test` **10/10**；真实仓库首跑即通过（69 个声明键全部有读者），
+  并打印一条降级提示（插件前缀读者不可达）。
+  A/B 变异：往 properties 掺一个 `aerofleet.plugins.probe.enabled=true` ⇒ 门禁 rc=1 并**点名该键**；
+  还原 ⇒ rc=0，且 `grep` 确认树中无探针残留。
+- 删除类改动的验收形状：**编译 + 全量测试**（死访问器没有任何用例会因删除而变红，
+  这本身就是要写清的事——见审计 §11.4），零引用面由扫描器复算。
+- 其余八门禁（卫生 / 测试计数 / 端点计数 / 自测覆盖 / 前端端点 / 目录计数 / 回退式 diff /
+  MAVLink 兼容 / 变异自测）全过；`check-doc-config-keys.py` 撤白名单后仍绿。
+- 无对外行为变更：properties 只删了**没人读**的键；`spi/` 框架代码一行未动。
+
+### 遗留（写清为什么本批不做）
+
+1. 24 个"代码内默认、properties 未声明"的键要不要统一显式化（运维可见性 vs 多一份同步账）——等口径。
+2. `spi/` 插件框架的补实现/删除裁决（审计 §5 第 9 条）。
+3. 「随响应出网」这条判据是**过近似**（类名在控制器文件里出现过就算），174 个里可能混有真死者；
+   收紧需要编译级调用图，与 §6 里 `check-dead-wiring.py` 暂缓是同一个原因。
+
+---
+
 ## [Unreleased] — 缓存键门禁自己失明：`java-level` 的恢复键与 warm 键永不同源（2026-10-29）
 
 ### 修（CI）：一条门禁因"缓存永不命中 → 冷下载 → Maven Central 429"而红，而守卫看不见它
@@ -433,7 +808,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-29 共有 239 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-31 共有 251 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -459,7 +834,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 239 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 251 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

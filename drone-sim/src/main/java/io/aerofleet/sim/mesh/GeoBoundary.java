@@ -70,13 +70,6 @@ public final class GeoBoundary {
     }
 
     /**
-     * 返回顶点数的不可变列表。
-     */
-    public List<GeoPoint> getVertices() {
-        return vertices;
-    }
-
-    /**
      * 顶点数量。
      */
     public int vertexCount() {

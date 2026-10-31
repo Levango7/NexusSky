@@ -698,6 +698,15 @@ public final class VirtualDrone implements AutoCloseable {
                 } else if (msg instanceof io.aerofleet.mavlink.messages.MissionRequestInt mr) {
                     // Download direction: GCS asks for stored item #seq.
                     handleMissionItemRequest(mr, frame.getSystemId());
+                } else if (msg instanceof io.aerofleet.mavlink.messages.CommandInt ci) {
+                    // 2026-10-30：带位置命令的 INT 口径（与真实固件对齐——AP 对 DO_REPOSITION
+                    // 强制 COMMAND_INT，LONG 回 MAV_RESULT=8）。复用 LONG 处理链：x/y 还原为度、
+                    // z 作为 param7。float 还原在 1e-7 度级约 0.1m，sim 内部判定足够；
+                    // 真机侧精度由 int32 字段本身保证。
+                    handleCommandLong(new CommandLong(ci.targetSystem, ci.targetComponent, ci.command,
+                            0, ci.param1, ci.param2, ci.param3, ci.param4,
+                            (float) (ci.x / 1e7), (float) (ci.y / 1e7), ci.z),
+                            frame.getSystemId());
                 } else if (msg instanceof CommandLong cmd) {
                     handleCommandLong(cmd, frame.getSystemId());
                 } else if (msg instanceof io.aerofleet.mavlink.messages.ManualControl mc) {

@@ -3,6 +3,7 @@ package io.aerofleet.sim;
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.enums.MavEnums;
 import io.aerofleet.mavlink.messages.CommandAck;
+import io.aerofleet.mavlink.messages.CommandInt;
 import io.aerofleet.mavlink.messages.CommandLong;
 import io.aerofleet.mavlink.messages.GlobalPositionInt;
 import io.aerofleet.mavlink.messages.MavlinkMessage;
@@ -90,6 +91,22 @@ class RepositionCommandDispatchTest {
     }
 
     @Test
+    @DisplayName("INT 口径同效：COMMAND_INT(frame=6, x/y=1e7) 同样被接受并真飞到位")
+    void repositionViaCommandIntGuidesVehicleToTarget() throws Exception {
+        runDrone(gcs -> {
+            arm(gcs);
+            double targetLat = GeoUtil.latOf(HOME_LAT, HOME_LON, 40.0, 0);
+            send(gcs, repositionInt(targetLat, HOME_LON, 22f));
+            assertThat(awaitAck(gcs, MavEnums.MAV_CMD_DO_REPOSITION))
+                    .as("COMMAND_INT 口径的 DO_REPOSITION 应回 ACCEPTED（真实固件要求的报文格式）")
+                    .isEqualTo(MavEnums.MAV_RESULT_ACCEPTED);
+            assertThat(awaitArrival(gcs, targetLat, HOME_LON, 22.0))
+                    .as("飞机应经 INT 口径同样飞到目标位并保持")
+                    .isTrue();
+        });
+    }
+
+    @Test
     @DisplayName("经纬度越界：拒绝而不是飞向 2500km 外的解析点")
     void repositionOutOfRangeRejected() throws Exception {
         runDrone(gcs -> {
@@ -131,6 +148,14 @@ class RepositionCommandDispatchTest {
     private static CommandLong reposition(double lat, double lon, float alt) {
         return new CommandLong(1, AUTOPILOT_COMP, MavEnums.MAV_CMD_DO_REPOSITION, 0,
                 0, 0, 0, Float.NaN, (float) lat, (float) lon, alt);
+    }
+
+    /** 同上的 INT 口径：x/y=lat/lon*1e7、frame=GLOBAL_RELATIVE_ALT_INT（真机强制形态）。 */
+    private static CommandInt repositionInt(double lat, double lon, float alt) {
+        return new CommandInt(1, AUTOPILOT_COMP, MavEnums.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+                MavEnums.MAV_CMD_DO_REPOSITION, 0, 0,
+                0, 0, 0, Float.NaN,
+                (int) Math.round(lat * 1e7), (int) Math.round(lon * 1e7), alt);
     }
 
     private final int[] seq = {0};

@@ -153,6 +153,25 @@ describe('api.getDayTrack：接上已存在的历史通路', () => {
     expect(seen()).not.toContain('day=undefined')
     expect(new URL(seen(), 'https://gcs.example.test').searchParams.has('day')).toBe(false)
   })
+
+  it('limit>0 时下推 limit（只拉最新 N 点，不为 1500 点拉整天）', async () => {
+    const seen = await captureUrl()
+
+    await api.getDayTrack(7, '2026-10-14', 1500)
+
+    const u = new URL(seen(), 'https://gcs.example.test')
+    expect(u.searchParams.get('limit')).toBe('1500')
+  })
+
+  it('不传 limit 或 limit<=0 时不拼 limit，保持「全天完整轨迹」契约', async () => {
+    const seen = await captureUrl()
+
+    await api.getDayTrack(7)
+    expect(new URL(seen(), 'https://gcs.example.test').searchParams.has('limit')).toBe(false)
+
+    await api.getDayTrack(7, undefined, 0)
+    expect(new URL(seen(), 'https://gcs.example.test').searchParams.has('limit')).toBe(false)
+  })
 })
 
 describe('单一真相源守卫', () => {
@@ -166,5 +185,11 @@ describe('单一真相源守卫', () => {
 
   it('共享模块导出的窗口值就是原先 hook 用的 1500（行为不应被搬移动过）', () => {
     expect(MAX_TRACK_POINTS).toBe(1500)
+  })
+
+  it('主地图装载历史时显式传 MAX_TRACK_POINTS：最终可见点数不变，但不再拉整天', () => {
+    const hook = readFileSync(join(SRC, 'hooks', 'useDrones.js'), 'utf-8')
+
+    expect(hook).toMatch(/getDayTrack\(\s*sysid\s*,\s*undefined\s*,\s*MAX_TRACK_POINTS\s*\)/)
   })
 })

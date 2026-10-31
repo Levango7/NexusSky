@@ -45,6 +45,8 @@ public class OrbitService {
     private static final double HOME_LON = 113.9345;
     private static final double M_PER_DEG_LAT = 111_320.0;
     private static final double M_PER_DEG_LON = M_PER_DEG_LAT * Math.cos(Math.toRadians(HOME_LAT));
+    /** sim-truth 单次请求的读取超时：连接超时只覆盖 TCP 握手，服务端接受连接后不响应会永久挂住调用线程。 */
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(3);
 
     private final DroneCommandService commands;
     private final GeolocationSolver solver;
@@ -266,9 +268,9 @@ public class OrbitService {
         return -1;
     }
 
-    private JsonNode getJson(String url) throws Exception {
+    JsonNode getJson(String url) throws Exception {
         HttpResponse<String> resp = http.send(
-                HttpRequest.newBuilder(URI.create(url)).GET().build(),
+                HttpRequest.newBuilder(URI.create(url)).timeout(REQUEST_TIMEOUT).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) {
             throw new IllegalStateException("sim truth HTTP " + resp.statusCode());

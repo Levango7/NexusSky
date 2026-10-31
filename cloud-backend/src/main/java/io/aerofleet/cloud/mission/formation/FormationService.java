@@ -94,23 +94,26 @@ public class FormationService {
             return;
         }
         List<FormationEntity> entities;
+        Integer maxId;
         try {
-            entities = repository.findAll();
+            // maxId 必须**含已解散行**（formation_id 是主键，ID 复用会撞主键）。
+            // 单独取 MAX 只回 1 行，替代旧实现为算 maxId 而 findAll() 整表读堆。
+            maxId = repository.findMaxFormationId();
+            // 只加载未解散的编队：DISSOLVED 行保留在库里供历史查询，
+            // 旧实现把它们也拖进堆再逐行 continue 掉（该表只增，这笔账落在每次启动）。
+            entities = repository.findRestorable(Formation.FormationState.DISSOLVED);
         } catch (Exception e) {
             log.warn("Failed to load formations from database: {}", e.getMessage());
             return;
         }
+        nextFormationId.set(maxId == null ? 0 : maxId);
         if (entities.isEmpty()) {
+            log.info("restored 0 formations from database (nextFormationId={})", nextFormationId.get());
             return;
         }
-        int maxId = 0;
         for (FormationEntity entity : entities) {
-            maxId = Math.max(maxId, entity.getFormationId());
             if (entity.getTenantId() != null) {
                 formationTenantMap.put(entity.getFormationId(), entity.getTenantId());
-            }
-            if (entity.getState() == Formation.FormationState.DISSOLVED) {
-                continue;
             }
             // members 理论非空，但历史脏数据 / Hibernate 6 懒加载代理都可能给 null：
             // @PostConstruct 里一个 NPE 会让整个 backend 起不来（上次失败跑残留的
@@ -135,7 +138,6 @@ public class FormationService {
                     entity.getFormationId(), f.sortedMembers(), entity.getShape(), entity.getState(),
                     entity.getTenantId());
         }
-        nextFormationId.set(maxId);
         log.info("restored {} formations from database (nextFormationId={})",
                 formations.size(), nextFormationId.get());
     }

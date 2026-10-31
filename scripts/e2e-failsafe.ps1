@@ -4,7 +4,8 @@
 # 验证 P0 failsafe 反应链（PX4 兼容行为）：
 #   1. 正常任务中段断链 -> 飞机 15s 失联阈值后自动 RTL（NAV_DLLC_ACT 行为）
 #   2. 链路恢复后飞机仍在自主返航（云端看到 mode=RTL）
-#   3. 落地后自主 disarm，云端最终观察到 STANDBY
+#   3. 落地后自主 disarm，云端最终观察到地面态标签 HOLD
+#      （sim 与真 PX4 同口径：AUTO/LOITER→HOLD；历史 STANDBY 已随 P2-F3 打包字对齐废弃）
 # 注意：全程一旦起飞即不再发任何命令，观察飞机的自主动作。
 $ErrorActionPreference = 'Stop'
 $Base = 'http://localhost:8080/api/v1'
@@ -111,7 +112,8 @@ for ($i = 0; $i -lt 44; $i++) {
         $modeTrace += "[$($i*5+5)s] online=$($d9.online) mode=$($d9.mode) alt=$($d9.relativeAlt)"
         if (-not $d9.online) { $sawOffline = $true }
         if ($d9.online -and $d9.mode -eq 'RTL') { $sawRtl = $true }
-        if ($d9.online -and $d9.mode -eq 'STANDBY' -and $d9.armed -eq $false -and $i -gt 30) { $sawLanded = $true }
+        # 地面态标签：sim 与真 PX4 同口径（AUTO/LOITER→HOLD）；历史 STANDBY 已随 P2-F3 打包字对齐废弃
+        if ($d9.online -and $d9.mode -eq 'HOLD' -and $d9.armed -eq $false -and $i -gt 30) { $sawLanded = $true }
     } catch { }
 }
 $modeTrace | ForEach-Object { Write-Host "   $_" -ForegroundColor DarkGray }

@@ -40,14 +40,42 @@ class FlightModeLabelTest {
     }
 
     @Test
-    @DisplayName("PX4 与未知固件：保持既有 PX4 nav-state 口径")
-    void px4AndUnknown_keepPx4Table() {
-        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 3))
+    @DisplayName("PX4 打包字（SITL 实测编码）：地面待命=HOLD、任务=MISSION、返航=RTL")
+    void px4PackedModeWord() {
+        // 真 PX4 心跳 custom_mode = (main_mode << 16) | (sub_mode << 24)。
+        // 0x03040000 = AUTO/LOITER：PX4 首验实测的「无 RC 地面待命」心跳值。
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 0x03040000))
+                .isEqualTo("HOLD");
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 0x04040000))
                 .isEqualTo("MISSION");
-        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 4))
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 0x05040000))
                 .isEqualTo("RTL");
-        // -1（尚未收到心跳）走历史口径，不改变既有行为
-        assertThat(TelemetrySnapshotListener.modeLabel(-1, 0)).isEqualTo("MANUAL");
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 0x06040000))
+                .isEqualTo("LAND");
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 0x02040000))
+                .isEqualTo("TAKEOFF");
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 0x00030000))
+                .isEqualTo("POSITION");
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 0x01030000))
+                .isEqualTo("ORBIT");
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 0x00010000))
+                .isEqualTo("MANUAL");
+    }
+
+    @Test
+    @DisplayName("PX4 裸值/零值不再猜模式：旧口径 3/4 与打包缺口 0 都如实 UNKNOWN")
+    void px4NaiveAndZeroAreNotGuessed() {
+        // 修复前 sim 口径的裸值 3/4 会被解成 MISSION/RTL 假标签；真 PX4 发打包字，
+        // 裸值一个都命中不了——删除该口径后如实 UNKNOWN（sim 同批已对齐打包字）
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 3))
+                .isEqualTo("UNKNOWN");
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 4))
+                .isEqualTo("UNKNOWN");
+        // custom_mode=0：v1.13 对 AUTO_READY 等 nav_state 的打包缺口，不猜成某个模式
+        assertThat(TelemetrySnapshotListener.modeLabel(MavEnums.MAV_AUTOPILOT_PX4, 0))
+                .isEqualTo("UNKNOWN");
+        // -1（尚未收到心跳）同 PX4 打包字口径
+        assertThat(TelemetrySnapshotListener.modeLabel(-1, 0)).isEqualTo("UNKNOWN");
     }
 
     @Test

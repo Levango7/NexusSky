@@ -55,6 +55,11 @@
   ① v2 尾零裁剪致 MISSION_ACK 解码崩溃（上传永远"失败"）② AP 任务槽 0=HOME 致首条命令
   静默丢失（单点任务等于没传）③ 模式标签 PX4 口径硬解致 GUIDED 误显示 RTL。共 +13 回归测试
   （`MissionTrailingZeroPayloadTest` / `ArduPilotMissionUploadTest` / `FlightModeLabelTest`）。
+- **✅ 第二固件也已首验（PX4 v1.13 SIH，2026-10-30）**：同闭环全绿（连接→任务上传→
+  起飞 20m→航点→RTL→降落自动 disarm），差异记录（7 条）见 `docs/sitl-integration.md` §12.2。
+  首验抓出并修复 **custom_mode 打包字（P2-F3）**与 **任务项线上形态（P2-F4：帧硬校验 +
+  autocontinue）** 两族兼容问题（后两族 AP/sim 都不管——"sim 测不出"家族第 5/6 例），
+  另立 P2-F5/F6 两条链路级候选（限速饥饿 / 多链路路由钉定）。
 - **P2-F1（真机接入前必须闭环）**：**AP 地面派飞序列适配**——AP 两条硬契约叠加：
   ⑥ AUTO 模式下 arm 被拒（"Auto mode not armable"，需先切 GUIDED）；⑦ AUTO 从地面启动要求
   任务首条命令是 TAKEOFF（"init failed"），单点"去某点"任务起不来。原
@@ -63,7 +68,42 @@
   GUIDED 再 arm、对地面任务在 home 槽后前置 `NAV_TAKEOFF`（判据 `landedState`，
   armed ≠ 空中）；红/绿对照与验收记录见 `docs/sitl-integration.md` §11.3。
   **方案 B（目标形态）已立项待触发**：`GUIDED + TAKEOFF + DO_REPOSITION(192)` 惯用法
-  （Mission Planner "Fly To" 同款），不传任务；无阻塞需求，与 A 并存。
+  （Mission Planner "Fly To" 同款），不传任务；无阻塞需求，与 A 并存；**其命令地基已由
+  P2-F2 铺平**（下条）。
+- **P2-F2（带位置命令 COMMAND_INT 契约）**：**2026-10-30 已落地**——AP 对携带经纬度的命令
+  强制 INT 报文（DO_REPOSITION 用 COMMAND_LONG 一律 `MAV_RESULT=8` COMMAND_INT_ONLY，
+  与模式无关），而全栈缺 `CommandInt(75)` → 编队修正/队形机动在真机上 100% 静默失效。
+  修法：新增 `CommandInt`（与 pymavlink 官方帧逐字节一致）+ `command()` 自动路由
+  `COMMAND_INT_REQUIRED` + sim 入站 INT；SITL 修复前/后对照（非 GUIDED `8`→`2`、
+  GUIDED `8`→ACCEPTED+飞行）见 `docs/sitl-integration.md` §11.2-⑨、§11.3。
+  **这是"sim 测不出"家族第 4 例**（前 3 例：尾零裁剪 / 任务槽 0=HOME / 模式枚举）。
+- **P2-F3（PX4 custom_mode 打包字）**：**2026-10-30 已落地**——真 PX4 心跳的
+  `custom_mode` 是 `(main_mode<<16)|(sub_mode<<24)` 打包字（地面待命 `0x03040000`=
+  AUTO/LOITER），而 `modeLabel` 按 sim 的历史裸值表解码 → 真机恒 "UNKNOWN"。
+  修法：按打包字解码（v1.13 对 AUTO_READY 等 nav_state 打包为 0 的编码缺口如实 UNKNOWN）；
+  **sim 同批对齐发打包字**（删历史裸值表，单一口径）。证据：PX4 SITL 首验
+  `docs/sitl-integration.md` §12.2-①；回归：`FlightModeLabelTest` 8 例 +
+  sim `FlightStateModeWordTest` 3 例。
+- **P2-F4（任务项线上形态规范化）**：**2026-10-30 已落地**——PX4 两条任务项硬契约：
+  ① 帧硬校验（带坐标帧只收「位置命令」，RTL 用 frame=3 → **整单**被拒
+  `MAV_MISSION_UNSUPPORTED=3`）；② `autocontinue` 被真正消费（置 0 时到点即停——
+  SITL 实测起飞到 20m 后悬停 150s 不奔航点）。AP 两条都不管、sim 也不消费 ⇒
+  全栈长期发 `frame=3 + autocontinue=0` 在 PX4 上 100% 失败。修法：
+  `normalizeMissionItems` 单一收口点（无坐标命令→frame=2、相对高 3→6、
+  autocontinue 一律 1），覆盖 REST 任务/事件派飞/出警派飞全路径。
+  证据：§12.2-②③（含 tcpdump 逐帧时序）；回归：`MissionItemNormalizationTest` 4 例 +
+  `ArduPilotMissionUploadTest` 线上项断言。
+- **P2-F5（接收限速饥饿）**：**2026-10-31 已落地**——单一滑动窗口下高码率流（SITL 4MB/s
+  场景 340k+ 条丢帧）把预算在每秒开头吃满，MISSION_ACK/COMMAND_ACK/心跳成批被丢。
+  修法：`UdpGateway` 限速器拆**双预算**——关键帧（ACK/心跳/任务协议回执/STATUSTEXT）走
+  独立小预算 `aerofleet.udp.max-critical-frame-rate-per-sysid`（默认 50/s，不占主窗口），
+  非关键帧主窗口语义不变；关键预算耗尽仍会丢（防滥用语义保留），配置 <=0 关闭豁免可回退。
+  证据：§12.2-⑤；回归：`UdpGatewayCriticalFrameRateTest` 4 例。
+- **P2-F6（多链路路由钉定，候选——2026-10-31 复议暂缓）**：PX4 双 mavlink 实例同 sysid，
+  last-seen 路由游走致任务传输跨实例 "No transfer"。**暂缓理由**：修复需把「发起方地址」
+  贯通 gateway↔telemetry 热路径（改动面大），而当前全部部署形态均为单链路、不受影响；
+  设计草案在 `docs/sitl-integration.md` §12.3，真实多链路需求出现或有人认领时再做。
+  详见 `docs/sitl-integration.md` §12.2-④、§12.3。
 - **附带口径**：`tcp://` 的 UDP 顶替已在 2026-10-28 修掉（改为**明确拒绝 + 指路**，
   `ArduPilotAdapter.connect`）——本次首验全程 UDP，未经过该路径；口径已闭合，不再挂"仍开放"。
 
@@ -115,18 +155,38 @@ ONVIF 事件订阅（PullPoint）另立"）。
 
 ## 待口径（产品/外部决定；扫描器与 agent 不替产品决定——审计 §5 原样转录）
 
+> **2026-10-30：十条全部结项**——#3/#6/#7/#8/#9/#10 经用户逐条拍板（决策包见本条各目），
+> 连同此前已裁的 #1/#2/#4/#5，本清单清空。后续新分歧按"新事实 → 新条目"再开。
+
 1. 空域预约开关缺 profile 覆盖——**已于 2026-10-27 定案为"未完成的上半截"并启用**（staging/prod）。
 2. `audit.persist-to-db` 在 staging——**已拍板：staging 打开**（2026-10-27，用户确认；理由：不打开则 prod
    落库路径从未被任何非生产环境验证过，风险不对称。已实现 + profile 钉测试）。
-3. UOM 上报计数 + `sink-type` 默认 Noop：对外话术里"上报 UOM"要不要继续写？（与 P3 联动）
+3. UOM 上报计数 + `sink-type` 默认 Noop：对外话术里"上报 UOM"要不要继续写？——**已拍板：维持
+   诚实限定口径、随 P3**（2026-10-30，用户确认）。实况扫描：对外材料关键位（`product-brief.md` §6、
+   `ROADMAP.md` C1）本就带"对端为模拟器/未与真实 UOM 平台联调"限定语，全仓未见无限定词的"已上报"
+   声称；本轮把 product-brief 限定语统一为"（对端为模拟器；真实联调待外部输入，P3）"。**不做**
+   演示默认切 `SimReportSink`——政府买家材料会被逐条对规范，假的"上报成功"比"未联调"更易翻车。
 4. 机巢事务号 `tidSeq`——**已拍板：持久化续号**（2026-10-27，用户确认；`sequence_counter` 表 V35 已实现）。
 5. `planIdSeq`——**已拍板：持久化续号**（同上；"ID 复用比丢数据更严重"成立，已随 V35 实现）。
-6. `FormationKeeper.correctionCount` 是否算考核/计费依据？
-7. 告警离线缓存"上限 500 + 重启丢未上传"接受为产品语义，还是做非易失暂存？
-8. `/air-ground/situation` 键名以哪侧为准？（#177 已把三列落实，键名口径如仍有分歧在此登记）
-9. 出警历史/维护记录等新表的**留存策略**：本轮与内存时期同口径（最新 500 / 全量），
-   长期留存与归档策略待定。
-10. `delivery2` 与 `DeliveryStatusTracker` 两套状态词汇的归一方向（P1 #5 前置）。
+6. `FormationKeeper.correctionCount` 是否算考核/计费依据？——**已拍板：明确为内部运行观测指标，
+   不考核、不计费**（2026-10-30，用户确认）。实据：内存 `AtomicInteger`（重启归零）且全仓零消费
+   （连 REST 都未暴露）——计费前必须先有计量层（持久化 + 成功判据"到位且误差收敛" + 窗口/归一 +
+   审计），属另立需求；对外指标层按低空经济研究的"识别率/误检比/处理时间"方向另行立项。
+7. 告警离线缓存"上限 500 + 重启丢未上传"接受为产品语义，还是做非易失暂存？——**已拍板：接受现状
+   语义**（2026-10-30，用户确认）。实据：主存储 `AlarmEventStore` 已落库（重启不丢），会丢的仅
+   "断网 + 未 flush + 网关重启"三条件叠加的 ≤500 条，`evictedCount()` 可对账、边界文档已自陈。
+   落盘 spool（NDJSON + UUID 去重 + flush 后清除）挂生产化清单，触发条件=客户提出"告警跨重启不丢"。
+8. `/air-ground/situation` 键名以哪侧为准？——**已结项**（2026-10-30 复核）：前端别名回退已吸收
+   （#177 三列落实 + 前端兼容），键名分歧不再产生行为差异；以代码现状为准。
+9. 出警历史/维护记录等新表的**留存策略**——**已拍板：机制先行、数值随运营**（2026-10-30，用户确认）。
+   落地：五张只增表（越界事件/出警历史/配送任务/应急编排/维护记录）各配
+   `aerofleet.<域>.retention-days`（**默认 0=关闭**，零行为变化）+ 每日错峰清理任务
+   （02:00-03:00，与 03:30/03:45 的飞行日志/审计清理错开）；建议开启值：越界 365 / 出警 365 /
+   配送 180 / 应急编排 365 / 维护 1095（适航合规向从宽）。配送表补 `created_at`（V38，@PrePersist
+   写入）——此前 PENDING/未启动即中止的行无时间基准。**编队表不动**：清理会让 #213 的
+   `MAX(formation_id)` 回退导致 ID 复用撞主键，前置=nextFormationId 迁 `sequence_counter`（V35 同型）。
+10. `delivery2` 与 `DeliveryStatusTracker` 两套状态词汇的归一方向（P1 #5 前置）——**已结项**
+    （2026-10-30 复核）：V36 已裁决"phase 权威、coarse 由 phase 派生"（单一写入点，永不漂移）。
 
 ## 与现有文档的关系
 

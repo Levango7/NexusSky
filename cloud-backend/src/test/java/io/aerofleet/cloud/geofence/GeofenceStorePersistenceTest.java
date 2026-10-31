@@ -3,6 +3,10 @@ package io.aerofleet.cloud.geofence;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.lang.reflect.Field;
 import java.util.List;
@@ -239,7 +243,77 @@ class GeofenceStorePersistenceTest {
         assertThat(store.zoneCount()).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("启动恢复只取最新 MAX_BREACH_HISTORY 条（LIMIT 下推），不整表读堆")
+    void loadFromDb_loadsOnlyNewestBreachPage() throws Exception {
+        GeofenceZoneRepository zoneRepo = mock(GeofenceZoneRepository.class);
+        GeofenceBreachEventRepository breachRepo = mock(GeofenceBreachEventRepository.class);
+        injectRepositories(zoneRepo, breachRepo);
+
+        GeofenceBreachEventEntity older = breachEntity(1, 1000L);
+        GeofenceBreachEventEntity newest = breachEntity(2, 2000L);
+        // 仓储按契约返回"最新在前"
+        when(breachRepo.findAll(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(newest, older)));
+
+        store.loadFromDb();
+
+        assertThat(store.getBreachHistory())
+                .extracting(GeofenceBreachEvent::getTimestampMs)
+                .as("deque 必须旧→新，最新在末尾")
+                .containsExactly(1000L, 2000L);
+
+        ArgumentCaptor<Pageable> page =
+                ArgumentCaptor.forClass(Pageable.class);
+        verify(breachRepo).findAll(page.capture());
+        assertThat(page.getValue().getPageSize())
+                .as("只取上限条数，而不是整张只增表")
+                .isEqualTo(GeofenceStore.MAX_BREACH_HISTORY);
+        assertThat(page.getValue().getSort().getOrderFor("timestampMs").getDirection())
+                .isEqualTo(Sort.Direction.DESC);
+        verify(breachRepo, never()).findAll();
+    }
+
+    @Test
+    @DisplayName("越界事件读取失败不影响围栏区域恢复（启动不得因历史表而失败）")
+    void loadFromDb_breachFailureDoesNotBreakZoneRestore() throws Exception {
+        GeofenceZoneRepository zoneRepo = mock(GeofenceZoneRepository.class);
+        GeofenceBreachEventRepository breachRepo = mock(GeofenceBreachEventRepository.class);
+        injectRepositories(zoneRepo, breachRepo);
+
+        GeofenceZoneEntity zoneEntity = new GeofenceZoneEntity();
+        zoneEntity.setId(9);
+        zoneEntity.setName("围栏9");
+        zoneEntity.setType("CIRCLE");
+        zoneEntity.setCenterLat(30.0);
+        zoneEntity.setCenterLon(120.0);
+        zoneEntity.setRadiusM(500);
+        zoneEntity.setEnabled(true);
+        zoneEntity.setAction("WARN");
+        zoneEntity.setTenantId(1);
+        when(zoneRepo.findAll()).thenReturn(List.of(zoneEntity));
+        when(breachRepo.findAll(any(Pageable.class)))
+                .thenThrow(new RuntimeException("history table unavailable"));
+
+        store.loadFromDb();
+
+        assertThat(store.getZone(9)).as("围栏本身已恢复").isNotNull();
+        assertThat(store.breachCount()).isZero();
+    }
+
     // ===== 辅助方法 =====
+
+    private static GeofenceBreachEventEntity breachEntity(int zoneId, long ts) {
+        GeofenceBreachEventEntity e = new GeofenceBreachEventEntity();
+        e.setSysid(1);
+        e.setZoneId(zoneId);
+        e.setZoneName("围栏" + zoneId);
+        e.setBreachType(GeofenceBreachEvent.BreachType.ENTER.name());
+        e.setLat(30.0);
+        e.setLon(120.0);
+        e.setTimestampMs(ts);
+        return e;
+    }
 
     /**
      * 通过反射注入 mock repository 到 GeofenceStore 的私有字段。

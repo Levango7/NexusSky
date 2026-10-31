@@ -76,14 +76,14 @@
 
 ### 1.4 测试基线
 
-当前项目测试基线：**5466 tests，0 failures**（全部通过）。
+当前项目测试基线：**5521 tests，0 failures**（全部通过）。
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
-| mavlink-core | 519 | MAVLink 协议编解码、CRC 一致性 |
-| drone-sim | 1452 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
-| cloud-backend | 3296 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **5466 **全部通过，0 failures** |
+| mavlink-core | 523 | MAVLink 协议编解码、CRC 一致性 |
+| drone-sim | 1456 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
+| cloud-backend | 3343 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5521 **全部通过，0 failures** |
 > 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
 
 ### 1.5 P3 能力实现状态
@@ -282,6 +282,9 @@ P3 优先级功能已全部实现，但尚无独立 e2e 脚本覆盖：
 > `GET /api/v1/delivery/sequence/{id}`、`POST /api/v1/spray/cancel`
 > **在仓内均不存在**（`PayloadPlugin` 是 SPI 内部接口，夹爪无 REST 端点），
 > 已按 `SprayController` / `DeliveryController` 的实际契约更正。
+> **2026-10-30 追记**：当年那个 `cloud-backend/.../spi/` 包（13 个文件、零实现零注入）
+> 已按 owner 裁决整体删除（审计 §12），所以"夹爪没有 REST 端点"这条结论**不变且更硬**了——
+> 现在连一个同名接口都没有，别照着旧文档去 `POST /spray/gripper`。
 
 #### 预期结果
 

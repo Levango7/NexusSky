@@ -3,6 +3,7 @@ package io.aerofleet.cloud.gateway;
 import io.aerofleet.cloud.telemetry.PendingAcks;
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.enums.MavEnums;
+import io.aerofleet.mavlink.messages.GlobalPositionInt;
 import io.aerofleet.mavlink.messages.Heartbeat;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -494,22 +495,23 @@ class UdpGatewayTest {
     // ===== 频率限制 (P1-3) =====
 
     @Test
-    @DisplayName("21. 频率限制：超过 maxRate 的帧被丢弃")
+    @DisplayName("21. 频率限制：超过 maxRate 的非关键帧被丢弃")
     void rateLimit_exceedMax_dropped() throws Exception {
         int maxRate = 5;
         gateway = newGateway(false, maxRate);
         int port = gateway.getLocalPort();
         Thread.sleep(100);
 
-        // 发送 maxRate + 3 帧，只有 maxRate 帧应被转发
+        // 探针用非关键帧（GLOBAL_POSITION_INT）：P2-F5 起心跳走关键帧独立预算，
+        // 不再受主窗口约束——主窗口语义要用非关键帧验证
         for (int i = 0; i < maxRate + 3; i++) {
-            sendFrame(port, droneHeartbeat(1, i));
+            sendFrame(port, dronePosition(1, i));
         }
 
         awaitHandleCount(maxRate);
         Thread.sleep(500);
         // 恰好 maxRate 帧被转发，超出部分被丢弃
-        verify(ingest, times(maxRate)).handle(any(MavlinkFrame.class));
+        verify(ingest, times(maxRate)).handle(argThat(f -> f.getMessageId() == GlobalPositionInt.ID));
     }
 
     @Test
@@ -538,13 +540,20 @@ class UdpGatewayTest {
         int port = gateway.getLocalPort();
         Thread.sleep(100);
 
-        // sysid=1 发 maxRate 帧，sysid=2 也发 maxRate 帧，都应全部转发
+        // sysid=1 发 maxRate 帧，sysid=2 也发 maxRate 帧，都应全部转发（非关键帧探针，见 21）
         for (int i = 0; i < maxRate; i++) {
-            sendFrame(port, droneHeartbeat(1, i));
-            sendFrame(port, droneHeartbeat(2, i));
+            sendFrame(port, dronePosition(1, i));
+            sendFrame(port, dronePosition(2, i));
         }
 
         awaitHandleCount(maxRate * 2);
         verify(ingest, timeout(2000).times(maxRate * 2)).handle(any(MavlinkFrame.class));
+    }
+
+    /** 构造一个 drone GLOBAL_POSITION_INT 帧（非关键帧：受主窗口限速约束）。 */
+    private MavlinkFrame dronePosition(int sysid, int seq) {
+        GlobalPositionInt p = new GlobalPositionInt(0, 225900000 + seq, 1139345000,
+                584000, 2000, 0, 0, 0, 0);
+        return p.toFrame(sysid, 1, seq);
     }
 }
