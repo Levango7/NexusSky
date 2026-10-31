@@ -6,7 +6,14 @@ import io.aerofleet.cloud.telemetry.PendingAcks;
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.MavlinkMessageInfo;
 import io.aerofleet.mavlink.enums.MavEnums;
+import io.aerofleet.mavlink.messages.CommandAck;
 import io.aerofleet.mavlink.messages.Heartbeat;
+import io.aerofleet.mavlink.messages.MissionAckMsg;
+import io.aerofleet.mavlink.messages.MissionCountMsg;
+import io.aerofleet.mavlink.messages.MissionRequest;
+import io.aerofleet.mavlink.messages.MissionRequestInt;
+import io.aerofleet.mavlink.messages.MissionRequestList;
+import io.aerofleet.mavlink.messages.Statustext;
 import io.aerofleet.mavlink.security.MavlinkSignatureConfig;
 import io.aerofleet.mavlink.security.MavlinkSigner;
 import io.aerofleet.mavlink.security.MavlinkSignerFactory;
@@ -147,6 +154,29 @@ public class UdpGateway {
     /** 每 sysid 滑动窗口频率限制器：key=sysid, value=最近1秒内的时间戳队列。 */
     private final ConcurrentHashMap<Integer, Deque<Long>> rateLimitWindows = new ConcurrentHashMap<>();
 
+    /**
+     * 关键帧独立预算（P2-F5）：key=sysid, value=最近1秒内的时间戳队列。
+     * <p>
+     * ACK/心跳/任务协议回执这类低频控制面帧不走主窗口——否则高码率流会在每秒开头
+     * 把主窗口吃满，关键帧成批被丢（SITL 实测：PX4 SITL 4MB/s 洪泛下单轮 340k+ 条
+     * 「Rate limit exceeded」，MISSION_ACK 全灭、上传必现超时，docs/sitl-integration.md
+     * §12.2-⑤）。独立小预算既保关键帧存活，又不放大非关键帧的准入（防滥用语义不变）。
+     */
+    private final ConcurrentHashMap<Integer, Deque<Long>> criticalRateWindows = new ConcurrentHashMap<>();
+
+    /**
+     * 关键帧判定集：GCS 功能依赖其「必达」的低频控制面帧。
+     * 协议回执（COMMAND_ACK、MISSION_ACK、MISSION_REQUEST 的 legacy 与 INT 变体、
+     * MISSION_COUNT、MISSION_REQUEST_LIST）、存活心跳（HEARTBEAT）、告警证据（STATUSTEXT）。
+     */
+    private static final java.util.Set<Integer> CRITICAL_FRAME_MSGIDS = java.util.Set.of(
+            CommandAck.ID, MissionAckMsg.ID, MissionRequest.ID, MissionRequestInt.ID,
+            MissionCountMsg.ID, MissionRequestList.ID, Heartbeat.ID, Statustext.ID);
+
+    /** 关键帧独立预算（每 sysid 每秒）；<=0 关闭豁免（关键帧退回主窗口，旧行为）。 */
+    @Value("${aerofleet.udp.max-critical-frame-rate-per-sysid:50}")
+    private int maxCriticalFrameRatePerSysid = 50;
+
     public UdpGateway(@Value("${aerofleet.udp-port:14550}") int udpPort,
                       @Value("${aerofleet.drone-host:127.0.0.1}") String droneHost,
                       @Value("${aerofleet.drone-port:14540}") int dronePort,
@@ -201,11 +231,21 @@ public class UdpGateway {
             }
         }
 
-        // 频率限制：滑动窗口算法（GCS_SYSID 不受限）
-        if (sysid > 0 && sysid != GCS_SYSID && !rateLimitAllow(sysid)) {
-            log.warn("Rate limit exceeded for sysid={}, dropping frame (max {}/s)",
-                    sysid, maxFrameRatePerSysid);
-            return;
+        // 频率限制：滑动窗口算法（GCS_SYSID 不受限）。
+        // P2-F5：关键帧走独立小预算（见 criticalRateWindows）——单一窗口下高码率流
+        // 会在每秒开头把预算吃满，ACK/心跳成批被丢（SITL 实测 340k+ 条丢帧）。
+        // 非关键帧的窗口与上限不变；关键预算耗尽才丢关键帧（防滥用语义保留）；
+        // 预算配置 <=0 时豁免关闭，关键帧退回主窗口（旧行为）。
+        if (sysid > 0 && sysid != GCS_SYSID) {
+            boolean critical = maxCriticalFrameRatePerSysid > 0
+                    && CRITICAL_FRAME_MSGIDS.contains(frame.getMessageId());
+            boolean allowed = critical ? criticalRateAllow(sysid) : rateLimitAllow(sysid);
+            if (!allowed) {
+                log.warn("Rate limit exceeded for sysid={}, dropping {}frame (max {}/s)",
+                        sysid, critical ? "critical " : "",
+                        critical ? maxCriticalFrameRatePerSysid : maxFrameRatePerSysid);
+                return;
+            }
         }
 
         if (sysid > 0 && sysid != GCS_SYSID) {
@@ -245,6 +285,26 @@ public class UdpGateway {
     }
 
     /**
+     * 关键帧独立预算（P2-F5）：与主窗口同型的滑动窗口，但配额独立
+     * （{@code aerofleet.udp.max-critical-frame-rate-per-sysid}，默认 50/s）。
+     * 关键帧只查本预算、不占主窗口——两条预算互不挤占。
+     */
+    private boolean criticalRateAllow(int sysid) {
+        long now = System.currentTimeMillis();
+        Deque<Long> window = criticalRateWindows.computeIfAbsent(sysid, k -> new ArrayDeque<>());
+        synchronized (window) {
+            while (!window.isEmpty() && now - window.peekFirst() > 1000) {
+                window.pollFirst();
+            }
+            if (window.size() >= maxCriticalFrameRatePerSysid) {
+                return false;
+            }
+            window.addLast(now);
+            return true;
+        }
+    }
+
+    /**
      * Route aging (D3): drop routes silent for 5 min - a replaced/rebound
      * drone otherwise leaves a stale address that silently eats commands.
      * Runs every 60 s.
@@ -258,22 +318,33 @@ public class UdpGateway {
 
     /**
      * 频率限制窗口清理：移除长时间（2 分钟）无活动的 sysid 窗口，防止内存泄漏。
-     * 每 5 分钟运行一次。
+     * 主窗口与关键帧预算窗口同一批清理。每 5 分钟运行一次。
      */
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 300_000, initialDelay = 300_000)
     public void pruneStaleRateLimitWindows() {
         long cutoff = System.currentTimeMillis() - 120_000;
-        int before = rateLimitWindows.size();
+        int before = rateLimitWindows.size() + criticalRateWindows.size();
         rateLimitWindows.entrySet().removeIf(entry -> {
             Deque<Long> window = entry.getValue();
             synchronized (window) {
                 return window.isEmpty() || window.peekLast() < cutoff;
             }
         });
-        int removed = before - rateLimitWindows.size();
+        criticalRateWindows.entrySet().removeIf(entry -> {
+            Deque<Long> window = entry.getValue();
+            synchronized (window) {
+                return window.isEmpty() || window.peekLast() < cutoff;
+            }
+        });
+        int removed = before - rateLimitWindows.size() - criticalRateWindows.size();
         if (removed > 0) {
             log.debug("Pruned {} stale rate-limit windows", removed);
         }
+    }
+
+    /** 设置关键帧预算（主要用于测试注入；<=0 关闭豁免，退回主窗口旧行为）。 */
+    void setMaxCriticalFrameRatePerSysid(int maxCriticalFrameRatePerSysid) {
+        this.maxCriticalFrameRatePerSysid = maxCriticalFrameRatePerSysid;
     }
 
     public int getLocalPort() {

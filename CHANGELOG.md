@@ -1,5 +1,26 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P2-F5：接收限速拆双预算——关键帧（ACK/心跳/任务回执）洪泛下不再被淹（2026-10-31）
+
+**P2-F5 落地**（PX4 首验暴露的链路级候选，docs/sitl-integration.md §12.2-⑤）：单一滑动窗口下，
+高码率流（SITL 4MB/s ≈ 8.6k fps）在每秒开头把 100/s 预算吃光——**MISSION_ACK/COMMAND_ACK/
+心跳成批被丢**（单轮 340k+ 条「Rate limit exceeded」日志、任务上传必现超时、armed 显示滞后）。
+真机同理：遥测突发/日志下载都会挤占同一窗口。
+
+- **cloud-backend**：`UdpGateway` 限速器拆**双预算**——关键帧（COMMAND_ACK/MISSION_ACK/
+  MISSION_REQUEST legacy+INT/MISSION_COUNT/MISSION_REQUEST_LIST/HEARTBEAT/STATUSTEXT）走
+  独立小预算 `aerofleet.udp.max-critical-frame-rate-per-sysid`（**默认 50/s，不占主窗口**），
+  非关键帧的主窗口语义不变；关键预算自身耗尽仍会丢（防滥用语义保留）；配置 <=0 关闭豁免
+  （退回旧行为，可回退）；两条窗口同批清理（防泄漏口径不变）。
+- 回归：`UdpGatewayCriticalFrameRateTest` 4 例（洪泛下 ACK/心跳存活且主窗口语义不变 /
+  关键预算耗尽仍丢 / 豁免关闭回退 / 心跳同享预算）；`UdpGatewayTest` 的主窗口限速探针
+  （#21/#23）换非关键帧 GLOBAL_POSITION_INT——心跳自本批起受独立预算约束，原探针语义迁移。
+- 程序面：program 文档 P2-F5 条目落定（候选→已落地）；P2-F6（多链路路由钉定）复议暂缓
+  （改动面大、当前部署全单链路不受影响），设计草案留在 §12.3 欢迎认领。
+
+计数：本批 +4 测试（cloud-backend 3339→3343），全仓 5517→5521（基数已含当日 #219 的 +2）；全 reactor 全绿；10 份口径文档同步。
+
+
 ## [Unreleased] — 修 ApiKey lastUsedAt 刷库事务边界：注解标在永不生效的一侧，刷库从未成功（2026-10-31）
 
 ### 修：`ApiKeyRepository.updateLastUsedAt` 补 `@Transactional`，删掉调用方上永不生效的注解
@@ -742,7 +763,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-31 共有 248 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-10-31 共有 249 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -768,7 +789,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 248 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 249 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
