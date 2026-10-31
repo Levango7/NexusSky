@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -49,11 +50,19 @@ public interface ApiKeyRepository extends JpaRepository<ApiKeyEntity, String> {
      * 定点更新 lastUsedAt（{@link ApiKeyLastUsedTracker} 周期批量调用）。
      * <p>
      * JPQL UPDATE 不加载实体、不动持久化上下文；需在事务内调用。
+     * <p>
+     * 事务边界必须声明在**本方法自己身上**：调用方 {@code ApiKeyLastUsedTracker.flush()}
+     * 由构造期自建的调度线程（{@code this::safeFlush}）与 {@code @PreDestroy} 自调用驱动，
+     * 均绕过 Spring 代理——调用方那里的 {@code @Transactional} 不生效（历史上正是
+     * 这样把每次 UPDATE 变成 {@code TransactionRequiredException} 被吞掉）。逐 Key
+     * 独立提交同时保住了「单条失败只丢该 Key」的语义（若整批一个事务，PG 里一条失败
+     * 会让后续所有语句报「current transaction is aborted」）。
      *
      * @param keyId      API Key ID
      * @param lastUsedAt 本次使用的最新时间
      * @return 更新行数（0 = keyId 不存在）
      */
+    @Transactional
     @Modifying
     @Query("update ApiKeyEntity k set k.lastUsedAt = :lastUsedAt where k.keyId = :keyId")
     int updateLastUsedAt(@Param("keyId") String keyId, @Param("lastUsedAt") Instant lastUsedAt);
