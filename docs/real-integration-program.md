@@ -93,11 +93,17 @@
   autocontinue 一律 1），覆盖 REST 任务/事件派飞/出警派飞全路径。
   证据：§12.2-②③（含 tcpdump 逐帧时序）；回归：`MissionItemNormalizationTest` 4 例 +
   `ArduPilotMissionUploadTest` 线上项断言。
-- **附带口径（P2-F5/F6 候选，2026-10-30 上板）**：PX4 首验另暴露出两条链路级问题，
-  已立项待裁——**P2-F5 接收限速饥饿**（100 fps 默认限速无消息类优先级，高频流吃满桶、
-  MISSION_ACK/心跳成批被丢；SITL 4MB/s 场景 340k+ 条丢帧）、**P2-F6 多链路路由钉定**
-  （PX4 双 mavlink 实例同 sysid，last-seen 路由游走致任务传输跨实例 "No transfer"）。
-  详见 `docs/sitl-integration.md` §12.2-④⑤、§12.3。
+- **P2-F5（接收限速饥饿）**：**2026-10-31 已落地**——单一滑动窗口下高码率流（SITL 4MB/s
+  场景 340k+ 条丢帧）把预算在每秒开头吃满，MISSION_ACK/COMMAND_ACK/心跳成批被丢。
+  修法：`UdpGateway` 限速器拆**双预算**——关键帧（ACK/心跳/任务协议回执/STATUSTEXT）走
+  独立小预算 `aerofleet.udp.max-critical-frame-rate-per-sysid`（默认 50/s，不占主窗口），
+  非关键帧主窗口语义不变；关键预算耗尽仍会丢（防滥用语义保留），配置 <=0 关闭豁免可回退。
+  证据：§12.2-⑤；回归：`UdpGatewayCriticalFrameRateTest` 4 例。
+- **P2-F6（多链路路由钉定，候选——2026-10-31 复议暂缓）**：PX4 双 mavlink 实例同 sysid，
+  last-seen 路由游走致任务传输跨实例 "No transfer"。**暂缓理由**：修复需把「发起方地址」
+  贯通 gateway↔telemetry 热路径（改动面大），而当前全部部署形态均为单链路、不受影响；
+  设计草案在 `docs/sitl-integration.md` §12.3，真实多链路需求出现或有人认领时再做。
+  详见 `docs/sitl-integration.md` §12.2-④、§12.3。
 - **附带口径**：`tcp://` 的 UDP 顶替已在 2026-10-28 修掉（改为**明确拒绝 + 指路**，
   `ArduPilotAdapter.connect`）——本次首验全程 UDP，未经过该路径；口径已闭合，不再挂"仍开放"。
 
