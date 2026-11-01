@@ -1,5 +1,25 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 应急计划内部列表收口：events / deployments 不再随计划存活时长增长（+3 例）（2026-11-01）
+
+### 修：单个计划内部的 `events` 与 `deployments` 只追加不裁剪
+
+#223 收口的是「内存里能放几个计划」，这里收口「一个计划内部能长多大」：
+
+- `events`：阶段切换、优先级调整、重规划都往里追加，永不清；
+- `deployments`：30046 覆盖上报是**周期性**的（每架机反复上报），同一架机会被反复记录，永不清。
+
+两者都随计划存活时间线性增长，而整份计划还要随 V37 快照**整体 JSON 写穿/读穿**、
+并经 WebSocket 推送——列表越长，每次写库与推送的负载越大。
+
+修法：各留最新 `MAX_PLAN_EVENTS` / `MAX_PLAN_DEPLOYMENTS` = 200 条，从头部丢最旧。
+裁剪用 `synchronized(list) + subList(0, n).clear()` 一次性完成，避免逐次 `remove(0)`
+在 synchronizedList 上退化成 O(n²)。
+
+测试 +3 例（`EmergencyOrchInnerListBoundTest`）：事件列表有界且最新必在、部署列表在
+「同机反复上报」下仍有界、`getProgress`/`getCoverage` 返回的快照与内部列表同长（截断对调用方透明）。
+**A/B 实测**：去掉 events 裁剪 ⇒ 1 例红；去掉 deployments 裁剪 ⇒ 2 例红；还原后全绿。
+
 ## [Unreleased] — 待确认语音指令补存活期：迟到的确认不再能下发高危动作（+4 例）（2026-11-01）
 
 ### 修：`VoiceCommandExecutor.pendingCommands` 无超时——安全问题，不只是内存
@@ -855,7 +875,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-01 共有 252 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-01 共有 253 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -881,7 +901,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 252 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 253 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
