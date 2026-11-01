@@ -302,6 +302,158 @@ Playwright / compose 四个 job 一起红，而且是在 2.5 小时 CI 队列的
 （1）注释里无 `--`；（2）`ET.parse` 可解析。自测夹具：注释带 `--strict` 的 pom 必须红、
 修好后必须绿。
 
+## 14. 协作状态板会被**整块复制**——写板面要就地改，不要整块追加
+
+**错在哪**（2026-11-01 实测）：`.coord/STATUS.md` 有 **32 份完整副本**（7.3 MB / 71067 行，
+标题行 `# Agent 状态板` 出现 32 次）。多个会话每次刷新板面都把**整块板追加到文件末尾**，
+而不是就地改。
+
+**后果**（比"文件太大"严重得多）：
+1. 30 份是 10-25 ~ 10-28 的陈旧快照，读板的人打开哪份取决于翻到哪；
+2. 头部与尾部两份「较新」的**互相矛盾**（名册各不相同）——无从判断哪份权威；
+3. **`scripts/coord-status.sh --write` 只刷新第一份标记块**（awk 的 `emitted` 守卫），
+   其余 31 份的「在途与占用」段会被**清空** ⇒ 读板的人看到一段**空的**「在途与占用」，
+   会误读成「当前没有在途工作」⇒ **各 agent 以为没人开工，于是各干各的、直接撞车**。
+   「板面坏了」比「没有板面」更危险。
+
+**硬约束**：
+1. **就地改，永远不要整块追加**。板面是**一份**，不是一份日志。
+2. 真要留历史，**另开归档文件**（`.coord/STATUS-HISTORY.md`），并标清每段来自原文件哪一行区间；
+3. 改板面后跑一次 `python scripts/check-coord-board.py`（断言副本数 = 1）。
+
+**机械化**：`scripts/check-coord-board.py`（CI `repo-gates` 跑它的 `--self-test`，
+正例/反例/干净态 5 情形）；`scripts/coord-status.sh --write` 的**多副本守卫**（副本 > 1 ⇒
+拒写并说明原因）。已用真事故反证：32 份副本 → 拦下；单份 → 放行。
+
+## 15. WSL **不转发** Windows 环境变量（除非在 `WSLENV` 里）
+
+**错在哪**（2026-11-01）：想给 `scripts/coord-status.sh --write` 指向一份**副本**做实验，
+用 PowerShell 设了 `$env:COORD_STATUS_FILE=...` 再调 `bash`。**WSL 的 bash 拿不到这个变量**
+（Windows → WSL 的环境变量转发靠 `WSLENV` 白名单），于是脚本用了它的默认路径——
+**写到了真实的 `.coord/STATUS.md`**。
+
+**后果**：注入「看起来生效了」其实没生效，脚本动了真实文件。幸而写前留了快照，
+逐行 diff 确认损伤只落在机器生成段（本来就该重写），手写声明一条未少。
+
+**硬约束**：
+1. 要给 WSL 里的脚本注入环境变量，**必须**走 `WSLENV`：
+   `$env:WSLENV = "COORD_STATUS_FILE"`；或直接在 `bash -c '...'` 的**内部**赋值
+   （`bash -c 'COORD_X=1 bash script.sh'`），别指望外层 PowerShell 的变量会传进去。
+2. 跑任何会**写文件**的脚本前，**先确认它写的是不是真实文件**：
+   临时目录 + 写前快照 + 事后逐行 diff，三步缺一不可。
+
+**机械化**：暂无（软约束）。`coord-status.sh` 已提供 `COORD_STATUS_FILE` 注入点，
+但注入本身在 WSL 下要靠 `WSLENV`——这一条写下来是为了下次别再踩。
+
+## 16. WSL 的 git 在 **Windows 建的 worktree** 里根本不能用
+
+**错在哪**（2026-11-01）：用 Windows 的 `git worktree add` 建了 `F:/Nexus/nexussky-mcode`，
+然后在 WSL 下 `cd` 进去跑 `bash scripts/coord-status.sh --self-test` ⇒ 报
+「无法判定：自测必须在仓库内运行」。
+
+**根因**：worktree 的 `.git` 是**文件**，内容是 `gitdir: F:/Nexus/NexusSky/.git/worktrees/xxx`
+——**Windows 路径**。WSL 的 git 解析不了这个路径 ⇒ `git rev-parse --show-toplevel` 直接失败。
+（同一条根因也让看板的 worktree 表里 5/8 个工作区显示成 `(DETACHED)` @ `?`。）
+
+**后果**：在 WSL 下跑任何 git 操作（build / test / status）于 Windows 建的 worktree，
+都会以"无法判定 / 仓库损坏"的形式失败——**很容易被误判成"代码坏了"**。
+
+**硬约束**：
+1. **WSL 下要跑 git ⇒ 必须在主检出里跑**（主检出的 `.git` 是真目录）。
+   worktree 里的操作走 **Windows 侧**（PowerShell + Windows git）。
+2. 需要 WSL 的脚本、又在 worktree 里 ⇒ **cd 到主检出**，用绝对路径指到 worktree 里的脚本，
+   并用 `COORD_STATUS_SELF`（该脚本自带的注入点）指定 SELF。
+3. `git worktree add` 最好**统一在 WSL 侧建**，路径就会记成 `/mnt/f/...`，两边都能用。
+
+**机械化**：`scripts/coord-status.sh` 的 `resolve_wt`（盘符路径换算成 `<mnt-root>/<盘符>/...`，
+**展示仍用原路径**）；自测 T9 用 `COORD_WSL_MNT_ROOT` 注入挂载根，CI（Linux，无 `/mnt`）也能自证。
+
+## 17. 统计「未提交文件数」有两个坑：一个在**内容层**，一个在 **stat 层**
+
+**错在哪**（2026-11-01 实测）：看板的「未提交面」列在 WSL 下报**「未提交 89 个文件」**，
+而工作区**是干净的**（Windows git 同一目录报 0 行）。
+
+**根因有两层，各有各的修法（两条都实测过，只做一条不够）**：
+
+**① 内容层**：Windows 的 `core.autocrlf=true` 把工作区检出成 CRLF，而 `.gitattributes`
+只声明了 `*.sh/*.java/*.md` 等扩展名，**漏了 `.yml/.yaml/.xml/.json/.ps1/.txt/.conf` 这类**——
+**没被声明的类型，git 压根不套 clean 过滤器**，CRLF 差异就是实打实的字节差异。
+⇒ 同一份检出在 Windows git（autocrlf=true，无条件套过滤器）与 WSL git（不套）**两侧判定相反**。
+实测（主树，WSL git）：内容级差异 **89 个**；挂上补齐后的 `.gitattributes` → **0 个**
+（`core.autocrlf` = false/input/true 三种口径都是 0）。
+**修法：修行尾要修在 `.gitattributes`，且要覆盖全部进仓的文件类型。**
+
+**② stat 层**：`git status` 判定「工作区已改」走的是 **stat 尺寸比对**
+（index 里缓存的旧尺寸 vs 当前文件尺寸），**内容相等与否是另一条路**。
+裸仓夹具实测（属性已声明 `text eol=lf`、工作区 CRLF、blob LF）：
+
+```
+git status --porcelain → " M a.txt"    ← 仍报已改
+git diff --name-only   → 空             ← 内容其实相等
+git hash-object a.txt  → == index blob  ← 内容逐字节相等
+```
+
+⇒ **光把属性补齐，修不了 `git status` 的 stat 判定**；光按内容算，
+在属性还没覆盖到的类型上又会把 CRLF 差异当真差异。
+**修法：脚本层按内容比**（`git diff --name-only HEAD` + `git ls-files --others --exclude-standard`），
+**不要用 `git status --porcelain` 计数**。
+
+⚠️ **一个反直觉的坑（差点让我把"看起来修好了"当成修好了）**：
+`-c core.autocrlf=input` 在**真实仓**里能把 89 降到 0，但在**裸仓库**夹具里
+**一点用都没有**（1→1，`false`/`input`/`true` 三种口径全试过）。
+⇒ 真正起作用的只有**属性覆盖**；那个开关只是"看起来修好了"。
+**别拿它当修复手段**——它只在"文件已被判定为文本"的场景下有意义，
+而没被属性声明的类型压根不进那条路。
+
+**后果**：不只"多报几个数"。`docs/agent-constraints.md` 第 2 条写着
+「看到别人的未提交改动就别 `git add -A`」⇒ **89 个假修改会让每个 agent 都以为有人在改主树**，
+进而互相让路、不敢提交——**板面与协作节奏一起被污染**。
+
+**硬约束**：
+1. **修行尾问题要修在 `.gitattributes`**，不要靠命令行开关——
+   开关只在"文件已被判定为文本"时有效，而没被属性声明的类型压根不进那条路；
+2. `.gitattributes` 要覆盖**全部**会进仓的文件类型，别只列"源码类"扩展名——
+   漏掉的类型在 Windows 检出后会变 CRLF，在 WSL/Linux 下变成假修改；
+   清单按 `git ls-files` 的**扩展名普查**列，别拍脑袋（本仓当前口径见 `.gitattributes` 末尾注释）；
+3. **统计"未提交面"按内容比，不用 `git status --porcelain`**（stat 判定会把内容等价的
+   文件报成已改）——见 `coord-status.sh` 的 `count_dirty`；
+4. 归一混合行尾时注意：**孤立 CR（后面没有 LF）`git add --renormalize` 不会动**，
+   必须自己逐字节去掉（根 `pom.xml` 曾是 332 行 CRLF + 267 行孤立 CR 的混合体）；
+5. **量具先自证，再信它的结论**（第 3 条）：任何"这样就好了"的说法，
+   都要在**最小复现**里验一遍——本条的反例是"真实仓里有效、裸仓里无效"。
+
+**机械化**：`.gitattributes` 补齐缺失类型（按扩展名普查，含 `.yml/.yaml/.xml/.json/.css/
+.html/.txt/.conf/.tpl/.b64/.example/.ps1/.npmrc` + `Dockerfile*` + `.gitignore/
+.gitattributes/.dockerignore/.jdk/*.MockMaker/LICENSE`）；
+`coord-status.sh` 的「未提交面」改用 `count_dirty`（内容级，且**刻意不加** `autocrlf=input`
+——加了会让人以为处理过了，见脚本注释）；自测 T8 用三个夹具把"等价差异"与"真差异"分开：
+内容等价的 CRLF 差异必须算 **0**、字节真差异必须算 **1**（判别性）、真实改动必须算 **1**（反假绿），
+且数字必须真的落到板面正文里。
+
+## 18. 属性补齐后，**已有的检出**要一次性重整才会变干净
+
+**错在哪**（2026-11-01 实测）：把 `.gitattributes` 补齐后，我一度以为"问题解决了"——
+但**已经存在的检出**（工作区是按旧规则检出的 CRLF 文件）里，`git status` 仍会报一堆改动，
+因为 index 里缓存的仍是旧尺寸。属性只影响**以后**的检出与内容判定，不回溯刷新 index 的 stat 缓存。
+
+**修法**：`git add --renormalize .`
+实测（裸仓夹具，属性已声明）：`git status --porcelain` 从 `" M a.txt"` 变成**空**，
+且**不产生任何 staged 差异**（blob 本来就是 LF，normalize 后与 HEAD 相同）⇒
+这是一次**只刷新 stat 缓存、不改内容**的操作。
+
+**硬约束**：
+1. **别在共享主检出里跑 `git add --renormalize .`**，除非确认工作区没有别人的未提交改动——
+   它会把工作区的改动**staged 进去**（别人的活儿被你替他暂存了）。
+   在**自己的 worktree** 里跑，或先在板面上登记意向、约时间。
+2. 属性补齐之后，**新克隆/新检出**不需要这一步（检出直接就是 LF）；
+   只有"补齐之前就存在的检出"需要。
+3. 改 `.gitattributes` 的**行尾声明**时，同步想到第 17 条 ①：漏掉的类型会在 Windows
+   侧变成 CRLF、在 WSL 侧变成假修改——**新增类型要补进清单**。
+
+**机械化**：暂无（软约束）。可考虑在 `scripts/check-repo-hygiene.py` 里加一条
+"`.gitattributes` 是否覆盖了全仓出现的全部文本扩展名"（用 `git ls-files` 普查 + 属性解析比对），
+但要小心误报（有些扩展名是二进制），本轮未做。
+
 ## 附：一次作业的收尾清单
 
 ```bash
@@ -311,6 +463,7 @@ python scripts/check-repo-hygiene.py           # 卫生 + CHANGELOG 自洽 + pom
 python scripts/check-selftest-coverage.py      # 自测是否都在 CI 里跑
 python scripts/check-empty-catch.py            # 空 catch 是否都有登记理由
 python scripts/check-test-count-docs.py --reports-root ... --frontend-json ...   # 计数
+python scripts/check-coord-board.py            # 协作状态板只有一份副本（本地有 .coord 才查）
 mvn -B -o -q validate                          # 动过任何 pom 必跑（见第 13 条）
 ```
 
@@ -319,3 +472,6 @@ mvn -B -o -q validate                          # 动过任何 pom 必跑（见�
 - 第 5 条（归因要有证据）目前只能靠自觉。
 - 「只 add 自己碰过的文件」目前是规则；可考虑做成 `scripts/precommit-check.sh`
   （对比暂存区与工作区，提示与本次主题无关的删除），但误报率尚可评估。
+- 第 15 条（WSL 环境变量转发）目前靠自觉；可考虑给 `coord-status.sh` 加一个
+  `--dry-run`（只打印将要写哪里，不落盘），从根上消除"写错文件"的可能。
+
