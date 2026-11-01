@@ -29,14 +29,53 @@ set -uo pipefail
 BEGIN='<!-- coord-status:begin 由 scripts/coord-status.sh 生成，别手改这一段 -->'
 END='<!-- coord-status:end -->'
 
+# --- 「我是谁」：本脚本自己的绝对路径 -----------------------------------------
+# 必须在**任何 cd 之前**取：$0 是相对路径时，脚本后面会 cd 到仓库根，
+# 那个相对路径就指向别的文件了。
+# 为什么需要它：自测的默认目标原来写死成相对路径 `scripts/coord-status.sh`，
+# 而自测跑之前会 `cd $selftest_root` ⇒ **从别的仓库目录用绝对路径调本脚本**时，
+# 自测测的是「那个仓库的」同名脚本，不是你调用的这一份。
+# 2026-11-02 实测事故：我从共享主树目录里调我分支的脚本，自测报「T7/T8 失败」，
+# 实际失败的是主树那份 405 行的老版本（它没有多副本守卫、用 git status 计数）——
+# 结论差点整个反了（我差点去"修"一个并不存在于我分支上的缺陷）。
+SELF_INVOKED=""
+if _self_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"; then
+  SELF_INVOKED="${_self_dir}/$(basename "$0")"
+else
+  SELF_INVOKED="$0"
+fi
+
+# 自测目标的**唯一**解析入口。--self-test-target 与 self_test 都走它：
+# 两处各写一份的话迟早走偏，而走偏的后果是「自测测了别的文件却看不出来」。
+# COORD_STATUS_SELF 仍是显式覆盖点（变异测试、复制副本时用）。
+resolve_selftest_target() {
+  if [ -n "${COORD_STATUS_SELF:-}" ]; then printf '%s' "$COORD_STATUS_SELF"; return 0; fi
+  printf '%s' "$SELF_INVOKED"
+}
+
+# 文件内容哈希（sha256sum 在 Linux/WSL 有，shasum 是 macOS 的等价物）。
+hash_of() {
+  { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1" 2>/dev/null; } | awk '{print $1}'
+}
+
 MODE="print"
 case "${1:-}" in
   --write) MODE="write" ;;
   --json)  MODE="json" ;;
   --self-test) MODE="selftest" ;;
+  --self-test-target) MODE="selftest-target" ;;
   "")      ;;
-  *) echo "用法: bash scripts/coord-status.sh [--write|--json|--self-test]" >&2; exit 64 ;;
+  *) echo "用法: bash scripts/coord-status.sh [--write|--json|--self-test|--self-test-target]" >&2; exit 64 ;;
 esac
+
+# --self-test-target：只回答「自测会去测哪一个文件」（路径 + 内容哈希），不跑自测。
+# 用途：让「自测测的是不是我以为的那份」可被外部观测 —— T10 断言就靠它，
+# 人排查时也能直接问一句，而不是靠猜。
+if [ "$MODE" = "selftest-target" ]; then
+  _tgt="$(resolve_selftest_target)"
+  printf '%s\t%s\n' "$_tgt" "$(hash_of "$_tgt")"
+  exit 0
+fi
 
 warn() { echo "$*" >&2; }
 
@@ -132,10 +171,14 @@ count_dirty() {
 # =============================================================================
 self_test() {
   local fails="" tmp status out rc marks n1 n2 heads self pr_fix pr_fix2 pr_fix3
-  local self_abs dup eolrepo bare realrepo eol_out d1 d2 d3
+  local self_abs dup eolrepo bare realrepo eol_out d1 d2 d3 decoy _t10
   local _mk_repo _dirty_via_script
-  SELF="${COORD_STATUS_SELF:-scripts/coord-status.sh}"
+  SELF="$(resolve_selftest_target)"
   [ -f "$SELF" ] || { echo "无法判定：自测目标不存在（$SELF）——绝不测别的文件冒充通过。" >&2; return 1; }
+  # **先**打印被测目标（路径 + 内容哈希）：**失败时也必须知道测的是哪一份**。
+  # 2026-11-02 实测事故：默认目标解析到 CWD 下同名脚本时，自测测了另一个文件，
+  # 而失败输出里根本没说测的是谁 —— 没有证据的失败，等于没有结论。
+  echo "自测目标=$SELF（sha256=$(hash_of "$SELF")）"
   # 绝对路径副本：T8 要 cd 进临时仓库跑子调用，相对路径会找不到脚本
   self_abs="$(cd "$(dirname "$SELF")" && pwd)/$(basename "$SELF")"
   tmp="$(mktemp -d)"
@@ -390,6 +433,24 @@ EOF
   p3="$(COORD_WSL_MNT_ROOT="$tmp/mnt" resolve_wt "Z:/nonexistent")"
   [ "$p3" = "Z:/nonexistent" ] || fails="${fails}T9:换算不成立时应原样返回（实得 '$p3'） "
 
+  # T10 自测目标必须就是**被调用的那一份**，不能是 CWD 下的同名文件。
+  #    2026-11-02 实测事故：从共享主树目录用绝对路径调我分支的脚本，
+  #    自测默认目标解析到主树的 scripts/coord-status.sh（405 行的老版本：
+  #    没有多副本守卫、用 git status 计数）⇒ 我看到的是「我的脚本 T7/T8 失败」，
+  #    实际失败的是老脚本的缺陷，结论差点整个反了。
+  #    诱饵夹具：造一个仓库，里面放一份**同名但内容不同**的脚本；
+  #    在该仓库里调用被测脚本 ⇒ 解析到的目标若指向诱饵，T10 转红。
+  #    ⚠️ 必须 env -u COORD_STATUS_SELF：父进程若带着这个注入点，
+  #    子进程就会沿用它 ⇒ 诱饵根本不会被选中，T10 变成永远绿的空断言。
+  decoy="$tmp/decoy"
+  mkdir -p "$decoy/scripts"
+  ( cd "$decoy" && git init -q . && git config user.email t@t && git config user.name t ) >/dev/null 2>&1
+  printf '#!/usr/bin/env bash\necho DECOY\n' > "$decoy/scripts/coord-status.sh"
+  _t10="$( cd "$decoy" && env -u COORD_STATUS_SELF bash "$self_abs" --self-test-target 2>/dev/null | head -1 | cut -f1 )"
+  if [ "$_t10" != "$self_abs" ]; then
+    fails="${fails}T10:自测目标解析到了别的文件（期望 '$self_abs'，实得 '${_t10:-<空>}'） "
+  fi
+
   rm -rf "$tmp"
   if [ -n "$fails" ]; then
     echo "自测失败：$fails" >&2
@@ -399,14 +460,14 @@ EOF
     fi
     return 1
   fi
-  echo "自测目标=$SELF（用 COORD_STATUS_SELF 注入，防副本测到原文件）"
   echo "自测通过：假 slug→UNVERIFIED/exit2、首写插入且他人段落齐全、重写幂等（begin/标题各 1 份、行数不变）、"
   echo "手写段并存→拒绝写入且文件未被改动、缺文件→exit2 且不凭空造板、"
   echo "不可合并的 PR→标出 Actions 不会调度（可合并与 UNKNOWN 都不标、夹具缺失→UNVERIFIED）、"
   echo "多份副本→拒写且文件未动（单份仍可写）、未提交面按内容判定→"
   echo "内容等价的 CRLF 差异算 0 个、字节真差异算 1 个（判别性对照）、真实改动算 1 个（反假绿）、"
   echo "数字能落到板面正文里、"
-  echo "Windows 盘符路径→可换算成 mnt 形式解析（原有路径不动、换算不成立时原样返回）。"
+  echo "Windows 盘符路径→可换算成 mnt 形式解析（原有路径不动、换算不成立时原样返回）、"
+  echo "自测目标恒为**被调用的那一份**（同名诱饵副本不被劫持）。"
   return 0
 }
 
