@@ -37,6 +37,15 @@ public class MappingResultService {
     private final ConcurrentHashMap<String, List<MappingResult>> resultsByTask = new ConcurrentHashMap<>();
 
     /**
+     * 成果保留条数上限。超出后按写入顺序淘汰最旧，并同步清理按任务索引
+     * （否则索引里会长出指向已淘汰成果的孤儿条目）。
+     */
+    static final int MAX_RESULTS = 500;
+
+    /** 成果写入顺序（resultId），用于淘汰最旧。 */
+    private final java.util.Deque<String> resultOrder = new java.util.concurrent.ConcurrentLinkedDeque<>();
+
+    /**
      * 生成正射影像成果。
      *
      * @param taskId 测绘任务 ID
@@ -195,5 +204,32 @@ public class MappingResultService {
     private void storeResult(String taskId, MappingResult result) {
         resultsById.put(result.getId(), result);
         resultsByTask.computeIfAbsent(taskId, k -> new CopyOnWriteArrayList<>()).add(result);
+        resultOrder.addLast(result.getId());
+        evictOldestResults();
+    }
+
+    /**
+     * 淘汰最旧成果，直到回到上限。
+     * <p>
+     * **两个 map 必须一起清**：只删 {@link #resultsById} 会让 {@link #resultsByTask}
+     * 留下指向已淘汰成果的孤儿条目；只删索引则 ID 检索还能查到没人引用的成果。
+     * 任务列表被清空时把 key 一并移除，否则 key 本身会随任务数继续泄漏。
+     */
+    private void evictOldestResults() {
+        while (resultsById.size() > MAX_RESULTS) {
+            String oldestId = resultOrder.pollFirst();
+            if (oldestId == null) {
+                return;
+            }
+            MappingResult removed = resultsById.remove(oldestId);
+            if (removed == null) {
+                continue;
+            }
+            resultsByTask.computeIfPresent(removed.getTaskId(),
+                    (id, list) -> {
+                        list.remove(removed);
+                        return list.isEmpty() ? null : list;
+                    });
+        }
     }
 }
