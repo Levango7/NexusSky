@@ -64,20 +64,21 @@ class TelemetryWsSlowClientDisconnectTest {
     }
 
     @Test
-    @DisplayName("装饰器契约：首帧阻塞超 sendTimeLimit 时，后续并发推送抛 SessionLimitExceededException")
+    @DisplayName("装饰器契约：首帧阻塞超过 sendTimeLimit 时，后续并发推送抛 SessionLimitExceededException")
     void decoratorTripsOnSlowSendUnderConcurrency() throws Exception {
         WebSocketSession raw = session("slow", IP);
-        // 模拟「连上但不读数据」的客户端：服务端 sendMessage 长时间阻塞
+        final int sendTimeLimitMs = 50;
+        // 模拟「连上但不读数据」的客户端：服务端 sendMessage 长时间阻塞（远超 sendTimeLimit）
         CountDownLatch entered = new CountDownLatch(1);
         doAnswer(inv -> {
             entered.countDown();
-            Thread.sleep(200);   // 远超 1ms 的 sendTimeLimit
+            Thread.sleep(400);
             return null;
         }).when(raw).sendMessage(any());
 
-        // sendTimeLimit=1ms，bufferSizeLimit=1KB；tiny limit 让慢发送必然触发断开
+        // 缓冲上限给足（1MB），让本用例只验证「发送时长」这一条路径
         ConcurrentWebSocketSessionDecorator dec =
-                new ConcurrentWebSocketSessionDecorator(raw, 1, 1024);
+                new ConcurrentWebSocketSessionDecorator(raw, sendTimeLimitMs, 1024 * 1024);
 
         AtomicReference<Throwable> secondError = new AtomicReference<>();
         Thread first = new Thread(() -> {
@@ -89,7 +90,13 @@ class TelemetryWsSlowClientDisconnectTest {
         });
         Thread second = new Thread(() -> {
             try {
-                entered.await();   // 等首个发送已进入阻塞（持住 flushLock）
+                entered.await();
+                // 关键：装饰器的 sendTimeLimit 从「本次发送开始」起算（sendStartTime），
+                // 且 checkSessionLimits() 只在拿不到 flushLock 时才被调用。
+                // 因此必须等 elapsed > sendTimeLimit 之后再发，否则判定不成立（这是本用例
+                // 第一版的错：entered 一 countdown 就立刻发，elapsed≈0，永远不触发）。
+                // 150ms vs 50ms 留 3 倍余量，且远小于首帧 400ms 的阻塞时长，不依赖精确时序。
+                Thread.sleep(150);
                 dec.sendMessage(new TextMessage("{\"b\":2}"));
             } catch (Throwable t) {
                 secondError.set(t);
@@ -107,7 +114,11 @@ class TelemetryWsSlowClientDisconnectTest {
 
     @Test
     @DisplayName("handler 集成：装饰器抛出 SessionLimitExceededException 后，该会话被移出连接集")
-    void handlerEvictsSessionOnDecoratorLimit() {
+    void handlerEvictsSessionOnDecoratorLimit() throws Exception {
+        // throws Exception 是必需的：下面 doAnswer(...).when(raw).sendMessage(any()) 走的是
+        // WebSocketSession 接口签名，sendMessage 声明 throws IOException（受检异常）。
+        // 缺这一条会在 javac 阶段报 "unreported exception java.io.IOException"，
+        // 连累 cloud-backend 全部构建 job（2026-10-31 run 41221275756 即此因）。
         TelemetryWebSocketHandler handler = handler(0, 0);
         WebSocketSession raw = session("slow", IP);
         // 模拟装饰器已判定超限并断开：sendMessage 直接抛 SessionLimitExceededException
