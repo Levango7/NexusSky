@@ -1,5 +1,44 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修 WS 慢客户端阻塞：/ws/telemetry 套上 ConcurrentWebSocketSessionDecorator（2026-11-02）
+
+原 PR #210（`fix/ws-telmetry-comment-clean`）代码侧完整（慢客户端阻塞 + WS 装饰器改造，+2 例），但 `CONFLICTING` 三天：base 从 master 漂移
+（#199 → `b560eef8`、#229 → `b0cbc410`、#227 → `186eeb9c` 三次前移），且计数口径
+被冻结在 10-30 老基数。本节即 **管接版 #230** （分支 `clean-210`），按本仓「绿→合」习惯：
+代码四件从 #210 原样 cherry-pick（**逐字节未改**），计数口径对账，配置键手工补进。
+
+### 修（WebSocket 运行时行为变更）
+
+`TelemetryWebSocketHandler.dispatch()` 原先靠 `synchronized (s)` 串行化同会话发送——这把锁
+同时**屏蔽了 Spring 装饰器的限流检查**（checkSessionLimits 只在「另一线程持 flushLock 时」触发）。
+慢客户端（连上不读）会让 sendMessage 阻塞至 TCP RST，期间占住 @Scheduled 调度线程；8 线程池
+被几条卡死连接拖垮即全局停摆。
+
+- `WebSocketConfig` 用一层 `WebSocketHandlerDecorator` 把 telemetry handler 包住（只作用于
+  `/ws/telemetry`），连接建立时套 `ConcurrentWebSocketSessionDecorator(session, 50ms, 1MB)`（参数取
+  `@Value aerofleet.ws.send-time-limit-ms` / `aerofleet.ws.buffer-size-limit`，默认 5000ms / 512KB）；
+- `dispatch()` 移除手工 `synchronized`，互斥交给装饰器 flushLock（等价 + 时限/缓冲保护）；
+- 装饰器抛 `SessionLimitExceededException` 由既有 catch 移出会话集（不污染其他端点）。
+- 新声明两个配置键（默认值 = 代码原值）：`aerofleet.ws.send-time-limit-ms=5000`、
+  `aerofleet.ws.buffer-size-limit=524288`，都有真实读者（`WebSocketConfig` 的 `@Value`）。
+
+### 回归
+
+`TelemetryWsSlowClientDisconnectTest` + `TelemetryWsConcurrencyTest` 共 4 例全绿
+（本地 mvn -pl cloud-backend 实测；原 #210 链上的缺 `throws Exception` 编译问题已随代码一并吸收）。
+
+### 计数对账（不是刷数）
+
+master `186eeb9c` 文档声称 **5547**；#227 未动任何测试文件
+（`git diff b0cbc410 186eeb9c --stat -- '*src/test*' '*.test.jsx'` 为空）。
+本节淨增 **+2** 例：`TelemetryWsSlowClientDisconnectTest` 新 2 例；`TelemetryWsConcurrencyTest` 例数不变
+（仅把两个探针换成 `GLOBAL_POSITION_INT` 变体、3 处断言同步点已随算一并吸收）。
+即 **5547 + 2 = 5549**（cloud-backend 3362 + 2 = 3364），与 10 份口径文档及 CI 实测一致。
+本地 `check-test-count-docs.py` 若报「例数少了」，原因是 `target/surefire-reports` 停在 10-31
+（本轮构建跑在 WSL ext4 worktree），以 CI 的 fresh 构建为准。
+
+计数：本节 +2 例；`[Unreleased]` 小节 261 → **262**。
+
 ## [Unreleased] — rebase 换基线后 CHANGELOG 的「小节数」会差一：冲突区不含头部声称（2026-11-02）
 
 ### 错在哪（2026-11-02 实测）
@@ -1258,7 +1297,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 261 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 262 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1284,7 +1323,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 261 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 262 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
