@@ -469,6 +469,7 @@ public class EmergencyOrchService {
         dep.put("expectedCoverage", expectedCoverage);
         dep.put("batteryBudget", batteryBudget);
         deployments.add(dep);
+        trimOldest(deployments, MAX_PLAN_DEPLOYMENTS);
         log.debug("coverage optimization: planId={} drone={} cell={} cov={}%",
                 planId, droneId, cellTypeName(cellType), expectedCoverage);
         pushCoverage(planId, getCoverage(planId));
@@ -718,10 +719,48 @@ public class EmergencyOrchService {
         return s;
     }
 
-    /** 添加事件到计划事件列表。 */
+    /**
+     * 单个计划内部事件列表的保留上限。
+     * <p>
+     * 应急编排是**低频**动作（阶段切换、优先级调整、重规划），但计划一旦长期停在中途，
+     * 上报回调仍会持续往里追加，且整份计划会随 V37 快照写穿/读穿——列表越长，
+     * 每次写穿与推送的 JSON 就越大。保留最新 N 条足够复盘，又不会让单个计划无限胀。
+     */
+    static final int MAX_PLAN_EVENTS = 200;
+
+    /**
+     * 单个计划内部覆盖部署列表的保留上限。
+     * <p>
+     * 30046 是周期上报（每架机各自上报一次覆盖方案），同一架机会被反复记录；
+     * 只留最新 N 条即可反映「当前覆盖部署态」，不会因长时间任务把列表撑大。
+     */
+    static final int MAX_PLAN_DEPLOYMENTS = 200;
+
+    /** 添加事件到计划事件列表（超出上限丢最旧）。 */
     @SuppressWarnings("unchecked")
     private static void addEvent(Map<String, Object> plan, String event) {
-        ((List<String>) plan.get("events")).add(event);
+        List<String> events = (List<String>) plan.get("events");
+        events.add(event);
+        trimOldest(events, MAX_PLAN_EVENTS);
+    }
+
+    /**
+     * 只保留列表最新 {@code limit} 条（从头部丢最旧）。
+     * <p>
+     * 加锁遍历：列表是 {@code Collections.synchronizedList}，逐次 {@code remove(0)}
+     * 会退化成 O(n²)；这里在列表自身上同步后一次性删除。
+     */
+    private static <T> void trimOldest(List<T> list, int limit) {
+        int excess = list.size() - limit;
+        if (excess <= 0) {
+            return;
+        }
+        synchronized (list) {
+            int stillExcess = list.size() - limit;
+            if (stillExcess > 0) {
+                list.subList(0, stillExcess).clear();
+            }
+        }
     }
 
     /** 获取当前阶段号。 */
