@@ -60,12 +60,41 @@ public class VoiceCommandExecutor {
     /** 待确认指令缓存：pendingId → ParsedCommand */
     private final Map<String, ParsedCommand> pendingCommands = new ConcurrentHashMap<>();
 
-    /** 指令历史：commandId → ExecutionResult */
+    /** 指令历史：commandId → ExecutionResult（只保留最新 {@value #MAX_HISTORY} 条）。 */
     private final Map<String, ExecutionResult> history = new ConcurrentHashMap<>();
+
+    /** 历史保留上限：语音指令是低频人工操作，200 条足够复盘且不会再无限增长。 */
+    static final int MAX_HISTORY = 200;
+
+    /** 历史插入顺序（commandId 是随机 UUID，不能按 key 排序，只能另记顺序用于淘汰最旧）。 */
+    private final java.util.Deque<String> historyOrder = new java.util.concurrent.ConcurrentLinkedDeque<>();
 
     public VoiceCommandExecutor(DeviceRegistry registry, DroneCommandService commands) {
         this.registry = registry;
         this.commands = commands;
+    }
+
+    /**
+     * 记录指令历史并淘汰最旧条目。
+     * <p>
+     * 不用「按 commandId 排序删除」：commandId 是随机 UUID，与时间无关。改为维护一条
+     * 插入顺序队列，超过 {@link #MAX_HISTORY} 时从队首淘汰。同一 commandId 会被写两次
+     * （execute 写 PENDING_CONFIRMATION、confirm 写最终结果），只有首次插入才入队，
+     * 否则同一个 id 会占两个淘汰位、把仍在队列里的有效条目提前挤掉。
+     * <p>
+     * 并发下队列长度可能瞬时略超上限（两个线程同时入队），下次写入会继续收敛；
+     * 这里只求有界，不求精确等于 N。
+     */
+    private void remember(String commandId, ExecutionResult result) {
+        if (history.put(commandId, result) == null) {
+            historyOrder.addLast(commandId);
+            while (historyOrder.size() > MAX_HISTORY) {
+                String oldest = historyOrder.pollFirst();
+                if (oldest != null) {
+                    history.remove(oldest);
+                }
+            }
+        }
     }
 
     /**
@@ -88,7 +117,7 @@ public class VoiceCommandExecutor {
                     ExecutionResult.Status.REJECTED,
                     "无人机 " + sysid + " 未注册，指令被拒绝",
                     null);
-            history.put(commandId, result);
+            remember(commandId, result);
             log.warn("Voice command rejected: sysid={} not registered", sysid);
             return result;
         }
@@ -102,7 +131,7 @@ public class VoiceCommandExecutor {
                     ExecutionResult.Status.PENDING_CONFIRMATION,
                     "紧急指令需二次确认：请确认执行 '" + describeAction(cmd) + "'",
                     null);
-            history.put(pendingId, result);
+            remember(pendingId, result);
             log.info("Voice command pending confirmation: pendingId={} action={}",
                     pendingId, cmd.getAction());
             return result;
@@ -125,7 +154,7 @@ public class VoiceCommandExecutor {
                     ExecutionResult.Status.FAILED,
                     "未找到待确认指令 " + pendingId,
                     null);
-            history.put(pendingId, result);
+            remember(pendingId, result);
             log.warn("Confirm failed: pendingId={} not found", pendingId);
             return result;
         }
@@ -138,7 +167,7 @@ public class VoiceCommandExecutor {
                     ExecutionResult.Status.REJECTED,
                     "无人机 " + sysid + " 未注册，指令被拒绝",
                     null);
-            history.put(pendingId, result);
+            remember(pendingId, result);
             log.warn("Voice command confirmed but rejected: pendingId={} sysid={} not registered",
                     pendingId, sysid);
             return result;
@@ -266,7 +295,7 @@ public class VoiceCommandExecutor {
                     ExecutionResult.Status.FAILED,
                     "指令下发失败：" + e.getMessage(),
                     actionDesc);
-            history.put(commandId, result);
+            remember(commandId, result);
             log.warn("Voice command dispatch failed: commandId={} action={} error={}",
                     commandId, cmd.getAction(), e.getMessage());
             return result;
@@ -276,7 +305,7 @@ public class VoiceCommandExecutor {
                     ExecutionResult.Status.FAILED,
                     "指令下发失败：" + e.getMessage(),
                     actionDesc);
-            history.put(commandId, result);
+            remember(commandId, result);
             log.warn("Voice command send failed: commandId={} action={} error={}",
                     commandId, cmd.getAction(), e.getMessage());
             return result;
@@ -285,7 +314,7 @@ public class VoiceCommandExecutor {
         String message = (confirmed ? "紧急指令已确认并下发：" : "指令已下发并获飞控确认：") + detail;
         ExecutionResult result = new ExecutionResult(commandId, ExecutionResult.Status.EXECUTED,
                 message, actionDesc);
-        history.put(commandId, result);
+        remember(commandId, result);
         log.info("Voice command executed: commandId={} action={} sysid={} detail={}",
                 commandId, cmd.getAction(), sysid, detail);
         return result;
@@ -295,7 +324,7 @@ public class VoiceCommandExecutor {
     private ExecutionResult rejected(String commandId, String message) {
         ExecutionResult result = new ExecutionResult(
                 commandId, ExecutionResult.Status.REJECTED, message, null);
-        history.put(commandId, result);
+        remember(commandId, result);
         log.info("Voice command rejected: commandId={} reason={}", commandId, message);
         return result;
     }

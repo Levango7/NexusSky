@@ -1,5 +1,51 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 三处进程内只增表收口 + 应急计划快照列宽缺陷（2026-11-01）
+
+### 修：`voicecmd` / `commadapt` / `api.service` 三张内存 map 只增不减
+
+#220 给五张**数据库表**补了留存 job，但那管的是落库的行。这三处是**进程内 map**，
+同样随运行时长单调增长，DB 清理管不到：
+
+- `VoiceCommandExecutor.history`（`commandId → ExecutionResult`）：每条指令 put 一次，
+  全仓零淘汰。`ExecutionResult` 还携带动作描述与拒绝原因。改为保最新
+  `MAX_HISTORY=200` 条。commandId 是随机 UUID，与时间无关，**不能按 key 排序淘汰**，
+  故另维护一条插入序队列；同一 commandId 的二次写入（确认流程覆盖 PENDING→最终结果）
+  只占一个淘汰位，否则同一 id 会挤掉两条有效记录。
+- `FailoverManager.failoverHistory`（`sysid → CopyOnWriteArrayList`）：每次切换 add 一条，
+  从不裁剪。一条长期在线但链路抖动的无人机可无限增长。改为每 sysid 保最新
+  `MAX_HISTORY_PER_DRONE=100` 条，返回顺序仍是时间升序。
+- `EmergencyOrchService.plans`：创建/上报都 put，全仓零 remove。改为上限
+  `MAX_CACHED_PLANS=256`，**只淘汰终态计划**（`status=ABORTED` 或
+  `phaseStatus=COMPLETED`），按 planId 从旧到新；RUNNING / PAUSED 一个都不动——
+  计划是活文档，淘汰在途计划会让 start/pause/resume/abort 拿不到同一份内存状态。
+  DB 仍是兜底源，淘汰后靠 V37 快照读穿，对外可查性不变。
+
+### 顺带修：淘汰/重启后 `getProgress` / `getCoverage` 与 `getPlan` 口径不一致
+
+`getPlan` 内存未命中会读穿 V37 快照，`getProgress` / `getCoverage` 只查内存。
+于是同一个 planId 一个查得到、另两个 404。三处统一走 `getPlan`。
+
+### 顺带修：淘汰清掉租户映射后不得跨租户放行（否则变成读取漏洞）
+
+`checkTenantAccess` 原本「映射缺失即放行」，在纯内存时代只影响历史数据。
+本轮加入淘汰后，`planTenantMap.remove` 与重启都让映射缺失——那条「放行」会变成
+跨租户读取漏洞。改为映射缺失时**回查 DB 真实租户**再判定；DB 也查不到才保持旧语义。
+
+### 顺带修：`emergency_plan.snapshot` 列宽——「读穿」自上线起一直是空操作
+
+`EmergencyPlanEntity.snapshot` 未声明长度，Hibernate 在 H2 上建出 `varchar(255)`，
+而一个计划快照实测 679 字符起 ⇒ 写穿必然 `Value too long` ⇒ 被 `persistPlan` 的
+`catch` 吞成 WARN ⇒ **库里永远没有行，读穿永远返回 null**（V37 想修的病换个地方复发）。
+生产 V37 迁移里本来就是 `TEXT`，只有测试/dev 的 `ddl-auto` 会建窄。补
+`columnDefinition = "TEXT"`（仓内 `DockScheduleEntity#waypoints` 等同写法），两处口径一致。
+
+测试 +8 例：`VoiceCommandHistoryBoundTest`（2）、`FailoverHistoryBoundTest`（2）、
+`EmergencyOrchCacheBoundTest`（4，`@SpringBootTest` + 真 H2，含写穿落库、只淘汰终态、
+淘汰后读穿、跨租户拒绝）。**A/B 实测**（四组，改坏⇒红、还原⇒绿）：
+去掉 `columnDefinition` ⇒ 3 例红；停用计划淘汰 ⇒ 2 例红；停用两处裁剪循环 ⇒ 3 例红；
+回退「租户映射缺失即放行」⇒ 1 例红。
+
 ## [Unreleased] — P2-F5：接收限速拆双预算——关键帧（ACK/心跳/任务回执）洪泛下不再被淹（2026-10-31）
 
 **P2-F5 落地**（PX4 首验暴露的链路级候选，docs/sitl-integration.md §12.2-⑤）：单一滑动窗口下，
@@ -763,7 +809,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-10-31 共有 249 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-01 共有 250 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -789,7 +835,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 249 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 250 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

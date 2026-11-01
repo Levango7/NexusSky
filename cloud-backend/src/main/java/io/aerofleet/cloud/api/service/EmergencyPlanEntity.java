@@ -27,7 +27,17 @@ public class EmergencyPlanEntity {
     @Column(name = "status", length = 32)
     private String status;
 
-    @Column(name = "snapshot")
+    /**
+     * 计划 Map 的整体 JSON 快照。
+     * <p>
+     * 必须显式 {@code columnDefinition = "TEXT"}：不声明长度时 Hibernate 在
+     * {@code ddl-auto=create-drop/update}（测试/dev 的 H2）下建出 {@code varchar(255)}，
+     * 而一个计划快照（5 阶段 + 事件列表 + 优先级队列）实测 679 字符起，写穿必然
+     * {@code Value too long}；{@code persistPlan} 把异常吞成 WARN，于是「读穿永远是
+     * null」——正是本表当初想修的那个病又换个地方复发。生产 V37 迁移里本就是 TEXT，
+     * 这里补上声明让两处口径一致（仓内 {@code DockScheduleEntity#waypoints} 等同样写法）。
+     */
+    @Column(name = "snapshot", columnDefinition = "TEXT")
     private String snapshot;
 
     @Column(name = "updated_at")

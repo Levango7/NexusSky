@@ -40,7 +40,10 @@ public class FailoverManager {
     /** 各无人机连续低评分计数：sysid → 连续低评分次数 */
     private final Map<Integer, AtomicInteger> failureCounters = new ConcurrentHashMap<>();
 
-    /** 各无人机故障切换历史：sysid → 切换记录列表 */
+    /** 每架无人机的故障切换历史保留上限：切换是低频事件，100 条足够复盘。 */
+    static final int MAX_HISTORY_PER_DRONE = 100;
+
+    /** 各无人机故障切换历史：sysid → 切换记录列表（每 sysid 只保留最新 N 条）。 */
     private final Map<Integer, List<FailoverRecord>> failoverHistory = new ConcurrentHashMap<>();
 
     /** 各无人机当前链路状态（是否处于故障中）：sysid → 是否故障 */
@@ -212,6 +215,13 @@ public class FailoverManager {
         FailoverRecord record = new FailoverRecord(recordId, sysid, fromLink, toLink,
                 triggerTime, completeTime, status, reason);
         // P1-fix: 使用 CopyOnWriteArrayList 替代 ArrayList，保证多线程安全
-        failoverHistory.computeIfAbsent(sysid, k -> new CopyOnWriteArrayList<>()).add(record);
+        List<FailoverRecord> records =
+                failoverHistory.computeIfAbsent(sysid, k -> new CopyOnWriteArrayList<>());
+        records.add(record);
+        // 只增表收口：每 sysid 保最新 N 条。切换是低频事件，remove(0) 的 O(n) 拷贝可忽略；
+        // 不裁剪的话，一条长期在线的链路抖动会让列表随运行时长无限增长。
+        while (records.size() > MAX_HISTORY_PER_DRONE) {
+            records.remove(0);
+        }
     }
 }

@@ -59,6 +59,12 @@ public class EmergencyOrchService {
     private final AtomicLong planIdGenerator = new AtomicLong(PLAN_ID_START);
 
     /**
+     * 内存计划缓存上限。超出后按 planId 从旧到新淘汰<b>终态</b>计划
+     * （status=ABORTED / phaseStatus=COMPLETED）；RUNNING / PAUSED 一个都不动。
+     */
+    static final int MAX_CACHED_PLANS = 256;
+
+    /**
      * 单调序列发号器（V35；§5 Q5 裁决：planId 跨重启单调——若它进过客户侧报表，
      * 复用比丢数据更严重）。缺失时走内存 generator。
      */
@@ -112,6 +118,9 @@ public class EmergencyOrchService {
                             if (entity.getTenantId() != null) {
                                 planTenantMap.put(planId, entity.getTenantId());
                             }
+                            // 放在租户回填之后：若这次读穿恰好又触发淘汰，租户映射会被一并清掉，
+                            // 不留「计划已不在内存、租户映射还在」的孤儿条目。
+                            evictTerminalPlans();
                             return restored;
                         } catch (Exception parse) {
                             log.warn("编排计划快照解析失败 planId={}：{}", planId, parse.getMessage());
@@ -159,6 +168,7 @@ public class EmergencyOrchService {
         if (tenantId != null) {
             planTenantMap.put(planId, tenantId);
         }
+        evictTerminalPlans();
         persistPlan(planId, plan);
         log.info("emergency plan started: planId={} scenario={} drones={} radius={}m",
                 planId, scenarioName(scenarioType), droneIds.size(), radius);
@@ -214,10 +224,9 @@ public class EmergencyOrchService {
      * （phases 元素为 ConcurrentHashMap，浅拷贝保留阶段状态的并发更新）。
      */
     public Map<String, Object> getProgress(long planId) {
-        if (!checkTenantAccess(planId)) {
-            return null;
-        }
-        Map<String, Object> plan = plans.get(planId);
+        // 与 getPlan 同口径：内存未命中时读穿快照。否则重启/淘汰后 getPlan 查得到、
+        // 进度却 404，是两个接口之间的自相矛盾。
+        Map<String, Object> plan = getPlan(planId);
         if (plan == null) {
             return null;
         }
@@ -234,10 +243,8 @@ public class EmergencyOrchService {
      * 内部 synchronizedList 的保护直接修改内部状态。
      */
     public Map<String, Object> getCoverage(long planId) {
-        if (!checkTenantAccess(planId)) {
-            return null;
-        }
-        Map<String, Object> plan = plans.get(planId);
+        // 同 getProgress：共用 getPlan 的租户判定 + 读穿，避免两个接口口径漂移。
+        Map<String, Object> plan = getPlan(planId);
         if (plan == null) {
             return null;
         }
@@ -418,6 +425,7 @@ public class EmergencyOrchService {
             plan = newPlanMap(planId, scenarioType, 0, 0, 0,
                     Collections.emptyList(), System.currentTimeMillis());
             plans.put(planId, plan);
+            evictTerminalPlans();
         }
         int oldPhase = phaseOf(plan);
         plan.put("scenarioType", scenarioType);
@@ -562,9 +570,33 @@ public class EmergencyOrchService {
         }
         Integer planTenantId = planTenantMap.get(planId);
         if (planTenantId == null) {
-            return true; // 历史数据未分配租户，允许访问
+            // 映射缺失有两种来源：① 历史数据本就没有租户；② 内存淘汰/重启后缓存为空。
+            // 直接放行会在 ② 下变成跨租户读取漏洞（重启后第一次访问谁的租户都放），
+            // 所以先回查 DB（V37 快照里带着 tenantId）再判。
+            planTenantId = loadPlanTenantId(planId);
+            if (planTenantId != null) {
+                planTenantMap.put(planId, planTenantId);
+            }
+        }
+        if (planTenantId == null) {
+            return true; // 无租户记录（历史数据）→ 保持旧语义
         }
         return currentTenantId.equals(planTenantId);
+    }
+
+    /** 从 V37 快照读真实租户；仓库缺失（纯单测构造）或查询失败时返回 null。 */
+    private Integer loadPlanTenantId(long planId) {
+        if (planRepository == null) {
+            return null;
+        }
+        try {
+            return planRepository.findById(planId)
+                    .map(EmergencyPlanEntity::getTenantId)
+                    .orElse(null);
+        } catch (Exception e) {
+            log.warn("编排计划租户回查失败 planId={}：{}", planId, e.getMessage());
+            return null;
+        }
     }
 
     /** 创建新计划状态 map。 */
@@ -615,6 +647,50 @@ public class EmergencyOrchService {
 
         plan.put("taskPriorities", new ConcurrentHashMap<Long, Integer>());
         return plan;
+    }
+
+    /**
+     * 内存计划缓存收口：只增表不能随运行时长无限长。
+     * <p>
+     * 只淘汰<b>终态</b>计划（{@code status=ABORTED} 或 {@code phaseStatus=COMPLETED}），
+     * 按 planId 升序（V35 发号器单调递增 = 创建顺序）从最旧开始，直到回到上限；
+     * RUNNING / PAUSED 一个都不动——计划是活文档，淘汰在途计划会让
+     * start/pause/resume/abort 拿不到同一份内存状态。
+     * <p>
+     * 淘汰后仍可通过 {@link #getPlan} 读穿 V37 快照（DB 是兜底源），对外可查性不变。
+     * 同时清掉租户映射：{@link #checkTenantAccess} 在映射缺失时会回查 DB 拿真实租户，
+     * 不会因为淘汰而放行别的租户。
+     */
+    private void evictTerminalPlans() {
+        if (plans.size() <= MAX_CACHED_PLANS) {
+            return;
+        }
+        List<Long> terminal = plans.entrySet().stream()
+                .filter(e -> isTerminalPlan(e.getValue()))
+                .map(Map.Entry::getKey)
+                .sorted()
+                .toList();
+        for (Long id : terminal) {
+            if (plans.size() <= MAX_CACHED_PLANS) {
+                break;
+            }
+            plans.remove(id);
+            planTenantMap.remove(id);
+        }
+    }
+
+    /** 终态判定：已中止，或上报回调把阶段标成 COMPLETED（此时 status 字段仍是 RUNNING）。 */
+    private static boolean isTerminalPlan(Map<String, Object> plan) {
+        Object status = plan.get("status");
+        if ("ABORTED".equals(status) || "COMPLETED".equals(status)) {
+            return true;
+        }
+        return Integer.valueOf(PHASE_STATUS_COMPLETED).equals(plan.get("phaseStatus"));
+    }
+
+    /** 测试辅助：当前内存计划缓存条数（不含 DB 兜底）。 */
+    int cachedPlanCount() {
+        return plans.size();
     }
 
     /** 查找场景预设。 */
