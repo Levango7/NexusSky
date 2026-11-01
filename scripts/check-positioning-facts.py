@@ -121,7 +121,12 @@ def check_evidence(facts, root):
                         f"{n} 个，少于要求的 {ev.get('min_count')} 个")
             elif kind == "no_file_matching":
                 hits = glob.glob(os.path.join(root, ev["glob"]), recursive=True)
-                hits = [h for h in hits if os.path.isfile(h)]
+                # ⚠️ 必须排除 .git：CI 上检出目录里带 .git，宽通配（如 **/*illing*）
+                # 可能扫到 git 内部文件 ⇒ 门禁在 CI 上误报。实测：本地有 .git 时
+                # 扫出的条目里就可能出现 .git/... 路径。
+                hits = [h for h in hits
+                        if os.path.isfile(h)
+                        and os.sep + ".git" + os.sep not in h + os.sep]
                 if hits:
                     rel = [os.path.relpath(h, root) for h in hits[:3]]
                     problems.append(
