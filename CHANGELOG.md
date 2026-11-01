@@ -1,5 +1,27 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修 flaky：`EnvOverrideE2ETest` 把「命令前的旧帧」当成覆写证据（2026-11-01）
+
+### 修：风向覆写用例的等待条件
+
+`setWind_endToEnd_onboardDirectionOverridden` 的断言本身没错，错在取样时机：
+
+- `fromIndex = events.size()` 在**发命令之前**取；
+- `awaitEnvStatus(fromIndex)` 只取「命令之后的第一帧 ENVIRONMENT_STATUS」；
+- 但覆写要等 `COMMAND_ACK` 往返才真正写进机载状态。命令已发出、覆写尚未生效时，
+  1Hz 遥测完全可能先吐一帧**旧值**（2026-11-01 实测：期望 26500–27500 cdeg，实际 246），
+  断言就随机红。
+
+修法：等待器改为「轮询到满足条件的帧，超时才返回 null」。风向用例传入
+「落在 265°–275°」的谓词，超时断言给出明确原因（覆写没生效，而不是"只慢了一帧"）。
+
+把「取第一帧满足条件的」抽成纯函数 `firstMatching`，用**确定性单测**钉住：
+喂 [246, 27000] 必须取 27000；只喂 [246] 必须返回 null（交给调用方超时判红），
+不得把旧帧当证据。这样回归不再依赖真 UDP 时序的随机复现。
+
+测试 +1 例（`firstMatchingSkipsPreOverrideFrame`）。**A/B**：把 `firstMatching`
+退回「取第一帧」⇒ 该例红；还原 ⇒ 绿（已实测）。
+
 ## [Unreleased] — 三处进程内只增表收口 + 应急计划快照列宽缺陷（2026-11-01）
 
 ### 修：`voicecmd` / `commadapt` / `api.service` 三张内存 map 只增不减
@@ -809,7 +831,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-01 共有 250 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-01 共有 251 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -835,7 +857,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 250 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 251 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

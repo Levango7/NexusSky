@@ -15,9 +15,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -126,6 +128,26 @@ class EnvOverrideE2ETest {
     // ===== 用例 =====
 
     @Test
+    @DisplayName("等待器必须跳过覆写生效前的旧帧（先 246、后 27000 ⇒ 取 27000）")
+    void firstMatchingSkipsPreOverrideFrame() {
+        EnvironmentStatus stale = envFrame(246);
+        EnvironmentStatus fresh = envFrame(27_000);
+        Predicate<EnvironmentStatus> inRange =
+                es -> es.windDirection >= 26_500 && es.windDirection <= 27_500;
+
+        assertThat(firstMatching(List.of(stale, fresh), inRange))
+                .as("不得把命令前的旧帧当成覆写后的证据")
+                .isSameAs(fresh);
+        assertThat(firstMatching(List.of(stale), inRange))
+                .as("只收到旧帧时应返回 null（由调用方超时判红），而不是返回旧帧")
+                .isNull();
+    }
+
+    private static EnvironmentStatus envFrame(int windDirectionCdeg) {
+        return new EnvironmentStatus(20, 40, 850, windDirectionCdeg, 0, 0, 10_000, 0);
+    }
+
+    @Test
     @DisplayName("风场覆写：REST ok（真 ACK 往返）+ 机载 ENVIRONMENT_STATUS 风向变为 270°")
     void setWind_endToEnd_onboardDirectionOverridden() throws Exception {
         // 先拿到一帧覆写前的机载状态（证链路已活）
@@ -140,8 +162,12 @@ class EnvOverrideE2ETest {
                 .as("REST 应返回 ok —— 该结果只有在机载真实回 COMMAND_ACK(ACCEPTED) 时才成立")
                 .isEqualTo("ok");
 
-        EnvironmentStatus after = awaitEnvStatus(fromIndex);
-        assertThat(after).as("覆写后未收到新的机载 ENVIRONMENT_STATUS").isNotNull();
+        EnvironmentStatus after = awaitEnvStatus(fromIndex,
+                es -> es.windDirection >= 26_500 && es.windDirection <= 27_500);
+        assertThat(after)
+                .as("覆写后 %d ms 内未等到风向落在 265°–275° 的机载帧"
+                        + "（说明覆写根本没生效，而不是只慢了一帧）", WAIT_MS)
+                .isNotNull();
         // 场景基线风向为 0，覆写目标 270°；机载风向按 current 慢漂移（每 tick 高斯×5×dt），
         // 数秒内偏移约 1°，故取 ±5°（cdeg：26500-27500）判定，避开 0/360 环绕区。
         assertThat(after.windDirection)
@@ -179,16 +205,51 @@ class EnvOverrideE2ETest {
      *
      * @return 命中的状态消息；超时返回 null（调用方按未达记失败）
      */
-    private EnvironmentStatus awaitEnvStatus(int fromIndex) throws InterruptedException {
+    /**
+     * 等一帧满足条件的机载 ENVIRONMENT_STATUS（从 {@code fromIndex} 起）。
+     * <p>
+     * **为什么必须带条件**：{@code fromIndex} 是在发命令之前取的，而覆写要等
+     * COMMAND_ACK 往返才真正生效。只取「命令后第一帧」会踩中「命令已发出、覆写尚未
+     * 生效」的那一帧——它带着旧值，断言就随机红（2026-11-01 实测到一次：
+     * 期望 26500–27500 cdeg，实际 246）。这里改成轮询到条件成立为止，超时才返回 null。
+     */
+    private EnvironmentStatus awaitEnvStatus(int fromIndex, Predicate<EnvironmentStatus> match)
+            throws InterruptedException {
         long deadline = System.currentTimeMillis() + WAIT_MS;
         while (System.currentTimeMillis() < deadline) {
+            List<EnvironmentStatus> frames = new ArrayList<>();
             List<MavlinkMessageEvent> snapshot = List.copyOf(events);
             for (int i = fromIndex; i < snapshot.size(); i++) {
                 if (snapshot.get(i).getMessage() instanceof EnvironmentStatus es) {
-                    return es;
+                    frames.add(es);
                 }
             }
+            EnvironmentStatus matched = firstMatching(frames, match);
+            if (matched != null) {
+                return matched;
+            }
             Thread.sleep(50);
+        }
+        return null;
+    }
+
+    /** 不带条件的老口径：拿到 fromIndex 之后的第一帧即可。 */
+    private EnvironmentStatus awaitEnvStatus(int fromIndex) throws InterruptedException {
+        return awaitEnvStatus(fromIndex, es -> true);
+    }
+
+    /**
+     * 从帧序列里取**第一帧满足条件**的；不满足则返回 null。
+     * <p>
+     * 抽成纯函数是为了能被确定性单测覆盖：「先来一帧旧值、再来一帧新值」时，
+     * 必须取后者。若退回「取第一帧」，单测立刻红——比依赖真 UDP 时序的随机复现可靠。
+     */
+    static EnvironmentStatus firstMatching(List<EnvironmentStatus> frames,
+                                           Predicate<EnvironmentStatus> match) {
+        for (EnvironmentStatus frame : frames) {
+            if (match.test(frame)) {
+                return frame;
+            }
         }
         return null;
     }
