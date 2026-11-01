@@ -1,5 +1,29 @@
 # NexusSky 变更日志
 
+## [Unreleased] — mapping 域两处进程内只增结构收口（+4 例）（2026-11-02）
+
+### 修：`PhotoCaptureService.photosByTask` 与 `MappingResultService` 两个 map 零清理
+
+两处都是「按 ID 存、永不淘汰」，intentionally in-memory（无 DB 兜底），所以外层
+的任务/成果数一多就只增不减：
+
+- `photosByTask`：按任务 ID 存照片。单任务的照片数由本次作业航点数决定、本来有界，
+  **无界的是「任务」这个维度**——每个跑过的测绘任务都会留下一整组照片记录。
+  改为 `MAX_TASKS=200` 个任务；**读路径不刷新淘汰顺序**（否则频繁回看老任务会让它
+  一直续命，上限形同虚设）。
+- `MappingResultService.resultsById` + `resultsByTask`：两个协同 map 同样零清理，
+  每次生成正射/DEM/三维之一就往里放一条。改为 `MAX_RESULTS=500`。
+
+淘汰必须是**联动**的：只删主表会让索引留下指向已淘汰成果的孤儿条目；任务列表清空后
+key 也要一并移除，否则 key 本身随任务数继续泄漏。
+
+测试 +4 例（`MappingInmemoryBoundTest`）：任务上限与最旧淘汰、读路径不续命、
+成果上限且两 map 一致（无孤儿）、任务清空后 key 移除。
+**A/B 实测**：停止任务淘汰 ⇒ 2 例红；只删主表不同步索引 ⇒ 2 例红；还原后全绿。
+
+计数：本批 +4（cloud-backend +4）；全仓 +4。[Unreleased] 小节数随 rebase 基线浮动，
+这里不写具体值，以文档计数门禁的实测为准。
+
 ## [Unreleased] — rebase 换基线后 CHANGELOG 的「小节数」会差一：冲突区不含头部声称（2026-11-02）
 
 ### 错在哪（2026-11-02 实测）
@@ -1258,7 +1282,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 261 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 262 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1284,7 +1308,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 261 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 262 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
