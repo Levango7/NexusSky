@@ -1002,11 +1002,6 @@ public class CoverageOptimizer {
             return rotationBatches > 1;
         }
 
-        /** 无人机数量是否充足（dronesShortfall <= 0）。 */
-        public boolean isSufficient() {
-            return dronesShortfall <= 0;
-        }
-
         @Override
         public String toString() {
             return "RotationSchedule{batches=" + rotationBatches

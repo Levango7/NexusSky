@@ -1,5 +1,38 @@
 # NexusSky 变更日志
 
+## [Unreleased] — getter 死码判据硬化：加「端点/框架方法」与「响应暴露面」两档，最暗一档 45 → 11 → 1，并删掉 10 个零调用访问器（2026-11-02）
+
+上一批把 `list-unreferenced-getters.py` 做成 report-only 时，只登记了"判据过近似"这句话。
+这次逐条复核那 **45 个候选**，发现这句话**低估了危险**：清单里有一条压根不是访问器——
+
+- `geofence/RestrictionController#getRestrictionStatus` 头上带 `@GetMapping`/`@Operation`/`@ApiResponse`，
+  它是**一个对外端点的处理器**。旧判据只按"public 无参 getXxx()"的形状收，就把它列进了"最暗一档"。
+  **照着清单动手 = 删掉一个端点**，而这条清单当初的设计目的正是"别误杀"。
+
+于是本批把判据做成真的（审计 §13）：
+
+- **新档 `端点/框架方法`（实测 103 条）**：声明上方紧邻 `@GetMapping`/`@RequestMapping`/`@Bean`/`@Query`/
+  `@Modifying`/`@PrePersist`/`@Override`/`@Scheduled`/`@ExceptionHandler` 等注解的，不是访问器，直接排除。
+- **新档 `响应暴露面`（实测 118 条）**：声明类从 `@RestController`/`@Controller` 出发、沿"谁引用了谁"走 3 跳
+  可达 ⇒ 它会随响应序列化，Jackson 按 getter 定 JSON 字段名，删了就是静默改响应形状。
+  这一档把 §11.6 那句"要收紧需要编译级调用图"变成**当下能跑的机器判据**（仍是文本级近似，见"残余弱点"）。
+- 结果：**最暗一档 45 → 11**；逐条复核这 11 条后，**10 条确认为零调用并删除**
+  （`VirtualDrone#isObstacleEnabled`、`edge/VideoStreamAnalyzer#getTotalDetections`、
+  `orch/CoverageOptimizer#isSufficient`、`orch/OrchestrationEngine#get{Cell,Mesh,Sat,Terrain}Integration`、
+  `orch/OrchestrationPlan#{getCreateTimeMs,getPhaseStates,isFinished}`），删后复跑清单 **11 → 1**。
+- **保留 1 条并给依据**：`sat/AdaptiveHysteresis#getHysteresisMs` —— 同文件 `:75`/`:122` 两处内部调用
+  （§11.3 早已登记这条），它是"只在本类内用"，不是死码。
+
+验证：全 reactor `mvn -B -o clean test` **5547 / 0 失败 / 0 错误**（逐模块 523/1463/139/41/3362/19，与 rebase 后的 master `b560eef8` 基线相等 ⇒ 本批确实零测试增删，不是靠声称）；`mvn -o test-compile` 先行通过（删除只可能表现为编译错，
+跨文件与测试里的调用点在判据里已排除）；16 道仓门全绿；`list-unreferenced-getters.py --self-test`
+**7 → 10 情形**，新增三条含**反证**——「暴露面没有把无关类一起吞掉」（否则新档会宽松到什么都没意义）。
+
+计数：本批 0 测试增删（只删无人调用的方法）；`[Unreleased]` 小节 255 → **256**。
+
+残余弱点（如实登记，不假装已解决）：可达性用大写 token 近似，**单字母类名会被漏掉**
+（自测第一版就因此假失败过一次，改用真实类名后才有效）；跨模块反射与手工 `Map` 装配仍可能漏判；
+3 跳是经验值，不是证明。所以第 3 档继续 report-only，`--strict` 依然只给本地用。
+
 ## [Unreleased] — 飞行阶段 / 固件版本打通到 GCS（2026-10-29）
 
 `EXTENDED_SYS_STATE`(245) 与 `AUTOPILOT_VERSION`(148) 此前只在 `mavlink-core` /
@@ -918,7 +951,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-01 共有 255 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 256 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -944,7 +977,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 255 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 256 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

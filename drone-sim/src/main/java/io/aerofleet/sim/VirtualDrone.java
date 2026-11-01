@@ -2397,11 +2397,6 @@ public final class VirtualDrone implements AutoCloseable {
         this.obstacleEnabled = enabled;
     }
 
-    /** 当前避障启用状态。 */
-    public boolean isObstacleEnabled() {
-        return obstacleEnabled;
-    }
-
     // ------------------------------------------------------------------
     // M4 硬件抽象（FR-01~FR-22）：数据源注入 + 气动切换 + 硬件数据上报
     // ------------------------------------------------------------------

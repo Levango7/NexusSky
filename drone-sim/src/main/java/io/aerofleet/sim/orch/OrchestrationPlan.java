@@ -119,12 +119,6 @@ public class OrchestrationPlan {
         return true;
     }
 
-    /** 是否已完成所有阶段。 */
-    public boolean isFinished() {
-        return phaseStates.get(phaseStates.size() - 1).getStatus() == OrchestrationState.Status.COMPLETED
-                || phaseStates.get(phaseStates.size() - 1).getStatus() == OrchestrationState.Status.ABORTED;
-    }
-
     // ---- setter for volatile metrics ----
 
     public void setCoverageRate(int rate) {
@@ -176,14 +170,6 @@ public class OrchestrationPlan {
 
     public List<Integer> getDroneIds() {
         return droneIds;
-    }
-
-    public List<OrchestrationState> getPhaseStates() {
-        return Collections.unmodifiableList(phaseStates);
-    }
-
-    public long getCreateTimeMs() {
-        return createTimeMs;
     }
 
     public int getCurrentPhaseIndex() {

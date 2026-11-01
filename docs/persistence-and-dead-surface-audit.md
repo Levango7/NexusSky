@@ -695,3 +695,44 @@
   `DroneCommandService` 构造时打默认目标 `sysid`（另三处本来就能看见：UdpGateway 的 discovery 行、
   CounterDroneRadarSource 的 base 行、instance-id 走 `/actuator/prometheus` 标签）。
   验证：`check-config-keys` 声明键 88 → **95** 全有读者（本批 +7；#218 落库时到 89，其后 #220 加 5 个 retention 键、#222 加 1 个关键帧限速键）；全 reactor 回归见 CHANGELOG 该批小节。
+
+## §13 report-only getter 清单的判据硬化与逐条定性（2026-11-02）
+
+§12.3 只做到「清单看得见」。本批把那句「判据过近似」兑现成机器判据，并把 45 条候选逐条定性。
+
+### 13.1 清单里混进了非访问器——照删会删掉一个端点
+
+- `geofence/RestrictionController#getRestrictionStatus`：声明上方是 `@Operation`/`@ApiResponse`/`@GetMapping`。
+  它名字形似 getter（public 无参 `get...()`），实质是**路由处理器**。旧判据按形状收，把它列进了最暗一档。
+- ⇒ 新档 **`端点/框架方法`**：紧邻注解命中 `@GetMapping|@PostMapping|@PutMapping|@DeleteMapping|
+  @PatchMapping|@RequestMapping|@Bean|@Query|@Modifying|@PrePersist|@PreUpdate|@PostLoad|@Override|
+  @Scheduled|@ExceptionHandler|@Operation|@ApiResponse` 即排除。实测 **103 条**。
+
+### 13.2 「随响应出网」从口头估计变成可达性判据
+
+- 新档 **`响应暴露面`**：以 `@RestController`/`@Controller` 类为源点，沿「谁引用了谁」走 `RESPONSE_HOPS=3` 跳
+  收集可达类型名；候选的声明类落在集合里 ⇒ 归此档（Jackson 按 getter 定 JSON 字段名，删了静默改响应形状）。
+  实测 **118 条**。
+- 最暗一档因此 **45 → 11**。
+
+### 13.3 那 11 条的逐条结论
+
+| 候选 | 同文件内调用 | 判定 | 依据 |
+|---|---|---|---|
+| `sat/AdaptiveHysteresis#getHysteresisMs` | 2（`:75`/`:122`） | **保留** | 只在本类内用 ≠ 死码；§11.3 已登记同一条 |
+| `VirtualDrone#isObstacleEnabled` | 0 | 删 | 跨文件/测试零调用；sim 的两个 HTTP 文件（`TargetStateServer`/`DockSim`）不引用该类 ⇒ 不在 JSON 面 |
+| `edge/VideoStreamAnalyzer#getTotalDetections` | 0 | 删 | 字段仍被内部累加，只是访问器无人调 |
+| `orch/CoverageOptimizer#isSufficient` | 0 | 删 | 派生自 `dronesShortfall <= 0`，调用方直接读该字段 |
+| `orch/OrchestrationEngine#get{Cell,Mesh,Sat,Terrain}Integration` | 0 ×4 | 删 | 四个集成对象在引擎内按字段使用 |
+| `orch/OrchestrationPlan#{getCreateTimeMs,getPhaseStates,isFinished}` | 0 ×3 | 删 | `phaseStates`/`createTimeMs` 类内直读；`isFinished` 全仓零调用 |
+
+删后复跑清单：**11 → 1**（只剩那条有证据的保留项）。
+
+### 13.4 反证与残余弱点
+
+- 自测 **7 → 10 情形**，新增三条：端点处理器不算访问器、响应面上的类不进最暗档、以及
+  **「暴露面没有把无关类一起吞掉」**——缺了这条反证，新档宽松到什么都证明不了。
+- 踩到的工具自身坑：类型 token 规则要求 ≥2 字符 ⇒ **单字母类名会被漏判**；夹具第一版因此假失败，
+  换成真实类名后断言才真正生效。
+- 仍是文本级近似：跨模块反射、手工 `Map` 装配、3 跳之外的间接引用都不在覆盖内。
+  所以第 3 档继续 report-only、`--strict` 只给本地；真要收严仍需编译级调用图（§11.6 那句话没有作废）。
