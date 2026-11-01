@@ -460,10 +460,6 @@ public class VideoStreamAnalyzer {
         return totalFrames;
     }
 
-    public long getTotalDetections() {
-        return totalDetections;
-    }
-
     // ===== 内部跟踪对象实现 =====
 
     /** 可变跟踪对象内部表示。 */

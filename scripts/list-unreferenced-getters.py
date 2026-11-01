@@ -15,14 +15,22 @@
 没有这条更糟。本脚本恒退 0，只在 CI 里打印三档计数和最暗的一档名单，让"新写出来的
 零引用访问器"至少**看得见**。将来若要收严，先把判据换成编译级，再谈 `--strict`。
 
-三档口径（可复算，优先级从高到低）
+五档口径（可复算，优先级从高到低）
 ----------------------------------
+0a. `端点/框架方法`：方法上方紧邻 `@GetMapping`/`@RequestMapping`/`@Bean`/`@Query`/
+    `@PrePersist`/`@Override`/`@Scheduled` 等注解——**它根本不是访问器**。
+    2026-11-02 实测：`geofence/RestrictionController#getRestrictionStatus` 带着 `@GetMapping`
+    被旧版列进"最暗一档"，照着清单动手会**删掉一个对外端点**。这一档存在本身就是教训。
+0b. `响应暴露面`：声明类从 `@RestController`/`@Controller` 出发、沿"谁引用了谁"走
+    `RESPONSE_HOPS` 跳可达 ⇒ 它会随响应序列化，Jackson 按 getter 定 JSON 字段名。
+    这一档把上面那段"过近似"从**嘴上登记**变成**机器判据**。
 1. `契约候选`：属性名（去掉 get/is 前缀，camel 与 kebab 两种写法）出现在
    `gcs-web/src`、`docs/`、`deploy/` 里 ⇒ 前端或文档在消费它，**不许当死码删**。
 2. `只有测试在用`：main 里零调用点，但 test 里有 ⇒ 是"测试在钉它"，
    删之前要先问是谁在钉（§10.2 那 6 组常量的教训）。
-3. `零外引用候选`：main/test 都零调用点，且属性名没见于契约面 ⇒ 最暗的一档，
-   但**含 Jackson 序列化的假阳性**，必须人工复核后才能动手。
+3. `零外引用候选`：以上都不命中 ⇒ 最暗的一档。加了 0a/0b 之后它**仍然不是零假阳性**：
+   可达性用文本 token 近似（不是编译级调用图），跨模块反射/`Map` 手工装配仍可能漏判，
+   所以必须人工复核后才动手。
    （复核时顺手把 javadoc/注释指向的"文档证据"当真证据的风险：§11.4 抓到过两例假阳性，
    一次是 alertmanager.yml 里的 `receiver:` 撞名，一次是 SVG 里的 `www.w3.org`。）
 
@@ -47,6 +55,16 @@ GETTER_DECL = re.compile(
 BLOCK_COMMENT = re.compile(r'/\*.*?\*/', re.S)
 LINE_COMMENT = re.compile(r'//[^\n]*')
 STRING_LIT = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+# 名为 getXxx()/isXxx() 但**不是访问器**的方法：路由处理器、Bean 工厂、Spring Data 查询、
+# JPA 生命周期回调、覆写契约。2026-11-02 实测踩过——`RestrictionController#getRestrictionStatus`
+# 带着 @GetMapping 被列进"最暗一档"，照着删就是删一个端点。
+NON_ACCESSOR_ANN = re.compile(
+    r'@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping|'
+    r'Bean|Query|Modifying|PrePersist|PreUpdate|PostLoad|Override|Scheduled|ExceptionHandler|'
+    r'Operation|ApiResponse)\b')
+CONTROLLER_ANN = re.compile(r'@(RestController|Controller)\b')
+TYPE_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{2,}\b')
+RESPONSE_HOPS = 3
 
 
 def strip_noise(text):
@@ -54,6 +72,51 @@ def strip_noise(text):
     text = BLOCK_COMMENT.sub(" ", text)
     text = LINE_COMMENT.sub(" ", text)
     return STRING_LIT.sub('""', text)
+
+
+def annotations_above(text, match_start):
+    """方法声明之前紧邻的注解行（允许中间夹注释/空行）。"""
+    lines = text[:match_start].split("\n")
+    out = []
+    for ln in reversed(lines):
+        s = ln.strip()
+        if s.startswith("@"):
+            out.append(s)
+        elif s == "" or s.startswith(("*", "/*", "//")):
+            continue
+        else:
+            break
+    return "\n".join(out)
+
+
+def declared_type(path):
+    return os.path.splitext(os.path.basename(path))[0]
+
+
+def response_exposed_types(main_clean):
+    """从 @RestController/@Controller 出发，沿"谁引用了谁"走 RESPONSE_HOPS 跳，
+    收集**可能随响应出网**的类型名。Jackson 按 getter 决定 JSON 字段名，
+    所以这些类里的 getter 即使全仓零调用点也不能算死码——这一档把 §12.3 的
+    "过近似"从嘴上登记变成机器判据。"""
+    ctrl_files = [p for p, t in main_clean.items() if CONTROLLER_ANN.search(t)]
+    by_type = {declared_type(p): p for p in main_clean}
+    reachable = set()
+    frontier = set()
+    for p in ctrl_files:
+        frontier.add(declared_type(p))
+        frontier.update(TYPE_TOKEN.findall(main_clean[p]))
+    for _ in range(RESPONSE_HOPS):
+        reachable |= frontier
+        nxt = set()
+        for t in frontier:
+            p = by_type.get(t)
+            if p and p not in ctrl_files:
+                nxt.update(TYPE_TOKEN.findall(main_clean[p]))
+        frontier = nxt - reachable
+        if not frontier:
+            break
+    return reachable, len(ctrl_files)
+
 
 
 def java_files(root, sub):
@@ -111,14 +174,22 @@ def scan(root):
     for text in main_clean.values():
         for mo in JAVA_VALUE_READ.finditer(text):
             value_keys.add(mo.group(1))
-    counts = {"契约候选": 0, "只有测试在用": 0, "零外引用候选": 0, "有调用点": 0}
+    counts = {"端点/框架方法": 0, "响应暴露面": 0, "契约候选": 0,
+              "只有测试在用": 0, "零外引用候选": 0, "有调用点": 0}
+    exposed, n_ctrl = response_exposed_types(main_clean)
     dead = []
     for path, text in sorted(main_clean.items()):
         for mo in GETTER_DECL.finditer(text):
             name = mo.group(1)
+            if NON_ACCESSOR_ANN.search(annotations_above(text, mo.start())):
+                counts["端点/框架方法"] += 1
+                continue
             body = re.compile(r'\b%s\s*\(' % re.escape(name))
             if any(body.search(t) for q, t in main_clean.items() if q != path):
                 counts["有调用点"] += 1
+                continue
+            if declared_type(path) in exposed:
+                counts["响应暴露面"] += 1
                 continue
             prop = re.sub(r"^(get|is)", "", name)
             prop = prop[0].lower() + prop[1:] if prop else prop
@@ -149,11 +220,12 @@ def main(argv=None):
         return self_test()
     counts, dead = scan(args.root)
     total_getters = sum(counts.values())
-    print("[report-only] public getter 零外引用清单（不判红；判据是过近似，"
-          "第 3 档含 Jackson 序列化假阳性——审计 §11.3/§12.3）")
-    print("  扫描 %d 个 public 无参 getter：有调用点 %d / 契约候选 %d / 只有测试在用 %d / "
-          "零外引用候选 %d" % (total_getters, counts["有调用点"], counts["契约候选"],
-                               counts["只有测试在用"], counts["零外引用候选"]))
+    print("[report-only] public getter 零外引用清单（不判红；第 3 档仍是文本级近似，"
+          "可达性不是编译级调用图——审计 §11.3/§12.3/§13）")
+    print("  扫描 %d 个 public 无参 getter：有调用点 %d / 端点·框架方法 %d / 响应暴露面 %d / "
+          "契约候选 %d / 只有测试在用 %d / 零外引用候选 %d"
+          % (total_getters, counts["有调用点"], counts["端点/框架方法"], counts["响应暴露面"],
+             counts["契约候选"], counts["只有测试在用"], counts["零外引用候选"]))
     if dead:
         print("  最暗一档（人工复核后才动手，前 %d 个）：" % args.top)
         for item in sorted(dead)[:args.top]:
@@ -181,7 +253,8 @@ def self_test():
     base = tempfile.mkdtemp(prefix="getters-")
     results = {}
     try:
-        def fixture(extra_main="", extra_test="", extra_frontend="", extra_docs=""):
+        def fixture(extra_main="", extra_test="", extra_frontend="", extra_docs="",
+                    extra_ctrl=""):
             root = os.path.join(base, "r%d" % len(os.listdir(base)))
             _write(os.path.join(root, "m", "src", "main", "java", "demo", "A.java"),
                    "package demo;\npublic class A {\n"
@@ -201,6 +274,10 @@ def self_test():
                 _write(os.path.join(root, "gcs-web", "src", "api.ts"), extra_frontend)
             if extra_docs:
                 _write(os.path.join(root, "docs", "d.md"), extra_docs)
+            if extra_ctrl:
+                _write(os.path.join(root, "m", "src", "main", "java", "demo", "Ctrl.java"),
+                       "package demo;\n@RestController\npublic class Ctrl {\n"
+                       + extra_ctrl + "}\n")
             return root
 
         r = fixture(extra_test="  void t() { A a = new A(); a.getTestOnly(); }\n",
@@ -220,6 +297,24 @@ def self_test():
                                '  String s = "getOrphan()";\n')
         _c, d2 = scan(r2)
         results["注释与字符串不算调用点"] = "getOrphan" in " ".join(d2)
+        # 0a/0b 两档：端点处理器不是访问器；响应面上的类不进最暗档
+        # （2026-11-02 实测：RestrictionController#getRestrictionStatus 被旧版列进第 3 档）
+        r3 = fixture(extra_ctrl="  @GetMapping(\"/status\")\n"
+                                "  public DemoDto getRestrictionStatus() { return new DemoDto(); }\n")
+        _write(os.path.join(r3, "m", "src", "main", "java", "demo", "DemoDto.java"),
+               "package demo;\npublic class DemoDto {\n"
+               "  public int getOnlyOnWire() { return 7; }\n}\n")
+        c3, d3 = scan(r3)
+        n3 = set(x.split("#")[1] for x in d3)
+        results["端点处理器不算访问器（第 0a 档）"] = c3["端点/框架方法"] == 1 and \
+            "getRestrictionStatus" not in n3
+        results["随响应出网的类不进最暗档（第 0b 档）"] = c3["响应暴露面"] == 1 and \
+            "getOnlyOnWire" not in n3
+        # 反证：控制器不该把全世界吞进暴露面——另一个与控制器无关的类仍是孤儿
+        _write(os.path.join(r3, "m", "src", "main", "java", "demo", "Z.java"),
+               "package demo;\npublic class Z {\n  public int getStillOrphan() { return 0; }\n}\n")
+        _c4, d4 = scan(r3)
+        results["暴露面没有把无关类一起吞掉"] = any("getStillOrphan" in x for x in d4)
         # 恒退 0：有候选也不红（这是本脚本存在的核心承诺）
         rc = main(["--root", r])
         results["有候选仍退 0（report-only）"] = rc == 0

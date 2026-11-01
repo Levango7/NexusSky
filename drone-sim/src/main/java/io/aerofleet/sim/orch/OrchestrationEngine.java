@@ -410,19 +410,4 @@ public class OrchestrationEngine {
         return plans.size();
     }
 
-    public MeshIntegration getMeshIntegration() {
-        return meshIntegration;
-    }
-
-    public CellTowerIntegration getCellIntegration() {
-        return cellIntegration;
-    }
-
-    public SatRelayIntegration getSatIntegration() {
-        return satIntegration;
-    }
-
-    public TerrainIntegration getTerrainIntegration() {
-        return terrainIntegration;
-    }
 }
