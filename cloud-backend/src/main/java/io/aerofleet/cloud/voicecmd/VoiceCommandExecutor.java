@@ -57,8 +57,26 @@ public class VoiceCommandExecutor {
     private final DeviceRegistry registry;
     private final DroneCommandService commands;
 
-    /** 待确认指令缓存：pendingId → ParsedCommand */
-    private final Map<String, ParsedCommand> pendingCommands = new ConcurrentHashMap<>();
+    /** 待确认指令缓存：pendingId → 待确认条目（指令 + 入队时刻）。 */
+    private final Map<String, PendingCommand> pendingCommands = new ConcurrentHashMap<>();
+
+    /**
+     * 待确认指令的存活期：超过该时长仍未确认即作废。
+     * <p>
+     * 这不只是内存问题，更是安全问题：高优先级指令要二次确认，若一条「起飞」在
+     * 未确认状态无限期挂着，几小时后任何一次同 ID 的确认都会把它真的下发。
+     * 2 分钟足够操作员看清提示并确认，又短到不会让迟到的确认变成意外动作。
+     */
+    static final long PENDING_TTL_MS = 120_000L;
+
+    /** 待确认队列上限（TTL 之外的第二道闸）：防止脚本刷屏把 map 撑大。 */
+    static final int MAX_PENDING = 64;
+
+    /** 测试可注入时钟；生产走系统时钟。 */
+    private final java.time.Clock clock;
+
+    /** 待确认条目。 */
+    private record PendingCommand(ParsedCommand command, long createdAtMs) { }
 
     /** 指令历史：commandId → ExecutionResult（只保留最新 {@value #MAX_HISTORY} 条）。 */
     private final Map<String, ExecutionResult> history = new ConcurrentHashMap<>();
@@ -69,9 +87,17 @@ public class VoiceCommandExecutor {
     /** 历史插入顺序（commandId 是随机 UUID，不能按 key 排序，只能另记顺序用于淘汰最旧）。 */
     private final java.util.Deque<String> historyOrder = new java.util.concurrent.ConcurrentLinkedDeque<>();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public VoiceCommandExecutor(DeviceRegistry registry, DroneCommandService commands) {
+        this(registry, commands, java.time.Clock.systemUTC());
+    }
+
+    /** 测试专用：注入可控时钟，让过期判定不依赖真实时间。 */
+    VoiceCommandExecutor(DeviceRegistry registry, DroneCommandService commands,
+                         java.time.Clock clock) {
         this.registry = registry;
         this.commands = commands;
+        this.clock = clock;
     }
 
     /**
@@ -125,7 +151,9 @@ public class VoiceCommandExecutor {
         // 高优先级指令需二次确认
         if (cmd.getPriority() == ParsedCommand.Priority.HIGH) {
             String pendingId = commandId;
-            pendingCommands.put(pendingId, cmd);
+            pruneExpiredPending();
+            pendingCommands.put(pendingId, new PendingCommand(cmd, clock.millis()));
+            enforcePendingCap(pendingId);
             ExecutionResult result = new ExecutionResult(
                     pendingId,
                     ExecutionResult.Status.PENDING_CONFIRMATION,
@@ -147,8 +175,8 @@ public class VoiceCommandExecutor {
      * @return 确认后的执行结果（EXECUTED / FAILED / REJECTED）；未找到时返回 FAILED
      */
     public ExecutionResult confirm(String pendingId) {
-        ParsedCommand cmd = pendingCommands.remove(pendingId);
-        if (cmd == null) {
+        PendingCommand pending = pendingCommands.remove(pendingId);
+        if (pending == null) {
             ExecutionResult result = new ExecutionResult(
                     pendingId,
                     ExecutionResult.Status.FAILED,
@@ -158,6 +186,19 @@ public class VoiceCommandExecutor {
             log.warn("Confirm failed: pendingId={} not found", pendingId);
             return result;
         }
+        if (isExpired(pending)) {
+            // 过期不是「找不到」，要说清楚原因：让操作员知道需要重新下达，而不是去查 ID 拼写。
+            ExecutionResult result = new ExecutionResult(
+                    pendingId,
+                    ExecutionResult.Status.FAILED,
+                    "待确认指令已过期（超过 " + (PENDING_TTL_MS / 1000) + " 秒未确认），请重新下达",
+                    null);
+            remember(pendingId, result);
+            log.warn("Confirm rejected: pendingId={} expired (age={}ms)",
+                    pendingId, clock.millis() - pending.createdAtMs());
+            return result;
+        }
+        ParsedCommand cmd = pending.command();
 
         // pending 期间无人机可能已离线/注销：下发前重校验
         int sysid = cmd.getSysid() > 0 ? cmd.getSysid() : 1;
@@ -181,9 +222,21 @@ public class VoiceCommandExecutor {
 
     /**
      * 指定 pendingId 是否存在待确认指令（供控制器区分 404 与下发失败）。
+     * <p>过期条目视同不存在，并顺带清掉——否则控制器会先放行、再在 confirm 里被拒。
      */
     public boolean hasPending(String pendingId) {
-        return pendingId != null && pendingCommands.containsKey(pendingId);
+        if (pendingId == null) {
+            return false;
+        }
+        PendingCommand pending = pendingCommands.get(pendingId);
+        if (pending == null) {
+            return false;
+        }
+        if (isExpired(pending)) {
+            pendingCommands.remove(pendingId, pending);
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -196,12 +249,50 @@ public class VoiceCommandExecutor {
     }
 
     /**
-     * 获取待确认指令列表。
+     * 获取待确认指令列表（已过期的不返回，并顺带清理）。
      *
      * @return 待确认指令 Map（pendingId → ParsedCommand）
      */
     public Map<String, ParsedCommand> getPending() {
-        return Collections.unmodifiableMap(pendingCommands);
+        pruneExpiredPending();
+        Map<String, ParsedCommand> snapshot = new java.util.LinkedHashMap<>();
+        pendingCommands.forEach((id, pending) -> snapshot.put(id, pending.command()));
+        return Collections.unmodifiableMap(snapshot);
+    }
+
+    // --- 待确认队列维护 ---
+
+    private boolean isExpired(PendingCommand pending) {
+        return clock.millis() - pending.createdAtMs() > PENDING_TTL_MS;
+    }
+
+    /** 清掉过期条目：没人确认的条目不能永远留在内存里。 */
+    private void pruneExpiredPending() {
+        pendingCommands.entrySet().removeIf(e -> isExpired(e.getValue()));
+    }
+
+    /**
+     * 第二道闸：TTL 已能收敛常态，这里兜住「短时间刷入大量待确认指令」。
+     * 超出上限时淘汰最旧的一条（新建的这条本身不动）。
+     */
+    private void enforcePendingCap(String justAddedId) {
+        if (pendingCommands.size() <= MAX_PENDING) {
+            return;
+        }
+        pendingCommands.entrySet().stream()
+                .filter(e -> !e.getKey().equals(justAddedId))
+                .min(java.util.Comparator.comparingLong(e -> e.getValue().createdAtMs()))
+                .map(Map.Entry::getKey)
+                .ifPresent(oldest -> {
+                    pendingCommands.remove(oldest);
+                    log.warn("Pending command queue full ({}), evicted oldest pendingId={}",
+                            MAX_PENDING, oldest);
+                });
+    }
+
+    /** 测试辅助：当前待确认条数。 */
+    int pendingSize() {
+        return pendingCommands.size();
     }
 
     // --- 真实下发 ---
