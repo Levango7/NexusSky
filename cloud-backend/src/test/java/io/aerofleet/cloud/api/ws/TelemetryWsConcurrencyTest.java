@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
 import java.net.InetSocketAddress;
 import java.util.Map;
@@ -92,10 +93,14 @@ class TelemetryWsConcurrencyTest {
     }
 
     @Test
-    @DisplayName("同一会话被两个线程同时广播：发送互斥，不并发")
+    @DisplayName("同一会话被两个线程同时广播：由装饰器 flushLock 互斥，不并发")
     void concurrentBroadcastToSameSessionIsSerialized() throws Exception {
         TelemetryWebSocketHandler handler = handler(0, 0);
-        WebSocketSession target = session("sess-shared", IP);
+        // 生产环境每个连接都套 ConcurrentWebSocketSessionDecorator（见 WebSocketConfig）：
+        // 同会话发送互斥改由装饰器内部 flushLock 提供。本测试复刻该路径——
+        // sendTimeLimit 调高到 60s，避免 60ms 睡眠被误判为慢客户端而断开。
+        WebSocketSession raw = session("sess-shared", IP);
+        WebSocketSession target = new ConcurrentWebSocketSessionDecorator(raw, 60_000, 10_000_000);
         handler.afterConnectionEstablished(target);
 
         AtomicInteger inFlight = new AtomicInteger();
@@ -110,7 +115,7 @@ class TelemetryWsConcurrencyTest {
                 inFlight.decrementAndGet();
             }
             return null;
-        }).when(target).sendMessage(org.mockito.ArgumentMatchers.any());
+        }).when(raw).sendMessage(org.mockito.ArgumentMatchers.any());
 
         CountDownLatch start = new CountDownLatch(1);
         Runnable broadcast = () -> {
@@ -130,9 +135,9 @@ class TelemetryWsConcurrencyTest {
         t2.join(5000);
 
         assertThat(overlapped.get())
-                .as("同一会话的 sendMessage 必须互斥（未加锁时两个线程会同时进入同一会话的发送）")
+                .as("同一会话的 sendMessage 必须互斥（装饰器 flushLock 保证，未加锁时两个线程会同时进入同一会话的发送）")
                 .isFalse();
-        org.mockito.Mockito.verify(target, org.mockito.Mockito.times(2))
+        org.mockito.Mockito.verify(raw, org.mockito.Mockito.times(2))
                 .sendMessage(org.mockito.ArgumentMatchers.any());
     }
 }
