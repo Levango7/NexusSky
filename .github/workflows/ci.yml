@@ -105,10 +105,26 @@ jobs:
           # 变异验证的还原必须刷新时间戳，否则增量编译会继续用改坏的 .class
           # （2026-10-22 踩过，见 docs/agent-constraints.md 第 12 条）
           python3 scripts/mutate-verify.py --self-test
+          # 协作状态板结构（2026-11-01 落地）：STATUS.md 必须只有一份完整副本。
+          # 真事：它被多个会话整块追加成 32 份（7.3 MB / 71067 行），其中 30 份是
+          # 10-25~10-28 的陈旧快照，头尾两份「较新」的还互相矛盾；而 coord-status.sh
+          # 的 --write 只刷新第一份标记块，其余各份的「在途与占用」段会被**清空**——
+          # 读板的人看到空段会误读成「当前没有在途工作」。
+          # .coord/ 是 gitignored 的，CI 上没有该文件 ⇒ 真检查在本机跑，这里只跑自测，
+          # 证明它能拦住多副本、且不误拦干净态。
+          python3 scripts/check-coord-board.py --self-test
+          # 阶段事实门禁（2026-11-01 落地）：定位白皮书的"自我声明"必须与代码事实一致。
+          # 真事：同一份文档里，§1.4 说"商用落地需要补齐鉴权、持久化"，§7.2 却把这两项
+          # 标成 ✅ 已完成；§7.1（标注同步自 README 的 2026-10-02）落后两个月，
+          # 其中"自主决策只建议不执行""M12 边缘库无生产调用方"两条已被代码反证。
+          python3 scripts/check-positioning-facts.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
         run: python3 scripts/check-selftest-coverage.py
+      # 定位白皮书声明的"已完成/待补"必须与仓库里的代码事实一致（事实源 = docs/stage-facts.json）
+      - name: Positioning facts gate (doc claims vs code facts)
+        run: python3 scripts/check-positioning-facts.py
       # 生产代码里的空 catch 必须显式登记理由（棘轮）。真事：多处 best-effort 收尾
       # 本身合理，但新增一处 `catch (Exception e) {}` 会静默吞掉请求线程的故障。
       - name: Empty catch ratchet gate

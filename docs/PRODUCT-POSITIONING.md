@@ -54,8 +54,17 @@ eVTOL 企业的**多机协同调度云平台中间件**。客户自带飞机（�
 
 当前为 **PoC 阶段**：以 `drone-sim` 软件模拟器代替真飞控，协议、接口与
 真实 PX4 硬件一致，但**未在真机集群上完成验证**。本白皮书所列能力均已
-在模拟器与 e2e 回归脚本中跑通（详见 §2 每项的"实现状态"），但商用落地
-需要补齐鉴权、持久化与真机集成（详见 §7）。
+在模拟器与 e2e 回归脚本中跑通（详见 §2 每项的"实现状态"）。
+
+商用落地尚需补齐的项以 **§7.2 为准（当前 5 项待补齐）**：其中真机集成验证、
+ONVIF 厂商现场联调、应急 SOP 对齐属**仓外依赖**（厂商硬件 / 现场 / 业务专家），
+计费与 K8s 生产级验证属本仓可做项。鉴权、持久化、多租户隔离、MAVLink 签名
+已完成（§7.2 中已划掉），不再列为待补。
+
+> 这份"哪些已完成、哪些还差"的清单有**机器可读的单一事实源**：
+> `docs/stage-facts.json`。本文档 §1.4 与 §7.2 必须与它一致，由
+> `scripts/check-positioning-facts.py` 在 CI 里守住——
+> **改了事实却不改文档（或反之），CI 会红**。
 
 ---
 
@@ -512,10 +521,14 @@ java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
 
 > 本节列出 PoC 阶段的已知边界，作为商用落地必须补齐的清单。
 
-### 7.1 已知边界（同步自 README.md "已知边界"章节，2026-10-02）
+### 7.1 已知边界（2026-11-01 按代码事实复核）
 
-> 旧版本节曾列「无鉴权 / 无持久化 / MAVLink 签名未实现」——三项均已落地
-> （见 §7.2），过期边界不再保留。
+> 本节此前标注"同步自 README.md 已知边界章节，2026-10-02"，已落后两个月；
+> 其中两条（自主决策、边缘 AI）**被代码反证**，本轮按代码事实更正。
+> 「阶段事实」的机器可读单一事实源是 `docs/stage-facts.json`，
+> 由 `scripts/check-positioning-facts.py` 守住（见 §1.4）。
+> 旧版本节曾列的三项（鉴权、持久化、MAVLink 签名）均已落地（见 §7.2），
+> 过期边界不再保留。
 
 - **模拟器为简化气动**：物理引擎 v2 含加速度/协调转弯/bank/姿态，非真飞控级气动。
 - **MAVLink 签名已与官方逐字节对等**（2026-10-01）；**prod 出厂仍明文**
@@ -523,10 +536,13 @@ java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
   但 **staging 已开启并收紧为 strict**（2026-10-11）。轮换端点与部署侧注入链路均已就位；
   口令与密钥库内容仍是**明文**（未做静态加密）。
 - **检测器是投影可见性**：无真实 CV 模型，接入点在 `CaptureService` 第 2 步。
-- **「自主决策」已接线为 advisory（只建议不执行），「边缘 AI」仍是库**：M11 决策
-  引擎经 `AutonomyAdvisor` 接入 `VirtualDrone.tickOnce`（1Hz，STATUSTEXT 建议，
-  执行链路仍是 `FailsafeController`）；M12 边缘库无生产调用方
-  （完整口径见 README「已知边界」）。
+- **「自主决策」已接线为 advisory + 执行级；「边缘 AI」已接入生产链路**：
+  M11 决策引擎经 `AutonomyAdvisor` 接入 `VirtualDrone.tickOnce`（1Hz，STATUSTEXT 建议）；
+  执行级经 `AutonomyExecutor` 门控（`--autonomy-exec`，**默认关闭**、failsafe 永远优先），
+  ADAPT_PATH 任务改写亦已接线。M12 的 `SensorFusionEngine` / `VideoStreamAnalyzer`
+  由 `EdgeInferenceRunner` 实例化并调用（该 runner 不在 `edge` 包内 ⇒ 属生产引用），
+  `AiAutonomyWiringTest` 有反回归断言钉住这两条接线，不得静默退线。
+  （完整口径见 README「已知边界」与 `docs/stage-facts.json`。）
 - **前端本地仅静态检查**：真实构建在 CI（`npm run build`）。
 
 ### 7.2 商用落地必补项
@@ -535,11 +551,12 @@ java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
 |---|---|---|---|
 | ~~鉴权（OAuth2 / API Key）~~ | ~~P0~~ | — | ✅ 已完成（2026-10-01：JWT RS256 + API Key + RBAC 默认拒绝） |
 | ~~持久化（Postgres + Redis）~~ | ~~P0~~ | — | ✅ 已完成（Flyway + PostgreSQL；CI Pass C 从零建库验证） |
-| 真机集成验证（PX4 + ArduPilot） | P0 | 4–8 人周 | SITL 已覆盖，真机未做 |
-| 多租户与计费 | P1 | 2–3 人周 | 多租户已上线（三态租户域），计费未做 |
+| ~~多租户隔离（三态租户域）~~ | ~~P1~~ | — | ✅ 已完成（租户表 + 隔离迁移，7 张业务表带 tenant_id） |
 | ~~MAVLink 签名~~ | ~~P1~~ | — | ✅ 已完成（2026-10-01 与官方逐字节对等；出厂默认关闭） |
-| ONVIF 三大厂商现场联调 | P1 | 2–4 人周 | 应急版核心卖点 |
-| 应急 SOP 对齐 | P1 | 业务专家参与 | 非纯技术工作 |
+| 真机集成验证（PX4 + ArduPilot） | P0 | 4–8 人周 | SITL 已覆盖，真机未做（**仓外依赖**：厂商硬件与现场） |
+| 计费 | P1 | 2–3 人周 | 仓内尚无计费实现（多租户隔离已完成，见上） |
+| ONVIF 三大厂商现场联调 | P1 | 2–4 人周 | 应急版核心卖点（**仓外依赖**：真实摄像头与厂商现场） |
+| 应急 SOP 对齐 | P1 | 业务专家参与 | 非纯技术工作（**仓外依赖**：业务专家与行业客户） |
 | K8s 部署 + Helm chart | P2 | — | 已提供（deploy/k8s + deploy/helm），生产级验证待真机部署 |
 
 ### 7.3 不夸大承诺
