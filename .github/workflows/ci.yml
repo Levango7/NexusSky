@@ -113,10 +113,18 @@ jobs:
           # .coord/ 是 gitignored 的，CI 上没有该文件 ⇒ 真检查在本机跑，这里只跑自测，
           # 证明它能拦住多副本、且不误拦干净态。
           python3 scripts/check-coord-board.py --self-test
+          # 阶段事实门禁（2026-11-01 落地）：定位白皮书的"自我声明"必须与代码事实一致。
+          # 真事：同一份文档里，§1.4 说"商用落地需要补齐鉴权、持久化"，§7.2 却把这两项
+          # 标成 ✅ 已完成；§7.1（标注同步自 README 的 2026-10-02）落后两个月，
+          # 其中"自主决策只建议不执行""M12 边缘库无生产调用方"两条已被代码反证。
+          python3 scripts/check-positioning-facts.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
         run: python3 scripts/check-selftest-coverage.py
+      # 定位白皮书声明的"已完成/待补"必须与仓库里的代码事实一致（事实源 = docs/stage-facts.json）
+      - name: Positioning facts gate (doc claims vs code facts)
+        run: python3 scripts/check-positioning-facts.py
       # 生产代码里的空 catch 必须显式登记理由（棘轮）。真事：多处 best-effort 收尾
       # 本身合理，但新增一处 `catch (Exception e) {}` 会静默吞掉请求线程的故障。
       - name: Empty catch ratchet gate

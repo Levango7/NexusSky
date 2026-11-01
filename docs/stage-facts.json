@@ -1,0 +1,146 @@
+{
+  "schema": 1,
+  "as_of": "2026-11-01",
+  "doc": "docs/PRODUCT-POSITIONING.md",
+  "purpose": "「阶段事实」的机器可读单一事实源。docs/PRODUCT-POSITIONING.md 的 §1.4 与 §7.2 必须与本文件一致，由 scripts/check-positioning-facts.py 守住。改事实先改这里，再改文档。",
+  "status_meaning": {
+    "done": "已完成并有代码级证据",
+    "wired": "已接入生产链路（有代码级证据），但可能默认关闭",
+    "pending": "待补，且可以在本仓内完成",
+    "external": "待补，但依赖仓外条件（真机、厂商、现场、业务专家）"
+  },
+  "evidence_note": "「不存在某文件」这类证据只是**自动化落地证据的缺失**，不等于「这件事没发生」——它证明的是「至今没有可自动复现的落地证据」。凡属此类，事实的 note 里必须写明这一点。",
+  "facts": [
+    {
+      "id": "auth",
+      "label": "鉴权（JWT RS256 + API Key + RBAC 默认拒绝）",
+      "status": "done",
+      "in_gap_table": true,
+      "doc_key": "鉴权",
+      "evidence": [
+        {"kind": "file_contains", "path": "cloud-backend/src/main/resources/application-prod.properties", "text": "aerofleet.security.rbac-enabled=true"},
+        {"kind": "file_contains", "path": "cloud-backend/src/main/resources/application-prod.properties", "text": "aerofleet.security.jwt-secret=${AEROFLEET_JWT_SECRET}"}
+      ],
+      "contradicting_phrases": ["需要补齐鉴权", "无鉴权"]
+    },
+    {
+      "id": "persistence",
+      "label": "持久化（Flyway + PostgreSQL）",
+      "status": "done",
+      "in_gap_table": true,
+      "doc_key": "持久化",
+      "evidence": [
+        {"kind": "file_exists", "path": "cloud-backend/src/main/resources/db/migration/V1__init.sql"},
+        {"kind": "file_count_at_least", "path": "cloud-backend/src/main/resources/db/migration", "glob": "V*__*.sql", "min_count": 30}
+      ],
+      "contradicting_phrases": ["需要补齐持久化", "无持久化"]
+    },
+    {
+      "id": "mavlink_signing",
+      "label": "MAVLink 签名（与官方逐字节对等，出厂默认关闭）",
+      "status": "done",
+      "in_gap_table": true,
+      "doc_key": "MAVLink 签名",
+      "evidence": [
+        {"kind": "file_contains", "path": "cloud-backend/src/main/resources/application-prod.properties", "text": "mavlink.signing.enabled=false"}
+      ],
+      "contradicting_phrases": ["MAVLink 签名未实现"]
+    },
+    {
+      "id": "multi_tenant",
+      "label": "多租户隔离（三态租户域）",
+      "status": "done",
+      "in_gap_table": true,
+      "doc_key": "多租户隔离",
+      "evidence": [
+        {"kind": "file_exists", "path": "cloud-backend/src/main/resources/db/migration/V6__user_tenant_tables.sql"},
+        {"kind": "file_exists", "path": "cloud-backend/src/main/resources/db/migration/V10__tenant_isolation.sql"}
+      ],
+      "contradicting_phrases": []
+    },
+    {
+      "id": "autonomy_exec",
+      "label": "自主决策（advisory + 执行级 --autonomy-exec，默认关闭、failsafe 优先）",
+      "status": "wired",
+      "in_gap_table": false,
+      "evidence": [
+        {"kind": "file_contains", "path": "drone-sim/src/main/java/io/aerofleet/sim/AutonomyExecutor.java", "text": "--autonomy-exec"},
+        {"kind": "file_contains", "path": "drone-sim/src/test/java/io/aerofleet/sim/AiAutonomyWiringTest.java", "text": "adaptivePathStrategyIsWired"}
+      ],
+      "contradicting_phrases": ["只建议不执行", "仅建议不执行"]
+    },
+    {
+      "id": "edge_ai",
+      "label": "边缘 AI（SensorFusionEngine / VideoStreamAnalyzer 已接入生产链路）",
+      "status": "wired",
+      "in_gap_table": false,
+      "evidence": [
+        {"kind": "file_contains", "path": "drone-sim/src/main/java/io/aerofleet/sim/EdgeInferenceRunner.java", "text": "SensorFusionEngine"},
+        {"kind": "file_contains", "path": "drone-sim/src/main/java/io/aerofleet/sim/EdgeInferenceRunner.java", "text": "VideoStreamAnalyzer"},
+        {"kind": "file_contains", "path": "drone-sim/src/test/java/io/aerofleet/sim/AiAutonomyWiringTest.java", "text": "edgeEnginesAreWired"}
+      ],
+      "contradicting_phrases": ["边缘库无生产调用方", "M12 边缘库无生产调用方"]
+    },
+    {
+      "id": "real_hardware",
+      "label": "真机集成验证（PX4 + ArduPilot）",
+      "status": "external",
+      "in_gap_table": true,
+      "doc_key": "真机集成验证",
+      "note": "SITL 已覆盖（scripts/e2e-px4-sitl.ps1 + docs/sitl-integration.md）；真机侧至今**没有可自动复现的落地证据**，且受制于厂商硬件与现场条件（仓外依赖）。",
+      "evidence": [
+        {"kind": "file_exists", "path": "scripts/e2e-px4-sitl.ps1"},
+        {"kind": "file_exists", "path": "docs/sitl-integration.md"},
+        {"kind": "no_file_matching", "glob": "scripts/e2e-*real*"}
+      ],
+      "contradicting_phrases": ["真机集群验证已完成", "真机已验证"]
+    },
+    {
+      "id": "onvif_vendor",
+      "label": "ONVIF 三大厂商现场联调",
+      "status": "external",
+      "in_gap_table": true,
+      "doc_key": "ONVIF",
+      "note": "ONVIF 后端与 PullPoint 客户端已在仓内，但**厂商设备现场联调**没有可自动复现的落地证据（需要真实摄像头与厂商现场，仓外依赖）。",
+      "evidence": [
+        {"kind": "file_exists", "path": "cloud-backend/src/main/java/io/aerofleet/cloud/surveillance/onvif/OnvifBackend.java"},
+        {"kind": "no_file_matching", "glob": "scripts/e2e-onvif-*"}
+      ],
+      "contradicting_phrases": ["ONVIF 三大厂商联调已完成"]
+    },
+    {
+      "id": "billing",
+      "label": "计费（多租户已上线，计费未做）",
+      "status": "pending",
+      "in_gap_table": true,
+      "doc_key": "计费",
+      "note": "仓内**没有任何计费相关实现**，因此没有可自动复现的落地证据（缺的是代码，不是证据）。",
+      "evidence": [
+        {"kind": "no_file_matching", "glob": "**/*illing*"}
+      ],
+      "contradicting_phrases": ["计费已完成"]
+    },
+    {
+      "id": "emergency_sop",
+      "label": "应急 SOP 对齐（需业务专家与行业客户参与，非纯技术工作）",
+      "status": "external",
+      "in_gap_table": true,
+      "doc_key": "应急 SOP",
+      "note": "纯业务工作，仓内不可能有「证据」，因此本事实**没有** evidence 条目（门禁对空 evidence 放行，但必须在表里出现且不得被划掉）。",
+      "evidence": [],
+      "contradicting_phrases": ["应急 SOP 对齐已完成"]
+    },
+    {
+      "id": "k8s_helm",
+      "label": "K8s 部署 + Helm chart（已提供，生产级验证待真机部署）",
+      "status": "pending",
+      "in_gap_table": true,
+      "doc_key": "Helm",
+      "evidence": [
+        {"kind": "file_exists", "path": "deploy/helm/nexussky/values.yaml"},
+        {"kind": "file_exists", "path": "deploy/k8s/cloud-backend.yaml"}
+      ],
+      "contradicting_phrases": []
+    }
+  ]
+}
