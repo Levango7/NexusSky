@@ -125,6 +125,9 @@ export default function TelemetryPanel({ drone, telemetry, onCommand }) {
             </div>
             <div className="mini-cell"><label>航点</label><b>{t.missionSeq != null && t.missionTotal != null ? `${t.missionSeq}/${t.missionTotal}` : '--'}</b></div>
             <div className="mini-cell"><label>油门</label><b>{t.throttle != null ? t.throttle : '--'}</b></div>
+            {/* 飞行阶段真值（EXTENDED_SYS_STATE）：null = 未定义/尚未上报，一律「未知」，不冒充状态 */}
+            <div className="mini-cell"><label>阶段</label><b>{t.landedStateName ?? '未知'}</b></div>
+            <div className="mini-cell"><label>固件</label><b>{t.firmwareVersion ?? '--'}</b></div>
             <div className="mini-cell">
               <label>链路</label>
               <SignalBars dbm={t.rssiDbm} />
