@@ -12,7 +12,10 @@
 # （报在脚本第一行，git blame 指向的行是无关的行）。显式声明把这个坑变成不可达。
 *.sh text eol=lf
 
-# Windows 批处理与 PS1 脚本必须是 CRLF，否则 cmd.exe 解析失败
+# Windows 批处理必须是 CRLF，否则 cmd.exe 解析失败。
+# （原文这里写的是「批处理与 PS1 脚本必须是 CRLF」——PS1 是 PowerShell 脚本，
+#   cmd.exe 根本不解析它；PowerShell 5.1/7 都能正常读 LF-only 的 .ps1，
+#   本机实测通过。故 PS1 归到下面的 LF 组，不按 CRLF 处理。）
 *.cmd text eol=crlf
 *.bat text eol=crlf
 
@@ -33,3 +36,75 @@
 *.sql text eol=lf
 *.mjs text eol=lf
 *.cjs text eol=lf
+
+# ---------------------------------------------------------------------------
+# 2026-11-01 补齐上面漏掉的一批（实测驱动，见下）。
+#
+# 为什么必须补：上面那份清单只覆盖了「源码类」扩展名，漏了 .yml/.yaml/.xml/.json
+# 与若干无扩展名的点文件、Dockerfile。**没被声明的类型，git 压根不套 clean 过滤器**
+# —— CRLF 差异就是实打实的字节差异。而本机工作区由 Windows 的 core.autocrlf=true
+# 检出成 CRLF，于是**同一份检出在 Windows git 与 WSL git 两侧判定相反**：
+#   Windows git（core.autocrlf=true，无条件套 clean 过滤器）→ status 报 0 个改动
+#   WSL git（autocrlf 未设，不套过滤器）                    → status 报 89 个"改动"
+# 实测（主树 F:\Nexus\NexusSky，Windows 侧 git ls-files --eol）：
+#   工作区是 CRLF 的文件共 958 个，其中 **86 个的类型没被 .gitattributes 声明**
+#   ⇒ 这 86 个在 WSL 侧是字节真差异（.yaml 19 / .ps1 34 / .json 7 / .xml 6 /
+#      .yml 6 / .txt 3 / .gitignore 2 / 其余点文件与 Dockerfile.* 共 9）
+#   剩下的 872 个已被声明（.java/.md/.sh/.ts/...），WSL 侧干净。
+# 用**缓存无关**的逐文件哈希比对（工作区文件经 clean 过滤后的哈希 vs index blob 哈希）实测：
+#   补齐前 = 89 个真实内容不一致；补齐后 = 1（剩的 1 个是根 pom.xml 的混合行尾，已单独归一）。
+# ⚠️ **不要用 `git diff`/`git status` 的数字当"内容真值"**：共享 index 的 stat 缓存是
+#    跨 git 配置共享的，谁最后刷新谁说了算 —— 缓存说"没改"，git 就直接跳过内容比较。
+#    要判"内容是否真的一致"，必须自己比哈希。
+# 后果不是"多报几个数"：docs/agent-constraints.md 第 2 条写着
+# 「看到别人的未提交改动就别 git add -A」，几十个假修改会让每个 agent 都以为
+# 有人在改主树，进而互相让路、不敢提交——**板面与协作节奏一起被污染**。
+#
+# ⚠️ 三个反直觉的坑（本批实测推翻过两次自己的结论，务必照抄结论、别照抄猜测）：
+#
+#   1) `.gitattributes` 覆盖**不会**让 `git status` 停下来。
+#      git status 判定"工作区已改"走的是 **stat 尺寸比对**（index 里缓存的是旧尺寸），
+#      内容层面是否相等是另一条路。裸仓夹具实测（属性已声明、attr/text eol=lf）：
+#        git status --porcelain  → " M a.txt"      ← 仍报已改
+#        git diff --name-only    → 空               ← 内容其实相等
+#        git hash-object a.txt   → == index blob    ← 内容逐字节相等
+#      ⇒ 内容等价的文件，status 照样报"已改"。**属性覆盖解决的是"内容层面判定"，
+#         不是"status 的 stat 判定"。** 所以统计"未提交面"要按内容比
+#         （见 scripts/coord-status.sh 的 count_dirty），别用 git status --porcelain。
+#   2) `-c core.autocrlf=input` 在真实仓能把数字压回 0，但在**裸仓库**夹具里
+#      一点用都没有（1→1，false/input/true 三种口径全试过）⇒ 它只是"看起来修好了"。
+#      **别拿它当修复手段**，也不要在脚本里靠它掩盖问题。
+#   3) 已有的检出需要**一次性重整**才会变干净：`git add --renormalize .`
+#      （实测：status 从 " M a.txt" 变空，且**不产生任何 staged 差异**，
+#      因为 blob 本来就是 LF）。⚠️ 别在共享主检出里跑它（会把别人的改动 staged 进去）。
+#      详见 docs/agent-constraints.md 第 17、18 条。
+#
+# 补充说明：根 pom.xml 此前是**混合行尾**（931 行里 332 行 CRLF + 267 行以孤立 CR 结尾，
+# 合计 599 个 CR 字符），本批已一并归一为 LF（纯行尾改动，去掉 CR 后内容逐字节相同，
+# 见 CHANGELOG 同日条目）。
+#
+# 下面的清单是**按全仓扩展名普查**列出来的（git ls-files 统计），不是拍脑袋列的。
+# 新增文件类型若不在清单里，记得同步补进来，否则它会重演"同一份检出在 Windows/WSL
+# 两侧判定相反"——注意这不是"显示上的假修改"，而是**实打实的字节差异**
+# （缓存无关的哈希比对实测：不声明的类型在 WSL 侧就是内容不一致）。
+*.yml text eol=lf
+*.yaml text eol=lf
+*.xml text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.txt text eol=lf
+*.conf text eol=lf
+*.tpl text eol=lf
+*.b64 text eol=lf
+*.example text eol=lf
+*.ps1 text eol=lf
+*.npmrc text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.dockerignore text eol=lf
+.jdk text eol=lf
+*.MockMaker text eol=lf
+LICENSE text eol=lf
