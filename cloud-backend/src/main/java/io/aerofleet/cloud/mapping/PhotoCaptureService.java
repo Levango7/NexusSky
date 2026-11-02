@@ -29,6 +29,18 @@ public class PhotoCaptureService {
             = new ConcurrentHashMap<>();
 
     /**
+     * 保留的任务数上限（不是照片数）。
+     * <p>
+     * 照片按任务分组，单个任务的照片数由本次作业的航点数决定，本来就有界；
+     * 无界的是「任务」这个维度——每个跑过的测绘任务都会留下一整组照片记录。
+     */
+    static final int MAX_TASKS = 200;
+
+    /** 任务首见顺序，用于淘汰最旧任务。 */
+    private final java.util.Deque<String> taskFirstSeen =
+            new java.util.concurrent.ConcurrentLinkedDeque<>();
+
+    /**
      * 在指定航点处采集一张照片。
      *
      * @param sysid 无人机 systemId
@@ -72,10 +84,31 @@ public class PhotoCaptureService {
     public CapturedPhoto capture(int sysid, MappingWaypoint wp, String taskId) {
         CapturedPhoto photo = capture(sysid, wp);
         photo.setTaskId(taskId);
+        boolean firstSight = !photosByTask.containsKey(taskId);
         photosByTask.computeIfAbsent(taskId, k -> new CopyOnWriteArrayList<>()).add(photo);
+        if (firstSight) {
+            taskFirstSeen.addLast(taskId);
+        }
+        evictOldTasks();
         log.info("Photo captured for task {}: photoId={} total={}",
                 taskId, photo.getId(), photosByTask.get(taskId).size());
         return photo;
+    }
+
+    /**
+     * 淘汰最旧任务（按首次采集顺序），直到回到上限。
+     * <p>
+     * 读路径（{@link #getPhotos} / {@link #getPhotosByArea}）**不刷新顺序**：
+     * 否则频繁回看某个老任务会让它一直续命，上限形同虚设。
+     */
+    private void evictOldTasks() {
+        while (photosByTask.size() > MAX_TASKS) {
+            String oldest = taskFirstSeen.pollFirst();
+            if (oldest == null) {
+                return;
+            }
+            photosByTask.remove(oldest);
+        }
     }
 
     /**
