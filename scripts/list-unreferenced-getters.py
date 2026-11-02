@@ -63,7 +63,7 @@ NON_ACCESSOR_ANN = re.compile(
     r'Bean|Query|Modifying|PrePersist|PreUpdate|PostLoad|Override|Scheduled|ExceptionHandler|'
     r'Operation|ApiResponse)\b')
 CONTROLLER_ANN = re.compile(r'@(RestController|Controller)\b')
-TYPE_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{2,}\b')
+TYPE_TOKEN = re.compile(r'\b[A-Z]\w*\b')
 RESPONSE_HOPS = 3
 
 
@@ -97,25 +97,138 @@ def response_exposed_types(main_clean):
     """从 @RestController/@Controller 出发，沿"谁引用了谁"走 RESPONSE_HOPS 跳，
     收集**可能随响应出网**的类型名。Jackson 按 getter 决定 JSON 字段名，
     所以这些类里的 getter 即使全仓零调用点也不能算死码——这一档把 §12.3 的
-    "过近似"从嘴上登记变成机器判据。"""
+    "过近似"从嘴上登记变成机器判据。
+
+    2026-11-02 收紧（§14）：边只认**仓内真实声明过的类型名**。
+    旧版把"任何大写 token"都当边 ⇒ 泛型参数 `T`、常量名、外部类名都会成为假边（过宽），
+    而 `TYPE_TOKEN` 原要求 ≥2 字符 ⇒ **单字母类名反而漏判**（过窄）。两个方向一起修：
+    先取大写 token，再与仓内声明过的类型名取交集——交集既去掉了噪音，也把 `A` 这类
+    真实但短的名字放了进来。"""
+    decl = {declared_type(p) for p in main_clean}
+    # 同一简单类名可能在多个包里各声明一次（实测：cloud-backend 的
+    # mission.FormationService 与 show.FormationService）。旧版按名字建单值表，
+    # 后写覆盖先写 ⇒ 被覆盖那个文件的边整片丢失（2026-11-02 字节码对账抓到 6 个类型）。
+    # 文本图只能拿到简单名，无法区分包，故对同名文件取**并集**（过近似，安全方向）。
+    by_type = {}
+    for p in main_clean:
+        by_type.setdefault(declared_type(p), []).append(p)
+
+    def edges(text):
+        return {t for t in TYPE_TOKEN.findall(text) if t in decl}
+
     ctrl_files = [p for p, t in main_clean.items() if CONTROLLER_ANN.search(t)]
-    by_type = {declared_type(p): p for p in main_clean}
     reachable = set()
     frontier = set()
     for p in ctrl_files:
         frontier.add(declared_type(p))
-        frontier.update(TYPE_TOKEN.findall(main_clean[p]))
+        frontier.update(edges(main_clean[p]))
     for _ in range(RESPONSE_HOPS):
         reachable |= frontier
         nxt = set()
         for t in frontier:
-            p = by_type.get(t)
-            if p and p not in ctrl_files:
-                nxt.update(TYPE_TOKEN.findall(main_clean[p]))
+            for p in by_type.get(t, ()):
+                if p not in ctrl_files:
+                    nxt.update(edges(main_clean[p]))
         frontier = nxt - reachable
         if not frontier:
             break
     return reachable, len(ctrl_files)
+
+
+def bytecode_edges(root):
+    """解析 `*/target/classes/**/*.class` 的常量池，取类型引用边（只取简单名，内类折叠到外类）。
+    返回 {类名: {引用的类型名}}；没有任何 class 产物时返回空 dict（调用方必须显式报"不可用"，
+    不许把"没产物"当成"没有引用"）。
+
+    边有两个来源：`CONSTANT_Class` 项，以及 Utf8 常量里的描述符（`Lpkg/Foo;`）。**只取前者会
+    严重低估**——字段/参数/返回值/上界/注解的类型大多只出现在描述符里，不会各自生成 Class 常量。
+    2026-11-02 实测：只取 Class 常量时闭包 205 个类，补上描述符后 584 个（源码图 601 个）。"""
+    out = {}
+    base = root.rstrip("/\\") + os.sep
+    for mod in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        classes = os.path.join(base, mod, "target", "classes")
+        if not os.path.isdir(classes):
+            continue
+        for dp, _, fns in os.walk(classes):
+            for fn in fns:
+                if not fn.endswith(".class"):
+                    continue
+                try:
+                    blob = open(os.path.join(dp, fn), "rb").read()
+                except OSError:
+                    continue
+                refs = _constant_pool_refs(blob)
+                key = os.path.relpath(os.path.join(dp, fn), classes)[:-6].replace(os.sep, ".")
+                leaf = key.split(".")[-1].split("$")[0]
+                out.setdefault(leaf, set()).update(refs)
+    return out
+
+
+DESCRIPTOR_REF = re.compile(r'L([\w$/]+);')
+
+
+def _constant_pool_refs(blob):
+    """粗解析 class 文件常量池，收集类型引用（取简单名、内类折叠到外类）。
+    来源：`CONSTANT_Class`(tag 7) + Utf8 里的 `L…;` 描述符。只读常量池，不解析方法体。"""
+    names = set()
+    try:
+        if blob[:4] != b"\xca\xfe\xba\xbe":
+            return names
+        count = int.from_bytes(blob[8:10], "big")
+        i = 10
+        utf8 = {}
+        class_refs = []
+        idx = 1
+        while idx < count:
+            tag = blob[i]
+            if tag == 1:                                  # Utf8
+                ln = int.from_bytes(blob[i + 1:i + 3], "big")
+                utf8[idx] = blob[i + 3:i + 3 + ln].decode("utf-8", "replace")
+                i += 3 + ln
+            elif tag == 7:                               # Class → name_index
+                class_refs.append(int.from_bytes(blob[i + 1:i + 3], "big"))
+                i += 3
+            elif tag in (15,):                           # MethodHandle
+                i += 4
+            elif tag in (8, 16, 19, 20):                 # String/Module/Package/Record → 2B
+                                                         # （tag 8 漏了会遇字符串字面量即 break）
+                i += 3
+            elif tag in (3, 4, 9, 10, 11, 12, 17, 18):   # 4B（Integer/Float/Fieldref/…）
+                i += 5
+            elif tag in (5, 6):                          # Long/Double 占两个槽
+                i += 9
+                idx += 1
+            else:
+                break
+            idx += 1
+        for ni in class_refs:
+            raw = utf8.get(ni, "")
+            if raw:
+                leaf = raw.split(".")[-1].split("/")[-1].split("$")[0]
+                if leaf and not leaf.startswith("["):
+                    names.add(leaf.replace("[", ""))
+        for s in utf8.values():
+            for mo in DESCRIPTOR_REF.finditer(s):
+                leaf = mo.group(1).split("/")[-1].split("$")[0]
+                if leaf:
+                    names.add(leaf)
+    except (IndexError, ValueError):
+        return names
+    return names
+
+
+def _closure(seed, graph, hops):
+    reach, frontier = set(), set(seed)
+    for _ in range(hops):
+        reach |= frontier
+        nxt = set()
+        for t in frontier:
+            nxt.update(graph.get(t, set()))
+        frontier = nxt - reach
+        if not frontier:
+            break
+    return reach
+
 
 
 
@@ -158,8 +271,8 @@ def camel_to_kebab(name):
     return re.sub(r"(?<!^)(?=[A-Z])", "-", name).lower()
 
 
-def scan(root):
-    """返回 (三档计数 dict, 第 3 档名单 list[(模块, 文件, 方法)])."""
+def scan(root, recon_out=None):
+    """返回 (六档计数 dict, 第 3 档名单 list[str])。recon_out 传 dict 时写入字节码对账结果。"""
     main_files = java_files(root, "main")
     test_files = java_files(root, "test")
     main_clean = {}
@@ -177,6 +290,25 @@ def scan(root):
     counts = {"端点/框架方法": 0, "响应暴露面": 0, "契约候选": 0,
               "只有测试在用": 0, "零外引用候选": 0, "有调用点": 0}
     exposed, n_ctrl = response_exposed_types(main_clean)
+    if recon_out is not None:
+        bc = bytecode_edges(root)
+        recon_out["classes"] = len(bc)
+        if bc:
+            src_names = {declared_type(q) for q in main_clean}
+            # 只统计字节码里**也出现过**的仓内类型；外部类（String/Map/…）不参与对账
+            graph = {t: {r for r in refs if r in src_names} for t, refs in bc.items()}
+            # 与源码图同口径：以控制器的直接引用为种子，再走 RESPONSE_HOPS 跳
+            seed = set()
+            for q, text in main_clean.items():
+                if CONTROLLER_ANN.search(text):
+                    seed |= graph.get(declared_type(q), set())
+            bc_reach = _closure(seed, graph, RESPONSE_HOPS)
+            recon_out["classes"] = len(graph)
+            recon_out["source"] = len(exposed)
+            recon_out["bytecode"] = len(bc_reach)
+            recon_out["bc_only"] = sorted(bc_reach - exposed)
+            recon_out["src_only"] = sorted(exposed - bc_reach)
+
     dead = []
     for path, text in sorted(main_clean.items()):
         for mo in GETTER_DECL.finditer(text):
@@ -214,11 +346,14 @@ def main(argv=None):
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument("--strict", action="store_true",
                     help="本地实验用：命中第 3 档即退 1。CI 不许用（本脚本的设计是不判红）。")
+    ap.add_argument("--with-bytecode", action="store_true",
+                    help="本地用：解析 */target/classes 的常量池，与源码可达性图对账（CI 无 JDK，不跑）")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
     if args.self_test:
         return self_test()
-    counts, dead = scan(args.root)
+    recon = {}
+    counts, dead = scan(args.root, recon_out=recon if args.with_bytecode else None)
     total_getters = sum(counts.values())
     print("[report-only] public getter 零外引用清单（不判红；第 3 档仍是文本级近似，"
           "可达性不是编译级调用图——审计 §11.3/§12.3/§13）")
@@ -234,6 +369,17 @@ def main(argv=None):
             print("    …另 %d 个（全量用 --top 999）" % (len(dead) - args.top))
     else:
         print("  最暗一档：0 个")
+    if args.with_bytecode:
+        if recon.get("classes"):
+            print("  字节码对账：仓内类型 %d 个有 class 产物；暴露面 源码图 %d / 字节码闭包 %d；"
+                  "字节码看到而源码图漏掉 %d 个%s；源码多出 %d 个（多为未使用 import 等文本假边）"
+                  % (recon["classes"], recon["source"], recon["bytecode"],
+                     len(recon["bc_only"]),
+                     ("（%s…）" % ", ".join(recon["bc_only"][:6])) if recon["bc_only"] else "",
+                     len(recon["src_only"])))
+        else:
+            print("  字节码对账：**UNVERIFIED——没找到 */target/classes，本轮只有源码图**"
+                  "（不把「没产物」写成「没有暴露面」；CI 的 repo-gates job 没有 JDK，故默认不开此开关）")
     if args.strict and dead:
         print("[--strict] 命中 %d 个候选 ⇒ 退 1（本地实验口径）" % len(dead))
         return 1
@@ -317,6 +463,45 @@ def self_test():
         results["暴露面没有把无关类一起吞掉"] = any("getStillOrphan" in x for x in d4)
         # 恒退 0：有候选也不红（这是本脚本存在的核心承诺）
         rc = main(["--root", r])
+        # §14：旧版 TYPE_TOKEN 要求 ≥2 字符 ⇒ 单字母类名漏判；现在按"仓内声明过的类型名"取交集
+        ctrl_body = '  @GetMapping("/api/x")\n  public A getWireOnly() { return null; }\n'
+        r5 = fixture(extra_ctrl=ctrl_body)
+        c5, d5 = scan(r5)
+        n5 = set(x.split("#")[1] for x in d5)
+        results["单字母类名不再被漏判（A 出现在控制器里 ⇒ 其 getter 归响应暴露面）"] = \
+            c5["响应暴露面"] >= 3 and "getOrphan" not in n5 and "isFlagged" not in n5
+        # --with-bytecode 在无 class 产物时必须显式 UNVERIFIED，不许静默当成"没有暴露面"
+        import contextlib
+        from io import StringIO
+        buf = StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc_b = main(["--root", r, "--with-bytecode"])
+        out = buf.getvalue()
+        results["无 class 产物时报 UNVERIFIED 而非静默"] = rc_b == 0 and "UNVERIFIED" in out
+        # 描述符里的类型引用也算边：字段/签名类型常只出现在 Utf8 描述符里，不算会低估闭包。
+        # 特意把 CONSTANT_String(tag 8) 放在前面：解析器漏掉 tag 8 会在这里 break，描述符就丢了。
+        blob = (b"\xca\xfe\xba\xbe" + b"\x00\x00\x00\x34" + (3).to_bytes(2, "big")
+                + b"\x08" + (2).to_bytes(2, "big")
+                + b"\x01" + (10).to_bytes(2, "big") + b"Ldemo/Foo;")
+        refs = _constant_pool_refs(blob)
+        results["描述符里的类型引用也算字节码边（含 tag 8 不提前 break）"] = refs == {"Foo"}
+        # 同名类（不同包）：旧版单值表后写覆盖先写 ⇒ 其中一个文件的边整片丢失。
+        # 两个 DTO 各只被一个同名类引用，取并集才能让两条 getter 都归暴露面（与先后顺序无关）。
+        r6 = fixture()
+        for pkg, dto, decl_line in (("demo", "DtoOne", "getOnlyViaOne"),
+                                    ("demo/sub", "DtoTwo", "getOnlyViaTwo")):
+            _write(os.path.join(r6, "m", "src", "main", "java", *pkg.split("/"), "Same.java"),
+                   "package %s;\npublic class Same {\n  %s d;\n}\n" % (pkg.replace("/", "."), dto))
+            _write(os.path.join(r6, "m", "src", "main", "java", *pkg.split("/"), dto + ".java"),
+                   "package %s;\npublic class %s {\n  public int %s() { return 1; }\n}\n"
+                   % (pkg.replace("/", "."), dto, decl_line))
+        _write(os.path.join(r6, "m", "src", "main", "java", "demo", "C2.java"),
+               "package demo;\n@RestController\npublic class C2 {\n"
+               "  @GetMapping(\"/same\")\n  public Same getSame() { return null; }\n}\n")
+        _c6, d6 = scan(r6)
+        n6 = set(x.split("#")[1] for x in d6)
+        results["同名类（不同包）的边取并集，不因覆盖丢失"] = \
+            "getOnlyViaOne" not in n6 and "getOnlyViaTwo" not in n6
         results["有候选仍退 0（report-only）"] = rc == 0
         rc2 = main(["--root", r, "--strict"])
         results["--strict 才退 1"] = rc2 == 1
