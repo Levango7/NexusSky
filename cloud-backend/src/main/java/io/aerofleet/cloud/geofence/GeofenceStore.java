@@ -363,9 +363,27 @@ public class GeofenceStore {
         return isZoneForTenant(zoneId, tenantId);
     }
 
-    /** 判断围栏是否属于指定租户。 */
+    /**
+     * 判断围栏是否属于指定租户。
+     * <p>
+     * <b>「查不到归属」必须判为不属于，而不是放行。</b>这里此前的写法是
+     * {@code zoneTenant == null || tenantId.equals(zoneTenant)}——映射缺失即放行，
+     * 与 {@code EmergencyOrchService.checkTenantAccess} 已在 #223 修掉的形状相同，
+     * 但这处更危险：{@code zoneTenantMap} 是纯内存 map，<b>没有 DB 回查兜底</b>。
+     * 两条路径会让映射稳定缺失：
+     * <ol>
+     *   <li>全局管理员建围栏时 {@code TenantContext} 为 null ⇒ 创建路径不登记；</li>
+     *   <li>重启后 DB 恢复只登记 {@code tenantId != null} 的行。</li>
+     * </ol>
+     * 后果是任何租户会话都能读、改、删这些未归属围栏，并读到它们的越界历史
+     * （7 个调用点全走这一个判定）。
+     * <p>
+     * 口径与 {@code DeviceRegistry.isVisibleTo} 对齐：未归属资源<b>只对全局管理员可见</b>，
+     * 租户会话一律按「不存在」处理。取舍说明：若线上存在历史遗留的未归属围栏，
+     * 修后它们对租户会话将不可见——这是安全方向（从严），未归属本就不该被某个租户占用。
+     */
     private boolean isZoneForTenant(int zoneId, Integer tenantId) {
         Integer zoneTenant = zoneTenantMap.get(zoneId);
-        return zoneTenant == null || tenantId.equals(zoneTenant);
+        return zoneTenant != null && tenantId.equals(zoneTenant);
     }
 }
