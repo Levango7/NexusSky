@@ -32,6 +32,16 @@ public class TerrainMapService {
     private final ConcurrentHashMap<Integer, TerrainMapSnapshot> maps = new ConcurrentHashMap<>();
     /** 飞行限制区列表（sysid → restrictions）。 */
     private final ConcurrentHashMap<Integer, List<FlightRestrictionSnapshot>> restrictions = new ConcurrentHashMap<>();
+
+    /**
+     * 单节点限制区保留条数上限。
+     * <p>
+     * 一条 30001 消息只描述**一个**限制区，同一节点的多个区本来就靠多条消息累积
+     * （所以这里不能像 {@link #maps} 那样按 sysid 覆盖——那会把同节点的其它区丢掉）。
+     * 会无限增长的是另一种情况：节点**周期性重报同一批区**，每次都原样再追加一遍。
+     * 因此按「内容去重 + 上限兜底」两道闸收口，累加语义不变。
+     */
+    static final int MAX_RESTRICTIONS_PER_NODE = 200;
     /** 变更历史（线程安全列表）。 */
     private final List<TerrainChangeRecord> changeHistory = Collections.synchronizedList(new ArrayList<>());
     /** 地形版本号（每次变化递增）。 */
@@ -94,7 +104,17 @@ public class TerrainMapService {
         }
         FlightRestrictionSnapshot snapshot = new FlightRestrictionSnapshot(
                 msg.restrictionType, msg.limitValue, polygon, System.currentTimeMillis());
-        restrictions.computeIfAbsent(sysid, k -> Collections.synchronizedList(new ArrayList<>())).add(snapshot);
+        List<FlightRestrictionSnapshot> list = restrictions.computeIfAbsent(
+                sysid, k -> Collections.synchronizedList(new ArrayList<>()));
+        synchronized (list) {
+            if (!hasEquivalentRestriction(list, snapshot)) {
+                list.add(snapshot);
+                // 上限兜底：即便内容都不重复（节点真的在不断刷新区），也不允许无界增长
+                while (list.size() > MAX_RESTRICTIONS_PER_NODE) {
+                    list.remove(0);
+                }
+            }
+        }
         log.debug("flight restriction: sysid={} type={} vertices={}",
                 sysid, msg.restrictionType, msg.vertexCount());
     }
@@ -180,6 +200,37 @@ public class TerrainMapService {
             List<double[]> areaPolygon,
             long timestamp
     ) {
+    }
+
+    /**
+     * 列表里是否已有「内容相同」的限制区。
+     * <p>
+     * 不能直接用 {@code list.contains(...)}：{@code FlightRestrictionSnapshot} 是 record，
+     * 但多边形是 {@code List<double[]>}，而 {@code double[]} 没有结构相等，
+     * 形状一样的两个多边形会被判为不等。故按「类型 + 限值 + 顶点」串一个规范键比较。
+     * <p>
+     * 这一步是收口的关键：节点周期性重报同一批区时，旧实现每次都原样再追加一遍，
+     * 列表随重报次数线性增长；去重后同样的重报不再长。
+     */
+    private static boolean hasEquivalentRestriction(List<FlightRestrictionSnapshot> list,
+                                                    FlightRestrictionSnapshot snapshot) {
+        String key = restrictionKey(snapshot);
+        for (FlightRestrictionSnapshot existing : list) {
+            if (restrictionKey(existing).equals(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 限制区内容键（类型|限值|每个顶点的 lat,lon）。 */
+    private static String restrictionKey(FlightRestrictionSnapshot s) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(s.restrictionType()).append('|').append(s.limitValue()).append('|');
+        for (double[] p : s.areaPolygon()) {
+            sb.append(p[0]).append(',').append(p[1]).append(';');
+        }
+        return sb.toString();
     }
 
     /** 地形变更记录。 */

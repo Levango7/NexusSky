@@ -1,5 +1,30 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 地形限制区列表收口：内容去重 + 单节点上限（+5 例）（2026-11-02）
+
+### 修：`TerrainMapService.restrictions` 无去重、无上限
+
+一条 30001 消息只描述**一个**限制区，同一节点的多个区本来就靠多条消息累积
+（所以这里**不能**像 {@code maps} 那样按 sysid 覆盖——那会把同节点的其它区丢掉）。
+会无限增长的是另一种情况：节点**周期性重报同一批区**，旧实现每次都原样再追加一遍，
+`getRestrictions()` 也跟着越返回越多。
+
+修法是两道闸，累加语义不变：
+
+1. **内容去重**：同一节点已有「类型 + 限值 + 顶点」完全相同的区就不再入列。
+   注意不能直接用 `list.contains(...)`：`FlightRestrictionSnapshot` 是 record，
+   但多边形是 `List<double[]>`，而 `double[]` 没有结构相等，形状一样的两个多边形
+   会被判为不等——所以按「类型|限值|顶点」串规范键比较。
+2. **单节点上限** `MAX_RESTRICTIONS_PER_NODE=200`：即便内容全都不同（节点真的在不断
+   刷新区）也不允许无界增长，最旧的先淘汰。
+
+测试 +5 例（`TerrainRestrictionsBoundTest`）：同一批区重报 50 次不变成 50 条、不同的区
+照常累加、限值变了算新区、单节点上限兜底、多节点互不影响。
+**A/B 实测**：停用去重 ⇒ 1 例红；停用上限 ⇒ 2 例红；还原后全绿。
+
+计数：本批 +5（cloud-backend +5）；全仓 +5。小节数随 rebase 基线浮动，这里不写具体值，
+以文档计数门禁的实测为准。
+
 ## [Unreleased] — 修 WS 慢客户端阻塞：/ws/telemetry 套上 ConcurrentWebSocketSessionDecorator（2026-11-02）
 
 原 PR #210（`fix/ws-telmetry-comment-clean`）代码侧完整（慢客户端阻塞 + WS 装饰器改造，+2 例），但 `CONFLICTING` 三天：base 从 master 漂移
@@ -1297,7 +1322,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 262 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 263 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1323,7 +1348,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 262 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 263 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
