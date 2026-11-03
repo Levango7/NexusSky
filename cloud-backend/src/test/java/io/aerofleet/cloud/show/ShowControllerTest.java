@@ -45,6 +45,18 @@ class ShowControllerTest {
                 });
         Mockito.when(showTaskRepository.findAll())
                 .thenAnswer(inv -> new ArrayList<>(taskStore.values()));
+        // listTasks 状态下推 DB，不再 findAll 后 stream().filter ⇒ 按同口径打桩
+        Mockito.when(showTaskRepository.findByStatus(Mockito.any(ShowStatus.class)))
+                .thenAnswer(inv -> {
+                    ShowStatus want = inv.getArgument(0);
+                    List<ShowTask> out = new ArrayList<>();
+                    for (ShowTask t : taskStore.values()) {
+                        if (t.getStatus() == want) {
+                            out.add(t);
+                        }
+                    }
+                    return out;
+                });
         Mockito.when(showTaskRepository.findById(Mockito.anyString()))
                 .thenAnswer(inv -> Optional.ofNullable(taskStore.get(inv.getArgument(0))));
         taskService = new ShowTaskService(showTaskRepository, formationService);

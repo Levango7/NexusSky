@@ -81,14 +81,17 @@ public class ShowTaskService {
         return task;
     }
 
-    /** 列出所有表演任务（可按状态筛选）。 */
+    /**
+     * 列出所有表演任务（可按状态筛选）。
+     * <p>
+     * 状态下推 DB：此前是 {@code findAll()} 后 {@code stream().filter(...)}，
+     * 而表演任务只增不减，那意味着每次列表请求都把整表拖进堆再逐行筛。
+     */
     public List<ShowTask> listTasks(ShowStatus status) {
         if (status == null) {
             return repository.findAll();
         }
-        return repository.findAll().stream()
-                .filter(t -> t.getStatus() == status)
-                .toList();
+        return repository.findByStatus(status);
     }
 
     /** 获取任务详情。 */

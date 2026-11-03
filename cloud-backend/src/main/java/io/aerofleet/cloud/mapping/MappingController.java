@@ -200,13 +200,19 @@ public class MappingController {
 
         Integer tenantId = TenantContext.getEffectiveTenantId();
         List<Map<String, Object>> result = new ArrayList<>();
-        for (MappingTask task : taskRepository.findAll()) {
-            if (tenantId != null && !tenantId.equals(task.getTenantId())) {
-                continue;
-            }
-            if (filter != null && task.getStatus() != filter) {
-                continue;
-            }
+        List<MappingTask> tasks;
+        if (tenantId == null) {
+            // 全局管理员：只看状态（无租户条件）。status 为 null 时用 findAll。
+            tasks = filter == null
+                    ? taskRepository.findAll()
+                    : taskRepository.findByStatus(filter);
+        } else {
+            // 租户会话：租户 + 状态一起下推 DB，不再整表拖进堆再逐行跳过
+            tasks = filter == null
+                    ? taskRepository.findByTenantId(tenantId)
+                    : taskRepository.findByTenantIdAndStatus(tenantId, filter);
+        }
+        for (MappingTask task : tasks) {
             result.add(taskSummary(task));
         }
         return result;
