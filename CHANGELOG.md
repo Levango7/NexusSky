@@ -1,5 +1,37 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 编队租户隔离补全：映射缺失即放行 + 四个写方法完全不设卡（+8 例）（2026-11-03）
+
+### 修：`FormationService` 两处同源缺口（租户隔离巡检第二批）
+
+巡检 #235（`GeofenceStore`）时确认这类形状在本仓重复出现，本批修 `FormationService`：
+
+**缺口一：映射缺失即放行。** `isFormationForTenant` 原写法是
+`formationTenant == null || tenantId.equals(formationTenant)`，与 #235 的
+`GeofenceStore.isZoneForTenant`、#223 的 `EmergencyOrchService.checkTenantAccess`
+同族。两条路径让映射稳定缺失：全局管理员建编队（创建路径 `if (tenantId != null)`
+门槛不登记）、重启后 DB 恢复的同类门槛。
+
+**缺口二（更严重）：四个写方法完全不设卡。** `command` / `transition` / `lights` /
+`removeMember` 此前直接 `formations.get(...)`，**任何租户只要猜到 formationId 就能对
+他人的编队下令、改队形、发灯光、摘成员**——读侧三个方法（`formation` /
+`activeFormations` / `allFormations`）早就守了，写侧一直是裸的。
+
+修法：
+
+- `isFormationForTenant` 改为 `formationTenant != null && tenantId.equals(...)`，
+  口径与 `DeviceRegistry.isVisibleTo` 对齐（未归属只对全局管理员可见）；
+- 四个写方法补 `isFormationAccessible` 守卫，跨租户一律按「编队不存在」响应
+  （`NotFoundException`），不泄露存在性；
+- 在类内写明调用约定：凡按 formationId 取内存态读/改的方法都必须先过校验，
+  并说明 `persistState` 为何是例外（内部写穿，由已校验的公有方法链到达）。
+
+测试 +8 例（`FormationTenantIsolationTest`）：未归属编队对租户会话读不到/列表不含、
+全局管理员照常可读、归属明确编队跨租户隔离、四个写方法对他租户一律 NotFound、
+未归属编队的写方法同样被拒、全局管理员的写不受影响、以及两条纯逻辑探针。
+**A/B 实测**：把判定改回「缺失即放行」⇒ 3 例红；撤掉四个写守卫 ⇒ 2 例红；还原后全绿。
+formation 域 77 个测试全绿（无行为破坏）。
+
 ## [Unreleased] — 修围栏租户隔离：映射缺失即放行 ⇒ 未归属只对全局管理员可见（+5 例）（2026-11-03）
 
 ### 修：`GeofenceStore.isZoneForTenant` 的「查不到归属即放行」
@@ -1459,7 +1491,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 267 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 268 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1485,7 +1517,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 267 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 268 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
