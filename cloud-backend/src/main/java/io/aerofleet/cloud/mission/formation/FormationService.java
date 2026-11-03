@@ -333,6 +333,11 @@ public class FormationService {
      */
     @Transactional
     public Map<Integer, AckResult> command(int formationId, FormationCommand cmd) {
+        // 租户隔离：跨租户与「编队不存在」同响应（口径同 formation()）。
+        // 此前这里直取 formations.get()，任何租户都能对他人的编队下令。
+        if (!isFormationAccessible(formationId)) {
+            throw new NotFoundException("formation " + formationId + " not found");
+        }
         Formation f = formations.get(formationId);
         if (f == null) {
             throw new NotFoundException("formation " + formationId + " not found");
@@ -419,6 +424,10 @@ public class FormationService {
     public Map<Integer, List<Formation.GeoPos>> transition(int formationId,
                                                             FormationGeometry.Shape newShape,
                                                             int steps) {
+        // 租户隔离：跨租户与「编队不存在」同响应（口径同 formation()）。
+        if (!isFormationAccessible(formationId)) {
+            throw new NotFoundException("formation " + formationId + " not found");
+        }
         Formation f = formations.get(formationId);
         if (f == null) {
             throw new NotFoundException("formation " + formationId + " not found");
@@ -523,6 +532,10 @@ public class FormationService {
      * @throws BadRequestException sync=true 但队内时钟未就绪
      */
     public Map<Integer, AckResult> lights(int formationId, LedControlCommand cmd) {
+        // 租户隔离：跨租户与「编队不存在」同响应（口径同 formation()）。
+        if (!isFormationAccessible(formationId)) {
+            throw new NotFoundException("formation " + formationId + " not found");
+        }
         Formation f = formations.get(formationId);
         if (f == null) {
             throw new NotFoundException("formation " + formationId + " not found");
@@ -579,6 +592,10 @@ public class FormationService {
      */
     @Transactional
     public void removeMember(int formationId, int sysid) {
+        // 租户隔离：跨租户与「编队不存在」同响应（口径同 formation()）。
+        if (!isFormationAccessible(formationId)) {
+            throw new NotFoundException("formation " + formationId + " not found");
+        }
         Formation f = formations.get(formationId);
         if (f == null) {
             throw new NotFoundException("formation " + formationId + " not found");
@@ -770,11 +787,37 @@ public class FormationService {
         return isFormationForTenant(formationId, tenantId);
     }
 
-    /** 判断编队是否属于指定租户。 */
+    /**
+     * 判断编队是否属于指定租户。
+     * <p>
+     * <b>「查不到归属」必须判为不属于，而不是放行。</b>此前写法是
+     * {@code formationTenant == null || tenantId.equals(formationTenant)}——与
+     * {@code GeofenceStore.isZoneForTenant}（#235 修掉）、
+     * {@code EmergencyOrchService.checkTenantAccess}（#223 修掉）是同一形状：
+     * <b>映射缺失即放行</b>。两条路径让映射稳定缺失：
+     * <ol>
+     *   <li>全局管理员建编队时 {@code TenantContext} 为 null ⇒ 创建路径（L272 的
+     *       {@code if (tenantId != null)} 门槛）不登记；</li>
+     *   <li>重启后 DB 恢复同样只登记 {@code tenantId != null} 的行。</li>
+     * </ol>
+     * 后果：任何租户会话可读写他人生成的未归属编队。
+     * <p>
+     * 口径与 {@code DeviceRegistry.isVisibleTo} 对齐：未归属资源<b>只对全局管理员可见</b>，
+     * 租户会话按「不存在」处理。全局管理员分支由 {@link #isFormationAccessible} 独立提供。
+     */
     private boolean isFormationForTenant(int formationId, Integer tenantId) {
         Integer formationTenant = formationTenantMap.get(formationId);
-        return formationTenant == null || tenantId.equals(formationTenant);
+        return formationTenant != null && tenantId.equals(formationTenant);
     }
+
+    /*
+     * 调用约定（本类租户隔离的形状，2026-11-03 巡检后补）：
+     * 凡按 formationId 取内存态并据此读/改的方法，都必须先过 isFormationAccessible。
+     * 3 个读方法（formation / activeFormations / allFormations）+ 4 个写方法
+     * （command / transition / lights / removeMember）均遵守；跨租户一律按
+     * 「编队不存在」响应（NotFoundException / null / 空），不泄露存在性。
+     * persistState 是内部写穿辅助，由已校验的公有方法链到达，不单独设卡。
+     */
 
     // =====================================================================
     // 内部工具
