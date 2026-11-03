@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.rid;
 
+import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.rid.model.BasicIdData;
 import io.aerofleet.cloud.rid.model.RidSnapshot;
 import io.aerofleet.mavlink.MavlinkFrame;
@@ -9,6 +11,9 @@ import io.aerofleet.mavlink.messages.MavlinkMessage;
 import io.aerofleet.mavlink.messages.OpenDroneIdBasicId;
 import io.aerofleet.mavlink.messages.OpenDroneIdLocation;
 import io.aerofleet.mavlink.messages.OpenDroneIdMessagePack;
+import ch.qos.logback.core.read.ListAppender;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -20,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -42,7 +48,7 @@ class RidIngestServiceTest {
         config = new RidConfig();
         stateManager = new RidStateManager(config);
         wsHandler = Mockito.mock(RidWebSocketHandler.class);
-        service = new RidIngestService(stateManager, wsHandler, config);
+        service = new RidIngestService(stateManager, wsHandler, config, null);
     }
 
     // ─── 消息过滤 ───
@@ -322,5 +328,149 @@ class RidIngestServiceTest {
     /** OPEN_DRONE_ID_BASIC_ID 的截短帧，payload 长度由参数给定。 */
     private static MavlinkFrame truncatedBasicIdFrame(int payloadLen) {
         return crcValidFrame(OpenDroneIdBasicId.ID, new byte[payloadLen]);
+    }
+
+    // ─── 位置一致性校验（RID 报文 vs 遥测真值） ───
+
+    @Nested
+    @DisplayName("位置一致性校验（RID vs 遥测）")
+    class LocationConsistency {
+
+        private DeviceRegistry registry;
+        private ListAppender<ILoggingEvent> logs;
+
+        @BeforeEach
+        void setUpRegistryAndCapture() {
+            registry = new DeviceRegistry();
+            ch.qos.logback.classic.Logger logger =
+                    (ch.qos.logback.classic.Logger)
+                            org.slf4j.LoggerFactory.getLogger(RidIngestService.class);
+            logs = new ListAppender<>();
+            logs.start();
+            logger.addAppender(logs);
+        }
+
+        @AfterEach
+        void detachAppender() {
+            ch.qos.logback.classic.Logger logger =
+                    (ch.qos.logback.classic.Logger)
+                            org.slf4j.LoggerFactory.getLogger(RidIngestService.class);
+            logger.detachAppender(logs);
+        }
+
+        /** 与 service 同一构造路径，但挂上真实注册表。 */
+        private RidIngestService serviceWithRegistry() {
+            return new RidIngestService(stateManager, wsHandler, config, registry);
+        }
+
+        private long warnCount() {
+            return logs.list.stream()
+                    .filter(e -> e.getLevel().toString().equals("WARN"))
+                    .filter(e -> e.getFormattedMessage().contains("RID 位置与遥测不一致"))
+                    .count();
+        }
+
+        @Test
+        @DisplayName("遥测与 RID 一致 → 不告警")
+        void consistentPositions_noWarn() {
+            DroneSnapshot snapshot = registry.registerIfAbsent(1);
+            snapshot.online = true;
+            snapshot.lat = 39.9;
+            snapshot.lon = 116.3;
+
+            OpenDroneIdLocation msg = new OpenDroneIdLocation(
+                    2, 18000, 0, 0,
+                    399000000, 1163000000, 100.0f, 120.0f,
+                    0, 10, 10, 10, 10, 1.0f);
+            serviceWithRegistry().onFrame(msg.toFrame(1, 1, 0));
+
+            assertThat(warnCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("偏差超阈值 → WARN 一条，紧随的第二帧被 5s 抑制")
+        void inconsistentPositions_warnOnceThenSuppress() {
+            DroneSnapshot snapshot = registry.registerIfAbsent(1);
+            snapshot.online = true;
+            snapshot.lat = 39.9;
+            snapshot.lon = 116.3;
+            RidIngestService withRegistry = serviceWithRegistry();
+
+            // 遥测在 (39.9, 116.3)，RID 报 (40.4, 116.3)：0.5° ≈ 55 km，远超 0.01°
+            OpenDroneIdLocation far = new OpenDroneIdLocation(
+                    2, 18000, 0, 0,
+                    404000000, 1163000000, 100.0f, 120.0f,
+                    0, 10, 10, 10, 10, 1.0f);
+            withRegistry.onFrame(far.toFrame(1, 1, 0));
+            withRegistry.onFrame(far.toFrame(1, 1, 1));
+
+            assertThat(warnCount()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("设备离线 → 无从对比，不告警")
+        void offlineDrone_skipped() {
+            DroneSnapshot snapshot = registry.registerIfAbsent(1);
+            snapshot.online = false;
+            snapshot.lat = 39.9;
+            snapshot.lon = 116.3;
+
+            OpenDroneIdLocation far = new OpenDroneIdLocation(
+                    2, 18000, 0, 0,
+                    404000000, 1163000000, 100.0f, 120.0f,
+                    0, 10, 10, 10, 10, 1.0f);
+            serviceWithRegistry().onFrame(far.toFrame(1, 1, 0));
+
+            assertThat(warnCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("遥测未定位（NaN）→ 跳过，不告警也不抛")
+        void telemetryNotLocated_skipped() {
+            DroneSnapshot snapshot = registry.registerIfAbsent(1);
+            snapshot.online = true;
+            // lat/lon 保持初始 NaN
+
+            OpenDroneIdLocation far = new OpenDroneIdLocation(
+                    2, 18000, 0, 0,
+                    404000000, 1163000000, 100.0f, 120.0f,
+                    0, 10, 10, 10, 10, 1.0f);
+            serviceWithRegistry().onFrame(far.toFrame(1, 1, 0));
+
+            assertThat(warnCount()).isZero();
+        }
+    }
+
+    @Nested
+    @DisplayName("位置角距计算")
+    class PositionDeltaMath {
+
+        @Test
+        @DisplayName("同一点 → 0")
+        void samePoint_zero() {
+            assertThat(RidIngestService.positionDeltaDeg(39.9, 116.3, 39.9, 116.3))
+                    .isZero();
+        }
+
+        @Test
+        @DisplayName("纬度差 0.01° → 角距 0.01°（阈值量级）")
+        void thresholdScale() {
+            assertThat(RidIngestService.positionDeltaDeg(39.9, 116.3, 39.91, 116.3))
+                    .isCloseTo(0.01, within(0.0001));
+        }
+
+        @Test
+        @DisplayName("反经线跨越：179.5°E 与 179.5°W 相邻（1°），不是绕地球半圈")
+        void antimeridian_shortWay() {
+            assertThat(RidIngestService.positionDeltaDeg(0, 179.5, 0, -179.5))
+                    .isCloseTo(1.0, within(0.0001));
+        }
+
+        @Test
+        @DisplayName("赤道到极点 → 90°")
+        void equatorToPole_90() {
+            assertThat(RidIngestService.positionDeltaDeg(0, 0, 90, 0))
+                    .isCloseTo(90.0, within(0.0001));
+        }
     }
 }
