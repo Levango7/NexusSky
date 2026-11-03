@@ -87,6 +87,7 @@ import shutil
 import sys
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 
 # 当前口径文档：这些文件里的单测数是对外声称，必须与实测一致。
@@ -851,7 +852,94 @@ def self_test():
     print('自检%s' % ('通过' if ok else '未通过'))
     if component_selftest() != 0:
         ok = False
+    if staleness_selftest() != 0:
+        ok = False
     print('总体%s' % ('通过' if ok else '未通过'))
+    return 0 if ok else 1
+
+
+def staleness_selftest():
+    u"""\u8bc1\u660e\u300c\u6574\u6279\u4ea7\u7269\u6bd4\u6e90\u7801\u65e7\u300d\u8fd9\u6761\u63d0\u793a\u771f\u7684\u4f1a\u5728\u8be5\u54cd\u7684\u65f6\u5019\u54cd\uff0c\u4e14\u4e0d\u8bef\u62a5\u3002
+
+    \u4e3a\u4ec0\u4e48\u5355\u72ec\u4e00\u4e2a\u51fd\u6570\uff1a\u8981**\u63a7\u5236 mtime**
+    \uff08\u4e00\u4efd\u62a5\u544a\u9020\u65e7\u3001\u4e00\u4efd\u9020\u65b0\uff09\uff0c\u585e\u8fdb self_test \u7684\u6784\u4ef6\u51fd\u6570\u4f1a\u628a\u5939\u5177\u64fe\u6210
+    \u4e00\u9505\u7cca\u3002\u8fd9\u91cc\u81ea\u6210\u4e00\u4f53\u3002
+
+    \u4e09\u6761\u7528\u4f8b\uff1a\u4ea7\u7269\u65e7\u5fc5\u63d0\u793a / \u4ea7\u7269\u65b0\u4e0d\u8bef\u62a5 / \u805a\u5408\u76ee\u5f55\u6a21\u5f0f\u4e0d\u63d0\u793a\u3002
+
+    \u4e0d\u6821\u9a8c\u9000\u51fa\u7801\uff1a\u8fd9\u6761\u662f\u53ea\u8bfb\u63d0\u793a\uff0c\u523b\u610f\u4e0d\u6539\u53d8\u95e8\u7981\u627f\u91cd\u6027\u2014\u2014\u5426\u5219\u63d0\u793a\u4f1a\u53d8\u6210\u95e8\u7981\uff0c
+    \u672c\u5730\u4e00\u8dd1\u5c31\u7ea2\uff0c\u7ed3\u679c\u662f\u6240\u6709\u4eba\u5b66\u4f1a\u5ffd\u7565\u5b83\u3002
+    """
+    ok = True
+    banner = u'\u672c\u5730 surefire \u4ea7\u7269\u6574\u4f53\u6bd4\u6d4b\u8bd5\u6e90\u7801\u65e7'
+
+    def make(xml_age, src_age):
+        tmp = tempfile.mkdtemp(prefix='countgate-stale-')
+        mod = os.path.join(tmp, 'm')
+        os.makedirs(os.path.join(mod, 'target', 'surefire-reports'))
+        os.makedirs(os.path.join(mod, 'src', 'test', 'java'))
+        xml = os.path.join(mod, 'target', 'surefire-reports', 'TEST-m.DemoTest.xml')
+        src = os.path.join(mod, 'src', 'test', 'java', 'DemoTest.java')
+        with open(xml, 'w', encoding='utf-8') as fh:
+            fh.write('<?xml version="1.0" encoding="UTF-8"?>\n'
+                     '<testsuite name="m" tests="1" failures="0" errors="0" '
+                     'skipped="0">\n'
+                     '  <testcase name="ok" classname="m.DemoTest"/>\n'
+                     '</testsuite>\n')
+        with open(src, 'w', encoding='utf-8') as fh:
+            fh.write('package m;\nclass DemoTest {}\n')
+        with open(os.path.join(tmp, 'README.md'), 'w', encoding='utf-8') as fh:
+            fh.write(u'# Demo\n\n\u65e0\u4efb\u4f55\u8ba1\u6570\u58f0\u79f0\n')
+        now = time.time()
+        # 先落较老的那份，避免后写的文件天然带更新 mtime 把设定盖掉
+        if xml_age >= src_age:
+            os.utime(src, (now - src_age, now - src_age))
+            os.utime(xml, (now - xml_age, now - xml_age))
+        else:
+            os.utime(xml, (now - xml_age, now - xml_age))
+            os.utime(src, (now - src_age, now - src_age))
+        return tmp
+
+    def run(tmp, extra):
+        proc = subprocess.run(
+            [sys.executable, os.path.abspath(__file__), '--root', tmp] + extra,
+            capture_output=True, text=True)
+        return proc.stdout + proc.stderr
+
+    tmp = make(xml_age=2 * 86400, src_age=0)
+    try:
+        out = run(tmp, [])
+        good = banner in out
+        print('  %s \u4ea7\u7269\u6bd4\u6e90\u7801\u65e7\u65f6\u7ed9\u51fa\u63d0\u793a'
+              % (u'\u2713' if good else u'\u2717'))
+        if not good:
+            print('    \u672a\u62ff\u5230\u63d0\u793a\uff1b\u8f93\u51fa\u5c3e\u90e8\uff1a%s'
+                  % out.strip().splitlines()[-3:])
+        ok &= good
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    tmp = make(xml_age=0, src_age=1 * 86400)
+    try:
+        out = run(tmp, [])
+        leaked = banner in out
+        print('  %s \u4ea7\u7269\u6bd4\u6e90\u7801\u65b0\u65f6\u4e0d\u8bef\u62a5'
+              % (u'\u2713' if not leaked else u'\u2717'))
+        ok &= not leaked
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    tmp = make(xml_age=2 * 86400, src_age=0)
+    try:
+        out = run(tmp, ['--reports-root',
+                        os.path.join(tmp, 'm', 'target', 'surefire-reports')])
+        leaked = banner in out
+        print('  %s \u805a\u5408\u76ee\u5f55\u6a21\u5f0f\u4e0d\u63d0\u793a\uff08CI \u8def\u5f84\uff09'
+              % (u'\u2713' if not leaked else u'\u2717'))
+        ok &= not leaked
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     return 0 if ok else 1
 
 
@@ -954,6 +1042,73 @@ def main():
     return _run(args.root, args.reports_root, args.frontend_json, args.print_actual)
 
 
+def _newest_mtime(root, rel_parts, suffix):
+    """rel_parts 子树里后缀为 suffix 的文件的最大 mtime；没有则 None。"""
+    base = os.path.join(root, *rel_parts)
+    if not os.path.isdir(base):
+        return None
+    best = None
+    for dirpath, _dirs, files in os.walk(base):
+        for f in files:
+            if not f.endswith(suffix):
+                continue
+            try:
+                m = os.path.getmtime(os.path.join(dirpath, f))
+            except OSError:
+                continue
+            if best is None or m > best:
+                best = m
+    return best
+
+
+def _whole_set_stale(root):
+    """整批 surefire 产物是否比它应覆盖的测试源码更旧。
+
+    为什么必须查：``_class_has_source`` 抓的是**逐类**陈旧（某个类的源码没了、
+    XML 还在）。但还有另一种更常见、也更难自己看出来的形态——**整批产物比源码旧**：
+    这几轮构建跑在别处（WSL ext4 worktree、CI、别人的 worktree），本机
+    ``target/surefire-reports`` 停在几天前，于是新增的测试不在报告里、旧的还在。
+    此时本门禁会报一堆「声称 5553 实测 5518」，读起来像**代码或文档出了问题**，
+    实际只是产物过期。
+
+    实测踩坑两次（2026-11-02 的 #230 与 #236）：每次都先怀疑自己的计数改动错了，
+    花时间才定位到「本机根本没跑过构建」。本函数把这件事变成一条明说的信号，
+    并且**只提示、不改退出码**——门禁承重性与可信度判定逻辑一概不动。
+
+    只在**默认本地模式**用：CI 走 ``--reports-root``，产物是刚下载的 artifact，
+    mtime 语义完全不同，在那儿比会误报，故调用处判 ``reports_root is None``。
+    """
+    if not os.path.isdir(root):
+        return None
+    best_xml = None
+    best_src = None
+    for entry in sorted(os.listdir(root)):
+        sub = os.path.join(root, entry)
+        if not os.path.isdir(sub):
+            continue
+        cand = _newest_mtime(sub, ('target', 'surefire-reports'), '.xml')
+        if cand and (best_xml is None or cand > best_xml):
+            best_xml = cand
+        for rel in (('src', 'test', 'java'), ('src',)):
+            cand = _newest_mtime(sub, rel, '.java')
+            if cand and (best_src is None or cand > best_src):
+                best_src = cand
+    # 前端源码也算「比它新就不用信 Java 侧结论」的一种来源
+    cand = _newest_mtime(root, ('gcs-web', 'src'), '.jsx')
+    if cand and (best_src is None or cand > best_src):
+        best_src = cand
+    if best_xml is None or best_src is None:
+        return None
+    if best_xml >= best_src:
+        return None
+    return best_xml, best_src
+
+
+def _fmt_mtime(ts):
+    import datetime
+    return datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
+
+
 def _run(root, reports_root=None, frontend_json=None, print_actual=False):
     (actual, failures, errors, skipped, files,
      per_module, missing, stale) = measure_actual(root, reports_root)
@@ -969,6 +1124,18 @@ def _run(root, reports_root=None, frontend_json=None, print_actual=False):
     print('实测：%d 用例 / %d 失败 / %d 错误 / %d 跳过（来自 %d 个测试类）'
           % (actual, failures, errors, skipped, files))
     print('  分模块：' + '，'.join('%s=%d' % kv for kv in sorted(per_module.items())))
+
+    # 整批陈旧信号（只读、只本地模式、不改退出码）。没有它，「本地产物过期」会被
+    # 读成「代码/文档有问题」，2026-11-02 为此误判过两轮。
+    whole = None if reports_root else _whole_set_stale(root)
+    if whole:
+        x, s = whole
+        print('  ⚠️ 本地 surefire 产物整体比测试源码旧（最新报告 %s < 最新源码 %s）：'
+              % (_fmt_mtime(x), _fmt_mtime(s)))
+        print('     本轮新增/改动的测试不在这些报告里 ⇒ 下面的「不一致」很可能不是代码问题，'
+              '而是产物过期。')
+        print('     处理：重跑 mvn test 再看；或直接以 CI 的 fresh 构建为准'
+              '（CI 的 Docs test-count gate 通过即代表文档口径正确）。')
 
     if stale:
         # 剔除必须说出来：静默剔除只是把「虚高的数」换成「看不见的剔除」。
