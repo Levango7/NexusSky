@@ -1,5 +1,36 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修围栏租户隔离：映射缺失即放行 ⇒ 未归属只对全局管理员可见（+5 例）（2026-11-03）
+
+### 修：`GeofenceStore.isZoneForTenant` 的「查不到归属即放行」
+
+原实现：
+
+```java
+Integer zoneTenant = zoneTenantMap.get(zoneId);
+return zoneTenant == null || tenantId.equals(zoneTenant);   // ← 映射缺失即放行
+```
+
+这与 `EmergencyOrchService.checkTenantAccess` 已在 #223 修掉的形状同族，但这处更危险：
+`zoneTenantMap` 是**纯内存 map，没有 DB 回查兜底**。两条路径让映射稳定缺失：
+
+1. 全局管理员建围栏时 `TenantContext` 为 null ⇒ 创建路径 `if (tenantId != null)` 不登记；
+2. 重启后 DB 恢复同样只登记 `tenantId != null` 的行。
+
+后果：任何租户会话都能读、改、删这些未归属围栏，并读到它们的越界历史——**7 个调用点全走这
+一个判定**（`updateZone` / `removeZone` / `getZone` / `getAllZones` / `getBreachHistory` /
+`getBreachesForDrone` / `getBreachesForZone`），而此前测试零覆盖。
+
+修法：改为 `zoneTenant != null && tenantId.equals(zoneTenant)`，口径与
+`DeviceRegistry.isVisibleTo` 对齐——**未归属资源只对全局管理员可见，租户会话按「不存在」处理**。
+取舍说明：若线上存在历史遗留的未归属围栏，修后它们对租户会话将不可见；这是安全方向（从严），
+未归属本就不该被某个租户占用。全局管理员视角不受影响。
+
+测试 +5 例（`GeofenceZoneTenantIsolationTest`）。**A/B 实测**：把判定改回「缺失即放行」⇒ 2 例红；
+还原 ⇒ 绿。geofence 域 72 个既有测试全绿（无行为破坏）。
+
+计数：本批 +5（cloud-backend +5）；全仓 +5。小节数与总计随 rebase 基线浮动，以计数门禁实测为准。
+
 ## [Unreleased] — P2-F6 补充：① 的现状已有测试锻住，但语义只锻了一升（2026-11-02  ）
 
 接 #234（§12.4）。今日尝试给 P2-F6 ① 补一个「锺住现状」的单测时，
@@ -1428,7 +1459,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 266 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 267 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1454,7 +1485,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 266 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 267 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
