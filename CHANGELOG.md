@@ -1,5 +1,31 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 缺陷自动晋升：catch 包住整帧 ⇒ 一条失败静默丢掉后续所有 detection（+3 例）（2026-11-04）
+
+### 修：`DefectService.onCapture` 的 try 位置
+
+`onCapture` 的旁路纪律（spec §4 / F1 N3）只要求「立案失败不影响拍照主路径」，
+但原实现把 `try` 包在**整个 for 循环外面**：
+
+```java
+try {
+    for (detection : detections) { ... defects.save(...) ... }
+} catch (Exception e) {
+    log.warn("defect auto-promote failed (ignored, frame {})", ...);
+}
+```
+
+于是同帧**某一条** detection 触发的 save 抛异常，会让本帧**余下所有 detection 全部不被
+处理**——缺陷静默消失，而日志只有一行 warn，从日志看不出丢了多少条。帧里 detection 越多、
+排在前面的越容易触发失败，损失越大。
+
+修法：try/catch 移入循环内，**单条失败只跳该条**；旁路纪律不变（主路径仍不抛），
+同帧余下检测照常立案。
+
+测试 +3 例（`DefectOnCaptureIsolationTest`）：同帧第 1 条 save 抛异常 ⇒ 余下 2 条仍落库、
+全部成功路径不变、置信度门槛语义不变。
+**A/B 实测**：把 try 挪回 for 外层 ⇒ 1 例红；还原 ⇒ 绿。
+
 ## [Unreleased] — RID 位置一致性校验落地：RID 报文 vs 遥测真值对比，偏差超 0.01° 告 WARN（+8 例）
 
 **C2 落地时留下的一张空头支票今天兑现**：`RidIngestService.verifyLocationConsistency` 自
@@ -1594,7 +1620,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 271 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 272 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1620,7 +1646,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 271 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 272 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

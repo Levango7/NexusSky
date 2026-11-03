@@ -56,8 +56,12 @@ public class DefectService {
         // 可观测性：这是 F4 自动晋升的唯一入口，e2e/线上排查第一跳就看这行
         log.info("defect onCapture: frame={} sysid={} -> {} detection(s) (threshold={})",
                 frameSeq, sysid, detections == null ? 0 : detections.size(), autoPromoteConfidence);
-        try {
-            for (java.util.Map<String, Object> d : detections) {
+        for (java.util.Map<String, Object> d : detections) {
+            // 单条 detection 单独 try：旁路纪律（spec §4 / F1 N3）只要求「立案失败不影响
+            // 拍照主路径」，不要求「一条失败静默丢掉本帧后续所有 detection」。此前 try 包住
+            // 整个 for，某一条 save 抛异常会让同帧余下检测全部不被处理——缺陷静默消失，
+            // 而日志只有一行 warn，看不出丢了多少条。
+            try {
                 Object confRaw = d.get("confidence");
                 Object kindRaw = d.get("kind");
                 Object latRaw = d.get("lat");
@@ -85,10 +89,11 @@ public class DefectService {
                     log.info("defect auto-promoted: id={} kind={} conf={} lat={} lon={} frame={}",
                             created.id, kind, conf.doubleValue(), lat, lon, frameSeq);
                 }
+            } catch (Exception e) {
+                // 纯旁路纪律（spec §4 / F1 N3 同款）：单条立案失败不影响拍照主路径，
+                // 也不影响同帧余下检测
+                log.warn("defect auto-promote failed (ignored, frame {}): {}", frameSeq, e.getMessage());
             }
-        } catch (Exception e) {
-            // 纯旁路纪律（spec §4 / F1 N3 同款）：立案失败不影响拍照主路径
-            log.warn("defect auto-promote failed (ignored, frame {}): {}", frameSeq, e.getMessage());
         }
     }
 
