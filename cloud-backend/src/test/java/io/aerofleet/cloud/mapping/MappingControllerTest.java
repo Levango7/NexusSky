@@ -50,6 +50,43 @@ class MappingControllerTest {
                 });
         Mockito.when(taskRepository.findAll())
                 .thenAnswer(inv -> new ArrayList<>(taskStore.values()));
+        // 列表查询已下推 DB（租户/状态）,不再 findAll 后内存过滤 ⇒ 这里按同样口径打桩
+        Mockito.when(taskRepository.findByStatus(Mockito.any(MappingTask.Status.class)))
+                .thenAnswer(inv -> {
+                    MappingTask.Status want = inv.getArgument(0);
+                    List<MappingTask> out = new ArrayList<>();
+                    for (MappingTask t : taskStore.values()) {
+                        if (t.getStatus() == want) {
+                            out.add(t);
+                        }
+                    }
+                    return out;
+                });
+        Mockito.when(taskRepository.findByTenantId(Mockito.anyInt()))
+                .thenAnswer(inv -> {
+                    Integer want = inv.getArgument(0);
+                    List<MappingTask> out = new ArrayList<>();
+                    for (MappingTask t : taskStore.values()) {
+                        if (want == null || want.equals(t.getTenantId())) {
+                            out.add(t);
+                        }
+                    }
+                    return out;
+                });
+        Mockito.when(taskRepository.findByTenantIdAndStatus(Mockito.anyInt(),
+                Mockito.any(MappingTask.Status.class)))
+                .thenAnswer(inv -> {
+                    Integer wantTenant = inv.getArgument(0);
+                    MappingTask.Status wantStatus = inv.getArgument(1);
+                    List<MappingTask> out = new ArrayList<>();
+                    for (MappingTask t : taskStore.values()) {
+                        boolean tenantOk = wantTenant == null || wantTenant.equals(t.getTenantId());
+                        if (tenantOk && t.getStatus() == wantStatus) {
+                            out.add(t);
+                        }
+                    }
+                    return out;
+                });
         Mockito.when(taskRepository.findById(Mockito.anyString()))
                 .thenAnswer(inv -> Optional.ofNullable(taskStore.get(inv.getArgument(0))));
         controller = new MappingController(routePlanner, photoCaptureService, resultService, registry, taskRepository);
