@@ -1,5 +1,46 @@
 # NexusSky 变更日志
 
+## [Unreleased] — RID 位置一致性校验落地：RID 报文 vs 遥测真值对比，偏差超 0.01° 告 WARN（+8 例）
+
+**C2 落地时留下的一张空头支票今天兑现**：`RidIngestService.verifyLocationConsistency` 自
+`62abc5c9`（C2 原始提交）起就是占位 stub——方法上写着「误差 > 0.01° 时输出 WARN 日志」，
+类里也早有 `LOCATION_CONSISTENCY_THRESHOLD = 0.01` 常量，实现却只有一行 debug log，
+注释还把后续接入指到「C3 阶段」——**C3 是电子围栏硬拦截，与此无关**（指错了阶段的挂账，
+正是「已知遗留落笔前必须对树核对」要防的形态）。
+
+### 实现（`RidIngestService`）
+
+- **真值来源**：`DeviceRegistry.get(sysid)` 的遥测快照。真机上 RID 由广播模块独立发报，
+  与飞控遥测是两条独立数据链 ⇒ 偏差超阈值即异常信号（**RID 欺骗**或某数据源故障），
+  是 Remote ID 合规监控里最直接的检测点。
+- **判定**：`positionDeltaDeg`（haversine 角距，天然处理反经线跨越）> 0.01° ⇒ WARN，
+  带两侧坐标与偏差值；否则维持原 debug 记录。
+- **防刷屏**：同 sysid 5s 内只告一次（RID 可达 1Hz+，持续不一致时不能每帧一条）。
+- **退化路径**：注册表缺席（null）、快照缺失、设备离线、遥测未定位（`lat/lon` 初始 `NaN`）
+  ⇒ 无从对比，不告警不抛——保持原记录口径。
+- **租户口径说明**：校验跑在 UDP 接收线程上，无 TenantContext ⇒ `get()` 的可见性过滤
+  按全局管理员放行。这是**物理一致性**检查，本就不应被租户可见性影响；
+  若未来该线程带上租户上下文，此处必须改用无过滤读取（已在 javadoc 写明）。
+
+### 为什么现在做
+
+用户令排查其他 agent 未完成工作时的全仓残留审计顺带发现：33 个生产代码 TODO 里
+外部依赖类（P5 厂商 SDK 等）之外，唯一一个「同进程内就有依赖、却挂账指向不存在阶段」的就是它。
+设计早已写进 javadoc（阈值、日志级别），实现只差接线。
+
+### 回归（+8 例，RidIngestServiceTest 20 例全绿）
+
+- `PositionDeltaMath` 4 例：同点零、0.01° 量级、**反经线跨越**（179.5°E 与 179.5°W 相邻 1°
+  而非绕半圈）、赤道到极点 90°。
+- `LocationConsistency` 4 例：一致不告警 / 超阈值告一次且**紧随第二帧被 5s 抑制** /
+  设备离线跳过 / 遥测未定位（NaN）跳过。WARN 断言走 Logback ListAppender，
+  喂的是真实 MAVLink 帧（与既有用例同路径）。
+
+验证：`mvn -pl cloud-backend -am test -Dtest=RidIngestServiceTest` 20/20 绿（本机 WSL 实跑，
+WARN 告警行逐字核对：`rid=(40.4, 116.3) telemetry=(39.9, 116.3) 偏差=0.50000°`）；
+八道仓门全绿。计数：+8 例 ⇒ 全仓 **5584** / cloud-backend **3399**（10 份口径文档同步）；
+`[Unreleased]` 小节 270 → **271**。
+
 ## [Unreleased] — 任务列表查询下推 DB：mapping / show 不再「findAll 后内存过滤」（+5 例）（2026-11-04）
 
 ### 修：`MappingController#listTasks` 与 `ShowTaskService#listTasks`
@@ -1553,7 +1594,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 270 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 271 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1579,7 +1620,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 270 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 271 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

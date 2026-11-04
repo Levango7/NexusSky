@@ -15,13 +15,17 @@ import io.aerofleet.mavlink.messages.OpenDroneIdMessagePack;
 import io.aerofleet.mavlink.messages.OpenDroneIdOperatorId;
 import io.aerofleet.mavlink.messages.OpenDroneIdSelfId;
 import io.aerofleet.mavlink.messages.OpenDroneIdSystem;
+import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.gateway.DroneSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Remote ID 消息接入服务。
@@ -64,23 +68,34 @@ public class RidIngestService {
     /** 位置一致性校验误差阈值（度）。 */
     private static final double LOCATION_CONSISTENCY_THRESHOLD = 0.01;
 
+    /** 同一 sysid 的不一致告警最小间隔（毫秒）：RID 可达 1Hz+，持续不一致时不刷屏。 */
+    private static final long CONSISTENCY_WARN_INTERVAL_MS = 5_000;
+
     private final RidStateManager stateManager;
     private final RidWebSocketHandler wsHandler;
     private final RidConfig config;
+    private final DeviceRegistry deviceRegistry;
+
+    /** 每个 sysid 上一次不一致告警的时间戳（幂等抑制用）。 */
+    private final Map<Integer, Long> lastConsistencyWarnAt = new ConcurrentHashMap<>();
 
     /**
      * 构造 RID 接入服务。
      *
-     * @param stateManager RID 状态管理器
-     * @param wsHandler    WebSocket 推送处理器
-     * @param config       RID 配置
+     * @param stateManager   RID 状态管理器
+     * @param wsHandler      WebSocket 推送处理器
+     * @param config         RID 配置
+     * @param deviceRegistry 设备注册表，供 RID 报文位置与遥测真值的一致性校验；
+     *                       可为 null（单元测试 / 注册表缺席时退化为仅记录，不校验）
      */
     public RidIngestService(RidStateManager stateManager,
                             RidWebSocketHandler wsHandler,
-                            RidConfig config) {
+                            RidConfig config,
+                            DeviceRegistry deviceRegistry) {
         this.stateManager = stateManager;
         this.wsHandler = wsHandler;
         this.config = config;
+        this.deviceRegistry = deviceRegistry;
     }
 
     /**
@@ -247,19 +262,64 @@ public class RidIngestService {
     // --- 私有辅助方法 ---
 
     /**
-     * 位置一致性校验：将 RID Location 与遥测数据对比。
+     * 位置一致性校验：将 RID Location 与遥测真值对比。
      * <p>
-     * 误差 > 0.01° 时输出 WARN 日志。当前实现仅记录日志，
-     * 后续可接入遥测服务进行实时对比。
+     * 同一架机的 RID 广播位置与 MAVLink 遥测位置本应一致（真机上两者来自不同
+     * 模块——RID 由广播模块独立发报）。偏差超过 {@link #LOCATION_CONSISTENCY_THRESHOLD}
+     * 时输出 WARN：可能是 <b>RID 欺骗</b>（广播位置被伪造）或某个数据源故障，
+     * 这是 Remote ID 合规监控里最直接的异常信号。
+     * <p>
+     * 遥测真值取 {@link DeviceRegistry#get(int)}：RID 摄取跑在 UDP 接收线程上，
+     * 无 TenantContext ⇒ 可见性过滤按全局管理员放行。此校验是<b>物理一致性</b>检查，
+     * 本就不应被租户可见性影响；若未来该线程带上租户上下文，这里必须改用无过滤读取。
+     * <p>
+     * 退化路径：注册表缺席（null）、快照缺失、设备离线、遥测尚未定位（NaN）
+     * ⇒ 无从对比，保留原 debug 记录，不告警。
      *
-     * @param sysid 无人机系统标识
+     * @param sysid  无人机系统标识
      * @param ridLat RID 报告纬度
      * @param ridLon RID 报告经度
      */
     private void verifyLocationConsistency(int sysid, double ridLat, double ridLon) {
-        // TODO: 接入遥测服务获取实时 GPS 数据进行对比
-        // 当前阶段仅记录 RID 位置，后续 C3 阶段接入 TelemetryIngestService
-        log.debug("RID 位置一致性校验: sysid={}, ridLat={}, ridLon={}", sysid, ridLat, ridLon);
+        DroneSnapshot snapshot = deviceRegistry == null ? null : deviceRegistry.get(sysid);
+        if (snapshot == null || !snapshot.online
+                || Double.isNaN(snapshot.lat) || Double.isNaN(snapshot.lon)) {
+            // 无遥测真值可比：保留原有记录口径（原实现在此只记 debug）
+            log.debug("RID 位置一致性校验: sysid={}, ridLat={}, ridLon={}（无遥测真值可比）",
+                    sysid, ridLat, ridLon);
+            return;
+        }
+        double delta = positionDeltaDeg(ridLat, ridLon, snapshot.lat, snapshot.lon);
+        if (delta <= LOCATION_CONSISTENCY_THRESHOLD) {
+            log.debug("RID 位置一致性校验通过: sysid={} 误差={}°", sysid, delta);
+            return;
+        }
+        long now = System.currentTimeMillis();
+        Long last = lastConsistencyWarnAt.get(sysid);
+        if (last != null && now - last < CONSISTENCY_WARN_INTERVAL_MS) {
+            return;
+        }
+        lastConsistencyWarnAt.put(sysid, now);
+        log.warn("RID 位置与遥测不一致: sysid={} rid=({}, {}) telemetry=({}, {}) "
+                        + "偏差={}°（阈值 {}°）—— 可能为 RID 欺骗或数据源故障",
+                sysid, ridLat, ridLon, snapshot.lat, snapshot.lon,
+                String.format("%.5f", delta), LOCATION_CONSISTENCY_THRESHOLD);
+    }
+
+    /**
+     * 两点间的角距（大圆距离换算成度）。用 haversine 天然处理反经线跨越
+     * （179.5°E 与 179.5°W 相邻而不是绕地球半圈）。
+     *
+     * @return 角距，单位度（0.01° ≈ 1.1 km）
+     */
+    static double positionDeltaDeg(double lat1, double lon1, double lat2, double lon2) {
+        double rad = Math.PI / 180.0;
+        double dLat = (lat2 - lat1) * rad;
+        double dLon = (lon2 - lon1) * rad;
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(lat1 * rad) * Math.cos(lat2 * rad)
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return Math.toDegrees(2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
     }
 
     /**
