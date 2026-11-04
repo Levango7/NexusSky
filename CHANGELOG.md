@@ -1,5 +1,40 @@
 # NexusSky 变更日志
 
+## [Unreleased] — Redis 限流健康态修法：isAvailable() 只看注入不看运行态，Redis 抖动期限流仍被整体绕过（+6 例）
+
+**#244 留下的一张半成品支票今天补完**：#244 修掉了「未注入 Redis 时被动放行被当成限流
+通过」——但 `RedisRateLimiter#isAvailable()` 只判 `redisTemplate != null`，即**只判
+bean 注入、不判运行态健康**。最常见的那条路径仍然敞开：Redis 已配置、运行时故障
+（连接超时、熔断、主从切换）⇒ `isAvailable()` 恒真 ⇒ `tryAcquire` 捕获异常后被动
+放行 ⇒ **集群 Redis 抖动期等于无限流**，而 `tryAcquire` 的 WARN 为此承诺的
+「将回退到内存限流」并不发生。生产里非空模板永远 `isAvailable()==true`——
+测试中那个「已标记故障」态只有 mock 造得出。
+
+### 实现（`RedisRateLimiter`，单文件）
+
+- **运行态健康标志**：volatile `available`，`tryAcquire` 成功置真、异常置假；
+  `isAvailable()` 三分支——未注入（假）/ 运行态健康（真）/ 运行态故障（假，
+  但每 30s 放行一次探针）。
+- **探针自愈**：`HEALTH_PROBE_INTERVAL_MS = 30s`，故障态按周期放行一次 Redis 调用，
+  成功即回分布式口径。没有这一步，一次失败会把集群**永久**钉在单机内存口径
+  （每实例各计数，集群实际配额 ×N），直到进程重启——降级必须能自愈。
+- 已知窗口如实写进 javadoc：乐观初始 `available=true` ⇒ Redis 从启动就不可用时，
+  第一个请求仍会被动放行；此后每探针周期至多再一次。
+- 顺手修掉 #244 引入的 javadoc 挂错：`tryAcquire` 的文档块被插在 `isAvailable()`
+  上方，两段注释叠在一起，`tryAcquire` 本身反而没有文档。
+
+### 回归（+6 例，`RedisRateLimiterHealthTest`）
+
+- 未注入 ⇒ `isAvailable()` 恒假（#244 已闭的洞，此处作护栏不回归）。
+- **残留缺口的直接回归**：实测异常后立即降级（`isAvailable()==false`）。
+- 探针被 30s 周期门控：窗口内连续问也不放行、过期才放行一次、探针本身重置时钟。
+- 探针成功 ⇒ 自愈回分布式口径，不再依赖探针时钟。
+- 集成口径（经过 `TenantInterceptor`）：Redis 故障时限流放行窗口 = 单请求，
+  第 LIMIT+1 次被内存限流拒绝；`execute` 恰被调 1 次（分流发生在调用前）。
+
+验证：全仓 **5596** / cloud-backend **3411**（10 份口径文档同步）；
+`[Unreleased]` 小节 273 → **274**。
+
 ## [Unreleased] — 修 Redis 故障时限流被整体绕过：降级链注释与实现相反（+3 例）（2026-11-04）
 
 ### 修：`TenantInterceptor#checkRateLimit` 把「被动放行」当成「限流通过」
@@ -1646,7 +1681,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 273 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 274 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1672,7 +1707,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 273 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 274 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
