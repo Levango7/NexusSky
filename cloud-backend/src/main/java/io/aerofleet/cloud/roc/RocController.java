@@ -1,8 +1,11 @@
 package io.aerofleet.cloud.roc;
 
+import io.aerofleet.cloud.api.exception.ClientErrorBodies;
 import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,6 +23,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/roc")
 public class RocController {
+
+    private static final Logger log = LoggerFactory.getLogger(RocController.class);
 
     private final RocSeatService seats;
     private final IncidentDispatchService incidents;
@@ -126,10 +131,18 @@ public class RocController {
                                 "unknown action: " + action + " (arm/takeoff/rtl/land)");
                     }
                     r.put("result", "ok");
-                } catch (Exception e) {
-                    // 逐机结果：部分失败如实呈现（指令彼此独立，不整体回滚）
+                } catch (IllegalArgumentException e) {
+                    // 请求侧/机队侧自建消息可回
                     r.put("result", "failed");
                     r.put("reason", e.getMessage());
+                } catch (Exception e) {
+                    // 逐机结果：部分失败如实呈现（指令彼此独立，不整体回滚）；
+                    // 但 CommandException 的消息可能粘着 MAVLink/传输层内部文本
+                    // （见 DroneCommandService 各构造点），宽捕尾巴只回通用文案，
+                    // 完整异常进日志（口径同 ApiExceptionHandler 生产模式）。
+                    r.put("result", "failed");
+                    r.put("reason", ClientErrorBodies.INTERNAL_SERVER_ERROR);
+                    log.warn("seat {} batch {} failed for sysid {}", id, action, sysid, e);
                 }
                 results.add(r);
             }

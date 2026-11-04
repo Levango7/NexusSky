@@ -1,10 +1,13 @@
 package io.aerofleet.cloud.api.controller;
 
+import io.aerofleet.cloud.api.exception.ClientErrorBodies;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.vision.ThermalTaskService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,6 +35,8 @@ import java.util.Map;
 @RequestMapping("/api/v1/thermal")
 @RequireRole(Role.OBSERVER)
 public class ThermalController {
+
+    private static final Logger log = LoggerFactory.getLogger(ThermalController.class);
 
     private final ThermalTaskService service;
     private final DeviceRegistry registry;
@@ -64,8 +69,13 @@ public class ThermalController {
             }
             ThermalTaskService.ThermalTask task = service.create(sysid, region, threshold);
             return ResponseEntity.ok(task.toView());
-        } catch (Exception e) {
+        } catch (IllegalArgumentException e) {
+            // 请求侧字段问题（服务端自建消息）
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            // 宽捕：内部异常一律通用文案（细节进服务端日志），不再回显
+            log.error("thermal createTask failed (ignored detail)", e);
+            return ResponseEntity.internalServerError().body(ClientErrorBodies.internal());
         }
     }
 

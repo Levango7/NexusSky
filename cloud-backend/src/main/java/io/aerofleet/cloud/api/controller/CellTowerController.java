@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.api.controller;
 
 import io.aerofleet.cloud.api.dto.CellTowerSnapshot;
+import io.aerofleet.cloud.api.exception.ClientErrorBodies;
 import io.aerofleet.cloud.api.dto.CellTowerSnapshot.TerminalInfo;
 import io.aerofleet.cloud.api.service.CellTowerTopologyService;
 import io.aerofleet.cloud.gateway.UdpGateway;
@@ -120,9 +121,11 @@ public class CellTowerController {
             log.info("celltower config sent: sysid={} cellType={} txPower={} maxTerminals={} freq={}",
                     sysid, body.cellType, body.txPowerDbm, body.maxTerminals, body.frequencyChannel);
         } catch (Exception e) {
-            log.warn("failed to send celltower config to sysid={}: {}", sysid, e.getMessage());
+            // 宽捕：跨 IO/序列化/内部错误统一通用文案，细节只进服务端日志
+            // （口径同 ApiExceptionHandler 生产模式；e.getMessage() 可能含内部地址/端口）
+            log.warn("failed to send celltower config to sysid={}", sysid, e);
             return ResponseEntity.status(502).body(
-                    Map.of("error", "failed to send config: " + e.getMessage()));
+                    ClientErrorBodies.failed("failed to send config"));
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sysid", sysid);
@@ -176,9 +179,10 @@ public class CellTowerController {
             log.info("handover triggered: terminal={} from={} to={} reason={}",
                     body.terminalId, sysid, body.toSysid, body.reason);
         } catch (Exception e) {
-            log.warn("failed to send handover to sysid={}: {}", sysid, e.getMessage());
+            // 宽捕：跨 IO/序列化/内部错误统一通用文案，细节只进服务端日志
+            log.warn("failed to send handover to sysid={}", sysid, e);
             return ResponseEntity.status(502).body(
-                    Map.of("error", "failed to send handover: " + e.getMessage()));
+                    ClientErrorBodies.failed("failed to send handover"));
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("terminalId", body.terminalId);
