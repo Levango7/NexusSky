@@ -63,6 +63,17 @@ public class RedisRateLimiter {
      * @param limitPerMinute 每分钟允许的最大请求数
      * @return true 表示允许通过，false 表示已超限
      */
+    /**
+     * Redis 当前是否可用。
+     * <p>
+     * 调用方必须用这个方法来区分「限流通过」与「Redis 挂了被动放行」——{@link #tryAcquire}
+     * 在后一种情况也返回 {@code true}（见其契约）。不看这个方法就直接采信 tryAcquire 的
+     * 返回值，会把「Redis 故障」实现成「限流整体绕过」。
+     */
+    public boolean isAvailable() {
+        return redisTemplate != null;
+    }
+
     public boolean tryAcquire(String key, int limitPerMinute) {
         if (redisTemplate == null) {
             return true;

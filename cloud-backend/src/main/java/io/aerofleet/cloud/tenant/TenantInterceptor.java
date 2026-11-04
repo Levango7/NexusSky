@@ -115,14 +115,23 @@ public class TenantInterceptor implements HandlerInterceptor {
 
     /**
      * 限流校验：优先使用 Redis 分布式限流，Redis 不可用时回退到内存滑动窗口限流。
+     * <p>
+     * <b>为什么不能把 {@code tryAcquire} 的返回值当最终答案</b>：{@link RedisRateLimiter}
+     * 的契约是「Redis 不可用（未注入 / 操作异常）时返回 {@code true} 放行，由调用方回退」——
+     * 也就是说 {@code true} 有两个来源：真限流通过、和 Redis 挂了被动放行。旧实现直接
+     * {@code return redisRateLimiter.tryAcquire(...)}，把后者当成了前者：Redis 故障时
+     * 限流被整体绕过（多实例部署下等于全集群无限流），与「回退内存限流」的注释相反。
+     * <p>
+     * 现在用 {@link RedisRateLimiter#isAvailable()} 显式分流：Redis 可用才信它的判定，
+     * 否则走内存限流（单机口径，好过无限流）。
      */
     private boolean checkRateLimit(String key) {
-        // 优先使用 Redis 分布式限流（多实例共享计数）
-        if (redisRateLimiter != null) {
+        // Redis 可用：分布式限流（多实例共享计数）
+        if (redisRateLimiter != null && redisRateLimiter.isAvailable()) {
             return redisRateLimiter.tryAcquire(key, rateLimitPerMinute);
         }
 
-        // 回退到内存滑动窗口限流（单机模式）
+        // Redis 不可用（未注入 / 已标记故障）：回退内存滑动窗口限流
         return checkRateLimitInMemory(key);
     }
 
