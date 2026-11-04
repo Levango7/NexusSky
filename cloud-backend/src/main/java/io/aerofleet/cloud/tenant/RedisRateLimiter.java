@@ -21,7 +21,8 @@ import java.util.Collections;
  * minuteBucket 为当前分钟的时间戳。
  * <p>
  * 当 Redis 不可用（StringRedisTemplate 未注入或操作异常）时，返回 true（允许通过），
- * 由调用方回退到内存限流。
+ * 由调用方回退到内存限流。「可用与否」由 {@link #isAvailable()} 表达，且它反映的是
+ * <b>运行态健康度</b>（注入与否 + 实测成败），不只是 bean 注入状态。
  *
  * @author AeroFleet Cloud Team
  */
@@ -32,6 +33,13 @@ public class RedisRateLimiter {
 
     private static final String KEY_PREFIX = "rate_limit:";
     private static final Duration WINDOW_TTL = Duration.ofMinutes(1);
+
+    /**
+     * 降级后的健康探针间隔：{@link #isAvailable()} 在故障态按此周期放行一次 Redis 调用，
+     * 让 Redis 恢复后自动回到分布式口径——否则一次失败会把集群永久钉在单机口径
+     * （每实例各计数，集群实际配额 ×N），直到进程重启。
+     */
+    private static final long HEALTH_PROBE_INTERVAL_MS = 30_000L;
 
     /**
      * Lua 脚本：原子化 INCR + EXPIRE，避免竞态条件导致 key 永不过期。
@@ -54,26 +62,67 @@ public class RedisRateLimiter {
     private int defaultLimitPerMinute;
 
     /**
+     * 运行态健康标志：{@code true} = 最近一次 Redis 操作成功（或尚未失败过，乐观初始），
+     * {@code false} = 最近一次操作抛异常。与「bean 是否注入」是两件事——非空模板也可能
+     * 处在 Redis 已挂的运行态里，而那才是限流最需要顶住的时刻。
+     * <p>
+     * volatile：限流跑在每个请求线程上，标志无复合操作，last-write-wins 即可。
+     */
+    private volatile boolean available = true;
+
+    /**
+     * 最近一次降级的时刻（{@link System#currentTimeMillis()}），只作探针节流时钟，
+     * 仅在 {@link #available} 为 {@code false} 时被读。
+     */
+    private volatile long lastDegradedAt = 0L;
+
+    /**
+     * Redis 当前是否可用（调用方据此决定信不信 {@link #tryAcquire} 的返回值）。
+     * <p>
+     * 三个层次，缺一不可：
+     * <ul>
+     *   <li><b>未注入</b>（{@code redisTemplate == null}）：不可用——单机部署没有 Redis。</li>
+     *   <li><b>运行态健康</b>（最近一次操作成功）：可用——信 Redis 的分布式判定。</li>
+     *   <li><b>运行态故障</b>（最近一次操作抛异常）：不可用，但每
+     *       {@value #HEALTH_PROBE_INTERVAL_MS}ms 放行一次探针调用，让 Redis 恢复后
+     *       自动回到分布式口径。</li>
+     * </ul>
+     * 只看「模板注入与否」会漏判「Redis 已配置但挂了」——那恰恰是限流最需要顶住的时刻
+     * （集群 Redis 抖动期），也是本方法与 #244 之前实现的本质区别。
+     * <p>
+     * 已知窗口（如实交代）：乐观初始 {@code available=true} ⇒ Redis 从进程启动就不可用时，
+     * 第一个请求仍会打到 Redis 并被被动放行；此后每个探针周期至多再一次。以「无限流」
+     * 为代价分母，这是可交代的上界。
+     */
+    public boolean isAvailable() {
+        if (redisTemplate == null) {
+            return false;
+        }
+        if (available) {
+            return true;
+        }
+        // 故障态：周期性放行一次探针，否则一次失败后即使 Redis 恢复，集群也会永远
+        // 卡在单机内存口径（每实例各计数，集群实际配额 ×N），直到进程重启。
+        long now = System.currentTimeMillis();
+        if (now - lastDegradedAt >= HEALTH_PROBE_INTERVAL_MS) {
+            lastDegradedAt = now;
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * 尝试获取限流许可。
      * <p>
      * 使用 Redis INCR 原子递增当前分钟窗口的计数器，首次递增时设置 EXPIRE。
-     * 当 Redis 不可用时返回 true（允许通过），由调用方回退到内存限流。
+     * 当 Redis 不可用时返回 true（允许通过），由调用方回退到内存限流——调用方必须用
+     * {@link #isAvailable()} 区分「真限流通过」与这里的被动放行。本方法同时维护运行态
+     * 健康标志：成功置真、异常置假（{@link #isAvailable()} 靠它识别「已配置但挂了」）。
      *
      * @param key           限流 key（真实租户桶 {@code tenant:<id>} 或客户端 IP 桶 {@code ip:<addr>}）
      * @param limitPerMinute 每分钟允许的最大请求数
      * @return true 表示允许通过，false 表示已超限
      */
-    /**
-     * Redis 当前是否可用。
-     * <p>
-     * 调用方必须用这个方法来区分「限流通过」与「Redis 挂了被动放行」——{@link #tryAcquire}
-     * 在后一种情况也返回 {@code true}（见其契约）。不看这个方法就直接采信 tryAcquire 的
-     * 返回值，会把「Redis 故障」实现成「限流整体绕过」。
-     */
-    public boolean isAvailable() {
-        return redisTemplate != null;
-    }
-
     public boolean tryAcquire(String key, int limitPerMinute) {
         if (redisTemplate == null) {
             return true;
@@ -87,8 +136,19 @@ public class RedisRateLimiter {
                     String.valueOf(WINDOW_TTL.getSeconds())
             );
 
-            return current != null && current <= limitPerMinute;
+            if (current != null) {
+                // 实测成功：运行态恢复（探针路径下尤其重要——把集群拉回分布式口径）。
+                available = true;
+                return current <= limitPerMinute;
+            }
+            // current == null：脚本返回空（RedisTemplate 对 nil 的处理）。不翻转健康标志——
+            // 没有证据说 Redis 病了，也没有明确的超限判定，保守放行并维持原口径。
+            return true;
         } catch (Exception e) {
+            // 实测失败：标记降级 + 重置探针时钟。后续 isAvailable() 为假时调用方走内存
+            // 限流（单机口径，好过无限流），直到探针成功自愈。
+            available = false;
+            lastDegradedAt = System.currentTimeMillis();
             log.warn("Redis 限流操作异常，允许通过（将回退到内存限流）：{}", e.getMessage());
             return true;
         }
