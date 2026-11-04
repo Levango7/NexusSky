@@ -1,5 +1,31 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修 Redis 故障时限流被整体绕过：降级链注释与实现相反（+3 例）（2026-11-04）
+
+### 修：`TenantInterceptor#checkRateLimit` 把「被动放行」当成「限流通过」
+
+`RedisRateLimiter#tryAcquire` 的契约是「Redis 不可用（未注入 / 操作异常）时返回
+{@code true} 放行，由调用方回退」——即 {@code true} 有两个来源：真限流通过、和 Redis
+挂了被动放行。而旧实现只判 bean 是否存在：
+
+```java
+if (redisRateLimiter != null) {
+    return redisRateLimiter.tryAcquire(key, rateLimitPerMinute);   // ← 采信了被动放行
+}
+return checkRateLimitInMemory(key);
+```
+
+后果：**Redis 真正故障时（这才是主要场景）限流被整体绕过**——多实例部署下等于全集群
+无限流，而类文档与注释都宣称“Redis 不可用时回退内存限流”。只有 Redis bean 压根不存在
+时才真的回退。
+
+修法：`RedisRateLimiter` 增 `isAvailable()`；`checkRateLimit` 显式分流——Redis 可用才信
+它的判定，否则走内存滑动窗口限流（单机口径，好过无限流）。
+
+测试 +3 例（`TenantInterceptorRedisFallbackTest`）：Redis 未注入 ⇒ 回退且超限被拒、
+Redis 已标记故障 ⇒ 同样回退且**不调用** Redis、Redis 可用 ⇒ 采信其判定。
+**A/B 实测**：把判定退回「只判 null」⇒ 1 例红；还原 ⇒ 绿。
+
 ## [Unreleased] — 缺陷自动晋升：catch 包住整帧 ⇒ 一条失败静默丢掉后续所有 detection（+3 例）（2026-11-04）
 
 ### 修：`DefectService.onCapture` 的 try 位置
@@ -1620,7 +1646,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 272 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-02 共有 273 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1646,7 +1672,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 272 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 273 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
