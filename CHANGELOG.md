@@ -1,5 +1,35 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 门禁去噪：`check-maven-incantations` 不再扫 `.coord` 归档，本机恒红改为真绿（0 例，纯工具）
+
+**一个永远红的门禁比没有门禁更糟**：本机执行 `python scripts/check-maven-incantations.py`
+恒报「32 处 `mvn -pl` 漏 `-am`」，但 32 处**全部**落在协作归档——`.coord/STATUS-HISTORY.md`
+31 处（历史验收记录原文，如「改完 `mvn -o -pl drone-sim,cloud-backend test`」）、
+`.coord/INBOX-zcode.md` 1 处（往来通信原文）。这些文本是**历史证据**，不是给人照抄的指令。
+
+### 根因
+
+- `scripts/check-maven-incantations.py` 的 `SCAN_DIRS = ('docs', 'scripts', '.coord')`；
+- `.coord/` 被 `.gitignore` 整目录忽略，`git ls-files .coord` 为空 ⇒ **CI 检出里根本没有这些文件**，
+  于是同一道门禁在 CI 恒绿、在本机恒红；
+- 后果是训练人「本机门禁反正红，忽略即可」——而本机门禁恰恰是提交前唯一能拦问题的一层。
+
+### 修法
+
+`SCAN_DIRS` 收窄为 `('docs', 'scripts')`，只扫入库文件；`.coord` 段的失效原因写进注释，
+避免后来者再把它加回来。扫描面从 159 个文件降到 **142** 个（剔除 17 个未入库归档）。
+
+### 双向验收（A/B，缺一不可）
+
+- **A 正常态**：改后本机 `python scripts/check-maven-incantations.py` → `扫描 142 个文件`、
+  `通过：未发现漏 -am 的 -pl 命令`、`exit=0`；
+- **B 反例态**：临时写入 `docs/_gate-probe-tmp.md`（内容 `mvn -o -pl cloud-backend test`）→
+  门禁仍报 `发现 1 处 … 漏 -am`、`exit=1`；验完即删（`git status` 只剩本脚本一处改动）。
+  这条证明真信号没有被一起关掉。
+
+验证：无新增用例，计数口径不变（全仓 **5596** / cloud-backend **3411** / 前端 **588**）；
+`[Unreleased]` 小节 274 → **275**。
+
 ## [Unreleased] — Redis 限流健康态修法：isAvailable() 只看注入不看运行态，Redis 抖动期限流仍被整体绕过（+6 例）
 
 **#244 留下的一张半成品支票今天补完**：#244 修掉了「未注入 Redis 时被动放行被当成限流
@@ -1681,7 +1711,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-02 共有 274 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-05 共有 275 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1707,7 +1737,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 274 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 275 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

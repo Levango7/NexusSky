@@ -44,7 +44,10 @@ HAS_AM = re.compile(r'(^|\s)(-am|--also-make)(\s|$)')
 
 # 扫描的文件：文档与脚本。CHANGELOG 也扫（它是给人看的命令记录）。
 SCAN_GLOBS = ('*.md',)
-SCAN_DIRS = ('docs', 'scripts', '.coord')
+# 只扫入库的文档与脚本。`.coord/` 是协作归档（`.gitignore` 整目录忽略、CI 检出里不存在），
+# 里面是历史往来原文与验收记录：扫它只会在本机制造 32 条归档噪声，CI 侧则从来不生效。
+# 结果就是"本机恒红、CI 恒绿"——这种红灯会训练人跳过本机门禁，比不查更糟。
+SCAN_DIRS = ('docs', 'scripts')
 SKIP_FILES = {
     'scripts/check-maven-incantations.py',      # 本脚本
     # CHANGELOG 是历史记录，且其中 65/68 行**正是**在讲"不带 -am 会怎样"的反面教材
