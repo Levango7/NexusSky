@@ -2,6 +2,7 @@ package io.aerofleet.cloud.surveillance;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.aerofleet.cloud.alarm.AlarmController;
+import io.aerofleet.cloud.api.exception.ClientErrorBodies;
 import io.aerofleet.cloud.alarm.AlarmEvent;
 import io.aerofleet.cloud.alarm.AlarmEventStore;
 import io.swagger.v3.oas.annotations.Operation;
@@ -351,9 +352,10 @@ public class SurveillanceController {
             result.put("deviceVerified", origin.deviceVerified());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.warn("GetStreamUri failed for {}: {}", id, e.getMessage());
+            // 宽捕：厂商 SDK/ONVIF/网络错误的原始文本（含内部 URL/凭据名）不回客户端
+            log.warn("GetStreamUri failed for {}", id, e);
             return ResponseEntity.status(502).body(
-                    Map.of("error", "failed to get rtsp url: " + e.getMessage()));
+                    ClientErrorBodies.failed("failed to get rtsp url"));
         }
     }
 
@@ -494,9 +496,10 @@ public class SurveillanceController {
             log.info("PTZ {} on device {} (vendor={})", cmd, id, d.vendor);
             return ResponseEntity.ok(Map.of("status", "ok", "cmd", cmd, "result", result));
         } catch (Exception e) {
-            log.warn("PTZ {} failed for {}: {}", cmd, id, e.getMessage());
+            // 宽捕：适配器/设备返回的原始错误不回客户端
+            log.warn("PTZ {} failed for {}", cmd, id, e);
             return ResponseEntity.status(502).body(
-                    Map.of("error", "ptz control failed: " + e.getMessage()));
+                    ClientErrorBodies.failed("ptz control failed"));
         }
     }
 
@@ -525,9 +528,10 @@ public class SurveillanceController {
             result.put("devices", view);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.warn("Discovery failed for {}: {}", subnet, e.getMessage());
+            // 宽捕：ONVIF 探测内部错误不回客户端
+            log.warn("Discovery failed for {}", subnet, e);
             return ResponseEntity.status(502).body(
-                    Map.of("error", "discovery failed: " + e.getMessage()));
+                    ClientErrorBodies.failed("discovery failed"));
         }
     }
 
@@ -574,9 +578,10 @@ public class SurveillanceController {
             result.put("results", view);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.warn("Rapid deploy failed for {}: {}", subnet, e.getMessage());
+            // 宽捕：批量探测/注册的内部错误不回客户端
+            log.warn("Rapid deploy failed for {}", subnet, e);
             return ResponseEntity.status(502).body(
-                    Map.of("error", "rapid deploy failed: " + e.getMessage()));
+                    ClientErrorBodies.failed("rapid deploy failed"));
         }
     }
 
@@ -612,9 +617,10 @@ public class SurveillanceController {
             result.put("results", view);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.warn("Scan failed for {}: {}", subnet, e.getMessage());
+            // 宽捕：子网扫描内部错误不回客户端
+            log.warn("Scan failed for {}", subnet, e);
             return ResponseEntity.status(502).body(
-                    Map.of("error", "scan failed: " + e.getMessage()));
+                    ClientErrorBodies.failed("scan failed"));
         }
     }
 
