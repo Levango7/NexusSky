@@ -45,10 +45,29 @@ class SurveillanceRegistryTenantContractTest {
 
     /** 无租户注册，然后手工归属到 owner（register 会用当前上下文覆写 tenantId）。 */
     private void registerOwned(String id, SurveillanceDevice.Vendor vendor, Integer owner) {
-        SurveillanceDevice d = new SurveillanceDevice(id, "cam-" + id, vendor,
-                "192.168.1.10", 80, "admin", "pass");
+        SurveillanceDevice d = new SurveillanceDevice(id, "cam-" + id, vendor, "192.168.1.100", 80, "u", "p");
+        if (owner != null) {
+            SurveillanceDevice registered = registry.register(d);
+            registered.tenantId = owner;
+            return;
+        }
+        // 未归属：手动落入内存但不绑定租户
         registry.register(d);
-        d.tenantId = owner;
+    }
+
+    @Test
+    @DisplayName("getDevice：未归属设备对租户不可见（统一口径，2026-11-05）")
+    void getDevice_unassignedDeviceInvisibleToTenant() {
+        registerOwned("dev-free", SurveillanceDevice.Vendor.HIKVISION, null);
+
+        TenantContext.setTenantId(42);
+        assertThat(registry.getDevice("dev-free")).isNull();
+        assertThat(registry.listDevices().stream().map(d -> d.id)).doesNotContain("dev-free");
+
+        // 全局管理员：可见
+        TenantContext.clear();
+        assertThat(registry.getDevice("dev-free")).isNotNull();
+        assertThat(registry.listDevices().stream().map(d -> d.id)).contains("dev-free");
     }
 
     @Test
@@ -69,7 +88,7 @@ class SurveillanceRegistryTenantContractTest {
     }
 
     @Test
-    @DisplayName("listDevices：租户外设备绝不泄漏；未归属设备对本租户可见")
+    @DisplayName("listDevices：租户外设备绝不泄漏；未归属设备对本租户不可见（统一口径，2026-11-05）")
     void listDevices_tenantIsolation() {
         registerOwned("dev-a", SurveillanceDevice.Vendor.HIKVISION, 42); // 他租户
         registerOwned("dev-b", SurveillanceDevice.Vendor.UNIVIEW, null); // 未归属
@@ -77,7 +96,7 @@ class SurveillanceRegistryTenantContractTest {
 
         TenantContext.setTenantId(43);
         List<String> visible = registry.listDevices().stream().map(d -> d.id).toList();
-        assertThat(visible).containsExactly("dev-b", "dev-c");
+        assertThat(visible).containsExactly("dev-c");
 
         // 全局管理员：全部可见（含他租户）
         TenantContext.clear();
@@ -96,7 +115,7 @@ class SurveillanceRegistryTenantContractTest {
         TenantContext.setTenantId(43);
         List<String> hik = registry.listDevicesByVendor(SurveillanceDevice.Vendor.HIKVISION)
                 .stream().map(d -> d.id).toList();
-        assertThat(hik).containsExactly("dev-c");   // 未归属的 dev-b 可见，但不是 HIK
+        assertThat(hik).containsExactly("dev-c");   // 未归属 dev-b 不可见（统一口径）
 
         List<String> dahua = registry.listDevicesByVendor(SurveillanceDevice.Vendor.DAHUA)
                 .stream().map(d -> d.id).toList();
