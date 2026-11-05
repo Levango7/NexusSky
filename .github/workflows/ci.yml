@@ -327,7 +327,24 @@ jobs:
             mvn-${{ runner.os }}-
       - name: Populate local repository (cold cache)
         if: steps.mvn-cache.outputs.cache-hit != 'true'
-        run: mvn -B -DskipTests verify
+        run: |
+          mvn -B -DskipTests verify
+          # surefire 的 JUnit Platform provider **及其依赖闭包**只在真跑测试时才解析：
+          # `-DskipTests verify` 全绿的 m2 里根本没有它们（本机冷仓实测：A1_EXIT=0 之后
+          # org/apache/maven/surefire/surefire-junit-platform 目录 ABSENT）。于是下游 6 个
+          # `Java <module>` 作业各自实时向中央仓要 provider——2026-11-06 master push run
+          # 42061771858 的 `Java mavlink-core` 就红在这里：
+          #   Failed to collect dependencies at org.apache.maven.surefire:surefire-junit-platform:jar:3.5.2
+          #   … from/to central: HTTP Status: 429
+          # （ci-mvn-retry.sh 判成取件类、probe 两次都 429；不是测试红：同 commit 本机 523/0 绿，
+          #  #246/#248/#249 三笔也都没碰 mavlink-core/**。）
+          # 同一条坐标在 2026-10-13 就红过一次（见 scripts/ci-mvn-retry.sh 头部原文：
+          #   org.apache.maven.surefire:surefire-junit-platform:jar:3.5.2 (absent)）
+          # ——重试是止血，焐进缓存才是不再复发。
+          # 修法刻意**不手挑坐标**：本机试过 `dependency:get -Dartifact=…surefire-junit-platform:3.5.2`，
+          # provider 本体进去了，但离线跑测试仍缺 `org.junit.platform:junit-platform-commons:1.9.3`
+          # ——闭包由 Maven 自己决定才靠谱，所以这里就让最小模块真跑一次测试。
+          bash scripts/ci-mvn-retry.sh -B -pl mavlink-core -am test
       # 命中缓存时的完整性自检。原形态「-o 一缺就判红」的代价：runner 自带的 Maven 一换默认
       # 插件版本集合（本仓从不显式钉 maven-resources-plugin 这类），缓存里就没有那一版，离线
       # 自检必挂；而 actions/cache 对已存在的同键不再保存 ⇒ master 与所有 PR 一起冻在红上。
@@ -337,15 +354,21 @@ jobs:
       # ⇒ 变的是工具链不是 pom（键里没掺 Maven 版本，所以键不动、缓存也不覆盖）。
       # 现在：自检失败 ⇒ 打警告并在线补齐，当次运行继续走完；真正换代由键尾 v 号显式抬升，
       # 上面那步守卫保证所有站点同源（防"只改一处"）。
-      - name: Verify cached repository is complete (offline build)
+      #
+      # 2026-11-06 补的第二条腿（本次改动的主角）：光 `-o -DskipTests verify` 通过**不能**说
+      # 「缓存完整」——它从不加载 provider，所以 provider 缺失这一类缺口对它结构性不可见，
+      # 而那正是上面那条 429 的落点。验证载体必须能表达被测物，所以这里加一条真跑测试的离线腿：
+      # 它一旦缺 provider 立刻红，红了就在线补同一条命令（补的就是被测的那件事，不会两头漂移）。
+      - name: Verify cached repository is complete (offline build + offline test)
         if: steps.mvn-cache.outputs.cache-hit == 'true'
         run: |
           echo "toolchain: $(mvn -version | head -1)"
-          if mvn -B -o -DskipTests verify; then
-            echo "m2 缓存对当前工具链完整"
+          if mvn -B -o -DskipTests verify && mvn -B -o -pl mavlink-core -am test; then
+            echo "m2 缓存对当前工具链完整（含 surefire provider 闭包）"
           else
-            echo "::warning::离线自检失败（多为 runner 的 Maven 代次换了默认插件版本）⇒ 本次在线补齐；请抬 ci.yml 键尾 v 号重开一代缓存"
+            echo "::warning::离线自检失败（runner 的 Maven 代次换了默认插件版本，或缓存缺 surefire provider 闭包）⇒ 本次在线补齐；请抬 ci.yml 键尾 v 号重开一代缓存"
             mvn -B -DskipTests verify
+            bash scripts/ci-mvn-retry.sh -B -pl mavlink-core -am test
           fi
 
   java:
