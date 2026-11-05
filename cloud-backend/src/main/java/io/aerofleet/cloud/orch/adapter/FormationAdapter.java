@@ -37,9 +37,14 @@ public class FormationAdapter implements ModuleAdapter {
             log.info("编队任务创建成功：formationId={}, state={}",
                     result.formationId(), result.state());
             return ModuleResult.ok(String.valueOf(result.formationId()), result.state().name());
-        } catch (Exception e) {
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
             log.warn("编队任务创建失败：{}", e.getMessage());
             return ModuleResult.fail(null, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("编队任务创建失败", e);
+            return ModuleResult.fail(null, "编队任务创建失败");
         }
     }
 
@@ -53,9 +58,14 @@ public class FormationAdapter implements ModuleAdapter {
             String status = f != null ? f.state.name() : "UNKNOWN";
             log.info("编队任务启动：formationId={}", formationId);
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("编队任务启动失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("编队任务启动失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("编队任务启动失败", e);
+            return ModuleResult.fail(taskId, "编队任务启动失败");
         }
     }
 
@@ -68,9 +78,14 @@ public class FormationAdapter implements ModuleAdapter {
             String status = f != null ? f.state.name() : "DISSOLVED";
             log.info("编队任务中止：formationId={}", formationId);
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("编队任务中止失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("编队任务中止失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("编队任务中止失败", e);
+            return ModuleResult.fail(taskId, "编队任务中止失败");
         }
     }
 
@@ -83,9 +98,14 @@ public class FormationAdapter implements ModuleAdapter {
                 return ModuleResult.fail(taskId, "formation not found");
             }
             return ModuleResult.ok(taskId, f.state.name());
-        } catch (Exception e) {
-            log.warn("编队状态查询失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("编队状态查询失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("编队状态查询失败", e);
+            return ModuleResult.fail(taskId, "编队状态查询失败");
         }
     }
 

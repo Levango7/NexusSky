@@ -48,9 +48,14 @@ public class EmergencyAdapter implements ModuleAdapter {
             String status = plan != null ? (String) plan.getOrDefault("status", "ACTIVE") : "ACTIVE";
             log.info("应急编排计划创建成功：planId={}, scenario={}", planId, scenarioType);
             return ModuleResult.ok(String.valueOf(planId), status);
-        } catch (Exception e) {
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
             log.warn("应急编排计划创建失败：{}", e.getMessage());
             return ModuleResult.fail(null, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("应急编排计划创建失败", e);
+            return ModuleResult.fail(null, "应急编排计划创建失败");
         }
     }
 
@@ -67,9 +72,14 @@ public class EmergencyAdapter implements ModuleAdapter {
             String status = (String) plan.getOrDefault("status", "ACTIVE");
             log.info("应急编排计划已启动：planId={}", planId);
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("应急编排计划启动失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("应急编排计划启动失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("应急编排计划启动失败", e);
+            return ModuleResult.fail(taskId, "应急编排计划启动失败");
         }
     }
 
@@ -84,9 +94,14 @@ public class EmergencyAdapter implements ModuleAdapter {
             } else {
                 return ModuleResult.fail(taskId, "plan not found or already aborted");
             }
-        } catch (Exception e) {
-            log.warn("应急编排计划中止失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("应急编排计划中止失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("应急编排计划中止失败", e);
+            return ModuleResult.fail(taskId, "应急编排计划中止失败");
         }
     }
 
@@ -100,9 +115,14 @@ public class EmergencyAdapter implements ModuleAdapter {
             }
             String status = (String) plan.getOrDefault("status", "UNKNOWN");
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("应急编排状态查询失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("应急编排状态查询失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("应急编排状态查询失败", e);
+            return ModuleResult.fail(taskId, "应急编排状态查询失败");
         }
     }
 

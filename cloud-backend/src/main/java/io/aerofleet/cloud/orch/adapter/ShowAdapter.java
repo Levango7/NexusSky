@@ -34,9 +34,14 @@ public class ShowAdapter implements ModuleAdapter {
             String status = (String) result.getOrDefault("status", "CREATED");
             log.info("表演任务创建成功：id={}, name={}", taskId, result.get("name"));
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
             log.warn("表演任务创建失败：{}", e.getMessage());
             return ModuleResult.fail(null, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("表演任务创建失败", e);
+            return ModuleResult.fail(null, "表演任务创建失败");
         }
     }
 
@@ -47,9 +52,14 @@ public class ShowAdapter implements ModuleAdapter {
             String status = (String) result.getOrDefault("status", "PERFORMING");
             log.info("表演任务启动：id={}", taskId);
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("表演任务启动失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("表演任务启动失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("表演任务启动失败", e);
+            return ModuleResult.fail(taskId, "表演任务启动失败");
         }
     }
 
@@ -60,9 +70,14 @@ public class ShowAdapter implements ModuleAdapter {
             String status = (String) result.getOrDefault("status", "ABORTED");
             log.info("表演任务中止：id={}", taskId);
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("表演任务中止失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("表演任务中止失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("表演任务中止失败", e);
+            return ModuleResult.fail(taskId, "表演任务中止失败");
         }
     }
 
@@ -72,9 +87,14 @@ public class ShowAdapter implements ModuleAdapter {
             Map<String, Object> result = showController.getTask(taskId);
             String status = (String) result.getOrDefault("status", "UNKNOWN");
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("表演状态查询失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("表演状态查询失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("表演状态查询失败", e);
+            return ModuleResult.fail(taskId, "表演状态查询失败");
         }
     }
 

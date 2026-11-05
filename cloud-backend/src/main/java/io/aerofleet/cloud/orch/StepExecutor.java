@@ -154,8 +154,10 @@ public class StepExecutor {
                 handleStepFail(step, planId, result.getErrorMessage());
             }
         } catch (Exception e) {
-            log.error("步骤 {} 执行异常：{}", step.getStepId(), e.getMessage(), e);
-            handleStepFail(step, planId, "执行异常：" + e.getMessage());
+            // 异常消息会落 TaskStepEntity.failReason 并经 WS/SSE StepFailEvent 推给订阅客户端：
+            // 只留自建短句，细节（含堆栈）进日志
+            log.error("步骤 {} 执行异常", step.getStepId(), e);
+            handleStepFail(step, planId, "执行异常（详情见服务端日志）");
         }
     }
 
