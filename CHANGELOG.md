@@ -1,5 +1,46 @@
 # NexusSky 变更日志
 
+## [Unreleased] — WS 推送帧不再携带底层异常文本：orch 适配器 `ModuleResult.fail` 分流（+5 例）
+
+### 修：编排执行失败的推送帧里混入底层异常细节
+
+#246/#248 收口了控制器错误体与领域异常构造点。本批收口**WS/SSE 进程内推送面**：
+
+```java
+} catch (Exception e) {
+    return ModuleResult.fail(taskId, e.getMessage());
+}
+```
+
+`ModuleResult.fail(...)` 的 errorMessage 会：
+1. 落 `TaskStepEntity.failReason`（持久化到 DB）；
+2. 经 `StepFailEvent` → `OrchestrationPusher` → `{"type":"step-fail", ..., "failReason": ...}`
+   的 WS/SSE 帧——**推给所有订阅该编排通道的客户端**，包含底层异常文本
+   （host/端口/SQL/上游响应体）。
+
+全仓 orch 适配器共 **20 处**（Delivery/Mapping/Show/Formation/Emergency，
+各 create/start/abort/status 四处）同款写法；`StepExecutor` 步骤异常分支
+（「执行异常：」+ e.getMessage()）同样落 failReason——一并收口。
+
+### 修法（同 #246 的口径分流）
+
+- **领域异常**（`IllegalArgumentException` / `IllegalStateException`——
+  「区域顶点少于 3 个」「指派无人机不在位」这类服务端自建消息）**原样透传**
+  （与 `ModuleAdapterContractTest` 的既定契约一致）；
+- **宽捕尾巴**（跨 IO/DB/序列化/适配器内部）一律**服务端自建短句**
+  （如「配送任务创建失败」），底层异常带完整 throwable 进日志；
+- `StepExecutor` 步骤异常 → `"执行异常（详情见服务端日志）"`；
+- 消费方（`OrchestrationPusher`）**不动**——消息从不源头开始就干净。
+
+### 测试 +5 例
+
+`ModuleResultLeakTest`（`orch/adapter` 包）：5 个适配器各 1 例
+（mock 依赖抛含内部 host/凭据的 canary 异常，断言 errorMessage 不含内部细节）。
+
+**A/B 实测**：把 `DeliveryAdapter` 状态查询路径改回回显 ⇒ **红**；还原 ⇒ 绿。
+`StepExecutorTest` 30/30 绿；`ModuleAdapterContractTest` 全绿
+（领域异常透传契约不变）。
+
 ## [Unreleased] — 门禁去噪：`check-maven-incantations` 不再扫 `.coord` 归档，本机恒红改为真绿（0 例，纯工具）
 
 **一个永远红的门禁比没有门禁更糟**：本机执行 `python scripts/check-maven-incantations.py`
@@ -1838,7 +1879,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-05 共有 278 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-05 共有 279 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1864,7 +1905,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 278 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 279 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

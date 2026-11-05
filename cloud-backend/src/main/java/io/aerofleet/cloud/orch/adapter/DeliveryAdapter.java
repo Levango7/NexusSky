@@ -34,9 +34,14 @@ public class DeliveryAdapter implements ModuleAdapter {
             String status = created.getStatus() != null ? created.getStatus().name() : "PENDING";
             log.info("配送任务创建成功：id={}, type={}", created.getId(), created.getType());
             return ModuleResult.ok(created.getId(), status);
-        } catch (Exception e) {
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
             log.warn("配送任务创建失败：{}", e.getMessage());
             return ModuleResult.fail(null, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("配送任务创建失败", e);
+            return ModuleResult.fail(null, "配送任务创建失败");
         }
     }
 
@@ -47,9 +52,14 @@ public class DeliveryAdapter implements ModuleAdapter {
             String status = task.getStatus() != null ? task.getStatus().name() : "IN_PROGRESS";
             log.info("配送任务启动：id={}", taskId);
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("配送任务启动失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("配送任务启动失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("配送任务启动失败", e);
+            return ModuleResult.fail(taskId, "配送任务启动失败");
         }
     }
 
@@ -60,9 +70,14 @@ public class DeliveryAdapter implements ModuleAdapter {
             String status = task.getStatus() != null ? task.getStatus().name() : "ABORTED";
             log.info("配送任务中止：id={}", taskId);
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("配送任务中止失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("配送任务中止失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("配送任务中止失败", e);
+            return ModuleResult.fail(taskId, "配送任务中止失败");
         }
     }
 
@@ -74,9 +89,14 @@ public class DeliveryAdapter implements ModuleAdapter {
                 return ModuleResult.fail(taskId, "no status for task " + taskId);
             }
             return ModuleResult.ok(taskId, status.getPhase().name());
-        } catch (Exception e) {
-            log.warn("配送状态查询失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("配送状态查询失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("配送状态查询失败", e);
+            return ModuleResult.fail(taskId, "配送状态查询失败");
         }
     }
 

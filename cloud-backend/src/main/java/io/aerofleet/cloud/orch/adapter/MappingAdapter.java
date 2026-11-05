@@ -35,9 +35,14 @@ public class MappingAdapter implements ModuleAdapter {
             String status = (String) result.getOrDefault("status", "PENDING");
             log.info("测绘任务创建成功：id={}, type={}", taskId, result.get("type"));
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
             log.warn("测绘任务创建失败：{}", e.getMessage());
             return ModuleResult.fail(null, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("测绘任务创建失败", e);
+            return ModuleResult.fail(null, "测绘任务创建失败");
         }
     }
 
@@ -48,9 +53,14 @@ public class MappingAdapter implements ModuleAdapter {
             String status = (String) result.getOrDefault("status", "IN_PROGRESS");
             log.info("测绘任务启动：id={}", taskId);
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("测绘任务启动失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("测绘任务启动失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("测绘任务启动失败", e);
+            return ModuleResult.fail(taskId, "测绘任务启动失败");
         }
     }
 
@@ -61,9 +71,14 @@ public class MappingAdapter implements ModuleAdapter {
             String status = (String) result.getOrDefault("status", "FAILED");
             log.info("测绘任务中止：id={}", taskId);
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("测绘任务中止失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("测绘任务中止失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("测绘任务中止失败", e);
+            return ModuleResult.fail(taskId, "测绘任务中止失败");
         }
     }
 
@@ -73,9 +88,14 @@ public class MappingAdapter implements ModuleAdapter {
             Map<String, Object> result = mappingController.getTask(taskId);
             String status = (String) result.getOrDefault("status", "UNKNOWN");
             return ModuleResult.ok(taskId, status);
-        } catch (Exception e) {
-            log.warn("测绘状态查询失败：taskId={}, error={}", taskId, e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 领域自建消息（如「指派无人机不在位」），操作员需要看，原样透传
+            log.warn("测绘状态查询失败：{}", e.getMessage());
             return ModuleResult.fail(taskId, e.getMessage());
+        } catch (Exception e) {
+            // 宽捕：IO/DB/序列化等底层文本不透传（会落 WS step-fail 帧），自建短句 + 完整日志
+            log.warn("测绘状态查询失败", e);
+            return ModuleResult.fail(taskId, "测绘状态查询失败");
         }
     }
 
