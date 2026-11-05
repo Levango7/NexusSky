@@ -61,7 +61,8 @@ public class LinkSimControlClient {
         try {
             payload = mapper.writeValueAsBytes(body);
         } catch (IOException e) {
-            throw new LinkSimBadRequestException("serialize control request failed: " + e.getMessage());
+            // 序列化失败属内部缺陷：消息只留自建短句（Jackson 文本可能含请求内容）
+            throw new LinkSimBadRequestException("serialize control request failed");
         }
         return exchange(HttpRequest.newBuilder(uri())
                 .header("Content-Type", "application/json")
@@ -90,7 +91,9 @@ public class LinkSimControlClient {
             try {
                 return mapper.readTree(response.body());
             } catch (IOException e) {
-                throw new LinkSimUpstreamException("link-sim returned malformed JSON: " + e.getMessage());
+                // 解析异常文本可能含上游响应正文——不回显，正文已在日志（log.warn 分支/调用方）
+                log.debug("link-sim control malformed JSON: {}", request.method(), e);
+                throw new LinkSimUpstreamException("link-sim returned malformed JSON");
             }
         }
         String detail = upstreamDetail(response.body());

@@ -171,9 +171,11 @@ public class IncidentDispatchService {
             commands.startMission(sysid);
         } catch (Exception e) {
             inc.status = "FAILED";
-            inc.suggestionReason = "dispatch failed: " + e.getMessage();
-            log.warn("incident {} dispatch failed: {}", incidentId, e.getMessage());
-            throw new IllegalStateException("dispatch failed: " + e.getMessage(), e);
+            // suggestionReason 会经 RocController 席位视图回到操作端：只留自建短句，
+            // 底层异常（MAVLink/传输层文本）走日志与原因链
+            inc.suggestionReason = "dispatch failed (see server log)";
+            log.warn("incident {} dispatch failed", incidentId, e);
+            throw new IllegalStateException("dispatch failed", e);
         }
         inc.status = "DISPATCHED";
         inc.dispatchedAt = System.currentTimeMillis();
