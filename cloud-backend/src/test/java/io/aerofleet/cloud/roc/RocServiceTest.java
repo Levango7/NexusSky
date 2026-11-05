@@ -215,7 +215,11 @@ class RocServiceTest {
             long incidentId = (Long) inc.get("incidentId");
 
             assertThatThrownBy(() -> incidents.dispatch(seatId, incidentId, 30))
-                    .hasMessageContaining("link down");
+                    .hasMessage("dispatch failed")
+                    .hasCauseInstanceOf(RuntimeException.class);
+            Map<String, Object> reasonView = incidents.listIncidents(seatId).get(0);
+            assertThat(String.valueOf(reasonView.get("suggestionReason")))
+                    .doesNotContain("link down");
             Map<String, Object> listed = incidents.listIncidents(seatId).get(0);
             assertThat(listed.get("status")).isEqualTo("FAILED");
         }

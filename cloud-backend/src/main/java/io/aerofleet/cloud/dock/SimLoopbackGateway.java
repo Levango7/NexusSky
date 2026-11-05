@@ -70,7 +70,9 @@ public class SimLoopbackGateway implements DockGateway {
         try {
             body = mapper.writeValueAsString(frame);
         } catch (Exception e) {
-            throw new DockGatewayException("serialize dock command failed: " + e.getMessage(), e);
+            // 序列化失败属内部缺陷：消息只留自建短句，细节走原因链/日志
+            log.warn("serialize dock command failed sn={} method={}", sn, command.method(), e);
+            throw new DockGatewayException("serialize dock command failed", e);
         }
 
         String url = props.getSimBaseUrl() + "/services";
@@ -82,7 +84,9 @@ public class SimLoopbackGateway implements DockGateway {
                     .build();
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() / 100 != 2) {
-                throw new DockGatewayException("dock-sim HTTP " + resp.statusCode() + ": " + resp.body());
+                // 上游错误体不透传（可能含内部文本）：只带状态码
+                throw new DockGatewayException(
+                        "dock-sim returned HTTP " + resp.statusCode());
             }
             JsonNode node = mapper.readTree(resp.body());
             int result = node.path("data").path("result").asInt(0);
@@ -93,8 +97,8 @@ public class SimLoopbackGateway implements DockGateway {
         } catch (DockGatewayException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("dock command transport failed sn={} method={}: {}", sn, command.method(), e.getMessage());
-            throw new DockGatewayException("dock command transport failed: " + e.getMessage(), e);
+            log.warn("dock command transport failed sn={} method={}", sn, command.method(), e);
+            throw new DockGatewayException("dock command transport failed", e);
         }
     }
 }

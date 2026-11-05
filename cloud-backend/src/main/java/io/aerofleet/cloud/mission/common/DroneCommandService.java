@@ -95,6 +95,17 @@ public class DroneCommandService {
             super(message);
             this.ackResult = ackResult;
         }
+
+        /**
+         * 带原因链的构造：message 必须只含服务端自建短句（含命令/sysid/ack 结果等
+         * 定位要素），<b>不得粘底层异常文本</b>——这些消息会被控制器回给操作端，
+         * 也可能经 IncidentDispatchService 的 suggestionReason 落到席位视图。
+         * 底层原因一律走 cause 链 + throw 点日志。
+         */
+        public CommandException(String message, int ackResult, Throwable cause) {
+            super(message, cause);
+            this.ackResult = ackResult;
+        }
     }
 
     public DroneCommandService(UdpGateway gateway, PendingAcks pendings,
@@ -292,8 +303,8 @@ public class DroneCommandService {
                     ack = future.get(ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 } catch (ExecutionException e) {
                     pendings.remove(CommandAck.ID, mavCommand, target, e);
-                    throw new CommandException("command " + mavCommand + " failed: "
-                            + rootMessage(e), -1);
+                    log.warn("command {} to sysid={} failed while awaiting ack", mavCommand, target, e);
+                    throw new CommandException("command " + mavCommand + " failed", -1, e);
                 }
                 if (ack.result == MavEnums.MAV_RESULT_ACCEPTED) {
                     log.info("Command {} to sysid={} accepted (attempt {})",
@@ -482,7 +493,8 @@ public class DroneCommandService {
             return MissionUploadResult.failure("timeout waiting for MISSION_REQUEST");
         } catch (ExecutionException e) {
             pendings.removeMissionRequest(target, e);
-            return MissionUploadResult.failure("mission request failed: " + rootMessage(e));
+            log.warn("mission upload request for sysid={} failed", target, e);
+            return MissionUploadResult.failure("mission request failed");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             pendings.removeMissionRequest(target, e);
@@ -566,8 +578,8 @@ public class DroneCommandService {
                 try {
                     return ackFuture.get();
                 } catch (java.util.concurrent.ExecutionException e) {
-                    throw new CommandException("mission ack failed: "
-                            + rootMessage(e), -1);
+                    log.warn("mission ack for sysid={} failed", target, e);
+                    throw new CommandException("mission ack failed", -1, e);
                 }
             }
             try {
@@ -770,7 +782,8 @@ public class DroneCommandService {
             } catch (TimeoutException e) {
                 throw e;
             } catch (ExecutionException e) {
-                throw new CommandException("mission count failed: " + rootMessage(e), -1);
+                log.warn("mission count for sysid={} failed", target, e);
+                throw new CommandException("mission count failed", -1, e);
             }
             if (count == null || count.count <= 0) {
                 return List.of();
@@ -807,7 +820,8 @@ public class DroneCommandService {
         } catch (TimeoutException e) {
             throw new CommandException("mission download timed out", -1);
         } catch (ExecutionException e) {
-            throw new CommandException("mission download failed: " + rootMessage(e), -1);
+            log.warn("mission download from sysid={} failed", target, e);
+            throw new CommandException("mission download failed", -1, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new CommandException("interrupted", -1);
@@ -862,14 +876,6 @@ public class DroneCommandService {
 
     private static long remainingMs(long deadline) {
         return deadline - System.currentTimeMillis();
-    }
-
-    private static String rootMessage(Throwable t) {
-        Throwable r = t;
-        while (r.getCause() != null && r.getCause() != r) {
-            r = r.getCause();
-        }
-        return r.getMessage() != null ? r.getMessage() : r.getClass().getSimpleName();
     }
 
     private int nextSeq() {
