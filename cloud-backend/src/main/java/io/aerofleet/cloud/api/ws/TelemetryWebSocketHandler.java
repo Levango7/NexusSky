@@ -20,7 +20,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Raw WebSocket endpoint /ws/telemetry (no SockJS). Sessions are kept in an
@@ -71,6 +73,14 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, Integer> ipConnectionCounts = new ConcurrentHashMap<>();
     /** Tenant ID → current connection count. */
     private final Map<Integer, Integer> tenantConnectionCounts = new ConcurrentHashMap<>();
+
+    /**
+     * 未知 sysid 告警哨兵上限。设备白名单关闭时（dev）任何 UDP 说话方都能填任意报头 sysid，
+     * 去重集合必须有硬上界，否则又是一张「进程内只增表」。
+     */
+    private static final int MAX_WARNED_UNKNOWN_SYSIDS = 1024;
+    private final Set<Integer> warnedUnknownSysids = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean warnCapNotified = new AtomicBoolean();
 
     /** msgId → WS frame type 映射（从 TelemetryIngestService.forwardToWs 迁移）。 */
     private static final Map<Integer, String> WS_TYPE_MAP = Map.ofEntries(
@@ -218,10 +228,12 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
      * 按租户投递一帧。
      * <p>
      * 带租户上下文的连接只收本租户的帧；无租户上下文的全局会话（全局管理员与 dev-mode）收全部。
-     * {@code ownerTenantId} 为 null 表示设备存在但尚未归属，此时只有全局会话可见——
-     * 未归属设备不得落到任何租户连接，口径与 {@code DeviceRegistry} 的可见性判定一致。
+     * {@code ownerTenantId} 为 null 表示「不对任何租户会话放行」，只有全局会话可见。
+     * 传 null 的调用方有两类：已登记但尚未归属的设备，以及
+     * {@link #resolveScope(int)} 判为 {@code UNKNOWN} 的未知 sysid（后者仍投递、但先经首现告警）。
+     * 口径与 {@code DeviceRegistry} 的可见性判定一致。
      *
-     * @param ownerTenantId 帧所属租户 ID，null 表示未归属
+     * @param ownerTenantId 帧所属租户 ID，null 表示不对租户会话放行
      */
     public void broadcastToTenant(Integer ownerTenantId, String json) {
         dispatch(json, ownerTenantId, false);
@@ -377,8 +389,20 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
      * {"type":"<type>","sysid":N,"data":<msg>,"timestamp":T}
      * <p>
      * 租户路由：设备源帧（安防报警/监控设备）经 {@link MavlinkMessageEvent#isTenantExplicit()}
-     * 携带显式租户，优先采用（其 sysid 是设备 ID 哈希，不可反查）；无人机源帧沿用
-     * {@code DeviceRegistry.tenantOf(sysid)} 推导。显式 null = 设备未归属 → 全局域。
+     * 携带显式租户，优先采用（其 sysid 是设备 ID 哈希，不可反查）；无人机源帧走
+     * {@link #resolveScope(int)} 三分：
+     * <ul>
+     *   <li>{@code TENANT} → 只投该租户（及其全局会话）；</li>
+     *   <li>{@code GLOBAL} → 已登记但未归属，只投全局会话；</li>
+     *   <li>{@code UNKNOWN} → 注册表无此 sysid，<b>仍只投全局会话</b>并首现告警，
+     *       绝不落到任何租户连接。</li>
+     * </ul>
+     * 后两者都向 {@link #broadcastToTenant} 传 null，但语义由三分显式区分，不再裸消费
+     * {@code DeviceRegistry.tenantOf} 的二义 null（它同时代表「未知」与「已登记未归属」）。
+     * <p>
+     * 本判据与 {@link #PUBLIC_INFRA} <b>正交</b>：后者是路径 A 的「帧级公共基础设施态势」
+     * 语义（按 ownerKey 缺失判定），本方法问的是「这条 MAVLink 事件帧的 sysid 归属」，
+     * 两者不共用常量、不合并语义（owner 裁决 B'，2026-11-05）。
      * <p>
      * 无 WS 连接时降级为日志输出，不阻塞事件处理。
      */
@@ -398,14 +422,83 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
             frame.put("sysid", event.getSysid());
             frame.put("data", event.getMessage());
             frame.put("timestamp", event.getMsgTimestamp());
-            Integer tenant = event.isTenantExplicit()
-                    ? event.getOwnerTenantId()
-                    : registry.tenantOf(event.getSysid());
+            Integer tenant;
+            if (event.isTenantExplicit()) {
+                // 6 参构造：非机队设备源帧，sysid 是设备 ID 哈希，不做 sysid 反查。
+                tenant = event.getOwnerTenantId();
+            } else {
+                MavlinkScope scope = resolveScope(event.getSysid());
+                if (scope.kind() == MavlinkScope.Kind.UNKNOWN) {
+                    // 显式收敛为「只投全局」：不丢弃帧（全局管理员/dev 排障仍可观测），
+                    // 也不把「碰巧 tenantOf 返回 null」当成未经判定的默认放行。
+                    warnUnknownSysidOnce(event.getSysid(), type);
+                }
+                // 用同一次解析的结果投递（GLOBAL/UNKNOWN 的 tenantId 都是 null）
+                tenant = scope.tenantId();
+            }
             broadcastToTenant(tenant,
                     objectMapper.writeValueAsString(frame));
         } catch (Exception e) {
             log.warn("WS forward failed: sysid={} type={}: {}", event.getSysid(), type, e.getMessage());
         }
+    }
+
+    /**
+     * 路径 B 的 sysid 归属三分结果：{@code TENANT} 携带租户 ID，其余两者为 null。
+     * <p>
+     * 一次解析即定稿，投递不再二次反查，避免解析与投递之间归属变化造成口径漂移。
+     * 与路径 A 的帧级 {@link #PUBLIC_INFRA} 判据无关。
+     */
+    record MavlinkScope(Kind kind, Integer tenantId) {
+        enum Kind { TENANT, GLOBAL, UNKNOWN }
+
+        static final MavlinkScope GLOBAL = new MavlinkScope(Kind.GLOBAL, null);
+        static final MavlinkScope UNKNOWN = new MavlinkScope(Kind.UNKNOWN, null);
+
+        static MavlinkScope tenant(int tenantId) {
+            return new MavlinkScope(Kind.TENANT, tenantId);
+        }
+    }
+
+    /**
+     * 解析 5 参 MAVLink 事件帧的 sysid 归属。
+     * <p>
+     * package-private 便于测试直接钉住三分判据，而不必靠广播副作用反推。
+     * 运行时可达性取决于部署配置：{@code UdpGateway.onFrame} 的设备白名单
+     * （prod/staging=true，dev=false）在 ingest 之前拒掉未注册 sysid，但
+     * {@code GCS_SYSID=255} 与 {@code sysid<=0} 是豁免项（`UdpGateway.java:226-232`），
+     * 而 `TelemetryIngestService.handle` 对每条 CRC-valid 帧无条件发 5 参事件
+     * ⇒ **prod 也不能保证 UNKNOWN 不可达**。dev / 豁免路径下任意 UDP 说话方可造出 UNKNOWN。
+     */
+    MavlinkScope resolveScope(int sysid) {
+        if (!registry.isKnownDevice(sysid)) {
+            return MavlinkScope.UNKNOWN;
+        }
+        Integer tenantId = registry.tenantOf(sysid);
+        return tenantId == null ? MavlinkScope.GLOBAL : MavlinkScope.tenant(tenantId);
+    }
+
+    /**
+     * 未知 sysid 首现告警：每个 sysid 只报一次，防 dev 下未知 sysid 洪水刷日志。
+     * 集合有硬上界（{@link #MAX_WARNED_UNKNOWN_SYSIDS}），超限后只发一条汇总告警——
+     * 去重表不能变成又一张「进程内只增表」。告警不影响投递：帧仍只投全局会话。
+     */
+    private void warnUnknownSysidOnce(int sysid, String type) {
+        if (!warnedUnknownSysids.add(sysid)) {
+            return;
+        }
+        if (warnedUnknownSysids.size() > MAX_WARNED_UNKNOWN_SYSIDS) {
+            warnedUnknownSysids.remove(sysid);
+            if (warnCapNotified.compareAndSet(false, true)) {
+                log.warn("WS forward: unknown-sysid sentinel reached cap={}; further unknown sysids "
+                        + "are still delivered to global sessions only but not logged individually",
+                        MAX_WARNED_UNKNOWN_SYSIDS);
+            }
+            return;
+        }
+        log.warn("WS forward: unknown sysid={} type={} — frame delivered to global sessions only. "
+                + "Reachable when UdpGateway deviceWhitelistEnabled=false (dev), via the GCS_SYSID=255 "
+                + "whitelist exemption, or from non-UDP producers.", sysid, type);
     }
 
     /**

@@ -140,8 +140,10 @@ public class WorkOrderService {
         try {
             shot = capture.captureAndLocate(sysid, null);
         } catch (Exception e) {
-            // 复检的拍照腿失败：如实上抛（控制器 502），不造假复检结果
-            throw new IllegalStateException("verify capture failed: " + e.getMessage(), e);
+            // 复检的拍照腿失败：如实上抛（控制器 502），不造假复检结果；
+            // 消息只留自建短句，细节（相机/像素管道内部文本）走日志与原因链
+            log.warn("recheck capture failed for work order on sysid={}", sysid, e);
+            throw new IllegalStateException("verify capture failed", e);
         }
         if ("error".equals(shot.get("status"))) {
             // F1 语义：飞控/链路失败时 capture 内部吞异常返回 status=error

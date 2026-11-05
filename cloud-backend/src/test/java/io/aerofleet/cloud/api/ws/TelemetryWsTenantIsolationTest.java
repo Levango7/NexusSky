@@ -1,5 +1,7 @@
 package io.aerofleet.cloud.api.ws;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
@@ -175,6 +177,10 @@ class TelemetryWsTenantIsolationTest {
     private static final int DEVICE_UNASSIGNED = 7303;
     /** 不是机队设备的基础设施 id（基站/卫星一类）。 */
     private static final int INFRA_SYSID = 9101;
+    /** 注册表里压根不存在的 sysid（5 参帧的「未知设备」形态）。 */
+    private static final int UNKNOWN_SYSID = 9201;
+    /** 另一个未知 sysid，用来验告警哨兵是「按 sysid」而非全局只报一次。 */
+    private static final int OTHER_UNKNOWN_SYSID = 9202;
 
     private Map<String, Object> node(int sysid) {
         Map<String, Object> v = new LinkedHashMap<>();
@@ -296,5 +302,82 @@ class TelemetryWsTenantIsolationTest {
         String payload = captor.getValue().getPayload();
         assertThat(payload).contains("\"sysid\":" + DEVICE_OF_A);
         assertThat(payload).contains("task-status");
+    }
+
+    // ============ 5 参帧的 sysid 归属三分（owner 裁决 B'，2026-11-05） ============
+
+    @Test
+    @DisplayName("已登记但未归属的 sysid → GLOBAL：仍只投全局会话（不丢弃、不进租户）")
+    void registeredUnassignedSysidStillReachesGlobalOnly() throws Exception {
+        registry.registerIfAbsent(DEVICE_UNASSIGNED);
+        registry.assignTenant(DEVICE_UNASSIGNED, null);
+
+        assertThat(handler.resolveScope(DEVICE_UNASSIGNED).kind())
+                .isEqualTo(TelemetryWebSocketHandler.MavlinkScope.Kind.GLOBAL);
+        assertThat(handler.resolveScope(DEVICE_UNASSIGNED).tenantId()).isNull();
+        assertThat(handler.resolveScope(DEVICE_OF_A).kind())
+                .isEqualTo(TelemetryWebSocketHandler.MavlinkScope.Kind.TENANT);
+        assertThat(handler.resolveScope(DEVICE_OF_A).tenantId()).isEqualTo(Integer.valueOf(TENANT_A));
+
+        WebSocketSession tenantB = connectedSession("B", "10.9.7.1", TENANT_B);
+        WebSocketSession globalAdmin = connectedSession("G", "10.9.7.2", null, Role.ADMIN);
+
+        handler.onMavlinkMessage(frameFor(DEVICE_UNASSIGNED));
+
+        verify(tenantB, never()).sendMessage(any(TextMessage.class));
+        // 裁决 B' 否决「log.warn 后丢弃」：全局会话本来就不越权，帧必须仍可见
+        verify(globalAdmin, times(1)).sendMessage(any(TextMessage.class));
+    }
+
+    @Test
+    @DisplayName("未知 sysid → UNKNOWN：仍只投全局会话，且按 sysid 首现各告警一次")
+    void unknownSysidStaysGlobalOnlyAndWarnsOncePerSysid() throws Exception {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(TelemetryWebSocketHandler.class);
+        ListAppender<ILoggingEvent> logs = new ListAppender<>();
+        logs.start();
+        logger.addAppender(logs);
+        try {
+            assertThat(handler.resolveScope(UNKNOWN_SYSID).kind())
+                    .isEqualTo(TelemetryWebSocketHandler.MavlinkScope.Kind.UNKNOWN);
+            assertThat(handler.resolveScope(UNKNOWN_SYSID).tenantId()).isNull();
+
+            WebSocketSession tenantB = connectedSession("B", "10.9.8.1", TENANT_B);
+            WebSocketSession globalAdmin = connectedSession("G", "10.9.8.2", null, Role.ADMIN);
+
+            handler.onMavlinkMessage(frameFor(UNKNOWN_SYSID));
+            handler.onMavlinkMessage(frameFor(UNKNOWN_SYSID));       // 同一未知 sysid 再来一帧
+            handler.onMavlinkMessage(frameFor(OTHER_UNKNOWN_SYSID)); // 另一个未知 sysid
+
+            // 行为不变：不丢弃（全局会话收到 3 帧），也绝不落到租户连接
+            verify(tenantB, never()).sendMessage(any(TextMessage.class));
+            verify(globalAdmin, times(3)).sendMessage(any(TextMessage.class));
+
+            List<String> warns = logs.list.stream()
+                    .filter(e -> "WARN".equals(e.getLevel().toString()))
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .filter(m -> m.contains("unknown sysid="))
+                    .toList();
+            assertThat(warns).hasSize(2);
+            assertThat(warns).anyMatch(m -> m.contains("unknown sysid=" + UNKNOWN_SYSID));
+            assertThat(warns).anyMatch(m -> m.contains("unknown sysid=" + OTHER_UNKNOWN_SYSID));
+        } finally {
+            logger.detachAppender(logs);
+        }
+    }
+
+    @Test
+    @DisplayName("6 参显式租户帧不按 sysid 反查，投递口径不变")
+    void explicitTenantFrameBypassesSysidLookup() throws Exception {
+        WebSocketSession sessionA = connectedSession("A", "10.9.9.1", TENANT_A);
+        WebSocketSession sessionB = connectedSession("B", "10.9.9.2", TENANT_B);
+
+        // 故意用未注册的 sysid：若误走 resolveScope 三分，UNKNOWN 会只投全局 ⇒ sessionA 收不到
+        MavlinkMessageEvent explicitTenantFrame = new MavlinkMessageEvent(
+                this, UNKNOWN_SYSID, TaskStatusMsg.ID, null, System.currentTimeMillis(), TENANT_A);
+        handler.onMavlinkMessage(explicitTenantFrame);
+
+        verify(sessionA, times(1)).sendMessage(any(TextMessage.class));
+        verify(sessionB, never()).sendMessage(any(TextMessage.class));
     }
 }

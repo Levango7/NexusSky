@@ -97,7 +97,8 @@ class WorkOrderServiceTest {
 
         assertThatThrownBy(() -> svc.verify(1L, 9))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("link down");
+                .hasMessage("verify capture failed")
+                .hasCauseInstanceOf(java.io.IOException.class);
         assertThat(wo.status).isEqualTo("RESOLVED"); // 状态未被动过
     }
 
