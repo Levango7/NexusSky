@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.api.controller;
 
+import io.aerofleet.cloud.api.exception.ClientErrorBodies;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
 import io.aerofleet.cloud.vision.CaptureService;
@@ -58,15 +59,17 @@ public class VisionController {
         try {
             return capture.captureAndLocate(sysid, source);
         } catch (Exception e) {
-            // 两处都不能省：① 日志必须带 throwable——只打 getMessage() 时 NPE 之类
+            // 三处都不能省：① 日志必须带 throwable——只打 getMessage() 时 NPE 之类
             // 的异常消息是 null，日志只剩一行 "failed: null"，什么都归因不了；
-            // ② Map.of 不接受 null value，用 captured message 直接塞会在 catch 里
-            // 再抛一个 NPE，把 500 和真正的异常一起冲掉（2026-10-13 e2e-vision-pixels
-            // 实测：pixels 管道失败 → 500，响应体里只有 internal error: NullPointerException）。
-            log.warn("vision pipeline failed for sysid={}: {}", sysid, e.toString(), e);
+            // ② 响应体不回显 e.getMessage()——宽捕同时覆盖像素管道/IO/内部异常，
+            //    原文可能含内部细节；口径同 ApiExceptionHandler 生产模式；
+            // ③ 用 LinkedHashMap 而非 Map.of——null value 会在 catch 里再抛一个
+            //    NPE，把 500 和真正的异常一起冲掉（2026-10-13 e2e-vision-pixels
+            //    实测：pixels 管道失败 → 500，响应体里只有 internal error: NullPointerException）。
+            log.warn("vision pipeline failed for sysid={}", sysid, e);
             Map<String, Object> err = new java.util.LinkedHashMap<>();
             err.put("status", "error");
-            err.put("result", String.valueOf(e.getMessage()));
+            err.put("result", ClientErrorBodies.INTERNAL_SERVER_ERROR);
             return err;
         }
     }
