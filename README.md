@@ -723,7 +723,7 @@ NexusSky/
 ├── gcs-web/             React GCS（59 个 .jsx 组件文件，其中 19 个已有直测）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
-├── scripts/             start-all.cmd / e2e-smoke.sh / 102 个脚本（其中 44 个 e2e-*）
+├── scripts/             start-all.cmd / e2e-smoke.sh / 103 个脚本（其中 45 个 e2e-*）
 ├── docker-compose.yml   Linux 下一键编排
 ├── docs/                43 篇文档
 └── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）
@@ -741,12 +741,12 @@ NexusSky/
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 523 |
-| `drone-sim` | 1468 |
+| `drone-sim` | 1477 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3458 |
+| `cloud-backend` | 3469 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5648
+| **总计** | **5668
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
@@ -877,7 +877,10 @@ NexusSky/
   services_reply 的设备消息内容在 **`data.output`**（struct，原实现误读 `data.message`）。
   字段集由 `DockDjiFrameContractTest` / `DockSimDjiFrameTest` 按官方表**恰好相等**断言
   （多/少字段即红）。可插拔 `DockGateway`；默认 `transport=sim`（HTTP 回环到 drone-sim 的
-  `dock` 子命令），`transport=mqtt` 是生产 seam（需 EMQX Broker 与真实对端）。
+  `dock` 子命令）；`transport=mqtt` 已有**设备侧对端 + 零硬件本地 E2E**
+  （`scripts/e2e-dock-mqtt.ps1`：docker mosquitto + 真后端 + 真对端，OSD 经
+  `thing/product/+/osd` 摄入、命令经 `services`/`services_reply` 往返，对端**不提供**
+  HTTP 回环以杜绝"走错传输还成功"）——真机巢联调仍待硬件。
   **method 语汇仍是 NexusSky 侧语义**（`door_open`/`door_close`/`battery_swap`/`reboot`
   不是 DJI 官方 method）：官方下行有 `services` 与 `property/set` 两条通道，而机巢
   **可写属性仅** `silent_mode`/`air_transfer_enable` 等，`mode_code`/`putter_state`/

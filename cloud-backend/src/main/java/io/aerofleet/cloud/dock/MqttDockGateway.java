@@ -65,6 +65,16 @@ public class MqttDockGateway implements DockGateway, MqttCallbackExtended {
     /** 生产路径由 {@link #start()} 创建；测试可注入 fake（包私有构造）。 */
     private IMqttAsyncClient client;
 
+    /**
+     * 生产构造器（Spring 注入）。
+     *
+     * <p><b>为什么必须显式 {@code @Autowired}</b>：本类有第二个构造器（包私有，测试注入
+     * fake client 用）。Spring 遇到多个构造器且都未标注时，会退回去找**无参构造器**——
+     * 找不到就抛 {@code No default constructor found}，整个应用起不来。
+     * 该缺陷在 {@code transport=mqtt} 真机链路上首次暴露（单测直连构造器，绕过了 Spring），
+     * 由 {@code scripts/e2e-dock-mqtt.ps1} 的真后端启动抓出。
+     */
+    @Autowired
     public MqttDockGateway(ObjectMapper mapper, DockProperties props) {
         this(mapper, props, null);
     }
