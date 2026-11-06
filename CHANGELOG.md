@@ -1,5 +1,50 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 机巢 MQTT transport 落地：`transport=mqtt` 从 seam 变成实现（+8 例，DockService 过渡原因收口）
+
+### 修：#17 机巢线的「等硬件」里藏着一个纯代码活
+
+`DockGateway` 的 seam 早就留好（`SimLoopbackGateway` 是
+`@ConditionalOnProperty(transport=sim, matchIfMissing=true)`，mqtt 位空缺）——但
+`transport=mqtt` 一直没有实现，于是 #17 被整条标成「等硬件」。实际上：**真机巢只是
+MQTT broker 起来之后的对端；transport 实现本身是纯代码活**。本批把这块补上，
+「等硬件」的表面从「整条线」缩到「真机联调」。
+
+### 实现：`MqttDockGateway`
+
+- Paho（`org.eclipse.paho.client.mqttv3:1.2.5`，parent pom 统一版本）；
+- DJI Cloud API 物模型：下行 `thing/product/{sn}/services`、应答
+  `thing/product/{sn}/services_reply`，帧形状与 `SimLoopbackGateway` 逐字段一致
+  （`{tid,bid,timestamp,method,data}` / `data:{result,message}`）；
+- **命令-应答按 tid 关联**（pending map + CompletableFuture），QoS 1；
+- Broker 地址 `aerofleet.dock.mqtt-broker-url`：**transport=mqtt 且空缺 ⇒ 启动 fail-fast**
+  （与 jwt-secret 同口径）；Broker 暂时不可达**不**拖垮后端——异步连接 + 自动重连，
+  通道故障如实抛 `DockGatewayException`（控制器 504），不返回假成功；
+- 异常消息纪律（#248/#250 同款）：对外只留自建短句，MqttException 文本（含 Broker
+  URL/原因码）只进日志与 cause；
+- tid 发号兼容 V35 单调口径（PersistentSequence 可选注入，与 Sim 同款）；
+- 未知 tid 的 reply 首现告警（哨兵 256 上界，防只增表）；`connectionLost` 让在等命令
+  立即以自建异常失败，不留挂死命令。
+
+### 同批：DockService 过渡原因收口（#250 漏网点）
+
+`DockService` 通道失败的过渡原因原为 `"..." + e.getMessage()`——会进状态记录。
+按 #250 口径收口为自建短句（`command <method> transport failed`），底层异常进日志。
+机巢自行返回的 `reply.message()`（设备自建错误文本）保持透传（与 GB28181 upstreamDetail
+同一「上游自建文本给操作员」口径）。
+
+### 测试 +8 例
+
+`MqttDockGatewayTest`（fake `IMqttAsyncClient`，CI 无 Broker）：发布 topic 与物模型帧形状、
+tid 关联（result=0 → ok）、机巢拒绝（result≠0 → 应答带回）、超时自建短句、发布失败
+cause 保留、断连让在等命令立即失败、broker-url 空缺 fail-fast、transportName。
+既有 dock 全家（sim 默认路径）零回归。
+
+### 影响面
+
+- 默认 `transport=sim` 不变，既有部署零影响；`transport=mqtt` 是显式 opt-in；
+- 真机联调仍待机巢硬件/broker（README 边界声明同步改写）。
+
 ## [Unreleased] — SurveillanceDeviceRegistry 租户口径统一：未归属设备对租户不可见，仅全局管理员可见（+1 例）
 
 ### 修：与 fleet registry 相反的口径
@@ -1922,7 +1967,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-05 共有 280 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-05 共有 281 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1948,7 +1993,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 280 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 281 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

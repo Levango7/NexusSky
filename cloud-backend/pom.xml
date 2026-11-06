@@ -85,6 +85,11 @@
       <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
       <version>${springdoc.version}</version>
     </dependency>
+    <dependency>
+      <groupId>org.eclipse.paho</groupId>
+      <artifactId>org.eclipse.paho.client.mqttv3</artifactId>
+      <version>${paho.mqtt.version}</version>
+    </dependency>
     <!-- 设备注册持久化：JPA + H2(dev/test) + PostgreSQL(prod) -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
