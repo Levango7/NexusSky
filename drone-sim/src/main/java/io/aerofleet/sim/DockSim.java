@@ -15,7 +15,6 @@ import java.time.Duration;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -32,7 +31,10 @@ import java.util.regex.Pattern;
  *   <li>GET  /health    → {ok:true}</li>
  * </ul>
  * OSD 推送：启动时给 --osd-url 则以 --osd-period-ms 周期 POST 到云端 /api/v1/docks/osd
- * （DJI 语义是机巢主动上报；HTTP 回环是 sim 传输的等价物）。
+ * （DJI 语义是机巢主动上报；HTTP 回环是 sim 传输的等价物——MQTT 传输的等价物是
+ * {@link DockSimMqttPeer}，它按官方 topic 与属性名上报）。
+ *
+ * <p>状态机语义与 MQTT 对端共用 {@link DockSimCore}——两条传输的语义必须一致。
  *
  * <p>时序（与云端状态机 spec R2 对齐）：开门 3s、关门 3s、换电 5s、重启 8s；
  * 温度默认 30-45℃ 随机游走，--temp-fixed 可固定（造 FAULT 用）。
@@ -49,13 +51,9 @@ public final class DockSim implements AutoCloseable {
     private final int httpPort;
     private final String osdUrl;
     private final long osdPeriodMs;
-    private final int droneSysid;
-    private final Double tempFixedC;
-
-    private volatile String state = "IDLE";
-    private volatile double temperature = 35.0;
-    private volatile int batteryPct = 80;
-    private volatile String faultReason = null;
+    private final DockSimCore core;
+    /** 是否暴露 HTTP /services 回环端点。MQTT 模式下**关闭**：走错传输要立刻失败，不能悄悄成功。 */
+    private final boolean httpServicesEnabled;
 
     private final ScheduledExecutorService timer = Executors.newScheduledThreadPool(2, r -> {
         Thread t = new Thread(r, "dock-sim-timer");
@@ -64,23 +62,35 @@ public final class DockSim implements AutoCloseable {
     });
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2)).build();
-    private final AtomicLong osdSeq = new AtomicLong();
     private HttpServer server;
 
     public DockSim(String sn, String name, int httpPort, String osdUrl, long osdPeriodMs,
                    int droneSysid, Double tempFixedC) {
+        this(sn, name, httpPort, osdUrl, osdPeriodMs, droneSysid, tempFixedC, true);
+    }
+
+    public DockSim(String sn, String name, int httpPort, String osdUrl, long osdPeriodMs,
+                   int droneSysid, Double tempFixedC, boolean httpServicesEnabled) {
         this.sn = sn;
         this.name = name;
         this.httpPort = httpPort;
         this.osdUrl = osdUrl;
         this.osdPeriodMs = osdPeriodMs;
-        this.droneSysid = droneSysid;
-        this.tempFixedC = tempFixedC;
+        this.httpServicesEnabled = httpServicesEnabled;
+        this.core = new DockSimCore(droneSysid, tempFixedC);
+        this.core.bindSn(sn);
+    }
+
+    /** 状态机核心（MQTT 对端复用同一份语义时由此取；测试用）。 */
+    public DockSimCore core() {
+        return core;
     }
 
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", httpPort), 0);
-        server.createContext("/services", this::handleServices);
+        if (httpServicesEnabled) {
+            server.createContext("/services", this::handleServices);
+        }
         server.createContext("/osd", this::handleOsd);
         server.createContext("/health", ex -> respond(ex, 200, "{\"ok\":true,\"sn\":\"" + sn + "\"}"));
         server.setExecutor(Executors.newFixedThreadPool(2, r -> {
@@ -96,16 +106,8 @@ public final class DockSim implements AutoCloseable {
 
     /** 周期：温度游走 + 充电推进 + OSD 推送。 */
     private void tick() {
-        if (tempFixedC != null) {
-            temperature = tempFixedC;
-        } else {
-            double delta = (Math.random() - 0.5) * 1.0;
-            temperature = Math.max(28.0, Math.min(50.0, temperature + delta));
-        }
-        if ("CHARGING".equals(state) && batteryPct < 100) {
-            batteryPct = Math.min(100, batteryPct + 1);
-        }
-        if ("FAULT".equals(state)) {
+        core.tick();
+        if ("FAULT".equals(core.state())) {
             return; // 故障态不推 OSD（真实机巢断电重启语义：心跳停 → 云端置 OFFLINE 前仍可 reboot）
         }
         if (osdUrl != null) {
@@ -124,11 +126,7 @@ public final class DockSim implements AutoCloseable {
     }
 
     public String osdJson() {
-        return "{\"sn\":\"" + sn + "\",\"state\":\"" + state + "\","
-                + "\"temperature\":" + String.format(java.util.Locale.ROOT, "%.1f", temperature) + ","
-                + "\"batteryPct\":" + batteryPct + ","
-                + "\"droneSysid\":" + droneSysid + ","
-                + "\"seq\":" + osdSeq.incrementAndGet() + "}";
+        return core.osdJson();
     }
 
     private void handleOsd(HttpExchange ex) throws IOException {
@@ -158,55 +156,20 @@ public final class DockSim implements AutoCloseable {
         respond(ex, 200, reply);
     }
 
-    /** 执行命令：合法返回 {"result":0,"output":{}}，非法返回 {"result":1,"output":{"message":"state=X"}}。 */
+    /**
+     * 执行命令，返回 DJI 形状的 data 片段。
+     *
+     * <p>合法返回 {@code {"result":0,"output":{}}}，非法返回
+     * {@code {"result":1,"output":{"message":"state=X"}}}，未知 method 返回
+     * {@code {"result":2,"output":{"message":"unknown method X"}}}。
+     */
     String applyMethod(String method) {
-        String cur = state;
-        switch (method) {
-            case "door_open" -> {
-                if (!"IDLE".equals(cur) && !"CHARGING".equals(cur)) {
-                    return rejected(cur);
-                }
-                state = "OPENING";
-                timer.schedule(() -> state = "OPEN", 3000, TimeUnit.MILLISECONDS);
-                return "{\"result\":0,\"output\":{}}";
-            }
-            case "door_close" -> {
-                if (!"OPEN".equals(cur)) {
-                    return rejected(cur);
-                }
-                state = "CLOSING";
-                timer.schedule(() -> state = batteryPct < 100 ? "CHARGING" : "IDLE",
-                        3000, TimeUnit.MILLISECONDS);
-                return "{\"result\":0,\"output\":{}}";
-            }
-            case "battery_swap" -> {
-                if (!"IDLE".equals(cur) && !"CHARGING".equals(cur)) {
-                    return rejected(cur);
-                }
-                state = "EXCHANGING";
-                timer.schedule(() -> {
-                    batteryPct = 20;
-                    state = "CHARGING";
-                }, 5000, TimeUnit.MILLISECONDS);
-                return "{\"result\":0,\"output\":{}}";
-            }
-            case "reboot" -> {
-                state = "FAULT";
-                faultReason = "manual reboot";
-                timer.schedule(() -> {
-                    state = "IDLE";
-                    faultReason = null;
-                }, 8000, TimeUnit.MILLISECONDS);
-                return "{\"result\":0,\"output\":{}}";
-            }
-            default -> {
-                return "{\"result\":2,\"output\":{\"message\":\"unknown method " + method + "\"}}";
-            }
+        DockSimCore.Result res = core.apply(method);
+        if (res.message() == null) {
+            return "{\"result\":" + res.result() + ",\"output\":{}}";
         }
-    }
-
-    private String rejected(String cur) {
-        return "{\"result\":1,\"output\":{\"message\":\"state=" + cur + "\"}}";
+        return "{\"result\":" + res.result() + ",\"output\":{\"message\":\""
+                + res.message().replace("\"", "'") + "\"}}";
     }
 
     private static String textOf(Pattern p, String s, String dflt) {
@@ -230,11 +193,11 @@ public final class DockSim implements AutoCloseable {
 
     /** 测试与故障注入入口。 */
     public void forceState(String s) {
-        this.state = s;
+        core.forceState(s);
     }
 
     public String state() {
-        return state;
+        return core.state();
     }
 
     @Override
@@ -243,5 +206,6 @@ public final class DockSim implements AutoCloseable {
             server.stop(0);
         }
         timer.shutdownNow();
+        core.close();
     }
 }

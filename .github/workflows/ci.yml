@@ -1258,6 +1258,66 @@ jobs:
             -exec cp {} b1-e2e-logs/ \; 2>/dev/null || true
           ls -la b1-e2e-logs || echo "(no logs captured)"
 
+  # ── 机巢 MQTT 真链路 e2e（DJI 上云 API 对接面，观察模式）───────────────────
+  # 为什么单开一个 job：它要 **真 broker**（docker mosquitto）+ **真 cloud-backend**
+  # （transport=mqtt）+ **设备侧对端**（drone-sim --mqtt-url）。
+  # #254 交付的 transport=mqtt 从没在真 Spring 容器里起过——`MqttDockGateway` 有两个
+  # 构造器且都没标 @Autowired，Spring 退回去找无参构造器 ⇒ No default constructor found。
+  # 单测直连构造器、绕过了容器，只有真后端才抓得到。
+  #
+  # **观察模式（continue-on-error）**：本 job 依赖从容器仓拉 broker 镜像，而本文件
+  # 的 docker-build 步骤注释里记过「Docker Hub 拉镜像在限流/超时下连续致红」的坑
+  # （那里为此把 base 镜像参数化到 mirror.gcr.io）。**镜像从哪拉是基建问题，不该
+  # 冒充链路问题**——故先观察若干轮，Linux 连续零红后再转硬门禁（与 e2e-b2-a/b
+  # 当初的接入方式同款）。broker 镜像可用 AF_MOSQUITTO_IMAGE 指定；拉不到会自动
+  # 退到 Docker Hub 官方镜像名。
+  e2e-dock-mqtt:
+    name: E2E dock MQTT (真 broker + 真后端 transport=mqtt + 设备侧对端)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [ java ]
+    continue-on-error: true
+    services:
+      redis:
+        image: mirror.gcr.io/library/redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v2
+          restore-keys: |
+            mvn-${{ runner.os }}-
+      - name: Build all
+        run: mvn -B -DskipTests package
+      - name: e2e-dock-mqtt (DJI 物模型 MQTT 真链路：OSD 上报 + services→services_reply)
+        run: pwsh -NoProfile -File scripts/e2e-dock-mqtt.ps1 -SkipBuild
+        env:
+          AF_BACKEND_PORT: 18199
+          AF_BROKER_PORT: 18884
+          AF_PEER_HTTP_PORT: 18091
+          AF_MOSQUITTO_IMAGE: mirror.gcr.io/library/eclipse-mosquitto:2
+      - name: Upload dock mqtt e2e logs on failure
+        if: failure()
+        run: |
+          mkdir -p dock-mqtt-e2e-logs
+          find "${{ runner.temp }}" -maxdepth 1 \
+            \( -name 'af-dock-mqtt-*' \) \
+            -exec cp {} dock-mqtt-e2e-logs/ \; 2>/dev/null || true
+          ls -la dock-mqtt-e2e-logs || echo "(no logs captured)"
+
   # ── B2 第三批 e2e（已转硬门禁）───────────────────────────────────────────
   # 与 e2e-b1-scripts 平行、互不依赖。十脚本里 9 个接入；px4-sitl 不接入
   # （ubuntu runner 无 PX4 SITL、脚本宿主导向，接了必红）。

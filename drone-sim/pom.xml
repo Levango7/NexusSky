@@ -19,6 +19,17 @@
       <groupId>io.aerofleet</groupId>
       <artifactId>aerofleet-mavlink-core</artifactId>
     </dependency>
+    <!-- MQTT 设备侧对端（DockSimMqttPeer）：Paho 客户端，版本由 parent pom 统一管理 -->
+    <dependency>
+      <groupId>org.eclipse.paho</groupId>
+      <artifactId>org.eclipse.paho.client.mqttv3</artifactId>
+      <version>${paho.mqtt.version}</version>
+    </dependency>
+    <!-- 显式声明 Jackson（MQTT 对端要解析/生成官方帧 JSON；此前仅靠 mavlink-core 传递） -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>

@@ -1,5 +1,79 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 机巢 MQTT 真链路落地：设备侧对端 + OSD 摄入 + 零硬件本地 E2E（+20 例，2 处真缺陷修复）
+
+### 真链路 E2E 抓出 #254 的两个真缺陷（单测抓不到的那类）
+
+本轮把 `transport=mqtt` 从"接口+配置就位"推到**真跑通**：本地 broker（docker mosquitto）
++ 真 cloud-backend + 设备侧 MQTT 对端。第一次起真后端就炸了——两个缺陷都是单测绕过的：
+
+1. **`MqttDockGateway` 在 Spring 里起不来**：`No default constructor found`。该类有两个
+   构造器（生产用 + 测试注入 fake client）且都未标注 `@Autowired`，Spring 遇到多构造器会
+   退回去找无参构造器，找不到就抛。**⇒ #254 的 `transport=mqtt` 从未真正启动过**
+   （单测直连构造器，绕过 Spring 容器）。修法：生产构造器显式 `@Autowired`，
+   并加一条反射不变式专测把这条装配规则钉死（见下）。
+2. **OSD 里的整数属性被写成浮点**：Java 三元表达式 `d == rint ? intValue() : d` 会把
+   int/double 两个分支统一提升成 double ⇒ `putter_state` 发出的是 `0.0` 而不是 `0`，
+   对端按 `isIntegralNumber()` 判定时全部落空 ⇒ 设备状态永远映射不出来（门永远开不到位）。
+   修法：分支内显式 `put(key, intValue())`；同时后端映射放宽为"任何数值节点都认"
+   （真实设备可能把枚举发成浮点）。
+
+### 实现
+
+- **drone-sim 设备侧 MQTT 对端**（`DockSimMqttPeer`）：订阅 `thing/product/{sn}/services`，
+  回 `thing/product/{sn}/services_reply`（官方帧形状），定频推 `thing/product/{sn}/osd`
+  （帧为官方公共字段，`data` 内为**官方属性名**子集：`mode_code`/`environment_temperature`/
+  `drone_charge_state{capacity_percent,state}`/`drone_in_dock`/`putter_state`/`alarm_state`）。
+- **状态机语义单源**（`DockSimCore`）：HTTP 回环对端与 MQTT 对端共用同一份状态机——两条
+  传输的语义必须一致，否则两条 e2e 断言会互相打架（一路说门开、另一路说门关）。
+- **MQTT 模式不暴露 HTTP /services**：`--mqtt-url` 启动时对端**不提供** HTTP 回环端点，
+  走错传输要立刻失败而不是悄悄成功（E2E 断言对端 HTTP /services 返回 404）。
+- **后端 OSD 摄入监听器**（`MqttDockOsdListener`）：订阅 `thing/product/+/osd`，把官方属性
+  子集映射成本系统 OSD 语义，走**同一条**摄入路径（同一套状态机裁决、同一套温度阈值）：
+  `drone_charge_state.state=1 → CHARGING`；`putter_state` 1→OPEN / 0→IDLE / 2 半开→不强制；
+  温度取 `environment_temperature`、电量取 `capacity_percent`。未映射的官方属性（如
+  `mode_code`）**不臆造语义**，只保留原帧不参与裁决；未注册 SN 只记首现告警（哨兵上界）。
+
+### 零硬件本地 E2E（`scripts/e2e-dock-mqtt.ps1`）
+
+docker mosquitto + 真 cloud-backend（transport=mqtt）+ 真设备侧对端，断言全绿：
+broker 可用 / 注册 201 / **OSD 经 MQTT 上报后上线** / **开门命令经 services→services_reply
+受理并进入 OPENING** / 门开到位 OPEN（对端 3s 时序 + MQTT OSD 跟随）/ 非法态 409 且点名
+当前状态 / 关门回稳 / 对端 HTTP /services 404（证明没走回环）。
+**依赖 docker（本地 broker），不依赖真机巢**——真机巢联调仍待硬件。
+
+CI 接入方式（**观察模式**，`continue-on-error: true`）：新增 job `e2e-dock-mqtt`。
+不直接做硬门禁的理由记在本仓 `ci.yml` 的 docker-build 注释里——Docker Hub 拉镜像在
+限流/超时下连续致过红，**"镜像从哪拉"是基建问题，不该冒充"链路"问题**。broker 镜像可用
+`AF_MOSQUITTO_IMAGE` 指定（CI 上走 mirror.gcr.io），拉不到脚本会自动退到 Docker Hub
+官方镜像名但**如实报失败、不静默跳过**；Linux 连续零红若干轮后再转硬门禁（与
+`e2e-b2-a/b` 当初同款）。台账（`docs/contributing-guide.md` 2.5 节）同步加行，
+并把那句已过期的"全部 PowerShell 脚本（18 个）都已接入 CI"改成**可核对的表述**
+（`scripts/` 下 29 个 `e2e-*.ps1`，需宿主机特定条件/真硬件的刻意不接）。
+
+### A/B 实证（改坏⇒红、还原⇒绿）
+
+- 整数属性退回浮点 ⇒ `DockSimMqttPeerTest.osdIntegerPropertiesAreIntegralNodes` 转红；
+- 去掉 `@Autowired` ⇒ **真后端起不来**（E2E 红）；还原 ⇒ 后端可启动、E2E 全绿。
+
+### CI 可跑的那条护栏：`MqttDockGatewayWiringTest`（2 例）
+
+上面那个 `@Autowired` 缺陷之所以能活到真链路才暴露，是因为**没有任何 CI 信号**盯着
+「Spring 能不能把这个 bean 装起来」——单测直连构造器，绕过了容器；而真链路 E2E 依赖
+docker（本地 broker），进不了 CI 的常规单测门禁。故另加一条**反射不变式**专测：
+**多构造器 ⇒ 必须恰好标一个 `@Autowired`**（否则 Spring 退去找无参构造器 ⇒
+`No default constructor found`），并断言被选中的那个就是生产构造器
+（`ObjectMapper` + `DockProperties`）。CI 无 Broker 也能跑，红了就是真缺陷。
+
+### 测试 +20 例
+
+`DockSimMqttPeerTest` 9 例（应答帧字段集恰好等于官方表 / tid·bid 文本回显 / 非法态
+result=1 / 未知 method result=2 / 缺 method result=1 / OSD 官方属性名 / 舱盖状态映射 /
+充电状态映射 / **整数属性必须是整型节点**）；`MqttDockOsdListenerTest` 9 例（topic 取 SN /
+充电优先于舱盖 / 舱盖映射 / 半开不强制 / 浮点枚举也认 / 官方属性进同一摄入路径 /
+未注册 SN 不抛 / 电量缺失不编造 / 温度沿用同一路径）；`MqttDockGatewayWiringTest` 2 例
+（多构造器必须恰好一个 `@Autowired` / 被选中的构造器是生产构造器）。
+
 ## [Unreleased] — DJI 物模型帧形状按官方字段表逐字段对齐（tid/bid UUID 文本、gateway 公共字段、data.output）+ 12 例契约测试
 
 ### 查证：拿官方文档表逐字段核我们的帧，发现三处实打实的偏差
@@ -2072,7 +2146,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-07 共有 284 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-07 共有 285 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -2098,7 +2172,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 284 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 285 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

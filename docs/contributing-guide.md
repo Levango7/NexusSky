@@ -115,9 +115,12 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e-failsafe.ps1
 
 Linux 版本：`scripts/e2e-smoke.sh`、`scripts/e2e-fault-linux.sh` 等。
 
-### 2.5 e2e 脚本台账（2026-10-20 按 CI 实测刷新）
+### 2.5 e2e 脚本台账（2026-11-07 按 CI 实测刷新）
 
-**全部 PowerShell 脚本（18 个）都已接入 CI**，分五个 job：
+**CI 里的 e2e 分六个 job**（下表列的是 CI 实际执行的脚本）。注意：**并非
+`scripts/` 下每个 `e2e-*` 都进 CI**——需要宿主机特定条件或真硬件的刻意不接
+（`e2e-px4-sitl` 因 ubuntu runner 无 PX4 SITL，`e2e-vision` / `e2e-hardware`
+需摄像头），接了必红反而是噪声；`e2e-common*.ps1` 是公共库/自检，不是场景脚本。
 
 | job | 脚本 | 断言（CI 实测） |
 |---|---|---|
@@ -127,6 +130,7 @@ Linux 版本：`scripts/e2e-smoke.sh`、`scripts/e2e-fault-linux.sh` 等。
 | `e2e-b2-a-type` | `e2e-cv-eval.ps1` / `e2e-operations.ps1` / `e2e-rtk.ps1` / `e2e-sensing.ps1` / `e2e-uspace.ps1` / `e2e-roc.ps1` / `e2e-spray.ps1` | 12 / 9 / 3 / 10 / 13 / 14 / 30 |
 | `e2e-b2-b-type` | `e2e-network.ps1` / `e2e-rf.ps1` / `e2e-vision-pixels.ps1` | 9 / 4 / 6 |
 | `e2e-mjpeg` | `scripts/e2e-mjpeg-ci.sh` → `scripts/e2e-mjpeg-preview.py`（python） | 23 |
+| `e2e-dock-mqtt`（观察模式） | `e2e-dock-mqtt.ps1` | 13（本地实测：真 broker + 真后端 transport=mqtt + 设备侧对端；Linux 连续零红后再转硬门禁） |
 
 另有 bash 版：`e2e-smoke.sh`、`e2e-fault-linux.sh`、`e2e-failsafe-linux.sh`、
 `e2e-vision-linux.sh`、`e2e-spray.sh`、`e2e-emergency.sh`、`e2e-hardware.sh`、
