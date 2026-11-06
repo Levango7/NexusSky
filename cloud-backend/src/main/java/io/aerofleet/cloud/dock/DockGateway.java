@@ -6,9 +6,14 @@ import java.util.Map;
  * 机巢命令下行通道抽象（spec R3，DJI Cloud API 物模型形状）。
  * <p>
  * 实现可插拔：{@link SimLoopbackGateway}（HTTP 回环到机巢模拟器，默认）与
- * 生产阶段的 MQTT 实现（thing/product/{sn}/services，见 README 边界声明）。
- * 帧形状与 DJI Cloud API 对齐：{@code {tid, bid, timestamp, method, data}}，
- * 应答 {@code {tid, bid, timestamp, data:{result}}}（result=0 成功）。
+ * {@link MqttDockGateway}（thing/product/{sn}/services，transport=mqtt）。
+ * 帧形状按 DJI Cloud API 官方文档逐字段对齐（{@code dji-sdk/Cloud-API-Doc} v1.18
+ * {@code 60.api-reference/20.dock-to-cloud/00.mqtt/00.topic-definition.md}）：
+ * 下行 {@code {tid, bid, timestamp, gateway, method, data}}，
+ * 应答 {@code {tid, bid, timestamp, gateway, method, data:{result, output}}}。
+ * 其中 <b>tid/bid 是 UUID 文本</b>（公共字段表：事务uuid/业务uuid，均为 text——不是 long）、
+ * <b>gateway 是网关设备（机巢）序列号</b>、<b>设备消息内容在 data.output</b>（struct，
+ * 无 data.message 字段位）。
  */
 public interface DockGateway {
 
@@ -29,8 +34,9 @@ public interface DockGateway {
     record DockCommandFrame(long tid, long bid, long timestamp, String method, Map<String, Object> data) {
     }
 
-    /** 应答帧。result=0 成功，非 0 为机巢侧错误码。 */
-    record DockReply(long tid, long bid, long timestamp, int result, String message, String rawJson) {
+    /** 应答帧。tid/bid 为 UUID 文本（DJI 口径）；result=0 成功，非 0 为机巢侧错误码；
+     *  message 为应答 data.output 的文本形式（DJI 无 data.message 字段，output 是 struct）。 */
+    record DockReply(String tid, String bid, long timestamp, int result, String message, String rawJson) {
         public boolean ok() {
             return result == 0;
         }

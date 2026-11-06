@@ -57,7 +57,9 @@ class DockGatewayLoopbackTest {
         DockGateway.DockReply reply = gateway.sendCommand("DOCK-E2E", DockCommand.OPEN_DOOR, Map.of());
 
         assertThat(reply.ok()).isTrue();
-        assertThat(reply.tid()).isGreaterThan(0);
+        // DJI 口径：tid/bid 是 UUID 文本
+        assertThat(reply.tid()).matches("[0-9a-f-]{36}");
+        assertThat(reply.bid()).matches("[0-9a-f-]{36}");
         assertThat(sim.state()).isEqualTo("OPENING");
     }
 

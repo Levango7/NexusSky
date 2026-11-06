@@ -741,12 +741,12 @@ NexusSky/
 | 模块 | 单测数 |
 |---|---|
 | `mavlink-core` | 523 |
-| `drone-sim` | 1463 |
+| `drone-sim` | 1468 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3451 |
+| `cloud-backend` | 3458 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5636
+| **总计** | **5648
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
@@ -869,9 +869,21 @@ NexusSky/
   去重与复检是同一空间近似口径。报告导出 json/csv/md，PDF 属渲染层不在本轮。
 
 - **机巢管控（F2）的传输与执行边界**：命令通道交付的是 DJI Cloud API **物模型形状**
-  （`{tid,bid,timestamp,method,data}` services 语义）+ 可插拔 `DockGateway`；默认
-  `transport=sim`（HTTP 回环到 drone-sim 的 `dock` 子命令），`transport=mqtt` 是生产
-  seam（需 EMQX Broker，接口/配置已就位但未联调——与 C1/C2 "对端是模拟器"同一诚实口径）。
+  ——自 2026-11-07 起按官方文档仓库 `dji-sdk/Cloud-API-Doc`（MIT，v1.18）
+  `60.api-reference/20.dock-to-cloud/00.mqtt/00.topic-definition.md` 的字段表**逐字段对齐**：
+  公共字段 `tid`/`bid` 为 **UUID 文本**（原实现误用 long）、`timestamp` 为毫秒整数、
+  **`gateway` 为网关设备（机巢）序列号**（原实现缺此字段）、`data` 为对象；
+  services 帧 = `{tid,bid,timestamp,gateway,method,data}`，
+  services_reply 的设备消息内容在 **`data.output`**（struct，原实现误读 `data.message`）。
+  字段集由 `DockDjiFrameContractTest` / `DockSimDjiFrameTest` 按官方表**恰好相等**断言
+  （多/少字段即红）。可插拔 `DockGateway`；默认 `transport=sim`（HTTP 回环到 drone-sim 的
+  `dock` 子命令），`transport=mqtt` 是生产 seam（需 EMQX Broker 与真实对端）。
+  **method 语汇仍是 NexusSky 侧语义**（`door_open`/`door_close`/`battery_swap`/`reboot`
+  不是 DJI 官方 method）：官方下行有 `services` 与 `property/set` 两条通道，而机巢
+  **可写属性仅** `silent_mode`/`air_transfer_enable` 等，`mode_code`/`putter_state`/
+  `drone_battery_maintenance_info` 均 `accessMode=r` **只读**——即真实 DJI 机巢的
+  开盖/换电属设备自主动作，云端不能像对模拟器那样直接下发。真实机巢映射待商务/固件
+  版本确认后单独立项，不在本轮声称。
   换电是计时仿真（5s + 电量曲线），非机械臂时序；无人值守完成判定用遥测
   （曾起飞 + 相对高度回地），非任务状态机回调。
 - 模拟器使用简化气动模型（物理引擎 v2 已加入加速度/协调转弯/bank/姿态，但非真飞控级气动）
