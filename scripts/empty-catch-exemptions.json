@@ -96,6 +96,16 @@
       "file": "sdk-java/src/main/java/io/aerofleet/sdk/NexusSkyClient.java",
       "comment": "响应体不是 JSON，使用默认错误消息",
       "reason": "错误响应体不是 JSON 时使用默认错误消息，避免二次解析异常覆盖状态码"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/surveillance/Gb28181SipTransport.java",
+      "comment": "读超时：收尾循环即可（事务等待由调用方轮询 byKey 完成，不依赖本循环）",
+      "reason": "DatagramSocket 的 SO_TIMEOUT 是轮询间隔（事务等待在 transact() 里用 deadline 完成），读超时是正常心跳而非故障；每次超时都打日志会在无流时段刷满日志"
+    },
+    {
+      "file": "cloud-backend/src/main/java/io/aerofleet/cloud/surveillance/Gb28181DeviceSimulator.java",
+      "comment": "无请求：继续等",
+      "reason": "设备替身的 SO_TIMEOUT 是空转间隔（无请求时本来就没有事可做）；与生产服务监听 accept 的空转同性质，日志只会掩盖真实的收发异常"
     }
   ]
 }

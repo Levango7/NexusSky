@@ -125,6 +125,72 @@ result=1 / 未知 method result=2 / 缺 method result=1 / OSD 官方属性名 / 
 充电优先于舱盖 / 舱盖映射 / 半开不强制 / 浮点枚举也认 / 官方属性进同一摄入路径 /
 未注册 SN 不抛 / 电量缺失不编造 / 温度沿用同一路径）；`MqttDockGatewayWiringTest` 2 例
 （多构造器必须恰好一个 `@Autowired` / 被选中的构造器是生产构造器）。
+## [Unreleased] — GB28181 信令面自给：SIP 真传输 + 设备侧对端 + 修掉 Content-Length 魔数（+34 例）
+
+### 查证：自称"国标形状层"的帧，真机读不了
+
+E5 此前宣称"编码/PTZ 指令码/SIP 信令/Catalog 解析为真实现"，并把"SIP 传输"记作
+生产阶段。\[\]()本轮把它当真来验证：**拼出来的 SIP 帧 a `Content-Length` 是硬编码魔数**——
+INVITE 写 145、Catalog 写 141，而实测 body 分别是 **170 / 115 字节**，且**随参数变化**
+（IP 位数、端口位数、SSRC/SN 位数）：
+
+| 帧 | 源码魔数 | 实测 body | 后果 |
+|---|---|---|---|
+| INVITE（含 SDP） | 145 | 170 | 对端按 Content-Length 读 ⇒ **挂起等 25 个永不到来的字节** |
+| MESSAGE（Catalog XML） | 141 | 115 | 对端读到 26 个不属于本条消息的字节 ⇒ **截断/混帧** |
+
+而原 `Gb28181ShapeTest` 只断言"包含某几个头"，**从没核过 Content-Length**——
+也就是说这个错值在单测里是隐形的。"形状层"因此并不合规：真机/真 SIP 服务器读不了。
+
+### 改
+
+- `Gb28181Sdp`（新）：SDP 变成可构造/可解析/可按字节计长的对象，`bodyBytes()` 是
+  Content-Length 的唯一合法来源；
+- `Gb28181SipMessage`（新）：start-line + 头集合 + body 的结构化消息，渲染时
+  **Content-Length 由真实 body 长度导出**，外部塞进来的该头直接忽略（魔数没有入口）；
+  解析侧按 Content-Length 收 body，支持一个 datagram 多条消息；
+- `Gb28181Signaling`（改）：所有帧改走模型；Via 补 `z9hG4bK-*` branch
+  （RFC 3261 事务标识，**旧实现整条缺失**——真机无法把响应关联回请求）；
+  新增响应构造（100 Trying / 200 OK / 200 OK+XML / 200 OK+SDP / 401+challenge）
+  与 ACK / BYE；
+- `Gb28181SipTransport`（新）：真 UDP socket 收发 + 按 Call-ID+CSeq+方法的事务匹配；
+  **1xx Provisional 不算终结响应**（首版把 100 Trying 当终结返回，真链路测试抓出）；
+  无匹配响应 ⇒ `SipTimeoutException`，**不返回假成功**；
+- `Gb28181DeviceSimulator`（新）：进程内 GB28181 设备替身——真 UDP 上的 SIP 对端，
+  处理 REGISTER 401/200、Catalog、INVITE 100+200+SDP、ACK、BYE、SUBSCRIBE。
+
+### 测试 +34 例（含 8 例**真 UDP 回环**）
+
+- `Gb28181SipMessageTest` 11 例：Content-Length 不变式（渲染值 == body 真实字节数）、
+  无 body 为 0、外部 Content-Length 无效、对端按声明长度必能读完、回带解析、
+  头名大小写不敏感、**同 datagram 两条消息不混帧**、折行并入、事务键同源、坏帧拒绝；
+- `Gb28181SignalingContractTest` 15 例：Content-Length == 真实字节（**多组参数数据驱动**，
+  直接对准旧魔数）、无 body 帧为 0、Via 带 branch 且不重复、起止行/Subject/SDP 必需行、
+  INVITE body 可解析回读、响应回带 + To tag、ACK/BYE 的 Request-URI 剥 tag；
+- `Gb28181SipLoopbackTest` 8 例（transport ↔ 设备替身，**真 UDP**）：
+  REGISTER→401+challenge、带 Authorization→200 OK、Catalog→200 OK 且解析出 2 条通道、
+  INVITE→100 Trying 与 200 OK+SDP 都到齐、dialog 完整收尾（ACK+BYE）、
+  未知方法**不造假成功**（超时收尾）、对端不可达同样超时、
+  链路两端帧都按 Content-Length 完整读出。
+- 既有 `Gb28181ShapeTest` 信令段 4 例改用模型口径（`renderText()`）。
+
+### A/B 实证（改坏⇒红、还原⇒绿）
+
+| 注入的破坏 | 转红 |
+|---|---|
+| `Content-Length` 退回硬编码 145（魔数复活） | **9 例**（含真链路上 3 例） |
+| `transact` 不再跳过 1xx Provisional | **3 例**（真链路） |
+| Catalog 频道 ID 退回 URI 形态（21 位，非 20 位合法编码） | **1 例**（真链路） |
+
+还原 ⇒ 全绿。
+
+### 口径（不夸大）
+
+- 本批交付的是**信令面**，**RTP/PS 媒体面仍未实现**——`Gb28181Adapter.getStreamUrl()`
+  仍返回 `gb28181-invite://` 描述性标识（`StreamUrlOrigin.DESCRIPTIVE_ONLY`），
+  **不假扮可播 RTSP**；200 OK 的 SDP 只声明参数，设备替身不推流。
+- 设备替身是**我们写的对端**（不是大华/海康官方模拟器），它证明的是"我们的传输与帧
+  能被一个独立 SIP 栈收发"。**真机联调仍需硬件**，这条边界没有因本批消失。
 
 ## [Unreleased] — DJI 物模型帧形状按官方字段表逐字段对齐（tid/bid UUID 文本、gateway 公共字段、data.output）+ 12 例契约测试
 

@@ -743,10 +743,10 @@ NexusSky/
 | `mavlink-core` | 523 |
 | `drone-sim` | 1477 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3472 |
+| `cloud-backend` | 3503 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5671
+| **总计** | **5702
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
@@ -842,9 +842,19 @@ NexusSky/
 - **ROC 席位（E1）是运行时会话概念**：in-memory 重启清零（与席位语义一致）；
   警情三因子线性评分不跑 GA（M10 职责）；单警情单机建议（多机协同处置属后续）；
   派飞=操作员确认后的常规任务链，动态航线中段改写属后续组合项。
-- **GB28181（E5）交付的是国标形状层**：编码/PTZ 指令码/SIP 信令/Catalog 解析为真实现
-  （22 例单测逐字节断言国标值）；SIP 传输与 RTP/PS 媒体面属生产阶段——点播返回
-  gb28181-invite:// 描述性标识，不假扮可播 RTSP。**SurveillanceController 的 PTZ
+- **GB28181（E5）分两层看，不混为一谈**：① **国标值层**是真实现——20 位编码 / PTZ
+  指令码 / Catalog 解析（逐字节断言国标值）；② **信令面**自 2026-11-07 起也是**真链路**：
+  `Gb28181Signaling` 经 `Gb28181SipMessage` / `Gb28181Sdp` 构造，`Content-Length`
+  由 body 真实长度导出，`Gb28181SipTransport` 上真 UDP socket，与
+  `Gb28181DeviceSimulator`（进程内设备替身）真收发注册 401→200、Catalog、
+  INVITE→100 Trying→200 OK+SDP、ACK、BYE——**8 例真回环测试跑在单测里**
+  （每次构建都验，不依赖真摄像头）。
+  **但信令面有个修掉的缺陷值得记账**：旧实现的 `Content-Length` 是**硬编码魔数**
+  （INVITE 写 145、实测 170；Catalog 写 141、实测 115），且随参数（IP 位数、端口位数、
+  SSRC 位数、SN 位数）变化；按 RFC 3261 对端严格按它读 body ⇒ 写小挂起、写大截断，
+  **旧帧真机读不了**，而原单测只断言"包含某几个头"、从没核过这个数。
+  ③ **RTP/PS 媒体面仍未交付**：点播仍返回 `gb28181-invite://` 描述性标识，
+  **不假扮可播 RTSP**；真机联调仍需硬件。**SurveillanceController 的 PTZ
   端点仍硬编码 ONVIF 路径**（按 vendor 路由的改造登记为后续项）。
 - **运营报表（E6）的成本是参数化模型**：`aerofleet.report.cost-per-hour`（默认 0）由
   部署方按其单位经济填——本仓不编造电价/折旧；能耗按电量百分比差，不换算 mAh；
@@ -877,10 +887,7 @@ NexusSky/
   services_reply 的设备消息内容在 **`data.output`**（struct，原实现误读 `data.message`）。
   字段集由 `DockDjiFrameContractTest` / `DockSimDjiFrameTest` 按官方表**恰好相等**断言
   （多/少字段即红）。可插拔 `DockGateway`；默认 `transport=sim`（HTTP 回环到 drone-sim 的
-  `dock` 子命令）；`transport=mqtt` 已有**设备侧对端 + 零硬件本地 E2E**
-  （`scripts/e2e-dock-mqtt.ps1`：docker mosquitto + 真后端 + 真对端，OSD 经
-  `thing/product/+/osd` 摄入、命令经 `services`/`services_reply` 往返，对端**不提供**
-  HTTP 回环以杜绝"走错传输还成功"）——真机巢联调仍待硬件。
+  `dock` 子命令），`transport=mqtt` 是生产 seam（需 EMQX Broker 与真实对端）。
   **method 语汇仍是 NexusSky 侧语义**（`door_open`/`door_close`/`battery_swap`/`reboot`
   不是 DJI 官方 method）：官方下行有 `services` 与 `property/set` 两条通道，而机巢
   **可写属性仅** `silent_mode`/`air_transfer_enable` 等，`mode_code`/`putter_state`/

@@ -80,10 +80,11 @@ public class Gb28181Adapter implements VendorAdapter {
     public String getStreamUrl(SurveillanceDevice device, int channel) {
         validateDevice(device);
         Gb28181DeviceId id = Gb28181DeviceId.parse(device.id);
-        String invite = signaling.inviteStream(id, channel, "0.0.0.0", 0, channel);
-        log.warn("GB28181 stream request for {} ch={} — INVITE constructed ({} bytes), "
+        Gb28181SipMessage invite = signaling.inviteStream(id, channel, "0.0.0.0", 0, channel);
+        log.warn("GB28181 stream request for {} ch={} — INVITE constructed ({} bytes, "
+                        + "Content-Length now derived from real SDP bytes, was a magic 145), "
                         + "but RTP/PS media plane is production-stage (no fake playable URL returned)",
-                id.value(), channel, invite.length());
+                id.value(), channel, invite.bodyBytes());
         return "gb28181-invite://" + id.value() + "?channel=" + channel;
     }
 
@@ -141,11 +142,11 @@ public class Gb28181Adapter implements VendorAdapter {
     public String subscribeEvents(SurveillanceDevice device, Consumer<String> callback) {
         validateDevice(device);
         Gb28181DeviceId id = Gb28181DeviceId.parse(device.id);
-        String sub = signaling.subscribeAlarm(id, 3600, 1);
+        Gb28181SipMessage sub = signaling.subscribeAlarm(id, 3600, 1);
         String handle = "gb28181-sub-" + id.value();
         log.warn("GB28181 alarm subscribe for {} — SUBSCRIBE constructed ({} bytes), "
                         + "SIP transport is production-stage; callback will not fire in PoC",
-                id.value(), sub.length());
+                id.value(), sub.bodyBytes());
         return handle;
     }
 
