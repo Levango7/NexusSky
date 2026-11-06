@@ -117,7 +117,7 @@ public class SurveillanceDeviceRegistry {
      * 获取设备（按租户隔离过滤）。
      * <p>
      * 若当前请求的 tenantId 为 null（全局管理员），则不做过滤；
-     * 否则仅返回属于当前租户或未分配租户的设备。
+     * 否则仅返回属于当前租户的设备（未归属设备仅全局管理员可见）。
      *
      * @param deviceId 设备 ID
      * @return 设备；若不存在或不属于当前租户返回 null
@@ -128,9 +128,10 @@ public class SurveillanceDeviceRegistry {
         if (device == null) return null;
         Integer tenantId = TenantContext.getEffectiveTenantId();
         if (tenantId == null) {
+            // 全局管理员：全部可见（含他租户/未归属）
             return device;
         }
-        if (device.tenantId == null || tenantId.equals(device.tenantId)) {
+        if (device.tenantId != null && tenantId.equals(device.tenantId)) {
             return device;
         }
         return null;
@@ -140,14 +141,14 @@ public class SurveillanceDeviceRegistry {
      * 列出所有设备（按租户隔离过滤，按 id 字典序排序）。
      * <p>
      * 若当前请求的 tenantId 为 null（全局管理员），则返回全部设备；
-     * 否则仅返回属于当前租户或未分配租户的设备。
+     * 否则仅返回属于当前租户的设备（未归属设备仅全局管理员可见）。
      *
      * @return 设备列表（不可变副本）
      */
     public List<SurveillanceDevice> listDevices() {
         Integer tenantId = TenantContext.getEffectiveTenantId();
         List<SurveillanceDevice> snapshot = devices.values().stream()
-                .filter(d -> tenantId == null || d.tenantId == null || tenantId.equals(d.tenantId))
+                .filter(d -> tenantId == null || (d.tenantId != null && tenantId.equals(d.tenantId)))
                 .sorted(Comparator.comparing(d -> d.id))
                 .collect(Collectors.toCollection(ArrayList::new));
         return Collections.unmodifiableList(snapshot);
@@ -157,7 +158,7 @@ public class SurveillanceDeviceRegistry {
      * 按厂商筛选设备（按租户隔离过滤）。
      * <p>
      * 若当前请求的 tenantId 为 null（全局管理员），则不做租户过滤；
-     * 否则仅返回属于当前租户或未分配租户的设备。
+     * 否则仅返回属于当前租户的设备（未归属设备仅全局管理员可见）。
      *
      * @param vendor 厂商
      * @return 该厂商的所有设备列表（当前租户可见）
@@ -167,7 +168,7 @@ public class SurveillanceDeviceRegistry {
         Integer tenantId = TenantContext.getEffectiveTenantId();
         return devices.values().stream()
                 .filter(d -> d.vendor == vendor)
-                .filter(d -> tenantId == null || d.tenantId == null || tenantId.equals(d.tenantId))
+                .filter(d -> tenantId == null || (d.tenantId != null && tenantId.equals(d.tenantId)))
                 .sorted(Comparator.comparing(d -> d.id))
                 .collect(Collectors.toCollection(ArrayList::new));
     }
