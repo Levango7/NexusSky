@@ -1,5 +1,33 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P2-F6 ②「drone-host 未设出站盲发」现状钉住：真实 UDP 收帧归属 3 例（+3 例，纯测试）
+
+**取证钉住，不是修复**：`docs/sitl-integration.md` §12.4 表②的出站盲区（drone-host 未配时
+「入站靠学、出站才盲」）此前零测试覆盖。本轮给 `UdpGateway#send(int, MavlinkFrame)` 的
+兜底路径补上现状测试——**不改任何生产行为**（§12.4 明确「单独修②会造出假安全感」，
+修复须与①一起按「三条判据」在真机双链路验收）。
+
+### 钉住的行为事实（读代码 + 真实 UDP 收帧实测）
+
+- 出站 `send(sysid, frame)` 两条路：路由表学到的地址（定向）→ `sendToLastPeer` 兜底；
+- `lastPeer` 唯一写点是 transport **收包**线程（discovery 心跳与定向出站都不刷新它）——
+  §12.4 证伪段「由最近任意入/出站刷新」与当前代码不符，本轮以代码为准（顺带留痕）；
+- 从未入站时 `sendToLastPeer` **静默丢弃**；`drone-host` 配置只进 `enablePeerDiscovery`
+  （发现握手），**不参与 send 任何路径**——未知 sysid 的命令帧落在「最后说话者」头上，
+  两个机载实例同机时只有最后入站者收得到。
+
+### 测试（+3 例，`UdpGatewayOutboundBlindSpotTest`，真实 UDP 收帧归属）
+
+1. learn 过的 sysid → 定向到该实例（路由表正常职责，基线）；
+2. 未 learn 的 sysid → 落 lastPeer（最后说话者拿走命令；A/B 两实例证明**不是广播**、
+   drone-host 的 discovery 地址也收不到）；
+3. 零入站 → 静默丢弃（`lastPeer` 保持 null，drone-host 地址不兜底、出站不反向制造 lastPeer）。
+
+**A/B 实测**：把 `send` 兜底临时改成「落 discovery 地址」（修②的错误方向）⇒ **例 2 红**
+（peerB 收不到帧），例 1/3 按预期绿；还原 ⇒ 3/3 绿。测试对「兜底行为被改动」真实敏感。
+
+验证：全仓 **5636** / cloud-backend **3451**（10 份口径文档同步）；`[Unreleased]` 小节 282 → **283**。
+
 ## [Unreleased] — 机巢 MQTT transport 落地：`transport=mqtt` 从 seam 变成实现（+8 例，DockService 过渡原因收口）
 
 ### 修：#17 机巢线的「等硬件」里藏着一个纯代码活
@@ -1989,7 +2017,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-05 共有 282 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-06 共有 283 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -2015,7 +2043,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 282 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 283 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
