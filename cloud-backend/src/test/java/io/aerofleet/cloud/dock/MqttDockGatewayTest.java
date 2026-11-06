@@ -56,12 +56,13 @@ class MqttDockGatewayTest {
         return new MqttDockGateway(MAPPER, props, fake.client());
     }
 
-    /** 模拟机巢回 services_reply（result/message 由调用方给）。 */
-    private static void deliverReply(MqttCallbackExtended cb, long tid, int result, String message)
+    /** 模拟机巢回 services_reply（DJI 形状：tid/bid 为 UUID 文本，设备消息在 data.output）。 */
+    private static void deliverReply(MqttCallbackExtended cb, String tid, int result, String message)
             throws Exception {
         String payload = MAPPER.writeValueAsString(Map.of(
-                "tid", tid, "bid", 1L, "timestamp", System.currentTimeMillis(),
-                "data", Map.of("result", result, "message", message)));
+                "tid", tid, "bid", "b-" + tid, "timestamp", System.currentTimeMillis(),
+                "method", "door_open",
+                "data", Map.of("result", result, "output", Map.of("message", message))));
         cb.messageArrived("thing/product/SN001/services_reply", new MqttMessage(payload.getBytes()));
     }
 
@@ -75,7 +76,7 @@ class MqttDockGatewayTest {
         // 发布后由 mock 投一份 ok reply，让 sendCommand 正常返回（本用例只验发布形状）
         org.mockito.Mockito.doAnswer(inv -> {
             MqttMessage msg = inv.getArgument(1);
-            long tid = MAPPER.readTree(msg.getPayload()).get("tid").asLong();
+            String tid = MAPPER.readTree(msg.getPayload()).get("tid").asText();
             deliverReply(fake.callbackOut()[0], tid, 0, "ok");
             return null;
         }).when(fake.client()).publish(anyString(), any(MqttMessage.class));
@@ -87,8 +88,9 @@ class MqttDockGatewayTest {
         verify(fake.client()).publish(contains("SN001"), msgCap.capture());
         assertThat(msgCap.getValue().getQos()).isEqualTo(1);
         JsonNode frame = MAPPER.readTree(msgCap.getValue().getPayload());
-        assertThat(frame.has("tid")).isTrue();
-        assertThat(frame.get("bid").asLong()).isGreaterThan(0);
+        // DJI 公共字段表：tid/bid 是 UUID 文本
+        assertThat(frame.get("tid").asText()).matches("[0-9a-f-]{36}");
+        assertThat(frame.get("bid").asText()).matches("[0-9a-f-]{36}");
         assertThat(frame.get("timestamp").asLong()).isGreaterThan(0);
         assertThat(frame.get("method").asText()).isEqualTo(DockCommand.OPEN_DOOR.method());
         assertThat(frame.get("data").get("holdSec").asInt()).isEqualTo(5);
@@ -104,10 +106,10 @@ class MqttDockGatewayTest {
         cb.connectComplete(false, "tcp://127.0.0.1:1883");
 
         // 先发命令拿 tid（mock publish 直接成功），再从 payload 里取 tid 回 reply
-        final long[] tidOut = new long[1];
+        final String[] tidOut = new String[1];
         org.mockito.Mockito.doAnswer(inv -> {
             MqttMessage msg = inv.getArgument(1);
-            tidOut[0] = MAPPER.readTree(msg.getPayload()).get("tid").asLong();
+            tidOut[0] = MAPPER.readTree(msg.getPayload()).get("tid").asText();
             deliverReply(cb, tidOut[0], 0, "ok");
             return null;
         }).when(fake.client()).publish(anyString(), any(MqttMessage.class));
@@ -130,7 +132,7 @@ class MqttDockGatewayTest {
         cb.connectComplete(false, "tcp://127.0.0.1:1883");
         org.mockito.Mockito.doAnswer(inv -> {
             MqttMessage msg = inv.getArgument(1);
-            long tid = MAPPER.readTree(msg.getPayload()).get("tid").asLong();
+            String tid = MAPPER.readTree(msg.getPayload()).get("tid").asText();
             deliverReply(cb, tid, 3, "dock busy");
             return null;
         }).when(fake.client()).publish(anyString(), any(MqttMessage.class));
@@ -139,7 +141,8 @@ class MqttDockGatewayTest {
 
         assertThat(reply.ok()).isFalse();
         assertThat(reply.result()).isEqualTo(3);
-        assertThat(reply.message()).isEqualTo("dock busy");
+        // DJI 应答的设备消息在 data.output（本 fake 把 message 放进 output.message）
+        assertThat(reply.message()).contains("dock busy");
     }
 
     @Test

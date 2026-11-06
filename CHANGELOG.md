@@ -1,5 +1,60 @@
 # NexusSky 变更日志
 
+## [Unreleased] — DJI 物模型帧形状按官方字段表逐字段对齐（tid/bid UUID 文本、gateway 公共字段、data.output）+ 12 例契约测试
+
+### 查证：拿官方文档表逐字段核我们的帧，发现三处实打实的偏差
+
+`MqttDockGateway` 与 `SimLoopbackGateway` 的 javadoc 都自称"帧形状与 DJI Cloud API
+对齐"，但那是**上一轮按记忆写的**。本轮拉取官方文档仓库 `dji-sdk/Cloud-API-Doc`
+（MIT，v1.18）的 `60.api-reference/20.dock-to-cloud/00.mqtt/00.topic-definition.md`
+逐字段核对，官方公共字段表（tid=事务uuid/**text**、bid=业务uuid/**text**、
+timestamp=毫秒/int、**gateway**=网关设备序列号/text、data=object）与
+services/services_reply 帧示例对下来，我们有三处**不一致**：
+
+| 项 | 官方 | 原实现 | 影响 |
+|---|---|---|---|
+| `tid`/`bid` | UUID **文本** | `long` 数字 | 真机巢按文本匹配事务号，数字帧无法关联应答 |
+| 应答设备消息 | `data.output`（struct） | `data.message` | 官方无 `message` 字段位 → 设备消息永远取不到 |
+| `gateway` 公共字段 | **必带**（网关 SN） | 缺失 | 官方帧形状不齐 |
+
+`DockSim`（设备侧替身）与 `DockGatewayLoopbackTest` 同步从"数字 tid"口径改过来。
+
+### 改
+
+- `DockGateway.DockReply` 的 `tid`/`bid` 改 `String`；两个 gateway 发号改为
+  `UUID.randomUUID()`（V35 "单调 long" 裁决随官方字段表对齐废止，
+  `PersistentSequence` 不再挂在这条线上）；
+- 帧补 `gateway`=机巢 SN（官方公共字段）；应答解析只认官方位 `data.output`，
+  `output` 缺失/空对象 ⇒ 设备消息为空（**不编造文本**），旧的 `data.message` 位不再采信；
+- `DockSim` 应答改为官方形状 `{tid,bid,timestamp,gateway,method,data:{result,output}}`，
+  成功 `result=0,output={}`、拒绝 `result=1,output={message:...}`；
+- 新增 `DockSim.boundPort()`（测试用临时端口，免抢端口）。
+
+### 测试 +12 例（官方字段表驱动，**恰好相等**断言）
+
+`DockDjiFrameContractTest`（7 例，cloud-backend）：字段集恰好等于官方表（多/少字段
+即红）、字段类型逐项对齐、官方应答解析、`data` 无 `output` 时不编造、
+旧位 `data.message` 不采信、tid 不匹配不关联、数字 tid 不关联。
+`DockSimDjiFrameTest`（5 例，drone-sim）：设备侧应答字段集/文本回显/`gateway` 回显/
+`data` 必填位齐备/拒绝与未知 method 的官方错误形状。
+
+### A/B 实证（改坏⇒红、还原⇒绿）
+
+注入三处破坏（① MQTT 帧删 `gateway` ② MQTT 应答改读 `data.message`
+③ DockSim 应答删 `gateway`）⇒ **6 例转红**（cloud 侧 4 + sim 侧 2，
+含字段集断言与 gateway 回显断言）；还原 ⇒ 全绿（39 例）。
+
+### 口径诚实化：method 语汇**不是**官方的
+
+同批查证还发现：官方文档里**不存在** `door_open`/`door_close`/`battery_swap`/`reboot`
+这些 method；官方下行有 `services` 与 `property/set` 两条通道，而机巢**可写属性仅**
+`silent_mode`/`air_transfer_enable` 等，`mode_code`/`putter_state`/
+`drone_battery_maintenance_info` 均 `accessMode=r` **只读**——即真实 DJI 机巢的
+开盖/换电属**设备自主动作**，云端不能像对模拟器那样直接下发。
+故 `DockCommand` 的 method 标注为 NexusSky 侧语义（当前对应模拟对端），
+README 已知边界同步订正；接真实机巢前需按官方属性/服务另建映射层，
+本轮**不声称**已完成真机对接。
+
 ## [Unreleased] — P2-F6 ②「drone-host 未设出站盲发」现状钉住：真实 UDP 收帧归属 3 例（+3 例，纯测试）
 
 **取证钉住，不是修复**：`docs/sitl-integration.md` §12.4 表②的出站盲区（drone-host 未配时
@@ -43,14 +98,14 @@ MQTT broker 起来之后的对端；transport 实现本身是纯代码活**。�
 - Paho（`org.eclipse.paho.client.mqttv3:1.2.5`，parent pom 统一版本）；
 - DJI Cloud API 物模型：下行 `thing/product/{sn}/services`、应答
   `thing/product/{sn}/services_reply`，帧形状与 `SimLoopbackGateway` 逐字段一致
-  （`{tid,bid,timestamp,method,data}` / `data:{result,message}`）；
+  （帧字段已按官方文档表逐字段对齐，见下条新段）；
 - **命令-应答按 tid 关联**（pending map + CompletableFuture），QoS 1；
 - Broker 地址 `aerofleet.dock.mqtt-broker-url`：**transport=mqtt 且空缺 ⇒ 启动 fail-fast**
   （与 jwt-secret 同口径）；Broker 暂时不可达**不**拖垮后端——异步连接 + 自动重连，
   通道故障如实抛 `DockGatewayException`（控制器 504），不返回假成功；
 - 异常消息纪律（#248/#250 同款）：对外只留自建短句，MqttException 文本（含 Broker
   URL/原因码）只进日志与 cause；
-- tid 发号兼容 V35 单调口径（PersistentSequence 可选注入，与 Sim 同款）；
+- tid/bid 为 UUID 文本（DJI 公共字段表口径；原 V35 单调 long 发号口径随官方字段表对齐废止）；
 - 未知 tid 的 reply 首现告警（哨兵 256 上界，防只增表）；`connectionLost` 让在等命令
   立即以自建异常失败，不留挂死命令。
 

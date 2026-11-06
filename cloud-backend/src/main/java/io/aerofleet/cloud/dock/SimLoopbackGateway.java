@@ -14,7 +14,6 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * sim 传输：把物模型形状的命令 POST 到机巢模拟器（dock-sim）的 /services。
@@ -32,7 +31,6 @@ public class SimLoopbackGateway implements DockGateway {
     private final ObjectMapper mapper;
     private final DockProperties props;
     private final HttpClient http;
-    private final AtomicLong tidSeq = new AtomicLong(0);
 
     /**
      * 单调序列发号器（V35；§5 Q4 裁决：机巢事务号跨重启单调）。缺失时走内存 tidSeq
@@ -56,13 +54,15 @@ public class SimLoopbackGateway implements DockGateway {
 
     @Override
     public DockReply sendCommand(String sn, DockCommand command, Map<String, Object> data) {
-        Long issued = sequence != null ? sequence.next("dock_tid", 0) : null;
-        long tid = issued != null ? issued : tidSeq.incrementAndGet();
-        long bid = System.currentTimeMillis();
+        // DJI 公共字段表：tid/bid 是 UUID 文本（V35 单调 long 裁决随真形状对齐废止）
+        String tid = java.util.UUID.randomUUID().toString();
+        String bid = java.util.UUID.randomUUID().toString();
         Map<String, Object> frame = new LinkedHashMap<>();
         frame.put("tid", tid);
         frame.put("bid", bid);
         frame.put("timestamp", System.currentTimeMillis());
+        // DJI 公共字段：gateway=网关设备（机巢）序列号
+        frame.put("gateway", sn);
         frame.put("method", command.method());
         frame.put("data", data == null ? Map.of() : data);
 
@@ -90,9 +90,12 @@ public class SimLoopbackGateway implements DockGateway {
             }
             JsonNode node = mapper.readTree(resp.body());
             int result = node.path("data").path("result").asInt(0);
-            String message = node.path("data").path("message").asText(null);
-            long rTid = node.path("tid").asLong(tid);
-            long rBid = node.path("bid").asLong(bid);
+            // DJI 应答的设备消息内容在 data.output（struct）；只认官方字段位
+            JsonNode output = node.path("data").path("output");
+            String message = output.isMissingNode() || output.isNull()
+                    || (output.isObject() && output.isEmpty()) ? null : output.toString();
+            String rTid = node.path("tid").asText(tid);
+            String rBid = node.path("bid").asText(bid);
             return new DockReply(rTid, rBid, System.currentTimeMillis(), result, message, resp.body());
         } catch (DockGatewayException e) {
             throw e;

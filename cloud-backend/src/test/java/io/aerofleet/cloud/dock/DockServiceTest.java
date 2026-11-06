@@ -134,7 +134,7 @@ class DockServiceTest {
     @DisplayName("开门：合法态下发并进入 OPENING")
     void openDoorFromIdle() {
         when(gateway.sendCommand(eq("DOCK-001"), eq(DockCommand.OPEN_DOOR), any()))
-                .thenReturn(new DockGateway.DockReply(1, 2, 3, 0, null, "{}"));
+                .thenReturn(new DockGateway.DockReply("tid-1", "bid-2", 3, 0, null, "{}"));
 
         Map<String, Object> out = service.sendCommand(1L, DockCommand.OPEN_DOOR);
 
@@ -169,7 +169,7 @@ class DockServiceTest {
     @DisplayName("机巢侧拒绝（result!=0）：回滚过渡态并抛通道异常")
     void dockSideRejectRollsBack() {
         when(gateway.sendCommand(anyString(), any(), any()))
-                .thenReturn(new DockGateway.DockReply(1, 2, 3, 1, "state=FAULT", "{}"));
+                .thenReturn(new DockGateway.DockReply("tid-1", "bid-2", 3, 1, "state=FAULT", "{}"));
 
         assertThatExceptionOfType(DockGateway.DockGatewayException.class)
                 .isThrownBy(() -> service.sendCommand(1L, DockCommand.OPEN_DOOR));

@@ -25,7 +25,9 @@ import java.util.regex.Pattern;
  *
  * <p>端点（与 DJI Cloud API services 通道同形的 JSON 形状）：
  * <ul>
- *   <li>POST /services  {tid,bid,method,data} → {tid,bid,timestamp,data:{result,message}}</li>
+ *   <li>POST /services  {tid,bid,timestamp,gateway,method,data}
+ *       → {tid,bid,timestamp,gateway,method,data:{result,output}}（DJI 官方字段表同形，
+ *       tid/bid 为 UUID 文本、设备消息在 data.output）</li>
  *   <li>GET  /osd       → 当前 OSD（state/temperature/batteryPct/droneSysid）</li>
  *   <li>GET  /health    → {ok:true}</li>
  * </ul>
@@ -38,8 +40,9 @@ import java.util.regex.Pattern;
 public final class DockSim implements AutoCloseable {
 
     private static final Pattern METHOD = Pattern.compile("\"method\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern TID = Pattern.compile("\"tid\"\\s*:\\s*(\\d+)");
-    private static final Pattern BID = Pattern.compile("\"bid\"\\s*:\\s*(\\d+)");
+    // DJI 公共字段表：tid/bid 是 UUID 文本（不是数字）
+    private static final Pattern TID = Pattern.compile("\"tid\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Pattern BID = Pattern.compile("\"bid\"\\s*:\\s*\"([^\"]+)\"");
 
     private final String sn;
     private final String name;
@@ -134,25 +137,28 @@ public final class DockSim implements AutoCloseable {
 
     private void handleServices(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
-            respond(ex, 405, "{\"data\":{\"result\":1,\"message\":\"method not allowed\"}}");
+            respond(ex, 405, "{\"data\":{\"result\":1,\"output\":{\"message\":\"method not allowed\"}}}");
             return;
         }
         String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Matcher m = METHOD.matcher(body);
         if (!m.find()) {
-            respond(ex, 400, "{\"data\":{\"result\":1,\"message\":\"missing method\"}}");
+            respond(ex, 400, "{\"data\":{\"result\":1,\"output\":{\"message\":\"missing method\"}}}");
             return;
         }
-        long tid = longOf(TID, body, 0);
-        long bid = longOf(BID, body, 0);
+        String tid = textOf(TID, body, "");
+        String bid = textOf(BID, body, "");
         String method = m.group(1);
         String result = applyMethod(method);
-        String reply = "{\"tid\":" + tid + ",\"bid\":" + bid + ","
-                + "\"timestamp\":" + System.currentTimeMillis() + ",\"data\":" + result + "}";
+        // DJI services_reply 形状：{tid,bid,timestamp,gateway,method,data:{result,output}}
+        String reply = "{\"tid\":\"" + tid + "\",\"bid\":\"" + bid + "\","
+                + "\"timestamp\":" + System.currentTimeMillis() + ",\"gateway\":\"" + sn + "\","
+                + "\"method\":\"" + method + "\","
+                + "\"data\":" + result + "}";
         respond(ex, 200, reply);
     }
 
-    /** 执行命令：合法返回 {"result":0}，非法返回 {"result":1,"message":"state=X"}。 */
+    /** 执行命令：合法返回 {"result":0,"output":{}}，非法返回 {"result":1,"output":{"message":"state=X"}}。 */
     String applyMethod(String method) {
         String cur = state;
         switch (method) {
@@ -162,7 +168,7 @@ public final class DockSim implements AutoCloseable {
                 }
                 state = "OPENING";
                 timer.schedule(() -> state = "OPEN", 3000, TimeUnit.MILLISECONDS);
-                return "{\"result\":0}";
+                return "{\"result\":0,\"output\":{}}";
             }
             case "door_close" -> {
                 if (!"OPEN".equals(cur)) {
@@ -171,7 +177,7 @@ public final class DockSim implements AutoCloseable {
                 state = "CLOSING";
                 timer.schedule(() -> state = batteryPct < 100 ? "CHARGING" : "IDLE",
                         3000, TimeUnit.MILLISECONDS);
-                return "{\"result\":0}";
+                return "{\"result\":0,\"output\":{}}";
             }
             case "battery_swap" -> {
                 if (!"IDLE".equals(cur) && !"CHARGING".equals(cur)) {
@@ -182,7 +188,7 @@ public final class DockSim implements AutoCloseable {
                     batteryPct = 20;
                     state = "CHARGING";
                 }, 5000, TimeUnit.MILLISECONDS);
-                return "{\"result\":0}";
+                return "{\"result\":0,\"output\":{}}";
             }
             case "reboot" -> {
                 state = "FAULT";
@@ -191,21 +197,21 @@ public final class DockSim implements AutoCloseable {
                     state = "IDLE";
                     faultReason = null;
                 }, 8000, TimeUnit.MILLISECONDS);
-                return "{\"result\":0}";
+                return "{\"result\":0,\"output\":{}}";
             }
             default -> {
-                return "{\"result\":2,\"message\":\"unknown method " + method + "\"}";
+                return "{\"result\":2,\"output\":{\"message\":\"unknown method " + method + "\"}}";
             }
         }
     }
 
     private String rejected(String cur) {
-        return "{\"result\":1,\"message\":\"state=" + cur + "\"}";
+        return "{\"result\":1,\"output\":{\"message\":\"state=" + cur + "\"}}";
     }
 
-    private static long longOf(Pattern p, String s, long dflt) {
+    private static String textOf(Pattern p, String s, String dflt) {
         Matcher m = p.matcher(s);
-        return m.find() ? Long.parseLong(m.group(1)) : dflt;
+        return m.find() ? m.group(1) : dflt;
     }
 
     private static void respond(HttpExchange ex, int code, String body) throws IOException {
@@ -215,6 +221,11 @@ public final class DockSim implements AutoCloseable {
         try (OutputStream os = ex.getResponseBody()) {
             os.write(bytes);
         }
+    }
+
+    /** 实际监听端口（httpPort=0 时为系统分配的临时端口；测试用）。 */
+    public int boundPort() {
+        return server == null ? httpPort : server.getAddress().getPort();
     }
 
     /** 测试与故障注入入口。 */

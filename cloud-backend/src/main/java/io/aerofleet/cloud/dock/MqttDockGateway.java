@@ -27,8 +27,11 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * mqtt 传输：按 DJI Cloud API 物模型走 Broker——
  * 下行 {@code thing/product/{sn}/services}，应答 {@code thing/product/{sn}/services_reply}。
- * 帧形状与 {@link SimLoopbackGateway} 逐字段一致（{@code tid,bid,timestamp,method,data}，
- * 应答 {@code data:{result,message}}），命令-应答按 {@code tid} 关联，QoS 1（at-least-once）。
+ * 帧形状按 DJI Cloud API 官方文档（{@code dji-sdk/Cloud-API-Doc} v1.18）逐字段对齐：
+ * 下行 {@code {tid,bid,timestamp,gateway,method,data}}、应答
+ * {@code {tid,bid,timestamp,gateway,method,data:{result,output}}}——其中 tid/bid 为 UUID
+ * 文本、gateway 为机巢序列号、设备消息内容在 data.output（struct）。
+ * 命令-应答按 {@code tid} 关联，QoS 1（at-least-once）。
  * <p>
  * 装配：{@code aerofleet.dock.transport=mqtt} 时启用（与 sim 互斥，见各自
  * {@code @ConditionalOnProperty}）。Broker 地址来自
@@ -54,17 +57,13 @@ public class MqttDockGateway implements DockGateway, MqttCallbackExtended {
 
     private final ObjectMapper mapper;
     private final DockProperties props;
-    private final AtomicLong tidSeq = new AtomicLong(0);
-    private final Map<Long, java.util.concurrent.CompletableFuture<DockReply>> pending =
+    /** DJI 公共字段表：tid/bid 是 UUID 文本——随机 UUID 即可，无需单调序列。 */
+    private final Map<String, java.util.concurrent.CompletableFuture<DockReply>> pending =
             new ConcurrentHashMap<>();
-    private final Map<Long, Boolean> warnedUnknownTids = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> warnedUnknownTids = new ConcurrentHashMap<>();
 
     /** 生产路径由 {@link #start()} 创建；测试可注入 fake（包私有构造）。 */
     private IMqttAsyncClient client;
-
-    /** 单调序列发号器（V35；机巢事务号跨重启单调，与 Sim 同款）。缺失时走内存 tidSeq。 */
-    @Autowired(required = false)
-    private io.aerofleet.cloud.api.service.PersistentSequence sequence;
 
     public MqttDockGateway(ObjectMapper mapper, DockProperties props) {
         this(mapper, props, null);
@@ -120,13 +119,14 @@ public class MqttDockGateway implements DockGateway, MqttCallbackExtended {
 
     @Override
     public DockReply sendCommand(String sn, DockCommand command, Map<String, Object> data) {
-        Long issued = sequence != null ? sequence.next("dock_tid", 0) : null;
-        long tid = issued != null ? issued : tidSeq.incrementAndGet();
-        long bid = System.currentTimeMillis();
+        String tid = java.util.UUID.randomUUID().toString();
+        String bid = java.util.UUID.randomUUID().toString();
         Map<String, Object> frame = new LinkedHashMap<>();
         frame.put("tid", tid);
         frame.put("bid", bid);
         frame.put("timestamp", System.currentTimeMillis());
+        // DJI 公共字段：gateway=网关设备（机巢）序列号
+        frame.put("gateway", sn);
         frame.put("method", command.method());
         frame.put("data", data == null ? Map.of() : data);
 
@@ -184,8 +184,8 @@ public class MqttDockGateway implements DockGateway, MqttCallbackExtended {
                 return;
             }
             JsonNode node = mapper.readTree(message.getPayload());
-            long tid = node.path("tid").asLong(-1);
-            if (tid < 0) {
+            String tid = node.path("tid").asText(null);
+            if (tid == null || tid.isBlank()) {
                 return;
             }
             java.util.concurrent.CompletableFuture<DockReply> future = pending.remove(tid);
@@ -198,8 +198,12 @@ public class MqttDockGateway implements DockGateway, MqttCallbackExtended {
                 return;
             }
             int result = node.path("data").path("result").asInt(-1);
-            String messageText = node.path("data").path("message").asText(null);
-            long rBid = node.path("bid").asLong(0);
+            // DJI 应答的设备消息内容在 data.output（struct），无 data.message 字段
+            JsonNode output = node.path("data").path("output");
+            // output 是 struct：缺失/空对象 = 设备无附加消息（不编造文本）
+            String messageText = output.isMissingNode() || output.isNull()
+                    || (output.isObject() && output.isEmpty()) ? null : output.toString();
+            String rBid = node.path("bid").asText(null);
             future.complete(new DockReply(tid, rBid, System.currentTimeMillis(),
                     result, messageText, new String(message.getPayload(),
                     java.nio.charset.StandardCharsets.UTF_8)));
@@ -223,7 +227,7 @@ public class MqttDockGateway implements DockGateway, MqttCallbackExtended {
     public void connectionLost(Throwable cause) {
         // 在等命令的 future 立即失败（自建异常），不留挂死命令
         log.warn("dock mqtt connection lost（{} 个在等命令将失败）", pending.size(), cause);
-        for (Map.Entry<Long, java.util.concurrent.CompletableFuture<DockReply>> en : pending.entrySet()) {
+        for (Map.Entry<String, java.util.concurrent.CompletableFuture<DockReply>> en : pending.entrySet()) {
             en.getValue().completeExceptionally(
                     new DockGatewayException("dock mqtt connection lost"));
         }
@@ -237,7 +241,7 @@ public class MqttDockGateway implements DockGateway, MqttCallbackExtended {
 
     @PreDestroy
     void stop() {
-        for (Map.Entry<Long, java.util.concurrent.CompletableFuture<DockReply>> en : pending.entrySet()) {
+        for (Map.Entry<String, java.util.concurrent.CompletableFuture<DockReply>> en : pending.entrySet()) {
             en.getValue().completeExceptionally(new DockGatewayException("dock gateway shutting down"));
         }
         pending.clear();

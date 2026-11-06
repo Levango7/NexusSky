@@ -2604,7 +2604,7 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 
 #### 命令 method 取值
 
-`door_open`（开门，仅 IDLE/CHARGING）、`door_close`（关门，仅 OPEN）、`battery_swap`（换电，仅 IDLE/CHARGING 门关）、`reboot`（重启，FAULT/MAINTENANCE/各稳态）。非法迁移返回 **409** + 当前状态名；命令经物模型形状（`{tid,bid,timestamp,method,data}`）下发，通道超时/机巢拒绝返回 **504**，状态机回滚不留中间态。
+`door_open`（开门，仅 IDLE/CHARGING）、`door_close`（关门，仅 OPEN）、`battery_swap`（换电，仅 IDLE/CHARGING 门关）、`reboot`（重启，FAULT/MAINTENANCE/各稳态）。非法迁移返回 **409** + 当前状态名；命令经 DJI Cloud API 物模型形状下发——下行 `{tid,bid,timestamp,gateway,method,data}`、应答 `{tid,bid,timestamp,gateway,method,data:{result,output}}`（`tid`/`bid` 为 UUID 文本，`gateway` 为机巢序列号，设备消息在 `data.output`；字段集按官方 `dji-sdk/Cloud-API-Doc` v1.18 逐字段对齐并由契约测试锁死）。通道超时/机巢拒绝返回 **504**，状态机回滚不留中间态。
 
 #### 度量口径
 
