@@ -45,6 +45,28 @@ cause 保留、断连让在等命令立即失败、broker-url 空缺 fail-fast�
 - 默认 `transport=sim` 不变，既有部署零影响；`transport=mqtt` 是显式 opt-in；
 - 真机联调仍待机巢硬件/broker（README 边界声明同步改写）。
 
+## [Unreleased] — 真机取流验证驱动入库：本机 UVC 摄像头 → 生产鉴权后端 → /mjpeg 全链路一键跑（0 测试增删）
+
+### 新增 scripts/run-webcam-mjpeg-e2e.ps1（非 CI，本机手动）
+
+安防取流链路此前只有 CI 配方（`e2e-mjpeg-ci.sh`，合成帧源）——**真实摄像头硬件上
+的端到端验证**没有可复现的驱动。本脚本补上（照 ci.sh 配方，三处实质差异）：
+
+1. 帧源：synthetic → `camera-snapshot-source.py`（本机 UVC 摄像头，每请求抓真帧，
+   模拟海康 ISAPI/大华 cgi-bin/ONVIF GetSnapshotUri 的 HTTP 快照形态）；
+2. 建号：bootstrap-admin 一次起齐（免去 dev 起停 + H2 落盘舞步）；
+3. 平台：Windows PowerShell（CI 配方是 bash）。
+
+断言链 S1-S7 不变（23 条 PASS 的那套：真 JPEG / 匿名 401 / 短令牌 200 / 帧号递增 / 注销 404）。
+脚本头部记录了本机踩过的三个 Windows 坑（PATH java=1.8 / localhost→IPv6 / PS5.1 无
+SkipHttpErrorCheck），全部已在代码里规避。
+
+### 边界
+
+- CI runner 没有摄像头，本脚本**不进 CI**（与 camera-motion-source.py 同类，依赖真实硬件）；
+- 2026-11-05 已在本机实跑：S1-S7 全过（23/23 PASS），结果记录见协调板。
+
+
 ## [Unreleased] — SurveillanceDeviceRegistry 租户口径统一：未归属设备对租户不可见，仅全局管理员可见（+1 例）
 
 ### 修：与 fleet registry 相反的口径
@@ -1967,7 +1989,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-05 共有 281 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-05 共有 282 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -1993,7 +2015,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 281 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 282 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
