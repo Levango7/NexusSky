@@ -19,6 +19,12 @@ public class DockProperties {
     /** sim 模式机巢模拟器基址（dock-sim 的 HTTP 端口）。 */
     private String simBaseUrl = "http://127.0.0.1:18081";
 
+    /** mqtt 模式 Broker 地址（tcp://host:1883 或 ssl://…）。transport=mqtt 时必填（空缺启动 fail-fast）。 */
+    private String mqttBrokerUrl = "";
+    /** mqtt 凭据（可空；EMQX 等 Broker 常要求）。 */
+    private String mqttUsername = "";
+    private String mqttPassword = "";
+
     /** 命令超时（ms）：超时记 WARN 并返回 504，不自动置 FAULT。 */
     private int commandTimeoutMs = 5000;
 
@@ -40,6 +46,12 @@ public class DockProperties {
     public void setTransport(String transport) { this.transport = transport; }
     public String getSimBaseUrl() { return simBaseUrl; }
     public void setSimBaseUrl(String simBaseUrl) { this.simBaseUrl = simBaseUrl; }
+    public String getMqttBrokerUrl() { return mqttBrokerUrl; }
+    public void setMqttBrokerUrl(String mqttBrokerUrl) { this.mqttBrokerUrl = mqttBrokerUrl; }
+    public String getMqttUsername() { return mqttUsername; }
+    public void setMqttUsername(String mqttUsername) { this.mqttUsername = mqttUsername; }
+    public String getMqttPassword() { return mqttPassword; }
+    public void setMqttPassword(String mqttPassword) { this.mqttPassword = mqttPassword; }
     public int getCommandTimeoutMs() { return commandTimeoutMs; }
     public void setCommandTimeoutMs(int commandTimeoutMs) { this.commandTimeoutMs = commandTimeoutMs; }
     public long getHeartbeatPeriodMs() { return heartbeatPeriodMs; }

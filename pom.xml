@@ -61,6 +61,7 @@
 
     <!-- 业务依赖（原散落在各子模块 pom，2026-10-05 收敛至此） -->
     <springdoc.version>2.8.6</springdoc.version>
+    <paho.mqtt.version>1.2.5</paho.mqtt.version>
     <jacoco.version>0.8.12</jacoco.version>
     <surefire.version>3.5.2</surefire.version>
     <compiler-plugin.version>3.13.0</compiler-plugin.version>
