@@ -47,9 +47,10 @@ public final class Gb28181SipMessage {
     /** 以**请求**建消息（请求-行形如 {@code INVITE sip:<target> SIP/2.0}）。 */
     public static Gb28181SipMessage request(String requestLine, byte[] body) {
         String line = Objects.requireNonNull(requestLine, "requestLine").trim();
-        // 请求-行必须含 "SIP/2.0" 且以 method+URI 开头
-        int sp = line.indexOf(' ');
-        if (sp <= 0 || !line.regionMatches(true, line.length() - "SIP/2.0".length(), "SIP/2.0", 0, 7)) {
+        // 与 parse() 用**同一把尺子**（isStartLine）：请求-行必须 METHOD + URI + SIP/2.0 三段。
+        // 旧实现只查"含空格且尾段是 SIP/2.0"，于是 "sip:x SIP/2.0"（缺方法名）也被当合法
+        // 请求行收下——构造侧比解析侧松， boundary 测试抓出。
+        if (!isStartLine(line)) {
             throw new IllegalArgumentException("not a SIP request-line: " + line);
         }
         return new Gb28181SipMessage(line, body);
@@ -323,7 +324,8 @@ public final class Gb28181SipMessage {
     }
 
     /** 头/body 分隔空行（CRLFCRLF 或 LFLF）的起始下标；找不到返回 -1。 */
-    private static int findHeaderBodySeparator(String text) {        int idx = text.indexOf("\r\n\r\n");
+    private static int findHeaderBodySeparator(String text) {
+        int idx = text.indexOf("\r\n\r\n");
         if (idx >= 0) {
             return idx;
         }

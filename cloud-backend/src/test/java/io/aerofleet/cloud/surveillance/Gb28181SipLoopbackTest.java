@@ -168,6 +168,8 @@ class Gb28181SipLoopbackTest {
         Gb28181SipMessage byeOk = transact(bye);
         assertThat(byeOk.statusCode()).isEqualTo(200);
         assertThat(byeOk.transactionKey()).isEqualTo(bye.transactionKey());
+        // 事务流水是诊断面：dialog 走完必须留下 ACK/BYE 痕迹（不是空表冒充"跑过了"）
+        assertThat(device.transactionLog()).contains("ACK");
     }
 
     // ------------------------------------------------------------------

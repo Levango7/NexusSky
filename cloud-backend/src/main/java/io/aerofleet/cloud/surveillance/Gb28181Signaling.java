@@ -194,24 +194,46 @@ public final class Gb28181Signaling {
      * 按请求构造响应（RFC 3261 §8.2.6：Via/From/To/Call-ID/CSeq 必须回带）。
      *
      * <p>To 头补 tag（响应必须带 tag，请求里的 To 无 tag）；CSeq 原样回带。
+     *
+     * <p>**请求缺任一回带头 ⇒ 明确抛 {@link IllegalArgumentException}**：RFC 3261 要求
+     * 响应逐字回带这四者，缺了就没法构造一个合法响应。旧实现在这里抛的是
+     * {@code NullPointerException("value")}（来自 {@code Objects.requireNonNull}），
+     * 调用方看不出是"请求缺头"——boundary 测试抓出后改成点名缺失头的自建异常。
      */
     private Gb28181SipMessage respond(Gb28181SipMessage request, int code,
                                       byte[] body, String contentType) {
+        String via = requireEcho(request, "Via");
+        String from = requireEcho(request, "From");
+        String to = requireEcho(request, "To");
         Gb28181SipMessage msg = Gb28181SipMessage.response(code, null, body)
-                .header("Via", request.firstHeader("Via"))
-                .header("From", request.firstHeader("From"))
-                .header("To", request.firstHeader("To"));
+                .header("Via", via)
+                .header("From", from)
+                .header("To", to);
         // To 头补 tag：响应必须带，否则对端无法关联 dialog
-        String to = msg.firstHeader("To");
-        if (to != null && !to.contains("tag=")) {
-            msg.header("To", to + ";tag=" + clientTag);
+        String echoedTo = msg.firstHeader("To");
+        if (echoedTo != null && !echoedTo.contains("tag=")) {
+            msg.header("To", echoedTo + ";tag=" + clientTag);
         }
-        msg.header("Call-ID", request.firstHeader("Call-ID"))
+        msg.header("Call-ID", requireEcho(request, "Call-ID"))
                 .header("CSeq", request.cseqNumber() + " " + request.method());
         if (contentType != null) {
             msg.header("Content-Type", contentType);
         }
         return msg;
+    }
+
+    /**
+     * 取必须回带的请求头；缺失时抛**点名该头**的自建异常。
+     *
+     * <p>不再让 {@code header(name, null)} 抛 {@code NPE("value")}——那看不出缺的是哪一头。
+     */
+    private static String requireEcho(Gb28181SipMessage request, String headerName) {
+        String v = request.firstHeader(headerName);
+        if (v == null) {
+            throw new IllegalArgumentException(
+                    "cannot respond: request has no " + headerName + " header to echo");
+        }
+        return v;
     }
 
     private static String stripTag(String uriWithTag) {

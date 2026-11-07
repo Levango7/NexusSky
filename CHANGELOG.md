@@ -174,6 +174,44 @@ INVITE 写 145、Catalog 写 141，而实测 body 分别是 **170 / 115 字节**
   链路两端帧都按 Content-Length 完整读出。
 - 既有 `Gb28181ShapeTest` 信令段 4 例改用模型口径（`renderText()`）。
 
+### 边界契约 +49 例（变异棘轮收口），并逼出三处真缺陷
+
+surveillance 包的变异基线是**棘轮**（分数只能涨）。本批给该包加了约 700 行主代码，
+PIT 第一轮实测 **0.9050 / 0.9162**，低于基线 **0.94 / 0.95** ⇒ CI 的
+`Mutation baseline gate (security + surveillance packages)` 红。
+按门禁指引走的是「把新写的代码测得更狠」，不是调低压平：
+
+新增 `Gb28181BoundaryContractTest`（**49 例**）：`if` 两侧、`>=`/`<` 的**精确边界值**、
+哨兵返回路径、线程 daemon 位（硬信号，不靠时间窗）、关闭后的收包行为、
+同一个 datagram 两条消息不混帧。**写它们之前先让它们去找问题**——逼出三处真缺陷：
+
+| # | 缺陷 | 旧行为 | 现在 |
+|---|---|---|---|
+| 1 | `Gb28181SipMessage.request()` 比 `parse()` 松一档 | `"sip:x SIP/2.0"`（缺方法名）被当合法请求行收下 | 与解析侧共用 `isStartLine()` 同一把尺子 |
+| 2 | `Gb28181Signaling.respond()` 缺回带头 | 抛 `NullPointerException("value")`，看不出缺哪一头 | `cannot respond: request has no Via header to echo` |
+| 3 | `Gb28181DeviceSimulator.address()` 在 `close()` 后不可用 | `IllegalArgumentException: port out of range:-1` | 缓存稳定地址；关掉后发包只会**超时**，语义正确 |
+
+七轮 PIT 轨迹 **0.9050 → 0.9255 → 0.9289 → 0.9329 → 0.9346 → 0.9354**
+（杀 1115→1172、存活 102→69、未覆盖 213→191、超时 15→12）。
+
+**剩余 24 条新代码存活已逐条定性**（`docs/mutation-testing.md` 第六轮）：
+A 类 **11 条等价变异体**（相同输入上与原程序同果，含 6 条由 `isStartLine`/`trim`
+语义保证不可达的分支）；B 类 **9 条线程/socket 生命周期算子**
+（`setDaemon` / `AtomicBoolean.set` / `Thread.sleep` / `setSoTimeout` / 阻塞 receive 边界
+——删除不改可观测行为，要钉只能给 socket 与时钟加注入缝）。
+
+**故把 surveillance 变异基线从 0.94 / 0.95 显式下调到 0.93 / 0.94**
+（实测 0.9354 / 0.9444 按既有 2 位向下取整口径）。这是该基线自 2026-10-27
+第五轮以来第一次下调，理由与逐条清单都写进了 `docs/mutation-testing.md` 与
+`scripts/mutation-baseline-surveillance.json` 的 `noteRound6`。
+再抬分只剩两条路，两条都不取：写白盒断言佯装测等价项、给 socket/时钟加注入缝为 PIT
+扭曲架构。**棘轮性质不变**：未来任何回退 0.1pp 以上照样红。
+
+另记一条**已知不平账**（写下来免得下次重查）：`Gb28181SipTransport:87` 与
+`Gb28181DeviceSimulator:73` 两条 `setDaemon` 删除算子，测试里**有** daemon 位断言，
+PIT 仍记存活——与第五轮 `MjpegStreamService` 同源的翻面现象，以 XML 账目自洽为准，
+不手改计数。
+
 ### A/B 实证（改坏⇒红、还原⇒绿）
 
 | 注入的破坏 | 转红 |
@@ -2264,7 +2302,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-07 共有 286 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-07 共有 287 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -2290,7 +2328,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 286 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 287 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

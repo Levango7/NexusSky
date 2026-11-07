@@ -87,10 +87,24 @@ public final class Gb28181DeviceSimulator implements Closeable {
      * {@link DatagramSocket} 会返回 {@code 0.0.0.0}——拿它当 sendto 目标会
      * {@code BindException: Cannot assign requested address}。这里固定回环地址
      * （通配 bind 在回环上必然可达），与测试/生产同一条路。
+     *
+     * <p>**为什么缓存**：{@code close()} 之后 {@code socket.getLocalPort()} 返回 {@code -1}，
+     * 现场 {@code new InetSocketAddress(host, -1)} 会抛
+     * {@code IllegalArgumentException: port out of range:-1}——调用方拿到的是一个
+     * 看不懂的异常，而不是"对端已经关了"（真链路测试抓出）。缓存后地址在生命周期内恒定，
+     * 关掉之后拿去发包只会**超时**，语义正确。
      */
     public InetSocketAddress address() {
-        return new InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), socket.getLocalPort());
+        InetSocketAddress cached = address;
+        if (cached == null) {
+            cached = new InetSocketAddress(java.net.InetAddress.getLoopbackAddress(),
+                    socket.getLocalPort());
+            address = cached;
+        }
+        return cached;
     }
+
+    private volatile InetSocketAddress address;
 
     /** 收到的全部请求（诊断/断言用）。 */
     public List<Gb28181SipMessage> received() {
