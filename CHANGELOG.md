@@ -1,5 +1,57 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P2-F6 ② 出站定向广播落地：未知 sysid 不再只归"最后说话者"（+3 例）
+
+### 背景：§12.4 判据 2 里写着"这一条今天能写测试，不需要真机"
+
+§12.4 把 P2-F6 的两个失败形态切开记：①（任务回包跨链路）要真机双链路才能观测；
+②（`drone-host` 未配 ⇒ 出站从 0 开始变盲）**是纯条件组合，今天能测**。
+判据 2 的原话：`drone-host` 未配时出站不应依赖"最后入站地址"，而应对
+`droneRoutes.addresses()` 里所有已知实例**定向广播**，且每秒帧数预算**按实例摊分**。
+
+旧行为：`send(sysid,…)` 查不到路由就一律 `transport.sendToLastPeer`——
+**最后说话者拿走命令**。集群里多实例时，其他实例既收不到命令也不报错，静默失联。
+`UdpGatewayOutboundBlindSpotTest` 当时把这行为**当取证钉住**（类注释写明：
+"修复②到达判据时它们会红，须回读 §12.4 判断是修复到达判据、还是误动"）。
+
+### 改
+
+- `UdpGateway#send` 的第三条路：路由未学到 + 已有其他已知实例 ⇒ 对
+  `RouteTable.addresses()` **逐个定向**发送（不是 LAN 广播——可枚举、可断言）；
+- 广播路径按 sysid 走独立滑动窗口，上限复用 `aerofleet.udp.max-frame-rate-per-sysid`
+  ⇒ 每实例实得「总配额 / 实例数」，**总帧数不随实例数翻倍**（即判据 2 的"摊分"）；
+- 一个已知实例也没有 ⇒ 退回 `sendToLastPeer`（可能静默丢弃，与旧行为一致）；
+- 广播窗口与路由同生命周期清理（`pruneStaleRoutes` 删 key、`pruneStaleRateLimitWindows`
+  按 2 分钟空闲清——三张窗口同一个清理口径，防漏内存）。
+
+**单机语义逐字节不变**：路由已学到的 sysid 仍单发；零入站仍静默丢弃；
+SITL/集群既有路径一条都没改。
+
+### 坦白一条
+
+预算只卡**广播**路径。广播耗尽后落 `sendToLastPeer` 的兜底帧**不限流**——
+单发、与旧行为等价；若给兜底也限流就会开始**丢命令**，那比"偶发多送一帧"贵得多。
+
+### 测试 +3 例
+
+`UdpGatewayOutboundBlindSpotTest` 由 3 例变 6 例：其中 1 例由"取证钉住旧行为"改为
+"钉新行为"（判据 2 到达，类注释同步改写），另 3 例新增——
+`unknownSysidBroadcastsToAllKnownInstances`（两实例都收到）、
+`broadcastIsBudgetCappedPerSysid`（预算=1 时 6 帧只广播 1 帧）、
+`broadcastDeliversToEveryInstanceWhenBudgetAllows`（预算充足 3 帧 × 2 实例全送达）。
+另有 2 例守着"不变"的部分（learn 过的 sysid 单发、零入站静默丢弃）。
+
+### A/B 实证（改坏⇒红、还原⇒绿）
+
+把 `send` 的 `else if (sysid > 0)` 改成 `else if (false)`（②修复摘掉、退回 lastPeer 兜底）
+⇒ **3 例转红**（两条广播 + 一条摊分）；还原 ⇒ 全绿。
+
+### 仍未交付（不假装）
+
+①（任务传输窗内不 learn stateful 消息）**未动代码**——失败面要真机双链路才可观测，
+但改动本身可单测（`learn` 是全仓唯一路由写入点）。③（"两链路同时活、命令只回一条"的
+现场回归）只能等真机或双 SITL。三者连同已落地的② 一并写进
+`docs/sitl-integration.md` §12.6「双链路验收条件清单」，标注每项今天能证到哪一步。
 ## [Unreleased] — 机巢 MQTT 真链路落地：设备侧对端 + OSD 摄入 + 零硬件本地 E2E（+20 例，2 处真缺陷修复）
 
 ### 真链路 E2E 抓出 #254 的两个真缺陷（单测抓不到的那类）
@@ -2146,7 +2198,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-07 共有 285 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-07 共有 286 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
@@ -2172,7 +2224,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 285 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 286 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

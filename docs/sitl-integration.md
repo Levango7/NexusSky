@@ -832,6 +832,33 @@ cloud-backend dev profile 监听 14550、`--aerofleet.drone-port=18570`（PX4 No
 3. 两条都修完，必须有一条「两链路同时活、命令只回一条」的回归**在真机或双 SITL 上**跑过；
    单测能证明策略，不能证明现场。
 
+### 12.6 双链路验收条件清单（2026-11-07，②已落地；① 待真机）
+
+> **这份清单是给"双链路到位那天"用的**：每条都写明「今天能不能证」「证到哪一步」，
+> 免得当天从零重新取证。② 的代码面 2026-11-07 已落地（见下），① 仍未动代码。
+
+**② 代码面已落地（P2-F6 判据 2 的"定向广播"与"摊分"两半都实现）**
+
+| 项 | 落地内容 | 测试 |
+|---|---|---|
+| 未知 sysid 出站定向广播 | `UdpGateway#send(sysid,…)`：路由未学到且已有其他已知实例时，对 `RouteTable#addresses()` **逐个定向**发送（不是 LAN 广播） | `UdpGatewayOutboundBlindSpotTest#unknownSysidBroadcastsToAllKnownInstances` / `broadcastDeliversToEveryInstanceWhenBudgetAllows` |
+| 预算按实例摊分 | 广播路径按 sysid 走独立滑动窗口，上限复用 `aerofleet.udp.max-frame-rate-per-sysid` ⇒ 每实例实得「总配额/实例数」，**总帧数不随实例数翻倍** | `broadcastIsBudgetCappedPerSysid`（预算=1 时 6 帧只广播 1 帧） |
+| 单机语义不变 | 路由已学到的 sysid 仍**单发**（不因广播改动重复投递） | `learnedSysidStaysSingleTargeted` / `learnedSysidSendsDirectlyToLearnedAddress` |
+| 无已知实例仍兜底 | 一个已知实例也没有时退回 `sendToLastPeer`（可能静默丢弃），与旧行为一致 | `zeroInboundSilentlyDropsOutboundDespiteDroneHost` |
+
+**坦白一条**：预算只卡**广播**路径；广播耗尽后落 `sendToLastPeer` 的兜底帧**不限流**
+（单发、与旧行为等价）。如果给兜底也限流，就会开始**丢命令**——那比"偶发多送一帧"
+贵得多，故不做。
+
+**留给真机的（今天证不了，不必重复取证）**
+
+| # | 条件 | 为什么今天证不了 |
+|---|---|---|
+| ① | 任务传输窗口内 `RouteTable` 对 stateful 消息类**不 learn**，且传输结束后 **3 个心跳周期内**路由跟上新链路 | 失败面要求两条链路**同时说话**；单机同 sysid 起两实例不算（§12.2-④）。改动本身可单测（`learn` 是全仓唯一写入点），但"现场真的不串台"只能现场证 |
+| ③ | 一条「两链路同时活、命令只回一条」的回归，**在真机或双 SITL 上**跑过 | 单测能证明策略，不能证明现场 |
+
+---
+
 ### 12.5 「①已有测试钉住，但语义只钉了一半」（2026-11-02 补充）
 
 **动 P2-F6 之前必读，否则会重复劳动或误判。**
