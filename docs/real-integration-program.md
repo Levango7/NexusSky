@@ -145,11 +145,14 @@ ONVIF 事件订阅（PullPoint）另立"）。
 ## P5 · 厂商私有 SDK 与 GB28181 媒体面（等的——外部）
 
 - 海康/大华/宇视私有 SDK：需厂商授权 + 真设备（GAPS §三 已登记前置）。
-- GB28181 媒体面（SIP 传输 + RTP/PS）：形状层已交付；媒体面属生产阶段。
-  事件订阅面同步：`Gb28181Adapter.supportsEventSubscription()` 已改为 `false`
-  ——只构造 SUBSCRIBE 形状、没有 SIP 传输，REST 现在在建立 SSE 之前回 501
+- GB28181 媒体面（RTP/PS）：形状层与 **SIP-over-UDP 传输层均已交付**（#258：
+  `Gb28181SipTransport` + `Gb28181DeviceSimulator` 8 例真回环测试）；
+  **适配器尚未接线**，RTP/PS 媒体面仍属生产阶段。
+  事件订阅面同步：`Gb28181Adapter.supportsEventSubscription()` 仍为 `false`
+  ——只构造 SUBSCRIBE 形状、未接线到传输层，REST 在建立 SSE 之前回 501
   （此前是先回 200 再挂一条永远不会触发回调的空流）。
-- 机巢 MQTT 真实 transport：硬件到位再动（todo #17）。
+- 机巢 MQTT 真实 transport：**已接线**（#257，`transport=mqtt` 条件装配 Paho +
+  DJI Cloud API 物模型）；剩余＝真实 EMQX Broker 与真机机巢联调（todo #17）。
 
 ---
 

@@ -492,7 +492,7 @@ class SurveillanceControllerTest {
     // ===== GET /devices/{id}/events SSE 事件订阅（按厂商路由） =====
 
     @Test
-    @DisplayName("SSE 事件订阅按厂商路由：GB28181 在建立流之前回 501（SIP 传输未实现，不假装有事件）")
+    @DisplayName("SSE 事件订阅按厂商路由：GB28181 在建立流之前回 501（未接线到 SIP 传输层，不假装有事件）")
     void subscribeEvents_gb28181Device_returns501NotFakeStream() throws Exception {
         String gbId = "34020000001321320001";
         mockMvc.perform(post("/api/v1/surveillance/devices")
@@ -501,7 +501,7 @@ class SurveillanceControllerTest {
 
         // 此前直连 OnvifClient：国标设备的事件源语义错置（进 ONVIF 模拟回调表，
         // 国标信令永远不触发）。路由修好后走 Gb28181Adapter，但它只构造 SUBSCRIBE
-        // 形状、没有 SIP 传输，回调永远不会触发——再往后就是「先回 200 再挂空流」。
+        // 形状、未接线到 SIP 传输层（传输层已实现，#258），回调永远不会触发——再往后就是「先回 200 再挂空流」。
         // 现在由适配器自己声明不支持，REST 在建立 SSE 之前回 501；
         // 501 文案带厂商名，同时证明路由确实落在 GB28181 适配器上。
         mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/events"))

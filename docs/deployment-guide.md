@@ -140,7 +140,7 @@ aerofleet.license.key=<Base64编码的License Key>
 
 ### 3.3 部署相关键（换环境就要改的那一组）
 
-下面 7 个键**不是内部调参**，而是"这套部署连的是谁 / 在哪"。出厂值是单机/仿真的姿势，
+下面 11 个键**不是内部调参**，而是"这套部署连的是谁 / 在哪"。出厂值是单机/仿真的姿势，
 生产用 profile 或环境变量覆盖即可（键名不变，Spring 照常读取）。改完用**启动日志自证**，
 每一行都写明去哪看——别靠猜。
 
@@ -153,9 +153,15 @@ aerofleet.license.key=<Base64编码的License Key>
 | `aerofleet.sensing.base-lat` | `22.5907` | 反制雷达站址纬度（模拟源的航迹基点） | 启动日志 `CounterDroneRadarSource (模拟) 就绪: base=(lat, lon)` |
 | `aerofleet.sensing.base-lon` | `113.9345` | 同上，经度 | 同上 |
 | `aerofleet.instance-id` | `unknown` | 指标公共标签 `instance`（多实例部署必改，否则 Prometheus 里聚成一个） | `/actuator/prometheus` 里的 `instance="…"` 标签 |
+| `aerofleet.dock.transport` | `sim` | 机巢命令通道：`sim`=HTTP 回环到 drone-sim；`mqtt`=DJI Cloud API over EMQX（二者条件装配、互斥） | `mqtt` 模式启动日志 `dock mqtt gateway: broker=…, clientId=…` |
+| `aerofleet.dock.mqtt-broker-url` | （空） | MQTT Broker 地址（如 `tcp://host:1883`）；`transport=mqtt` 且为空 ⇒ **启动失败** | 启动失败文本 `aerofleet.dock.mqtt-broker-url is required when aerofleet.dock.transport=mqtt`；成功见上行 `broker=…` |
+| `aerofleet.dock.mqtt-username` | （空） | Broker 用户名；空=匿名连接 | Broker 侧会话/ACL（进程日志不打印用户名） |
+| `aerofleet.dock.mqtt-password` | （空） | Broker 密码；仅当用户名非空时随 CONNECT 下发 | 同上（口令不落日志） |
 
-> ⚠️ 这 7 个键**此前只写在代码默认值里**，配置文件里搜不到（审计 §12 / §12.5）。
+> ⚠️ 前 7 个键**此前只写在代码默认值里**，配置文件里搜不到（审计 §12 / §12.5）。
 > 声明进 `application.properties` 不会改变行为（值等于代码默认），只是让运维能在配置里看见。
+> 后 4 个机巢 MQTT 键已声明在 `application.properties`：`transport=mqtt` 时才装配，
+> `mqtt-broker-url` 为空会让进程**启动失败**（fail-fast），不是"配了不响"。
 > 其中 `gb28181.sip-domain` 必须 20 位数字串；写错不会启动失败，只会连不上对端——
 > 所以以启动日志那一行为准。
 
