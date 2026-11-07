@@ -106,6 +106,18 @@ public final class Gb28181DeviceSimulator implements Closeable {
 
     private volatile InetSocketAddress address;
 
+    /** RTP 媒体面推送目的地；null = 只做信令、不推流（默认）。 */
+    private volatile InetSocketAddress mediaTarget;
+    /** 本进程内的收流会话（null = 不收流）。 */
+    private volatile Gb28181MediaSession mediaSession;
+    /** 收流侧观察者（E2E/断言用）。 */
+    private final java.util.List<java.util.function.Consumer<Gb28181MediaFrame>> mediaObservers =
+            new CopyOnWriteArrayList<>();
+    /** 推流周期（ms）；GB/T 28181-2022 对帧率无规定，只规定时间戳纪律。 */
+    private volatile long mediaPeriodMs = 200;
+    /** 90 kHz 时钟每帧步长（默认 25fps ⇒ 3600 ticks/帧）。 */
+    private volatile long mediaStepTicks = 3600;
+
     /** 收到的全部请求（诊断/断言用）。 */
     public List<Gb28181SipMessage> received() {
         return List.copyOf(received0);
@@ -210,9 +222,109 @@ public final class Gb28181DeviceSimulator implements Closeable {
         return sb.toString();
     }
 
-    /** 设备侧 SDP（媒体参数声明；本版不真正推流）。 */
+    /** 设备侧 SDP（媒体参数声明；{@link #streamMediaTo} 非空时本模拟器真按此推流）。 */
     public Gb28181Sdp deviceSdp() {
         return deviceSdp;
+    }
+
+    /**
+     * 设置 RTP 媒体面推送目的地（真 UDP）。
+     *
+     * <p>GB/T 28181-2022 附录 C.1：PS 以 RTP 负载封装，PT=96 / PS / 90kHz。
+     * 本模拟器逐帧推送，**每帧一个 PS 包**，关键帧带系统头 + PSM、非关键帧不带。
+     *
+     * @param target 收流端地址；null = 停止推流
+     */
+    public void streamMediaTo(InetSocketAddress target) {
+        this.mediaTarget = target;
+    }
+
+    /** 推流节奏：周期（ms）与每帧的 90 kHz 时钟步长。 */
+    public void setMediaTiming(long periodMs, long stepTicks) {
+        if (periodMs <= 0) {
+            throw new IllegalArgumentException("media period must be positive: " + periodMs);
+        }
+        this.mediaPeriodMs = periodMs;
+        this.mediaStepTicks = stepTicks > 0 ? stepTicks : 3600;
+    }
+
+    /** 本进程内的收流会话（E2E 用；null = 不本地收流）。 */
+    public void attachMediaSession(Gb28181MediaSession session) {
+        this.mediaSession = session;
+    }
+
+    /** 注册收流观察者。 */
+    public void onMediaFrame(java.util.function.Consumer<Gb28181MediaFrame> cb) {
+        mediaObservers.add(cb);
+        Gb28181MediaSession s = mediaSession;
+        if (s != null) {
+            s.onFrame(cb);
+        }
+    }
+
+    public List<Gb28181MediaFrame> mediaFrames() {
+        Gb28181MediaSession s = mediaSession;
+        return s == null ? List.of() : s.frames();
+    }
+
+    /**
+     * 推一帧（真 UDP）。E2E 与单测都可直接调，不依赖定时器。
+     *
+     * <p><b>序号由内部自增维护</b>：调用方只给起始序号（首帧），之后每帧自动接续。
+     * 若让调用方每次传序号，一旦与上一帧撞号，收流侧的去重逻辑会把新帧的第一片
+     * 判成"重复"⇒ 该帧永久缺片（{@code Gb28181MediaSession} 宁可丢帧也不交半帧）。
+     * 真链路测试 {@code frameTimestampDisciplineHoldsOnTheWire} 撞过这个坑。
+     *
+     * @param seqStart 起始 RTP 序号（仅首帧有意义；内部会往后自增）
+     * @return 本帧用到的起始序号（便于调用方知道下一帧从哪继续，若它仍想自己管）
+     */
+    int pushFrame(int seqStart, long timestamp, boolean keyframe) throws IOException {
+        InetSocketAddress target = mediaTarget;
+        if (target == null) {
+            return seqStart;
+        }
+        int seq = seqInitialized ? nextSeq : seqStart;
+        seqInitialized = true;
+        byte[] ps = Gb28181PsPacketizer.pack(timestamp, keyframe, List.of(
+                new Gb28181PsPacketizer.ElementaryStream(
+                        Gb28181PsPacketizer.STREAM_ID_VIDEO,
+                        Gb28181PsPacketizer.STREAM_TYPE_H264,
+                        new byte[]{(byte) 0x65, (byte) frameSeq, (byte) 0x02})));
+        frameSeq++;
+        java.net.DatagramSocket out = mediaSocket();
+        int cut = Math.max(1, ps.length / 3);
+        int off = 0;
+        int part = 0;
+        int total = (ps.length + cut - 1) / cut;
+        while (off < ps.length) {
+            int end = Math.min(ps.length, off + cut);
+            byte[] payload = java.util.Arrays.copyOfRange(ps, off, end);
+            boolean last = ++part == total;
+            Gb28181RtpPacket pkt = Gb28181RtpPacket.of(last, Gb28181RtpPacket.PAYLOAD_TYPE_PS,
+                    seq, timestamp, ssrcValue, payload);
+            out.send(new DatagramPacket(pkt.encode(), pkt.length(), target));
+            nextSeq = Gb28181RtpPacket.nextSequence(seq);
+            seq = nextSeq;
+            off = end;
+        }
+        return seq;
+    }
+
+    private volatile long ssrcValue = 0x0A0B0C0D;
+    private int frameSeq;
+    /** 下一个可用序号（内部自增，防调用方撞号）。 */
+    private int nextSeq;
+    private boolean seqInitialized;
+
+    private volatile java.net.DatagramSocket cachedOut;
+
+    private java.net.DatagramSocket mediaSocket() throws IOException {
+        java.net.DatagramSocket s = cachedOut;
+        if (s == null || s.isClosed()) {
+            s = new java.net.DatagramSocket();
+            cachedOut = s;
+        }
+        return s;
     }
 
     /** 事务流水（诊断用）。 */
@@ -225,6 +337,14 @@ public final class Gb28181DeviceSimulator implements Closeable {
         running.set(false);
         loop.shutdownNow();
         socket.close();
+        java.net.DatagramSocket s = cachedOut;
+        if (s != null) {
+            s.close();
+        }
+        Gb28181MediaSession ms = mediaSession;
+        if (ms != null) {
+            ms.close();
+        }
     }
 
     private static String hostOf(String sipHost) {

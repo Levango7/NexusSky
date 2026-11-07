@@ -743,10 +743,15 @@ NexusSky/
 | `mavlink-core` | 523 |
 | `drone-sim` | 1477 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3589 |
+| `cloud-backend` | 3618 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5788
+| **总计** | **5817
+| `cloud-backend` | 3618 |
+| `sdk-java` | 19 |
+| `regulator-sim` | 41 |
+| **总计** | **5817
+| **总计** | **5817
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
@@ -853,8 +858,14 @@ NexusSky/
   （INVITE 写 145、实测 170；Catalog 写 141、实测 115），且随参数（IP 位数、端口位数、
   SSRC 位数、SN 位数）变化；按 RFC 3261 对端严格按它读 body ⇒ 写小挂起、写大截断，
   **旧帧真机读不了**，而原单测只断言"包含某几个头"、从没核过这个数。
-  ③ **RTP/PS 媒体面仍未交付**：点播仍返回 `gb28181-invite://` 描述性标识，
-  **不假扮可播 RTSP**；真机联调仍需硬件。**SurveillanceController 的 PTZ
+  ③ **RTP/PS 媒体面已自给**（2026-11-08，标准全文已下载取证）：
+  `Gb28181RtpPacket`（RFC 3550 逐字节）+ `Gb28181PsPacketizer`/`Gb28181PsDemuxer`
+  （ISO/IEC 13818-1 PS：pack header/SCR → system header → PSM → PES，
+  **关键帧带系统头+PSM、非关键帧不带**）+ `Gb28181MediaSession`
+  （真 UDP 收流 + 序号排序去重 + 按时间戳/marker 组帧 + 解 PS），**37 例**
+  （含 9 例真 UDP 回环）。点播仍返回 `gb28181-invite://`——**不解码 H.264**、
+  不做 TCP/RFC 4571 传输，**不假扮可播 RTSP**；真实厂商互操作（海康/大华私有
+  behaviors、NAT 穿透、真实码流 quirks）仍需真机。**SurveillanceController 的 PTZ
   端点仍硬编码 ONVIF 路径**（按 vendor 路由的改造登记为后续项）。
 - **运营报表（E6）的成本是参数化模型**：`aerofleet.report.cost-per-hour`（默认 0）由
   部署方按其单位经济填——本仓不编造电价/折旧；能耗按电量百分比差，不换算 mAh；
