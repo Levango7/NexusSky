@@ -1,6 +1,6 @@
 # NexusSky 变更日志
 
-## [Unreleased] — 遥测 WS 扇出与 UDP 摄入解耦：慢客户端不再能堵住整条机队（+3 例）
+## [Unreleased] — 遥测 WS 扇出与 UDP 摄入解耦：慢客户端不再能堵住整条机队（+6 例）
 
 ### 问题（证据链，不是推断）
 
@@ -26,7 +26,36 @@
 - `drained()`（package-private）供测试做确定性等待：**先等消费完成再断言**，否则 `never()`
   会在消费者还没跑到时空转成**假绿**——比红灯更危险。
 
-### 测试（+3 例，`TelemetryWsFanoutIsolationTest`）
+### 可观测性：丢帧必须能被 Prometheus 看见（+3 例）
+
+上面那套「满了丢最旧」有个自带的风险：**降级是静默的**。`droppedFrames` 原先只是测试可见的
+原子计数，首次丢弃打一条 WARN 之后就再也不出声——持续过载一小时后，运维手上唯一的证据是
+一小时前那条日志，而现象只是「遥测好像变少了」，无法区分「丢帧 / 客户端没连上 / 飞机没上报」。
+
+这与 `DroneMetrics` 里 `aerofleet.signing.*` 的教训是同一条（见该类的 javadoc：安全计数器
+当时只打 `log.info` 然后清零，对已接好的 Prometheus 完全不可见，有人在爆破签名时没有任何东西
+能据此告警）。本轮把同一把尺子用在扇出上：
+
+| 指标 | 类型 | 含义 |
+|---|---|---|
+| `aerofleet.ws.sessions` | Gauge | 当前活跃遥测会话数 |
+| `aerofleet.ws.fanout.queue.depth` | Gauge | 待发队列积压深度（持续贴近容量 = 有客户端消费不过来） |
+| `aerofleet.ws.fanout.dropped` | FunctionCounter | 因队列饱和丢弃的帧数（单调递增） |
+
+`rate(aerofleet.ws.fanout.dropped[5m]) > 0` 从此是一条可写的告警规则。
+
+实现取向（三点都为了不拖慢热路径）：
+
+- 新增独立组件 `WsFanoutMetrics`，**只读** handler 已有的公开原子计数，不往每帧的 `enqueue`
+  里加任何一次指标调用——扇出路径上多一次 map 查找都是浪费。
+- 用 `FunctionCounter` 包住 `droppedFrames` 原子量，而不是在 `enqueue` 里 `counter.increment()`：
+  丢弃发生在 UDP 接收线程上，**指标未装配时也必须不影响丢弃语义**。
+- 不改 `DroneMetrics` 的构造签名（它被 gateway 侧测试直接 `new`，改签名会波及别人的文件）；
+  用 `ObjectProvider` 取 handler，切片上下文里优雅缺席（不注册、不抛异常）。
+
+### 测试（+6 例）
+
+`TelemetryWsFanoutIsolationTest`（+3）：
 
 | 用例 | 钉住什么 |
 |---|---|
@@ -34,14 +63,23 @@
 | `saturatedQueueDropsOldestAndCounts` | 灌 `容量+50` 帧：`droppedFrames() > 0` 且积压 ≤ 容量（有界、不 OOM、不阻塞） |
 | `framesKeepEnqueueOrder` | 20 帧顺序不变（单消费者保序，改造前后语义一致） |
 
+`WsFanoutMetricsTest`（+3）：指标的价值全在「名字对不对、数值是不是活的」——注册错名字
+不会让任何功能失败，只会在真出事那天发现告警规则查不到序列，故断言注册表本身。
+
+| 用例 | 钉住什么 |
+|---|---|
+| `metersTrackLiveHandlerState` | 三个指标都注册成功；会话数 Gauge 读**实时值**（2 条连接后为 2），不是注册那刻的快照 |
+| `droppedFramesVisibleOnRegistry` | 灌满队列后注册表上的计数与 `handler.droppedFrames()` **相等**，积压 ≤ 容量 |
+| `absentHandlerRegistersNothing` | 上下文无 handler bean 时静默缺席，不抛异常、不留半套 `aerofleet.ws.*` 序列 |
+
 既有 `TelemetryWsTenantIsolationTest`（12 例）与 `TelemetryWsSlowClientDisconnectTest`（2 例）
 改为 await 断言：异步化后「发完」与「断言」不再同步，负向断言必须等消费完成才有效。
 
 **A/B 实测**：把两处 `enqueue` 改回同步 `dispatch` ⇒ `slowClientDoesNotBlockCallerThread` **红**，
 耗时 14.66s（断言要求 <500ms）；还原 ⇒ WS 全量 **22/22 绿**。
 
-**验证**：全 reactor `mvn -B -o test` = **BUILD SUCCESS / 5671 例 0 失败**（cloud-backend 3472、
-sdk-java 19）；10 份口径文档计数同步 5668→5671 / 3469→3472；`check-repo-hygiene` 与
+**验证**：全 reactor `mvn -B -o test` = **BUILD SUCCESS / 5677 例 0 失败**（cloud-backend 3478、
+sdk-java 19）；10 份口径文档计数同步 5674→5677 / 3475→3478；`check-repo-hygiene` 与
 `check-test-count-docs` 通过。
 > 同一轮全量里 `UdpGatewayCriticalFrameRateTest.ackSurvivesFloodOnMainWindow` 曾偶发红一次
 > （`Wanted 5 times but was 9 times`）：该用例用真 UDP 发 20 帧并断言「恰好 5 帧通过 1 秒滑动窗口」，
@@ -55,6 +93,24 @@ sdk-java 19）；10 份口径文档计数同步 5668→5671 / 3469→3472；`che
   多少并发客户端）**仍未测量**，`docs/performance.md` 现有数字只覆盖 MAVLink 解析层。
 - 队列容量是常量而非配置项：改它需要改代码。若将来要按部署规模调，再引入
   `aerofleet.ws.outbound-queue-capacity`（本次不做，避免为假想需求加配置面）。
+
+### 同批修复：5 处客户文档的表格被压成了一行（非本改动引入）
+
+同步计数时逐行核对发现的**既有**缺陷：4 份文档里有 5 处表格的**两行被合并成了一行**，
+断点处留下 `||`。读者看到的是「一行里挤了两个不同维度的格子」，表格错位。
+
+| 文件:行 | 被压在一起的两行 |
+|---|---|
+| `docs/whitepaper.md:128` | 测试覆盖 / 代码审查 |
+| `docs/whitepaper.md:233` | 单元测试覆盖 / 模块数 |
+| `docs/sales-pitch-deck.md:340` | 当前：PoC / 下一步：真机验证 |
+| `docs/pricing-strategy.md:35` | 技术风险 / 人力需求 |
+| `docs/customer-onboarding-guide.md:762` | 单测覆盖风险 / 迭代节奏风险 |
+| `docs/demo-scenarios.md:86` | 该行本身结构损坏（`**5674 **全部通过`，缺列） |
+
+这几处全在**客户会直接读**的文档里（白皮书、销售页、定价、上手指南），且都不是本改动
+引入的——是此前某次批量替换留下的。既然本轮本来就要改这些文件的计数，顺带修好，
+避免"数字对、表错位"。未做全仓表格 lint（那是另一个话题，且会撞上别人正在改的文档）。
 
 
 ## [Unreleased] — P2-F6 ② 出站定向广播落地：未知 sysid 不再只归"最后说话者"（+3 例）
@@ -182,110 +238,6 @@ result=1 / 未知 method result=2 / 缺 method result=1 / OSD 官方属性名 / 
 充电优先于舱盖 / 舱盖映射 / 半开不强制 / 浮点枚举也认 / 官方属性进同一摄入路径 /
 未注册 SN 不抛 / 电量缺失不编造 / 温度沿用同一路径）；`MqttDockGatewayWiringTest` 2 例
 （多构造器必须恰好一个 `@Autowired` / 被选中的构造器是生产构造器）。
-## [Unreleased] — GB28181 信令面自给：SIP 真传输 + 设备侧对端 + 修掉 Content-Length 魔数（+34 例）
-
-### 查证：自称"国标形状层"的帧，真机读不了
-
-E5 此前宣称"编码/PTZ 指令码/SIP 信令/Catalog 解析为真实现"，并把"SIP 传输"记作
-生产阶段。\[\]()本轮把它当真来验证：**拼出来的 SIP 帧 a `Content-Length` 是硬编码魔数**——
-INVITE 写 145、Catalog 写 141，而实测 body 分别是 **170 / 115 字节**，且**随参数变化**
-（IP 位数、端口位数、SSRC/SN 位数）：
-
-| 帧 | 源码魔数 | 实测 body | 后果 |
-|---|---|---|---|
-| INVITE（含 SDP） | 145 | 170 | 对端按 Content-Length 读 ⇒ **挂起等 25 个永不到来的字节** |
-| MESSAGE（Catalog XML） | 141 | 115 | 对端读到 26 个不属于本条消息的字节 ⇒ **截断/混帧** |
-
-而原 `Gb28181ShapeTest` 只断言"包含某几个头"，**从没核过 Content-Length**——
-也就是说这个错值在单测里是隐形的。"形状层"因此并不合规：真机/真 SIP 服务器读不了。
-
-### 改
-
-- `Gb28181Sdp`（新）：SDP 变成可构造/可解析/可按字节计长的对象，`bodyBytes()` 是
-  Content-Length 的唯一合法来源；
-- `Gb28181SipMessage`（新）：start-line + 头集合 + body 的结构化消息，渲染时
-  **Content-Length 由真实 body 长度导出**，外部塞进来的该头直接忽略（魔数没有入口）；
-  解析侧按 Content-Length 收 body，支持一个 datagram 多条消息；
-- `Gb28181Signaling`（改）：所有帧改走模型；Via 补 `z9hG4bK-*` branch
-  （RFC 3261 事务标识，**旧实现整条缺失**——真机无法把响应关联回请求）；
-  新增响应构造（100 Trying / 200 OK / 200 OK+XML / 200 OK+SDP / 401+challenge）
-  与 ACK / BYE；
-- `Gb28181SipTransport`（新）：真 UDP socket 收发 + 按 Call-ID+CSeq+方法的事务匹配；
-  **1xx Provisional 不算终结响应**（首版把 100 Trying 当终结返回，真链路测试抓出）；
-  无匹配响应 ⇒ `SipTimeoutException`，**不返回假成功**；
-- `Gb28181DeviceSimulator`（新）：进程内 GB28181 设备替身——真 UDP 上的 SIP 对端，
-  处理 REGISTER 401/200、Catalog、INVITE 100+200+SDP、ACK、BYE、SUBSCRIBE。
-
-### 测试 +34 例（含 8 例**真 UDP 回环**）
-
-- `Gb28181SipMessageTest` 11 例：Content-Length 不变式（渲染值 == body 真实字节数）、
-  无 body 为 0、外部 Content-Length 无效、对端按声明长度必能读完、回带解析、
-  头名大小写不敏感、**同 datagram 两条消息不混帧**、折行并入、事务键同源、坏帧拒绝；
-- `Gb28181SignalingContractTest` 15 例：Content-Length == 真实字节（**多组参数数据驱动**，
-  直接对准旧魔数）、无 body 帧为 0、Via 带 branch 且不重复、起止行/Subject/SDP 必需行、
-  INVITE body 可解析回读、响应回带 + To tag、ACK/BYE 的 Request-URI 剥 tag；
-- `Gb28181SipLoopbackTest` 8 例（transport ↔ 设备替身，**真 UDP**）：
-  REGISTER→401+challenge、带 Authorization→200 OK、Catalog→200 OK 且解析出 2 条通道、
-  INVITE→100 Trying 与 200 OK+SDP 都到齐、dialog 完整收尾（ACK+BYE）、
-  未知方法**不造假成功**（超时收尾）、对端不可达同样超时、
-  链路两端帧都按 Content-Length 完整读出。
-- 既有 `Gb28181ShapeTest` 信令段 4 例改用模型口径（`renderText()`）。
-
-### 边界契约 +49 例（变异棘轮收口），并逼出三处真缺陷
-
-surveillance 包的变异基线是**棘轮**（分数只能涨）。本批给该包加了约 700 行主代码，
-PIT 第一轮实测 **0.9050 / 0.9162**，低于基线 **0.94 / 0.95** ⇒ CI 的
-`Mutation baseline gate (security + surveillance packages)` 红。
-按门禁指引走的是「把新写的代码测得更狠」，不是调低压平：
-
-新增 `Gb28181BoundaryContractTest`（**49 例**）：`if` 两侧、`>=`/`<` 的**精确边界值**、
-哨兵返回路径、线程 daemon 位（硬信号，不靠时间窗）、关闭后的收包行为、
-同一个 datagram 两条消息不混帧。**写它们之前先让它们去找问题**——逼出三处真缺陷：
-
-| # | 缺陷 | 旧行为 | 现在 |
-|---|---|---|---|
-| 1 | `Gb28181SipMessage.request()` 比 `parse()` 松一档 | `"sip:x SIP/2.0"`（缺方法名）被当合法请求行收下 | 与解析侧共用 `isStartLine()` 同一把尺子 |
-| 2 | `Gb28181Signaling.respond()` 缺回带头 | 抛 `NullPointerException("value")`，看不出缺哪一头 | `cannot respond: request has no Via header to echo` |
-| 3 | `Gb28181DeviceSimulator.address()` 在 `close()` 后不可用 | `IllegalArgumentException: port out of range:-1` | 缓存稳定地址；关掉后发包只会**超时**，语义正确 |
-
-七轮 PIT 轨迹 **0.9050 → 0.9255 → 0.9289 → 0.9329 → 0.9346 → 0.9354**
-（杀 1115→1172、存活 102→69、未覆盖 213→191、超时 15→12）。
-
-**剩余 24 条新代码存活已逐条定性**（`docs/mutation-testing.md` 第六轮）：
-A 类 **11 条等价变异体**（相同输入上与原程序同果，含 6 条由 `isStartLine`/`trim`
-语义保证不可达的分支）；B 类 **9 条线程/socket 生命周期算子**
-（`setDaemon` / `AtomicBoolean.set` / `Thread.sleep` / `setSoTimeout` / 阻塞 receive 边界
-——删除不改可观测行为，要钉只能给 socket 与时钟加注入缝）。
-
-**故把 surveillance 变异基线从 0.94 / 0.95 显式下调到 0.93 / 0.94**
-（实测 0.9354 / 0.9444 按既有 2 位向下取整口径）。这是该基线自 2026-10-27
-第五轮以来第一次下调，理由与逐条清单都写进了 `docs/mutation-testing.md` 与
-`scripts/mutation-baseline-surveillance.json` 的 `noteRound6`。
-再抬分只剩两条路，两条都不取：写白盒断言佯装测等价项、给 socket/时钟加注入缝为 PIT
-扭曲架构。**棘轮性质不变**：未来任何回退 0.1pp 以上照样红。
-
-另记一条**已知不平账**（写下来免得下次重查）：`Gb28181SipTransport:87` 与
-`Gb28181DeviceSimulator:73` 两条 `setDaemon` 删除算子，测试里**有** daemon 位断言，
-PIT 仍记存活——与第五轮 `MjpegStreamService` 同源的翻面现象，以 XML 账目自洽为准，
-不手改计数。
-
-### A/B 实证（改坏⇒红、还原⇒绿）
-
-| 注入的破坏 | 转红 |
-|---|---|
-| `Content-Length` 退回硬编码 145（魔数复活） | **9 例**（含真链路上 3 例） |
-| `transact` 不再跳过 1xx Provisional | **3 例**（真链路） |
-| Catalog 频道 ID 退回 URI 形态（21 位，非 20 位合法编码） | **1 例**（真链路） |
-
-还原 ⇒ 全绿。
-
-### 口径（不夸大）
-
-- 本批交付的是**信令面**，**RTP/PS 媒体面仍未实现**——`Gb28181Adapter.getStreamUrl()`
-  仍返回 `gb28181-invite://` 描述性标识（`StreamUrlOrigin.DESCRIPTIVE_ONLY`），
-  **不假扮可播 RTSP**；200 OK 的 SDP 只声明参数，设备替身不推流。
-- 设备替身是**我们写的对端**（不是大华/海康官方模拟器），它证明的是"我们的传输与帧
-  能被一个独立 SIP 栈收发"。**真机联调仍需硬件**，这条边界没有因本批消失。
 
 ## [Unreleased] — DJI 物模型帧形状按官方字段表逐字段对齐（tid/bid UUID 文本、gateway 公共字段、data.output）+ 12 例契约测试
 
