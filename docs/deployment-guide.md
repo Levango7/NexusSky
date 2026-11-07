@@ -178,9 +178,21 @@ curl http://localhost:8080/actuator/prometheus
 
 关键指标：
 - `aerofleet_drones_online` — 在线无人机数
-- `aerofleet_mavlink_frames_received_total` — 接收帧总数
+- `aerofleet_messages_received_total` — 接收帧总数（按 `msgId` 标签）
 - `aerofleet_api_requests_total` — API 请求总数
-- `aerofleet_ws_connections` — WebSocket 连接数
+- `aerofleet_ws_sessions` — 当前遥测 WebSocket 会话数
+- `aerofleet_ws_fanout_queue_depth` — 遥测扇出待发队列积压（持续贴近 4096 即意味着有客户端消费不过来）
+- `aerofleet_ws_fanout_dropped_total` — 因扇出队列饱和被丢弃的帧数
+
+> 名字按 Micrometer → Prometheus 的转换规则写：点号变下划线，Counter 追加 `_total`。
+> 上面 6 个都在代码里有对应的注册点（`DroneMetrics` / `ApiMetricsFilter` / `WsFanoutMetrics`），
+> 可直接拿去写告警规则。此前本节写的 `aerofleet_mavlink_frames_received_total` 与
+> `aerofleet_ws_connections` **在代码里从未存在过**（前者实际叫 `aerofleet_messages_received_total`，
+> 后者直到 2026-11-07 才以 `aerofleet_ws_sessions` 落地），照抄会得到永远查不到数据的告警规则。
+
+**建议告警规则**（扇出背压）：`rate(aerofleet_ws_fanout_dropped_total[5m]) > 0`
+——非零即表示已有客户端跟不上，遥测开始丢最旧帧。处置顺序：先看
+`aerofleet_ws_sessions` 是否突增，再查是否有客户端连上不读。
 
 ### 4.3 日志
 

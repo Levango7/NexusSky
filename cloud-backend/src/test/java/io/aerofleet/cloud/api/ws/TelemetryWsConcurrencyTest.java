@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -134,8 +135,12 @@ class TelemetryWsConcurrencyTest {
         t1.join(5000);
         t2.join(5000);
 
+        // 扇出已剥离到单消费者线程：两个 broadcaster 的帧会先后入队、由同一线程发送，
+        // 断言前必须等它把队列排空，否则 verify(times(2)) 会看到"还没发"而误报。
+        await().atMost(java.time.Duration.ofSeconds(5)).until(handler::drained);
+
         assertThat(overlapped.get())
-                .as("同一会话的 sendMessage 必须互斥（装饰器 flushLock 保证，未加锁时两个线程会同时进入同一会话的发送）")
+                .as("同一会话的 sendMessage 必须互斥（单消费者 + 装饰器 flushLock 双保险；未加锁时两个线程会同时进入同一会话的发送）")
                 .isFalse();
         org.mockito.Mockito.verify(raw, org.mockito.Mockito.times(2))
                 .sendMessage(org.mockito.ArgumentMatchers.any());

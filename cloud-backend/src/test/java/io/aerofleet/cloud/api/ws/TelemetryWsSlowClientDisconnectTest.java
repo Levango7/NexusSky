@@ -18,6 +18,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -135,6 +136,9 @@ class TelemetryWsSlowClientDisconnectTest {
 
         handler.broadcastPublicInfra("{\"k\":\"v\"}");
 
+        // 扇出已剥离到消费者线程：驱逐发生在 dispatch 的 catch 里，故要等它跑完再断言。
+        await().atMost(java.time.Duration.ofSeconds(5))
+                .until(() -> handler.connectionCount() == 0);
         assertThat(handler.connectionCount())
                 .as("装饰器断开设定的会话必须被 dispatch 的 catch 移出连接集，否则会持续占用调度线程")
                 .isEqualTo(0);
