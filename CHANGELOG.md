@@ -1,6 +1,6 @@
 # NexusSky 变更日志
 
-## [Unreleased] — 遥测 WS 扇出与 UDP 摄入解耦：慢客户端不再能堵住整条机队（+3 例）
+## [Unreleased] — 遥测 WS 扇出与 UDP 摄入解耦：慢客户端不再能堵住整条机队（+6 例）
 
 ### 问题（证据链，不是推断）
 
@@ -26,7 +26,36 @@
 - `drained()`（package-private）供测试做确定性等待：**先等消费完成再断言**，否则 `never()`
   会在消费者还没跑到时空转成**假绿**——比红灯更危险。
 
-### 测试（+3 例，`TelemetryWsFanoutIsolationTest`）
+### 可观测性：丢帧必须能被 Prometheus 看见（+3 例）
+
+上面那套「满了丢最旧」有个自带的风险：**降级是静默的**。`droppedFrames` 原先只是测试可见的
+原子计数，首次丢弃打一条 WARN 之后就再也不出声——持续过载一小时后，运维手上唯一的证据是
+一小时前那条日志，而现象只是「遥测好像变少了」，无法区分「丢帧 / 客户端没连上 / 飞机没上报」。
+
+这与 `DroneMetrics` 里 `aerofleet.signing.*` 的教训是同一条（见该类的 javadoc：安全计数器
+当时只打 `log.info` 然后清零，对已接好的 Prometheus 完全不可见，有人在爆破签名时没有任何东西
+能据此告警）。本轮把同一把尺子用在扇出上：
+
+| 指标 | 类型 | 含义 |
+|---|---|---|
+| `aerofleet.ws.sessions` | Gauge | 当前活跃遥测会话数 |
+| `aerofleet.ws.fanout.queue.depth` | Gauge | 待发队列积压深度（持续贴近容量 = 有客户端消费不过来） |
+| `aerofleet.ws.fanout.dropped` | FunctionCounter | 因队列饱和丢弃的帧数（单调递增） |
+
+`rate(aerofleet.ws.fanout.dropped[5m]) > 0` 从此是一条可写的告警规则。
+
+实现取向（三点都为了不拖慢热路径）：
+
+- 新增独立组件 `WsFanoutMetrics`，**只读** handler 已有的公开原子计数，不往每帧的 `enqueue`
+  里加任何一次指标调用——扇出路径上多一次 map 查找都是浪费。
+- 用 `FunctionCounter` 包住 `droppedFrames` 原子量，而不是在 `enqueue` 里 `counter.increment()`：
+  丢弃发生在 UDP 接收线程上，**指标未装配时也必须不影响丢弃语义**。
+- 不改 `DroneMetrics` 的构造签名（它被 gateway 侧测试直接 `new`，改签名会波及别人的文件）；
+  用 `ObjectProvider` 取 handler，切片上下文里优雅缺席（不注册、不抛异常）。
+
+### 测试（+6 例）
+
+`TelemetryWsFanoutIsolationTest`（+3）：
 
 | 用例 | 钉住什么 |
 |---|---|
@@ -34,14 +63,23 @@
 | `saturatedQueueDropsOldestAndCounts` | 灌 `容量+50` 帧：`droppedFrames() > 0` 且积压 ≤ 容量（有界、不 OOM、不阻塞） |
 | `framesKeepEnqueueOrder` | 20 帧顺序不变（单消费者保序，改造前后语义一致） |
 
+`WsFanoutMetricsTest`（+3）：指标的价值全在「名字对不对、数值是不是活的」——注册错名字
+不会让任何功能失败，只会在真出事那天发现告警规则查不到序列，故断言注册表本身。
+
+| 用例 | 钉住什么 |
+|---|---|
+| `metersTrackLiveHandlerState` | 三个指标都注册成功；会话数 Gauge 读**实时值**（2 条连接后为 2），不是注册那刻的快照 |
+| `droppedFramesVisibleOnRegistry` | 灌满队列后注册表上的计数与 `handler.droppedFrames()` **相等**，积压 ≤ 容量 |
+| `absentHandlerRegistersNothing` | 上下文无 handler bean 时静默缺席，不抛异常、不留半套 `aerofleet.ws.*` 序列 |
+
 既有 `TelemetryWsTenantIsolationTest`（12 例）与 `TelemetryWsSlowClientDisconnectTest`（2 例）
 改为 await 断言：异步化后「发完」与「断言」不再同步，负向断言必须等消费完成才有效。
 
 **A/B 实测**：把两处 `enqueue` 改回同步 `dispatch` ⇒ `slowClientDoesNotBlockCallerThread` **红**，
 耗时 14.66s（断言要求 <500ms）；还原 ⇒ WS 全量 **22/22 绿**。
 
-**验证**：全 reactor `mvn -B -o test` = **BUILD SUCCESS / 5674 例 0 失败**（cloud-backend 3475、
-sdk-java 19）；10 份口径文档计数同步 5671→5674 / 3472→3475；`check-repo-hygiene` 与
+**验证**：全 reactor `mvn -B -o test` = **BUILD SUCCESS / 5677 例 0 失败**（cloud-backend 3478、
+sdk-java 19）；10 份口径文档计数同步 5674→5677 / 3475→3478；`check-repo-hygiene` 与
 `check-test-count-docs` 通过。
 > 同一轮全量里 `UdpGatewayCriticalFrameRateTest.ackSurvivesFloodOnMainWindow` 曾偶发红一次
 > （`Wanted 5 times but was 9 times`）：该用例用真 UDP 发 20 帧并断言「恰好 5 帧通过 1 秒滑动窗口」，
@@ -55,6 +93,24 @@ sdk-java 19）；10 份口径文档计数同步 5671→5674 / 3472→3475；`che
   多少并发客户端）**仍未测量**，`docs/performance.md` 现有数字只覆盖 MAVLink 解析层。
 - 队列容量是常量而非配置项：改它需要改代码。若将来要按部署规模调，再引入
   `aerofleet.ws.outbound-queue-capacity`（本次不做，避免为假想需求加配置面）。
+
+### 同批修复：5 处客户文档的表格被压成了一行（非本改动引入）
+
+同步计数时逐行核对发现的**既有**缺陷：4 份文档里有 5 处表格的**两行被合并成了一行**，
+断点处留下 `||`。读者看到的是「一行里挤了两个不同维度的格子」，表格错位。
+
+| 文件:行 | 被压在一起的两行 |
+|---|---|
+| `docs/whitepaper.md:128` | 测试覆盖 / 代码审查 |
+| `docs/whitepaper.md:233` | 单元测试覆盖 / 模块数 |
+| `docs/sales-pitch-deck.md:340` | 当前：PoC / 下一步：真机验证 |
+| `docs/pricing-strategy.md:35` | 技术风险 / 人力需求 |
+| `docs/customer-onboarding-guide.md:762` | 单测覆盖风险 / 迭代节奏风险 |
+| `docs/demo-scenarios.md:86` | 该行本身结构损坏（`**5674 **全部通过`，缺列） |
+
+这几处全在**客户会直接读**的文档里（白皮书、销售页、定价、上手指南），且都不是本改动
+引入的——是此前某次批量替换留下的。既然本轮本来就要改这些文件的计数，顺带修好，
+避免"数字对、表错位"。未做全仓表格 lint（那是另一个话题，且会撞上别人正在改的文档）。
 
 
 ## [Unreleased] — P2-F6 ② 出站定向广播落地：未知 sysid 不再只归"最后说话者"（+3 例）
