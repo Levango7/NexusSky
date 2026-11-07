@@ -1,6 +1,7 @@
 package io.aerofleet.cloud.api.ws;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.security.JwtTokenProvider;
@@ -21,8 +22,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Raw WebSocket endpoint /ws/telemetry (no SockJS). Sessions are kept in an
@@ -75,6 +80,30 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
     private final Map<Integer, Integer> tenantConnectionCounts = new ConcurrentHashMap<>();
 
     /**
+     * 扇出队列容量。满时丢最旧（遥测要新不要旧），**绝不阻塞调用线程**。
+     * <p>
+     * 4096 帧 ≈ 50 机 × 5Hz 下约 16 秒的积压余量，足够吸收一次 GC 停顿或瞬时调度抖动；
+     * 积压超过这个量级说明客户端已经不可用，继续攒只会把内存和时延一起拖坏。
+     */
+    static final int OUTBOUND_QUEUE_CAPACITY = 4096;
+
+    /**
+     * 待发送的一帧。<b>不可变</b>：入队后由单一消费者线程读取，序列化在调用线程已完成，
+     * 队列里只留 String，避免持有可变 frame map 造成跨线程竞态。
+     */
+    private record Outbound(String json, Integer ownerTenantId, boolean toEverySession) {
+    }
+
+    private final BlockingQueue<Outbound> outbound = new ArrayBlockingQueue<>(OUTBOUND_QUEUE_CAPACITY);
+    private final AtomicLong droppedFrames = new AtomicLong();
+    /** 提交的帧数（每次 enqueue 调用一次）。 */
+    private final AtomicLong submittedFrames = new AtomicLong();
+    /** 已了结的帧数 = 已发送 + 已丢弃。 */
+    private final AtomicLong completedFrames = new AtomicLong();
+    private volatile boolean dispatcherRunning = true;
+    private final Thread dispatcher;
+
+    /**
      * 未知 sysid 告警哨兵上限。设备白名单关闭时（dev）任何 UDP 说话方都能填任意报头 sysid，
      * 去重集合必须有硬上界，否则又是一张「进程内只增表」。
      */
@@ -109,6 +138,18 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
         this.maxConnectionsPerIp = maxConnectionsPerIp;
         this.maxConnectionsPerTenant = maxConnectionsPerTenant;
         this.objectMapper = objectMapper;
+        // 单一消费者：保证同一会话的帧按入队顺序发送（顺序语义与改造前一致），
+        // 同时把「可能阻塞的 socket 写」从 UDP 接收线程 / 调度线程上彻底剥离。
+        this.dispatcher = new Thread(this::drainOutbound, "ws-telemetry-dispatch");
+        this.dispatcher.setDaemon(true);
+        this.dispatcher.start();
+    }
+
+    /** 容器关闭时停掉消费者线程，避免上下文刷新后线程泄漏（测试里会反复建上下文）。 */
+    @PreDestroy
+    void stopDispatcher() {
+        dispatcherRunning = false;
+        dispatcher.interrupt();
     }
 
     @Override
@@ -221,7 +262,7 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
      * {@link #broadcastToTenant}；调用本方法即是在声明"这帧不属于任何租户"，请写明依据。
      */
     public void broadcastPublicInfra(String json) {
-        dispatch(json, null, true);
+        enqueue(json, null, true);
     }
 
     /**
@@ -236,7 +277,7 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
      * @param ownerTenantId 帧所属租户 ID，null 表示不对租户会话放行
      */
     public void broadcastToTenant(Integer ownerTenantId, String json) {
-        dispatch(json, ownerTenantId, false);
+        enqueue(json, ownerTenantId, false);
     }
 
     /**
@@ -334,6 +375,94 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
+     * 入队一帧待发。**调用线程只做入队，绝不做 socket 写**。
+     * <p>
+     * 为什么要这一层：遥测帧由 {@code UdpMavlinkTransport} 的<b>唯一接收线程</b>内联回调
+     * {@code UdpGateway.onFrame → ingest.handle → publishEvent}，而本类是同步
+     * {@code @EventListener}。改造前 {@code sendMessage} 直接跑在那条线程上，
+     * 任一「连上但不读」的客户端一旦把 socket 发送缓冲填满，就会把整条机队的遥测摄入
+     * 一起堵住（见 {@code docs/architecture-deepening-plan.md} 热点 1 方案 3）。
+     * <p>
+     * 队列满时的取舍：**丢最旧、保最新并计数**。遥测的价值随时间衰减，攒着旧帧只会
+     * 让积压无限增长、让「实时」变成「回放」；有界 + 丢弃计数让过载变成可观测事件，
+     * 而不是内存泄漏或线程挂死。
+     */
+    private void enqueue(String json, Integer ownerTenantId, boolean toEverySession) {
+        Outbound item = new Outbound(json, ownerTenantId, toEverySession);
+        submittedFrames.incrementAndGet();
+        if (outbound.offer(item)) {
+            return;
+        }
+        // 队列满：腾一个最旧的位置给最新帧。被挤掉的那帧已经提交过，
+        // 这里必须同步记入 completed（它是"了结"而不是"待发"），否则
+        // 提交/了结两个计数永远对不上——那会让 drained() 永远为 false。
+        outbound.poll();
+        countDrop();
+        completedFrames.incrementAndGet();
+        if (!outbound.offer(item)) {
+            // 极端并发下连腾出的位置都被抢走：本帧也丢，仍要计数，不能静默
+            countDrop();
+            completedFrames.incrementAndGet();
+        }
+    }
+
+    /**
+     * 记一次丢弃；首次丢弃时打一条 WARN。
+     * <p>
+     * 只在第一次告警：饱和时每帧都打日志会把日志系统也一起拖垮（同一类「过载放大」错误）。
+     * 之后的丢弃由 {@link #droppedFrames()} 的单调计数体现，供指标/排障读取。
+     */
+    private void countDrop() {
+        if (droppedFrames.incrementAndGet() == 1L) {
+            log.warn("WS outbound queue saturated (capacity={}): dropping oldest frames — "
+                    + "at least one client is not consuming fast enough", OUTBOUND_QUEUE_CAPACITY);
+        }
+    }
+
+    /** 单一消费者：顺序发送，异常不外溢（否则线程会静默死掉，WS 全哑）。 */
+    private void drainOutbound() {
+        while (dispatcherRunning) {
+            Outbound item;
+            try {
+                item = outbound.poll(500, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (item == null) {
+                continue;
+            }
+            try {
+                dispatch(item.json(), item.ownerTenantId(), item.toEverySession());
+            } catch (Throwable t) {
+                log.warn("WS dispatch loop error: {}", t.toString());
+            } finally {
+                completedFrames.incrementAndGet();
+            }
+        }
+    }
+
+    /** 因队列饱和被丢弃的帧数（单调递增，供指标/排障读取）。 */
+    public long droppedFrames() {
+        return droppedFrames.get();
+    }
+
+    /** 当前积压深度（诊断用；持续接近容量说明客户端消费不过来）。 */
+    public int outboundQueueDepth() {
+        return outbound.size();
+    }
+
+    /**
+     * 已接收的帧是否都已发送完毕。
+     * <p>
+     * package-private 供测试做确定性等待：断言前先等到 {@code true}，
+     * 负向断言（「某会话不应收到」）才不会在消费者还没跑到之前空转成假绿。
+     */
+    boolean drained() {
+        return completedFrames.get() >= submittedFrames.get();
+    }
+
+    /**
      * @param toEverySession true=无归属的基础设施帧，发给所有连接；
      *                       false=按 {@code ownerTenantId} 做租户可见性判定
      */
@@ -353,7 +482,9 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
             }
             try {
                 // 同一会话可能被多个线程同时广播（遥测帧 + 调度帧 + 告警帧来源不同）。
-                // WebSocketSession 不是线程安全的：并发 sendMessage 会帧交错/抛
+                // 改造后本方法只由 ws-telemetry-dispatch 单线程调用，但 @Scheduled 推送器
+                // 仍可能并发命中同一会话（它们同样走队列，故实际已串行化）——装饰器保留作为
+                // 第二道防线。WebSocketSession 不是线程安全的：并发 sendMessage 会帧交错/抛
                 // IllegalStateException（客户端表现=偶发断连或半包 JSON）。
                 // 本类唯一发送入口是 dispatch()。同会话发送的互斥不再由本类加锁，
                 // 而由 WebSocketConfig 套上的 ConcurrentWebSocketSessionDecorator 内部 flushLock 提供

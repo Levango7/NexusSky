@@ -1,5 +1,62 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 遥测 WS 扇出与 UDP 摄入解耦：慢客户端不再能堵住整条机队（+3 例）
+
+### 问题（证据链，不是推断）
+
+- `UdpMavlinkTransport.java:61` 只有**一条**接收线程 `mavlink-udp-<port>`；`:211/:217-219`
+  **内联**回调 `UdpGateway::onFrame`；`UdpGateway.java:258` 内联 `ingest.handle(frame)`；
+  `MavlinkMessageEvent` 的 **16 个 `@EventListener` 全部同步**（全仓无 `@Async`、
+  无自定义 `ApplicationEventMulticaster`）。
+- `TelemetryWebSocketHandler.onMavlinkMessage` 就跑在这条线程上，**逐个 `session.sendMessage`**。
+  ⇒ 一个「连上但不读」的客户端把 socket 发送缓冲填满后，阻塞会顺着 `sendMessage` 顶回
+  UDP 接收线程，**整条机队的遥测摄入一起停摆**——受害的不是那个客户端，是所有飞机。
+- 这条不是新发现：`docs/architecture-deepening-plan.md:407-421` 早已把它列为「热点 1」，
+  方案 3「异步 WebSocket 推送」写在那里，但代码一直是同步内联。本轮把既定方案落地。
+
+### 实现
+
+- `broadcastToTenant` / `broadcastPublicInfra` 改为**入队**：调用线程只做 `offer`，不碰 socket 写。
+- 有界队列 `OUTBOUND_QUEUE_CAPACITY = 4096`（50 机 × 5Hz ≈ 16 秒积压余量）+ **单消费者线程**
+  `ws-telemetry-dispatch`：顺序语义与改造前一致（同一会话仍按入队序发送）。
+- 队列满时**丢最旧、保最新并计数**（`droppedFrames()`，首次丢弃打一条 WARN）：遥测价值随时间
+  衰减，攒旧帧只会把「实时」变成「回放」；有界 + 计数让过载成为**可观测事件**，而不是
+  内存增长或线程挂死。首次告警只打一次——饱和时每帧打日志会把日志系统一起拖垮。
+- `@PreDestroy` 停消费者线程，避免反复建上下文（测试）时线程泄漏。
+- `drained()`（package-private）供测试做确定性等待：**先等消费完成再断言**，否则 `never()`
+  会在消费者还没跑到时空转成**假绿**——比红灯更危险。
+
+### 测试（+3 例，`TelemetryWsFanoutIsolationTest`）
+
+| 用例 | 钉住什么 |
+|---|---|
+| `slowClientDoesNotBlockCallerThread` | sendMessage 挂死 10s 的会话在场时，`onMavlinkMessage` 必须 <500ms 返回；放行后快客户端仍收到帧 |
+| `saturatedQueueDropsOldestAndCounts` | 灌 `容量+50` 帧：`droppedFrames() > 0` 且积压 ≤ 容量（有界、不 OOM、不阻塞） |
+| `framesKeepEnqueueOrder` | 20 帧顺序不变（单消费者保序，改造前后语义一致） |
+
+既有 `TelemetryWsTenantIsolationTest`（12 例）与 `TelemetryWsSlowClientDisconnectTest`（2 例）
+改为 await 断言：异步化后「发完」与「断言」不再同步，负向断言必须等消费完成才有效。
+
+**A/B 实测**：把两处 `enqueue` 改回同步 `dispatch` ⇒ `slowClientDoesNotBlockCallerThread` **红**，
+耗时 14.66s（断言要求 <500ms）；还原 ⇒ WS 全量 **22/22 绿**。
+
+**验证**：全 reactor `mvn -B -o test` = **BUILD SUCCESS / 5671 例 0 失败**（cloud-backend 3472、
+sdk-java 19）；10 份口径文档计数同步 5668→5671 / 3469→3472；`check-repo-hygiene` 与
+`check-test-count-docs` 通过。
+> 同一轮全量里 `UdpGatewayCriticalFrameRateTest.ackSurvivesFloodOnMainWindow` 曾偶发红一次
+> （`Wanted 5 times but was 9 times`）：该用例用真 UDP 发 20 帧并断言「恰好 5 帧通过 1 秒滑动窗口」，
+> 负载高时发送循环自身跨过窗口边界 ⇒ 窗口重置。干净 master 单跑 4/4 绿、本轮重跑亦绿 ⇒
+> **既有时序 flake，与本改动无因果**（本改动在 ingest 下游，不参与该计数）。未修改该测试（属 #259 范围），
+> 已在 `.coord/INBOX-zcode.md` 留证。
+
+### 已知边界（如实声明）
+
+- 本改动**不提升吞吐上限**，只消除「慢客户端拖垮摄入」这一类故障；平台级容量（多少架机 ×
+  多少并发客户端）**仍未测量**，`docs/performance.md` 现有数字只覆盖 MAVLink 解析层。
+- 队列容量是常量而非配置项：改它需要改代码。若将来要按部署规模调，再引入
+  `aerofleet.ws.outbound-queue-capacity`（本次不做，避免为假想需求加配置面）。
+
+
 ## [Unreleased] — P2-F6 ② 出站定向广播落地：未知 sysid 不再只归"最后说话者"（+3 例）
 
 ### 背景：§12.4 判据 2 里写着"这一条今天能写测试，不需要真机"
