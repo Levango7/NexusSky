@@ -10,7 +10,15 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** E5 GB28181 国标形状层：编码/PTZ 指令码/信令构造/目录解析。 */
+/**
+ * E5 GB28181 国标形状层：编码 / PTZ 指令码 / 信令构造 / 目录解析。
+ *
+ * <p>**口径分层（2026-11-07）**：本类只管"国标值"——20 位编码、PTZ 指令码、Catalog 解析。
+ * 信令的**帧构造与传输**已单独立类：{@link Gb28181SipMessage}（结构 + Content-Length 不变式）、
+ * {@link Gb28181SignalingContractTest}（帧契约，多组参数数据驱动）、
+ * {@link Gb28181SipLoopbackTest}（真 UDP 传输 ↔ 设备替身）。三者合起来证明"帧发得出去"，
+ * 本类只证明"值对"——别把两者混着引（README 的 E5 边界条款已按三层重写）。
+ */
 @DisplayName("GB28181 国标形状层")
 class Gb28181ShapeTest {
 
@@ -104,15 +112,17 @@ class Gb28181ShapeTest {
 
         @Test
         void REGISTER_形状() {
-            String m = sig.register(dev, 3600, 1);
+            String m = sig.register(dev, 3600, 1).renderText();
             assertThat(m).startsWith("REGISTER sip:34010000002000000001 SIP/2.0");
             assertThat(m).contains("From: <sip:34010000001101320001@34010000002000000001>");
             assertThat(m).contains("Expires: 3600");
+            // Content-Length 由真实 body 长度导出（旧实现写死魔数，无 body 也写 0 才对）
+            assertThat(m).contains("Content-Length: 0");
         }
 
         @Test
         void INVITE_点播含通道与SDP() {
-            String m = sig.inviteStream(dev, 1, "10.0.0.5", 9000, 12345);
+            String m = sig.inviteStream(dev, 1, "10.0.0.5", 9000, 12345).renderText();
             assertThat(m).startsWith("INVITE sip:34010000001101320001:1@34010000002000000001 SIP/2.0");
             assertThat(m).contains("Content-Type: application/sdp");
             assertThat(m).contains("m=video 9000 TCP/RTP/AVP 96 98 97");
@@ -121,7 +131,7 @@ class Gb28181ShapeTest {
 
         @Test
         void Catalog查询含MANSCDP类型() {
-            String m = sig.catalogQuery(dev, 42);
+            String m = sig.catalogQuery(dev, 42).renderText();
             assertThat(m).startsWith("MESSAGE sip:");
             assertThat(m).contains("Content-Type: Application/MANSCDP+xml");
             assertThat(m).contains("<CmdType>Catalog</CmdType>");
@@ -130,7 +140,7 @@ class Gb28181ShapeTest {
 
         @Test
         void 报警订阅SUBSCRIBE形状() {
-            String m = sig.subscribeAlarm(dev, 3600, 1);
+            String m = sig.subscribeAlarm(dev, 3600, 1).renderText();
             assertThat(m).startsWith("SUBSCRIBE sip:34010000001101320001@");
             assertThat(m).contains("Event: Presence");
         }
