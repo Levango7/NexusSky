@@ -31,7 +31,10 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.net.SocketAddress;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import java.util.function.BiConsumer;
@@ -163,6 +166,15 @@ public class UdpGateway {
      * §12.2-⑤）。独立小预算既保关键帧存活，又不放大非关键帧的准入（防滥用语义不变）。
      */
     private final ConcurrentHashMap<Integer, Deque<Long>> criticalRateWindows = new ConcurrentHashMap<>();
+
+    /**
+     * 出站定向广播的每-sysid 预算（P2-F6 ②，2026-11-07）：key=sysid。
+     * <p>
+     * 广播把一帧放大成 N 帧（N = 已知实例数）——不限就等于把限速上限乘以链路数。
+     * 这里的上限复用 {@code maxFrameRatePerSysid}，因此每个实例实得
+     * 「总配额 / 实例数」：总帧数不放大，即 §12.4 判据 2 的**按实例摊分**。
+     */
+    private final ConcurrentHashMap<Integer, Deque<Long>> broadcastRateWindows = new ConcurrentHashMap<>();
 
     /**
      * 关键帧判定集：GCS 功能依赖其「必达」的低频控制面帧。
@@ -305,25 +317,64 @@ public class UdpGateway {
     }
 
     /**
+     * **出站定向广播**的每-sysid 预算（P2-F6 ②，2026-11-07）。
+     *
+     * <p>为什么只在广播路径上查：单地址出站（路由已学到）与旧行为逐字节等价，
+     * 给它也加限会改变单机 SITL 的既有语义；而**广播会把一帧放大成 N 帧**
+     * （N = 已知实例数），不限就等于把限速上限乘以链路数。
+     *
+     * <p>口径：按 sysid 的滑动窗口计数（与入站主窗口同型），上限复用
+     * {@code aerofleet.udp.max-frame-rate-per-sysid}。它落在广播路径上 ⇒
+     * 每个实例实际拿到的配额是「总配额 / 实例数」，即 §12.4 判据 2 说的
+     * **按实例摊分**（总帧数不放大，而不是每实例都给满配额）。
+     */
+    private boolean outboundBroadcastAllow(int sysid) {
+        long now = System.currentTimeMillis();
+        Deque<Long> window = broadcastRateWindows.computeIfAbsent(sysid, k -> new java.util.ArrayDeque<>());
+        synchronized (window) {
+            while (!window.isEmpty() && now - window.peekFirst() > 1000) {
+                window.pollFirst();
+            }
+            if (window.size() >= maxFrameRatePerSysid) {
+                return false;
+            }
+            window.addLast(now);
+            return true;
+        }
+    }
+
+    /** 窗口集合的过期清理与 {@link #pruneStaleRateLimitWindows()} 同周期（key 与路由同生命周期）。 */
+    private void pruneBroadcastWindows(java.util.Collection<Integer> deadSysids) {
+        if (deadSysids.isEmpty()) {
+            return;
+        }
+        java.util.Set<Integer> dead = new java.util.HashSet<>(deadSysids);
+        broadcastRateWindows.keySet().removeAll(dead);
+    }
+
+    /**
      * Route aging (D3): drop routes silent for 5 min - a replaced/rebound
      * drone otherwise leaves a stale address that silently eats commands.
      * Runs every 60 s.
      */
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
     public void pruneStaleRoutes() {
-        for (Integer sysid : droneRoutes.prune()) {
+        List<Integer> pruned = droneRoutes.prune();
+        for (Integer sysid : pruned) {
             log.info("pruning stale route sysid={} (silent >5min)", sysid);
         }
+        // 路由走了，出站广播窗口随之作废（key 与路由同生命周期）
+        pruneBroadcastWindows(pruned);
     }
 
     /**
      * 频率限制窗口清理：移除长时间（2 分钟）无活动的 sysid 窗口，防止内存泄漏。
-     * 主窗口与关键帧预算窗口同一批清理。每 5 分钟运行一次。
+     * 主窗口、关键帧预算窗口与出站广播窗口同一批清理。每 5 分钟运行一次。
      */
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 300_000, initialDelay = 300_000)
     public void pruneStaleRateLimitWindows() {
         long cutoff = System.currentTimeMillis() - 120_000;
-        int before = rateLimitWindows.size() + criticalRateWindows.size();
+        int before = rateLimitWindows.size() + criticalRateWindows.size() + broadcastRateWindows.size();
         rateLimitWindows.entrySet().removeIf(entry -> {
             Deque<Long> window = entry.getValue();
             synchronized (window) {
@@ -336,7 +387,14 @@ public class UdpGateway {
                 return window.isEmpty() || window.peekLast() < cutoff;
             }
         });
-        int removed = before - rateLimitWindows.size() - criticalRateWindows.size();
+        broadcastRateWindows.entrySet().removeIf(entry -> {
+            Deque<Long> window = entry.getValue();
+            synchronized (window) {
+                return window.isEmpty() || window.peekLast() < cutoff;
+            }
+        });
+        int removed = before - rateLimitWindows.size() - criticalRateWindows.size()
+                - broadcastRateWindows.size();
         if (removed > 0) {
             log.debug("Pruned {} stale rate-limit windows", removed);
         }
@@ -367,9 +425,45 @@ public class UdpGateway {
 
         if (addr != null) {
             transport.send(frameToSend, addr);
+        } else if (sysid > 0) {
+            sendUnrouted(sysid, frameToSend);
         } else {
-            transport.sendToLastPeer(frameToSend); // route unknown yet: best effort
+            transport.sendToLastPeer(frameToSend); // sysid<=0（广播级/未知）：沿用旧兜底
         }
+    }
+
+    /**
+     * 未学到路由的出站（P2-F6 ②，2026-11-07）。
+     *
+     * <p>**旧行为**：一律 {@code transport.sendToLastPeer}——即「最后说话者拿走命令」。
+     * §12.4 表②记的失败形态：一个集群里有多实例时，命令只会落在**最近一次发言**的那一个
+     * 上，其他实例既拿不到命令、也不会报错，静默失败。
+     *
+     * <p>**新行为**：对 {@link RouteTable#addresses()} 里**所有已知实例定向广播**
+     * （不是 LAN 广播——逐个 {@code InetSocketAddress} 定向发，语义可枚举、可断言）。
+     * 广播路径受 {@link #outboundBroadcastAllow(int)} 限制：预算按 sysid 计，
+     * 实例越多每实例实得越少（**总帧数不放大**，即按实例摊分）。
+     *
+     * <p>一个实例也没学到时（启动初期、或全部路由已老化）仍需兜底——退回
+     * {@code sendToLastPeer}（可能为 null ⇒ 静默丢弃，与旧行为一致）。此时**不**广播：
+     * 没有已知地址就没有广播对象，且退化成 lastPeer 可保住「drone-host 发现存活」的单机路径。
+     */
+    private void sendUnrouted(int sysid, MavlinkFrame frame) throws IOException {
+        List<SocketAddress> known = new java.util.ArrayList<>();
+        for (SocketAddress a : droneRoutes.addresses()) {
+            known.add(a);
+        }
+        if (known.isEmpty() || !outboundBroadcastAllow(sysid)) {
+            transport.sendToLastPeer(frame); // 无已知实例 / 预算耗尽：旧兜底（best effort）
+            return;
+        }
+        int delivered = 0;
+        for (SocketAddress a : known) {
+            transport.send(frame, a);
+            delivered++;
+        }
+        log.debug("outbound broadcast sysid={} to {} known instance(s) (unrouted; P2-F6 ②)",
+                sysid, delivered);
     }
 
     /** Send one frame to the drone with the given sysid, or learn-and-wait fallback. */

@@ -19,29 +19,31 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 
 /**
- * P2-F6 ②「drone-host 未设时出站盲发」的现状钉住测试（{@code docs/sitl-integration.md}
- * §12.4 表②取证，2026-11-06）。
+ * P2-F6 ②「未知 sysid 出站」语义测试（{@code docs/sitl-integration.md} §12.4 表②取证，
+ * 2026-11-06 取证；2026-11-07 修复）。
  *
- * <h2>本类钉住什么（以及它不是什么）</h2>
- * 出站 {@code UdpGateway#send(int, MavlinkFrame)} 只有两条路：路由表学到的地址（定向），
- * 或 {@code transport.sendToLastPeer} 兜底。而 {@code lastPeer} 的<b>唯一写点</b>是
- * transport 收包线程（{@code UdpMavlinkTransport} 收包循环），discovery 心跳与定向出站
- * 都<b>不</b>刷新它；从未收到过任何包时 {@code sendToLastPeer} <b>静默丢弃</b>。
- * {@code drone-host} 配置只进 {@code enablePeerDiscovery}（GCS 式发现握手），
- * <b>不参与 send 任何一条路径</b>——即 §12.4 表②的「入站靠学、出站才盲」：
- * 未 learn 的 sysid 的命令帧落在「最后说话者」头上，与 drone-host 配成什么无关；
- * 两个机载实例同机时，只有最后入站的那个收得到未知 sysid 的命令。
+ * <h2>本类钉住什么</h2>
+ * 出站 {@code UdpGateway#send(int, MavlinkFrame)} 有三条路：
+ * <ol>
+ *   <li>路由表学到的地址 → <b>定向单发</b>（单机语义，逐字节不变）；</li>
+ *   <li><b>未学到路由</b>且已有其他已知实例 → <b>定向广播</b>给
+ *       {@link RouteTable#addresses()} 全部已知实例（P2-F6 ②；受每-sysid 出站预算限制，
+ *       预算按实例摊分 ⇒ 总帧数不放大）；</li>
+ *   <li>一个已知实例也没有 → {@code transport.sendToLastPeer} 兜底（可能静默丢弃）。</li>
+ * </ol>
  *
- * <p><b>这是取证钉住，不是产品意图。</b>修复②（未知 sysid 对所有已知实例定向广播 +
- * 帧率预算按实例摊分）须与修①一起按 §12.4「三条判据」在真机双链路验收；在那之前
- * 这些测试红了 = 出站行为被改动，须回读 §12.4 判断是修复到达判据、还是误动。
+ * <p><b>历史口径（2026-11-06 的取证版）</b>：当时第 2 条路也是 {@code sendToLastPeer}，
+ * 即「最后说话者拿走命令」——多实例时其他实例静默失联。那时这些测试
+ * <b>是取证钉住、不是产品意图</b>，注释写明「修复②到达判据时它们会红，须回读 §12.4」。
+ * 2026-11-07 修复落地（判据 2 的「定向广播 + 摊分」两半都实现并有专测），
+ * 本类随之改为钉<b>新行为</b>；「零入站静默丢弃」那条形态今天仍成立。
  *
  * <h2>手法</h2>
  * 与 {@link UdpGatewayTest} 同款：transport 无法注入（构造内 new），故用真实 ephemeral
  * UDP 端口 + Mockito mock 下游；另起绑定随机端口的 DatagramSocket 充当「机载实例」，
  * 以收帧归属验证出站落点。签名默认关闭，出站帧字节与入参帧逐字节一致，可直接比对。
  */
-@DisplayName("UdpGateway P2-F6②：出站兜底=lastPeer 的取证钉住（drone-host 不参与 send 路径）")
+@DisplayName("UdpGateway P2-F6②：未知 sysid 出站定向广播 + 摊分预算（零入站仍静默丢弃）")
 class UdpGatewayOutboundBlindSpotTest {
 
     /** drone-port：无人监听的固定端口（仅作为 discovery 目标；若出站兜底落向它，收帧断言必超时红）。 */
@@ -135,28 +137,120 @@ class UdpGatewayOutboundBlindSpotTest {
     }
 
     @Test
-    @DisplayName("未 learn 的 sysid：出站落 lastPeer——最后说话者拿走命令，不是广播（§12.4 表②取证）")
-    void unknownSysidFallsToLastPeerWhichIsTheLastSpeaker() throws Exception {
+    @DisplayName("未 learn 的 sysid：出站**定向广播**给所有已知实例，不再是「最后说话者独占」")
+    void unknownSysidBroadcastsToAllKnownInstances() throws Exception {
         gateway = newGateway();
         try (DatagramSocket peerA = newDrone(); DatagramSocket peerB = newDrone()) {
             droneSaysHeartbeat(peerA, 7, 1);
             droneSaysHeartbeat(peerB, 8, 1);
             awaitHandleCount(2);
 
-            // sysid=9 从未入站：send(9,…) 查不到路由 ⇒ sendToLastPeer（=peerB，最后入站者）
+            // sysid=9 从未入站：send(9,…) 查不到路由 ⇒ 定向广播给两个已 learn 实例
             gateway.send(9, droneHeartbeat(9, 2));
 
-            byte[] atB = tryReceive(peerB);
-            assertThat(atB).as("未知 sysid 的命令帧落在最后说话者（peerB）")
+            byte[] atA = tryReceive(peerA);
+            assertThat(atA).as("广播必须送达 peerA（旧行为只有最后说话者收到）")
                     .isEqualTo(droneHeartbeat(9, 2).encodeV2());
 
-            byte[] atA = tryReceive(peerA);
-            assertThat(atA).as("不得广播给所有已 learn 实例——只有最后说话者收到").isNull();
+            byte[] atB = tryReceive(peerB);
+            assertThat(atB).as("广播必须送达 peerB").isEqualTo(droneHeartbeat(9, 2).encodeV2());
         }
     }
 
     @Test
-    @DisplayName("零入站：出站静默丢弃——drone-host 地址不兜底、lastPeer 保持 null（表②的最强形态）")
+    @DisplayName("广播路径受每-sysid 出站预算约束：预算=1 时只广播 1 帧，其余走兜底（摊分）")
+    void broadcastIsBudgetCappedPerSysid() throws Exception {
+        // 主预算=1：sysid=9 的广播窗口首帧即用掉配额
+        gateway = new UdpGateway(0, "127.0.0.1", UNLISTENED_DRONE_PORT, "", "0.0.0.0",
+                false, 1, ingest, pendings);
+        try (DatagramSocket peerA = newDrone(); DatagramSocket peerB = newDrone()) {
+            droneSaysHeartbeat(peerA, 7, 1);
+            droneSaysHeartbeat(peerB, 8, 1);
+            awaitHandleCount(2);
+
+            // 同一秒内连发 6 帧未知 sysid：第 1 帧广播给 2 个实例，后 5 帧预算耗尽 ⇒ 兜底
+            for (int i = 0; i < 6; i++) {
+                gateway.send(9, droneHeartbeat(9, 10 + i));
+            }
+            Thread.sleep(250);
+
+            // peerA 不是 lastSpeaker：它收到的帧**全部来自广播** ⇒ 收到的包数 == 被放行广播的帧数
+            assertThat(countDelivered(peerA))
+                    .as("广播被预算限制为 1 帧（不是 6 帧都广播 ⇒ 不随实例数翻倍）")
+                    .isEqualTo(1);
+            // peerB 同时是 lastPeer：1 次广播 + 5 次兜底
+            assertThat(countDelivered(peerB)).isEqualTo(6);
+        }
+    }
+
+    @Test
+    @DisplayName("预算充足时广播完整送达每个已知实例（3 帧 × 2 实例）")
+    void broadcastDeliversToEveryInstanceWhenBudgetAllows() throws Exception {
+        gateway = new UdpGateway(0, "127.0.0.1", UNLISTENED_DRONE_PORT, "", "0.0.0.0",
+                false, 100, ingest, pendings);
+        try (DatagramSocket peerA = newDrone(); DatagramSocket peerB = newDrone()) {
+            droneSaysHeartbeat(peerA, 7, 1);
+            droneSaysHeartbeat(peerB, 8, 1);
+            awaitHandleCount(2);
+
+            for (int i = 0; i < 3; i++) {
+                gateway.send(9, droneHeartbeat(9, 10 + i));
+            }
+            Thread.sleep(250);
+
+            assertThat(countDelivered(peerA)).isEqualTo(3);
+            assertThat(countDelivered(peerB)).isEqualTo(3);
+        }
+    }
+
+    /** 把 socket 缓冲里能收到的包数取出（非阻塞式：接收超时 150ms 后停）。 */
+    private int countDelivered(DatagramSocket drone) {
+        int n = 0;
+        try {
+            drone.setSoTimeout(150);
+            while (n < 50) {
+                byte[] buf = new byte[2048];
+                DatagramPacket p = new DatagramPacket(buf, buf.length);
+                drone.receive(p);
+                n++;
+            }
+        } catch (Exception e) {
+            // 超时/关闭即为读完
+        }
+        return n;
+    }
+
+    @Test
+    @DisplayName("learn 过的 sysid 仍是单发（不因广播改动而重复投递）")
+    void learnedSysidStaysSingleTargeted() throws Exception {
+        gateway = newGateway();
+        try (DatagramSocket peerA = newDrone(); DatagramSocket peerB = newDrone()) {
+            droneSaysHeartbeat(peerA, 7, 1);
+            droneSaysHeartbeat(peerB, 8, 1);
+            awaitHandleCount(2);
+
+            gateway.send(7, droneHeartbeat(7, 2));
+
+            // peerA 收到 1 帧，peerB 一帧都不收（sysid=7 有定向路由）
+            drain(peerA);
+            assertThat(countDelivered(peerB)).as("有定向路由的 sysid 不得广播").isZero();
+        }
+    }
+
+    private void drain(DatagramSocket drone) {
+        try {
+            drone.setSoTimeout(150);
+            while (true) {
+                byte[] buf = new byte[2048];
+                drone.receive(new DatagramPacket(buf, buf.length));
+            }
+        } catch (Exception e) {
+            // 读完
+        }
+    }
+
+    @Test
+    @DisplayName("零入站：出站静默丢弃——无已知实例、lastPeer 仍为 null（表②最强形态不变）")
     void zeroInboundSilentlyDropsOutboundDespiteDroneHost() throws Exception {
         gateway = newGateway();
 
