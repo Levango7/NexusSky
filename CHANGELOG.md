@@ -40,8 +40,8 @@
 **A/B 实测**：把两处 `enqueue` 改回同步 `dispatch` ⇒ `slowClientDoesNotBlockCallerThread` **红**，
 耗时 14.66s（断言要求 <500ms）；还原 ⇒ WS 全量 **22/22 绿**。
 
-**验证**：全 reactor `mvn -B -o test` = **BUILD SUCCESS / 5671 例 0 失败**（cloud-backend 3472、
-sdk-java 19）；10 份口径文档计数同步 5668→5671 / 3469→3472；`check-repo-hygiene` 与
+**验证**：全 reactor `mvn -B -o test` = **BUILD SUCCESS / 5674 例 0 失败**（cloud-backend 3475、
+sdk-java 19）；10 份口径文档计数同步 5671→5674 / 3472→3475；`check-repo-hygiene` 与
 `check-test-count-docs` 通过。
 > 同一轮全量里 `UdpGatewayCriticalFrameRateTest.ackSurvivesFloodOnMainWindow` 曾偶发红一次
 > （`Wanted 5 times but was 9 times`）：该用例用真 UDP 发 20 帧并断言「恰好 5 帧通过 1 秒滑动窗口」，
