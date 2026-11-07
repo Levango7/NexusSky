@@ -61,13 +61,23 @@ public final class Gb28181SipTransport implements Closeable {
     /**
      * 在指定本地端口开 socket。
      *
+     * <p>**刻意不设 SO_TIMEOUT**：收包循环只负责把字节交给 {@link #onMessage}，
+     * 事务等待由调用方 {@link #transact} 用自己的 deadline 轮询完成——
+     * 循环里的超时 tick **没有任何用途**。留着它反而制造两类故障：
+     * <ol>
+     *   <li>变异体「删掉 setSoTimeout」会让循环永久阻塞 ⇒ 依赖收包的测试整批挂起
+     *       ⇒ 被 PIT 记成 TIMED_OUT（CI 慢机器上一次翻掉 10+ 个 kill，
+     *       见 docs/mutation-testing.md 第六轮）；</li>
+     *   <li>无流时段每 500ms 醒一次，纯空转。</li>
+     * </ol>
+     * 阻塞 receive + close() 时由 {@code shutdownNow}/{@code socket.close} 打断，
+     * 这才是正确的形状。
+     *
      * @param localPort 0 = 让系统分配（测试用随机端口，避免抢端口）
      */
     public Gb28181SipTransport(int localPort) throws SocketException {
         this.socket = new DatagramSocket(localPort);
-        this.socket.setSoTimeout(RETRANSMIT_INTERVAL_MS);
     }
-
     /** 本地端口（发送方地址，SDP 的 {@code c=} 与 {@code m=} 要填它）。 */
     public int localPort() {
         return socket.getLocalPort();
@@ -102,8 +112,6 @@ public final class Gb28181SipTransport implements Closeable {
                 for (Gb28181SipMessage m : msgs) {
                     onMessage(m);
                 }
-            } catch (SocketTimeoutException e) {
-                // 读超时：收尾循环即可（事务等待由调用方轮询 byKey 完成，不依赖本循环）
             } catch (IOException e) {
                 if (running.get()) {
                     log.warn("sip udp receive failed on port {}", localPort(), e);

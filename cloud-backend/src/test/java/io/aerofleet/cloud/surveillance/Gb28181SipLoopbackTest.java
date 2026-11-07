@@ -29,6 +29,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @DisplayName("GB28181 SIP 真链路：transport ↔ 设备侧对端（真 UDP 回环）")
 class Gb28181SipLoopbackTest {
 
+    /**
+     * 事务等待上限。
+     *
+     * <p>**为什么是 3s 而不是更大**：PIT 的 per-test 超时默认 **4s**。
+     * 正断言等的是"必然会到的响应"，正常情况下几毫秒就返回——这个上限只在
+     * **对端真的坏了**（或变异体把传输破坏了）时才被等满。等满时：
+     * < 4s ⇒ 测试跑完并**失败** ⇒ 变异体被**杀掉**（KILLED）；
+     * ≥ 4s ⇒ PIT 判 **TIMED_OUT** ⇒ 变异体既没被杀也不计入存活，
+     * 白白压低变异分数（实测：放到 15s 后本地 TIMED_OUT 从 12 跳到 31、
+     * 分数从 0.9354 掉到 0.9209）。
+     *
+     * <p>所以这里**不能**为了"CI 慢机器更稳"而放大窗口：放得越大，
+     * 越多本该被杀的变异体变成超时。CI 上那 0.88pp 的落差来自别处
+     * （已定位并修掉：{@code Gb28181SipTransport} 那个没有用途的
+     * {@code setSoTimeout}，见变异文档第六轮 b）。
+     */
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
 
     private Gb28181Signaling sig;
