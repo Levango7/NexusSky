@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -121,6 +122,7 @@ class TelemetryWsTenantIsolationTest {
         WebSocketSession sessionB = connectedSession("B", "10.9.0.2", TENANT_B);
 
         handler.onMavlinkMessage(frameFor(DEVICE_OF_A));
+        awaitDrained();
 
         verify(sessionA, atLeastOnce()).sendMessage(any(TextMessage.class));
         verify(sessionB, never()).sendMessage(any(TextMessage.class));
@@ -135,6 +137,7 @@ class TelemetryWsTenantIsolationTest {
         WebSocketSession sessionB = connectedSession("B", "10.9.0.3", TENANT_B);
 
         handler.onMavlinkMessage(frameFor(DEVICE_OF_A));
+        awaitDrained();
 
         verify(sessionB, never()).sendMessage(any(TextMessage.class));
     }
@@ -164,6 +167,7 @@ class TelemetryWsTenantIsolationTest {
         WebSocketSession second = connectedSession("A2", "10.9.1.2", TENANT_A);
 
         handler.onMavlinkMessage(frameFor(DEVICE_OF_A));
+        awaitDrained();
 
         verify(first, times(1)).sendMessage(any(TextMessage.class));
         verify(second, times(1)).sendMessage(any(TextMessage.class));
@@ -197,9 +201,20 @@ class TelemetryWsTenantIsolationTest {
     }
 
     private List<String> payloadsOf(WebSocketSession session) throws Exception {
+        awaitDrained();
         ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
         verify(session, atLeastOnce()).sendMessage(captor.capture());
         return captor.getAllValues().stream().map(TextMessage::getPayload).toList();
+    }
+
+    /**
+     * 等扇出消费者把已入队的帧全部发完，再做断言。
+     * <p>
+     * 扇出已从调用线程剥离（有界队列 + 单消费者），所以「发了」与「断言」之间不再是同步关系。
+     * 不等待就断言 {@code never()} 会在消费者还没跑到时**空转成假绿**——那比红灯更危险。
+     */
+    private void awaitDrained() {
+        await().atMost(Duration.ofSeconds(5)).until(handler::drained);
     }
 
     @Test
@@ -243,6 +258,7 @@ class TelemetryWsTenantIsolationTest {
 
         handler.tryBroadcastByDeviceOwner(
                 frameWith("nodes", List.of(node(DEVICE_UNASSIGNED))), objectMapper);
+        awaitDrained();
 
         verify(sessionB, never()).sendMessage(any(TextMessage.class));
         verify(globalAdmin, times(1)).sendMessage(any(TextMessage.class));
@@ -296,6 +312,7 @@ class TelemetryWsTenantIsolationTest {
         connectedSession("B", "10.9.2.2", TENANT_B);
 
         handler.onMavlinkMessage(frameFor(DEVICE_OF_A));
+        awaitDrained();
 
         ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
         verify(sessionA, times(1)).sendMessage(captor.capture());
@@ -323,6 +340,7 @@ class TelemetryWsTenantIsolationTest {
         WebSocketSession globalAdmin = connectedSession("G", "10.9.7.2", null, Role.ADMIN);
 
         handler.onMavlinkMessage(frameFor(DEVICE_UNASSIGNED));
+        awaitDrained();
 
         verify(tenantB, never()).sendMessage(any(TextMessage.class));
         // 裁决 B' 否决「log.warn 后丢弃」：全局会话本来就不越权，帧必须仍可见
@@ -348,6 +366,7 @@ class TelemetryWsTenantIsolationTest {
             handler.onMavlinkMessage(frameFor(UNKNOWN_SYSID));
             handler.onMavlinkMessage(frameFor(UNKNOWN_SYSID));       // 同一未知 sysid 再来一帧
             handler.onMavlinkMessage(frameFor(OTHER_UNKNOWN_SYSID)); // 另一个未知 sysid
+            awaitDrained();
 
             // 行为不变：不丢弃（全局会话收到 3 帧），也绝不落到租户连接
             verify(tenantB, never()).sendMessage(any(TextMessage.class));
@@ -376,6 +395,7 @@ class TelemetryWsTenantIsolationTest {
         MavlinkMessageEvent explicitTenantFrame = new MavlinkMessageEvent(
                 this, UNKNOWN_SYSID, TaskStatusMsg.ID, null, System.currentTimeMillis(), TENANT_A);
         handler.onMavlinkMessage(explicitTenantFrame);
+        awaitDrained();
 
         verify(sessionA, times(1)).sendMessage(any(TextMessage.class));
         verify(sessionB, never()).sendMessage(any(TextMessage.class));
