@@ -396,9 +396,15 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
         // 队列满：腾一个最旧的位置给最新帧。被挤掉的那帧已经提交过，
         // 这里必须同步记入 completed（它是"了结"而不是"待发"），否则
         // 提交/了结两个计数永远对不上——那会让 drained() 永远为 false。
-        outbound.poll();
-        countDrop();
-        completedFrames.incrementAndGet();
+        //
+        // 必须判 poll() 的返回值：offer 失败与 poll 之间消费者可能已把队列清空，
+        // 此时 poll 返回 null，**没有任何帧被挤掉**。若照样 +1，completed 会多计，
+        // drained() 就会在真帧还在路上时提前为真——负向断言会因此假绿。
+        Outbound evicted = outbound.poll();
+        if (evicted != null) {
+            countDrop();
+            completedFrames.incrementAndGet();
+        }
         if (!outbound.offer(item)) {
             // 极端并发下连腾出的位置都被抢走：本帧也丢，仍要计数，不能静默
             countDrop();
