@@ -379,7 +379,7 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
   连接结束/超时/出错经同一适配器退订（handle 契约统一）
 - 前置检查在**建立 SSE 之前**完成——不先回 200 再挂一条永远没有事件的流：
   - 适配器声明自己不实现事件订阅 → **501**（当前：GB28181——只构造国标 SUBSCRIBE 形状，
-    SIP 传输未实现，回调不会触发）；
+    适配器尚未接线到已实现的 SIP-over-UDP 传输层（`Gb28181SipTransport`，#258），回调不会触发）；
   - live ONVIF 订阅失败（设备无 Events 服务 / 鉴权被拒 / 连不上）→ **502**
 - 响应: 200 - SSE 流（`stream-established` 注释先行；每 15s `heartbeat` 注释；事件以
   `surveillance-event` 事件推送，`data` 是设备原始通知——live ONVIF 为
