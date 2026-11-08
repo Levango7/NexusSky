@@ -109,6 +109,26 @@ start / stop / status / broadcast 四个端点，只有测试在读它），属�
 
 - `mvn -pl cloud-backend -am -Dtest=UdpGatewayCriticalFrameRateTest test` 通过（4/4）；
 - 用例总数不变；`[Unreleased]` 小节 289 → **291**。
+
+## [Unreleased] — CI 抬号：maven 缓存键尾 `v2 → v3`，19 站点 + 守卫 CANON 同批（2026-11-09，0 例，纯 CI）
+
+todo P2 #21 收口。`actions/cache` 同键首存者胜出、之后只读不覆盖，抬代次漏掉
+任何一处 = 该 job 永远读不到 warm 缓存、各自冷下载整个 reactor，在共享 runner IP
+上撞 Maven Central 429——这正是 `ci-maven-cache-key.sh` 守的同源面，改一处即红。
+本次把守卫 `CANON` 与 ci.yml 的 **19 处** `key:` 站点同批抬（`…-v2` → `…-v3`），
+守卫实测 `sites=19 mismatch=0`、自测 5/5；`restore-keys` 无代次令牌、不受影响。
+
+验收（todo #21 原口径，随 CI 落定取证）：抬号后首跑 `Populate local repository
+(cold cache)` 执行、`Verify cached repository is complete (offline build +
+offline test)` skipped；其后一次命中 run 不再打 `::warning::离线自检失败`、
+六条 `Java <module>` 无 `surefire-junit-platform` 取件报错。抬号前实测
+in_progress=1 / queued=3，安静窗口成立。
+
+本批 0 测试增删；只动 `.github/workflows/ci.yml` + `scripts/ci-maven-cache-key.sh`
++ `CHANGELOG.md` + `docs/todo.md`，Java / 前端零改动。
+
+计数：本批 0 测试增删；`[Unreleased]` 小节 291 → **292**。
+
 ### 变异门禁收口：+9 例覆盖，本地实测双过基线
 ## [Unreleased] — 文档口径回填：GB28181 SIP 传输 / 机巢 MQTT 已落地，6 处旧表述仍与代码相反（仅文档·注释·日志文案）
 
