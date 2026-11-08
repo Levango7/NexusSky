@@ -24,6 +24,9 @@
 #                    以便测出客户真实会遇到的连接上限；测平台容量上限时才调大）
 #   --inject-procs P 注入进程数（默认 1）。单线程在 254 架时只能到约 10 Hz/架，
 #                    要压更高帧率必须多进程各管一段 sysid，否则测的是注入器上限
+#   --udp-rcvbuf B   后端 UDP 接收缓冲区字节数（默认 0 = 沿用 OS 默认）。
+#                    摄入侧是单线程串行收包，突发下内核缓冲溢出会静默丢包；
+#                    加大缓冲是不改线程模型的最低成本缓解手段
 #   --port P         HTTP/WS 端口（默认 18190）
 #   --udp-port U     MAVLink UDP 端口（默认 14560）
 #   --out DIR        报告目录（默认 docs/capacity）
@@ -38,6 +41,7 @@ CLIENTS=10
 DURATION=60
 MAX_PER_IP=10
 INJECT_PROCS=1
+UDP_RCVBUF=0
 PORT=18190
 UDP_PORT=14560
 OUT_DIR=docs/capacity
@@ -50,6 +54,7 @@ while [[ $# -gt 0 ]]; do
         --duration)   DURATION="$2"; shift 2 ;;
         --max-per-ip) MAX_PER_IP="$2"; shift 2 ;;
         --inject-procs) INJECT_PROCS="$2"; shift 2 ;;
+        --udp-rcvbuf) UDP_RCVBUF="$2"; shift 2 ;;
         --port)       PORT="$2"; shift 2 ;;
         --udp-port)   UDP_PORT="$2"; shift 2 ;;
         --out)        OUT_DIR="$2"; shift 2 ;;
@@ -63,6 +68,8 @@ cd "$REPO"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LABEL="d${DRONES}-hz${HZ}-c${CLIENTS}-ip${MAX_PER_IP}"
+# 只有显式调过缓冲区才进文件名，避免改变既有档位的命名
+if [[ "$UDP_RCVBUF" -gt 0 ]]; then LABEL="${LABEL}-rb${UDP_RCVBUF}"; fi
 WORK="/f/tmp/capacity"
 mkdir -p "$OUT_DIR" "$WORK"
 
@@ -104,15 +111,17 @@ info "模拟器 jar: $(basename "$SIM_JAR")"
 info "JAVA: $JAVA"
 
 # ---- 1. 起后端 ----
-info "启动后端（dev profile, port=$PORT, udp=$UDP_PORT, max-connections-per-ip=$MAX_PER_IP）"
+info "启动后端（dev profile, port=$PORT, udp=$UDP_PORT, max-connections-per-ip=$MAX_PER_IP, udp-rcvbuf=$UDP_RCVBUF）"
 "$JAVA" -Xmx1g -jar "$BACKEND_JAR" \
     --spring.profiles.active=dev \
     --server.port="$PORT" \
     --aerofleet.udp-port="$UDP_PORT" \
+    --aerofleet.udp.receive-buffer-bytes="$UDP_RCVBUF" \
     --aerofleet.ws.max-connections-per-ip="$MAX_PER_IP" \
     --aerofleet.ws.max-connections-per-tenant=200 \
     --spring.datasource.url="jdbc:h2:mem:capacity;DB_CLOSE_DELAY=-1" \
     --logging.level.io.aerofleet=WARN \
+    --logging.level.io.aerofleet.mavlink.transport=INFO \
     --logging.level.org.springframework.web=WARN \
     --logging.level.org.hibernate.SQL=WARN \
     --spring.jpa.show-sql=false \
@@ -225,7 +234,7 @@ M_DECODED="$(metric aerofleet_messages_decoded_total)"
 REPORT="$OUT_DIR/$STAMP-$LABEL.json"
 export LABEL DRONES HZ CLIENTS DURATION MAX_PER_IP ONLINE READY
 export M_SESSIONS M_DEPTH M_DROPPED M_ONLINE M_DECODED PROBE_RAW
-export M_DEPTH_PEAK M_SESS_PEAK INJECT_PROCS
+export M_DEPTH_PEAK M_SESS_PEAK INJECT_PROCS UDP_RCVBUF
 python - "$REPORT" <<PYEOF
 import json, sys, os
 report_path = sys.argv[1]
@@ -251,6 +260,7 @@ out = {
     "durationSec": int(os.environ["DURATION"]),
     "maxConnPerIp": int(os.environ["MAX_PER_IP"]),
     "injectProcs": int(os.environ["INJECT_PROCS"]),
+    "udpReceiveBufferBytes": int(os.environ.get("UDP_RCVBUF") or 0),
     "onlineDrones": int(os.environ["ONLINE"]),
     "backendStartSec": int(os.environ["READY"]),
     "probe": probe,
