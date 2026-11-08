@@ -279,6 +279,18 @@ class UdpGatewaySigningMetricsTest {
         assertThat(counterValue("aerofleet.signing.verified"))
                 .as("通过的帧必须落在 Prometheus 上，否则「签名在工作」只能靠翻日志证明")
                 .isEqualTo(1.0);
+
+        // 死指标回归：recordMessageReceived/Decoded 此前全仓零调用，指标虽已注册却恒为 0，
+        // 导致容量基线无法判断摄入侧是否丢帧。这里断言它们在真实 UDP 路径上真的涨了。
+        assertThat(counterValue("aerofleet.messages.decoded"))
+                .as("成功解析成 MavlinkFrame 的帧必须计入 decoded")
+                .isEqualTo(1.0);
+        var received = registry.find("aerofleet.messages.received")
+                .tag("msgId", String.valueOf(Heartbeat.ID)).counter();
+        assertThat(received)
+                .as("received 按 msgId 标签计数，Heartbeat 必须落在 msgId=%s", Heartbeat.ID)
+                .isNotNull();
+        assertThat(received.count()).isEqualTo(1.0);
     }
 
     @Test
@@ -291,6 +303,16 @@ class UdpGatewaySigningMetricsTest {
         assertThat(counterValue("aerofleet.signing.verified"))
                 .as("被拒的帧不该同时被计为 verified")
                 .isZero();
+
+        // 接入侧计数看「是否到达且解析成功」，不看「是否被策略放行」：
+        // 被验签拒绝的帧同样是已收到的帧，抹掉它就无法与注入量对账。
+        assertThat(counterValue("aerofleet.messages.decoded"))
+                .as("策略丢弃不得抹掉接入侧计数")
+                .isEqualTo(1.0);
+        var received = registry.find("aerofleet.messages.received")
+                .tag("msgId", String.valueOf(Heartbeat.ID)).counter();
+        assertThat(received).as("被拒帧仍应计入 received").isNotNull();
+        assertThat(received.count()).isEqualTo(1.0);
     }
 
     @Test
