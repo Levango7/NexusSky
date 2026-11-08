@@ -1,11 +1,11 @@
 {
-  "label": "d255-hz10-c10-ip10",
-  "drones": 255,
-  "hz": 10,
+  "label": "d254-hz50-c10-ip10",
+  "drones": 254,
+  "hz": 50,
   "clients": 10,
   "durationSec": 60,
   "maxConnPerIp": 10,
-  "onlineDrones": 255,
+  "onlineDrones": 254,
   "backendStartSec": 13,
   "probe": {
     "clients": 10,
@@ -15,86 +15,86 @@
     "perClient": [
       {
         "index": 1,
-        "messages": 139952,
-        "latencySamples": 139944,
+        "messages": 163853,
+        "latencySamples": 163846,
         "parseFailures": 0
       },
       {
         "index": 2,
-        "messages": 139893,
-        "latencySamples": 139885,
+        "messages": 163703,
+        "latencySamples": 163696,
         "parseFailures": 0
       },
       {
         "index": 3,
-        "messages": 139770,
-        "latencySamples": 139762,
+        "messages": 163627,
+        "latencySamples": 163620,
         "parseFailures": 0
       },
       {
         "index": 4,
-        "messages": 139704,
-        "latencySamples": 139696,
+        "messages": 163535,
+        "latencySamples": 163528,
         "parseFailures": 0
       },
       {
         "index": 5,
-        "messages": 139625,
-        "latencySamples": 139617,
+        "messages": 163470,
+        "latencySamples": 163463,
         "parseFailures": 0
       },
       {
         "index": 6,
-        "messages": 139561,
-        "latencySamples": 139553,
+        "messages": 163418,
+        "latencySamples": 163411,
         "parseFailures": 0
       },
       {
         "index": 7,
-        "messages": 139462,
-        "latencySamples": 139454,
+        "messages": 163322,
+        "latencySamples": 163315,
         "parseFailures": 0
       },
       {
         "index": 8,
-        "messages": 139379,
-        "latencySamples": 139371,
+        "messages": 163253,
+        "latencySamples": 163246,
         "parseFailures": 0
       },
       {
         "index": 9,
-        "messages": 139317,
-        "latencySamples": 139309,
+        "messages": 163127,
+        "latencySamples": 163120,
         "parseFailures": 0
       },
       {
         "index": 10,
-        "messages": 139250,
-        "latencySamples": 139242,
+        "messages": 163075,
+        "latencySamples": 163068,
         "parseFailures": 0
       }
     ],
     "activeClients": 10,
     "rejectedByServer": 0,
-    "totalMessages": 1395913,
+    "totalMessages": 1634383,
     "parseFailures": 0,
     "latencyCoverage": 1.0,
     "latencyMs": {
-      "count": 1395833,
-      "p50": 2,
-      "p95": 51,
-      "p99": 107,
-      "max": 144,
-      "mean": 11.15
+      "count": 1634313,
+      "p50": 1186,
+      "p95": 1482,
+      "p99": 1782,
+      "max": 2030,
+      "mean": 1155.83
     }
   },
   "metrics": {
     "wsSessions": 0.0,
     "queueDepth": 0.0,
-    "droppedTotal": 0.0,
+    "droppedTotal": 33603.0,
     "wsSessionsPeak": 10.0,
-    "queueDepthPeak": 123.0,
-    "dronesOnline": 255.0,
+    "queueDepthPeak": 4096.0,
+    "dronesOnline": 254.0,
     "messagesDecoded": 0.0
   }
 }

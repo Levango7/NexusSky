@@ -22,6 +22,8 @@
 #   --duration S     测量时长（秒）
 #   --max-per-ip M   覆盖 aerofleet.ws.max-connections-per-ip（默认沿用产品值 10，
 #                    以便测出客户真实会遇到的连接上限；测平台容量上限时才调大）
+#   --inject-procs P 注入进程数（默认 1）。单线程在 254 架时只能到约 10 Hz/架，
+#                    要压更高帧率必须多进程各管一段 sysid，否则测的是注入器上限
 #   --port P         HTTP/WS 端口（默认 18190）
 #   --udp-port U     MAVLink UDP 端口（默认 14560）
 #   --out DIR        报告目录（默认 docs/capacity）
@@ -35,6 +37,7 @@ HZ=10
 CLIENTS=10
 DURATION=60
 MAX_PER_IP=10
+INJECT_PROCS=1
 PORT=18190
 UDP_PORT=14560
 OUT_DIR=docs/capacity
@@ -46,6 +49,7 @@ while [[ $# -gt 0 ]]; do
         --clients)    CLIENTS="$2"; shift 2 ;;
         --duration)   DURATION="$2"; shift 2 ;;
         --max-per-ip) MAX_PER_IP="$2"; shift 2 ;;
+        --inject-procs) INJECT_PROCS="$2"; shift 2 ;;
         --port)       PORT="$2"; shift 2 ;;
         --udp-port)   UDP_PORT="$2"; shift 2 ;;
         --out)        OUT_DIR="$2"; shift 2 ;;
@@ -82,11 +86,11 @@ SIM_JAR="$(ls -1 drone-sim/target/*-shaded.jar 2>/dev/null | head -1)"
 [[ -n "$SIM_JAR" ]] || { fail "drone-sim shaded jar 不存在，先跑: mvn -o -q -pl drone-sim -am -DskipTests package"; exit 1; }
 
 BACKEND_PID=""
-INJECT_PID=""
+INJECT_PIDS=()
 PEAK_PID=""
 
 cleanup() {
-    for pid in "$PEAK_PID" "$INJECT_PID" "$BACKEND_PID"; do
+    for pid in "$PEAK_PID" "${INJECT_PIDS[@]}" "$BACKEND_PID"; do
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
             kill -9 "$pid" 2>/dev/null || true
         fi
@@ -133,12 +137,26 @@ info "后端就绪（${READY}s）"
 
 # ---- 2. 起注入器 ----
 # 时长比测量多 30s：探针要跑满 duration，注入器必须一直有帧
-info "注入负载：$DRONES 架 × $HZ Hz → 127.0.0.1:$UDP_PORT"
-"$JAVA" -jar "$SIM_JAR" fleetload inject \
-    --drones "$DRONES" --hz "$HZ" \
-    --target "127.0.0.1:$UDP_PORT" --duration "$((DURATION + 30))" \
-    > "$WORK/inject-$STAMP.log" 2>&1 &
-INJECT_PID=$!
+#
+# 为什么可能要多进程：单线程注入每帧要 encode(CRC)+UDP send，实测约 0.35ms/帧。
+# 254 架跑一轮要 90ms+，因此单进程在 254 架时只能到约 10 Hz/架——
+# 设定 50Hz 也发不出去。此时探针测到的低速率是**注入器上限**，
+# 若不加区分就会被误读成服务端容量上限。用 --inject-procs 各管一段 sysid 分摊。
+info "注入负载：$DRONES 架 × $HZ Hz → 127.0.0.1:$UDP_PORT（$INJECT_PROCS 个进程）"
+BASE=$((DRONES / INJECT_PROCS))
+REM=$((DRONES % INJECT_PROCS))
+SYSID=1
+for ((p = 0; p < INJECT_PROCS; p++)); do
+    N=$BASE
+    if ((p < REM)); then N=$((BASE + 1)); fi
+    "$JAVA" -jar "$SIM_JAR" fleetload inject \
+        --drones "$N" --hz "$HZ" --sysid-start "$SYSID" \
+        --target "127.0.0.1:$UDP_PORT" --duration "$((DURATION + 30))" \
+        > "$WORK/inject-$STAMP-p$p.log" 2>&1 &
+    INJECT_PIDS+=($!)
+    info "  进程 $p: sysid $SYSID..$((SYSID + N - 1))（$N 架）"
+    SYSID=$((SYSID + N))
+done
 
 # ---- 3. 等设备在线 ----
 # TelemetryPusher 只推「在线」设备，而 online 由 HEARTBEAT 驱动（1Hz）。
@@ -207,7 +225,7 @@ M_DECODED="$(metric aerofleet_messages_decoded_total)"
 REPORT="$OUT_DIR/$STAMP-$LABEL.json"
 export LABEL DRONES HZ CLIENTS DURATION MAX_PER_IP ONLINE READY
 export M_SESSIONS M_DEPTH M_DROPPED M_ONLINE M_DECODED PROBE_RAW
-export M_DEPTH_PEAK M_SESS_PEAK
+export M_DEPTH_PEAK M_SESS_PEAK INJECT_PROCS
 python - "$REPORT" <<PYEOF
 import json, sys, os
 report_path = sys.argv[1]
@@ -232,6 +250,7 @@ out = {
     "clients": int(os.environ["CLIENTS"]),
     "durationSec": int(os.environ["DURATION"]),
     "maxConnPerIp": int(os.environ["MAX_PER_IP"]),
+    "injectProcs": int(os.environ["INJECT_PROCS"]),
     "onlineDrones": int(os.environ["ONLINE"]),
     "backendStartSec": int(os.environ["READY"]),
     "probe": probe,

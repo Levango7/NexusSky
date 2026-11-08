@@ -65,20 +65,25 @@ public final class FleetLoadMain {
             port = Integer.parseInt(target.substring(colon + 1));
         }
 
+        int sysidStart = intOpt(opts, "sysid-start", 1);
+
         FleetInjector injector = new FleetInjector(drones, hz, host, port,
-                durationSec > 0 ? durationSec * 1000L : 0);
+                durationSec > 0 ? durationSec * 1000L : 0, sysidStart);
         Runtime.getRuntime().addShutdownHook(new Thread(injector::stop));
 
-        System.out.printf("[inject] %d 架 × %d Hz → %s:%d（时长 %s）%n",
-                drones, hz, host, port, durationSec > 0 ? durationSec + "s" : "直到 Ctrl+C");
+        System.out.printf("[inject] %d 架（sysid %d..%d）× %d Hz → %s:%d（时长 %s）%n",
+                drones, sysidStart, sysidStart + drones - 1, hz, host, port,
+                durationSec > 0 ? durationSec + "s" : "直到 Ctrl+C");
 
         long start = System.currentTimeMillis();
         injector.run();
         long elapsed = System.currentTimeMillis() - start;
-        long sent = injector.framesSent();
-        double actualHz = elapsed > 0 ? sent * 1000.0 / elapsed / drones : 0;
-        System.out.printf("[inject] 结束：共发 %d 帧，实际 %.2f Hz/架（目标 %d Hz）%n",
-                sent, actualHz, hz);
+        // 用高频帧（TaskStatusMsg）算 Hz/架：framesSent 含 1Hz 心跳，
+        // 直接除会虚高，小机队时误差尤其明显。
+        long task = injector.taskSent();
+        double actualHz = elapsed > 0 ? task * 1000.0 / elapsed / drones : 0;
+        System.out.printf("[inject] 结束：高频帧 %d，实际 %.2f Hz/架（目标 %d Hz）；总帧 %d%n",
+                task, actualHz, hz, injector.framesSent());
     }
 
     private static void runProbe(Map<String, String> opts) throws Exception {
