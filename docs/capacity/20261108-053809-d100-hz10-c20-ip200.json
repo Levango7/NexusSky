@@ -1,0 +1,138 @@
+{
+  "label": "d100-hz10-c20-ip200",
+  "drones": 100,
+  "hz": 10,
+  "clients": 20,
+  "durationSec": 60,
+  "maxConnPerIp": 200,
+  "onlineDrones": 100,
+  "backendStartSec": 13,
+  "probe": {
+    "clients": 20,
+    "durationSec": 60.0,
+    "handshakeOk": 20,
+    "connectFailures": 0,
+    "perClient": [
+      {
+        "index": 1,
+        "messages": 56570,
+        "latencySamples": 56551
+      },
+      {
+        "index": 2,
+        "messages": 56531,
+        "latencySamples": 56512
+      },
+      {
+        "index": 3,
+        "messages": 56481,
+        "latencySamples": 56462
+      },
+      {
+        "index": 4,
+        "messages": 56468,
+        "latencySamples": 56449
+      },
+      {
+        "index": 5,
+        "messages": 56414,
+        "latencySamples": 56395
+      },
+      {
+        "index": 6,
+        "messages": 56367,
+        "latencySamples": 56348
+      },
+      {
+        "index": 7,
+        "messages": 56315,
+        "latencySamples": 56296
+      },
+      {
+        "index": 8,
+        "messages": 56193,
+        "latencySamples": 56174
+      },
+      {
+        "index": 9,
+        "messages": 56168,
+        "latencySamples": 56149
+      },
+      {
+        "index": 10,
+        "messages": 56115,
+        "latencySamples": 56096
+      },
+      {
+        "index": 11,
+        "messages": 56097,
+        "latencySamples": 56078
+      },
+      {
+        "index": 12,
+        "messages": 56060,
+        "latencySamples": 56041
+      },
+      {
+        "index": 13,
+        "messages": 56032,
+        "latencySamples": 56013
+      },
+      {
+        "index": 14,
+        "messages": 55986,
+        "latencySamples": 55967
+      },
+      {
+        "index": 15,
+        "messages": 55913,
+        "latencySamples": 55894
+      },
+      {
+        "index": 16,
+        "messages": 55872,
+        "latencySamples": 55853
+      },
+      {
+        "index": 17,
+        "messages": 55745,
+        "latencySamples": 55726
+      },
+      {
+        "index": 18,
+        "messages": 55700,
+        "latencySamples": 55681
+      },
+      {
+        "index": 19,
+        "messages": 55663,
+        "latencySamples": 55644
+      },
+      {
+        "index": 20,
+        "messages": 55604,
+        "latencySamples": 55585
+      }
+    ],
+    "activeClients": 20,
+    "rejectedByServer": 0,
+    "totalMessages": 1122294,
+    "latencyMs": {
+      "count": 1121914,
+      "p50": 14,
+      "p95": 45,
+      "p99": 104,
+      "max": 166,
+      "mean": 18.18
+    }
+  },
+  "metrics": {
+    "wsSessions": 0.0,
+    "queueDepth": 0.0,
+    "droppedTotal": 0.0,
+    "wsSessionsPeak": 20.0,
+    "queueDepthPeak": 51.0,
+    "dronesOnline": 100.0,
+    "messagesDecoded": 0.0
+  }
+}

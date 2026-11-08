@@ -1,0 +1,86 @@
+{
+  "label": "d100-hz10-c10-ip10",
+  "drones": 100,
+  "hz": 10,
+  "clients": 10,
+  "durationSec": 60,
+  "maxConnPerIp": 10,
+  "onlineDrones": 100,
+  "backendStartSec": 8,
+  "probe": {
+    "clients": 10,
+    "durationSec": 60.0,
+    "handshakeOk": 10,
+    "connectFailures": 0,
+    "perClient": [
+      {
+        "index": 1,
+        "messages": 55815,
+        "latencySamples": 55800
+      },
+      {
+        "index": 2,
+        "messages": 55767,
+        "latencySamples": 55752
+      },
+      {
+        "index": 3,
+        "messages": 55746,
+        "latencySamples": 55731
+      },
+      {
+        "index": 4,
+        "messages": 55728,
+        "latencySamples": 55713
+      },
+      {
+        "index": 5,
+        "messages": 55661,
+        "latencySamples": 55646
+      },
+      {
+        "index": 6,
+        "messages": 55646,
+        "latencySamples": 55631
+      },
+      {
+        "index": 7,
+        "messages": 55632,
+        "latencySamples": 55617
+      },
+      {
+        "index": 8,
+        "messages": 55615,
+        "latencySamples": 55600
+      },
+      {
+        "index": 9,
+        "messages": 55610,
+        "latencySamples": 55595
+      },
+      {
+        "index": 10,
+        "messages": 55578,
+        "latencySamples": 55563
+      }
+    ],
+    "activeClients": 10,
+    "rejectedByServer": 0,
+    "totalMessages": 556798,
+    "latencyMs": {
+      "count": 556648,
+      "p50": 0,
+      "p95": 1,
+      "p99": 2,
+      "max": 68,
+      "mean": 0.47
+    }
+  },
+  "metrics": {
+    "wsSessions": null,
+    "queueDepth": null,
+    "droppedTotal": null,
+    "dronesOnline": 100.0,
+    "messagesDecoded": 0.0
+  }
+}
