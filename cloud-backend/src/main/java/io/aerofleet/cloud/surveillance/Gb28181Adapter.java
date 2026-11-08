@@ -15,8 +15,10 @@ import java.util.function.Consumer;
  * <p>
  * 与 UniviewAdapter（私有 SDK 无法落地，5 处搁置）的口径不同：GB28181 的
  * **国标形状层是真实现**——编码校验、PTZ 指令码、SIP 信令构造、Catalog 解析
- * 全部按国标落地（纯函数可逐字节断言）。**SIP 传输与 RTP/PS 媒体面属生产阶段**：
- * getStreamUrl 返回描述性 INVITE 标识并 WARN，不返回假的可播 RTSP 地址。
+ * 全部按国标落地（纯函数可逐字节断言）。**SIP-over-UDP 传输层已实现**
+ * （{@link Gb28181SipTransport}，与设备模拟器 8 例真回环测试），**本适配器尚未接线、
+ * RTP/PS 媒体面属生产阶段**：getStreamUrl 返回描述性 INVITE 标识并 WARN，
+ * 不返回假的可播 RTSP 地址。
  */
 @Component
 public class Gb28181Adapter implements VendorAdapter {
@@ -126,7 +128,8 @@ public class Gb28181Adapter implements VendorAdapter {
     }
 
     /**
-     * 国标报警订阅：**只构造 SUBSCRIBE 形状，SIP 传输未实现**，回调不会触发。
+     * 国标报警订阅：**只构造 SUBSCRIBE 形状，未接线到 SIP 传输层**
+     * （{@link Gb28181SipTransport} 已实现并有回环测试），回调不会触发。
      *
      * <p>因此 {@link #supportsEventSubscription()} 返回 {@code false}——REST 的
      * SSE 端点在建立流之前就回 501，而不是先回 200 再挂一条永远没有事件的流。
@@ -145,7 +148,7 @@ public class Gb28181Adapter implements VendorAdapter {
         Gb28181SipMessage sub = signaling.subscribeAlarm(id, 3600, 1);
         String handle = "gb28181-sub-" + id.value();
         log.warn("GB28181 alarm subscribe for {} — SUBSCRIBE constructed ({} bytes), "
-                        + "SIP transport is production-stage; callback will not fire in PoC",
+                        + "adapter not wired to Gb28181SipTransport yet; callback will not fire in PoC",
                 id.value(), sub.bodyBytes());
         return handle;
     }
