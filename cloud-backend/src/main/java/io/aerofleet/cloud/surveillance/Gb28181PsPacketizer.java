@@ -44,6 +44,14 @@ public final class Gb28181PsPacketizer {
     public static final int STREAM_ID_VIDEO = 0xE0;
     /** 音频基本流 ID（GB 附录 C.1：音频流 ID = 0xC0）。 */
     public static final int STREAM_ID_AUDIO = 0xC0;
+    /** ISO 13818-1 §2.5.3.5：音频基本流 ID 下界（0xC0）。 */
+    public static final int STREAM_ID_AUDIO_MIN = 0xC0;
+    /** ISO 13818-1 §2.5.3.5：音频基本流 ID 上界（0xDF，含）。 */
+    public static final int STREAM_ID_AUDIO_MAX = 0xDF;
+    /** ISO 13818-1 §2.5.3.5：视频基本流 ID 下界（0xE0）。 */
+    public static final int STREAM_ID_VIDEO_MIN = 0xE0;
+    /** ISO 13818-1 §2.5.3.5：视频基本流 ID 上界（0xEF，含）。 */
+    public static final int STREAM_ID_VIDEO_MAX = 0xEF;
 
     /** PSM stream_type：H.264（GB 附录 C.1 b）。 */
     public static final int STREAM_TYPE_H264 = 0x1B;
@@ -187,8 +195,16 @@ public final class Gb28181PsPacketizer {
             }
         }
         // audio_bound(1 byte) + video_bound(1 byte) + packet_rate_restriction(1) + reserved(7)
-        int audioBound = (int) ids.stream().filter(i -> i >= STREAM_ID_AUDIO).count();
-        int videoBound = (int) ids.stream().filter(i -> i == STREAM_ID_VIDEO).count();
+        // ISO 13818-1 §2.5.3.5：audio_bound = 音频流数（0xC0..0xDF），
+        // video_bound = 视频流数（0xE0..0xEF）。
+        // **这里曾写成 `i >= STREAM_ID_AUDIO`**：0xE0 >= 0xC0 也成立，
+        // 于是"只有视频流"的 PS 包会把 audio_bound 报成 1（应为 0），
+        // video_bound 同时漏掉不认识的 0xE1..。已知答案测试
+        // systemHeaderVideoOnly / systemHeaderVideoAudioDedup 当场抓出。
+        int audioBound = (int) ids.stream()
+                .filter(i -> i >= STREAM_ID_AUDIO_MIN && i <= STREAM_ID_AUDIO_MAX).count();
+        int videoBound = (int) ids.stream()
+                .filter(i -> i >= STREAM_ID_VIDEO_MIN && i <= STREAM_ID_VIDEO_MAX).count();
         // audio_bound(1) + flags/video_bound(1) + packet_rate_restriction(1) = 3 字节内容头，
         // 之后每个流 3 字节（stream_id + 2 字节 STD_buffer_size_scale）。
         // start code(4) + length(2) + 内容 ⇒ body = 6 + 3 + 3*n
@@ -254,10 +270,12 @@ public final class Gb28181PsPacketizer {
             b[off++] = 0x00;                              // ES_info_length 低 8 位
         }
         // CRC_32：本类填 0（ISO 13818-1 要求存在但国标实时点播不解码它；
-        // 详见 Gb28181PsDemuxer 的对应注释——**填 0 而不是假装算对**）
-        for (int i = body - 4; i < body; i++) {
-            b[i] = 0x00;
-        }
+        // 详见 Gb28181PsDemuxer 的对应注释——**填 0 而不是假装算对**）。
+        //
+        // **这里曾有一个显式填零循环**（`for (i = body-4; i < body; i++) b[i] = 0x00;`），
+        // 2026-11-08 删除：Java 的 `new byte[]` 本就零初始化，循环体写 0 与不写同果，
+        // PIT 把循环条件/起点改坏后行为依然不变（等价变异体）。与其留一段空转代码
+        // 假装"处理了 CRC"，不如让上面这条注释单独承担意图。
         return b;
     }
 

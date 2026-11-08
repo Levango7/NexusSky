@@ -134,6 +134,7 @@ public final class Gb28181MediaSession implements Closeable {
         if (rtp.marker()) {
             // 记"该帧已发完"（乱序时它可能第一个到；数据包后到时由 tryBuildFrame 补齐）
             pendingMarkerTs.put(frameKey(rtp.ssrc(), rtp.timestamp()), rtp.timestamp());
+            pendingMarkerSeq.put(frameKey(rtp.ssrc(), rtp.timestamp()), rtp.sequenceNumber());
         }
         // 每个包到达都尝试组帧——pendingMarkerTs 守卫保证"没见过 marker 就不组"，
         // 所以这里不会把半帧当好帧交上去；只有在 marker 先到、数据包后到的乱序
@@ -148,6 +149,15 @@ public final class Gb28181MediaSession implements Closeable {
      * 这样既不会早组帧（1 片也是合法 PS），又不会漏组（反序时数据包后到）。
      */
     private final Map<Long, Long> pendingMarkerTs = new ConcurrentHashMap<>();
+    /**
+     * 同上，但记的是 **marker 包的序号**（= 该帧最后一个包的序号）。
+     *
+     * <p>为什么不能只按序号数值排序：16 位序号在 {@code 0xFFFF → 0x0000} 处回绕，
+     * 跨回绕的那一帧若按数值排，{@code 0x0000} 会被排到最前面 ⇒ 拼出来的 PS 字节
+     * 顺序错乱 ⇒ 解复用失败 ⇒ <b>整帧静默丢失</b>。长流上序号必然回绕，
+     * 只是"一帧恰好横跨回绕点"概率低——低不等于不会。
+     */
+    private final Map<Long, Integer> pendingMarkerSeq = new ConcurrentHashMap<>();
 
     /** 尝试组帧；未见过 marker 或帧不完整都不组（宁可丢帧，不交半帧）。 */
     private void tryBuildFrame(long ts, long ssrc) {
@@ -165,6 +175,17 @@ public final class Gb28181MediaSession implements Closeable {
         if (ordered.isEmpty()) {
             return;
         }
+        // **回绕安全排序**：以 marker 序号为锚，按 `(anchor - seq) mod 2^16` 降序排。
+        // 正常帧（10,11,12，锚 12）⇒ (12-10)=2, (12-11)=1, (12-12)=0 ⇒ 10,11,12；
+        // 跨回绕帧（65534,65535,0，锚 0）⇒ 2,1,0 ⇒ 65534,65535,0。
+        // 旧的"按序号数值升序"在后一种情况下把 0 排到最前，字节错序、整帧丢失。
+        Integer anchor = pendingMarkerSeq.get(frameKey(ssrc, ts));
+        if (anchor != null) {
+            int a = anchor;
+            ordered.sort((x, y) -> Integer.compare(
+                    (a - y.sequenceNumber()) & 0xFFFF,
+                    (a - x.sequenceNumber()) & 0xFFFF));
+        }
         byte[] ps = assemble(ordered);
         Gb28181PsDemuxer.PsPack pack;
         try {
@@ -175,9 +196,21 @@ public final class Gb28181MediaSession implements Closeable {
         }
         ordered.forEach(p -> bySeq.remove(key(p.ssrc(), p.sequenceNumber())));
         pendingMarkerTs.remove(frameKey(ssrc, ts));
+        pendingMarkerSeq.remove(frameKey(ssrc, ts));
         frames.add(new Gb28181MediaFrame(ssrc, ts, ordered.size(), ps));
         framesBuilt.incrementAndGet();
-        frameObservers.forEach(c -> c.accept(frames.get(frames.size() - 1)));
+        // **观察者异常必须在此就地吞掉**：否则它会冒泡出 onRtp，被 receiveLoop 的
+        // `catch (RuntimeException)` 记成"无法解码的包"——上层的一个业务 bug 会被
+        // 误报成媒体面收包故障，排障时完全指错方向（#263 收尾、变异门禁新增覆盖时
+        // 逼出来）。帧本身已入列，丢的只是一个观察者的通知。
+        frameObservers.forEach(c -> {
+            try {
+                c.accept(frames.get(frames.size() - 1));
+            } catch (RuntimeException e) {
+                log.warn("gb28181 media frame observer failed (frame ts={} still queued)",
+                        ts, e);
+            }
+        });
     }
 
     private static long frameKey(long ssrc, long ts) {
