@@ -1,5 +1,61 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 海康 iSecure Center OpenAPI 契约层：AK/SK 签名 + 已知答案测试（+18 例）
+
+### 依据（公开文档 + 官方 SDK 行为）
+
+海康开放平台公开文档（综合安防管理平台 iSecure Center OpenAPI）+ 官方 SDK 行为，
+逐条落实：
+
+- 接口形如 `https://{host}:{port}/artemis/{uri}`，仅 HTTPS，**artemis 前缀必带**；
+- 鉴权为 **AK/SK 摘要签名**：请求头 `x-ca-key` / `x-ca-nonce` / `x-ca-timestamp` /
+  `x-ca-signature-headers` / `x-ca-signature`；
+- 签名字符串（**顺序即契约**）：`METHOD\nAccept\nContent-Type\n 自定义头(小写名排序)\n
+  带 artemis 前缀的路径`；`X-Ca-Signature = Base64(HmacSHA256(appSecret, 串))`；
+- **token 也必须经签名请求获取**（`POST /artemis/oauth/token`）——不是匿名端点；
+- 响应统一 `{"code":"0","msg":"success","data":...}`，**code 是字符串 "0" 才算成功**
+  （不是 HTTP 200 就是成功）。
+
+海康开放平台另提供官方 **OpenAPI 接口测试工具**（下载中心），签名算法公开且确定性
+⇒ 契约层零硬件可对接；真机取流属互操作层。
+
+### 交付
+
+`HikvisionIscAuth`（AK/SK 签名器 + token 态：2h TTL 扣 1min 安全余量）
++ `HikvisionIscClient`（签名请求、token 获取与缓存、业务 POST、
+`previewUrl()` 按文档取 rtsp/hls 地址、平台语义失败与链路失败分开报）。
+
+**边界（不假装）**：只覆盖**鉴权 + 通用 POST + 预览 URL 契约**；未接业务接口全表
+（设备目录/云台/告警订阅）；未校验服务端证书链（ISC 常自签名）；**未接真实平台**
+（需 app_key/app_secret 与平台地址）；### 测试 +18 例 + A/B 五项
+
+`HikvisionIscClientContractTest`（JDK HttpServer 假平台，18 例）：
+**已知答案签名** / 签名字符串顺序 / 头名大小写不影响签名 / artemis 前缀参与签名 /
+换 secret 换签名 / Content-Type 参数不参与签名 / token 经签名请求且带五头 /
+token 过期扣余量 / token 缓存 / 业务请求带 access_token / code≠"0" 语义失败 /
+auth 类失败重取重试 / token 字段缺失响亮失败 / 预览返回 data.url / 预览缺 url 响亮失败 /
+cameraIndexCode 空白拒绝 / 构造 null 立即 NPE / baseUri 尾斜杠归一。
+
+**其中「已知答案签名」是关键**：期望值由**独立 Python hmac 实现**算出
+（`hmac.digest(secret, signedString, sha256)` 后 Base64），与 Java 实现无关。
+没有它，A/B 实测显示「改错拼接顺序」「把 HmacSHA256 换成 SHA1」都**0 红**——
+那类自证测试（只验"换个输入签名会变"）挡不住算法/顺序错。
+
+**A/B 五项全部转红**（还原 ⇒ 全绿）：
+
+| 破坏 | 转红 |
+|---|---|
+| 签名字符串段序对调（少一个换行） | 2 例 |
+| HmacSHA256 → HmacSHA1 | 2 例 |
+| 自定义头名不再小写化 | 2 例 |
+| 签名字符串丢掉 artemis 前缀 | 3 例 |
+| 平台 code 检查关掉（HTTP 200 当成功） | 3 例 |
+
+### P5 分级表同步
+
+`docs/real-integration-program.md` P5.3 表中「海康 iSecure Center OpenAPI」由
+⏳ 未开工改为 ✅ 已交付（契约层）。
+
 ## [Unreleased] — 文档口径回填：GB28181 SIP 传输 / 机巢 MQTT 已落地，6 处旧表述仍与代码相反（仅文档·注释·日志文案）
 
 ### 背景
@@ -2453,7 +2509,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-08 共有 289 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-08 共有 290 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -2480,7 +2536,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 289 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 290 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
