@@ -34,6 +34,8 @@ final class FleetInjector {
 
     /** 单帧 payload 上限（MAVLink v2）。 */
     private static final int MAX_PAYLOAD = 255;
+    /** MAVLink systemId 上界：字段是 uint8，可用范围 1..255（0 留给 GCS）。 */
+    private static final int MAX_SYSID = 255;
 
     private final int droneCount;
     private final int hz;
@@ -57,6 +59,16 @@ final class FleetInjector {
             // 那样压的就不是平台容量而是限速器——直接拒绝，避免测出一个假上限。
             throw new IllegalArgumentException(
                     "--hz 不得超过 100（后端 max-frame-rate-per-sysid 默认 100，超限会被限速桶丢弃）");
+        }
+        if (droneCount > MAX_SYSID) {
+            // MAVLink 的 systemId 是 uint8（1..255），编码时 buf[5] = (byte) systemId。
+            // 超过 255 会被静默截断：500 架实际只映射到 256 个 sysid，
+            // 多架共用同一 ID，测出来的是「256 架 + 大量串号」而不是 500 架。
+            // 这种数据比没有数据更糟——它看起来像一次成功的 500 架测量。
+            throw new IllegalArgumentException(
+                    "--drones 不得超过 " + MAX_SYSID
+                            + "（MAVLink systemId 是 uint8，超出会被静默截断成重复 ID；"
+                            + "要压更大机队需多链路/多 componentId，本工具未实现）");
         }
         this.droneCount = droneCount;
         this.hz = hz;

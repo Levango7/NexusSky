@@ -1,0 +1,100 @@
+{
+  "label": "d255-hz10-c10-ip10",
+  "drones": 255,
+  "hz": 10,
+  "clients": 10,
+  "durationSec": 60,
+  "maxConnPerIp": 10,
+  "onlineDrones": 255,
+  "backendStartSec": 13,
+  "probe": {
+    "clients": 10,
+    "durationSec": 60.0,
+    "handshakeOk": 10,
+    "connectFailures": 0,
+    "perClient": [
+      {
+        "index": 1,
+        "messages": 139952,
+        "latencySamples": 139944,
+        "parseFailures": 0
+      },
+      {
+        "index": 2,
+        "messages": 139893,
+        "latencySamples": 139885,
+        "parseFailures": 0
+      },
+      {
+        "index": 3,
+        "messages": 139770,
+        "latencySamples": 139762,
+        "parseFailures": 0
+      },
+      {
+        "index": 4,
+        "messages": 139704,
+        "latencySamples": 139696,
+        "parseFailures": 0
+      },
+      {
+        "index": 5,
+        "messages": 139625,
+        "latencySamples": 139617,
+        "parseFailures": 0
+      },
+      {
+        "index": 6,
+        "messages": 139561,
+        "latencySamples": 139553,
+        "parseFailures": 0
+      },
+      {
+        "index": 7,
+        "messages": 139462,
+        "latencySamples": 139454,
+        "parseFailures": 0
+      },
+      {
+        "index": 8,
+        "messages": 139379,
+        "latencySamples": 139371,
+        "parseFailures": 0
+      },
+      {
+        "index": 9,
+        "messages": 139317,
+        "latencySamples": 139309,
+        "parseFailures": 0
+      },
+      {
+        "index": 10,
+        "messages": 139250,
+        "latencySamples": 139242,
+        "parseFailures": 0
+      }
+    ],
+    "activeClients": 10,
+    "rejectedByServer": 0,
+    "totalMessages": 1395913,
+    "parseFailures": 0,
+    "latencyCoverage": 1.0,
+    "latencyMs": {
+      "count": 1395833,
+      "p50": 2,
+      "p95": 51,
+      "p99": 107,
+      "max": 144,
+      "mean": 11.15
+    }
+  },
+  "metrics": {
+    "wsSessions": 0.0,
+    "queueDepth": 0.0,
+    "droppedTotal": 0.0,
+    "wsSessionsPeak": 10.0,
+    "queueDepthPeak": 123.0,
+    "dronesOnline": 255.0,
+    "messagesDecoded": 0.0
+  }
+}
