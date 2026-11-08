@@ -103,11 +103,6 @@
       "reason": "WebSocket 连接关闭时可能抛异常（连接已断、超时等），但前序测量样本已记录完毕，关闭失败不应掩盖已有结果"
     },
     {
-      "file": "drone-sim/src/main/java/io/aerofleet/sim/WsProbe.java",
-      "comment": "解析失败不中断测量：帧格式问题应由契约测试发现，不是压测的职责",
-      "reason": "压测探针只负责收帧、记时延，帧格式错误属契约层验收范畴，不应中断高并发采样循环"
-    },
-    {
       "file": "cloud-backend/src/main/java/io/aerofleet/cloud/surveillance/Gb28181DeviceSimulator.java",
       "comment": "无请求：继续等",
       "reason": "设备替身的 SO_TIMEOUT 是空转间隔（无请求时本来就没有事可做）；与生产服务监听 accept 的空转同性质，日志只会掩盖真实的收发异常"

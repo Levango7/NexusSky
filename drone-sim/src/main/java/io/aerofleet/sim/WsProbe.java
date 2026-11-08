@@ -105,6 +105,7 @@ final class WsProbe {
         long totalMessages = 0;
         int activeClients = 0;
         int rejectedByServer = 0;
+        int totalParseFailures = 0;
         ArrayNode perClient = root.putArray("perClient");
         for (int i = 0; i < listeners.size(); i++) {
             Listener l = listeners.get(i);
@@ -121,7 +122,9 @@ final class WsProbe {
             }
             c.put("messages", l.messages);
             c.put("latencySamples", samples.length);
+            c.put("parseFailures", l.parseFailures);
             totalMessages += l.messages;
+            totalParseFailures += l.parseFailures;
             for (long v : samples) {
                 all.add(v);
             }
@@ -129,6 +132,11 @@ final class WsProbe {
         root.put("activeClients", activeClients);
         root.put("rejectedByServer", rejectedByServer);
         root.put("totalMessages", totalMessages);
+        root.put("parseFailures", totalParseFailures);
+        // 时延样本数与帧数的比值。若显著小于 1，说明大量帧没有 timestamp 字段
+        // 或解析失败，此时 p50/p99 只代表一小撮样本，不能当作整体时延。
+        root.put("latencyCoverage",
+                totalMessages == 0 ? 0.0 : round((double) all.size() / totalMessages));
 
         if (!all.isEmpty()) {
             long[] arr = new long[all.size()];
@@ -166,6 +174,12 @@ final class WsProbe {
         private final StringBuilder buf = new StringBuilder();
         private final List<Long> latencies = new ArrayList<>();
         private int messages;
+        /**
+         * 解析失败帧数。必须计数而不是静默吞掉：若全部帧都解析失败，
+         * {@link #latencies} 会是空的，报告里 latencyMs 直接变 null——
+         * 「没有时延数据」和「时延为零」在报告上看起来一样，无法区分。
+         */
+        private int parseFailures;
         private String failure;
         private WebSocket ws;
 
@@ -222,8 +236,10 @@ final class WsProbe {
                         latencies.add(now - ts);
                     }
                 }
-            } catch (Exception ignored) {
-                // 解析失败不中断测量：帧格式问题应由契约测试发现，不是压测的职责
+            } catch (Exception e) {
+                // 单帧解析失败不中断测量（帧格式问题应由契约测试发现，不是压测的职责），
+                // 但必须计数：否则全量解析失败会伪装成「无时延样本」。
+                parseFailures++;
             }
         }
 
