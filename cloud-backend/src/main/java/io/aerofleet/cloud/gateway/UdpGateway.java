@@ -189,6 +189,16 @@ public class UdpGateway {
     @Value("${aerofleet.udp.max-critical-frame-rate-per-sysid:50}")
     private int maxCriticalFrameRatePerSysid = 50;
 
+    /**
+     * 内核 UDP 接收缓冲区字节数；{@code 0} 表示沿用 OS 默认值（不改变既有行为）。
+     * <p>
+     * 摄入侧是单线程串行收包，突发流量下内核缓冲溢出会**静默丢包**（无计数器）。
+     * 容量实测显示摄入量约 4,100 帧/s 即进入临界区，加大缓冲是最低成本缓解手段。
+     * 用字段注入而非构造参数，是为了不改构造签名——测试与既有调用点零影响。
+     */
+    @Value("${aerofleet.udp.receive-buffer-bytes:0}")
+    private int receiveBufferBytes;
+
     public UdpGateway(@Value("${aerofleet.udp-port:14550}") int udpPort,
                       @Value("${aerofleet.drone-host:127.0.0.1}") String droneHost,
                       @Value("${aerofleet.drone-port:14540}") int dronePort,
@@ -523,6 +533,21 @@ public class UdpGateway {
             } catch (IOException e) {
                 // route went dark: the heartbeat watchdog will age it out
             }
+        }
+    }
+
+    /**
+     * 应用 UDP 接收缓冲区配置。
+     * <p>
+     * 必须放在 {@code @PostConstruct}：{@code @Value} 字段注入发生在构造之后，
+     * 在构造函数里读 {@code receiveBufferBytes} 只会拿到默认值 0。
+     * <p>
+     * {@code receiveBufferBytes <= 0}（默认）时本方法不做任何事，行为与改动前完全一致。
+     */
+    @jakarta.annotation.PostConstruct
+    void applyUdpReceiveBuffer() {
+        if (receiveBufferBytes > 0) {
+            transport.setReceiveBufferSize(receiveBufferBytes);
         }
     }
 

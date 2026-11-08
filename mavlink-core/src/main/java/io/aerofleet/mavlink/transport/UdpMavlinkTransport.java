@@ -72,6 +72,52 @@ public class UdpMavlinkTransport implements AutoCloseable {
         sourceListeners.add(listener);
     }
 
+    /**
+     * 调整内核接收缓冲区大小。
+     * <p>
+     * <b>为什么需要</b>：本类的收包是**单线程串行**的（{@code receiveLoop}），
+     * 且监听器在收包线程内同步执行。当对端以突发方式发帧（一轮内连发 N 帧）时，
+     * 内核缓冲区若太小就会溢出丢包，而丢包在应用层**完全不可见**——
+     * 本类没有任何溢出计数器。容量实测显示摄入侧在约 4,100 帧/s 进入临界区，
+     * 加大缓冲区是最低成本、不改线程模型的缓解手段。
+     * <p>
+     * <b>默认不调用</b>：保持既有行为不变（JVM/OS 默认值）。只有显式配置才生效，
+     * 因此对现有调用点（{@code UdpGateway} / {@code VirtualDrone} / 硬件适配器 / 测试）零影响。
+     *
+     * @param bytes 期望字节数；{@code <= 0} 表示不做任何调整
+     * @return 实际生效值（OS 可能低于请求值，例如 Windows 有上限）
+     */
+    public int setReceiveBufferSize(int bytes) {
+        if (bytes <= 0) {
+            return currentReceiveBufferSize();
+        }
+        try {
+            socket.setReceiveBufferSize(bytes);
+            int actual = socket.getReceiveBufferSize();
+            if (actual < bytes) {
+                log.info("MAVLink UDP receive buffer: requested " + bytes + "B, actual " + actual
+                        + "B（OS 上限限制，请求值未完全生效）on port " + socket.getLocalPort());
+            } else {
+                log.info("MAVLink UDP receive buffer: " + actual + "B on port " + socket.getLocalPort());
+            }
+            return actual;
+        } catch (java.net.SocketException e) {
+            // 设不上不影响功能：只是回到「突发更容易丢包」的旧状态，必须记录但不能中断
+            int fallback = currentReceiveBufferSize();
+            log.log(Level.WARNING, "设置 UDP 接收缓冲区失败（保持 " + fallback + "B）", e);
+            return fallback;
+        }
+    }
+
+    /** 读当前内核缓冲区大小；读不到返回 -1（仅用于报告，不代表故障）。 */
+    private int currentReceiveBufferSize() {
+        try {
+            return socket.getReceiveBufferSize();
+        } catch (java.net.SocketException e) {
+            return -1;
+        }
+    }
+
     public void addFrameListener(Consumer<MavlinkFrame> listener) {
         frameListeners.add(listener);
     }
