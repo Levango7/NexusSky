@@ -240,6 +240,19 @@ public class UdpGateway {
     private void onFrame(MavlinkFrame frame, SocketAddress source) {
         int sysid = frame.getSystemId();
 
+        // 接入侧计数：必须放在所有策略丢弃分支之前。否则「收到多少帧」会被验签/白名单/
+        // 限速的丢弃量污染，无法与容量基线里的注入量对账（这正是此前无法区分
+        // 「注入器少发」与「UDP 摄入丢包」的原因）。
+        // 语义：能构造出 MavlinkFrame 就说明已完成解析，故 received 与 decoded 同步递增；
+        // 解析失败发生在 mavlink-core 的 MavlinkParser（crcErrors），根本不进本方法。
+        // DroneMetrics 是可选依赖（ObjectProvider 破环），未注入时整段跳过；
+        // metrics() 命中 volatile 缓存后每帧只是一次读，不额外查 Spring 容器。
+        DroneMetrics m = metrics();
+        if (m != null) {
+            m.recordMessageReceived(frame.getMessageId());
+            m.recordMessageDecoded();
+        }
+
         // 签名验证（签名启用时）
         if (isSigningEnabled() && !verifyFrame(frame)) {
             return; // 验证失败，丢弃帧

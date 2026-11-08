@@ -196,6 +196,14 @@ curl http://localhost:8080/actuator/prometheus
 > `aerofleet_ws_connections` **在代码里从未存在过**（前者实际叫 `aerofleet_messages_received_total`，
 > 后者直到 2026-11-07 才以 `aerofleet_ws_sessions` 落地），照抄会得到永远查不到数据的告警规则。
 
+> **2026-11-08 更正：「有注册点」不等于「有数据」**。`aerofleet_messages_received_total`
+> 对应的 `DroneMetrics.recordMessageReceived/Decoded` 此前**全仓零调用**，指标虽已注册却恒为 0，
+> 容量基线因此无法区分「注入器少发」与「UDP 摄入丢包」。现已在 `UdpGateway.onFrame` 入口接入
+> `received`（按 `msgId` 标签）与 `decoded`，位置在验签 / 白名单 / 限速等丢弃分支之前，
+> 故可与注入量直接对账；被策略丢弃的帧仍计入接入侧。
+> `aerofleet.messages.errors` **仍未接入**：解析失败由 mavlink-core 的 `MavlinkParser.crcErrors`
+> 在内存累计，跨模块未桥接到 Micrometer，**不要拿它写告警规则**（会恒为 0）。
+
 **建议告警规则**（扇出背压）：`rate(aerofleet_ws_fanout_dropped_total[5m]) > 0`
 ——非零即表示已有客户端跟不上，遥测开始丢最旧帧。处置顺序：先看
 `aerofleet_ws_sessions` 是否突增，再查是否有客户端连上不读。
