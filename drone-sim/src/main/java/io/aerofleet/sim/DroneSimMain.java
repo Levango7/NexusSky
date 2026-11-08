@@ -29,6 +29,13 @@ public final class DroneSimMain {
             return;
         }
 
+        // 容量基线工具：`fleetload inject|probe`（见 FleetLoadMain）。
+        // 同样最先分派——它不启动任何虚拟无人机，参数面与单机模式无关。
+        if (args.length > 0 && "fleetload".equals(args[0])) {
+            FleetLoadMain.main(args);
+            return;
+        }
+
         SimConfig config = SimConfig.parse(args);
 
         log.info("[sim] AeroFleet virtual drone simulator starting");

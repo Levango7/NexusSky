@@ -1,0 +1,146 @@
+{
+  "label": "d20-hz10-c20-ip10",
+  "drones": 20,
+  "hz": 10,
+  "clients": 20,
+  "durationSec": 40,
+  "maxConnPerIp": 10,
+  "onlineDrones": 20,
+  "backendStartSec": 9,
+  "probe": {
+    "clients": 20,
+    "durationSec": 40.0,
+    "handshakeOk": 20,
+    "connectFailures": 0,
+    "perClient": [
+      {
+        "index": 1,
+        "messages": 7531,
+        "latencySamples": 7500
+      },
+      {
+        "index": 2,
+        "messages": 7525,
+        "latencySamples": 7494
+      },
+      {
+        "index": 3,
+        "messages": 7525,
+        "latencySamples": 7494
+      },
+      {
+        "index": 4,
+        "messages": 7514,
+        "latencySamples": 7483
+      },
+      {
+        "index": 5,
+        "messages": 7514,
+        "latencySamples": 7483
+      },
+      {
+        "index": 6,
+        "messages": 7514,
+        "latencySamples": 7483
+      },
+      {
+        "index": 7,
+        "messages": 7511,
+        "latencySamples": 7480
+      },
+      {
+        "index": 8,
+        "messages": 7511,
+        "latencySamples": 7480
+      },
+      {
+        "index": 9,
+        "messages": 7505,
+        "latencySamples": 7474
+      },
+      {
+        "index": 10,
+        "messages": 7505,
+        "latencySamples": 7474
+      },
+      {
+        "index": 11,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      },
+      {
+        "index": 12,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      },
+      {
+        "index": 13,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      },
+      {
+        "index": 14,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      },
+      {
+        "index": 15,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      },
+      {
+        "index": 16,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      },
+      {
+        "index": 17,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      },
+      {
+        "index": 18,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      },
+      {
+        "index": 19,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      },
+      {
+        "index": 20,
+        "error": "closed with status 1008",
+        "messages": 0,
+        "latencySamples": 0
+      }
+    ],
+    "activeClients": 10,
+    "rejectedByServer": 10,
+    "totalMessages": 75155,
+    "latencyMs": {
+      "count": 74845,
+      "p50": 0,
+      "p95": 1,
+      "p99": 2,
+      "max": 18,
+      "mean": 0.47
+    }
+  },
+  "metrics": {
+    "wsSessions": null,
+    "queueDepth": null,
+    "droppedTotal": null,
+    "dronesOnline": 20.0,
+    "messagesDecoded": 0.0
+  }
+}
