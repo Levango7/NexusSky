@@ -56,6 +56,10 @@ class Insta360OscClientContractTest {
     private volatile boolean giveFileGroup = true;
     /** true ⇒ done 响应完全不带 results 节点（用于验证 fileUrls()/fileUrl() 的空分支）。 */
     private volatile boolean doneWithoutResults;
+    /** 非空 ⇒ camera.delete 回这些 fileUrls（用于验证透传，不是一律空列表）。 */
+    private volatile List<String> deleteReturnsUrls = List.of();
+    /** 非空 ⇒ done 响应的 results.fileUrls 用这些（用于验证 fileUrls() 透传）。 */
+    private volatile List<String> doneWithFileUrls = List.of();
 
     @BeforeEach
     void boot() throws Exception {
@@ -150,8 +154,16 @@ class Insta360OscClientContractTest {
             return;
         }
         if ("camera.delete".equals(name)) {
-            respond(ex, 200, "{\"name\":\"camera.delete\",\"state\":\"done\","
-                    + "\"results\":{\"fileUrls\":[]}}");
+            StringBuilder sb = new StringBuilder("{\"name\":\"camera.delete\","
+                    + "\"state\":\"done\",\"results\":{\"fileUrls\":[");
+            for (int i = 0; i < deleteReturnsUrls.size(); i++) {
+                if (i > 0) {
+                    sb.append(',');
+                }
+                sb.append('"').append(deleteReturnsUrls.get(i)).append('"');
+            }
+            sb.append("]}}");
+            respond(ex, 200, sb.toString());
             return;
         }
         respond(ex, 200, "{\"name\":\"" + name + "\",\"state\":\"error\","
@@ -181,6 +193,16 @@ class Insta360OscClientContractTest {
         if (giveFileGroup) {
             sb.append("\"_fileGroup\":[\"http://192.168.42.1:80/VENDOR/wrong.jpg\"],");
             sb.append("\"_localFileGroup\":[\"/VENDOR/wrong.jpg\"],");
+        }
+        if (!doneWithFileUrls.isEmpty()) {
+            sb.append("\"fileUrls\":[");
+            for (int i = 0; i < doneWithFileUrls.size(); i++) {
+                if (i > 0) {
+                    sb.append(',');
+                }
+                sb.append('"').append(doneWithFileUrls.get(i)).append('"');
+            }
+            sb.append("],");
         }
         if (giveFileUrl) {
             sb.append("\"fileUrl\":\"http://192.168.42.1:80/DCIM/Camera01/"
@@ -760,6 +782,98 @@ class Insta360OscClientContractTest {
         // 空对象节点是**显式给出**的 parameters ⇒ 带上（相机侧自己判断无参）
         fast(base).execute("camera.takePicture", MAPPER.createObjectNode());
         assertThat(hit(1)).contains("\"parameters\":{}");
+    }
+
+    // ==================================================================
+    // 变异门禁第二轮：把"返回值/分支"钉住（不只看"没抛异常"）
+    // ==================================================================
+
+    @Test
+    @DisplayName("maxPollAttempts=1 合法（边界是 < 1，不是 <= 1）")
+    void maxPollAttemptsOneIsLegal() {
+        inProgressPolls = 0;   // 第一次轮询就 done，否则 1 次上限必然不够
+        var c = new Insta360OscClient(base, java.time.Duration.ofMillis(1), 1);
+        assertThat(c.awaitDone("001996")).isNotNull();
+        assertThat(hits).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("info 缓存命中时也要返回非 null 的同一份信息（不是只置标志）")
+    void cachedInfoReturnsSameNonNullValue() {
+        Insta360OscClient c = fast(base);
+        Insta360OscClient.Insta360CameraInfo first = c.info();
+        Insta360OscClient.Insta360CameraInfo second = c.info();
+
+        assertThat(second).isNotNull();
+        assertThat(second).isSameAs(first);
+        assertThat(second.model()).isEqualTo("Insta360 X4");
+        assertThat(infoHits).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("info 的 api 数组逐条透传（不是空列表）")
+    void infoApiArrayIsPassedThrough() {
+        var info = fast(base).info();
+
+        assertThat(info.api()).containsExactly(
+                "/osc/info", "/osc/state", "/osc/checkForUpdates",
+                "/osc/commands/execute", "/osc/commands/status");
+        assertThat(info.supports("/osc/info")).isTrue();
+        assertThat(info.supports("/osc/doesNotExist")).isFalse();
+    }
+
+    @Test
+    @DisplayName("status 响应带 name 时原样透传（不缺省、不错吞）")
+    void statusNameIsPassedThroughWhenPresent() {
+        inProgressPolls = 0;
+        var st = fast(base).status("001996");
+        assertThat(st.name()).isEqualTo("camera.takePicture");
+    }
+
+    @Test
+    @DisplayName("error 时 errorCode/errorMessage 都透传；正常时两者为 null")
+    void errorFieldsArePassedThroughOnlyOnError() throws Exception {
+        // ① error 态：code 与 message 都要拿到
+        takePictureOverride = MAPPER.readTree("{\"name\":\"camera.takePicture\","
+                + "\"state\":\"error\",\"error\":{\"code\":\"disabledCommand\","
+                + "\"message\":\"not in image mode\"}}");
+        try {
+            fast(base).takePicture(null);
+        } catch (Insta360OscClient.Insta360OscException e) {
+            assertThat(e.code()).isEqualTo("disabledCommand");
+            assertThat(e.getMessage()).contains("not in image mode");
+        }
+
+        // ② 正常态：无 error ⇒ 两者为 null（不为 "null" 字符串）
+        takePictureOverride = null;
+        var st = fast(base).status("001996");
+        assertThat(st.errorCode()).isNull();
+        assertThat(st.errorMessage()).isNull();
+    }
+
+    @Test
+    @DisplayName("delete 返回平台给的 fileUrls（不是一律空列表）")
+    void deleteReturnsPlatformFileUrls() {
+        deleteReturnsUrls = List.of("http://192.168.42.1:80/DCIM/Camera01/a.jpg",
+                "http://192.168.42.1:80/DCIM/Camera01/b.jpg");
+        List<String> left = fast(base).delete(List.of(
+                "http://192.168.42.1:80/DCIM/Camera01/a.jpg"));
+
+        assertThat(left).containsExactly(
+                "http://192.168.42.1:80/DCIM/Camera01/a.jpg",
+                "http://192.168.42.1:80/DCIM/Camera01/b.jpg");
+    }
+
+    @Test
+    @DisplayName("fileUrls() 透传 results.fileUrls 全部条目（不是空列表）")
+    void fileUrlsPassesAllEntries() {
+        doneWithFileUrls = List.of("http://192.168.42.1:80/x.mp4",
+                "http://192.168.42.1:80/y.mp4");
+        var st = fast(base).awaitDone("001996");
+
+        assertThat(st.fileUrls()).containsExactly(
+                "http://192.168.42.1:80/x.mp4",
+                "http://192.168.42.1:80/y.mp4");
     }
 
     @Test

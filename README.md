@@ -747,6 +747,21 @@ NexusSky/
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
 | **总计** | **5891**
+| **总计** | **5890**
+| **总计** | **5885
+| `cloud-backend` | 3686 |
+| `sdk-java` | 19 |
+| `regulator-sim` | 41 |
+| **总计** | **5885
+| **总计** | **5885
+| `cloud-backend` | 3637 |
+| `sdk-java` | 19 |
+| `regulator-sim` | 41 |
+| **总计** | **5836
+| `cloud-backend` | 3637 |
+| `sdk-java` | 19 |
+| `regulator-sim` | 41 |
+| **总计** | **5836
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
