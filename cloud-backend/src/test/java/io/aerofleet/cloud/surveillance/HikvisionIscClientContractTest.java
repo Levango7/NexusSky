@@ -358,6 +358,141 @@ class HikvisionIscClientContractTest {
                 .putObject("data").put("ok", true)).toString();
     }
 
+    // ==================================================================
+    // ⑨ 变异门禁收口：错误分类 / 传输异常 / firstText 兜底 / 构造路径
+    // ==================================================================
+
+    @Test
+    @DisplayName("send 的 IOException ⇒ 自建短句在外、底层异常必须留在 cause 里")
+    void transportFailureKeepsCauseAndShortMessage() {
+        // 打一个拒绝连接的端口 ⇒ 传输失败（不像平台语义拒绝那样吞掉 cause）
+        var c = new HikvisionIscClient(URI.create("http://127.0.0.1:1"), "ak", "sk");
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(c::authenticate);
+
+        assertThat(thrown).isInstanceOf(HikvisionIscClient.HikvisionIscException.class);
+        assertThat(thrown.getMessage())
+                .contains("hikvision isc POST /oauth/token failed")
+                // 消息里不留底层细节（排障时先看消息，细节去 cause）
+                .doesNotContain("Connection refused")
+                .doesNotContain("127.0.0.1:1");
+        // **关键不变量**：传输失败的 cause 被保留——否则排障时只剩一句
+        // "failed"，完全看不出是网络、超时还是被拒。
+        assertThat(thrown.getCause())
+                .as("transport failure must keep its cause")
+                .isNotNull();
+        assertThat(c.currentAuth()).isNull();
+    }
+
+    @Test
+    @DisplayName("平台回非 JSON（HTML 错误页）⇒ 归为响应不可读而不是解析 NPE")
+    void nonJsonResponseIsUnreadable() {
+        hits.clear();
+        // 直接打一个会回 HTML 的端口：用假平台响应非 JSON body
+        businessResponse = "<html>502 Bad Gateway</html>";
+        tokenResponse = "<html>502 Bad Gateway</html>";
+        assertThatThrownBy(client::authenticate)
+                .isInstanceOf(HikvisionIscClient.HikvisionIscException.class)
+                .hasMessageContaining("unreadable");
+    }
+
+    @Test
+    @DisplayName("code 为 null / msg 缺失 ⇒ 异常消息里带 code，不留 NPE")
+    void nullCodeDoesNotNpe() {
+        // 平台回 {"code":"5"}（无 msg）⇒ 短句里带 code
+        businessResponse = toStringOf(m -> m.put("code", "5"));
+        client.authenticate();
+        int before = hits.size();
+        try {
+            client.postJson("/api/x", newBody());
+        } catch (HikvisionIscClient.HikvisionIscException e) {
+            // 无 msg 时短句要带 code（不能 NPE），且必须能被认成"普通业务失败"
+            assertThat(e.getMessage()).contains("code 5");
+            assertThat(e.code()).isEqualTo("5");
+        }
+        // 普通业务失败不触发重取：只多打了这一次业务请求
+        assertThat(hits).hasSize(before + 1);
+    }
+
+    @Test
+    @DisplayName("firstText 兜底顺序：accessToken > access_token > token")
+    void firstTextFallbackOrder() {
+        tokenResponse = toStringOf(m -> m.put("code", "0").putObject("data")
+                .put("accessToken", "at.accessToken"));
+        assertThat(client.authenticate().accessToken()).isEqualTo("at.accessToken");
+
+        tokenResponse = toStringOf(m -> m.put("code", "0").putObject("data")
+                .put("token", "at.token"));
+        var c2 = new HikvisionIscClient(base, "ak", "sk");
+        assertThat(c2.authenticate().accessToken()).isEqualTo("at.token");
+    }
+
+    @Test
+    @DisplayName("contentMd5 是稳定的 Base64（同一 body ⇒ 同一值，不同 body 不同值）")
+    void contentMd5IsStable() {
+        String a = HikvisionIscAuth.contentMd5("{\"a\":1}");
+        String b = HikvisionIscAuth.contentMd5("{\"a\":1}");
+        String c = HikvisionIscAuth.contentMd5("{\"a\":2}");
+        assertThat(a).isEqualTo(b).isNotEqualTo(c);
+        // MD5 = 16 字节 ⇒ Base64 长度 24（22 字符 + '=='）
+        assertThat(a).hasSize(24);
+        assertThat(a).matches("^[A-Za-z0-9+/]{22}==$");
+    }
+
+    @Test
+    @DisplayName("token 缺失时构造 auth 立即 NPE（不造出 expiresAt=null 的半成品）")
+    void nullTokenRejectedAtConstruction() {
+        assertThatThrownBy(() -> new HikvisionIscAuth(null, Instant.now()))
+                .isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> HikvisionIscAuth.issuedNow(null, Instant.now()))
+                .isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> new HikvisionIscAuth("at", null))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("validAt 边界：等于 expiresAt 的那一刻算已过期")
+    void validAtBoundary() {
+        Instant now = Instant.now();
+        HikvisionIscAuth auth = new HikvisionIscAuth("at", now.plusSeconds(60));
+        assertThat(auth.validAt(now.minusSeconds(1))).isTrue();
+        assertThat(auth.validAt(now.plusSeconds(59))).isTrue();
+        assertThat(auth.validAt(now.plusSeconds(60))).isFalse();
+        assertThat(auth.validAt(now.plusSeconds(61))).isFalse();
+    }
+
+    @Test
+    @DisplayName("artemisPrefix 空白 ⇒ 归一为默认 /artemis（不吃 null 造出 //oauth/token）")
+    void blankArtemisPrefixNormalised() {
+        var c = new HikvisionIscClient(base, "ak", "sk", "   ");
+        c.authenticate();
+        assertThat(hits.get(0)).contains("/artemis/oauth/token");
+        assertThat(hits.get(0)).doesNotContain("//artemis");
+
+        var c2 = new HikvisionIscClient(base, "ak", "sk", null);
+        c2.authenticate();
+        assertThat(hits).allSatisfy(h -> assertThat(h).contains("/artemis/"));
+    }
+
+    @Test
+    @DisplayName("retryOnceOnAuthFailure 只在 auth 类失败时重取（普通业务失败不重试）")
+    void noRetryOnPlainBusinessFailure() {
+        client.authenticate();
+        int before = hits.size();
+        businessResponse = toStringOf(m -> m.put("code", "7").put("msg", "camera offline"));
+        assertThatThrownBy(() -> client.postJson("/api/x", newBody()))
+                .isInstanceOf(HikvisionIscClient.HikvisionIscException.class);
+        // 只多打了一次业务请求，没有重取 token
+        assertThat(hits).hasSize(before + 1);
+    }
+
+    // ---- 小工具 ----
+
+    private static String toStringOf(java.util.function.Consumer<ObjectNode> f) {
+        ObjectNode n = MAPPER.createObjectNode();
+        f.accept(n);
+        return n.toString();
+    }
+
     private static void respond(HttpExchange ex, int code, String s) throws IOException {
         byte[] b = s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", "application/json");

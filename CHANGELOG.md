@@ -1,5 +1,24 @@
 # NexusSky 变更日志
 
+### 变异门禁收口：+9 例覆盖，本地实测双过基线
+
+#266 的 Mutation baseline gate 在 CI 上量到新代码把 surveillance 包拖到
+0.9178 / 0.9327（基线 0.9200 / 0.9400）。按纪律取 PIT 报告逐条分诊后补覆盖
+（**没动基线**）：
+
+- 传输失败（IOException 连接被拒）的 **cause 必须保留**——否则排障只剩一句
+  "failed"，看不出是网络/超时/被拒；消息里不留 `Connection refused` 与内网地址；
+- 平台回**非 JSON**（HTML 错误页）⇒ 归为"响应不可读"而不是解析 NPE；
+- `code` 缺失时的短句必须带 code，且**普通业务失败不触发重取 token**；
+- `firstText` 的三级兜底顺序（accessToken > access_token > token）；
+- `contentMd5` 是 Base64（22 字符 + `==`），同一 body 稳定、不同 body 不同；
+- `HikvisionIscAuth` 对 null token / null expiresAt 立即 NPE（不造半成品）；
+- `validAt` 在等于 `expiresAt` 的那一刻算已过期；
+- `artemisPrefix` 传空白 ⇒ 归一为默认 `/artemis`（不吃 null 造出 `//oauth/token`）。
+
+A/B 新增 2 项（传输异常丢 cause：2 红；首个 payload 兜底改成空串：2 红），还原全绿。
+本地 PIT 实测：**变异分数 0.9332（基线 0.9200）/ 测试强度 0.9418（基线 0.9400）**。
+
 ## [Unreleased] — 海康 iSecure Center OpenAPI 契约层：AK/SK 签名 + 已知答案测试（+18 例）
 
 ### 依据（公开文档 + 官方 SDK 行为）
