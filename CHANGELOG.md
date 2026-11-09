@@ -127,7 +127,7 @@ in_progress=1 / queued=3，安静窗口成立。
 本批 0 测试增删；只动 `.github/workflows/ci.yml` + `scripts/ci-maven-cache-key.sh`
 + `CHANGELOG.md` + `docs/todo.md`，Java / 前端零改动。
 
-计数：本批 0 测试增删；`[Unreleased]` 小节 291 → **292**。
+计数：本批 0 测试增删；`[Unreleased]` 小节 292 → **293**。
 
 ### 变异门禁收口：+9 例覆盖，本地实测双过基线
 ## [Unreleased] — 文档口径回填：GB28181 SIP 传输 / 机巢 MQTT 已落地，6 处旧表述仍与代码相反（仅文档·注释·日志文案）
@@ -906,7 +906,7 @@ surefire 的 JUnit Platform provider **及其依赖闭包**只在**真跑测试�
 本批只动 `.github/workflows/ci.yml` + `CHANGELOG.md` + `docs/todo.md`，
 Java / 前端**零改动**。
 
-计数：本批 0 测试增删；`[Unreleased]` 小节 290 → **291**。
+计数：本批 0 测试增删；`[Unreleased]` 小节 291 → **292**。
 
 ## [Unreleased] — 门禁去噪：`check-maven-incantations` 不再扫 `.coord` 归档，本机恒红改为真绿（0 例，纯工具）
 
