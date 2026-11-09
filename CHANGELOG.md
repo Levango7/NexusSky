@@ -1,5 +1,27 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 视频融合录制登记簿租户隔离（1 例新增）
+
+### 问题
+
+- `VideoFusionRecordingService` 的录制登记簿无租户归属：`start` 不记登记属于哪个租户，
+  `stop`/`isRecording`/`list`/`activeCount` 对全局登记簿生效/返回——任意已认证租户可
+  列出、停掉、计数其他租户的录制，无租户 OPERATOR（NO_ACCESS）也能看到全部。
+
+### 修复
+
+- `start` 记 `TenantContext.getWritableTenantId()`（NO_ACCESS 哨兵归一为 null，
+  `Integer.MIN_VALUE` 永不落库）；`stop`/`isRecording`/`list`/`activeCount` 与
+  `VideoFusionController.listRecordings` 一律按 `visibleTo(effective, rec)` 过滤，
+  约定同 `DeviceRegistry.isVisibleTo`（effective 为 null 的全局管理员仍见全部）。
+- `listRecordings` 响应体显式映射 sourceId/sourceType/startedAtMs 三字段，
+  Recording 的 tenantId（隔离依据）不进响应体，线上形状与加字段前一致。
+- 新增 `HttpAuthChainTest#recordingRegistryIsTenantScoped`：B 列表 0 / B 停 404 /
+  B 起 404（设备解析本已按租户过滤）/ NO_ACCESS 0 / 无租户 ADMIN 见全量 /
+  A 正向对照。
+- 测试数口径同步：cloud-backend 3762 → 3763，全仓 5961 → 5962（README 计数表 +
+  ROADMAP 两处）。
+
 ## [Unreleased] — P1-9 缺陷工单闭环：复检通过后缺陷真正关闭（+20 例，A/B 十项全红）
 
 ### 背景：闭环缺了最后一环
@@ -2917,7 +2939,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-10 共有 300 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-10 共有 301 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -2944,7 +2966,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 300 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 301 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
