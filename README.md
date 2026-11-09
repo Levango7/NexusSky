@@ -746,28 +746,7 @@ NexusSky/
 | `cloud-backend` | 3742 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5941**
-| **总计** | **5941**
-| **总计** | **5941
-| `cloud-backend` | 3742 |
-| `cloud-backend` | 3742 |
-| `sdk-java` | 19 |
-| `regulator-sim` | 41 |
-| **总计** | **5941**
-| **总计** | **5941
-| `cloud-backend` | 3742 |
-| `sdk-java` | 19 |
-| `regulator-sim` | 41 |
-| **总计** | **5941
-| **总计** | **5941
-| `cloud-backend` | 3742 |
-| `sdk-java` | 19 |
-| `regulator-sim` | 41 |
-| **总计** | **5941
-| `cloud-backend` | 3742 |
-| `sdk-java` | 19 |
-| `regulator-sim` | 41 |
-| **总计** | **5941
+| **总计** | **5941** |
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。
@@ -1226,3 +1205,4 @@ NexusSky/
 `scripts/publish-pypi.*` 与 `scripts/publish-maven.*` 具备一键发布到公共仓库的能力。
 发布后制品**不可撤回**，执行前务必确认 `sdk-python/setup.py` 与 `sdk-java/pom.xml`
 的许可字段已是"Proprietary"（2026-10-05 已从误标的 Apache 2.0 修正）。
+
