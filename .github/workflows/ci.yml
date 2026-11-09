@@ -279,7 +279,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Compile all modules
@@ -322,7 +322,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Populate local repository (cold cache)
@@ -390,7 +390,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build & test
@@ -581,7 +581,7 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: mvn-${{ runner.os }}-
       - name: Build backend + drone-sim jars
         # 覆盖 job 级 defaults.run.working-directory（gcs-web）：本步必须在仓库根跑 Maven，
@@ -681,7 +681,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -753,7 +753,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build backend + sim
@@ -884,7 +884,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Run integration tests
@@ -942,7 +942,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -1089,7 +1089,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -1150,7 +1150,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -1231,7 +1231,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -1322,7 +1322,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -1380,7 +1380,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -1547,7 +1547,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Build all
@@ -1747,7 +1747,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       # 先自证合成帧源：它吐的必须是**真 JPEG** 且会轮换。
@@ -1804,7 +1804,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Compile and install cloud-backend (install ⇒ 兄弟模块进本地 m2)
@@ -1913,7 +1913,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Install PostgreSQL client (psql / pg_dump / pg_restore)
@@ -2005,7 +2005,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - name: Pre-populate local Maven repository (Trivy offline dependency resolution)
@@ -2082,7 +2082,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
-          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
           restore-keys: |
             mvn-${{ runner.os }}-
       - uses: github/codeql-action/init@v3

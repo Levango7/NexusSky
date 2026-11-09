@@ -41,7 +41,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 SELF="$SCRIPT_DIR/$(basename "$0")"
 
-CANON="mvn-\${{ runner.os }}-\${{ hashFiles('**/pom.xml') }}-v3"
+CANON="mvn-\${{ runner.os }}-\${{ hashFiles('**/pom.xml') }}-v4"
 RESTORE="mvn-\${{ runner.os }}-"
 # 站点数下限：2026-10-29 实测 18 处（ci.yml 的 18 个 job 各一处）。
 # 这是一个**下限**不是目标值——新增 job 只加分；要减必须先想清楚减掉的那个 job 靠什么

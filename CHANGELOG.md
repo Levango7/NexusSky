@@ -1,5 +1,37 @@
 # NexusSky 变更日志
 
+## [Unreleased] — maven 缓存毒 v3 代根因处置：gcs-e2e 抢写改 restore-only + 键尾 v3→v4
+
+### 问题
+
+`GCS Web E2E (Playwright)` job 的 m2 缓存是**保存型** `actions/cache@v4`，与 `maven-warm`
+抢同一键且无 `needs: [maven-warm]`。run 42512151276 中该 job（128827324841）以
+`-DskipTests package` 形态于 19:22:42.526 先保存 `mvn-…-v3`（150,360,683 B，比同 pom 的
+v2 还小 ⇒ 无 surefire provider 闭包）；actions/cache 同键首写者胜出且不覆盖，毒条目冻结。
+其后所有命中腿（#252 head run 42538867333 在内）离线自检失败打
+`::warning::离线自检失败` + 在线兜底，job 假绿，#252「焐 provider 闭包」的验收腿从未被
+真实验证。
+
+### 改
+
+- gcs-e2e 的 m2 缓存改 `actions/cache/restore@v4`：消费者只恢复不保存，保存权归 maven-warm。
+- 键尾 v3→v4（ci.yml 19 站点 + `scripts/ci-maven-cache-key.sh` CANON 同批；守卫实测
+  `sites=19 mismatch=0`，自测 5/5）；毒 v3 条目同键不可覆盖，抬号即绕过。
+- `docs/todo.md` #21 追加 v3 代污染记录与 v4 重验口径。
+
+### A/B 实证
+
+- 毒写入链：job 日志 19:21:33 restore 落 v2 → 19:22:42.526 `Cache saved with key:
+  mvn-…-v3`；maven-warm 19:28:57 命中即打 warning（run 42512151276 与 head run
+  42538867333 两处日志同形）。
+- v4 验收随 CI：抬号后首跑冷路径 `Populate local repository (cold cache)` 执行、
+  `Verify cached repository…` skipped；其后一次命中 run 零 `离线自检失败` warning，
+  六条 `Java <module>` 无 `surefire-junit-platform` 取件报错。
+
+### 遗留（不在本批）
+
+- 毒 v3 条目未删（删除缓存属破坏性操作，未授权）；v4 抬号后自然绕开。
+- 合并不在本批：38/38 必检绿 + 命中腿零 warning + mss=CLEAN 后另行提请。
 ## [Unreleased] — 步骤失败帧不再携带底层异常文本（2 例新增）
 
 ### 问题
