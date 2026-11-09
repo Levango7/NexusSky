@@ -576,7 +576,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: actions/cache@v4
+      # 只恢复不保存：m2 的唯一保存者是 maven-warm；本 job 曾抢写 v3（skipTests 无 provider
+      # 闭包），first-writer-wins 把毒缓存冻进同键，#252 的命中腿自此假绿。
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository
           key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v3
