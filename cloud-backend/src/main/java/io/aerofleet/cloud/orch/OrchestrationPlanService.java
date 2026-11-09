@@ -499,9 +499,11 @@ public class OrchestrationPlanService {
                         log.error("afterCommit 中执行步骤异常：stepId={}, planId={}", step.getStepId(), planId, e);
                         step.setStatus(StepStatus.FAILED);
                         stepRepository.save(step);
+                        // failReason 会经 OrchestrationPusher 推送给 WS/SSE 订阅方并落库，
+                        // 因此只留自建短句，底层异常文本与堆栈只进服务端日志
                         eventPublisher.publishEvent(
                                 new StepFailEvent(OrchestrationPlanService.this, planId, step.getStepId(),
-                                        "afterCommit 执行异常：" + e.getMessage()));
+                                        "执行异常（详情见服务端日志）"));
                     }
                 }
             });
@@ -512,8 +514,9 @@ public class OrchestrationPlanService {
                 log.error("执行步骤异常：stepId={}, planId={}", step.getStepId(), planId, e);
                 step.setStatus(StepStatus.FAILED);
                 stepRepository.save(step);
+                // 同上：failReason 对外可见，不外泄底层异常文本
                 eventPublisher.publishEvent(
-                        new StepFailEvent(this, planId, step.getStepId(), "执行异常：" + e.getMessage()));
+                        new StepFailEvent(this, planId, step.getStepId(), "执行异常（详情见服务端日志）"));
             }
         }
     }

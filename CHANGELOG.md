@@ -1,5 +1,32 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 步骤失败帧不再携带底层异常文本（2 例新增）
+
+### 问题
+
+`OrchestrationPlanService.executeStepAfterCommit(...)` 的两处 catch 分支把 `e.getMessage()`
+直接拼进 `StepFailEvent.failReason`（`"afterCommit 执行异常：" + e.getMessage()` 与
+`"执行异常：" + e.getMessage()`）。该 failReason 会被 `OrchestrationPusher.onStepFail`
+原样写进推送帧的 `failReason` 字段，发给所有 WS/SSE 订阅客户端并随事件落库——
+底层异常（JDBC/中间件等）文本因此对前端可见。同主题已在 `StepExecutor.handleStepFail`
+收口为固定短句「执行异常（详情见服务端日志）」，这两处是漏改的姊妹点。
+
+### 改
+
+- 两个 catch 分支的 failReason 统一为「执行异常（详情见服务端日志）」；异常与堆栈仍由
+  `log.error(..., e)` 写入服务端日志，排查信息不丢。
+- 补注释说明 failReason 对外可见（推送 + 落库），避免以后再把异常文本拼回来。
+- 新增 2 例：`syncStepFailureUsesFixedFailReason`（非事务同步执行分支）与
+  `afterCommitStepFailureUsesFixedFailReason`（事务同步激活后手动触发 `afterCommit`），
+  用 canary 文本 `db-internal canary` 断言 failReason 为固定短句且不含该文本。
+- 测试数口径同步：cloud-backend 3740 → 3742，全仓 5939 → 5941。
+
+### A/B 实证
+
+- 把同步分支改回 `"执行异常：" + e.getMessage()`，对应用例立即变红：
+  `expected: <执行异常（详情见服务端日志）> but was: <执行异常：db-internal canary>`；
+- 还原后 `OrchestrationPlanServiceTest` 全绿。
+
 ## [Unreleased] — 语音广播历史加 1000 条上限（1 例新增）
 
 ### 问题
@@ -2640,7 +2667,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-11-09 共有 294 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-09 共有 295 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -2665,7 +2692,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 294 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 295 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
