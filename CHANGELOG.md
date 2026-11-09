@@ -110,43 +110,80 @@ start / stop / status / broadcast 四个端点，只有测试在读它），属�
 - `mvn -pl cloud-backend -am -Dtest=UdpGatewayCriticalFrameRateTest test` 通过（4/4）；
 - 用例总数不变；`[Unreleased]` 小节 289 → **291**。
 ### 变异门禁收口：+9 例覆盖，本地实测双过基线
-## [Unreleased] — 文档口径回填：GB28181 SIP 传输 / 机巢 MQTT 已落地，6 处旧表述仍与代码相反（仅文档·注释·日志文案）
 
-### 背景
+#266 的 Mutation baseline gate 在 CI 上量到新代码把 surveillance 包拖到
+0.9178 / 0.9327（基线 0.9200 / 0.9400）。按纪律取 PIT 报告逐条分诊后补覆盖
+（**没动基线**）：
 
-#257（机巢 MQTT 真链路，2026-11-07）与 #258（GB28181 SIP-over-UDP 传输 + 设备模拟器，
-2026-11-07）落地后，README 的「已知边界」已写成真链路；但配套的 4 份文档、1 处配置注释、
-1 处源码 javadoc/WARN、1 处用例 DisplayName 仍停在旧口径（“SIP 传输未实现”“机巢 MQTT 未接”）
-——**读文档的人会得到与代码相反的事实**。
+- 传输失败（IOException 连接被拒）的 **cause 必须保留**——否则排障只剩一句
+  "failed"，看不出是网络/超时/被拒；消息里不留 `Connection refused` 与内网地址；
+- 平台回**非 JSON**（HTML 错误页）⇒ 归为"响应不可读"而不是解析 NPE；
+- `code` 缺失时的短句必须带 code，且**普通业务失败不触发重取 token**；
+- `firstText` 的三级兜底顺序（accessToken > access_token > token）；
+- `contentMd5` 是 Base64（22 字符 + `==`），同一 body 稳定、不同 body 不同；
+- `HikvisionIscAuth` 对 null token / null expiresAt 立即 NPE（不造半成品）；
+- `validAt` 在等于 `expiresAt` 的那一刻算已过期；
+- `artemisPrefix` 传空白 ⇒ 归一为默认 `/artemis`（不吃 null 造出 `//oauth/token`）。
 
-### 改
+A/B 新增 2 项（传输异常丢 cause：2 红；首个 payload 兜底改成空串：2 红），还原全绿。
+本地 PIT 实测：**变异分数 0.9332（基线 0.9200）/ 测试强度 0.9418（基线 0.9400）**。
 
-- `docs/todo.md` #14：GB28181 事件订阅 501 的说明由“SIP 传输未实现”改为“适配器尚未接线”，
-  并记明传输层已于 #258 交付（8 例真回环测试）；RTP/PS 媒体面仍是缺口（口径不变）。
-- `docs/todo.md` #17：`机巢 MQTT 未接` → **已接线**（`transport=mqtt` 条件装配
-  `MqttDockGateway` / `MqttDockOsdListener`，Paho + DJI Cloud API 物模型；默认仍 `sim`）；
-  剩余改为真实 EMQX Broker + 真机机巢联调。
-- `docs/api-reference.md`（surveillance events）：501 语义示意行同步为“未接线到已实现的传输层”。
-- `docs/real-integration-program.md` P5：GB28181 行与机巢 MQTT 行同口径改写。
-- `cloud-backend/src/main/resources/application.properties`：机巢段注释
-  `transport=mqtt 属生产阶段` → 已接线，并指向部署文档的 4 个键。
-- `Gb28181Adapter` 类 javadoc / `subscribeEvents` javadoc / WARN 文案 /
-  `SurveillanceControllerTest` 的 `@DisplayName` 与注释：同口径改写（501 行为不变）。
+## [Unreleased] — 海康 iSecure Center OpenAPI 契约层：AK/SK 签名 + 已知答案测试（+18 例）
 
-### 顺手补齐：机巢 MQTT 的 4 个键此前没进部署文档
+### 依据（公开文档 + 官方 SDK 行为）
 
-`aerofleet.dock.transport` / `mqtt-broker-url` / `mqtt-username` / `mqtt-password`
-已在 `application.properties` 声明（#257），但 `docs/deployment-guide.md` §3.3
-「换环境就要改的那一组」没有它们——运维不知道 `transport=mqtt` 怎么开、
-`broker-url` 为空会**启动失败**。本批补进 §3.3（含「改完在哪行日志看见」自证列），
-该节口径由 7 键更新为 11 键。
+海康开放平台公开文档（综合安防管理平台 iSecure Center OpenAPI）+ 官方 SDK 行为，
+逐条落实：
 
-### 验证
+- 接口形如 `https://{host}:{port}/artemis/{uri}`，仅 HTTPS，**artemis 前缀必带**；
+- 鉴权为 **AK/SK 摘要签名**：请求头 `x-ca-key` / `x-ca-nonce` / `x-ca-timestamp` /
+  `x-ca-signature-headers` / `x-ca-signature`；
+- 签名字符串（**顺序即契约**）：`METHOD\nAccept\nContent-Type\n 自定义头(小写名排序)\n
+  带 artemis 前缀的路径`；`X-Ca-Signature = Base64(HmacSHA256(appSecret, 串))`；
+- **token 也必须经签名请求获取**（`POST /artemis/oauth/token`）——不是匿名端点；
+- 响应统一 `{"code":"0","msg":"success","data":...}`，**code 是字符串 "0" 才算成功**
+  （不是 HTTP 200 就是成功）。
 
-- 无行为改动：唯一 Java 变更是 WARN 日志文案与注释，501/装配条件均不变；
-- `check-doc-counts.py` / `check-repo-hygiene.py` / `check-doc-config-keys.py` 全绿；
-- `mvn -pl cloud-backend -am -Dtest=SurveillanceControllerTest test` 通过（501 路径不变）；
-- 用例总数不变；`[Unreleased]` 小节按实际重算为 **288**。
+海康开放平台另提供官方 **OpenAPI 接口测试工具**（下载中心），签名算法公开且确定性
+⇒ 契约层零硬件可对接；真机取流属互操作层。
+
+### 交付
+
+`HikvisionIscAuth`（AK/SK 签名器 + token 态：2h TTL 扣 1min 安全余量）
++ `HikvisionIscClient`（签名请求、token 获取与缓存、业务 POST、
+`previewUrl()` 按文档取 rtsp/hls 地址、平台语义失败与链路失败分开报）。
+
+**边界（不假装）**：只覆盖**鉴权 + 通用 POST + 预览 URL 契约**；未接业务接口全表
+（设备目录/云台/告警订阅）；未校验服务端证书链（ISC 常自签名）；**未接真实平台**
+（需 app_key/app_secret 与平台地址）；### 测试 +18 例 + A/B 五项
+
+`HikvisionIscClientContractTest`（JDK HttpServer 假平台，18 例）：
+**已知答案签名** / 签名字符串顺序 / 头名大小写不影响签名 / artemis 前缀参与签名 /
+换 secret 换签名 / Content-Type 参数不参与签名 / token 经签名请求且带五头 /
+token 过期扣余量 / token 缓存 / 业务请求带 access_token / code≠"0" 语义失败 /
+auth 类失败重取重试 / token 字段缺失响亮失败 / 预览返回 data.url / 预览缺 url 响亮失败 /
+cameraIndexCode 空白拒绝 / 构造 null 立即 NPE / baseUri 尾斜杠归一。
+
+**其中「已知答案签名」是关键**：期望值由**独立 Python hmac 实现**算出
+（`hmac.digest(secret, signedString, sha256)` 后 Base64），与 Java 实现无关。
+没有它，A/B 实测显示「改错拼接顺序」「把 HmacSHA256 换成 SHA1」都**0 红**——
+那类自证测试（只验"换个输入签名会变"）挡不住算法/顺序错。
+
+**A/B 五项全部转红**（还原 ⇒ 全绿）：
+
+| 破坏 | 转红 |
+|---|---|
+| 签名字符串段序对调（少一个换行） | 2 例 |
+| HmacSHA256 → HmacSHA1 | 2 例 |
+| 自定义头名不再小写化 | 2 例 |
+| 签名字符串丢掉 artemis 前缀 | 3 例 |
+| 平台 code 检查关掉（HTTP 200 当成功） | 3 例 |
+
+### P5 分级表同步
+
+`docs/real-integration-program.md` P5.3 表中「海康 iSecure Center OpenAPI」由
+⏳ 未开工改为 ✅ 已交付（契约层）。
+
 ## [Unreleased] — GB28181 媒体面落地：RTP/PS 打包·解复用·真 UDP 回环（+37 例，标准全文已取证）
 
 ### 为什么之前说"媒体面等硬件"——那句话是错的
@@ -365,6 +402,7 @@ sdk-java 19）；10 份口径文档计数同步 5755→5761 / 3556→3562；`che
 这几处全在**客户会直接读**的文档里（白皮书、销售页、定价、上手指南），且都不是本改动
 引入的——是此前某次批量替换留下的。既然本轮本来就要改这些文件的计数，顺带修好，
 避免"数字对、表错位"。未做全仓表格 lint（那是另一个话题，且会撞上别人正在改的文档）。
+
 
 ## [Unreleased] — P2-F6 ② 出站定向广播落地：未知 sysid 不再只归"最后说话者"（+3 例）
 
@@ -2667,8 +2705,11 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
+
 > 最新在最上方，不按版本分节。截至 2026-11-09 共有 295 个 `[Unreleased]` 小节，自 v1.0.5
+
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
+
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
 
