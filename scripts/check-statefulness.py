@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""持久化状态性守卫：审计 §2.1「必须落库」的九个域，必须要么真有持久化证据、要么在豁免账里写明理由与到期日。
+"""持久化状态性守卫：审计 §2.1「必须落库」的十个域，必须要么真有持久化证据、要么在豁免账里写明理由与到期日。
 
 **为什么需要它**
 ----------------
-`docs/persistence-and-dead-surface-audit.md` §2.1 实测了九个"对外承诺了持久性、或丢了会破坏合规
-叙事"的业务域。它们在审计时全是内存态，重启即失；2026-10-27 起分批落库（V30~V35）。
+`docs/persistence-and-dead-surface-audit.md` §2.1 实测了十个"对外承诺了持久性、或丢了会破坏合规
+叙事"的业务域。它们在审计时全是内存态，重启即失；2026-10-27 起分批落库（V30~V35，V40 补巡检）。
 这类债的特点是**回退不响**：某个域哪天被改回纯内存（或迁移表被删、水合调用被摘），
 编译照过、启动照跑、测试可能照绿——只有重启后数据没了才知道。
 
@@ -24,7 +24,7 @@
 
 **口径与局限（别把它当"全仓内存态覆盖"）**
 ------------------------------------------
-- 它盯的是审计已定性的这九个域；**新增业务域需要手动登记**（登记本身就是一次声明）。
+- 它盯的是审计已定性的这十个域；**新增业务域需要手动登记**（登记本身就是一次声明）。
 - "证据齐全"只证明持久化通路存在（实体/仓库/迁移表/水合方法），**不证明行为正确**——
   行为由各域自己的"重启恢复"测试钉（第一批三条约 13 例是模板）。
 - 判据锚点是文本级（正则命中），不是编译级；改包名/改方法名后锚点失配会红，跟着修即可。
@@ -133,6 +133,19 @@ DOMAINS = [
              r"aerofleet\.audit\.persist-to-db"),
             ("cloud-backend/src/main/resources/db/migration/V*.sql",
              r"(?i)create table\s+(if not exists\s+)?audit_log\b"),
+        ],
+    },
+    {
+        "name": "10 巡检任务与报告 InspectionTaskService",
+        "checks": [
+            ("cloud-backend/src/main/java/io/aerofleet/cloud/inspection/InspectionTaskService.java",
+             r"InspectionTaskRepository"),
+            ("cloud-backend/src/main/java/io/aerofleet/cloud/inspection/InspectionReportEntity.java",
+             r"@Entity"),
+            ("cloud-backend/src/main/resources/db/migration/V*.sql",
+             r"(?i)create table\s+(if not exists\s+)?inspection_tasks\b"),
+            ("cloud-backend/src/main/resources/db/migration/V*.sql",
+             r"(?i)create table\s+(if not exists\s+)?inspection_reports\b"),
         ],
     },
 ]
