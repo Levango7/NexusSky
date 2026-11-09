@@ -83,6 +83,10 @@
 当前项目测试基线：**5885 tests，0 failures**（全部通过）。
 当前项目测试基线：**5836 tests，0 failures**（全部通过）。
 当前项目测试基线：**5836 tests，0 failures**（全部通过）。
+当前项目测试基线：**5836 tests，0 failures**（全部通过）。
+当前项目测试基线：**5836 tests，0 failures**（全部通过）。
+当前项目测试基线：**5836 tests，0 failures**（全部通过）。
+当前项目测试基线：**5836 tests，0 failures**（全部通过）。
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
@@ -98,6 +102,14 @@
 | **总计** | **5885** | 全部通过，0 failures |
 | cloud-backend | 3686 | REST API、调度引擎、应急编排、安防联动 |
 | **总计** | **5885 **全部通过，0 failures** |
+| cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5836** | 全部通过，0 failures |
+| cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5836 **全部通过，0 failures** |
+| cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5836** | 全部通过，0 failures |
+| cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5836 **全部通过，0 failures** |
 | cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
 | **总计** | **5836** | 全部通过，0 failures |
 | cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |

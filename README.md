@@ -750,10 +750,16 @@ NexusSky/
 | **总计** | **5890**
 | **总计** | **5885
 | `cloud-backend` | 3686 |
+| `cloud-backend` | 3637 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5885
-| **总计** | **5885
+| **总计** | **5836**
+| **总计** | **5836
+| `cloud-backend` | 3637 |
+| `sdk-java` | 19 |
+| `regulator-sim` | 41 |
+| **总计** | **5836
+| **总计** | **5836
 | `cloud-backend` | 3637 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
