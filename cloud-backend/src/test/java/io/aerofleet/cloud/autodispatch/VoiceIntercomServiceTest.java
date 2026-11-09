@@ -157,6 +157,21 @@ class VoiceIntercomServiceTest {
     }
 
     @Test
+    @DisplayName("广播历史只保留最新 MAX_HISTORY 条，最旧的被淘汰")
+    void broadcastHistoryBoundedByMaxHistory() {
+        int overflow = 5;
+        int total = VoiceIntercomService.MAX_HISTORY + overflow;
+        for (int i = 0; i < total; i++) {
+            service.broadcast(1, "msg-" + i, 70);
+        }
+
+        List<VoiceIntercomService.BroadcastRecord> history = service.getBroadcastHistory(0, 0);
+        assertThat(history).hasSize(VoiceIntercomService.MAX_HISTORY);
+        assertThat(history.get(0).getText()).isEqualTo("msg-" + overflow);
+        assertThat(history.get(history.size() - 1).getText()).isEqualTo("msg-" + (total - 1));
+    }
+
+    @Test
     @DisplayName("activeCount 返回活跃对讲数量")
     void activeCountReturnsCorrectNumber() {
         service.startIntercom(1);

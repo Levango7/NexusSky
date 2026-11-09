@@ -1,5 +1,34 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 语音广播历史加 1000 条上限（1 例新增）
+
+### 问题
+
+`VoiceIntercomService.broadcast()` 每喊话一次就往 `broadcastHistory` 追加一条，只增不减。
+广播端点是 `POST /api/v1/voice-intercom/{sysid}/broadcast`（OPERATOR 可调），所以这个单例
+Bean 的内存随运行时长无界增长；每条还自带最多 500 字符文本（`MAX_TEXT_LENGTH`）。
+同仓同类历史都已有上限——`DecisionMonitorService` / `EdgeCoordinationService` /
+`SituationOverlayService` 各 1000 条、`VoiceCommandExecutor` 200 条，只有这里漏了。
+
+### 改
+
+- 新增 `MAX_HISTORY = 1000`：`broadcast()` 在原有 `synchronized (broadcastHistory)` 块内
+  追加后从最旧淘汰，只保留最新 1000 条。
+- 新增用例 `broadcastHistoryBoundedByMaxHistory`：连发 1005 条，断言历史恰好 1000 条、
+  首条是第 6 条（前 5 条被淘汰）、末条是最新一条。
+- 测试数口径同步：cloud-backend 3589 → 3590，全仓 5788 → 5789（README 模块表 + 10 份口径文档共 22 处）。
+
+### A/B 实证
+
+- 去掉淘汰循环后同一用例立刻变红：`Expected size: 1000 but was: 1005`；
+- 还原后 `VoiceIntercomServiceTest`：`Tests run: 17, Failures: 0, Errors: 0`。
+
+### 遗留（不在本批）
+
+`getBroadcastHistory` 在生产侧无调用者（`VoiceIntercomController` 只暴露
+start / stop / status / broadcast 四个端点，只有测试在读它），属于"只有测试在读"的表面。
+本批只收内存边界；暴露成端点还是随死表面清理一并删除，留待产品口径决定。
+
 ## [Unreleased] — 关键帧限速用例的「假红」：把「总通过数恰好 5」改成滑动窗口不变量（0 测试增删）
 
 ### 问题（协调板 2026-11-07 记录的真实偶发）
@@ -2563,7 +2592,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-08 共有 291 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-09 共有 292 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -2590,7 +2619,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 291 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 292 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
