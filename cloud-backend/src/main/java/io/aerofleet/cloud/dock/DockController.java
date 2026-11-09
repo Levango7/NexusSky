@@ -181,6 +181,10 @@ public class DockController {
             // cron 语法错误是请求侧问题（400）；机巢不存在才是 404——两者不能混
             return ResponseEntity.badRequest().body(error("invalid cron expression: " + cron));
         }
+        String templateId = str(body, "templateId");
+        if (templateId == null) {
+            templateId = str(body, "inspectionTemplateId");
+        }
         Object wp = body.get("waypoints");
         String wpJson = null;
         if (wp != null) {
@@ -192,7 +196,7 @@ public class DockController {
         }
         boolean enabled = !(body.get("enabled") instanceof Boolean b) || b;
         try {
-            DockScheduleEntity s = docks.createSchedule(id, name, cron, wpJson, enabled);
+            DockScheduleEntity s = docks.createSchedule(id, name, cron, wpJson, templateId, enabled);
             return ResponseEntity.status(201).body(scheduleView(s));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(404).body(error(e.getMessage()));
@@ -266,6 +270,7 @@ public class DockController {
         m.put("name", s.name);
         m.put("cron", s.cronExpr);
         m.put("waypoints", s.waypoints);
+        m.put("templateId", s.inspectionTemplateId);
         m.put("enabled", s.enabled);
         m.put("lastRunAt", s.lastRunAt);
         m.put("lastResult", s.lastResult);

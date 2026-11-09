@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.inspection.InspectionTask;
+import io.aerofleet.cloud.inspection.InspectionTaskService;
+import io.aerofleet.cloud.inspection.Waypoint;
 import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.cloud.mission.common.MissionItemRequest;
 import io.aerofleet.mavlink.messages.MissionItemInt;
@@ -40,6 +43,7 @@ public class UnattendedScheduler {
     private final DockRunLogRepository runLogs;
     private final DockRepository docks;
     private final DockService dockService;
+    private final InspectionTaskService inspectionTasks;
     private final DroneCommandService droneCmd;
     private final DeviceRegistry registry;
     private final DockProperties props;
@@ -54,11 +58,13 @@ public class UnattendedScheduler {
     public UnattendedScheduler(DockScheduleRepository schedules, DockRunLogRepository runLogs,
                                DockRepository docks, DockService dockService,
                                DroneCommandService droneCmd, DeviceRegistry registry,
-                               DockProperties props, ObjectMapper mapper) {
+                               DockProperties props, ObjectMapper mapper,
+                               InspectionTaskService inspectionTasks) {
         this.schedules = schedules;
         this.runLogs = runLogs;
         this.docks = docks;
         this.dockService = dockService;
+        this.inspectionTasks = inspectionTasks;
         this.droneCmd = droneCmd;
         this.registry = registry;
         this.props = props;
@@ -183,16 +189,24 @@ public class UnattendedScheduler {
         int sysid = dock.droneSysid;
         long start = System.currentTimeMillis();
         boolean airborneSeen = false;
+        String inspectionTaskId = null;
         try {
             dockService.sendCommand(dock.id, DockCommand.OPEN_DOOR);
             waitForState(dock.id, DockState.OPEN, 30_000);
 
-            List<MissionItemRequest> requests = missionFrom(s, dock);
+            List<MissionItemRequest> requests;
+            if (s.inspectionTemplateId != null && !s.inspectionTemplateId.isBlank()) {
+                inspectionTaskId = createInspectionTask(s, dock, run);
+                requests = missionFrom(inspectionTasks.getWaypoints(inspectionTaskId));
+            } else {
+                requests = missionFrom(s, dock);
+            }
             List<MissionItemInt> items = droneCmd.toMissionItems(requests, sysid);
             droneCmd.uploadMission(sysid, items);
             droneCmd.arm(sysid);
             droneCmd.startMission(sysid);
-            log.info("unattended mission started dock={} schedule={} sysid={}", dock.sn, s.id, sysid);
+            log.info("unattended mission started dock={} schedule={} sysid={} inspectionTask={}",
+                    dock.sn, s.id, sysid, inspectionTaskId);
 
             long deadline = start + props.getUnattendedFlightTimeoutMin() * 60_000L;
             while (System.currentTimeMillis() < deadline) {
@@ -205,10 +219,7 @@ public class UnattendedScheduler {
                 }
                 sleepQuietly(2_000);
             }
-            boolean timedOut = System.currentTimeMillis() >= deadline && airborneSeen;
-            if (System.currentTimeMillis() >= deadline) {
-                timedOut = true;
-            }
+            boolean timedOut = System.currentTimeMillis() >= deadline;
 
             closeDoorQuietly(dock.id);
 
@@ -219,8 +230,17 @@ public class UnattendedScheduler {
             runLogs.save(run);
             s.lastResult = run.result;
             schedules.save(s);
-            log.info("unattended mission finished dock={} result={} flightMin={}",
-                    dock.sn, run.result, String.format("%.2f", run.flightMinutes));
+
+            if (inspectionTaskId != null) {
+                if (timedOut) {
+                    inspectionTasks.failTask(inspectionTaskId, "flight timeout");
+                } else {
+                    inspectionTasks.completeFromRun(inspectionTaskId, run.flightMinutes,
+                            0, 0, "相机未接入：本轮只记录飞行执行结果，未生成照片/视觉检测");
+                }
+            }
+            log.info("unattended mission finished dock={} result={} flightMin={} inspectionTask={}",
+                    dock.sn, run.result, String.format("%.2f", run.flightMinutes), inspectionTaskId);
         } catch (Exception e) {
             run.finishedAt = System.currentTimeMillis();
             run.result = "FAILED";
@@ -228,9 +248,61 @@ public class UnattendedScheduler {
             runLogs.save(run);
             s.lastResult = "FAILED";
             schedules.save(s);
+            if (inspectionTaskId != null) {
+                inspectionTasks.failTask(inspectionTaskId, e.getMessage());
+            }
             closeDoorQuietly(dock.id);
             log.warn("unattended mission failed dock={}: {}", dock.sn, e.getMessage());
         }
+    }
+
+    /**
+     * 为带巡检模板的定时任务创建巡检任务，并把 taskId 写进 run log。
+     * 调用方须保证 {@code s.inspectionTemplateId} 非空（无模板时走旧 waypoints 路径）。
+     */
+    String createInspectionTask(DockScheduleEntity s, DockEntity dock, DockRunLogEntity run) {
+        double[] start = startPoint(s, dock);
+        InspectionTask task = inspectionTasks.createTask(
+                s.inspectionTemplateId, dock.droneSysid, start[0], start[1], null);
+        run.inspectionTaskId = task.id();
+        runLogs.save(run);
+        inspectionTasks.startTask(task.id());
+        return task.id();
+    }
+
+    /** 起始点：优先机巢坐标，其次定时任务的首个航点。 */
+    private double[] startPoint(DockScheduleEntity s, DockEntity dock) {
+        if (dock.lat != null && dock.lon != null) {
+            return new double[]{dock.lat, dock.lon};
+        }
+        double[][] wps;
+        try {
+            wps = parseWaypoints(s.waypoints);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("invalid schedule waypoints: " + e.getMessage());
+        }
+        if (wps.length == 0) {
+            throw new IllegalArgumentException(
+                    "schedule has no start point (dock lat/lon and waypoints both empty)");
+        }
+        return new double[]{wps[0][0], wps[0][1]};
+    }
+
+    /** 巡检航线 → 任务项：takeoff + waypoints + rtl。 */
+    List<MissionItemRequest> missionFrom(List<Waypoint> wps) {
+        if (wps == null || wps.isEmpty()) {
+            throw new IllegalArgumentException("inspection route has no waypoints");
+        }
+        List<MissionItemRequest> requests = new ArrayList<>();
+        Waypoint first = wps.get(0);
+        double takeoffAlt = first.alt > 0 ? first.alt : 60;
+        requests.add(new MissionItemRequest("takeoff", first.lat, first.lon, takeoffAlt, 0));
+        for (Waypoint wp : wps) {
+            requests.add(new MissionItemRequest("waypoint", wp.lat, wp.lon, wp.alt, 0));
+        }
+        Waypoint last = wps.get(wps.size() - 1);
+        requests.add(new MissionItemRequest("rtl", last.lat, last.lon, 0, 0));
+        return requests;
     }
 
     /** 航点 JSON → 任务项：takeoff + waypoints + rtl（复用 DroneCommandService 的构造）。 */

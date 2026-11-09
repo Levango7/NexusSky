@@ -31,6 +31,10 @@ public class DockRunLogEntity {
     @Column(name = "flight_minutes")
     public Double flightMinutes;
 
+    /** 关联的巡检任务 ID（定时任务未配巡检模板时为空）。 */
+    @Column(name = "inspection_task_id", length = 64)
+    public String inspectionTaskId;
+
     @Column(name = "created_at", nullable = false)
     public long createdAt = System.currentTimeMillis();
 }
