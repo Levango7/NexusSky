@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 更新至 2026-10-24，共 79 个 `@RestController`、3 个 `@Service` 辅助类、414 个 REST API 端点
+> 更新至 2026-11-10，共 79 个 `@RestController`、3 个 `@Service` 辅助类、415 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -2597,6 +2597,7 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 | POST | `/{id}/commands` | 动作命令（需 OPERATOR） | {method} | 200 受理 / 409 非法状态 / 404 / 504 通道故障 |
 | POST | `/osd` | OSD 心跳摄取（机巢 → 云，需 OPERATOR） | {sn, state?, temperature?, batteryPct?, droneSysid?} | 200 机巢视图 / 404 |
 | GET | `/{id}/metrics` | 利用率与运维健康度聚合（需 OBSERVER） | ?days=N（默认 7，上限 90） | 200 度量 / 404 |
+| GET | `/{id}/runs` | 无人值守运行记录（架次结果 + 关联 inspectionTaskId，需 OBSERVER） | - | 200 [运行记录] / 404 |
 | POST | `/{id}/schedules` | 创建无人值守定时任务（需 OPERATOR） | {name, cron, waypoints?, enabled?} | 201 / 400 非法 cron / 404 |
 | GET | `/{id}/schedules` | 定时任务列表（需 OBSERVER） | - | 200 / 404 |
 | POST | `/{id}/schedules/{sid}/enable` | 启用/停用（需 ADMIN） | {enabled} | 200 / 404 |
@@ -2683,7 +2684,7 @@ es.onerror = (e) => {
 | 模块 | Controller | 基础路径 | 端点数 |
 |------|-----------|----------|--------|
 | 无人机控制 | DroneController | /api/v1/drones | 8 |
-| 机巢管理 | DockController | /api/v1/docks | 10 |
+| 机巢管理 | DockController | /api/v1/docks | 11 |
 | 无人机控制 | FlightLogController | /api/v1/flightlog | 2 |
 | 飞行追踪 | TrackingController | /api/v1/tracking | 6 |
 | 电子围栏 | GeofenceController | /api/v1/geofence | 7 |
@@ -2712,7 +2713,7 @@ es.onerror = (e) => {
 | 边缘计算 | EdgeCoordinationController | /api/v1/edge | 3 |
 | 数字孪生 | TwinController | /api/v1/twin | 4 |
 | 环境气象 | EnvAlertController | /api/v1/env-alerts | 1 |
-| 环境覆盖 | EnvOverrideController | /api/v1/env | 3 |
+| 环境覆盖 | EnvOverrideController | /api/v1/env | 4 |
 | 安全认证 | AuthController | /api/v1/auth | 3 |
 | 签名密钥 | MavlinkSigningKeyController | /api/v1/mavlink/signing | 3 |
 | 签名姿态 | MavlinkSigningPostureController | /api/v1/mavlink/signing/posture | 3 |
@@ -2759,6 +2760,6 @@ es.onerror = (e) => {
 | 视觉感知 | CvEvalController | /api/v1/cv-eval | 2 |
 | 视频融合 | VideoFusionController | /api/v1/video-fusion | 5 |
 | 链路仿真 | LinkSimControlController | /api/v1/link-sim | 2 |
-| **合计** | **79 个 @RestController** | | **414** |
+| **合计** | **79 个 @RestController** | | **415** |
 
-> **注**: 项目共 80 个 Controller 源文件：77 个为 `@RestController`，`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。不算 actuator，`@RestController` 类共 79 个（另有 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的类也标注 `@RestController`，但不含任何方法级映射注解、不暴露 API）—— 共 414 个端点（219 GET / 163 POST / 14 PUT / 16 DELETE / 1 PATCH）。因此下表列 77 行（+链接仿真的 `LinkSimControlController`），端点列之和 411 = 414 − 2。
+> **注**: 项目共 80 个 Controller 源文件：77 个为 `@RestController`，`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。不算 actuator，`@RestController` 类共 79 个（另有 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的类也标注 `@RestController`，但不含任何方法级映射注解、不暴露 API）—— 共 415 个端点（221 GET / 163 POST / 14 PUT / 16 DELETE / 1 PATCH）。因此下表列 77 行（+链接仿真的 `LinkSimControlController`），端点列之和 415 与总数一致（2026-11-10 按代码逐类重数，顺手修正 EnvOverrideController 3→4 的旧漂移）。
