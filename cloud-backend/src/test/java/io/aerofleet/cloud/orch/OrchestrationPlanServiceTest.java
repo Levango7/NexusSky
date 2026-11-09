@@ -23,10 +23,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -67,6 +71,9 @@ class OrchestrationPlanServiceTest {
 
     @Mock
     private StepExecutor stepExecutor;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -321,6 +328,69 @@ class OrchestrationPlanServiceTest {
 
         // Assert
         verify(stepExecutor).executeStep(step, 1L);
+    }
+
+    @Test
+    @DisplayName("同步执行步骤失败时 failReason 为固定短句，不外泄底层异常文本")
+    void syncStepFailureUsesFixedFailReason() {
+        // Arrange
+        OrchestrationPlanEntity plan = buildPlan(1L, PlanStatus.DRAFT, "[1]");
+        TaskStepEntity step = buildStep("step-1", null, "[]", null);
+        step.setStatus(StepStatus.PENDING);
+
+        when(planRepository.findById(1L)).thenReturn(Optional.of(plan));
+        when(planRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(resourceManager.allocate(1L, Arrays.asList(1))).thenReturn(true);
+        when(stepRepository.findByPlanId(1L)).thenReturn(Collections.singletonList(step));
+        doThrow(new IllegalStateException("db-internal canary"))
+                .when(stepExecutor).executeStep(step, 1L);
+
+        // Act
+        service.startPlan(1L);
+
+        // Assert
+        ArgumentCaptor<StepFailEvent> captor = ArgumentCaptor.forClass(StepFailEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        StepFailEvent event = captor.getValue();
+        assertEquals("执行异常（详情见服务端日志）", event.getFailReason());
+        assertFalse(event.getFailReason().contains("db-internal"));
+        assertEquals(StepStatus.FAILED, step.getStatus());
+    }
+
+    @Test
+    @DisplayName("事务提交后执行步骤失败时 failReason 为固定短句，不外泄底层异常文本")
+    void afterCommitStepFailureUsesFixedFailReason() {
+        // Arrange
+        OrchestrationPlanEntity plan = buildPlan(1L, PlanStatus.DRAFT, "[1]");
+        TaskStepEntity step = buildStep("step-1", null, "[]", null);
+        step.setStatus(StepStatus.PENDING);
+
+        when(planRepository.findById(1L)).thenReturn(Optional.of(plan));
+        when(planRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(resourceManager.allocate(1L, Arrays.asList(1))).thenReturn(true);
+        when(stepRepository.findByPlanId(1L)).thenReturn(Collections.singletonList(step));
+        doThrow(new IllegalStateException("db-internal canary"))
+                .when(stepExecutor).executeStep(step, 1L);
+
+        // Act：模拟事务同步激活，让步骤执行推迟到 afterCommit
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.startPlan(1L);
+            List<TransactionSynchronization> synchronizations =
+                    TransactionSynchronizationManager.getSynchronizations();
+            assertEquals(1, synchronizations.size());
+            synchronizations.forEach(TransactionSynchronization::afterCommit);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        // Assert
+        ArgumentCaptor<StepFailEvent> captor = ArgumentCaptor.forClass(StepFailEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        StepFailEvent event = captor.getValue();
+        assertEquals("执行异常（详情见服务端日志）", event.getFailReason());
+        assertFalse(event.getFailReason().contains("db-internal"));
+        assertEquals(StepStatus.FAILED, step.getStatus());
     }
 
     // ==================== pausePlan / resumePlan ====================
