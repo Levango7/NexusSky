@@ -112,6 +112,86 @@ class WorkOrderServiceTest {
     }
 
     @Test
+    @DisplayName("创建工单：RECTIFIED（已消缺）缺陷 → 拒绝（此前只拒 DISMISSED，已修好的点位会被再派一遍）")
+    void createRejectsRectifiedDefect() {
+        DefectEntity fixed = new DefectEntity();
+        fixed.id = 9L;
+        fixed.kind = "person";
+        fixed.status = "RECTIFIED";
+        when(defects.findById(9L)).thenReturn(Optional.of(fixed));
+
+        assertThatThrownBy(() -> svc.create("t", null, List.of(9L), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("RECTIFIED");
+    }
+
+    @Test
+    @DisplayName("创建工单：同一缺陷已在另一张未终态工单上 → 拒绝并点名那张单")
+    void createRejectsDefectOnActiveWorkOrder() {
+        // 缺陷 7 本身合规（OPEN），但它已被工单 #42（IN_PROGRESS，未终态）占用
+        when(refs.findByDefectId(7L)).thenReturn(List.of(refOf(42L, 7L)));
+        WorkOrderEntity blocking = new WorkOrderEntity();
+        blocking.id = 42L;
+        blocking.status = "IN_PROGRESS";
+        when(orders.findById(42L)).thenReturn(Optional.of(blocking));
+
+        assertThatThrownBy(() -> svc.create("t", null, List.of(7L), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("already on active work order #42");
+
+        verify(orders, never()).save(any(WorkOrderEntity.class));
+    }
+
+    @Test
+    @DisplayName("创建工单：占用它的工单已终态（VERIFIED/CANCELLED）→ 允许再派")
+    void createAllowsDefectAfterWorkOrderTerminal() {
+        when(refs.findByDefectId(7L)).thenReturn(List.of(refOf(43L, 7L)));
+        WorkOrderEntity done = new WorkOrderEntity();
+        done.id = 43L;
+        done.status = "CANCELLED";
+        when(orders.findById(43L)).thenReturn(Optional.of(done));
+        when(orders.save(any(WorkOrderEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        WorkOrderEntity wo = svc.create("改期后重派", null, List.of(7L), null);
+
+        assertThat(wo).isNotNull();
+        assertThat(wo.status).isEqualTo("OPEN");
+    }
+
+    @Test
+    @DisplayName("复检通过 → 挂着的缺陷落库为 RECTIFIED（闭环最后一环，此前只改工单）")
+    void verifyPassRectifiesDefects() throws Exception {
+        when(capture.captureAndLocate(anyInt(), any())).thenReturn(Map.of(
+                "frameSeq", 555L,
+                "detections", List.of(Map.of("kind", "vehicle", "lat", 22.9, "lon", 113.9))));
+
+        Map<String, Object> out = svc.verify(1L, 9);
+
+        assertThat(out.get("result")).isEqualTo("VERIFIED");
+        assertThat(out.get("closedDefects")).isEqualTo(List.of(7L));
+        assertThat(out.get("openDefects")).isEqualTo(List.of());
+        assertThat(defectRef7().status).isEqualTo("RECTIFIED");
+        assertThat(defectRef7().note).contains("work order #1").contains("555");
+        assertThat(defectRef7().lastSeenAt).isEqualTo(wo.verifiedAt);
+    }
+
+    @Test
+    @DisplayName("复检命中 → 缺陷一条都不动（保持可派单）")
+    void verifyFailLeavesDefectsDispatchable() throws Exception {
+        when(capture.captureAndLocate(anyInt(), any())).thenReturn(Map.of(
+                "frameSeq", 556L,
+                "detections", List.of(Map.of(
+                        "kind", "person", "confidence", 0.9, "lat", 22.591, "lon", 113.934))));
+
+        Map<String, Object> out = svc.verify(1L, 9);
+
+        assertThat(out.get("result")).isEqualTo("REOPENED");
+        assertThat(out.get("closedDefects")).isEqualTo(List.of());
+        assertThat(out.get("openDefects")).isEqualTo(List.of(7L));
+        assertThat(defectRef7().status).isEqualTo("OPEN");
+    }
+
+    @Test
     @DisplayName("创建工单：空 defectIds → 400；DISMISSED 缺陷 → 400")
     void createValidation() {
         assertThatThrownBy(() -> svc.create("t", null, List.of(), null))
@@ -124,6 +204,18 @@ class WorkOrderServiceTest {
         assertThatThrownBy(() -> svc.create("t", null, List.of(8L), null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("DISMISSED");
+    }
+
+    /** 取 setUp 里 stub 的那条缺陷 7（每次 verify 后它应已被改写）。 */
+    private DefectEntity defectRef7() {
+        return defects.findById(7L).orElseThrow();
+    }
+
+    private static WorkOrderDefectRefEntity refOf(Long workOrderId, Long defectId) {
+        WorkOrderDefectRefEntity r = new WorkOrderDefectRefEntity();
+        r.workOrderId = workOrderId;
+        r.defectId = defectId;
+        return r;
     }
 
     @Test

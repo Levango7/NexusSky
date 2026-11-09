@@ -38,10 +38,17 @@ public class DefectReportService {
         long cancelled = wos.stream().filter(w -> "CANCELLED".equals(w.status)).count();
         long open = ds.stream().filter(d -> "OPEN".equals(d.status)).count();
         long confirmed = ds.stream().filter(d -> "CONFIRMED".equals(d.status)).count();
+        long rectified = ds.stream().filter(d -> DefectService.RECTIFIED.equals(d.status)).count();
 
         // 复检通过率：VERIFIED / (VERIFIED + REOPENED)，分母零返回 null（F1 口径）
         Double verifyPassRate = (verified + reopened) == 0 ? null
                 : Math.round(verified * 10000.0 / (verified + reopened)) / 100.0;
+
+        // 缺陷闭环率：RECTIFIED / 缺陷总数，分母零返回 null（同 F1 口径）。
+        // 这是"闭环消缺"唯一能拿出来的数——此前的报告只有工单侧的 VERIFIED 数，
+        // 而缺陷本身从不关闭，于是这个数永远是 0，对表时说不清到底消了多少。
+        Double defectClosureRate = ds.isEmpty() ? null
+                : Math.round(rectified * 10000.0 / ds.size()) / 100.0;
 
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("from", DAY.format(Instant.ofEpochMilli(from)));
@@ -50,6 +57,8 @@ public class DefectReportService {
         summary.put("defectsTotal", ds.size());
         summary.put("defectsOpen", open);
         summary.put("defectsConfirmed", confirmed);
+        summary.put("defectsRectified", rectified);
+        summary.put("defectClosureRatePct", defectClosureRate);
         summary.put("workOrdersTotal", wos.size());
         summary.put("workOrdersVerified", verified);
         summary.put("workOrdersReopened", reopened);
@@ -119,7 +128,9 @@ public class DefectReportService {
         sb.append("## 概览\n\n");
         sb.append("- 缺陷：").append(s.get("defectsTotal"))
                 .append("（OPEN ").append(s.get("defectsOpen"))
-                .append(" / CONFIRMED ").append(s.get("defectsConfirmed")).append("）\n");
+                .append(" / CONFIRMED ").append(s.get("defectsConfirmed"))
+                .append(" / 已消缺 ").append(s.get("defectsRectified"))
+                .append("，闭环率 ").append(s.get("defectClosureRatePct")).append("%）\n");
         sb.append("- 工单：").append(s.get("workOrdersTotal"))
                 .append("（VERIFIED ").append(s.get("workOrdersVerified"))
                 .append(" / REOPENED ").append(s.get("workOrdersReopened"))

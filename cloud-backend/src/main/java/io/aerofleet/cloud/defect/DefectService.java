@@ -21,6 +21,36 @@ public class DefectService {
     /** 去重半径（米）：同 kind 且 ≤ 此距离视为同一缺陷的复现。 */
     static final double DEDUP_RADIUS_M = 10.0;
 
+    /**
+     * 已消缺：缺陷经工单复检通过（或人工裁决）关闭。
+     *
+     * <p><b>为什么必须有这个状态</b>：在此之前缺陷只有 OPEN/CONFIRMED/DISMISSED，
+     * 而 {@code WorkOrderService.verify()} 通过后**只改工单状态、不动缺陷**。后果不是
+     * "少记一笔"，而是两件事：
+     * <ol>
+     *   <li>报告里 {@code defectsOpen} 永远大于 0，"闭环消缺"少最后一环，招投标对表时
+     *       拿不出已消缺数量；</li>
+     *   <li><b>消缺后复发的缺陷会被静默并回旧单</b>：{@link #findNearby} 只看
+     *       OPEN/CONFIRMED，已修好的点位再次被拍到时会命中那条旧缺陷并刷新
+     *       {@code lastSeenAt}，而不是产生新告警——复发被吞掉，运维永远不知道。</li>
+     * </ol>
+     * 有了 RECTIFIED 之后，复发自然走"立新单 + 旧记录留痕"，既能审计（这个点位修过
+     * 几次）又不吞复发。
+     */
+    static final String RECTIFIED = "RECTIFIED";
+
+    /** 缺陷状态全集（人工裁决与工单回写都只能产生这四种）。 */
+    static final List<String> STATUSES = List.of("OPEN", "CONFIRMED", RECTIFIED, "DISMISSED");
+
+    /**
+     * 可派单状态：工单只能挂这两种缺陷。
+     *
+     * <p>与 {@link #STATUSES} 分开是因为口径不同：DISMISSED 是否决、RECTIFIED 是已关闭，
+     * 都不该再出现在新工单上；而 {@link #findNearby} 用的是**同一份**集合——这保证了
+     * "能派单的缺陷才会被去重折叠"，不会出现"已消缺的缺陷还在吸收新观测"。
+     */
+    static final List<String> DISPATCHABLE = List.of("OPEN", "CONFIRMED");
+
     /** 自动晋升置信度阈值（可配 aerofleet.defect.auto-promote-confidence）。 */
     private final double autoPromoteConfidence;
 
@@ -97,10 +127,14 @@ public class DefectService {
         }
     }
 
-    /** 找 ≤ DEDUP_RADIUS_M 且同 kind 的活动缺陷（OPEN/CONFIRMED）。 */
+    /**
+     * 找 ≤ DEDUP_RADIUS_M 且同 kind 的可派单缺陷（OPEN/CONFIRMED）。
+     *
+     * <p>RECTIFIED **刻意不在**这个集合里：已消缺的点位再次被拍到必须立新单，而不是
+     * 刷新旧缺陷的 {@code lastSeenAt}（那会让复发无声无息地消失）。
+     */
     DefectEntity findNearby(String kind, double lat, double lon) {
-        List<DefectEntity> active = defects.findByStatusInOrderByCreatedAtDesc(
-                List.of("OPEN", "CONFIRMED"));
+        List<DefectEntity> active = defects.findByStatusInOrderByCreatedAtDesc(DISPATCHABLE);
         DefectEntity best = null;
         double bestM = Double.MAX_VALUE;
         for (DefectEntity d : active) {
@@ -157,14 +191,30 @@ public class DefectService {
         return 6371000.0 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    /** 缺陷状态流转：OPEN↔CONFIRMED↔DISMISSED（人工裁决，与工单状态独立）。 */
+    /**
+     * 缺陷状态人工裁决：OPEN↔CONFIRMED↔DISMISSED + →RECTIFIED（与工单状态独立）。
+     *
+     * <p>RECTIFIED 与另三个不同：它是**关闭**语义，必须有说明才允许手工置入——
+     * 与 {@link #createManual} 的"人工单没说明等于没立案"同一条纪律。没写说明的
+     * 关闭在审计里等于"不知道谁修的、什么时候修的"。
+     */
     @Transactional
     public DefectEntity setStatus(Long id, String status, String note) {
-        if (!List.of("OPEN", "CONFIRMED", "DISMISSED").contains(status)) {
-            throw new IllegalArgumentException("invalid defect status: " + status);
+        if (!STATUSES.contains(status)) {
+            throw new IllegalArgumentException("invalid defect status: " + status
+                    + " (supported: " + STATUSES + ")");
+        }
+        if (RECTIFIED.equals(status) && (note == null || note.isBlank())) {
+            throw new IllegalArgumentException(
+                    "marking a defect RECTIFIED requires a note (who/when/how)");
         }
         DefectEntity d = get(id);
         d.status = status;
+        if (RECTIFIED.equals(status)) {
+            // 消缺口径下 lastSeenAt 记为"关闭时间"，不是"最后一次看到缺陷的时间"，
+            // 两者混用会让报告里的复发时间线读反
+            d.lastSeenAt = System.currentTimeMillis();
+        }
         if (note != null && !note.isBlank()) {
             d.note = (d.note == null ? "" : d.note + " | ") + note;
         }
