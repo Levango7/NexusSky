@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.inspection;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,6 +12,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 /**
  * {@link InspectionController} REST 端点单测（P1-1 无人机集群智能巡检）。
@@ -30,7 +32,10 @@ class InspectionControllerTest {
         RoutePlannerService routePlanner = new RoutePlannerService();
         AnomalyDetectionService anomalyDetector = new AnomalyDetectionService();
         presetFactory = new InspectionPresetFactory();
-        taskService = new InspectionTaskService(routePlanner, anomalyDetector, presetFactory);
+        taskService = new InspectionTaskService(routePlanner, anomalyDetector, presetFactory,
+                mock(InspectionTaskRepository.class),
+                mock(InspectionReportRepository.class),
+                new ObjectMapper());
         controller = new InspectionController(taskService, presetFactory);
     }
 

@@ -1,10 +1,12 @@
 package io.aerofleet.cloud.inspection;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /**
  * 真实执行完成路径：报告只能来自调用方传入的实际采集结果，不得凭空生成照片/异常。
@@ -22,7 +24,10 @@ class InspectionRunReportTest {
         service = new InspectionTaskService(
                 new RoutePlannerService(),
                 new AnomalyDetectionService(),
-                new InspectionPresetFactory());
+                new InspectionPresetFactory(),
+                mock(InspectionTaskRepository.class),
+                mock(InspectionReportRepository.class),
+                new ObjectMapper());
     }
 
     @Test
