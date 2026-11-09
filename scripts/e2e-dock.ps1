@@ -10,6 +10,8 @@
 #   R4  定时任务创建（cron 非法→400）、门控 SKIPPED（无托管机）
 #   R5  度量聚合形状（summary/perDay，分母零返回 null）
 #   R6  GCS 面板可加载（可选，仅当 gcs-web 已构建）
+#   R7  无人值守真飞行：templateId 定时任务 + 托管机在线 → 真实飞行 →
+#       run log 记 inspectionTaskId → 巡检报告可查且摘要注明相机未接入（D5/D6 黄金路径）
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File scripts\e2e-dock.ps1
@@ -75,7 +77,7 @@ try {
     $backendJar = Get-E2eJar -Root $Root -Module 'cloud-backend' -Jar 'aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar'
     $simJar = Get-E2eJar -Root $Root -Module 'drone-sim' -Jar 'aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar'
     if (-not $SkipBuild -or -not (Test-Path $backendJar) -or -not (Test-Path $simJar)) {
-        Write-Host '[1/6] 构建后端 + 模拟器...'
+        Write-Host '[1/7] 构建后端 + 模拟器...'
         # 本机 Windows 的 JDK17 固定位置；不存在（如 Linux CI）则沿用外部环境已配好的 JDK
         if (Test-Path 'E:\dev-tools\jdk17.0.20_8') {
             $env:JAVA_HOME = 'E:\dev-tools\jdk17.0.20_8'
@@ -85,13 +87,13 @@ try {
         mvn -q package -DskipTests
         Pop-Location
     } else {
-        Write-Host '[1/6] 使用既有 jar（-SkipBuild）'
+        Write-Host '[1/7] 使用既有 jar（-SkipBuild）'
     }
 
     $java = Get-E2eJava   # 跨平台探测（Linux 叫 java 不是 java.exe）
 
     # ---- 1. 起后端 ----
-    Write-Host '[2/6] 启动 cloud-backend（dev profile）...'
+    Write-Host '[2/7] 启动 cloud-backend（dev profile）...'
     $backendLog = Join-Path $TempDir 'af-dock-backend.log'
     $backend = Start-Process -FilePath $java -ArgumentList @(
         '-jar', $backendJar, "--server.port=$BackendPort",
@@ -100,6 +102,7 @@ try {
         # 编队/任务会被 restore 复活并干扰本轮断言（同一 JVM 生命周期内不重启，mem 足够）。
         '--spring.datasource.url=jdbc:h2:mem:dock-e2e;DB_CLOSE_DELAY=-1',
         '--aerofleet.security.jwt-secret=e2e-test-secret-0123456789abcdef0123456789abcdef',
+        # R7 门控要求托管机在线：drone-sim 普通模式的心跳经 drone-port 进设备注册表
         "--aerofleet.drone-port=$DronePort",
         "--aerofleet.dock.sim-base-url=http://127.0.0.1:$DockHttpPort",
         '--aerofleet.dock.schedule-poll-ms=5000'
@@ -119,7 +122,7 @@ try {
     if (-not $up) { throw 'backend not ready' }
 
     # ---- 2. 注册与幂等 ----
-    Write-Host '[3/6] 注册机巢（R1）...'
+    Write-Host '[3/7] 注册机巢（R1）...'
     $body = @{ name = 'A区无人值守机巢'; sn = 'DOCK-E2E-001'; model = 'NS-D1'; lat = 22.5916; lon = 113.9345 } | ConvertTo-Json
     $r1 = Try-Json 'POST' "$Base/docks" $body
     Assert-True ($r1.code -eq 200 -or $r1.code -eq 201) "注册成功（code=$($r1.code)）"
@@ -130,7 +133,7 @@ try {
     Assert-True ($r1b.code -eq 409) "重复 SN → 409（实际 $($r1b.code)）"
 
     # ---- 3. 起机巢模拟器并推 OSD ----
-    Write-Host '[4/6] 启动机巢模拟器（DockSim，HTTP 18081）并观测 OSD 上线...'
+    Write-Host '[4/7] 启动机巢模拟器（DockSim，HTTP 18081）并观测 OSD 上线...'
     $simLog = Join-Path $TempDir 'af-dock-sim.log'
     $sim = Start-Process -FilePath $java -ArgumentList @(
         '-jar', $simJar, 'dock',
@@ -152,7 +155,7 @@ try {
     Assert-True $online "OSD 心跳后上线（state 离开 OFFLINE，实际 $($d.body.state)）"
 
     # ---- 4. 命令与状态机 ----
-    Write-Host '[5/6] 命令与状态机（R2/R3）...'
+    Write-Host '[5/7] 命令与状态机（R2/R3）...'
     $open = Try-Json 'POST' "$Base/docks/$dockId/commands" (@{ method = 'door_open' } | ConvertTo-Json)
     Assert-True ($open.code -eq 200) "开门命令受理（code=$($open.code)）"
     Assert-True ($open.body.state -eq 'OPENING') "进入 OPENING（实际 $($open.body.state)）"
@@ -187,7 +190,7 @@ try {
     Assert-True $back "关门回稳（IDLE/CHARGING，实际 $($d.body.state)）"
 
     # ---- 5. 定时任务与门控 ----
-    Write-Host '[6/6] 定时任务与度量（R4/R5）...'
+    Write-Host '[6/7] 定时任务与度量（R4/R5）...'
     $schedBad = Try-Json 'POST' "$Base/docks/$dockId/schedules" `
         (@{ name = '坏cron'; cron = 'not-a-cron' } | ConvertTo-Json)
     Assert-True ($schedBad.code -eq 400) "非法 cron → 400（实际 $($schedBad.code)）"
@@ -223,6 +226,78 @@ try {
 
     # 状态迁移时间线非空
     Assert-True (@($d.body.recentTransitions).Count -ge 3) "状态迁移日志 ≥3 条（实际 $((@($d.body.recentTransitions)).Count)）"
+
+    # ---- 6. 无人值守真飞行 + 巡检报告（R7，D5/D6 黄金路径）----
+    Write-Host '[7/7] 无人值守真飞行 + 巡检报告（R7）...'
+    # 托管机上线：drone-sim 普通模式心跳进设备注册表（与 e2e-cv-eval 同口径）
+    $droneSim = Start-Process -FilePath $java -ArgumentList @(
+        '-jar', $simJar, '--port', "$DronePort", '--sysid', "$DroneSysid", '--name', 'AF-DOCKE2E-02'
+    ) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-dock-drone.log') `
+        -RedirectStandardError (Join-Path $TempDir 'af-dock-drone.err')
+    Stop-Proc $droneSim
+    $droneOnline = $false
+    for ($i = 0; $i -lt 120; $i++) {
+        Start-Sleep -Milliseconds 500
+        try {
+            $drones = (Invoke-RestMethod -Uri "$Base/drones" -TimeoutSec 2)
+            if (@($drones) | Where-Object { $_.sysid -eq $DroneSysid -and $_.online }) { $droneOnline = $true; break }
+        } catch {}
+    }
+    Assert-True $droneOnline "托管机 sysid=$DroneSysid 上线（R7 门控前提）"
+    if (-not $droneOnline) { throw 'drone not online for R7' }
+
+    # 第二台机巢：注册即指定托管机（与 dock1 的无托管机 SKIPPED 场景对照）
+    $body2 = @{ name = 'B区无人值守机巢'; sn = 'DOCK-E2E-002'; model = 'NS-D1'; lat = 22.5916; lon = 113.9345; droneSysid = $DroneSysid } | ConvertTo-Json
+    $r2 = Try-Json 'POST' "$Base/docks" $body2
+    Assert-True ($r2.code -eq 200 -or $r2.code -eq 201) "机巢2 注册成功（code=$($r2.code)）"
+    $dock2Id = $r2.body.id
+    Assert-True ($null -ne $dock2Id) "返回 dock2Id=$dock2Id"
+
+    # 第二台 DockSim：OSD 心跳防 offlineSweep 误判（无 OSD ~15s 会被扫成 OFFLINE）
+    $sim2 = Start-Process -FilePath $java -ArgumentList @(
+        '-jar', $simJar, 'dock',
+        '--sn', 'DOCK-E2E-002', '--name', 'B区无人值守机巢',
+        '--http-port', '18082', '--drone-sysid', "$DroneSysid",
+        '--osd-url', "http://127.0.0.1:$BackendPort/api/v1/docks/osd",
+        '--osd-period-ms', '2000'
+    ) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-dock-sim2.log') `
+        -RedirectStandardError (Join-Path $TempDir 'af-dock-sim2.err')
+    Stop-Proc $sim2
+    $d2online = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Milliseconds 700
+        $d2 = Try-Json 'GET' "$Base/docks/$dock2Id" $null
+        if ($d2.body -and $d2.body.state -ne 'OFFLINE') { $d2online = $true; break }
+    }
+    Assert-True $d2online "机巢2 OSD 上线（state 离开 OFFLINE，实际 $($d2.body.state)）"
+    if (-not $d2online) { throw 'dock2 not online for R7' }
+
+    # templateId 定时任务：调度器创建巡检任务 → 真飞行 → completeFromRun 出报告
+    $r7sched = Try-Json 'POST' "$Base/docks/$dock2Id/schedules" `
+        (@{ name = 'R7太阳能巡检'; cron = '*/20 * * * * *'; templateId = 'preset-solar-farm' } | ConvertTo-Json)
+    Assert-True ($r7sched.code -eq 201) "R7 定时任务创建 → 201（实际 $($r7sched.code)）"
+
+    # 轮询 run log：result=OK 且 inspectionTaskId 非空。
+    # 上限 = 航线飞行时长（solar-farm 约 2.4km @5m/s ≈ 8-9.5 分钟）+ 调度/开关门余量，取 15 分钟。
+    $r7done = $false
+    $r7task = $null
+    for ($i = 0; $i -lt 90; $i++) {
+        Start-Sleep -Milliseconds 10000
+        $rn = Try-Json 'GET' "$Base/docks/$dock2Id/runs" $null
+        $one = @($rn.body) | Where-Object { $_.scheduleId -eq $r7sched.body.id -and $_.result -eq 'OK' -and $_.inspectionTaskId }
+        if ($one) { $r7done = $true; $r7task = $one[0].inspectionTaskId; break }
+    }
+    Assert-True $r7done "R7 真飞行完成（run log result=OK 且 inspectionTaskId 非空，实际 task=$r7task）"
+
+    if ($r7done) {
+        $rep = Try-Json 'GET' "$Base/inspection/reports/$r7task" $null
+        Assert-True ($rep.code -eq 200) "R7 巡检报告可查（GET /inspection/reports/{taskId}，code=$($rep.code)）"
+        if ($rep.code -eq 200) {
+            Assert-True ("$($rep.body.summary)" -match '相机未接入') "R7 报告摘要注明相机未接入（Phase 1 诚实口径）"
+            Assert-True ($rep.body.totalPhotos -eq 0) "R7 报告 totalPhotos=0（相机未接入，不伪造照片）"
+            Assert-True ($rep.body.totalAnomalies -eq 0) "R7 报告 totalAnomalies=0"
+        }
+    }
 
 } catch {
     Write-Host "  [FAIL] 异常：$($_.Exception.Message)" -ForegroundColor Red
