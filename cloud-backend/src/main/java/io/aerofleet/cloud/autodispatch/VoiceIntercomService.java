@@ -31,10 +31,19 @@ public class VoiceIntercomService {
     public static final int MAX_VOLUME = 100;
     /** 最大广播文本长度。 */
     public static final int MAX_TEXT_LENGTH = 500;
+    /**
+     * 广播历史最多保留条数。
+     * <p>
+     * 广播端点对 OPERATOR 开放，历史只增不减会让单例 Bean 的内存随运行时长无界增长
+     * （每条最多 {@value #MAX_TEXT_LENGTH} 字符文本）。与
+     * {@code DecisionMonitorService} / {@code EdgeCoordinationService} /
+     * {@code SituationOverlayService} 保持同一口径：1000 条后从最旧淘汰。
+     */
+    static final int MAX_HISTORY = 1000;
 
     /** sysid → 语音对讲状态。 */
     private final Map<Integer, IntercomState> intercomStates = new ConcurrentHashMap<>();
-    /** 广播历史（最新在前）。 */
+    /** 广播历史（仅保留最新 {@value #MAX_HISTORY} 条，最旧的先淘汰）。 */
     private final List<BroadcastRecord> broadcastHistory = new ArrayList<>();
 
     /** 语音对讲状态枚举。 */
@@ -136,6 +145,9 @@ public class VoiceIntercomService {
                 sysid, text, effectiveVolume, ttsInstruction, System.currentTimeMillis());
         synchronized (broadcastHistory) {
             broadcastHistory.add(record);
+            while (broadcastHistory.size() > MAX_HISTORY) {
+                broadcastHistory.remove(0);
+            }
         }
 
         return new BroadcastResult(sysid, "SENT", "broadcast sent", effectiveVolume);
