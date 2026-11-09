@@ -46,6 +46,7 @@ class DockServiceTest {
         gateway = mock(DockGateway.class);
         props = new DockProperties();
         service = new DockService(docks, stateLog, schedules,
+                mock(DockRunLogRepository.class),
                 new DockStateMachine(), gateway, props);
 
         stored = new DockEntity();

@@ -49,6 +49,7 @@ class DockTenantIsolationTest {
         stateLog = mock(DockStateLogRepository.class);
         service = new DockService(docks, stateLog,
                 mock(io.aerofleet.cloud.dock.DockScheduleRepository.class),
+                mock(io.aerofleet.cloud.dock.DockRunLogRepository.class),
                 new DockStateMachine(), mock(DockGateway.class), new DockProperties());
     }
 
