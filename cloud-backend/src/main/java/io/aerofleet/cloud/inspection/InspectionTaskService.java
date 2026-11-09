@@ -1,5 +1,8 @@
 package io.aerofleet.cloud.inspection;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 import org.slf4j.Logger;
@@ -20,6 +23,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * 持有 {@code ConcurrentHashMap<taskId, InspectionTask>}，承载任务创建 / 查询 / 启动 / 中止 / 进度查询；
  * 航线规划委托 {@link RoutePlannerService}，异常检测委托 {@link AnomalyDetectionService}。
  * <p>
+ * 持久化（V40）：任务/报告/航线快照写 {@code inspection_tasks} / {@code inspection_reports}，
+ * 构造时从库还原进内存（新实例即"重启后"的诚实还原）。照片/异常明细列表不落库——
+ * 生产路径（{@link #completeFromRun}）只传计数，重启后 {@code getPhotos/getAnomalies}
+ * 对老任务返回空列表，这是已声明的取舍而非缺陷。
+ * <p>
  * 并发安全：tasks ConcurrentHashMap + UUID 任务 ID。
  */
 @Service
@@ -36,13 +44,53 @@ public class InspectionTaskService {
     private final RoutePlannerService routePlanner;
     private final AnomalyDetectionService anomalyDetector;
     private final InspectionPresetFactory presetFactory;
+    private final InspectionTaskRepository taskRepo;
+    private final InspectionReportRepository reportRepo;
+    private final ObjectMapper mapper;
 
     public InspectionTaskService(RoutePlannerService routePlanner,
                                  AnomalyDetectionService anomalyDetector,
-                                 InspectionPresetFactory presetFactory) {
+                                 InspectionPresetFactory presetFactory,
+                                 InspectionTaskRepository taskRepo,
+                                 InspectionReportRepository reportRepo,
+                                 ObjectMapper mapper) {
         this.routePlanner = routePlanner;
         this.anomalyDetector = anomalyDetector;
         this.presetFactory = presetFactory;
+        this.taskRepo = taskRepo;
+        this.reportRepo = reportRepo;
+        this.mapper = mapper;
+        hydrateFromDb();
+    }
+
+    /** 启动还原：把库里的任务与报告事实装回内存，不重放任何迁移路径。 */
+    private void hydrateFromDb() {
+        for (InspectionTaskEntity e : taskRepo.findAll()) {
+            List<Waypoint> wps = waypointsFromJson(e.waypoints);
+            List<InspectionTask.Wp> wpSummary = new ArrayList<>(wps.size());
+            for (Waypoint wp : wps) {
+                wpSummary.add(new InspectionTask.Wp(wp.seq, wp.lat, wp.lon, wp.alt, wp.action));
+            }
+            InspectionTask task = new InspectionTask(e.taskId, e.templateId, e.sysid, wpSummary);
+            task.restore(
+                    InspectionTask.Status.valueOf(e.status),
+                    e.startTime == null ? null : Instant.ofEpochMilli(e.startTime),
+                    e.endTime == null ? null : Instant.ofEpochMilli(e.endTime),
+                    e.progressPct == null ? 0.0 : e.progressPct,
+                    e.photosCaptured == null ? 0 : e.photosCaptured,
+                    e.anomaliesFound == null ? 0 : e.anomaliesFound);
+            tasks.put(task.id(), task);
+            taskWaypoints.put(task.id(), wps);
+            taskPhotos.put(task.id(), new ArrayList<>());
+            taskAnomalies.put(task.id(), new ArrayList<>());
+        }
+        for (InspectionReportEntity e : reportRepo.findAll()) {
+            taskReports.put(e.taskId, reportFromEntity(e));
+        }
+        if (!tasks.isEmpty() || !taskReports.isEmpty()) {
+            log.info("Inspection state restored from DB: tasks={} reports={}",
+                    tasks.size(), taskReports.size());
+        }
     }
 
     /**
@@ -75,6 +123,7 @@ public class InspectionTaskService {
         taskWaypoints.put(taskId, waypoints);
         taskPhotos.put(taskId, new ArrayList<>());
         taskAnomalies.put(taskId, new ArrayList<>());
+        persistTask(task, waypoints);
 
         log.info("Inspection task created: id={} template={} sysid={} waypoints={}",
                 taskId, templateId, sysid, waypoints.size());
@@ -110,6 +159,7 @@ public class InspectionTaskService {
     public InspectionTask startTask(String taskId) {
         InspectionTask task = getTask(taskId);
         task.start();
+        persistTask(task, taskWaypoints.get(taskId));
         log.info("Inspection task started: id={}", taskId);
         return task;
     }
@@ -118,6 +168,7 @@ public class InspectionTaskService {
     public InspectionTask abortTask(String taskId) {
         InspectionTask task = getTask(taskId);
         task.abort();
+        persistTask(task, taskWaypoints.get(taskId));
         log.info("Inspection task aborted: id={}", taskId);
         return task;
     }
@@ -171,7 +222,9 @@ public class InspectionTaskService {
         // 生成报告
         InspectionReport report = buildReport(task, template, photos, anomalies, waypoints);
         taskReports.put(taskId, report);
+        persistReport(report);
         task.complete();
+        persistTask(task, waypoints);
 
         log.info("Inspection task completed: id={} photos={} anomalies={}",
                 taskId, photos.size(), anomalies.size());
@@ -213,7 +266,9 @@ public class InspectionTaskService {
                 Instant.now(), photosCaptured, anomaliesFound, bySeverity,
                 100.0, actualDurationMin, 0.0, summary, recommendations);
         taskReports.put(taskId, report);
+        persistReport(report);
         task.complete();
+        persistTask(task, taskWaypoints.get(taskId));
         log.info("Inspection task completed from run: id={} flightMin={} photos={} anomalies={}",
                 taskId, actualDurationMin, photosCaptured, anomaliesFound);
         return report;
@@ -223,6 +278,7 @@ public class InspectionTaskService {
     public InspectionTask failTask(String taskId, String reason) {
         InspectionTask task = getTask(taskId);
         task.fail();
+        persistTask(task, taskWaypoints.get(taskId));
         log.info("Inspection task failed: id={} reason={}", taskId, reason);
         return task;
     }
@@ -247,6 +303,145 @@ public class InspectionTaskService {
     public List<InspectionPhoto> getPhotos(String taskId) {
         getTask(taskId);
         return taskPhotos.getOrDefault(taskId, List.of());
+    }
+
+    /** 任务行写透：create/start/abort/fail/complete 五个稳定迁移点各写一次。 */
+    private void persistTask(InspectionTask task, List<Waypoint> waypoints) {
+        InspectionTaskEntity e = taskRepo.findById(task.id()).orElse(new InspectionTaskEntity());
+        e.taskId = task.id();
+        e.templateId = task.templateId();
+        e.sysid = task.assignedSysid();
+        e.status = task.status().name();
+        e.startTime = task.startTime() == null ? null : task.startTime().toEpochMilli();
+        e.endTime = task.endTime() == null ? null : task.endTime().toEpochMilli();
+        e.progressPct = task.progressPct();
+        e.photosCaptured = task.photosCaptured();
+        e.anomaliesFound = task.anomaliesFound();
+        e.waypoints = waypointsToJson(waypoints);
+        taskRepo.save(e);
+    }
+
+    /** 报告行写透：报告一旦生成即落库，重启后 getReport 不丢。 */
+    private void persistReport(InspectionReport report) {
+        InspectionReportEntity e = new InspectionReportEntity();
+        e.reportId = report.id();
+        e.taskId = report.taskId();
+        e.templateId = report.templateId();
+        e.generatedAtMs = report.generatedAt().toEpochMilli();
+        e.totalPhotos = report.totalPhotos();
+        e.totalAnomalies = report.totalAnomalies();
+        e.bySeverityJson = severityToJson(report.anomaliesBySeverity());
+        e.routeCoveragePct = report.routeCoveragePct();
+        e.actualDurationMin = report.actualDurationMin();
+        e.distanceFlownKm = report.distanceFlownKm();
+        e.summary = report.summary();
+        e.recommendations = stringListToJson(report.recommendations());
+        reportRepo.save(e);
+    }
+
+    private InspectionReport reportFromEntity(InspectionReportEntity e) {
+        return new InspectionReport(
+                e.reportId, e.taskId, e.templateId,
+                Instant.ofEpochMilli(e.generatedAtMs),
+                e.totalPhotos, e.totalAnomalies,
+                severityFromJson(e.bySeverityJson),
+                e.routeCoveragePct, e.actualDurationMin, e.distanceFlownKm,
+                e.summary, stringListFromJson(e.recommendations));
+    }
+
+    /**
+     * 航线快照序列化：数组的数组 [seq,lat,lon,alt,heading,speed,action,hold]。
+     * <p>
+     * 不做 Jackson 实体自省——Waypoint 是领域对象不是 DTO，手写 8 字段 positional 格式，
+     * 字段顺序即契约，改 Waypoint 时这里必须同步。
+     */
+    private String waypointsToJson(List<Waypoint> waypoints) {
+        if (waypoints == null || waypoints.isEmpty()) {
+            return "[]";
+        }
+        List<List<Object>> rows = new ArrayList<>(waypoints.size());
+        for (Waypoint wp : waypoints) {
+            rows.add(List.of(wp.seq, wp.lat, wp.lon, wp.alt,
+                    wp.headingDeg, wp.speedMps, wp.action.name(), wp.holdTimeSec));
+        }
+        try {
+            return mapper.writeValueAsString(rows);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("waypoints 序列化失败", ex);
+        }
+    }
+
+    private List<Waypoint> waypointsFromJson(String json) {
+        if (json == null || json.isBlank()) {
+            return new ArrayList<>();
+        }
+        try {
+            List<?> rows = mapper.readValue(json, List.class);
+            List<Waypoint> wps = new ArrayList<>(rows.size());
+            for (Object rowObj : rows) {
+                List<?> row = (List<?>) rowObj;
+                wps.add(new Waypoint(
+                        ((Number) row.get(0)).intValue(),
+                        ((Number) row.get(1)).doubleValue(),
+                        ((Number) row.get(2)).doubleValue(),
+                        ((Number) row.get(3)).doubleValue(),
+                        ((Number) row.get(4)).doubleValue(),
+                        ((Number) row.get(5)).doubleValue(),
+                        Waypoint.Action.valueOf((String) row.get(6)),
+                        ((Number) row.get(7)).doubleValue()));
+            }
+            return wps;
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("waypoints 反序列化失败", ex);
+        }
+    }
+
+    private String severityToJson(Map<Anomaly.Severity, Integer> bySeverity) {
+        Map<String, Integer> flat = new LinkedHashMap<>();
+        for (Map.Entry<Anomaly.Severity, Integer> entry : bySeverity.entrySet()) {
+            flat.put(entry.getKey().name(), entry.getValue());
+        }
+        try {
+            return mapper.writeValueAsString(flat);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("by_severity 序列化失败", ex);
+        }
+    }
+
+    private Map<Anomaly.Severity, Integer> severityFromJson(String json) {
+        Map<Anomaly.Severity, Integer> result = new LinkedHashMap<>();
+        if (json == null || json.isBlank()) {
+            return result;
+        }
+        try {
+            Map<String, Integer> flat = mapper.readValue(json, new TypeReference<>() {});
+            for (Map.Entry<String, Integer> entry : flat.entrySet()) {
+                result.put(Anomaly.Severity.valueOf(entry.getKey()), entry.getValue());
+            }
+            return result;
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("by_severity 反序列化失败", ex);
+        }
+    }
+
+    private String stringListToJson(List<String> values) {
+        try {
+            return mapper.writeValueAsString(values == null ? List.of() : values);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("recommendations 序列化失败", ex);
+        }
+    }
+
+    private List<String> stringListFromJson(String json) {
+        if (json == null || json.isBlank()) {
+            return new ArrayList<>();
+        }
+        try {
+            List<String> values = mapper.readValue(json, new TypeReference<>() {});
+            return new ArrayList<>(values);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("recommendations 反序列化失败", ex);
+        }
     }
 
     private InspectionReport buildReport(InspectionTask task,
