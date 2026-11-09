@@ -76,11 +76,11 @@
 
 ### 1.4 测试基线
 
-当前项目测试基线：**5891 tests，0 failures**（全部通过）。
-当前项目测试基线：**5890 tests，0 failures**（全部通过）。
-当前项目测试基线：**5885 tests，0 failures**（全部通过）。
-当前项目测试基线：**5885 tests，0 failures**（全部通过）。
-当前项目测试基线：**5885 tests，0 failures**（全部通过）。
+当前项目测试基线：**5836 tests，0 failures**（全部通过）。
+当前项目测试基线：**5836 tests，0 failures**（全部通过）。
+当前项目测试基线：**5836 tests，0 failures**（全部通过）。
+当前项目测试基线：**5836 tests，0 failures**（全部通过）。
+当前项目测试基线：**5836 tests，0 failures**（全部通过）。
 当前项目测试基线：**5836 tests，0 failures**（全部通过）。
 当前项目测试基线：**5836 tests，0 failures**（全部通过）。
 当前项目测试基线：**5836 tests，0 failures**（全部通过）。
@@ -92,16 +92,16 @@
 |---|---|---|
 | mavlink-core | 523 | MAVLink 协议编解码、CRC 一致性 |
 | drone-sim | 1477 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
-| cloud-backend | 3692 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **5891** | 全部通过，0 failures |
-| cloud-backend | 3691 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **5890** | 全部通过，0 failures |
-| cloud-backend | 3686 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **5885 **全部通过，0 failures** |
-| cloud-backend | 3686 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **5885** | 全部通过，0 failures |
-| cloud-backend | 3686 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **5885 **全部通过，0 failures** |
+| cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5836** | 全部通过，0 failures |
+| cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5836** | 全部通过，0 failures |
+| cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5836 **全部通过，0 failures** |
+| cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5836** | 全部通过，0 failures |
+| cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **5836 **全部通过，0 failures** |
 | cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |
 | **总计** | **5836** | 全部通过，0 failures |
 | cloud-backend | 3637 | REST API、调度引擎、应急编排、安防联动 |

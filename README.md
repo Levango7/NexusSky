@@ -743,13 +743,13 @@ NexusSky/
 | `mavlink-core` | 523 |
 | `drone-sim` | 1477 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3692 |
+| `cloud-backend` | 3637 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5891**
-| **总计** | **5890**
-| **总计** | **5885
-| `cloud-backend` | 3686 |
+| **总计** | **5836**
+| **总计** | **5836**
+| **总计** | **5836
+| `cloud-backend` | 3637 |
 | `cloud-backend` | 3637 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
