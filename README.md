@@ -30,7 +30,7 @@
 | `gcs-web` | React 18 + MapLibre | Web 地面站：实时地图轨迹、飞行仪表 HUD、任务规划、命令下发、告警流、编队/喷洒/安防/应急等 45 个功能面板（顶栏按 8 个业务域分组导航） | 不需要换 |
 | `link-sim` | 纯 Java 17 | MAVLink/UDP 链路损伤代理：延迟/Gilbert-Elliot 突发丢包/令牌桶带宽/周期分区四引擎 + 7 种链路画像 + 一跳静态中继 | 不需要换——损伤模型本身就是要保留的实验变量 |
 | `regulator-sim` | 纯 Java 17 + JDK HttpServer | 模拟 CAAC UOM 监管平台 HTTP API（`/api/verify\|activate\|cancel\|telemetry\|records\|reset` 六端点 + `--delay-ms`/`--error-rate` 故障注入），独立进程，供 regulator 包集成测试与本地开发 | 不需要换——对接端是真 UOM 平台 |
-| `sdk-java` | 纯 Java 11 | Java 客户端 SDK（drones / missions / flightLogs 三域 + 20 余便捷方法），12 单测 | 不需要换 |
+| `sdk-java` | 纯 Java 11 | Java 客户端 SDK（drones / missions / flightLogs 三域 + 20 余便捷方法），19 单测 | 不需要换 |
 | `sdk-python` | Python 3 | Python 客户端 SDK（drones / missions / flightlog + exceptions），7 文件、**27 个用例** | 不需要换 |
 
 > Maven reactor 含前 6 个 Java 模块（见根 `pom.xml` 的 `<modules>`）；`gcs-web` 与
@@ -743,31 +743,10 @@ NexusSky/
 | `mavlink-core` | 523 |
 | `drone-sim` | 1477 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3742 |
+| `cloud-backend` | 3745 |
 | `sdk-java` | 19 |
 | `regulator-sim` | 41 |
-| **总计** | **5941**
-| **总计** | **5941**
-| **总计** | **5941
-| `cloud-backend` | 3742 |
-| `cloud-backend` | 3742 |
-| `sdk-java` | 19 |
-| `regulator-sim` | 41 |
-| **总计** | **5941**
-| **总计** | **5941
-| `cloud-backend` | 3742 |
-| `sdk-java` | 19 |
-| `regulator-sim` | 41 |
-| **总计** | **5941
-| **总计** | **5941
-| `cloud-backend` | 3742 |
-| `sdk-java` | 19 |
-| `regulator-sim` | 41 |
-| **总计** | **5941
-| `cloud-backend` | 3742 |
-| `sdk-java` | 19 |
-| `regulator-sim` | 41 |
-| **总计** | **5941
+| **总计** | **5944** |
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。

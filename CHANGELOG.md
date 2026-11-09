@@ -1,5 +1,49 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 巡检任务与报告落库（V40）+ 机巢架次可观测（R7）+ 10 份文档计数结构修复（净增 3 例）
+
+### 问题
+
+- 机巢无人值守飞行只写 `dock_run_log`，与巡检域的内存态任务互不关联，飞行结果
+  无法反查巡检任务；巡检任务与报告纯内存，重启即失。
+- `e2e-dock.ps1` 只覆盖 R1~R5，R7（无人值守真飞行 → 巡检报告可查）无回归。
+- #269 的 squash 合并把 10 份口径文档的计数行复制成最多 11 份、相邻行胶连
+  （`||` 合并）、续行截断；**两次同类事故都绿过全部门禁**——计数门禁只核值不核结构。
+
+### 改
+
+- `inspection_tasks` / `inspection_reports` 两表（V40）+ Entity/Repository；
+  `completeFromRun()` 写库并推进任务态，报告内容诚实（相机未接入等缺口写进
+  summary/recommendations，不凭空造照片/异常）；启动 `hydrateFromDb()` 水合，
+  `InspectionTask.restore()` 绕过迁移守卫（FAILED/ABORTED 重放会丢终态，
+  `start()` 会把 startTime 刷成恢复时刻）。
+- `GET /api/v1/docks/{id}/runs`（R7，OBSERVER）：架次结果 + 关联 inspectionTaskId。
+- `e2e-dock.ps1` 加 R7 黄金路径断言腿（托管机在线门控 + 模板定时任务 → 真飞行 →
+  run log 记 inspectionTaskId → 巡检报告可查且摘要注明相机未接入）；
+  ci.yml 步骤名 R1~R5 → R1~R7。
+- 状态性守卫九域 → 十域（新增 inspection 域）。
+- 端点计数 414 → 415 全文档同步（README ×3、contributing、onboarding、pricing、
+  sales-pitch-deck、api-reference；顺带修正 EnvOverrideController 3→4 旧漂移）。
+- 10 份文档结构还原：以 #269 前干净版为基底去重去胶连（224 删 / 23 增），
+  计数同步到实测，并修正 README「sdk-java 12 单测」过期 prose（实测 19）。
+- 测试数口径同步：cloud-backend 3742 → 3745，全仓 5941 → 5944（surefire 实测净增 3 例）。
+
+### 验证
+
+- `mvn test` 全量 5944 例 / 0 失败 / 0 错误 / 0 跳过（722 类，BUILD SUCCESS）；
+- `check-test-count-docs.py` 全绿（11 份口径文档逐格一致，含组件覆盖 60/23/37）；
+- 四道端点门禁（声称数/文档路径/前端契约/端点计数）全绿；
+- `check-statefulness.py` 十域全绿 + 自测过；`e2e-dock.ps1` PowerShell 语法解析通过。
+
+### 遗留
+
+- master 当前仍带 #269 的坏结构（56d5eeb2 只刷了数值没去重），本支已修；
+  `fix/doc-dup-regression-269` 的「相邻重复行」卫生门禁（check-repo-hygiene.py
+  检查项 6）尚未上 master，防第三次复发的闸门还开着。
+- 多处旧口径数字现有门禁正则覆盖不到（sales「关键数字速查」4234/51/38、
+  whitepaper「模块数 5 个 Maven 模块」vs 实际 6 模块），属产品口径，他线在办，
+  本批未擅改。
+
 ## [Unreleased] — 步骤失败帧不再携带底层异常文本（2 例新增）
 
 ### 问题
