@@ -138,7 +138,8 @@ public class InspectionTaskService {
     /**
      * 模拟任务执行：生成照片并检测异常，生成报告。
      * <p>
-     * 实际场景由无人机执行航点并回传照片，此处为模拟完成流程。
+     * <b>仅用于演示/测试。</b> 生产路径（机巢无人值守任务）走
+     * {@link #completeFromRun(String, double, int, int, String)}，不生成任何模拟照片/异常。
      */
     public InspectionReport simulateCompletion(String taskId) {
         InspectionTask task = getTask(taskId);
@@ -175,6 +176,55 @@ public class InspectionTaskService {
         log.info("Inspection task completed: id={} photos={} anomalies={}",
                 taskId, photos.size(), anomalies.size());
         return report;
+    }
+
+    /**
+     * 真实执行完成后生成报告。
+     * <p>
+     * 照片数/异常数由调用方按实际采集结果传入，本方法不做任何模拟补充；
+     * Phase 1 相机未接入时传 0/0，并在 {@code note} 里写明原因。
+     */
+    public InspectionReport completeFromRun(String taskId, double actualDurationMin,
+                                            int photosCaptured, int anomaliesFound, String note) {
+        InspectionTask task = getTask(taskId);
+        if (task.status() == InspectionTask.Status.PENDING) {
+            task.start();
+        }
+        task.addPhotos(photosCaptured);
+        task.setAnomaliesFound(anomaliesFound);
+
+        Map<Anomaly.Severity, Integer> bySeverity = new LinkedHashMap<>();
+        bySeverity.put(Anomaly.Severity.HIGH, 0);
+        bySeverity.put(Anomaly.Severity.MEDIUM, 0);
+        bySeverity.put(Anomaly.Severity.LOW, 0);
+
+        String summary = String.format(
+                "巡检结束：实际飞行 %.1f 分钟，照片 %d 张，异常 %d 处（未分离严重度统计；距离未采集）。%s",
+                actualDurationMin, photosCaptured, anomaliesFound,
+                note == null ? "" : note);
+        List<String> recommendations = new ArrayList<>();
+        if (note != null && !note.isBlank()) {
+            recommendations.add(note);
+        }
+        recommendations.add("建议下次巡检间隔不超过 30 天");
+
+        InspectionReport report = new InspectionReport(
+                UUID.randomUUID().toString(), task.id(), task.templateId(),
+                Instant.now(), photosCaptured, anomaliesFound, bySeverity,
+                100.0, actualDurationMin, 0.0, summary, recommendations);
+        taskReports.put(taskId, report);
+        task.complete();
+        log.info("Inspection task completed from run: id={} flightMin={} photos={} anomalies={}",
+                taskId, actualDurationMin, photosCaptured, anomaliesFound);
+        return report;
+    }
+
+    /** 执行失败时把任务置为 FAILED；失败原因由调用方写 run log。 */
+    public InspectionTask failTask(String taskId, String reason) {
+        InspectionTask task = getTask(taskId);
+        task.fail();
+        log.info("Inspection task failed: id={} reason={}", taskId, reason);
+        return task;
     }
 
     /** 获取任务报告。 */

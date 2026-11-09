@@ -3,6 +3,7 @@ package io.aerofleet.cloud.dock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
+import io.aerofleet.cloud.inspection.InspectionTaskService;
 import io.aerofleet.cloud.mission.common.DroneCommandService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -39,7 +40,7 @@ class UnattendedGateTest {
                 mock(DockScheduleRepository.class), runLogs,
                 mock(DockRepository.class), mock(DockService.class),
                 mock(DroneCommandService.class), registry,
-                new DockProperties(), new ObjectMapper());
+                new DockProperties(), new ObjectMapper(), mock(InspectionTaskService.class));
 
         dock = new DockEntity();
         dock.id = 1L;

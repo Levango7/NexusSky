@@ -23,6 +23,10 @@ public class DockScheduleEntity {
     @Column(name = "waypoints", columnDefinition = "TEXT")
     public String waypoints;
 
+    /** 巡检模板 ID；非空时无人值守任务会创建巡检任务并按模板规划航线。 */
+    @Column(name = "inspection_template_id", length = 64)
+    public String inspectionTemplateId;
+
     @Column(nullable = false)
     public boolean enabled = true;
 
