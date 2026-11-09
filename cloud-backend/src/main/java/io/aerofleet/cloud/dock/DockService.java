@@ -34,6 +34,7 @@ public class DockService {
     private final DockRepository docks;
     private final DockStateLogRepository stateLog;
     private final DockScheduleRepository schedules;
+    private final DockRunLogRepository runLogs;
     private final DockStateMachine machine;
     private final DockGateway gateway;
     private final DockProperties props;
@@ -44,11 +45,12 @@ public class DockService {
     });
 
     public DockService(DockRepository docks, DockStateLogRepository stateLog,
-                       DockScheduleRepository schedules,
+                       DockScheduleRepository schedules, DockRunLogRepository runLogs,
                        DockStateMachine machine, DockGateway gateway, DockProperties props) {
         this.docks = docks;
         this.stateLog = stateLog;
         this.schedules = schedules;
+        this.runLogs = runLogs;
         this.machine = machine;
         this.gateway = gateway;
         this.props = props;
@@ -326,6 +328,12 @@ public class DockService {
     public List<DockScheduleEntity> listSchedules(Long dockId) {
         get(dockId);
         return schedules.findByDockIdOrderById(dockId);
+    }
+
+    /** 机巢运行记录（无人值守架次，含 inspectionTaskId 关联）查询。 */
+    public List<DockRunLogEntity> listRuns(Long dockId) {
+        get(dockId); // 404 语义
+        return runLogs.findByDockIdOrderByStartedAtDesc(dockId);
     }
 
     @Transactional

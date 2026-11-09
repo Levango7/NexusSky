@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 机巢管控 REST（F2，spec R1-R5）。
+ * 机巢管控 REST（F2，spec R1-R5；/{id}/runs 为 R7 无人值守架次可观测）。
  * <p>
  * 权限：注册/定时任务管理=ADMIN，动作命令与 OSD 摄取=OPERATOR，读=OBSERVER。
  * 异常映射：未知机巢 404；非法状态迁移与重复 SN 409；通道故障 504。
@@ -214,6 +214,18 @@ public class DockController {
         }
     }
 
+    /** 机巢运行记录（spec R7：无人值守架次可观测，含关联的巡检任务 ID）。 */
+    @GetMapping("/{id}/runs")
+    @RequireRole(Role.OBSERVER)
+    public ResponseEntity<List<Map<String, Object>>> runs(@PathVariable Long id) {
+        try {
+            return ResponseEntity.ok(docks.listRuns(id).stream()
+                    .map(DockController::runView).collect(Collectors.toList()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(404).build();
+        }
+    }
+
     @PostMapping("/{id}/schedules/{sid}/enable")
     @RequireRole(Role.ADMIN)
     public ResponseEntity<Map<String, Object>> enableSchedule(@PathVariable Long id,
@@ -275,6 +287,20 @@ public class DockController {
         m.put("lastRunAt", s.lastRunAt);
         m.put("lastResult", s.lastResult);
         m.put("nextDueMs", s.nextDueMs);
+        return m;
+    }
+
+    static Map<String, Object> runView(DockRunLogEntity r) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", r.id);
+        m.put("scheduleId", r.scheduleId);
+        m.put("dockId", r.dockId);
+        m.put("result", r.result);
+        m.put("reason", r.reason);
+        m.put("startedAt", r.startedAt);
+        m.put("finishedAt", r.finishedAt);
+        m.put("flightMinutes", r.flightMinutes);
+        m.put("inspectionTaskId", r.inspectionTaskId);
         return m;
     }
 
