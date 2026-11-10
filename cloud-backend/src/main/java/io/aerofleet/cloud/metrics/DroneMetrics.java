@@ -25,7 +25,10 @@ import java.util.function.Supplier;
  *   <li>{@code aerofleet.drones.offline}    — 离线无人机数（Gauge）</li>
  *   <li>{@code aerofleet.messages.received} — 接收的 MAVLink 消息总数（Counter，按 msgId 标签）</li>
  *   <li>{@code aerofleet.messages.decoded}  — 成功解码的消息数（Counter）</li>
- *   <li>{@code aerofleet.messages.errors}   — 解码错误数（Counter）</li>
+ *   <li>{@code aerofleet.messages.errors}   — 解码错误数（Counter，桥接自 mavlink-core 的 CRC 失败增量）</li>
+ *   <li>{@code aerofleet.udp.ingest.datagrams} — 收到的 UDP 数据报数（Counter，内核丢包对账基准）</li>
+ *   <li>{@code aerofleet.udp.ingest.noise.bytes} — 跳过的噪声字节数（Counter，单位=字节，不是帧）</li>
+ *   <li>{@code aerofleet.udp.ingest.dropped} — 摄入侧丢弃（Counter，按 reason 标签；前缀标明帧/包单位）</li>
  *   <li>{@code aerofleet.mesh.routes}       — mesh 路由表大小（Gauge，按 sysId 标签）</li>
  *   <li>{@code aerofleet.mesh.neighbors}    — mesh 邻居数（Gauge，按 sysId 标签）</li>
  *   <li>{@code aerofleet.orch.phase}        — 编排引擎当前阶段（Gauge，按 sysId 标签）</li>
@@ -97,6 +100,10 @@ public class DroneMetrics {
     private final ConcurrentHashMap<Integer, Counter> messageReceivedCounters = new ConcurrentHashMap<>();
     private final Counter messageDecodedCounter;
     private final Counter messageErrorCounter;
+    private final Counter udpDatagramsCounter;
+    private final Counter udpNoiseBytesCounter;
+    /** reason → 摄入侧丢弃 Counter（按 reason 标签动态创建；取值集合固定，基数安全）。 */
+    private final ConcurrentHashMap<String, Counter> ingestDroppedByReason = new ConcurrentHashMap<>();
     private final Counter signingVerifiedCounter;
     private final Counter signingUnsignedCounter;
     /** reason → 验签拒绝 Counter（按 reason 标签动态创建，取值集合固定，基数安全）。 */
@@ -122,7 +129,13 @@ public class DroneMetrics {
                 .description("成功解码的 MAVLink 消息数")
                 .register(meterRegistry);
         this.messageErrorCounter = Counter.builder("aerofleet.messages.errors")
-                .description("MAVLink 消息解码错误数")
+                .description("MAVLink 消息解码错误数（CRC / 未知消息校验失败，由 mavlink-core 跨模块桥接）")
+                .register(meterRegistry);
+        this.udpDatagramsCounter = Counter.builder("aerofleet.udp.ingest.datagrams")
+                .description("收到的 UDP 数据报数；注入端送出数 − 本值 = 内核层丢弃数（间接对账，非溢出直接计数）")
+                .register(meterRegistry);
+        this.udpNoiseBytesCounter = Counter.builder("aerofleet.udp.ingest.noise.bytes")
+                .description("MAVLink 流解析时跳过的非 STX 噪声字节数（单位=字节，不是帧数）")
                 .register(meterRegistry);
 
         // --- 签名（rejected 的 reason 标签在首次记录时按需创建，不预注册空值）---
@@ -230,6 +243,74 @@ public class DroneMetrics {
     /** 记录一条解码错误。 */
     public void recordMessageError() {
         messageErrorCounter.increment();
+    }
+
+    /**
+     * 批量记录解码错误：一个 UDP 数据报内可能含多个 CRC 失败帧，
+     * 逐帧调用 {@link #recordMessageError()} 会把收包热路径放大数倍。
+     */
+    public void recordMessageErrors(long count) {
+        if (count > 0) {
+            messageErrorCounter.increment(count);
+        }
+    }
+
+    /** 记录收到一个 UDP 数据报（发生在解析之前，是内核丢包对账的分母）。 */
+    public void recordUdpDatagram() {
+        udpDatagramsCounter.increment();
+    }
+
+    /** 记录解析时跳过的噪声字节数（单位=字节）。 */
+    public void recordUdpNoiseBytes(long bytes) {
+        if (bytes > 0) {
+            udpNoiseBytesCounter.increment(bytes);
+        }
+    }
+
+    /** 记录一次摄入侧丢弃，按 reason 标签归类。 */
+    public void recordIngestDrop(String reason) {
+        recordIngestDrop(reason, 1L);
+    }
+
+    /** 批量记录摄入侧丢弃（同一 reason）。 */
+    public void recordIngestDrop(String reason, long count) {
+        if (count <= 0) {
+            return;
+        }
+        String r = reason == null ? IngestDropReason.FRAME_LISTENER_ERROR : reason;
+        Counter c = ingestDroppedByReason.computeIfAbsent(r,
+                key -> Counter.builder("aerofleet.udp.ingest.dropped")
+                        .description("UDP 摄入侧丢弃；reason 前缀 frame-/datagram- 标明计数单位")
+                        .tag("reason", key)
+                        .register(meterRegistry));
+        c.increment(count);
+    }
+
+    /**
+     * UDP 摄入侧丢弃原因（{@code aerofleet.udp.ingest.dropped} 的 reason 标签取值）。
+     *
+     * <p><b>单位不能混加</b>：{@code frame-} 前缀计的是帧数，{@code datagram-} 前缀计的
+     * 是数据报数。它们被放在同一指标名下是为了一个查询就能看全摄入损耗归因，
+     * 但写告警规则时必须按 reason 单独设阈值。取值集合固定，标签基数安全。
+     */
+    public static final class IngestDropReason {
+        /** 帧：CRC / 未知消息校验失败（桥接自 {@code MavlinkParser.crcErrors} 的增量）。 */
+        public static final String FRAME_CRC_ERROR = "frame-crc-error";
+        /** 帧：单个帧监听器抛异常，该帧未进入业务链。 */
+        public static final String FRAME_LISTENER_ERROR = "frame-listener-error";
+        /** 帧：验签失败被丢弃。 */
+        public static final String FRAME_SIGNATURE_REJECTED = "frame-signature-rejected";
+        /** 帧：设备白名单拒绝（未注册 sysid）。 */
+        public static final String FRAME_WHITELIST_REJECTED = "frame-whitelist-rejected";
+        /** 帧：每 sysid 频率限制丢弃。 */
+        public static final String FRAME_RATE_LIMITED = "frame-rate-limited";
+        /** 数据报：长度等于接收缓冲上限，疑似被内核截断。 */
+        public static final String DATAGRAM_TRUNCATED = "datagram-truncated";
+        /** 数据报：{@code socket.receive} 抛 IOException，本轮无包。 */
+        public static final String DATAGRAM_RECEIVE_ERROR = "datagram-receive-error";
+
+        private IngestDropReason() {
+        }
     }
 
     // ==================== 签名（MAVLink v2） ====================
