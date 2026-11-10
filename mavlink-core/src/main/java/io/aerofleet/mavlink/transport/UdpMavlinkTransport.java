@@ -42,6 +42,9 @@ public class UdpMavlinkTransport implements AutoCloseable {
     private final Thread cleanupThread;
     private volatile boolean running = true;
 
+    /** 摄入侧信号出口；默认 NOOP —— 不注入观察者时行为与接口加入前逐字节一致。 */
+    private volatile UdpIngestObserver ingestObserver = UdpIngestObserver.NOOP;
+
     private final ConcurrentLinkedQueue<Consumer<MavlinkFrame>> frameListeners = new ConcurrentLinkedQueue<>();
     /** 高级监听器（带源地址）；与普通监听器互斥使用，注册了高级就不回调普通的。 */
     private final ConcurrentLinkedQueue<BiConsumer<MavlinkFrame, SocketAddress>> sourceListeners =
@@ -65,6 +68,22 @@ public class UdpMavlinkTransport implements AutoCloseable {
         this.cleanupThread = new Thread(this::peerCleanupLoop, "mavlink-peer-cleanup-" + bindPort);
         this.cleanupThread.setDaemon(true);
         this.cleanupThread.start();
+    }
+
+    /**
+     * 注入摄入侧信号出口（依赖倒置：本协议库不认识 Micrometer / Spring / cloud-backend）。
+     *
+     * <p>可在任意时刻调用，<b>包括收包线程已启动之后</b>：{@code receiveLoop} 每轮循环
+     * 开头重新读一次这个 volatile 字段，因此 Spring {@code @PostConstruct} 注入也来得及。
+     * 传 {@code null} 表示恢复默认 NOOP。
+     *
+     * <p><b>不改构造签名</b>：{@code UdpGateway}、{@code VirtualDrone}、硬件适配器与
+     * 全部测试共 7 个调用点零影响；不注入时收包路径只多一次 volatile 读 + 一次 NOOP 调用。
+     *
+     * @see UdpIngestObserver 实现方的线程约束（回调在收包线程内同步执行，不得阻塞或抛异常）
+     */
+    public void setIngestObserver(UdpIngestObserver observer) {
+        this.ingestObserver = observer == null ? UdpIngestObserver.NOOP : observer;
     }
 
     /** 注册带源地址的监听器（多机路由用）；注册后普通监听器不再被回调。 */
@@ -242,13 +261,25 @@ public class UdpMavlinkTransport implements AutoCloseable {
         byte[] buf = new byte[2048];
         DatagramPacket packet = new DatagramPacket(buf, buf.length);
         while (running) {
+            // 每轮开头取一次：setIngestObserver 可在收包线程已启动后再注入（Spring @PostConstruct）。
+            UdpIngestObserver observer = ingestObserver;
             try {
                 packet.setLength(buf.length);
                 socket.receive(packet);
+                int length = packet.getLength();
                 lastPeer = packet.getSocketAddress();
                 peerLastSeen.put(lastPeer, System.currentTimeMillis());
                 onPacketFrom(lastPeer);
-                ByteBuffer buffer = ByteBuffer.wrap(buf, 0, packet.getLength());
+                observer.onDatagramReceived(length);
+                // UDP 不做分片续传：长度恰好等于接收缓冲上限意味着尾部极可能已被内核截掉。
+                // 这是 JVM 内能直接观测到的唯一「缓冲不足」信号；内核队列溢出仍需靠
+                // 「注入端送出包数 − datagrams 计数」对账推算，见 UdpIngestObserver Javadoc。
+                if (length == buf.length) {
+                    observer.onTruncatedDatagram(length);
+                }
+                ByteBuffer buffer = ByteBuffer.wrap(buf, 0, length);
+                long crcBefore = parser.getCrcErrors();
+                long noiseBefore = parser.getNoiseBytes();
                 MavlinkParser.ParseResult result;
                 while ((result = parser.parse(buffer)) != null) {
                     if (!sourceListeners.isEmpty()) {
@@ -256,6 +287,7 @@ public class UdpMavlinkTransport implements AutoCloseable {
                             try {
                                 l.accept(result.frame, lastPeer);
                             } catch (RuntimeException ignore) {
+                                observer.onListenerError();
                                 // 单个监听器异常不拖垮收包循环
                             }
                         }
@@ -264,12 +296,21 @@ public class UdpMavlinkTransport implements AutoCloseable {
                             try {
                                 l.accept(result.frame);
                             } catch (RuntimeException ignore) {
+                                observer.onListenerError();
                                 // 单个监听器异常不拖垮收包循环
                             }
                         }
                     }
                 }
+                // 按包聚合一次回调，不逐帧回调：parse() 内部 CRC 失败会 continue 并继续扫
+                // 下一个 STX，一次 parse() 可能累计多个错误；逐帧回调会把热路径放大数倍。
+                int crcDelta = (int) (parser.getCrcErrors() - crcBefore);
+                long noiseDelta = parser.getNoiseBytes() - noiseBefore;
+                if (crcDelta > 0 || noiseDelta > 0) {
+                    observer.onParseErrors(crcDelta, noiseDelta);
+                }
             } catch (IOException e) {
+                observer.onReceiveError();
                 if (running) {
                     // 端口被占或套接字异常：记录日志，由健康检查暴露
                     log.log(Level.WARNING, "MAVLink UDP receive error on port "

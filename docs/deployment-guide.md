@@ -184,15 +184,20 @@ curl http://localhost:8080/actuator/prometheus
 
 关键指标：
 - `aerofleet_drones_online` — 在线无人机数
-- `aerofleet_messages_received_total` — 接收帧总数（按 `msgId` 标签）
+- `aerofleet_messages_received_total` — 接入帧总数（按 `msgId` 标签；位于验签/白名单/限速之前，可与注入量对账）
+- `aerofleet_messages_decoded_total` — 成功解码帧数
+- `aerofleet_messages_errors_total` — 解析失败帧数（CRC 校验失败等）
 - `aerofleet_api_requests_total` — API 请求总数
 - `aerofleet_ws_sessions` — 当前遥测 WebSocket 会话数
 - `aerofleet_ws_fanout_queue_depth` — 遥测扇出待发队列积压（持续贴近 4096 即意味着有客户端消费不过来）
 - `aerofleet_ws_fanout_dropped_total` — 因扇出队列饱和被丢弃的帧数
+- `aerofleet_udp_ingest_datagrams_total` — 收到的 UDP 数据报数
+- `aerofleet_udp_ingest_noise_bytes_total` — 解析时跳过的非 STX 噪声**字节数**（不是帧数）
+- `aerofleet_udp_ingest_dropped_total{reason=...}` — 摄入侧丢弃，按原因分片
 
 > 名字按 Micrometer → Prometheus 的转换规则写：点号变下划线，Counter 追加 `_total`。
-> 上面 6 个都在代码里有对应的注册点（`DroneMetrics` / `ApiMetricsFilter` / `WsFanoutMetrics`），
-> 可直接拿去写告警规则。此前本节写的 `aerofleet_mavlink_frames_received_total` 与
+> 上面列出的都在代码里有对应的注册点（`DroneMetrics` / `ApiMetricsFilter` / `WsFanoutMetrics`）。
+> 此前本节写的 `aerofleet_mavlink_frames_received_total` 与
 > `aerofleet_ws_connections` **在代码里从未存在过**（前者实际叫 `aerofleet_messages_received_total`，
 > 后者直到 2026-11-07 才以 `aerofleet_ws_sessions` 落地），照抄会得到永远查不到数据的告警规则。
 
@@ -201,12 +206,43 @@ curl http://localhost:8080/actuator/prometheus
 > 容量基线因此无法区分「注入器少发」与「UDP 摄入丢包」。现已在 `UdpGateway.onFrame` 入口接入
 > `received`（按 `msgId` 标签）与 `decoded`，位置在验签 / 白名单 / 限速等丢弃分支之前，
 > 故可与注入量直接对账；被策略丢弃的帧仍计入接入侧。
-> `aerofleet.messages.errors` **仍未接入**：解析失败由 mavlink-core 的 `MavlinkParser.crcErrors`
-> 在内存累计，跨模块未桥接到 Micrometer，**不要拿它写告警规则**（会恒为 0）。
+>
+> **2026-11-10 已完成 `messages.errors` 桥接**：该指标不再恒为 0。`mavlink-core` 新增
+> `UdpIngestObserver` 接口（依赖倒置——core 不依赖 Micrometer / Spring / cloud-backend），
+> `UdpMavlinkTransport` 在每个 UDP 包解析结束后回调一次，`UdpGateway` 注入实现写入 Micrometer。
+> 计数取解析前后 `MavlinkParser.crcErrors` 的差值，**按包聚合而非逐帧回调**：
+> 回调在收包线程内同步执行，实现必须 O(1)、不阻塞、不做 IO、不抛异常。
+
+#### 摄入侧丢包怎么定位
+
+四类口径互不重叠，**不要相加**：
+
+| 现象 | 指标 | 单位 |
+|---|---|---|
+| 内核 UDP 队列溢出 | 无直接指标（见下） | — |
+| 数据报被截断 | `udp.ingest.dropped{reason="datagram-truncated"}` | 数据报 |
+| 帧解析失败（CRC 等） | `udp.ingest.dropped{reason="frame-crc-error"}` | 帧 |
+| 非 STX 噪声 | `udp.ingest.noise.bytes` | 字节 |
+| 策略丢弃 | `{reason="frame-signature-rejected" / "frame-whitelist-rejected" / "frame-rate-limited"}` | 帧 |
+| 监听器抛异常 | `{reason="frame-listener-error"}` | 帧 |
+| 收包 IO 异常 | `{reason="datagram-receive-error"}` | 次 |
+
+**内核溢出只能间接对账**：Java `DatagramSocket` 没有跨平台的「内核丢包」计数，
+只能用「注入端送出包数 − `udp.ingest.datagrams`」估算。这个差值是**量级参考，不是精确值**：
+注入器日志每 10 秒打印一次累计值，与 Prometheus 采集时刻最多差 10 秒，
+误差量级 = 10s × 注入速率。
+
+⚠️ 不要用 `messages.errors` 单独判断丢包：它只覆盖 CRC / 解析失败，
+内核溢出和策略丢弃都不会进入该计数。
 
 **建议告警规则**（扇出背压）：`rate(aerofleet_ws_fanout_dropped_total[5m]) > 0`
 ——非零即表示已有客户端跟不上，遥测开始丢最旧帧。处置顺序：先看
 `aerofleet_ws_sessions` 是否突增，再查是否有客户端连上不读。
+
+**建议告警规则**（摄入侧丢弃）：`rate(aerofleet_udp_ingest_dropped_total[5m]) > 0`，
+按 `reason` 分流处置——`frame-rate-limited` 是产品限速（先确认
+`aerofleet.udp.max-frame-rate-per-sysid` 是否被调得过小，属预期行为）；
+`frame-crc-error` 指向链路质量或对端实现不一致；`datagram-truncated` 说明帧长超过接收缓冲区。
 
 ### 4.3 日志
 
