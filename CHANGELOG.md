@@ -1,5 +1,31 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修 e2e-dock R7 红：sim 命令按 SN 路由 + 响应显式 UTF-8 解码
+
+### 问题
+
+- `SimLoopbackGateway` 把 `aerofleet.dock.sim-base-url` 当作**所有**机巢的命令地址：
+  双机巢 e2e 中 dock2 的开关门全部落到 dock1 的模拟器端口，云端 dock2 卡在
+  OPENING（OSD 跟随规则只接受 OPENING→OPEN），无人值守门控每轮记
+  `SKIPPED state:OPENING`，R7 真飞行永远起不来——CI B1 `e2e-dock` 由此全红
+  （run 42716242549，唯一红 job）。单机巢时代不可见，R7 引入第二台 DockSim 后才暴露。
+- `Invoke-E2eJson` 用 `.Content` 取响应正文：Content-Type 不带 charset 时 PS 5.1 按
+  Latin-1 解，中文摘要变 mojibake，`-match '相机未接入'` 本地必假红（CI 的 pwsh 7
+  默认 UTF-8 不受影响，所以 CI 上不可见）。
+
+### 改
+
+- `DockProperties.simBaseUrls`（`aerofleet.dock.sim-base-urls.<SN>`）：按 SN 的 sim
+  基址覆盖，与 MQTT 传输按 `thing/product/{sn}/services` 寻址同义；未命中回落
+  `sim-base-url`，单机巢拓扑零配置变化。
+- `e2e-dock.ps1` 给后端传 `DOCK-E2E-002` → 18082 的覆盖；回归用例
+  `DockGatewayLoopbackTest.perSnRoutingSendsCommandToThatDocksSim` 起两台真模拟器，
+  断言各自只收自己的命令、未覆盖 SN 仍走全局基址。
+- `Invoke-E2eJson` 改读 `RawContentStream` 原始字节显式 UTF-8 解码，5.1 / 7 同口径。
+- `e2e-dock.ps1` 在 R4 SKIPPED 证据落库后禁用 dock1 的定时任务——无人机上线后其
+  门控会转真，再与 R7 抢同一台托管机（同 sysid 的任务上传/armed 互相踩）。
+- 计数：本批 +1 测试（cloud-backend 3745→3746）；全 reactor 5944→5945。
+
 ## [Unreleased] — 巡检任务与报告落库（V40）+ 机巢架次可观测（R7）+ 10 份文档计数结构修复（净增 3 例）
 
 ### 问题
@@ -2711,7 +2737,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-11-10 共有 296 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-10 共有 297 个 `[Unreleased]` 小节，自 v1.0.5
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
@@ -2736,7 +2762,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 296 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 297 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
