@@ -304,8 +304,13 @@ function Invoke-E2eJson {
 
     try {
         $r = Invoke-WebRequest @req -UseBasicParsing
+        # 显式按 UTF-8 解原始字节：响应 Content-Type 不带 charset 时，5.1 的
+        # .Content 按 Latin-1 解，中文正文变 mojibake；7+ 默认 UTF-8 不受影响，
+        # 显式解码让两个 shell 同口径。
+        $buf = $r.RawContentStream.ToArray()
+        $text = [System.Text.Encoding]::UTF8.GetString($buf, 0, $buf.Length)
         $parsed = $null
-        try { $parsed = $r.Content | ConvertFrom-Json } catch {}
+        try { $parsed = $text | ConvertFrom-Json } catch {}
         return @{ code = [int]$r.StatusCode; body = $parsed }
     } catch {
         $status = $null
