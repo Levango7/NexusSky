@@ -2,6 +2,7 @@ package io.aerofleet.sim.comm;
 
 import io.aerofleet.mavlink.MavlinkFrame;
 import io.aerofleet.mavlink.messages.Heartbeat;
+import io.aerofleet.mavlink.transport.UdpIngestObserver;
 import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +17,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,13 +35,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p><b>刻意用真回环而不是替身</b>：本模块没有 mockito，且"序列化→DatagramSocket→对端解析"
  * 这条链上的任何一处错位（目标选择、关闭语义）只有真发真收才照得出来。
  *
- * <p><b>钉住的四条事实</b>：
+ * <p><b>钉住的五条事实</b>：
  * <ol>
  *   <li>配了默认目标 ⇒ 发往默认目标；没配 ⇒ 发往最近对端；两者都没 ⇒ 静默丢弃不抛。</li>
  *   <li>{@code transport} 为 null 在构造期就拒绝（把配置错误挡在启动期）。</li>
  *   <li>{@code close()} 关掉底层：关闭后再 {@code send} 抛 {@code IOException}，
  *       而不是把帧悄悄吞掉。</li>
  *   <li>{@code addFrameListener / getLocalPort / unwrap} 如实透传到底层。</li>
+ *   <li>（2026-11-10 补）<b>收包侧三条契约</b>：一个数据报内连续多帧全部交付；
+ *       监听器抛异常被隔离且计入 {@code onListenerError}；长度等于接收缓冲上限时报截断。
+ *       这三条此前无任何测试覆盖，而它们正是「帧莫名消失」与「收包线程静默停摆」的
+ *       唯一可观测入口——异步化重构（收包与业务解耦）必须先有它们托底。</li>
  * </ol>
  */
 @DisplayName("UdpTransportAdapter：UDP 分支选路、null 守卫、关闭语义、透传")
@@ -166,8 +172,20 @@ class UdpTransportAdapterContractTest {
     }
 
     @Test
-    @DisplayName("addFrameListener 透传到底层：对端发来的合法帧会回调到注册在适配器上的监听器")
+    @DisplayName("addFrameListener 透传到底层 + 收包侧三条契约：包内多帧、监听器异常隔离、满包截断")
     void frameListenerReceivesInboundFrame() throws IOException {
+        // 先注入观察者：收包线程每轮循环开头重读这个 volatile 字段，所以第二个及以后
+        // 的数据报一定能被观测到（第一个可能仍用 NOOP，故不对它做观察者断言）。
+        AtomicInteger listenerErrors = new AtomicInteger();
+        AtomicInteger truncated = new AtomicInteger();
+        transport.setIngestObserver(new UdpIngestObserver() {
+            @Override public void onDatagramReceived(int bytes) { }
+            @Override public void onParseErrors(int crcErrors, long noiseBytes) { }
+            @Override public void onTruncatedDatagram(int bytes) { truncated.set(bytes); }
+            @Override public void onListenerError() { listenerErrors.incrementAndGet(); }
+            @Override public void onReceiveError() { }
+        });
+
         UdpTransportAdapter adapter = new UdpTransportAdapter(transport);
         List<byte[]> got = new CopyOnWriteArrayList<>();
         adapter.addFrameListener(f -> got.add(f.encodeV2()));
@@ -178,5 +196,35 @@ class UdpTransportAdapterContractTest {
         await(() -> !got.isEmpty());
         assertThat(got).hasSize(1);
         assertThat(got.get(0)).isEqualTo(f.encodeV2());
+
+        // 契约 1：一个 UDP 包内连续两帧必须都交付。MAVLink 是流式协议，
+        // 只解析第一帧会让高频注入下的吞吐凭空减半，且现象是「帧莫名消失」——
+        // 在指标上看起来跟摄入丢包一模一样，极难归因。
+        byte[] f1 = frame(7, (byte) 4).encodeV2();
+        byte[] f2 = frame(7, (byte) 5).encodeV2();
+        byte[] twoInOne = new byte[f1.length + f2.length];
+        System.arraycopy(f1, 0, twoInOne, 0, f1.length);
+        System.arraycopy(f2, 0, twoInOne, f1.length, f2.length);
+        peerSendsTo(twoInOne, transportAddress());
+        await(() -> got.size() >= 3);
+        assertThat(got).as("同一数据报内的连续两帧都要回调，不能只解析第一帧").hasSize(3);
+
+        // 契约 2：监听器抛异常必须被隔离，且计入 onListenerError。
+        // 否则一个坏监听器会让整条收包线程静默停摆，而线上只能看到「没有数据了」。
+        List<byte[]> afterBad = new CopyOnWriteArrayList<>();
+        adapter.addFrameListener(x -> { throw new IllegalStateException("boom"); });
+        adapter.addFrameListener(x -> afterBad.add(x.encodeV2()));
+
+        peerSendsTo(frame(7, (byte) 6).encodeV2(), transportAddress());
+        await(() -> !afterBad.isEmpty());
+        assertThat(afterBad).as("抛异常的监听器不得阻断后续监听器").hasSize(1);
+        assertThat(listenerErrors.get())
+                .as("异常必须被计入 onListenerError，否则线上无从归因").isGreaterThanOrEqualTo(1);
+
+        // 契约 3：长度等于接收缓冲上限 ⇒ 报截断。
+        // 这是 JVM 内唯一能直接观测到的「缓冲不足」信号；内核队列溢出无法直接计数。
+        peerSendsTo(new byte[2048], transportAddress());
+        await(() -> truncated.get() > 0);
+        assertThat(truncated.get()).as("2048B 满包必须触发截断信号").isGreaterThan(0);
     }
 }

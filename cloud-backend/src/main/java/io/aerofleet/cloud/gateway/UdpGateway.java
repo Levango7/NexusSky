@@ -19,6 +19,7 @@ import io.aerofleet.mavlink.security.MavlinkSigner;
 import io.aerofleet.mavlink.security.MavlinkSignerFactory;
 import io.aerofleet.mavlink.security.SigningKeyManager;
 import io.aerofleet.mavlink.security.TimestampTracker;
+import io.aerofleet.mavlink.transport.UdpIngestObserver;
 import io.aerofleet.mavlink.transport.UdpMavlinkTransport;
 import org.springframework.beans.factory.ObjectProvider;
 import jakarta.annotation.PreDestroy;
@@ -154,6 +155,18 @@ public class UdpGateway {
         }
     }
 
+    /**
+     * 记一次摄入侧丢弃（统一丢弃视图）。与 {@code signing.rejected} 不冲突：
+     * 后者是安全维度的原因细分，本方法是容量/摄入维度的总量归因。
+     * DroneMetrics 是可选依赖（ObjectProvider 破环），未注入时静默跳过。
+     */
+    private void recordDrop(String reason) {
+        DroneMetrics m = metrics();
+        if (m != null) {
+            m.recordIngestDrop(reason);
+        }
+    }
+
     /** 每 sysid 滑动窗口频率限制器：key=sysid, value=最近1秒内的时间戳队列。 */
     private final ConcurrentHashMap<Integer, Deque<Long>> rateLimitWindows = new ConcurrentHashMap<>();
 
@@ -213,6 +226,54 @@ public class UdpGateway {
         this.deviceWhitelistEnabled = deviceWhitelistEnabled;
         this.maxFrameRatePerSysid = maxFrameRatePerSysid;
         this.transport = new UdpMavlinkTransport(bindAddress, udpPort);
+
+        // 摄入侧信号出口：mavlink-core 只认识 UdpIngestObserver 接口，Micrometer 接线留在本层。
+        // 依赖倒置是硬要求——mavlink-core 不能反向依赖 cloud-backend 或监控后端。
+        // 这里不能立刻调 metrics()：droneMetricsProvider 是字段注入，发生在构造之后；
+        // 回调是惰性触发的，届时容器已就绪（与 rejectSigning() 同构）。
+        // 所有回调都在收包线程内同步执行，故实现只做 Counter.increment，不阻塞、不抛异常。
+        transport.setIngestObserver(new UdpIngestObserver() {
+            @Override
+            public void onDatagramReceived(int bytes) {
+                DroneMetrics m = metrics();
+                if (m != null) {
+                    m.recordUdpDatagram();
+                }
+            }
+
+            @Override
+            public void onParseErrors(int crcErrors, long noiseBytes) {
+                DroneMetrics m = metrics();
+                if (m == null) {
+                    return;
+                }
+                // crcErrors 是帧数：同时喂给「解码错误总数」和统一丢弃视图，
+                // 这是同一批帧的两个视角，不是两次丢弃。噪声按字节单独记，单位不同。
+                if (crcErrors > 0) {
+                    m.recordMessageErrors(crcErrors);
+                    m.recordIngestDrop(DroneMetrics.IngestDropReason.FRAME_CRC_ERROR, crcErrors);
+                }
+                if (noiseBytes > 0) {
+                    m.recordUdpNoiseBytes(noiseBytes);
+                }
+            }
+
+            @Override
+            public void onTruncatedDatagram(int bytes) {
+                recordDrop(DroneMetrics.IngestDropReason.DATAGRAM_TRUNCATED);
+            }
+
+            @Override
+            public void onListenerError() {
+                recordDrop(DroneMetrics.IngestDropReason.FRAME_LISTENER_ERROR);
+            }
+
+            @Override
+            public void onReceiveError() {
+                recordDrop(DroneMetrics.IngestDropReason.DATAGRAM_RECEIVE_ERROR);
+            }
+        });
+
         // 带源地址的监听器：路由表的学习与分发都靠它
         transport.addFrameListener((BiConsumer<MavlinkFrame, SocketAddress>) this::onFrame);
 
@@ -244,7 +305,8 @@ public class UdpGateway {
         // 限速的丢弃量污染，无法与容量基线里的注入量对账（这正是此前无法区分
         // 「注入器少发」与「UDP 摄入丢包」的原因）。
         // 语义：能构造出 MavlinkFrame 就说明已完成解析，故 received 与 decoded 同步递增；
-        // 解析失败发生在 mavlink-core 的 MavlinkParser（crcErrors），根本不进本方法。
+        // 解析失败发生在 mavlink-core 的 MavlinkParser（crcErrors），根本不进本方法——
+        // 那部分现在由 UdpIngestObserver 桥接到 messages.errors / ingest.dropped{frame-crc-error}。
         // DroneMetrics 是可选依赖（ObjectProvider 破环），未注入时整段跳过；
         // metrics() 命中 volatile 缓存后每帧只是一次读，不额外查 Spring 容器。
         DroneMetrics m = metrics();
@@ -255,6 +317,7 @@ public class UdpGateway {
 
         // 签名验证（签名启用时）
         if (isSigningEnabled() && !verifyFrame(frame)) {
+            recordDrop(DroneMetrics.IngestDropReason.FRAME_SIGNATURE_REJECTED);
             return; // 验证失败，丢弃帧
         }
 
@@ -262,6 +325,7 @@ public class UdpGateway {
         if (deviceWhitelistEnabled && sysid > 0 && sysid != GCS_SYSID) {
             if (deviceRegistry == null || deviceRegistry.get(sysid) == null) {
                 log.warn("Rejected frame from unregistered sysid={} (device whitelist enabled)", sysid);
+                recordDrop(DroneMetrics.IngestDropReason.FRAME_WHITELIST_REJECTED);
                 return;
             }
         }
@@ -279,6 +343,7 @@ public class UdpGateway {
                 log.warn("Rate limit exceeded for sysid={}, dropping {}frame (max {}/s)",
                         sysid, critical ? "critical " : "",
                         critical ? maxCriticalFrameRatePerSysid : maxFrameRatePerSysid);
+                recordDrop(DroneMetrics.IngestDropReason.FRAME_RATE_LIMITED);
                 return;
             }
         }
