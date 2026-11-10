@@ -539,10 +539,10 @@ public class LicenseInfo {
 
 | License 档位 | modules | maxDevices | maxApiCallsPerDay | 适用客户 |
 |---|---|---|---|---|
-| **基础版** | core, fleet | 10 | 10,000 | 二线整机厂商、飞控厂商 |
-| **应急版** | core, fleet, emergency | 20 | 50,000 | 行业解决方案商 |
-| **完整版** | core, fleet, emergency, network, advanced | 50 | 200,000 | 大型方案商、eVTOL |
-| **开发版** | all | 0 (无限制) | 0 (无限制) | 内部开发/评估 |
+| **基础版** | core, fleet, mesh, orch | 10 | 10,000 | 二线整机厂商、飞控厂商 |
+| **应急版** | core, fleet, mesh, orch, emergency | 20 | 50,000 | 行业解决方案商、应急管理机构 |
+| **完整版** | core, fleet, mesh, orch, emergency, network, advanced | 50 | 200,000 | 大型解决方案商、eVTOL 企业 |
+| **受限评估档** | all | 0 (无限制) | 0 (无限制) | 内部开发/评估 |
 
 ### 3.3 计费模型设计
 
@@ -562,21 +562,19 @@ public class LicenseInfo {
 
 | 档位 | 活跃设备数 | 年费 | 包含模块 | API 调用上限 |
 |---|---|---|---|---|
-| **入门版** | ≤ 5 | 10 万/年 | core | 5,000/天 |
-| **基础版** | ≤ 20 | 30 万/年 | core, fleet | 20,000/天 |
-| **应急版** | ≤ 50 | 80 万/年 | core, fleet, emergency | 50,000/天 |
-| **完整版** | ≤ 100 | 150 万/年 | all | 200,000/天 |
-| **企业版** | 不限 | 面议 | all | 不限 |
+| **基础版** | ≤ 20 | 30 万/年 | core, fleet, mesh, orch | 20,000/天 |
+| **应急版** | ≤ 50 | 80 万/年 | core, fleet, mesh, orch, emergency | 50,000/天 |
+| **完整版** | ≤ 100 | 150 万/年 | core, fleet, mesh, orch, emergency, network, advanced | 200,000/天 |
 
 **模型 B：按 API 调用量（补充，适合轻量集成）**
 
 | 档位 | 月调用次数 | 年费 | 包含模块 |
 |---|---|---|---|
-| **试用版** | 10,000 | 0（免费） | core（只读） |
-| **轻量版** | 100,000 | 5 万/年 | core |
-| **标准版** | 1,000,000 | 20 万/年 | core, fleet |
-| **专业版** | 10,000,000 | 50 万/年 | core, fleet, emergency |
-| **不限版** | 不限 | 面议 | all |
+| **基础版试用档** | 10,000 | 0（免费） | core（只读） |
+| **基础版** | 100,000 | 5 万/年 | core |
+| **应急版** | 1,000,000 | 20 万/年 | core, fleet |
+| **完整版** | 10,000,000 | 50 万/年 | core, fleet, emergency, network, advanced |
+| **不限档** | 不限 | 面议 | all |
 
 **模型 C：按功能模块（补充，适合行业定制）**
 
@@ -592,7 +590,7 @@ public class LicenseInfo {
 
 - 私有化部署客户：模型 A + 模型 C（设备数 × 模块组合）
 - SDK 集成客户：模型 B（API 调用量）
-- 试用客户：免费试用版（模型 B 试用档）
+- 试用客户：基础版试用档（模型 B 试用档）
 
 #### 3.3.3 计量数据采集
 
@@ -988,7 +986,7 @@ MetricsCollector
 ### LicenseService.java
 - License Key 格式：Base64(JSON(LicenseInfo))
 - 激活码：Base64(HMAC-SHA256(secret, tenantId + "|" + machineId))
-- 开发版降级：未配置 license key 时返回永久有效开发版
+- 受限评估档：未配置 license key 时返回永久有效受限评估档（全模块启用、设备数 / API 调用无限制、永不过期；仅限内部开发与评估，不用于生产）
 - LicenseInfo 字段：tenantId, productName, maxDevices, expiryDate, issuedAt, issuedTo, active
 
 ### TenantInterceptor.java
