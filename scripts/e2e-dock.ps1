@@ -40,6 +40,7 @@ $script:CleanupActions = @()
 $BackendPort = if ($env:AF_BACKEND_PORT) { [int]$env:AF_BACKEND_PORT } else { 18099 }
 $DronePort = 14544
 $DockHttpPort = 18081
+$DockHttpPort2 = 18082
 $DroneSysid = 9
 
 $Base = "http://localhost:$BackendPort/api/v1"
@@ -105,6 +106,9 @@ try {
         # R7 门控要求托管机在线：drone-sim 普通模式的心跳经 drone-port 进设备注册表
         "--aerofleet.drone-port=$DronePort",
         "--aerofleet.dock.sim-base-url=http://127.0.0.1:$DockHttpPort",
+        # 第二台机巢模拟器在 $DockHttpPort2：sim 传输按 SN 路由命令，
+        # 否则 dock2 的开关门会落到 dock1 的端口（R7 门控卡在 OPENING 的真因）
+        "--aerofleet.dock.sim-base-urls.DOCK-E2E-002=http://127.0.0.1:$DockHttpPort2",
         '--aerofleet.dock.schedule-poll-ms=5000'
     ) -PassThru -RedirectStandardOutput $backendLog
     Stop-Proc $backend
@@ -227,6 +231,13 @@ try {
     # 状态迁移时间线非空
     Assert-True (@($d.body.recentTransitions).Count -ge 3) "状态迁移日志 ≥3 条（实际 $((@($d.body.recentTransitions)).Count)）"
 
+    # R4 证据已落 run log，禁用 dock1 的定时任务：无人机上线后其门控会转真
+    # （OSD 心跳带 droneSysid=9 落地），再与 R7 抢同一台托管机（同一 sysid 的
+    # 任务上传/armed 互相踩）。禁用只停后续触发，不抹已记录的 SKIPPED 证据。
+    $r4disable = Try-Json 'POST' "$Base/docks/$dockId/schedules/$($schedOk.body.id)/enable" `
+        (@{ enabled = $false } | ConvertTo-Json)
+    Assert-True ($r4disable.code -eq 200) "dock1 定时任务已禁用（防与 R7 抢托管机）"
+
     # ---- 6. 无人值守真飞行 + 巡检报告（R7，D5/D6 黄金路径）----
     Write-Host '[7/7] 无人值守真飞行 + 巡检报告（R7）...'
     # 托管机上线：drone-sim 普通模式心跳进设备注册表（与 e2e-cv-eval 同口径）
@@ -257,7 +268,7 @@ try {
     $sim2 = Start-Process -FilePath $java -ArgumentList @(
         '-jar', $simJar, 'dock',
         '--sn', 'DOCK-E2E-002', '--name', 'B区无人值守机巢',
-        '--http-port', '18082', '--drone-sysid', "$DroneSysid",
+        '--http-port', "$DockHttpPort2", '--drone-sysid', "$DroneSysid",
         '--osd-url', "http://127.0.0.1:$BackendPort/api/v1/docks/osd",
         '--osd-period-ms', '2000'
     ) -PassThru -RedirectStandardOutput (Join-Path $TempDir 'af-dock-sim2.log') `
