@@ -23,8 +23,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DockGatewayLoopbackTest {
 
     private static DockSim sim;
+    private static DockSim sim2;
     private static SimLoopbackGateway gateway;
     private static int port;
+    private static int port2;
 
     @BeforeAll
     static void boot() throws Exception {
@@ -36,9 +38,18 @@ class DockGatewayLoopbackTest {
         sim = new DockSim("DOCK-E2E", "测试机巢", port, null, 60_000, 9, null);
         sim.start();
 
+        // 第二台回环模拟器（不同 SN 不同端口）：验证网关按 SN 路由，而不是把所有
+        // 命令都砸向同一个 sim-base-url（多机巢 e2e 的真实拓扑）
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+            port2 = probe.getLocalPort();
+        }
+        sim2 = new DockSim("DOCK-E2E-2", "测试机巢2", port2, null, 60_000, 9, null);
+        sim2.start();
+
         DockProperties props = new DockProperties();
         props.setSimBaseUrl("http://127.0.0.1:" + port);
         props.setCommandTimeoutMs(3000);
+        props.setSimBaseUrls(Map.of("DOCK-E2E-2", "http://127.0.0.1:" + port2));
         gateway = new SimLoopbackGateway(new ObjectMapper(), props);
     }
 
@@ -46,6 +57,9 @@ class DockGatewayLoopbackTest {
     static void shutdown() {
         if (sim != null) {
             sim.close();
+        }
+        if (sim2 != null) {
+            sim2.close();
         }
     }
 
@@ -81,6 +95,23 @@ class DockGatewayLoopbackTest {
         assertThatThrownBy(() -> DockCommand.fromMethod("nope"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("nope");
+    }
+
+    @Test
+    @DisplayName("按 SN 路由：覆盖基址的 SN 落到各自模拟器，未命中回落 simBaseUrl")
+    void perSnRoutingSendsCommandToThatDocksSim() {
+        sim.forceState("IDLE");
+        sim2.forceState("IDLE");
+
+        gateway.sendCommand("DOCK-E2E-2", DockCommand.OPEN_DOOR, Map.of());
+
+        assertThat(sim2.state()).isEqualTo("OPENING");
+        assertThat(sim.state()).isEqualTo("IDLE"); // 另一台不被误开
+
+        gateway.sendCommand("DOCK-E2E", DockCommand.OPEN_DOOR, Map.of());
+
+        assertThat(sim.state()).isEqualTo("OPENING"); // 未覆盖 SN 回落全局基址
+        assertThat(sim2.state()).isEqualTo("OPENING"); // 保持原状，不被回落命令误伤
     }
 
     @Test

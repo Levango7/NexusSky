@@ -3,6 +3,9 @@ package io.aerofleet.cloud.dock;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * F2 机巢管控配置（aerofleet.dock.*）。
  * <p>
@@ -18,6 +21,12 @@ public class DockProperties {
 
     /** sim 模式机巢模拟器基址（dock-sim 的 HTTP 端口）。 */
     private String simBaseUrl = "http://127.0.0.1:18081";
+
+    /**
+     * sim 模式按 SN 的基址覆盖（多机巢回环）：命中的 SN 命令发到各自模拟器，
+     * 与 MQTT 传输按 thing/product/{sn}/services 寻址同义；未命中回落 simBaseUrl。
+     */
+    private Map<String, String> simBaseUrls = new LinkedHashMap<>();
 
     /** mqtt 模式 Broker 地址（tcp://host:1883 或 ssl://…）。transport=mqtt 时必填（空缺启动 fail-fast）。 */
     private String mqttBrokerUrl = "";
@@ -46,6 +55,8 @@ public class DockProperties {
     public void setTransport(String transport) { this.transport = transport; }
     public String getSimBaseUrl() { return simBaseUrl; }
     public void setSimBaseUrl(String simBaseUrl) { this.simBaseUrl = simBaseUrl; }
+    public Map<String, String> getSimBaseUrls() { return simBaseUrls; }
+    public void setSimBaseUrls(Map<String, String> simBaseUrls) { this.simBaseUrls = simBaseUrls; }
     public String getMqttBrokerUrl() { return mqttBrokerUrl; }
     public void setMqttBrokerUrl(String mqttBrokerUrl) { this.mqttBrokerUrl = mqttBrokerUrl; }
     public String getMqttUsername() { return mqttUsername; }

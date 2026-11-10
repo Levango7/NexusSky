@@ -75,7 +75,10 @@ public class SimLoopbackGateway implements DockGateway {
             throw new DockGatewayException("serialize dock command failed", e);
         }
 
-        String url = props.getSimBaseUrl() + "/services";
+        // sim 传输按 SN 寻址（与 MQTT 的 thing/product/{sn}/services 同义）：
+        // 单台回环走 simBaseUrl，多台回环时按 SN 落到各自基址。
+        String baseUrl = props.getSimBaseUrls().getOrDefault(sn, props.getSimBaseUrl());
+        String url = baseUrl + "/services";
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
                     .timeout(Duration.ofMillis(props.getCommandTimeoutMs()))
