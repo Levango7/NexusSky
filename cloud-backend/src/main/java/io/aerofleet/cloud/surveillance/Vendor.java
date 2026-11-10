@@ -18,6 +18,8 @@ public enum Vendor {
     ONVIF,
     /** GB28181 政企视频网标准（国标 SIP 信令 + RTP/PS 媒体，E5 接入形状层）。 */
     GB28181,
+    /** RTMP 推流/拉流（Adobe RTMP 规范公开，E5 对称补齐）。 */
+    RTMP,
     /** 通用/未知厂商（当设备厂商无法识别时使用，自动降级到 ONVIF fallback）。 */
     GENERIC
 }
