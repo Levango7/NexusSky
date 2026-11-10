@@ -261,11 +261,17 @@ public class UdpMavlinkTransport implements AutoCloseable {
         byte[] buf = new byte[2048];
         DatagramPacket packet = new DatagramPacket(buf, buf.length);
         while (running) {
-            // 每轮开头取一次：setIngestObserver 可在收包线程已启动后再注入（Spring @PostConstruct）。
+            // 循环开头先取一次，供 catch 分支使用：socket.receive 抛异常时还没有新包可归属。
             UdpIngestObserver observer = ingestObserver;
             try {
                 packet.setLength(buf.length);
                 socket.receive(packet);
+                // 收到包之后重读一次。UdpGateway 的构造顺序是「new transport（收包线程已启动）
+                // → setIngestObserver」，若在循环开头预读并就此阻塞在 receive，启动窗口内到达的
+                // 第一个包会用默认 NOOP 处理，udp.ingest.datagrams 少计 1。
+                // CI 上 verifiedFrame_incrementsVerifiedMetric 报 1.0 < 2.0 即此竞态
+                // （本地因设置恰好先于预读而通过）。
+                observer = ingestObserver;
                 int length = packet.getLength();
                 lastPeer = packet.getSocketAddress();
                 peerLastSeen.put(lastPeer, System.currentTimeMillis());
