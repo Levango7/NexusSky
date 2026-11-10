@@ -1,5 +1,69 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 集成腿撤销断言竞态修复 + README 计数表结构修复（0 例增删）
+
+### 问题
+
+- `scripts/ci-integration-test.sh` Pass C 撤销腿在 DELETE 与 PUT /tenant 之间留着活体
+  sim：sim 以 1Hz 心跳把刚删掉的设备经 `DeviceRegistry.registerIfAbsent` 重建回内存，
+  `assignTenant` 落到 `snapshot != null` 分支回 200，「撤销后条目真没了」变成竞态彩票
+  （CI run 42613631283：Pass B 同腿 12:19:38 绿、Pass C 同腿 12:21:15 红，期望 404 实际 200）。
+- README 测试规模表被 #269（d9f9ebd4）写成 22 行乱序重复（多个缺闭合竖线的总计行 +
+  重复模块行）；值逐位未变（523/1477/139/3742/19/41/5941），值门禁因此照绿，结构损坏
+  只有肉眼可见。
+
+### 改
+
+- 撤销腿前先把 sim 进程 kill + wait 到真死，再发 DELETE→PUT 断言对（该 sysid 的帧源
+  只有 sim 进程；PID_SIM 清空让 EXIT trap 不二次 kill）；日志清理保留在断言之后，
+  失败时仍可诊断。
+- README 表恢复为 9 行良构单列表（表头/分隔行/6 模块/1 总计），值逐位不变。
+
+### 验证
+
+- bash -n 通过；README 值同一性证明（改前改后模块→数映射逐格相等、门禁文法抓到的
+  总计声称仍为 5941）、新表 9 行全部以竖线闭合。
+- A 红：CI run 42613631283 job 129153492501 原文「❌ 撤销后 PUT /tenant 应判设备未知
+  （证明条目真没了）：期望 HTTP 404，实际 200」（同 run 内 Pass B 同腿 26 秒前绿）。
+- B 绿：本 PR 的 Integration Tests CI 腿（与 A 红同一套 CI 环境。本地全跑受共享基础设施
+  非对齐所限未强开：18080-18082 被并行会话进程占用、5432 为共享容器 PG 且口令非 CI 值；
+  改动仅为断言顺序前置，腿内端点与期望值未动）。
+
+### 计数
+
+0 例增删；README 数值不变，`check-test-count-docs.py` 口径不受影响。
+## [Unreleased] — maven 缓存毒 v3 代根因处置：gcs-e2e 抢写改 restore-only + 键尾 v3→v4
+
+### 问题
+
+`GCS Web E2E (Playwright)` job 的 m2 缓存是**保存型** `actions/cache@v4`，与 `maven-warm`
+抢同一键且无 `needs: [maven-warm]`。run 42512151276 中该 job（128827324841）以
+`-DskipTests package` 形态于 19:22:42.526 先保存 `mvn-…-v3`（150,360,683 B，比同 pom 的
+v2 还小 ⇒ 无 surefire provider 闭包）；actions/cache 同键首写者胜出且不覆盖，毒条目冻结。
+其后所有命中腿（#252 head run 42538867333 在内）离线自检失败打
+`::warning::离线自检失败` + 在线兜底，job 假绿，#252「焐 provider 闭包」的验收腿从未被
+真实验证。
+
+### 改
+
+- gcs-e2e 的 m2 缓存改 `actions/cache/restore@v4`：消费者只恢复不保存，保存权归 maven-warm。
+- 键尾 v3→v4（ci.yml 19 站点 + `scripts/ci-maven-cache-key.sh` CANON 同批；守卫实测
+  `sites=19 mismatch=0`，自测 5/5）；毒 v3 条目同键不可覆盖，抬号即绕过。
+- `docs/todo.md` #21 追加 v3 代污染记录与 v4 重验口径。
+
+### A/B 实证
+
+- 毒写入链：job 日志 19:21:33 restore 落 v2 → 19:22:42.526 `Cache saved with key:
+  mvn-…-v3`；maven-warm 19:28:57 命中即打 warning（run 42512151276 与 head run
+  42538867333 两处日志同形）。
+- v4 验收随 CI：抬号后首跑冷路径 `Populate local repository (cold cache)` 执行、
+  `Verify cached repository…` skipped；其后一次命中 run 零 `离线自检失败` warning，
+  六条 `Java <module>` 无 `surefire-junit-platform` 取件报错。
+
+### 遗留（不在本批）
+
+- 毒 v3 条目未删（删除缓存属破坏性操作，未授权）；v4 抬号后自然绕开。
+- 合并不在本批：38/38 必检绿 + 命中腿零 warning + mss=CLEAN 后另行提请。
 ## [Unreleased] — 修 e2e-dock R7 红：sim 命令按 SN 路由 + 响应显式 UTF-8 解码
 
 ### 问题
@@ -179,44 +243,101 @@ start / stop / status / broadcast 四个端点，只有测试在读它），属�
 
 - `mvn -pl cloud-backend -am -Dtest=UdpGatewayCriticalFrameRateTest test` 通过（4/4）；
 - 用例总数不变；`[Unreleased]` 小节 289 → **291**。
+
+## [Unreleased] — CI 抬号：maven 缓存键尾 `v2 → v3`，19 站点 + 守卫 CANON 同批（2026-11-09，0 例，纯 CI）
+
+todo P2 #21 收口。`actions/cache` 同键首存者胜出、之后只读不覆盖，抬代次漏掉
+任何一处 = 该 job 永远读不到 warm 缓存、各自冷下载整个 reactor，在共享 runner IP
+上撞 Maven Central 429——这正是 `ci-maven-cache-key.sh` 守的同源面，改一处即红。
+本次把守卫 `CANON` 与 ci.yml 的 **19 处** `key:` 站点同批抬（`…-v2` → `…-v3`），
+守卫实测 `sites=19 mismatch=0`、自测 5/5；`restore-keys` 无代次令牌、不受影响。
+
+验收（todo #21 原口径，随 CI 落定取证）：抬号后首跑 `Populate local repository
+(cold cache)` 执行、`Verify cached repository is complete (offline build +
+offline test)` skipped；其后一次命中 run 不再打 `::warning::离线自检失败`、
+六条 `Java <module>` 无 `surefire-junit-platform` 取件报错。抬号前实测
+in_progress=1 / queued=3，安静窗口成立。
+
+本批 0 测试增删；只动 `.github/workflows/ci.yml` + `scripts/ci-maven-cache-key.sh`
++ `CHANGELOG.md` + `docs/todo.md`，Java / 前端零改动。
+
+计数：本批 0 测试增删；`[Unreleased]` 小节 292 → **293**。
+
 ### 变异门禁收口：+9 例覆盖，本地实测双过基线
-## [Unreleased] — 文档口径回填：GB28181 SIP 传输 / 机巢 MQTT 已落地，6 处旧表述仍与代码相反（仅文档·注释·日志文案）
 
-### 背景
+#266 的 Mutation baseline gate 在 CI 上量到新代码把 surveillance 包拖到
+0.9178 / 0.9327（基线 0.9200 / 0.9400）。按纪律取 PIT 报告逐条分诊后补覆盖
+（**没动基线**）：
 
-#257（机巢 MQTT 真链路，2026-11-07）与 #258（GB28181 SIP-over-UDP 传输 + 设备模拟器，
-2026-11-07）落地后，README 的「已知边界」已写成真链路；但配套的 4 份文档、1 处配置注释、
-1 处源码 javadoc/WARN、1 处用例 DisplayName 仍停在旧口径（“SIP 传输未实现”“机巢 MQTT 未接”）
-——**读文档的人会得到与代码相反的事实**。
+- 传输失败（IOException 连接被拒）的 **cause 必须保留**——否则排障只剩一句
+  "failed"，看不出是网络/超时/被拒；消息里不留 `Connection refused` 与内网地址；
+- 平台回**非 JSON**（HTML 错误页）⇒ 归为"响应不可读"而不是解析 NPE；
+- `code` 缺失时的短句必须带 code，且**普通业务失败不触发重取 token**；
+- `firstText` 的三级兜底顺序（accessToken > access_token > token）；
+- `contentMd5` 是 Base64（22 字符 + `==`），同一 body 稳定、不同 body 不同；
+- `HikvisionIscAuth` 对 null token / null expiresAt 立即 NPE（不造半成品）；
+- `validAt` 在等于 `expiresAt` 的那一刻算已过期；
+- `artemisPrefix` 传空白 ⇒ 归一为默认 `/artemis`（不吃 null 造出 `//oauth/token`）。
 
-### 改
+A/B 新增 2 项（传输异常丢 cause：2 红；首个 payload 兜底改成空串：2 红），还原全绿。
+本地 PIT 实测：**变异分数 0.9332（基线 0.9200）/ 测试强度 0.9418（基线 0.9400）**。
 
-- `docs/todo.md` #14：GB28181 事件订阅 501 的说明由“SIP 传输未实现”改为“适配器尚未接线”，
-  并记明传输层已于 #258 交付（8 例真回环测试）；RTP/PS 媒体面仍是缺口（口径不变）。
-- `docs/todo.md` #17：`机巢 MQTT 未接` → **已接线**（`transport=mqtt` 条件装配
-  `MqttDockGateway` / `MqttDockOsdListener`，Paho + DJI Cloud API 物模型；默认仍 `sim`）；
-  剩余改为真实 EMQX Broker + 真机机巢联调。
-- `docs/api-reference.md`（surveillance events）：501 语义示意行同步为“未接线到已实现的传输层”。
-- `docs/real-integration-program.md` P5：GB28181 行与机巢 MQTT 行同口径改写。
-- `cloud-backend/src/main/resources/application.properties`：机巢段注释
-  `transport=mqtt 属生产阶段` → 已接线，并指向部署文档的 4 个键。
-- `Gb28181Adapter` 类 javadoc / `subscribeEvents` javadoc / WARN 文案 /
-  `SurveillanceControllerTest` 的 `@DisplayName` 与注释：同口径改写（501 行为不变）。
+## [Unreleased] — 海康 iSecure Center OpenAPI 契约层：AK/SK 签名 + 已知答案测试（+18 例）
 
-### 顺手补齐：机巢 MQTT 的 4 个键此前没进部署文档
+### 依据（公开文档 + 官方 SDK 行为）
 
-`aerofleet.dock.transport` / `mqtt-broker-url` / `mqtt-username` / `mqtt-password`
-已在 `application.properties` 声明（#257），但 `docs/deployment-guide.md` §3.3
-「换环境就要改的那一组」没有它们——运维不知道 `transport=mqtt` 怎么开、
-`broker-url` 为空会**启动失败**。本批补进 §3.3（含「改完在哪行日志看见」自证列），
-该节口径由 7 键更新为 11 键。
+海康开放平台公开文档（综合安防管理平台 iSecure Center OpenAPI）+ 官方 SDK 行为，
+逐条落实：
 
-### 验证
+- 接口形如 `https://{host}:{port}/artemis/{uri}`，仅 HTTPS，**artemis 前缀必带**；
+- 鉴权为 **AK/SK 摘要签名**：请求头 `x-ca-key` / `x-ca-nonce` / `x-ca-timestamp` /
+  `x-ca-signature-headers` / `x-ca-signature`；
+- 签名字符串（**顺序即契约**）：`METHOD\nAccept\nContent-Type\n 自定义头(小写名排序)\n
+  带 artemis 前缀的路径`；`X-Ca-Signature = Base64(HmacSHA256(appSecret, 串))`；
+- **token 也必须经签名请求获取**（`POST /artemis/oauth/token`）——不是匿名端点；
+- 响应统一 `{"code":"0","msg":"success","data":...}`，**code 是字符串 "0" 才算成功**
+  （不是 HTTP 200 就是成功）。
 
-- 无行为改动：唯一 Java 变更是 WARN 日志文案与注释，501/装配条件均不变；
-- `check-doc-counts.py` / `check-repo-hygiene.py` / `check-doc-config-keys.py` 全绿；
-- `mvn -pl cloud-backend -am -Dtest=SurveillanceControllerTest test` 通过（501 路径不变）；
-- 用例总数不变；`[Unreleased]` 小节按实际重算为 **288**。
+海康开放平台另提供官方 **OpenAPI 接口测试工具**（下载中心），签名算法公开且确定性
+⇒ 契约层零硬件可对接；真机取流属互操作层。
+
+### 交付
+
+`HikvisionIscAuth`（AK/SK 签名器 + token 态：2h TTL 扣 1min 安全余量）
++ `HikvisionIscClient`（签名请求、token 获取与缓存、业务 POST、
+`previewUrl()` 按文档取 rtsp/hls 地址、平台语义失败与链路失败分开报）。
+
+**边界（不假装）**：只覆盖**鉴权 + 通用 POST + 预览 URL 契约**；未接业务接口全表
+（设备目录/云台/告警订阅）；未校验服务端证书链（ISC 常自签名）；**未接真实平台**
+（需 app_key/app_secret 与平台地址）；### 测试 +18 例 + A/B 五项
+
+`HikvisionIscClientContractTest`（JDK HttpServer 假平台，18 例）：
+**已知答案签名** / 签名字符串顺序 / 头名大小写不影响签名 / artemis 前缀参与签名 /
+换 secret 换签名 / Content-Type 参数不参与签名 / token 经签名请求且带五头 /
+token 过期扣余量 / token 缓存 / 业务请求带 access_token / code≠"0" 语义失败 /
+auth 类失败重取重试 / token 字段缺失响亮失败 / 预览返回 data.url / 预览缺 url 响亮失败 /
+cameraIndexCode 空白拒绝 / 构造 null 立即 NPE / baseUri 尾斜杠归一。
+
+**其中「已知答案签名」是关键**：期望值由**独立 Python hmac 实现**算出
+（`hmac.digest(secret, signedString, sha256)` 后 Base64），与 Java 实现无关。
+没有它，A/B 实测显示「改错拼接顺序」「把 HmacSHA256 换成 SHA1」都**0 红**——
+那类自证测试（只验"换个输入签名会变"）挡不住算法/顺序错。
+
+**A/B 五项全部转红**（还原 ⇒ 全绿）：
+
+| 破坏 | 转红 |
+|---|---|
+| 签名字符串段序对调（少一个换行） | 2 例 |
+| HmacSHA256 → HmacSHA1 | 2 例 |
+| 自定义头名不再小写化 | 2 例 |
+| 签名字符串丢掉 artemis 前缀 | 3 例 |
+| 平台 code 检查关掉（HTTP 200 当成功） | 3 例 |
+
+### P5 分级表同步
+
+`docs/real-integration-program.md` P5.3 表中「海康 iSecure Center OpenAPI」由
+⏳ 未开工改为 ✅ 已交付（契约层）。
+
 ## [Unreleased] — GB28181 媒体面落地：RTP/PS 打包·解复用·真 UDP 回环（+37 例，标准全文已取证）
 
 ### 为什么之前说"媒体面等硬件"——那句话是错的
@@ -435,6 +556,7 @@ sdk-java 19）；10 份口径文档计数同步 5755→5761 / 3556→3562；`che
 这几处全在**客户会直接读**的文档里（白皮书、销售页、定价、上手指南），且都不是本改动
 引入的——是此前某次批量替换留下的。既然本轮本来就要改这些文件的计数，顺带修好，
 避免"数字对、表错位"。未做全仓表格 lint（那是另一个话题，且会撞上别人正在改的文档）。
+
 
 ## [Unreleased] — P2-F6 ② 出站定向广播落地：未知 sysid 不再只归"最后说话者"（+3 例）
 
@@ -899,6 +1021,64 @@ SkipHttpErrorCheck），全部已在代码里规避。
 **A/B 实测**：把 `DeliveryAdapter` 状态查询路径改回回显 ⇒ **红**；还原 ⇒ 绿。
 `StepExecutorTest` 30/30 绿；`ModuleAdapterContractTest` 全绿
 （领域异常透传契约不变）。
+## [Unreleased] — CI 加固：surefire provider 闭包焐进 m2，「缓存完整」自检补上真跑测试那条腿（2026-11-06）
+
+master push run `42061771858`（`b5e75228`）里 `Java mavlink-core` 判红。读 attempt 1 的 job 日志原文定性：
+**不是测试红，是取件红**——
+
+```
+Failed to collect dependencies at org.apache.maven.surefire:surefire-junit-platform:jar:3.5.2
+  … Could not transfer … from/to central (https://repo.maven.apache.org/maven2): HTTP Status: 429
+```
+
+`ci-mvn-retry.sh` 自己就把它判成取件类、带 probe 重试一次，两次 probe（jar / pom）**都是 429**。
+旁证两条：同 commit 本机 `mvn -B -pl mavlink-core -am package` **523 / 0 BUILD SUCCESS**；
+`#246 / #248 / #249` 三笔的 `--stat` 都没碰 `mavlink-core/**`。
+重跑（已有人起了 attempt 2）只消这一次，**消不掉下面这个缺口**。
+
+### 缺口是结构性的，不是抖动
+
+surefire 的 JUnit Platform provider **及其依赖闭包**只在**真跑测试时**才解析。而 `maven-warm` 的
+两条路径——冷路径 `mvn -B -DskipTests verify`、命中路径的"完整性自检" `mvn -B -o -DskipTests verify`——
+**都带 `-DskipTests`** ⇒ provider 永远进不了焐好的 m2，那条自检也**永远看不见它缺**，
+却照样打印「m2 缓存对当前工具链完整」。下游 6 个 `Java <module>` 都带测试跑
+⇒ 每次各自向中央仓要 provider，这就是 429 的暴露面。**同一坐标 `surefire-junit-platform:3.5.2 (absent)`
+在 2026-10-13 就红过**（见 `scripts/ci-mvn-retry.sh` 头部原文）——重试是止血，焐进缓存才是不再复发。
+
+### 本机冷仓 A/B/C（隔离 `-Dmaven.repo.local`，未读写本机 m2）
+
+| 步 | 结果 |
+|---|---|
+| A1 `-DskipTests verify`（CI 焐缓存的原形态） | **EXIT=0**（焐"成功"） |
+| A2 `org/apache/maven/surefire/surefire-junit-platform` 目录 | **ABSENT** |
+| A3 `mvn -o -pl mavlink-core -am test`（模拟下游作业） | **EXIT=1**，报错与 CI 同形：`surefire-junit-platform:jar:3.5.2 (absent) … in offline mode` |
+| B1 `dependency:get -Dartifact=…surefire-junit-platform:3.5.2` | EXIT=0，但**只补齐 provider 本体** |
+| B2 同一条离线测试再来一遍 | **仍 EXIT=1**，换成缺 `org.junit.platform:junit-platform-commons:1.9.3` |
+| C1 让 Maven 自己决定闭包：在线跑一次 `-pl mavlink-core -am test` | EXIT=0 |
+| C2 **同一条离线命令**再来一遍 | **EXIT=0 / Tests run: 523, Failures: 0** |
+
+⇒ **手挑坐标这条路被 B 组当场否掉**（provider 的闭包不由人算），所以修法是「让最小模块真跑一次测试」：
+冷路径加一条 `bash scripts/ci-mvn-retry.sh -B -pl mavlink-core -am test`，
+命中路径的自检从 `-o -DskipTests verify` **扩成** `-o -DskipTests verify && -o -pl mavlink-core -am test`，
+失败分支在线补的是**同一条命令**——验证载体与被测面从此是同一件事，不会两头漂移。
+离线那条**刻意不套** retry 包装：套了就会在离线失败时回源，自检也就白做了。
+
+### 未做（刻意登记，见 `docs/todo.md` P2 #21）
+
+**没有抬缓存键尾 `v2 → v3`**。抬号会让全部 maven 作业冷启动重下整个 reactor，而共享 runner IP 上
+那正是 429 的高危时刻。本批改完的直接效果是 provider 闭包从「6 个作业各下一次」变成「warm 下一次」；
+要真正焐进那一代缓存，仍需一次**安静窗口**里显式抬号（前置条件与验收标准写在 todo #21）。
+在抬号之前，命中路径会**每次**打一条 `::warning::` 并在线补齐——那是有意为之的明说信号，不是新故障。
+
+验证：rebase 到 `4a1f1853` 后全 reactor `mvn -B -o test` **5761 / 0 失败 / 0 错误**（逐模块
+**523 / 1477 / 139 / 3562 / 19 / 41**）——与 master 既有声称逐模块相等 ⇒ 本批**零测试增删**是量出来的，不是声称的；
+17 道仓门全绿（含 `check-repo-hygiene` 对本节计数 289→290 的自洽检查、`check-selftest-coverage`——
+本批不新增脚本，README 脚本数不变）；缓存键守卫 `ci-maven-cache-key.sh` 在改后的 ci.yml 上实测
+`sites=19 mismatch=0`（master 新增 `e2e-dock-mqtt` restore 站点后由 18 涨到 19，守卫输出为准）。
+本批只动 `.github/workflows/ci.yml` + `CHANGELOG.md` + `docs/todo.md`，
+Java / 前端**零改动**。
+
+计数：本批 0 测试增删；`[Unreleased]` 小节 291 → **292**。
 
 ## [Unreleased] — 门禁去噪：`check-maven-incantations` 不再扫 `.coord` 归档，本机恒红改为真绿（0 例，纯工具）
 
@@ -2737,8 +2917,11 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
-> 最新在最上方，不按版本分节。截至 2026-11-10 共有 297 个 `[Unreleased]` 小节，自 v1.0.5
+
+> 最新在最上方，不按版本分节。截至 2026-11-10 共有 301 个 `[Unreleased]` 小节，自 v1.0.5
+
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
+
 > 附注 tag，`git tag -n99 vX.Y.Z` 可读该版 release notes）。下表为版本索引。
 
 
@@ -2762,7 +2945,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 297 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 301 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

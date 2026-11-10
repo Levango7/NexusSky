@@ -25,6 +25,10 @@
 * 2026-10-20：某个工作树把 CHANGELOG 撤掉 559 行、并把已修好的脚本退回成有 bug 的版本。
 * 2026-10-20：同一天我自己的字符串手术把头部写成「共有 159 158 个」，
   宽松的门禁**没抓住** —— 于是把解析口径改成"整段必须是单个整数"。
+* 2026-11-08/09（两次复发，见检查项 6）：`#263` 的 squash 合并（`d7256aa6`）把 9 份
+  商业文档的计数行复制成双份（`#270` 顺带清掉）；**次日 `#269` 的合并（`d9f9ebd4`）
+  又把同一批文档复制成最多 11 份**。两次都**全绿通过全部门禁**——计数门禁只核"值"
+  （重复行的值都对）、冲突标记检查看不见它，而读者看到的是同一句话重复十一遍的文档。
 
 检查项
 ------
@@ -35,6 +39,7 @@
 4. 不得提交构建产物 / 依赖目录 / 本地报告（`target/`、`node_modules/`、`dist/`、
    `vitest-report.json`、`data/`、`.env`）。
 5. 不得有"疑似回退式改动"（删除远多于新增），除非确认过。
+6. 不得有"复制粘贴式"连续重复行（同一非空行相邻出现 ≥2 次），见 `check_duplicate_lines`。
 
 用法：
     python scripts/check-repo-hygiene.py              # 查本仓库
@@ -160,6 +165,38 @@ def check_http_status(pairs):
     return out
 
 
+# --- 6. 连续重复行（复制粘贴式损坏）---
+# 事故链（2026-11-08/09，两次复发）：#263 的合并把 9 份商业文档的计数行复制成双份，
+# #270 顺带清掉；次日 #269 的合并又把同一批复制成最多 11 份。**两次都全绿通过所有门禁**：
+# 计数门禁只核"值"（重复行携带的值都正确），冲突标记检查也看不见它。
+# 判据取最保守的形状：相邻的非空行**逐字节相同**。干净仓库全量 .md 实测 0 处，
+# 故用零容忍；空行不受限（本仓 CHANGELOG 等处允许连空两行）。
+# 已知射程：交替型（A B A B…）不直接命中——但实测中它总是伴随相邻重复出现
+# （11 份复制的区块里必然出现相邻全同行），先抓这个最容易抓、误报率为零的形状。
+def check_duplicate_lines(pairs):
+    """pairs = [(相对路径, 文本)]；返回"同一非空行相邻重复"的问题列表。"""
+    out = []
+    for rel, text in pairs:
+        lines = text.replace("\r\n", "\n").split("\n")
+        i = 0
+        shown = 0
+        while i < len(lines):
+            j = i + 1
+            while j < len(lines) and lines[j] == lines[i]:
+                j += 1
+            run = j - i
+            if run >= 2 and lines[i].strip():
+                out.append("重复行 %s:%d 同一非空行连续出现 %d 次 ← 复制粘贴型损坏"
+                           "（merge/补丁重放事故；2026-11-08/09 两次把 9 份商业文档复制坏）：%s"
+                           % (rel, i + 1, run, lines[i].strip()[:64]))
+                shown += 1
+                if shown >= 8:
+                    out.append("重复行 %s：另有更多处未逐一列出" % rel)
+                    break
+            i = j
+    return out
+
+
 def check_repo(root=None):
     """对指定目录做检查，返回问题列表。"""
     problems = []
@@ -235,6 +272,9 @@ def check_repo(root=None):
         except OSError:
             continue
     problems += check_http_status(md_pairs)
+
+    # --- 6. 连续重复行（与 5 共用同一份 md 全扫结果）---
+    problems += check_duplicate_lines(md_pairs)
     return problems
 
 
@@ -329,6 +369,25 @@ def self_test():
             f.write("")
         run("add", "-A")
 
+        # --- 检查项 6 自证：复制粘贴式连续重复行 ---
+        dupdoc = os.path.join(docdir, "dup.md")
+        with open(dupdoc, "w", encoding="utf-8", newline="") as f:
+            f.write("# T\n\n| 模块 | 单测数 |\n|---|---|\n"
+                    "| `a` | 1 |\n| `a` | 1 |\n| `a` | 1 |\n\ntail\n")
+        run("add", "-A")
+        pr = check_repo(tmp)
+        dup_hits = [x for x in pr if "重复行" in x]
+        ok["连续重复行被拦（3 连只报一处）"] = len(dup_hits) == 1
+
+        # 合法形态不误伤：远距离同名行（非相邻）、连空两行、分隔行相隔
+        with open(dupdoc, "w", encoding="utf-8", newline="") as f:
+            f.write("# T\n\n| `a` | 1 |\n\n\n| `a` | 1 |\n\nmid\n\n| `a` | 1 |\n")
+        run("add", "-A")
+        pr = check_repo(tmp)
+        ok["远距离重复与连空两行不误伤"] = not any("重复行" in x for x in pr)
+        os.remove(dupdoc)
+        run("add", "-A")
+
         # pom 的 XML 注释里出现 "--"：2026-10-23 实测把 7 个 CI job 一起带红
         mod = os.path.join(tmp, "mod")
         os.makedirs(mod, exist_ok=True)
@@ -371,7 +430,8 @@ def main():
         if len(problems) > 40:
             print("  ... 其余 %d 项省略" % (len(problems) - 40))
         return 1
-    print("仓库卫生门禁：通过（无冲突标记、CHANGELOG 自洽、pom 可解析、无合并残留、无构建产物入库、无疑似回退式改动）")
+    print("仓库卫生门禁：通过（无冲突标记、CHANGELOG 自洽、pom 可解析、无合并残留、无构建产物入库、"
+          "无连续重复行、无疑似回退式改动）")
     return 0
 
 

@@ -624,6 +624,13 @@ if [ -n "$TOKEN_C" ]; then
                 "$([ "$DRONE_SEEN" -gt 0 ] && echo yes)"
             # 撤销腿（纯 REST 状态断言，不依赖帧到达时刻，避免计时抖动）：DELETE 成功后
             # 注册表里内存与库行都没了，此时给同一 sysid 指派租户应当 404 device unknown。
+            # 必须先把 sim 进程停掉再做这对断言：sim 活着就会以 1Hz 心跳把刚 DELETE 掉的
+            # 设备经 registerIfAbsent 重建回内存，assignTenant 落到 snapshot!=null 分支回 200，
+            # "条目真没了"就变成竞态彩票（CI 已据此红过一次）。wait 到进程真死才放行，
+            # 不留已在途的帧源；PID_SIM 清空让 EXIT trap 不会二次 kill。
+            kill "$PID_SIM" 2>/dev/null || true
+            wait "$PID_SIM" 2>/dev/null || true
+            PID_SIM=""
             DELETE_STATUS=$(http_status -X DELETE -H "Authorization: Bearer ${TOKEN_C}" \
                 "http://localhost:${C_PORT}/api/v1/devices/${C_SIM_SYSID}")
             assert_status "DELETE /api/v1/devices/${C_SIM_SYSID}（撤销登记）" "200" "$DELETE_STATUS"
@@ -637,8 +644,7 @@ if [ -n "$TOKEN_C" ]; then
             tail -15 "$LOG_SIM"
             FAILED=1
         fi
-        kill "$PID_SIM" 2>/dev/null || true
-        PID_SIM=""
+        # sim 已在撤销腿前停掉（见上），这里只清日志；失败时保留日志供诊断。
         rm -f "$LOG_SIM"
     else
         echo "   ❌ 找不到 sim 制品 $SIM_JAR，活体设备断言无法执行"
