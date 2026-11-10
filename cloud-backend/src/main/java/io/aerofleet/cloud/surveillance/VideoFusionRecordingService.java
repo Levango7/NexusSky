@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.surveillance;
 
+import io.aerofleet.cloud.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -37,8 +38,13 @@ public class VideoFusionRecordingService {
 
     private static final Logger log = LoggerFactory.getLogger(VideoFusionRecordingService.class);
 
-    /** 单条录制登记（不可变值对象；start/stop 用整体替换而非原地改字段）。 */
-    public record Recording(String sourceId, String sourceType, long startedAtMs) {
+    /**
+     * 单条录制登记（不可变值对象；start/stop 用整体替换而非原地改字段）。
+     * <p>
+     * tenantId 为登记发起者的可写租户（全局管理员为 null）；NO_ACCESS 归一为 null
+     * 由 {@link TenantContext#getWritableTenantId()} 保证，哨兵值永不落进注册表。
+     */
+    public record Recording(String sourceId, String sourceType, long startedAtMs, Integer tenantId) {
     }
 
     /** sourceId（设备号或 sysid 字面量）→ 登记。 */
@@ -52,8 +58,9 @@ public class VideoFusionRecordingService {
      * @return 登记后的状态（幂等：已在录则原样返回，不重置起始时刻）
      */
     public Recording start(String sourceId, String sourceType) {
+        Integer tenantId = TenantContext.getWritableTenantId();
         Recording rec = active.computeIfAbsent(sourceId,
-                id -> new Recording(id, sourceType, System.currentTimeMillis()));
+                id -> new Recording(id, sourceType, System.currentTimeMillis(), tenantId));
         if (!rec.sourceType().equals(sourceType)) {
             // 同一 id 先被当作安防设备、后被当作无人机登记（id 命名空间不重叠，
             // 正常不会发生）。保留首次登记的 sourceType，不静默改写来源标签。
@@ -69,6 +76,10 @@ public class VideoFusionRecordingService {
      * @return 被移除的登记；此前未在录则返回 {@code null}（调用方据此回 404）
      */
     public Recording stop(String sourceId) {
+        Recording existing = active.get(sourceId);
+        if (existing == null || !visibleTo(TenantContext.getEffectiveTenantId(), existing)) {
+            return null;
+        }
         Recording removed = active.remove(sourceId);
         if (removed != null) {
             log.info("录制登记已停止: id={} 时长={}ms", sourceId,
@@ -77,20 +88,35 @@ public class VideoFusionRecordingService {
         return removed;
     }
 
-    /** 当前是否在录。 */
+    /** 当前是否在录（跨租户的登记视为未在录）。 */
     public boolean isRecording(String sourceId) {
-        return active.containsKey(sourceId);
+        Recording rec = active.get(sourceId);
+        return rec != null && visibleTo(TenantContext.getEffectiveTenantId(), rec);
     }
 
-    /** 当前全部录制登记（快照，按开始时刻升序）。 */
+    /** 当前全部录制登记（快照，按开始时刻升序；仅本租户可见）。 */
     public List<Recording> list() {
+        Integer tenantId = TenantContext.getEffectiveTenantId();
         List<Recording> out = new ArrayList<>(active.values());
+        out.removeIf(rec -> !visibleTo(tenantId, rec));
         out.sort((a, b) -> Long.compare(a.startedAtMs(), b.startedAtMs()));
         return out;
     }
 
-    /** 当前在录数量。 */
+    /** 当前在录数量（仅计本租户可见的登记）。 */
     public int activeCount() {
-        return active.size();
+        Integer tenantId = TenantContext.getEffectiveTenantId();
+        return (int) active.values().stream()
+                .filter(rec -> visibleTo(tenantId, rec))
+                .count();
+    }
+
+    /**
+     * 跨租户可见性，与 {@code DeviceRegistry.isVisibleTo} 同一约定：
+     * 全局管理员（effective==null）看全部；其余只看到自己租户的登记。
+     * NO_ACCESS 哨兵永不等于任何 tenantId，故看不到任何登记。
+     */
+    private static boolean visibleTo(Integer effective, Recording rec) {
+        return effective == null || effective.equals(rec.tenantId());
     }
 }

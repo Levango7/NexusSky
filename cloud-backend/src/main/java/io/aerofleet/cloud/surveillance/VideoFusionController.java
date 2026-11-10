@@ -186,9 +186,20 @@ public class VideoFusionController {
     @ApiResponse(responseCode = "200", description = "录制登记列表")
     @GetMapping("/recording")
     public ResponseEntity<Map<String, Object>> listRecordings() {
+        // 显式映射字段：Recording 携带 tenantId（隔离依据），不进响应体，
+        // 线上形状与加租户字段前保持一致。
+        List<Map<String, Object>> recordings = recordingService.list().stream()
+                .map(rec -> {
+                    Map<String, Object> v = new LinkedHashMap<>();
+                    v.put("sourceId", rec.sourceId());
+                    v.put("sourceType", rec.sourceType());
+                    v.put("startedAtMs", rec.startedAtMs());
+                    return v;
+                })
+                .toList();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("count", recordingService.activeCount());
-        result.put("recordings", recordingService.list());
+        result.put("recordings", recordings);
         return ResponseEntity.ok(result);
     }
 

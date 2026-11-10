@@ -477,4 +477,58 @@ class HttpAuthChainTest {
         org.junit.jupiter.api.Assertions.assertFalse(reloaded.isAcknowledged(),
                 "未归属事件不得被任何具体租户确认");
     }
+
+    // ==================== 5. 跨租户录制登记隔离（video-fusion） ====================
+    // 录制登记簿曾是完全全局的：start 不记租户、stop/list/activeCount 全局可见，
+    // 于是他租户能停掉本租户的录制、能在列表里看到本租户的登记。
+    // 与第 4 节同一约定：负向断言必须配本租户正向对照，否则「恒 404」的坏门禁也算绿。
+
+    @Test
+    @DisplayName("他租户看不到我的录制登记、也不能停我的录制（video-fusion 隔离）")
+    void recordingRegistryIsTenantScoped() throws Exception {
+        registry.registerIfAbsent(DEVICE_SYSID);
+        registry.assignTenant(DEVICE_SYSID, TENANT_A);
+
+        mvc.perform(post("/api/v1/video-fusion/recording/" + DEVICE_SYSID + "/start")
+                        .header("Authorization", bearerA))
+                .andExpect(status().isOk());
+
+        // B 的列表与计数：看不到 A 的登记
+        mvc.perform(get("/api/v1/video-fusion/recording").header("Authorization", bearerB))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(0))
+                .andExpect(jsonPath("$.recordings.length()").value(0));
+
+        // B 不能停 A 的录制（404 而非 200）
+        mvc.perform(post("/api/v1/video-fusion/recording/" + DEVICE_SYSID + "/stop")
+                        .header("Authorization", bearerB))
+                .andExpect(status().isNotFound());
+
+        // B 连对 A 的无人机发起录制都做不到（resolveSourceType 已按租户过滤）
+        mvc.perform(post("/api/v1/video-fusion/recording/" + DEVICE_SYSID + "/start")
+                        .header("Authorization", bearerB))
+                .andExpect(status().isNotFound());
+
+        // NO_ACCESS 哨兵租户看不到任何录制登记（哨兵永不等于任何 tenantId）
+        String tenantlessOperator = "Bearer " + tokens.generateToken("tenantless-op-vf",
+                Role.OPERATOR, null, Duration.ofMinutes(10));
+        mvc.perform(get("/api/v1/video-fusion/recording").header("Authorization", tenantlessOperator))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(0));
+
+        // 全局管理员（无租户 claim 的 ADMIN）看全部——null 语义的另一半
+        String tenantlessAdmin = "Bearer " + tokens.generateToken("tenantless-admin-vf",
+                Role.ADMIN, null, Duration.ofMinutes(10));
+        mvc.perform(get("/api/v1/video-fusion/recording").header("Authorization", tenantlessAdmin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1));
+
+        // 正向对照：A 仍能停掉自己的录制（证明条目一直在，且门禁不是恒 404）
+        mvc.perform(post("/api/v1/video-fusion/recording/" + DEVICE_SYSID + "/stop")
+                        .header("Authorization", bearerA))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/video-fusion/recording").header("Authorization", bearerA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(0));
+    }
 }
