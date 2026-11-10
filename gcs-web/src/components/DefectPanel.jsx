@@ -4,7 +4,9 @@ import { defects as defectsApi } from '../api.js'
 const POLL_MS = 5000
 
 export const SEVERITY_COLORS = { P0: '#ef4444', P1: '#f97316', P2: '#eab308', P3: '#6b7280' }
-export const DEFECT_STATUS_LABELS = { OPEN: '待确认', CONFIRMED: '已确认', DISMISSED: '已驳回' }
+export const DEFECT_STATUS_LABELS = {
+  OPEN: '待确认', CONFIRMED: '已确认', DISMISSED: '已驳回', RECTIFIED: '已消缺',
+}
 export const WO_STATUS_LABELS = {
   OPEN: '待派单', DISPATCHED: '已派单', IN_PROGRESS: '处置中',
   RESOLVED: '待复检', VERIFIED: '已闭环', REOPENED: '复检退回', CANCELLED: '已取消',
@@ -153,7 +155,9 @@ export default function DefectPanel() {
               {d.note ? ` · ${d.note}` : ''}
             </div>
             <div style={{ marginTop: 4 }}>
-              {d.status !== 'DISMISSED' && (
+              {/* 只有"还活着"的缺陷才给人工裁决。RECTIFIED 是已关闭（复检通过消缺），
+                  给它一个"确认"按钮等于让已修好的点位再走一遍工单流程。 */}
+              {(d.status === 'OPEN' || d.status === 'CONFIRMED') && (
                 <>
                   <button onClick={() => setDefectStatus(d.id, 'CONFIRMED')} disabled={busy} style={{ fontSize: 12 }}>确认</button>{' '}
                   <button onClick={() => setDefectStatus(d.id, 'DISMISSED')} disabled={busy} style={{ fontSize: 12 }}>驳回</button>

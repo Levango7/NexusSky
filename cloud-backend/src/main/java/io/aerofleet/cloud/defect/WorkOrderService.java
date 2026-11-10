@@ -42,19 +42,54 @@ public class WorkOrderService {
     // 创建与查询
     // ------------------------------------------------------------------
 
-    /** 从缺陷列表创建工单（≥1 条，缺陷须为 OPEN/CONFIRMED）。 */
+    /**
+     * 从缺陷列表创建工单（≥1 条，缺陷须为 OPEN/CONFIRMED）。
+     *
+     * <h2>两道守卫（此前**一条都没有**，尽管 javadoc 写着"须为 OPEN/CONFIRMED"）</h2>
+     *
+     * <ol>
+     *   <li><b>状态守卫</b>：只接受 {@link DefectService#DISPATCHABLE}。此前只拒
+     *       DISMISSED，于是 RECTIFIED（已消缺）的缺陷也能被重新派单——一个已经被
+     *       复检证明修好的点位再次派班组过去。声明与行为不一致，比没有声明更坏。</li>
+     *   <li><b>重复派单守卫</b>：同一缺陷不得同时挂在两个未终态工单上。此前没有这道
+     *       检查，两个班组会被派到同一个缺陷（"统筹调度"的反面教材），而且两份工单
+     *       后来都会各自复检、各自回写，记录互相覆盖说不清。</li>
+     * </ol>
+     *
+     * <p>取消（CANCELLED）会释放占用：派单取消了，缺陷必须还能再派，否则一次误取消
+     * 就把这个点位永久锁死。回归见 {@code DefectClosureLoopTest}。
+     */
     @Transactional
     public WorkOrderEntity create(String title, String note, List<Long> defectIds, String tenantId) {
         if (defectIds == null || defectIds.isEmpty()) {
             throw new IllegalArgumentException("work order requires at least one defect");
         }
+        int i = 0;
         for (Long id : defectIds) {
+            i++;
             DefectEntity d = defects.findById(id)
                     .orElseThrow(() -> new IllegalArgumentException("unknown defect " + id));
-            if ("DISMISSED".equals(d.status)) {
-                throw new IllegalArgumentException("defect " + id + " is DISMISSED");
+            // ① 状态守卫（含 DISMISSED / RECTIFIED）
+            if (!DefectService.DISPATCHABLE.contains(d.status)) {
+                throw new IllegalArgumentException(
+                        "defect " + id + " is " + d.status + "; only " + DefectService.DISPATCHABLE
+                                + " can be dispatched");
+            }
+            // ② 重复派单守卫：该缺陷是否已被另一张未终态工单占用
+            for (WorkOrderDefectRefEntity ref : refs.findByDefectId(id)) {
+                if (ref.workOrderId == null) {
+                    continue;
+                }
+                WorkOrderEntity other = orders.findById(ref.workOrderId).orElse(null);
+                if (other == null || other.id == null || machine.isTerminal(other.status)) {
+                    continue;
+                }
+                throw new IllegalArgumentException(
+                        "defect " + id + " is already on active work order #" + other.id
+                                + " (status " + other.status + "); finish or cancel it first");
             }
         }
+        log.debug("work order create: {} defect(s), first={}", i, defectIds.get(0));
         WorkOrderEntity wo = new WorkOrderEntity();
         wo.title = title == null || title.isBlank() ? "缺陷处置 #" + System.currentTimeMillis() : title;
         wo.note = note;
@@ -176,6 +211,7 @@ public class WorkOrderService {
             }
         }
 
+        List<Long> attached = defectIdsOf(wo.id);
         boolean pass = hitDefects.isEmpty();
         WorkOrderStateMachine.Transition t = pass
                 ? WorkOrderStateMachine.Transition.VERIFY_PASS
@@ -187,8 +223,44 @@ public class WorkOrderService {
                 : "reopened, hits=" + hitDefects + " (frame " + shot.get("frameSeq") + ")";
         orders.save(updated);
 
-        log.info("work order {} verify: {} (hits={})", id, updated.status, hitDefects);
-        return Map.of("workOrderId", id, "result", updated.status,
-                "hitDefects", hitDefects, "frameSeq", shot.get("frameSeq"));
+        // ---- 闭环的最后一环：缺陷本身要关闭（此前只改工单、不动缺陷）----
+        //
+        // 通过：挂着的缺陷全部置 RECTIFIED。少这一步的后果不是"少记一笔"，而是
+        //   ① 报告的已消缺数永远为 0，对表"闭环消缺"时拿不出数；
+        //   ② 消缺后这个点位再次被拍到，findNearby 会命中这条旧缺陷并刷新
+        //      lastSeenAt —— 复发被静默吞掉，不产生任何新告警。
+        // 失败：一条都不改。保持 OPEN/CONFIRMED 的意思是"这些点位还没消缺，
+        //   可以（也必须）再派单"，而 REOPENED 工单本身也还能 START。
+        List<Long> closedDefects = new ArrayList<>();
+        List<Long> openDefects = new ArrayList<>();
+        for (Long defectId : attached) {
+            DefectEntity d = defects.findById(defectId).orElse(null);
+            if (d == null) {
+                continue;
+            }
+            if (pass) {
+                d.status = DefectService.RECTIFIED;
+                // lastSeenAt 在消缺口径下记"关闭时间"，不是"最后看到缺陷的时间"
+                d.lastSeenAt = updated.verifiedAt;
+                d.note = (d.note == null ? "" : d.note + " | ")
+                        + "rectified by work order #" + id + " (verify pass, frame "
+                        + shot.get("frameSeq") + ")";
+                defects.save(d);
+                closedDefects.add(defectId);
+            } else {
+                openDefects.add(defectId);
+            }
+        }
+
+        log.info("work order {} verify: {} (hits={}, closed={})",
+                id, updated.status, hitDefects, closedDefects);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("workOrderId", id);
+        out.put("result", updated.status);
+        out.put("hitDefects", hitDefects);
+        out.put("frameSeq", shot.get("frameSeq"));
+        out.put("closedDefects", closedDefects);
+        out.put("openDefects", openDefects);
+        return out;
     }
 }
