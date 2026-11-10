@@ -13,7 +13,7 @@
 - **ONVIF 清理**：删除 `OnvifUnsupportedException`（事件订阅 live 侧已由 `OnvifLiveBackend` 的
   PullPoint 实现承载）；`OnvifBackend` javadoc 改指 `OnvifEventSource` / `OnvifLiveBackend`。
 - `docs/protocol-vendor-integration.md` 入库：DJI 行 unverified→verified（Cloud API 2.0 v2.4.0、
-  Apache-2.0、MQTT 前置与限流核实状态），搁置项清理。
+  Apache-2.0、MQTT 前置与限流核实状态），搁置项清理；MAVLink/PX4/ArduPilot 官方页 2026-11-11 重试复核可达（services 索引页偶发超时，逐页访问替代）。
 - 计数：cloud-backend 3763→3800、全仓 5962→5999（+37 例）；docs 44→45 篇。
 
 ## [Unreleased] — 统一：许可档位与模块归属（2026-10-07 裁决落地，仅文档·LICENSE，0 测试增删）
