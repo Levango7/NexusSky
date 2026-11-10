@@ -145,7 +145,9 @@ done
 info "后端就绪（${READY}s）"
 
 # ---- 2. 起注入器 ----
-# 时长比测量多 30s：探针要跑满 duration，注入器必须一直有帧
+# 时长比测量多 10s：探针比注入器晚启动约 2s（等后端就绪 + 等设备上线），多 10s 足够。
+# 刻意不取 30s：注入器跑得越久，datagrams 的统计窗口就越长于注入日志末行，
+# 「注入量 − 收到量」算出的内核丢包失真越大（实测 30s 富余会算出负数，见第 5 节）。
 #
 # 为什么可能要多进程：单线程注入每帧要 encode(CRC)+UDP send，实测约 0.35ms/帧。
 # 254 架跑一轮要 90ms+，因此单进程在 254 架时只能到约 10 Hz/架——
@@ -160,7 +162,7 @@ for ((p = 0; p < INJECT_PROCS; p++)); do
     if ((p < REM)); then N=$((BASE + 1)); fi
     "$JAVA" -jar "$SIM_JAR" fleetload inject \
         --drones "$N" --hz "$HZ" --sysid-start "$SYSID" \
-        --target "127.0.0.1:$UDP_PORT" --duration "$((DURATION + 30))" \
+        --target "127.0.0.1:$UDP_PORT" --duration "$((DURATION + 10))" \
         > "$WORK/inject-$STAMP-p$p.log" 2>&1 &
     INJECT_PIDS+=($!)
     info "  进程 $p: sysid $SYSID..$((SYSID + N - 1))（$N 架）"
@@ -218,6 +220,16 @@ M_SESS_PEAK="${PEAKS##* }"
 info "测量期峰值：queueDepth=${M_DEPTH_PEAK:-0} wsSessions=${M_SESS_PEAK:-0}（采样 $(wc -l < "$PEAK_LOG" 2>/dev/null | tr -d ' ') 次）"
 
 # ---- 5. 采集后端指标 ----
+# 先等注入器自然结束，再采 PROM：注入器的「总帧」覆盖全程，若此时 datagrams 只
+# 覆盖到探针结束时刻，两者相减会把「还没发出的帧」误算成内核丢包
+# （实测三档都差约 5%，与窗口误差同量级，无法区分）。等它结束后两个口径才同窗。
+for pid in "${INJECT_PIDS[@]}"; do
+    for _ in $(seq 1 20); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 1
+    done
+done
+
 PROM="$(curl -s -m 20 "http://localhost:$PORT/actuator/prometheus" 2>/dev/null)"
 echo "$PROM" > "$WORK/prom-$STAMP.txt"
 [[ -n "$PROM" ]] || fail "prometheus 采集为空（见 $WORK/backend-$STAMP.log），指标将记 null"
@@ -262,7 +274,16 @@ INJECT_SENT=0
 INJECT_LOG_T=0
 for f in "$WORK"/inject-"$STAMP"-p*.log; do
     [[ -f "$f" ]] || continue
-    line="$(awk -v d="$DURATION" '
+    # 优先用收尾行「结束：…总帧 N」：它覆盖注入器全程，与「等注入器结束后采集的
+    # datagrams」同一窗口，是内核丢包对账唯一可靠的分子。进度行是 10s 粒度，
+    # 只作退路（例如注入器被 kill、没来得及打印收尾行）。
+    fin="$(sed -n 's/.*总帧 \([0-9]*\).*/\1/p' "$f" 2>/dev/null | tail -1)"
+    if [[ -n "$fin" ]]; then
+        INJECT_SENT=$((INJECT_SENT + fin))
+        INJECT_LOG_T=$((DURATION + 10))
+        continue
+    fi
+    line="$(awk -v d="$((DURATION + 10))" '
         match($0, /t=[0-9]+s/) {
             t = substr($0, RSTART + 2, RLENGTH - 3) + 0
             if (t <= d) { last = $0; lastT = t }
