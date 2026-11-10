@@ -1,5 +1,74 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P1-9 缺陷工单闭环：复检通过后缺陷真正关闭（+20 例，A/B 十项全红）
+
+### 背景：闭环缺了最后一环
+
+`io.aerofleet.cloud.defect` 的领域模型、工单状态机、复检比对、报告三格式都在
+（F4 既有交付），但**闭环断在最后一环**：`WorkOrderService.verify()` 复检通过后
+**只改工单状态、不动缺陷**。后果不是"少记一笔"，而是三件事：
+
+1. 报告的已消缺数永远为 0——"闭环消缺"拿不出数，招投标对表时说不清到底消了多少；
+2. **消缺后复发的缺陷被静默吞并**：`DefectService.findNearby()` 只认
+   OPEN/CONFIRMED，已修好的点位再次被拍到时会命中旧缺陷并刷新 `lastSeenAt`，
+   而不产生新告警——复发无声无息消失，运维永远不知道；
+3. 建工单的两道守卫**一条都没有**（尽管 javadoc 写着"须为 OPEN/CONFIRMED"）：
+   已消缺的缺陷能被再派一遍班组；同一缺陷可同时挂两张未终态工单，
+   两个班组派到同一个点位，且两份工单各自复检回写、记录互相覆盖说不清。
+
+### 改了什么
+
+**1. 新增缺陷状态 `RECTIFIED`（已消缺）**
+`DefectService` 状态词表从三个扩到四个：OPEN / CONFIRMED / RECTIFIED / DISMISSED。
+`DISPATCHABLE`（=OPEN+CONFIRMED）单独一份，`findNearby` 与建单守卫共用它——
+这保证"能派单的缺陷才会被去重折叠"，不会出现"已消缺的缺陷还在吸收新观测"。
+RECTIFIED 的**复发自然走"立新单 + 旧记录留痕"**：既能审计（这个点位修过几次），
+又不吞复发。schema 无需改动（`status varchar(12)`，"RECTIFIED" 9 字符）。
+
+**2. 复检通过 → 挂着的缺陷全部落库 RECTIFIED**
+`verify()` 在同一事务内回写，note 带工单号与帧号，`lastSeenAt` 在消缺口径下记
+"关闭时间"（与"最后看到缺陷的时间"分开，否则报告里的复发时间线会读反）。
+复检命中（REOPENED）则**一条都不改**——这些点位还没消缺，必须能再派单。
+
+**3. 建工单两道守卫**
+- 状态守卫：只接受 `DISPATCHABLE`（含此前的 DISMISSED 拒绝，契约未退）；
+- 重复派单守卫：同一缺陷不得同时挂两张未终态工单，报错点名占用它的工单。
+  **取消（CANCELLED）会释放占用**——派单取消了，缺陷必须还能再派，
+  否则一次误取消就把点位永久锁死。
+
+**4. 报告出"闭环率"**
+`summary.defectsRectified` + `summary.defectClosureRatePct`（RECTIFIED / 缺陷总数，
+分母零返回 null，沿用 F1 口径）；Markdown 概览行改为
+`（OPEN x / CONFIRMED y / 已消缺 z，闭环率 r%）`。
+
+**5. 手工置 RECTIFIED 必须有 note**
+与 `createManual` 的"人工单没说明等于没立案"同一条纪律：没写说明的关闭，
+在审计里等于"不知道谁修的、什么时候修的"。
+
+**6. 前端状态表同步**
+`DefectPanel.DEFECT_STATUS_LABELS` 加 `RECTIFIED: '已消缺'`；已关闭的缺陷不再渲染
+"确认 / 驳回"按钮（给已修好的点位一个"确认"等于让它再走一遍工单流程）。
+
+### 测试 +20 例 + A/B 十项全红
+
+新增 `DefectClosureLoopTest`（真 Spring 代理 + 真 H2 + JdbcTemplate 直读库，
+9 例）——**不复用 `WorkOrderServiceTest` 的纯 mock**：在 mock 上断言
+`defect.status` 只证明"给 mock 对象赋了值"，证明不了持久化行为。
+另给 `WorkOrderServiceTest` +5、`DefectServiceTest` +3、`DefectReportServiceTest` +3。
+
+A/B 十项全部转红（还原后全绿）：不写回缺陷 / 只关第一条 / 失败分支也关 /
+状态守卫退回只拒 DISMISSED / 重复派单守卫判反 / 去重口径吃回 RECTIFIED /
+RECTIFIED 免 note / 状态词表放开 / 报告不数已消缺 / 闭环率分母错。
+
+**A/B 过程本身抓出我的四个不合法破坏**（都已换成语义真实的变异）：两处
+`if (false) {` 少配平大括号 = 编译错（不是有效变异）；一处只把
+`defects.save(d)` 变条件——JPA 脏检查在事务提交时照样刷盘，**语义上是空操作**；
+一处加了个没人用的变量，纯死代码。这正是 A/B harness 该干的事。
+
+### 未接的（不假装）
+
+缺陷与检修班组的派发渠道（当前止于"可派单"的守卫，不改飞控）；PMS 3.0 侧对接
+（招标文件里 Q/GDW 与 PMS 3.0 缺陷工单流转细则未获取，见需求调研 §风险）。
 ## [Unreleased] — 集成腿撤销断言竞态修复 + README 计数表结构修复（0 例增删）
 
 ### 问题
@@ -2848,7 +2917,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-10 共有 299 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-10 共有 300 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -2875,7 +2944,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 299 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 300 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

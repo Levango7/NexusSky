@@ -71,7 +71,11 @@ public class DefectController {
         }
     }
 
-    /** 缺陷状态裁决：OPEN/CONFIRMED/DISMISSED。 */
+    /**
+     * 缺陷状态裁决：OPEN/CONFIRMED/DISMISSED/RECTIFIED。
+     * <p>RECTIFIED 必须有 note（谁 / 何时 / 如何消缺）——人工关闭没说明等于没关闭。
+     * 工单复检通过时的回写走 {@link WorkOrderService#verify}，自动带工单号与帧号。
+     */
     @PostMapping("/{id}/status")
     @RequireRole(Role.OPERATOR)
     public ResponseEntity<Map<String, Object>> setDefectStatus(@PathVariable Long id,

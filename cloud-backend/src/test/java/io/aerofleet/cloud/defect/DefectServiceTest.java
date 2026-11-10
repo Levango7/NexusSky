@@ -49,6 +49,13 @@ class DefectServiceTest {
                         .filter(d -> ((List<String>) inv.getArgument(0)).contains(d.status))
                         .toList());
         when(defects.findAll(any(Sort.class))).thenReturn(store);
+        // setStatus / get 要走 findById——本类原先只测 onCapture 没 stub 它，
+        // 于是任何"按 id 取缺陷"的用例都会撞上 Optional.empty() 的
+        // "unknown defect 1"（夹具缺桩，不是被测行为）。按 store 真查。
+        org.mockito.Mockito.when(defects.findById(org.mockito.ArgumentMatchers.anyLong()))
+                .thenAnswer(inv -> store.stream()
+                        .filter(d -> d.id.equals(inv.getArgument(0)))
+                        .findFirst());
     }
 
     @Test
@@ -111,6 +118,54 @@ class DefectServiceTest {
         // 不得抛——F1 N3 同款旁路纪律
         svc.onCapture(1, 9, List.of(
                 Map.of("kind", "person", "confidence", 0.9, "lat", 22.59, "lon", 113.93)), null);
+    }
+
+    @Test
+    @DisplayName("RECTIFIED 必须带 note（人工关闭没说明等于没关闭）")
+    void rectifiedRequiresNote() {
+        DefectEntity d = svc.createManual("person", 22.60, 113.94, 0.9, "巡检", null);
+        assertThatThrownBy(() -> svc.setStatus(d.id, DefectService.RECTIFIED, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("requires a note");
+        assertThatThrownBy(() -> svc.setStatus(d.id, DefectService.RECTIFIED, "   "))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        DefectEntity closed = svc.setStatus(d.id, DefectService.RECTIFIED, "现场班组 11-09 更换");
+        assertThat(closed.status).isEqualTo("RECTIFIED");
+        // 消缺口径下 lastSeenAt 记"关闭时间"，不是"最后看到缺陷的时间"
+        assertThat(closed.lastSeenAt).isNotNull();
+    }
+
+    @Test
+    @DisplayName("未知状态仍被拒（状态词表封闭）")
+    void unknownStatusRejected() {
+        DefectEntity d = svc.createManual("person", 22.601, 113.941, 0.9, "巡检", null);
+        assertThatThrownBy(() -> svc.setStatus(d.id, "FIXED", "x"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("invalid defect status");
+    }
+
+    @Test
+    @DisplayName("已消缺缺陷不再被去重折叠：同点位复发立新单，而不是刷新旧缺陷")
+    void rectifiedDefectIsNotFoldedInto() {
+        // 立案 → 消缺
+        svc.onCapture(10, 9, List.of(
+                Map.of("kind", "person", "confidence", 0.9, "lat", 22.61, "lon", 113.95)), null);
+        DefectEntity first = store.get(0);
+        svc.setStatus(first.id, DefectService.RECTIFIED, "已更换");
+
+        // 同一位置再次被拍到
+        svc.onCapture(11, 9, List.of(
+                Map.of("kind", "person", "confidence", 0.92, "lat", 22.61, "lon", 113.95)), null);
+
+        assertThat(store)
+                .as("消缺后复发必须产生新缺陷；若仍是 1 条，说明复发被旧缺陷静默吞并")
+                .hasSize(2);
+        assertThat(store.get(1).id).isNotEqualTo(first.id);
+        assertThat(store.get(1).status).isEqualTo("OPEN");
+        assertThat(store.get(1).source).isEqualTo("auto");
+        // 旧缺陷保持已消缺（点位修过几次，审计可查）
+        assertThat(store.get(0).status).isEqualTo("RECTIFIED");
     }
 
     @Test
