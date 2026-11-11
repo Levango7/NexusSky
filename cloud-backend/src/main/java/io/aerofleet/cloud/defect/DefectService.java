@@ -49,7 +49,7 @@ public class DefectService {
      * 都不该再出现在新工单上；而 {@link #findNearby} 用的是**同一份**集合——这保证了
      * "能派单的缺陷才会被去重折叠"，不会出现"已消缺的缺陷还在吸收新观测"。
      */
-    static final List<String> DISPATCHABLE = List.of("OPEN", "CONFIRMED");
+    public static final List<String> DISPATCHABLE = List.of("OPEN", "CONFIRMED");
 
     /** 自动晋升置信度阈值（可配 aerofleet.defect.auto-promote-confidence）。 */
     private final double autoPromoteConfidence;
@@ -71,10 +71,39 @@ public class DefectService {
     @Transactional
     public DefectEntity createManual(String kind, double lat, double lon,
                                      double confidence, String note, String tenantId) {
+        return createManual(kind, lat, lon, confidence, note, tenantId, null);
+    }
+
+    /**
+     * 人工立案（带杆塔号——"按杆塔号+缺陷复检"的口径入口）。
+     *
+     * <p>杆塔号可空：AI 拍照晋升的缺陷拿不到杆塔号（相机不知道自己飞的是哪个塔），
+     * null 不等于非法，只是不参与"按杆塔号"筛选与复检航线自动收录。
+     */
+    @Transactional
+    public DefectEntity createManual(String kind, double lat, double lon,
+                                     double confidence, String note, String tenantId,
+                                     String towerNo) {
         if (note == null || note.isBlank()) {
             throw new IllegalArgumentException("manual defect requires 'note'");
         }
-        return persist(kind, lat, lon, confidence, note, "manual", tenantId);
+        if (towerNo != null && towerNo.isBlank()) {
+            throw new IllegalArgumentException("towerNo must be null or non-blank (got blank string)");
+        }
+        String normalized = towerNo == null ? null : towerNo.trim();
+        DefectEntity d = persist(kind, lat, lon, confidence, note, "manual", tenantId);
+        if (normalized != null) {
+            d.towerNo = normalized;
+            d = defects.save(d);
+        }
+        return d;
+    }
+
+    /** 按杆塔号列出指定可派单状态的缺陷（"T-012 还有几个未消缺"的口径）。 */
+    public List<DefectEntity> listByTowerNo(String towerNo, String status) {
+        List<String> wanted = status != null && !status.isBlank()
+                ? List.of(status) : DISPATCHABLE;
+        return defects.findByTowerNoAndStatusInOrderByCreatedAtDesc(towerNo, wanted);
     }
 
     /**

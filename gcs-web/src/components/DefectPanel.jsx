@@ -31,6 +31,8 @@ export default function DefectPanel() {
   const [workOrders, setWorkOrders] = useState([])
   const [selected, setSelected] = useState(new Set())
   const [error, setError] = useState(null)
+  /** 复检航线结果（按工单 id 缓存，展示区只画最新一条）。 */
+  const [routeInfo, setRouteInfo] = useState(null)
   const [busy, setBusy] = useState(false)
   const [verifySysid, setVerifySysid] = useState('9')
   const [woTitle, setWoTitle] = useState('')
@@ -89,6 +91,20 @@ export default function DefectPanel() {
       await defectsApi.transitionWorkOrder(id, action)
       setError(null)
       await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const woRecheckRoute = async (workOrderId) => {
+    setBusy(true)
+    try {
+      const body = { workOrderId }
+      const data = await defectsApi.recheckRoute(body)
+      setRouteInfo({ workOrderId, ...data })
+      setError(null)
+    } catch (e) {
+      setError(`复检航线生成失败：${e.message}`)
     } finally {
       setBusy(false)
     }
@@ -210,6 +226,10 @@ export default function DefectPanel() {
                   {a.label}
                 </button>
               ))}
+              <button disabled={busy} onClick={() => woRecheckRoute(w.id)}
+                      style={{ fontSize: 12, padding: '2px 8px', borderColor: '#a78bfa' }}>
+                复检航线
+              </button>
               {w.status === 'RESOLVED' && (
                 <button disabled={busy} onClick={() => woVerify(w.id)}
                         style={{ fontSize: 12, padding: '2px 8px', borderColor: '#22c55e' }}>
@@ -219,6 +239,21 @@ export default function DefectPanel() {
             </div>
           </div>
         ))}
+        {routeInfo && (
+          <div style={{ border: '1px solid #a78bfa', borderRadius: 6, padding: 8, marginBottom: 6, fontSize: 12, color: '#e2e8f0' }}>
+            <strong>复检航线（工单 #{routeInfo.workOrderId}）</strong>
+            <div style={{ marginTop: 2 }}>
+              {routeInfo.towerCount} 塔 · {Array.isArray(routeInfo.waypoints) ? routeInfo.waypoints.length : '?'} 航点 ·
+              ≈{Number(routeInfo.estKm || 0).toFixed(2)} km
+            </div>
+            {Array.isArray(routeInfo.unlinkedDefectIds) && routeInfo.unlinkedDefectIds.length > 0 && (
+              <div style={{ color: '#fbbf24', marginTop: 2 }}>
+                {routeInfo.unlinkedDefectIds.length} 个缺陷未挂杆塔号，复检航线不会飞到它们——
+                请先补杆塔号（立案时可填 /api/v1/defects 的 towerNo 字段）
+              </div>
+            )}
+          </div>
+        )}
         {workOrders.length === 0 && <div className="empty-hint">暂无工单</div>}
       </div>
 

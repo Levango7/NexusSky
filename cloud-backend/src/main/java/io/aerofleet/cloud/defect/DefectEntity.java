@@ -36,6 +36,10 @@ public class DefectEntity {
     @Column(nullable = false, length = 20)
     public String source = "manual";
 
+    /** 杆塔号（如 T-012）；手工填或从巡检 Leg 带出；null = 未关联杆塔。 */
+    @Column(name = "tower_no", length = 40)
+    public String towerNo;
+
     @Column(length = 500)
     public String note;
 

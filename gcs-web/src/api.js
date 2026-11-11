@@ -1131,6 +1131,13 @@ export const defects = {
       body: JSON.stringify({ action }),
     }),
 
+  recheckRoute: (body) =>
+    jsonFetch(`${BASE}/route-templates/defect-recheck`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
   verifyWorkOrder: (id, sysid) =>
     jsonFetch(`${BASE}/defects/work-orders/${id}/verify`, {
       method: 'POST',

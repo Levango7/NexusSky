@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 行业航线模板 REST（F3）：四类模板生成，输出可直接下发到
+ * 行业航线模板 REST（F3 + P1-8 缺陷复检）：四类模板生成，输出可直接下发到
  * POST /api/v1/drones/{sysid}/mission 的航点列表。
  * <p>
  * 生成是纯计算（无副作用），OPERATOR 可用；参数问题 400 + 字段名。
@@ -19,6 +19,12 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/route-templates")
 public class RouteTemplateController {
+
+    private final DefectRecheckRouteService defectRecheck;
+
+    public RouteTemplateController(DefectRecheckRouteService defectRecheck) {
+        this.defectRecheck = defectRecheck;
+    }
 
     @PostMapping("/generate")
     @RequireRole(Role.OPERATOR)
@@ -53,6 +59,36 @@ public class RouteTemplateController {
                         "unknown type: " + type + " (tower|solar|pipeline|shoreline)");
             };
             return ResponseEntity.ok(view(r));
+        } catch (IllegalArgumentException e) {
+            return bad(e.getMessage());
+        }
+    }
+
+    /**
+     * 缺陷复检航线（P1-8："按杆塔号 + 缺陷复检"）：为未消缺缺陷生成 tower 复检航线。
+     * <p>
+     * 入参：{towerNos?: string[], workOrderId?: number, altM?, orbitRadiusM?,
+     * orbitPoints?, hoverSec?}——至少给一个。返回与 tower 模板同构的航点视图，
+     * 外加 sourceDefectIds / unlinkedDefectIds / towers 摘要（哪个塔欠着哪几笔）。
+     */
+    @PostMapping("/defect-recheck")
+    @RequireRole(Role.OPERATOR)
+    public ResponseEntity<Map<String, Object>> defectRecheck(@RequestBody Map<String, Object> body) {
+        if (body == null) {
+            return bad("missing body");
+        }
+        List<String> towerNos = stringList(body.get("towerNos"), "towerNos");
+        Long workOrderId = body.get("workOrderId") instanceof Number n ? n.longValue() : null;
+        if (body.get("workOrderId") != null && workOrderId == null) {
+            return bad("workOrderId must be a number");
+        }
+        try {
+            Map<String, Object> out = defectRecheck.generate(
+                    towerNos, workOrderId,
+                    numOpt(body, "altM"), numOpt(body, "orbitRadiusM"),
+                    body.get("orbitPoints") instanceof Number n ? n.intValue() : null,
+                    numOpt(body, "hoverSec"));
+            return ResponseEntity.ok(out);
         } catch (IllegalArgumentException e) {
             return bad(e.getMessage());
         }
@@ -126,6 +162,39 @@ public class RouteTemplateController {
     private static double num(Map<String, Object> body, String key, double dflt) {
         Object v = body.get(key);
         return v instanceof Number n ? n.doubleValue() : dflt;
+    }
+
+    /** 数组入参：元素必须是 string（空串/空白跳过）；非法类型报字段名。 */
+    private static List<String> stringList(Object raw, String field) {
+        if (raw == null) {
+            return null;
+        }
+        if (!(raw instanceof List<?> list)) {
+            throw new IllegalArgumentException("invalid route template parameter: " + field + " (array)");
+        }
+        List<String> out = new ArrayList<>();
+        for (Object o : list) {
+            if (o != null && !(o instanceof String)) {
+                throw new IllegalArgumentException("invalid route template parameter: " + field + "[] must be strings");
+            }
+            String s = o == null ? null : o.toString().trim();
+            if (s != null && !s.isEmpty()) {
+                out.add(s);
+            }
+        }
+        return out;
+    }
+
+    /** 可选数字入参（不在 body 里返回 null ⇒ 由 service 用默认值）。 */
+    private static Double numOpt(Map<String, Object> body, String key) {
+        Object v = body.get(key);
+        if (v == null) {
+            return null;
+        }
+        if (!(v instanceof Number num)) {
+            throw new IllegalArgumentException("invalid route template parameter: " + key + " (number)");
+        }
+        return num.doubleValue();
     }
 
     private static ResponseEntity<Map<String, Object>> bad(String message) {

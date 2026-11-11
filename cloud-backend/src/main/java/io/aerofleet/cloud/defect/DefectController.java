@@ -46,9 +46,13 @@ public class DefectController {
             return ResponseEntity.badRequest().body(error("missing/bad fields: kind, lat, lon"));
         }
         double confidence = body.get("confidence") instanceof Number n ? n.doubleValue() : 0.5;
+        String towerNo = str(body, "towerNo");
+        if (towerNo != null && towerNo.isBlank()) {
+            return ResponseEntity.badRequest().body(error("towerNo must be omitted or non-blank"));
+        }
         try {
             DefectEntity d = defects.createManual(kind, lat.doubleValue(), lon.doubleValue(),
-                    confidence, str(body, "note"), null);
+                    confidence, str(body, "note"), null, towerNo);
             return ResponseEntity.status(201).body(defectView(d));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(error(e.getMessage()));
@@ -57,8 +61,15 @@ public class DefectController {
 
     @GetMapping
     @RequireRole(Role.OBSERVER)
-    public List<Map<String, Object>> listDefects(@RequestParam(value = "status", required = false) String status) {
-        return defects.list(status).stream().map(DefectController::defectView).collect(Collectors.toList());
+    public List<Map<String, Object>> listDefects(@RequestParam(value = "status", required = false) String status,
+                                                 @RequestParam(value = "towerNo", required = false) String towerNo) {
+        List<DefectEntity> source;
+        if (towerNo != null && !towerNo.isBlank()) {
+            source = defects.listByTowerNo(towerNo.trim(), status);
+        } else {
+            source = defects.list(status);
+        }
+        return source.stream().map(DefectController::defectView).collect(Collectors.toList());
     }
 
     @GetMapping("/{id}")
@@ -211,6 +222,7 @@ public class DefectController {
         m.put("lon", d.lon);
         m.put("source", d.source);
         m.put("note", d.note);
+        m.put("towerNo", d.towerNo);
         m.put("lastSeenAt", d.lastSeenAt);
         m.put("createdAt", d.createdAt);
         return m;
