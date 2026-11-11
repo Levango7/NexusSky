@@ -245,11 +245,16 @@ class Gb28181ShapeTest {
         }
 
         @Test
-        void 点播返回描述性标识而非假RTSP() {
+        void 点播返回RTP摄入端点而非假RTSP() {
+            // 接线后（见 Gb28181AdapterWiringTest）：先学设备联系地址，再点播。
+            // 返回的是平台自己的 RTP 摄入端点 gb28181-rtp://，**不是** rtsp://
+            // （标准播放器连不上；StreamUrlOrigin 已如实标为 MEDIA_PLANE_LOCAL）。
+            adapter.learnContact(dev.value(), new java.net.InetSocketAddress("10.0.0.5", 5060));
             String url = adapter.getStreamUrl(camera(), 1);
-            // 媒体面属生产阶段：必须返回 gb28181-invite:// 标识，绝不假扮可播的 rtsp://
-            assertThat(url).startsWith("gb28181-invite://").contains("channel=1");
+            assertThat(url).startsWith("gb28181-rtp://").contains("channel=1");
             assertThat(url).doesNotStartWith("rtsp://");
+            // 入口仍必须带真实收流端口与 ssrc（上游凭此对账）
+            assertThat(url).contains("port=").contains("ssrc=");
         }
 
         @Test
@@ -347,6 +352,9 @@ class Gb28181ShapeTest {
 
         @Test
         void 订阅句柄形状固定() {
+            // 接线后订阅前必须先学到设备联系地址（GB28181 平台侧是 SIP 服务端）。
+            // 未登记时适配器响亮失败，而不是把 SUBSCRIBE 发去 0.0.0.0。
+            adapter.learnContact(dev.value(), new java.net.InetSocketAddress("10.0.0.5", 5060));
             String handle = adapter.subscribeEvents(camera(), payload -> { });
             assertThat(handle).isEqualTo("gb28181-sub-" + dev.value());
         }

@@ -165,6 +165,18 @@ ONVIF 事件订阅（PullPoint）另立"）。
   事件订阅面同步：`Gb28181Adapter.supportsEventSubscription()` 仍为 `false`
   ——只构造 SUBSCRIBE 形状、未接线到传输层，REST 在建立 SSE 之前回 501
   （此前是先回 200 再挂一条永远不会触发回调的空流）。
+- GB28181 适配器**已接线**（本轮）：`Gb28181Adapter.getStreamUrl()` 从
+  「构造信令形状 + 返回 `gb28181-invite://` 描述性标识」变成
+  「开真实收流端口 → 构造带真实 SDP 的 INVITE → 真发到设备 → 返回
+  `gb28181-rtp://` 摄入端点」，`streamUrlOrigin()` 如实标为
+  `MEDIA_PLANE_LOCAL`（本地媒体面可用、对通用播放器不可播、设备未验证）。
+  事件订阅面同步接线：`supportsEventSubscription()` 现为 `true`，
+  SUBSCRIBE 真发、NOTIFY 按 RFC 3265 的 Call-ID 真分发到回调。
+  测试含真 UDP 回环（设备模拟器为对端）+ A/B 十项全红。
+  同时修掉三个此前未暴露的缺陷：SDP 写死 `0.0.0.0:0`（设备不知往哪推流）、
+  设备联系地址从未被使用（直接往 0.0.0.0 造信令）、报警订阅是纯桩。
+  **仍未接**：真实设备联调（需真机 + 设备 REGISTER 上报地址）、
+  跨机收流（媒体会话当前绑 127.0.0.1 回环）。
 - 机巢 MQTT 真实 transport：**已接线**（#257，`transport=mqtt` 条件装配 Paho +
   DJI Cloud API 物模型）；剩余＝真实 EMQX Broker 与真机机巢联调（todo #17）。
 

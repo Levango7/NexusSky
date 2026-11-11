@@ -48,10 +48,30 @@ public enum StreamUrlOrigin {
      * 前端能明确告诉使用者"这个通道现在放不出画面"，而不是给一个
      * 连上去必然失败的地址再配一个语焉不详的报错。
      */
-    DESCRIPTIVE_ONLY(false, false);
+    DESCRIPTIVE_ONLY(false, false),
 
-    private final boolean playable;
-    private final boolean deviceVerified;
+    /**
+     * 媒体面已在**本地接好**（RTP/PS 收流会话 + 解复用可用），但**设备侧未验证**。
+     *
+     * <p>这是 GB28181 特有的第三种情形，不能塞进前三个中的任何一个：
+     * <ul>
+     *   <li>不是 {@link #DESCRIPTIVE_ONLY}——媒体面不再是空壳，
+     *       {@link Gb28181MediaSession} 真在收 RTP、{@link Gb28181PsDemuxer}
+     *       真在解复用，有真 UDP 回环测试兜底；</li>
+     *   <li>不是 {@link #VENDOR_STANDARD_FORMAT}——GB28181 不交付
+     *       {@code rtsp://} URL，交付的是 RTP over UDP 摄入端点，
+     *       拿标准播放器直接连不起来；</li>
+     *   <li>不是 {@link #ONVIF_GETSTREAM_URI}——设备从未确认过。</li>
+     * </ul>
+     *
+     * <p>因此 {@link #playable} 为 {@code false}：**对通用播放器不可播**，
+     * 平台自己的消费者可以解复用。这与"设备会不会把流发到这个端口"是两个问题：
+     * 后者 {@link #deviceVerified} 同为 {@code false}。两件事必须同时说出来，
+     * 否则前端会挂一个永远黑屏的播放器。
+     */
+    MEDIA_PLANE_LOCAL(false, false);
+
+    private final boolean playable;    private final boolean deviceVerified;
 
     StreamUrlOrigin(boolean playable, boolean deviceVerified) {
         this.playable = playable;
