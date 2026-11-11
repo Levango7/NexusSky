@@ -13,8 +13,120 @@
 - **ONVIF 清理**：删除 `OnvifUnsupportedException`（事件订阅 live 侧已由 `OnvifLiveBackend` 的
   PullPoint 实现承载）；`OnvifBackend` javadoc 改指 `OnvifEventSource` / `OnvifLiveBackend`。
 - `docs/protocol-vendor-integration.md` 入库：DJI 行 unverified→verified（Cloud API 2.0 v2.4.0、
-  Apache-2.0、MQTT 前置与限流核实状态），搁置项清理；MAVLink/PX4/ArduPilot 官方页 2026-11-11 重试复核可达（services 索引页偶发超时，逐页访问替代）。
-- 计数：cloud-backend 3763→3800、全仓 5962→5999（+37 例）；docs 44→45 篇。
+  Apache-2.0、MQTT 前置与限流核实状态），搁置项清理；MAVLink/PX4/ArduPilot 官方页 2026-11-11
+  重试复核可达（services 索引页偶发超时，逐页访问替代）。
+- 计数：cloud-backend 3792→3829、全仓 5991→6028（+37 例）；docs 44→45 篇。
+
+## [Unreleased] — GB28181 接线变异门禁收口（+13 例；本轮接线代码存活变异体 18 → 0）
+
+### 为什么有这一轮
+
+#272 的接线把 surveillance 包的变异体从 1444 推到 2108，变异分数从基线 0.92 掉到
+**0.9160**、测试强度从 0.94 掉到 **0.9355** ⇒ CI 的
+`Mutation baseline gate (security + surveillance packages)` 判红。
+**这不是"基线数字过期"**——是接线带进来的新代码有 18 个存活变异体，即"行为没人盯住"。
+
+### 本轮做了什么（先杀变异体，不是先改基线）
+
+新增 `Gb28181AdapterMutationClosureTest`（13 例），补上**此前从未被执行过的生产路径**：
+
+- **「datagram → transport 收流线程 → onMessage → dispatchNotify → 订阅回调」**
+  这条链此前只测过 `deliverNotify()` 这个接缝。后果很具体：`transport()` 里的
+  `t.onMessage(...)` 与 `t.start()` 被改坏，**没有任何用例会红**——而那正是
+  "设备 NOTIFY 到了平台却没人收到"的形态。现在用真 UDP datagram 打适配器的
+  SIP 监听端口，断言订阅回调真被触发（并另测 Call-ID 对不上时不得回调）。
+- **SSRC 已知答案**：测试内用独立实现重算 FNV-1a + 通道混合，并钉死具体常量
+  （`34010000001101320001` ch=1 → 345860835）。此前只断言"确定性"与"通道间不同"，
+  哈希常量被改也能过——设备侧 `y=` 与 RTP 头 SSRC 对不上会丢帧。
+- **退订必须真发** `Expires: 0` 的 SUBSCRIBE（不是只清本地状态）；未知 handle 不得发信。
+- **close 必须真关传输层**（新增 `Gb28181SipTransport#isClosed` 与
+  `Gb28181Adapter#transportClosed` 作为可断言出口）与**真清订阅表**
+  （用仓内 `LogWiretap` 断言落在"未知 handle"分支）。
+- 空参与越界边界：`learnContact` 拒绝空白 deviceId 但**放行正常 id**（只测"该抛的抛了"
+  抓不住条件取反型变异体）、`mediaFrame` 越界返回 null。
+
+顺带**删掉两个无调用者的死方法**（`Gb28181MediaSessionRegistry#keys` / `#release`）——
+它们是 NO_COVERAGE 变异体的来源，留着只是表面。
+
+### 结果
+
+- 本轮接线代码在包内的**存活变异体：18 → 0**；surveillance 包整体
+  2108 → **2115** 变异体（多出的 7 个是新增的 `isClosed`/`transportClosed` 等出口），
+  杀掉 1743、存活 99、未覆盖 234 ⇒ **变异分数 0.9266 / 测试强度 0.9463**，
+  均高于地板（0.92 / 0.94，按本地实测向下取整，给 CI↔本地运行间抖动留余量）。
+- `scripts/mutation-baseline-surveillance.json` 同步更新记账五列与 `ciObserved`，
+  并写 `noteRound8` 记录本轮改了什么——**变异体总数变了却不同步基线**，
+  下一个人只能重跑一次 PIT 才知道。
+
+## [Unreleased] — GB28181 适配器接线：信令面 + 媒体面 + 适配器三层串通（+16 例，真 UDP 回环）
+
+### 背景：能力都在，但没人把它们接起来
+
+#258 交付 SIP-over-UDP 信令面、#263 交付 RTP/PS 媒体面，但 `Gb28181Adapter`
+仍是「构造信令形状 → 返回描述性标识」——上层拿不到可用的流。本次把三层接起来。
+
+### 修掉的真缺陷
+
+**1. INVITE 的 SDP 写死 `0.0.0.0:0`（设备不知道该往哪推流）**
+GB/T 28181-2022 附录 C.1 要求 SDP 的 `c=` 行与 `m=video` 行写**真实的**媒体接收端
+地址。原实现写 {@code 0.0.0.0} / {@code 0}，等于"设备你看着推"——INVITE 造得出来，
+但发出去没有任何意义。此前从未真发过，所以这个缺陷一直没暴露。
+
+现在：先从 {@link Gb28181MediaSessionRegistry}（新类）拿真实收流端口，再构造
+INVITE。SDP 的 `c=IN IP4 127.0.0.1` / `m=video <真实端口>` / `y=<ssrc>` 全是真值。
+
+**2. 设备联系地址从未被使用**
+GB28181 里平台侧是 SIP 服务端，设备 IP:port 由它自己 REGISTER 上报。
+原实现直接往 0.0.0.0 构造信令，从没想过"发给谁"。新增
+{@link Gb28181Adapter#learnContact}，未登记时抛
+{@link Gb28181DeviceContactUnknownException}，而不是发一条注定失败的信令。
+
+**3. 报警订阅是纯桩**
+`subscribeEvents()` 只构造 SUBSCRIBE 形状、回调永不触发，
+`supportsEventSubscription()` 返回 false（REST SSE 直接 501）。
+现在真发 SUBSCRIBE，按 RFC 3265（同订阅 NOTIFY 与 SUBSCRIBE 共用 Call-ID）
+分发 NOTIFY 到回调；`supportsEventSubscription()` 改为 true。
+
+### 顺手修掉的一个自造缺陷（被测试当场抓出）
+
+`inviteStream(...)` 的第 5 参是 **ssrc** 而非 channel，我误传了 channel ⇒
+SDP 的 `y=` 行写 1、URI 写真实 ssrc，两侧对不上（设备侧 y= 与 RTP 头 SSRC
+必须一致，否则丢帧）。`inviteCarriesRealSdp` 抓出。
+
+### StreamUrlOrigin 新增 MEDIA_PLANE_LOCAL
+
+`getStreamUrl()` 此前返回 `gb28181-invite://` 描述性标识（`DESCRIPTIVE_ONLY`），
+现在返回 `gb28181-rtp://<id>?channel=N&port=P&ssrc=S` —— 平台自己的 RTP 摄入端点。
+但**这不是 rtsp:// URL，标准播放器连不上**，而且设备侧从未验证过。
+因此新增 {@code MEDIA_PLANE_LOCAL(playable=false, deviceVerified=false)}：
+"本地媒体面可用、对通用播放器不可播、设备未验证"三件事分开说，前端据此显示
+"平台可解、需接设备"，而不是挂一个必然黑屏的播放器。
+
+### 测试 +16 例 + A/B 十项全红
+
+`Gb28181AdapterWiringTest`（真 UDP 回环，`Gb28181DeviceSimulator` 为对端）：
+未登记联系地址响亮失败且不留副作用 / 登记后可点播 / INVITE 带真实 SDP /
+重复点播复用同一端口 / 不同通道独立会话 / SSRC 确定性 /
+**端到端：点播 → 设备推 RTP → 适配器收并解出 PS 帧** /
+事件订阅声明 / 订阅真发且 NOTIFY 真回调 / 未登记订阅不留空壳 / 退订幂等 /
+重复订阅复用 handle / close 真释放端口 / origin 诚实 / 非 GB28181 设备仍拒 /
+channel<1 仍拒。
+
+A/B 十项全部转红（还原后 16 例全绿）：SDP 退回 0.0.0.0:0 / ssrc 误传 channel /
+INVITE 不发送 / 去掉联系地址闸门 / 会话不复用 / supportsEventSubscription 退回 false /
+SUBSCRIBE 发到死地址 / NOTIFY 按错误键路由 / origin 夸大 / close 不关 socket。
+
+### 未验证点（如实标注，不顺手"修"）
+
+SDP `m=` 行里的传输标记 `TCP/RTP/AVP` 来自 #258 交付的 `Gb28181Sdp.body()`，
+本轮未改。GB28181 附录 C.1 的示例 SDP 确实写作 `TCP/RTP/AVP` 而媒体实际走 UDP，
+但本机标准 PDF 文本提取无法证实原文，因此这里只断言它不变、不当作缺陷处理——
+需要标准原文核对后单独开一轮。
+
+### 仍然未接的（不假装）
+
+真实设备联调（需真机 + 设备 REGISTER 上报地址）；SSL/证书；跨机收流
+（当前媒体会话绑 127.0.0.1 回环，PoC 口径）；多路并发点播的端口分配策略。
 
 ## [Unreleased] — 统一：许可档位与模块归属（2026-10-07 裁决落地，仅文档·LICENSE，0 测试增删）
 
@@ -2970,7 +3082,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-11 共有 303 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-11 共有 305 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -2997,7 +3109,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 303 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 305 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

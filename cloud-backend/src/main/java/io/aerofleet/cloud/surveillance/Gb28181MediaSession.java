@@ -304,6 +304,11 @@ public final class Gb28181MediaSession implements Closeable {
         return framesBuilt.get();
     }
 
+    /** socket 是否已关闭（{@link #close} 后为 true）。供上层断言端口真的放了。 */
+    public boolean isClosed() {
+        return socket.isClosed();
+    }
+
     @Override
     public void close() {
         running.set(false);

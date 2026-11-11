@@ -37,6 +37,8 @@ class SurveillanceControllerTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /** GB28181 适配器引用（测试里用来 learnContact 驱动真点播路径）。 */
+    private Gb28181Adapter gb28181Adapter;
     private SurveillanceDeviceRegistry registry;
     private OnvifClient onvifClient;
     private RapidDeployService rapidDeployService;
@@ -58,9 +60,11 @@ class SurveillanceControllerTest {
         // 真实适配器组装（与 Spring 装配同形）：ONVIF 复用 OnvifClient，
         // GB28181 走国标形状层（纯函数、无外部依赖）；三个私有协议适配器为模拟实现。
         // PTZ/stream 端点按此注册表路由——测试路由行为本身，而非某个适配器内部。
+        gb28181Adapter = new Gb28181Adapter(new Gb28181CatalogParser(),
+                "00000000000000000001", "127.0.0.1:5060");
         vendorAdapterRegistry = new VendorAdapterRegistry(List.of(
                 new OnvifVendorAdapter(onvifClient),
-                new Gb28181Adapter(new Gb28181CatalogParser(), "00000000000000000001", "127.0.0.1:5060")));
+                gb28181Adapter));
         // GET /events 现在委托给 AlarmEventStore（此前是固定返回 items:[] 的空桩）
         alarmEventStore = newInMemoryAlarmEventStore();
         mjpegStreamService = new MjpegStreamService();
@@ -424,16 +428,20 @@ class SurveillanceControllerTest {
     }
 
     @Test
-    @DisplayName("stream 按厂商路由：GB28181 设备返回国标 INVITE 标识（不假扮可播地址）")
-    void getStreamUrl_gb28181Device_returnsInviteMarker() throws Exception {
+    @DisplayName("stream 按厂商路由：GB28181 设备返回 RTP 摄入端点（不假扮 rtsp://）")
+    void getStreamUrl_gb28181Device_returnsRtpIngestUri() throws Exception {
         String gbId = "34020000001321320001";
         mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody(gbId, "GB28181"))));
 
+        gb28181Adapter.learnContact(gbId, new java.net.InetSocketAddress("127.0.0.1", 5060));
         mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/stream").param("channel", "1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.rtspUrl").value(org.hamcrest.Matchers.startsWith("gb28181-invite://")));
+                .andExpect(jsonPath("$.rtspUrl").value(
+                        org.hamcrest.Matchers.startsWith("gb28181-rtp://")))
+                .andExpect(jsonPath("$.streamUrlOrigin").value("MEDIA_PLANE_LOCAL"))
+                .andExpect(jsonPath("$.playable").value(false));
     }
 
     // ===== POST /discover 发现 =====
@@ -492,26 +500,25 @@ class SurveillanceControllerTest {
     // ===== GET /devices/{id}/events SSE 事件订阅（按厂商路由） =====
 
     @Test
-    @DisplayName("SSE 事件订阅按厂商路由：GB28181 在建立流之前回 501（未接线到 SIP 传输层，不假装有事件）")
-    void subscribeEvents_gb28181Device_returns501NotFakeStream() throws Exception {
+    @DisplayName("SSE 事件订阅：GB28181 设备未 REGISTER 时回 502（不挂一条假流）")
+    void subscribeEvents_gb28181Device_returns502WhenNotRegistered() throws Exception {
         String gbId = "34020000001321320001";
         mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody(gbId, "GB28181"))));
 
-        // 此前直连 OnvifClient：国标设备的事件源语义错置（进 ONVIF 模拟回调表，
-        // 国标信令永远不触发）。路由修好后走 Gb28181Adapter，但它只构造 SUBSCRIBE
-        // 形状、未接线到 SIP 传输层（传输层已实现，#258），回调永远不会触发——再往后就是「先回 200 再挂空流」。
-        // 现在由适配器自己声明不支持，REST 在建立 SSE 之前回 501；
-        // 501 文案带厂商名，同时证明路由确实落在 GB28181 适配器上。
+        // 路由修好后走 Gb28181Adapter；适配器现已真接线（SUBSCRIBE 真发、NOTIFY 真回调，
+        // 见 Gb28181AdapterWiringTest），但 GB28181 平台侧是 SIP 服务端，设备地址由它
+        // 自己 REGISTER 上报。设备没注册过 ⇒ 不知道该把 SUBSCRIBE 发给谁 ⇒ 502，
+        // 文案点明"设备未注册"——而不是先回 200 再挂一条永远没有事件的假流。
         mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/events"))
-                .andExpect(status().isNotImplemented())
+                .andExpect(status().isBadGateway())
                 .andExpect(result -> {
                     Throwable resolved = result.getResolvedException();
                     assertThat(resolved)
                             .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
                     assertThat(resolved.getMessage())
-                            .contains("not implemented")
+                            .contains("not registered")
                             .contains("GB28181");
                 });
     }
@@ -752,8 +759,13 @@ class SurveillanceControllerTest {
         String gbId = "34020000001321320001";
         registerWithCaps(gbId, "GB28181", Set.of("PTZ", "STREAM", "RECORD"));
 
+        // 学过联系地址后点播才走得通（未学则适配器抛未注册异常 ⇒ 502），
+        // 因此这里能拿到 200 才证明 MEDIA 门控确实被 STREAM 别名通过了。
+        gb28181Adapter.learnContact(gbId, new java.net.InetSocketAddress("127.0.0.1", 5060));
         mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/stream"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rtspUrl").value(
+                        org.hamcrest.Matchers.startsWith("gb28181-rtp://")));
     }
 
     @Test
@@ -827,7 +839,7 @@ class SurveillanceControllerTest {
      * 否则前端会拿一个必然连不上的地址去挂播放器。
      */
     @Test
-    @DisplayName("GB28181：返回描述性标识且 playable=false")
+    @DisplayName("GB28181：返回 RTP 摄入端点，且 playable=false / deviceVerified=false")
     void streamUrl_gb28181_isDescriptiveOnlyAndNotPlayable() throws Exception {
         String gbId = "34020000001321320001";
         mockMvc.perform(post("/api/v1/surveillance/devices")
@@ -835,13 +847,16 @@ class SurveillanceControllerTest {
                 .content(json(deviceBody(gbId, "GB28181"))))
                 .andExpect(status().isOk());
 
+        // 学过联系地址后点播才走得通（未学 ⇒ 适配器抛未注册异常 ⇒ 502）；
+        // 能拿到 200 才证明路由与能力门控都对。
+        gb28181Adapter.learnContact(gbId, new java.net.InetSocketAddress("127.0.0.1", 5060));
         mockMvc.perform(get("/api/v1/surveillance/devices/" + gbId + "/stream"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.rtspUrl").value(
-                        org.hamcrest.Matchers.startsWith("gb28181-invite://")))
-                // 已有守卫要求它绝不假扮可播的 rtsp://（Gb28181ShapeTest），
-                // 这里再加一条：REST 契约本身也必须说清它不可播
-                .andExpect(jsonPath("$.streamUrlOrigin").value("DESCRIPTIVE_ONLY"))
+                        org.hamcrest.Matchers.startsWith("gb28181-rtp://")))
+                // 已接线（Gb28181AdapterWiringTest）：本地媒体面可用、但对通用播放器
+                // 不可播、设备侧从未验证——REST 契约必须把这三件事同时说清
+                .andExpect(jsonPath("$.streamUrlOrigin").value("MEDIA_PLANE_LOCAL"))
                 .andExpect(jsonPath("$.playable").value(false))
                 .andExpect(jsonPath("$.deviceVerified").value(false));
     }
