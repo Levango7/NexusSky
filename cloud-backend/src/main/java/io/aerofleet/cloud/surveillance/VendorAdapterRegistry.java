@@ -164,6 +164,7 @@ public final class VendorAdapterRegistry {
             case UNIVIEW -> Vendor.UNIVIEW;
             case ONVIF -> Vendor.ONVIF;
             case GB28181 -> Vendor.GB28181;
+            case RTMP -> Vendor.RTMP;
         };
     }
 }

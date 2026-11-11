@@ -1,5 +1,22 @@
 # NexusSky 变更日志
 
+## [Unreleased] — Q2 协议/厂商适配收口批：DJI 物模型字段表核实 + 坐标转换 + RTMP 适配器 + ONVIF 清理（+37 例）
+
+- **DJI 物模型字段表**（`dock/DjThingModelFieldTable`，7 例）：帧层 `{tid,bid,timestamp,method,data}`
+  与 services_reply 应答层 VERIFIED；OSD / flight_task / wayline / livestream / media 五大服务逐字段
+  标注 VERIFIED / UNVERIFIED（依据 `dji-sdk/Cloud-API-2` 官方文档仓逐项核对），未核实项不作为实施依据。
+- **坐标转换**（`geo/CoordinateTransform`，9 例）：WGS-84 / GCJ-02 / BD-09 互转（中国区偏移规则），
+  含参数化用例；往返精度 ≤ 5 米。
+- **RTMP 推流/拉流适配器**（`surveillance/RtmpAdapter`，21 例）：`rtmp://` URL 组装（RFC 3986 编码，
+  复用 VendorRtspUrl 口径）；`Vendor` / `SurveillanceDevice.Vendor` / `DeviceInfo` 与
+  `VendorAdapterRegistry` 四处枚举/分派对称补齐 RTMP。
+- **ONVIF 清理**：删除 `OnvifUnsupportedException`（事件订阅 live 侧已由 `OnvifLiveBackend` 的
+  PullPoint 实现承载）；`OnvifBackend` javadoc 改指 `OnvifEventSource` / `OnvifLiveBackend`。
+- `docs/protocol-vendor-integration.md` 入库：DJI 行 unverified→verified（Cloud API 2.0 v2.4.0、
+  Apache-2.0、MQTT 前置与限流核实状态），搁置项清理；MAVLink/PX4/ArduPilot 官方页 2026-11-11
+  重试复核可达（services 索引页偶发超时，逐页访问替代）。
+- 计数：cloud-backend 3792→3829、全仓 5991→6028（+37 例）；docs 44→45 篇。
+
 ## [Unreleased] — GB28181 接线变异门禁收口（+13 例；本轮接线代码存活变异体 18 → 0）
 
 ### 为什么有这一轮
@@ -3065,7 +3082,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-10 共有 304 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-11 共有 305 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3092,7 +3109,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 304 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 305 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

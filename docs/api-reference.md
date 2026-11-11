@@ -369,7 +369,7 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/drone-lock/
 #### 端点详情
 
 **POST /api/v1/surveillance/devices**
-- 请求体: `{id:String, name:String, vendor:"HIKVISION"|"DAHUA"|"UNIVIEW"|"ONVIF"|"GB28181", ip:String, port:int, username:String, password:String, channels:int?}`
+- 请求体: `{id:String, name:String, vendor:"HIKVISION"|"DAHUA"|"UNIVIEW"|"ONVIF"|"GB28181"|"RTMP", ip:String, port:int, username:String, password:String, channels:int?}`
   （`channels` 可选，视频总通道数，默认 1，取值 [1,255]；注册时 onlineCameras=channels 全在线）
 - 响应: 200 - 设备详情（含能力信息与 totalCameras）；400 - 参数错误
 
