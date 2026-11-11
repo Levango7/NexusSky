@@ -1,5 +1,6 @@
 package io.aerofleet.cloud.surveillance;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
@@ -269,10 +270,110 @@ class DahuaIccClientContractTest {
     @Test
     @DisplayName("trailing slash on baseUri is normalised (//evo-apigw would 404)")
     void baseUriTrailingSlashNormalised() {
-        client.fetchPublicKey();
+        // **必须真的用带尾斜杠的 base**：原实现用的 base 不带斜杠，
+        // 于是 `resolve()` 里"去掉尾斜杠"那个分支**一次都没执行过**——
+        // 用例名字声称覆盖了它，实际没有（PIT 报该分支 NO_COVERAGE 才暴露）。
+        URI withSlash = URI.create(base.toString() + "/");
+        newClient(withSlash).fetchPublicKey();
 
         assertThat(hits).contains("GET public-key");
         assertThat(hits).hasSize(1);
+    }
+
+    // ------------------------------------------------------------------
+    // 变异收口：下面几条盯的是"行为有没有被盯住"，不是"功能对不对"
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("登录请求体里的 password 必���是非空 Base64 密文（RSA 加密结果不得为空）")
+    void tokenRequestCarriesNonEmptyRsaCiphertext() throws Exception {
+        client.authenticate();
+
+        String post = hits.stream().filter(h -> h.startsWith("POST token body="))
+                .findFirst().orElseThrow(() -> new AssertionError("没有抓到 token 请求"));
+        String body = post.substring("POST token body=".length());
+        JsonNode json = MAPPER.readTree(body);
+        String cipher = json.path("password").asText("");
+        assertThat(cipher)
+                .as("password 字段必须是非空的 RSA Base64 密文（空串等于没加密就发出去）")
+                .isNotBlank();
+        assertThat(Base64.getDecoder().decode(cipher))
+                .as("Base64 密文必须可解码")
+                .isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("token 有值但没有 tokenType 字段 ⇒ 授权头必须是 bearer <token>（不得变成 null）")
+    void missingTokenTypeFallsBackToBearer() throws Exception {
+        tokenResponseOverride = json(m -> m.putObject("data").put("accessToken", "tok-xyz"));
+
+        client.getAuthorized("/business");
+
+        assertThat(hits).anyMatch(h -> h.contains("auth=bearer tok-xyz"));
+    }
+
+    @Test
+    @DisplayName("tokenType 存在但为空串 ⇒ 授权头仍必须是 bearer <token>（不得把空串当类型）")
+    void blankTokenTypeFallsBackToBearer() throws Exception {
+        tokenResponseOverride = json(m -> m.putObject("data")
+                .put("accessToken", "tok-blank").put("tokenType", ""));
+
+        client.getAuthorized("/business");
+
+        assertThat(hits)
+                .as("空串的 tokenType 必须被当作缺省（文档：token_type 一般为固定值 bearer）")
+                .anyMatch(h -> h.contains("auth=bearer tok-blank"));
+    }
+
+    @Test
+    @DisplayName("二次 authenticate 命中缓存 ⇒ 必须返回同一个非空会话（不得返回 null）")
+    void authenticateReturnsCachedSession() {
+        DahuaIccAuth first = client.authenticate();
+        DahuaIccAuth second = client.authenticate();
+
+        assertThat(first).isNotNull();
+        assertThat(second)
+                .as("缓存命中时必须返回同一个会话对象（返回 null 会让调用方拿到空令牌）")
+                .isNotNull()
+                .isSameAs(first);
+    }
+
+    @Test
+    @DisplayName("连接不通 ⇒ 抛自建异常并保留 cause（不得把 IOException 吞成 null）")
+    void unreachablePlatformFailsLoudly() {
+        // 找一个确定没人监听的端口
+        int dead;
+        try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
+            dead = s.getLocalPort();
+        } catch (IOException e) {
+            throw new AssertionError("拿不到空闲端口", e);
+        }
+        DahuaIccClient broken = newClient(URI.create("http://127.0.0.1:" + dead));
+
+        assertThatThrownBy(broken::authenticate)
+                .isInstanceOf(DahuaIccClient.DahuaIccException.class)
+                .hasMessageContaining("failed")
+                .hasCauseInstanceOf(IOException.class);
+        assertThat(Thread.currentThread().isInterrupted())
+                .as("普通 IO 失败不得把当前线程标成中断状态（那是 InterruptedException 的分支）")
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("调用线程被中断 ⇒ 抛自建异常且中断标志必须被恢复（不得吞掉中断语义）")
+    void interruptedCallRestoresInterruptFlag() {
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(client::authenticate)
+                    .isInstanceOf(DahuaIccClient.DahuaIccException.class)
+                    .hasMessageContaining("failed");
+            assertThat(Thread.currentThread().isInterrupted())
+                    .as("InterruptedException 必须把中断标志还回去（吞掉它会让上层以为没被打断）")
+                    .isTrue();
+        } finally {
+            // 清掉中断标志，别污染后续用例
+            Thread.interrupted();
+        }
     }
 
     // ------------------------------------------------------------------
