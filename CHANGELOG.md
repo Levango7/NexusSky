@@ -1,5 +1,20 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 统一：许可档位与模块归属（2026-10-07 裁决落地，仅文档·LICENSE，0 测试增删）
+
+LICENSE §2.2 与 `docs/PRODUCT-POSITIONING.md` §5.1.1（唯一销售对照入口）及 README、6 份商业文档
+统一为三档，模块归属逐一对齐：
+
+- **基础版** = `core` + `fleet` + `mesh` + `orch`（参考年费 20–50 万/年）
+- **应急版** = 基础版 + `emergency`（参考年费 50–100 万/年）
+- **完整版** = 应急版 + `network` + `advanced`（参考年费 100–200 万/年）
+
+旧档名「SDK 授权版 / 私有部署版 / 行业定制版」全面清理：SDK 授权 / 私有部署 / 行业定制保留为**交付形态**，
+子档改名 轻量档 / 标准档 / 专业档、基础部署档 / 标准部署档 / 完整部署档、行业标准档 / 行业深度档 / 行业旗舰档；
+内部开发档改名「受限评估档」（全模块启用、设备数 / API 调用无限制、永不过期，仅限内部开发与评估，不用于生产）。
+拆分前（5 模块列表、不含 mesh/orch）签发的授权不再对应任何档位，必须重新签发，不做旧模块集合的兼容映射。
+另随批入库 `docs/education-training-market.md`（院校实训市场调研）。
+
 ## [Unreleased] — 视频融合录制登记簿租户隔离（1 例新增）
 
 ### 问题
@@ -3009,7 +3024,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-10 共有 303 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-10 共有 304 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3036,7 +3051,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 303 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 304 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
@@ -21920,7 +21935,7 @@ SCALED_PRESSURE3=143），`RADIO_STATUS(109)` 的 CRC_EXTRA 是 88 而官方为 
 
 |---|---|---|---|
 
-| 1 | 验签失败 fail-open | `LicenseService.loadLicense()` 无论验签成败一律 `return buildDevLicense()`，而 dev license 是 `maxDevices=0`（无限制）、`expiryDate=null`（永不过期）、`ALL_MODULES`。**被篡改或损坏的 key 反而拿到最宽松的授权**，商业门禁形同虚设 | 改为 fail-closed。判据是**「是否配置了 key」而不是「是否 enabled」**——配置 key 本身就是运营方声明本部署要执行授权校验，此时任何失败都必须显式失败。没配 key 仍是开发版，开发/CI 路径零影响（已核对全仓无任何配置设置过 `aerofleet.license.key`）。不新增开关：多一个 `fail-closed=false` 就多一条"配错反而继续放行"的路 |
+| 1 | 验签失败 fail-open | `LicenseService.loadLicense()` 无论验签成败一律 `return buildDevLicense()`，而 dev license 是 `maxDevices=0`（无限制）、`expiryDate=null`（永不过期）、`ALL_MODULES`。**被篡改或损坏的 key 反而拿到最宽松的授权**，商业门禁形同虚设 | 改为 fail-closed。判据是**「是否配置了 key」而不是「是否 enabled」**——配置 key 本身就是运营方声明本部署要执行授权校验，此时任何失败都必须显式失败。没配 key 仍是受限评估档，开发/CI 路径零影响（已核对全仓无任何配置设置过 `aerofleet.license.key`）。不新增开关：多一个 `fail-closed=false` 就多一条"配错反而继续放行"的路 |
 
 | 2 | 签名覆盖了信封（**合法 License 永远验不过**） | `serializeForSigning` 只排除 `signature`/`signerCert`，**`licenseKey` 参与了签名计算**；而 `parseSignedLicense` 又在验签**之前**把 `licenseKey` 覆写成完整 key 串（`payload + "." + signature`）。签发方在算签名时不可能预知自己将要产出的那串 key → 签方签的 `licenseKey` 与验签方算的必然不同 → **任何合法签名的 License 都验不过** | `licenseKey` 一并排除出签名（它是承载签名的那层信封，不是被签名的内容），并把 `setLicenseKey` 移到验签之后，摆正顺序避免后人再踩 |
 

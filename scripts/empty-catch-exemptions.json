@@ -83,16 +83,6 @@
       "reason": "目标暂时不可达丢包（FR 5.2.3-2），与真实链路一致"
     },
     {
-      "file": "mavlink-core/src/main/java/io/aerofleet/mavlink/transport/UdpMavlinkTransport.java",
-      "comment": "单个监听器异常不拖垮收包循环",
-      "reason": "单个监听器抛异常不得拖垮收包循环，其余监听器继续"
-    },
-    {
-      "file": "mavlink-core/src/main/java/io/aerofleet/mavlink/transport/UdpMavlinkTransport.java",
-      "comment": "单个监听器异常不拖垮收包循环",
-      "reason": "单个监听器抛异常不得拖垮收包循环，其余监听器继续"
-    },
-    {
       "file": "sdk-java/src/main/java/io/aerofleet/sdk/NexusSkyClient.java",
       "comment": "响应体不是 JSON，使用默认错误消息",
       "reason": "错误响应体不是 JSON 时使用默认错误消息，避免二次解析异常覆盖状态码"

@@ -14,9 +14,12 @@ import java.nio.ByteBuffer;
  */
 public final class MavlinkParser {
 
-    private long noiseBytes;
-    private long framesParsed;
-    private long crcErrors;
+    // volatile：写入只在 UdpMavlinkTransport 的收包线程，但读取还可能来自监控线程，
+    // 且 UdpIngestObserver 要把差值桥接到 Prometheus。非 volatile 时跨线程可能长期读到旧值，
+    // 表现就是「解析错误指标恒为 0」。单写线程 + 多读线程，volatile 足够；无复合更新，不需原子类。
+    private volatile long noiseBytes;
+    private volatile long framesParsed;
+    private volatile long crcErrors;
 
     public MavlinkParser() {
     }

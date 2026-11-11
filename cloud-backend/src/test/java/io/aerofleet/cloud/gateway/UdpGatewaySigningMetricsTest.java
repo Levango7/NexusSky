@@ -216,6 +216,20 @@ class UdpGatewaySigningMetricsTest {
         return copy;
     }
 
+    /**
+     * 篡改 <b>CRC</b>（不是签名）：无签名 v2 帧的末两字节就是 CRC。
+     *
+     * <p>与 {@link #tamperSignature(byte[])} 的区别是关键：后者改的是帧尾签名块，
+     * 帧仍能被解析成 {@code MavlinkFrame} 再被验签拒绝；改 CRC 则连
+     * {@code ParseResult} 都产生不了，根本进不了 {@code UdpGateway.onFrame}。
+     * 这正是「解析失败必须靠跨模块桥接才能被看见」的场景。
+     */
+    private static byte[] tamperCrc(byte[] frame) {
+        byte[] copy = frame.clone();
+        copy[copy.length - 2] ^= 0x5A;
+        return copy;
+    }
+
     private void send(byte[] bytes) throws Exception {
         try (DatagramSocket s = new DatagramSocket()) {
             s.send(new DatagramPacket(bytes, bytes.length,
@@ -247,6 +261,32 @@ class UdpGatewaySigningMetricsTest {
         return c == null ? 0.0 : c.count();
     }
 
+    /** 读摄入侧某 reason 的丢弃计数，未注册时返回 0（同 {@link #rejectedReasonOrZero}）。 */
+    private double dropReasonOrZero(String reason) {
+        var c = registry.find("aerofleet.udp.ingest.dropped").tag("reason", reason).counter();
+        return c == null ? 0.0 : c.count();
+    }
+
+    /**
+     * 轮询等待某个 Counter 达到下界。
+     *
+     * <p>UDP 收包是异步的，而 CRC 失败帧<b>不会</b>触发 {@code ingest.handle}，
+     * 没法像其它用例那样用 {@code verify(ingest, timeout(...))} 等待，只能轮询指标本身。
+     * 超时后不抛异常：由后续 assertThat 给出带数值的失败信息，便于区分「没接线」与「慢」。
+     */
+    private void awaitCounter(String name, String tagKey, String tagValue, double min)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 2000L;
+        while (System.currentTimeMillis() < deadline) {
+            var finder = registry.find(name);
+            var c = tagKey == null ? finder.counter() : finder.tag(tagKey, tagValue).counter();
+            if (c != null && c.count() >= min) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+    }
+
     // ==================== 场景 ====================
 
     @Test
@@ -271,7 +311,7 @@ class UdpGatewaySigningMetricsTest {
     }
 
     @Test
-    @DisplayName("1. 验签通过 → aerofleet.signing.verified 递增")
+    @DisplayName("1. 验签通过 → verified 递增；坏 CRC 帧 → messages.errors / 摄入丢弃视图递增")
     void verifiedFrame_incrementsVerifiedMetric() throws Exception {
         send(signedFrame(42, 0, SECRET));
 
@@ -291,6 +331,28 @@ class UdpGatewaySigningMetricsTest {
                 .as("received 按 msgId 标签计数，Heartbeat 必须落在 msgId=%s", Heartbeat.ID)
                 .isNotNull();
         assertThat(received.count()).isEqualTo(1.0);
+
+        // 跨模块桥接回归：再发一帧 CRC 被篡改的帧。它连 ParseResult 都产生不了，
+        // 根本进不了 onFrame，所以「解析失败」只能由
+        // UdpMavlinkTransport → UdpIngestObserver → DroneMetrics 这条桥接送到 Prometheus。
+        // 桥接断了下面三项会全部停在 0 —— 这正是 recordMessageError 此前恒为 0 的死指标形态。
+        send(tamperCrc(unsignedFrame(42, 1)));
+        awaitCounter("aerofleet.messages.errors", null, null, 1.0);
+        awaitCounter("aerofleet.udp.ingest.dropped", "reason",
+                DroneMetrics.IngestDropReason.FRAME_CRC_ERROR, 1.0);
+
+        assertThat(counterValue("aerofleet.messages.errors"))
+                .as("CRC 失败帧必须桥接到 messages.errors，否则该指标仍是死指标")
+                .isGreaterThanOrEqualTo(1.0);
+        assertThat(dropReasonOrZero(DroneMetrics.IngestDropReason.FRAME_CRC_ERROR))
+                .as("同一批帧必须落在统一丢弃视图，容量归因才能区分解析失败与策略丢弃")
+                .isGreaterThanOrEqualTo(1.0);
+        assertThat(counterValue("aerofleet.udp.ingest.datagrams"))
+                .as("两个 UDP 包都要计入：这是「注入送出数 − 收到数 = 内核层丢包」的对账基准")
+                .isGreaterThanOrEqualTo(2.0);
+        assertThat(counterValue("aerofleet.messages.decoded"))
+                .as("坏帧没解析成 MavlinkFrame，不得计入 decoded")
+                .isEqualTo(1.0);
     }
 
     @Test
@@ -313,6 +375,12 @@ class UdpGatewaySigningMetricsTest {
                 .tag("msgId", String.valueOf(Heartbeat.ID)).counter();
         assertThat(received).as("被拒帧仍应计入 received").isNotNull();
         assertThat(received.count()).isEqualTo(1.0);
+
+        // 统一丢弃视图：被验签拒绝的帧必须按 reason 归类。
+        // 否则容量复测时「策略丢弃」与「UDP 摄入丢包」仍会混成一个数，无法归因。
+        assertThat(dropReasonOrZero(DroneMetrics.IngestDropReason.FRAME_SIGNATURE_REJECTED))
+                .as("未签名被拒的帧应计入 frame-signature-rejected（与 signing.rejected{unsigned} 是不同维度）")
+                .isEqualTo(1.0);
     }
 
     @Test
