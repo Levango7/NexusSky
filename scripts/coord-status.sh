@@ -21,6 +21,10 @@
 # 边界：它只证明"谁站在哪个 sha、有无未提交面、PR 是否可合"，
 #       **不证明** 那个人是谁（GitHub 上 PR 都挂同一个账号）。归属仍需各 agent 自己在
 #       「开工声明」里签名；本脚本会标出哪些在途工作没有声明。
+#       「有声明」的判定口径（2026-11-11 起）：分支名须落在**声明型记录**里
+#       （以开工声明/接管声明/CLAIM/认领标记开头的那条记录，含其后续条目行）；
+#       **自动生成段与纯叙述段里的分支名不算**——旧口径是整文件 grep，
+#       而自动生成段必然含每一个分支名 ⇒ 该列曾结构性恒为「有」⇒ 避撞车防护失效。
 # =============================================================================
 set -uo pipefail
 
@@ -165,6 +169,88 @@ count_dirty() {
   echo $(( ${n_tracked:-0} + ${n_untracked:-0} ))
 }
 
+# --- 「开工声明」判定：分支名是否出现在**声明型记录**里 ----------------------------
+# 2026-11-11 实测的缺陷（本次修复的起因）：旧判定是
+#     grep -qF "$br" "$STATUS_FILE"        # 找的是**整个文件**
+# 而本脚本自己生成的「在途与占用」段**必然含每一个分支名** ⇒ 命中恒为真
+# ⇒ 这一列对所有 worktree **结构性恒为「有声明」** ⇒ 避撞车防护等于没有。
+# 实测后果：#264 的 owner 至今查不出来，板面却显示「有声明」＝假安全感；
+# 连本线自己的盘点节点（只是提到 `feat/gb28181-adapter-wiring`）都被点成「有声明」。
+#
+# 新口径（三条同时满足才算「有声明」）：
+#   ① **排除自动生成块**（BEGIN…END 之间）——那一段是本脚本写的，不是人的声明。
+#   ② 分支名必须落在**声明型记录**里：一条声明型记录 ＝ 以声明标记开头的一行
+#      （开工声明 / 接管声明 / CLAIM / 认领）**及其后续条目行**，
+#      直到下一条声明型记录行、或下一个 `## ` 标题为止。
+#   ③ 标记与分支名**不必同行**——真实板面里两者常分行：
+#      实测 ZCode 的 q2，标记行「认领继续做」与分支名 `feat/q2-protocol-vendor-closure`
+#      相隔 7 行，但在同一条声明记录里 ⇒ 同行匹配会把真声明判成没声明。
+#   ④ **标记落在括号里的不算声明标记**，**否定表述不算声明头**：
+#      「**本线边界（开工声明）**：…」这种把标记写在括号里的行是**旁注**，
+#      不是开工登记——若把它当声明头，它后面整节（含盘点表格里的分支名）都会被
+#      误判成「有声明」（实测：本线 07:1x 节就踩了这个，整节被吞进声明记录）。
+#      2026-11-11 再实测：只排除「圆括号**直接包住**标记」**不够**——真实板面的旁注是
+#      「**实证（板面有 CLAIM）**：…」这种括号里**还有别的字**的形态，照样开记录 ⇒
+#      把**下一个同级条目**（盘点正文）吞进去 ⇒ `feat/gb28181-adapter-wiring`
+#      被误判成「有声明」（板面自陈「**推定（未确证）**」）⇒ 假绿。
+#      ⇒ 规则推广为：**标记落在圆括号内 ⇒ 旁注**（一行里只要还有一个不在括号内的
+#      标记，仍算声明头）。全量回归（真实板面自动块外 **72 个**分支形态令牌）：
+#      只有 **2 个**令牌判定变化——`feat/gb28181-adapter-wiring`（假绿，修掉）与
+#      `chore/p2-f6-route-evidence2`（板面明写「已删远程废弃分支」，判无声明才对）；
+#      其余 70 个不变，`fix/exception-message-source` / `fix/controller-error-body-leak` /
+#      `feat/q2-protocol-vendor-closure` 的证据行全部保住。
+#      同理「未认领 / 不认领 / 无人认领」是**否定**表述，不能开声明记录。
+# 纯叙述 / 审计 / 盘点段落里提到分支名 **不算声明**（否则等于没改）。
+declared_corpus() {
+  awk -v mk_b="$BEGIN" -v mk_e="$END" '
+    # 这行是不是「声明头」？排除规则只作用于**判定**，不改写原行内容。
+    # 2026-11-11 实测（口径 V2）：旧的「圆括号**直接包住**标记」口径**不够**——
+    #   真实板面的旁注形态是「**实证（板面有 CLAIM）**：…」这种**括号里还有别的字**，
+    #   旧口径照样把它当声明头开记录 ⇒ 它**下一个同级条目**（盘点正文）被吞进声明记录
+    #   ⇒ `feat/gb28181-adapter-wiring` 被误判成「有声明」，而板面自陈是「**推定（未确证）**」。
+    #   ⇒ 规则①推广为：**标记落在圆括号内 ⇒ 旁注，不是声明标记**；
+    #     一行里只要还有一个**不在括号内**的标记，仍算声明头（防过度收紧）。
+    function is_claim_header(s,   t, pos, mstart, pre, depth) {
+      t = s
+      # ② 否定表述 ⇒ 不是声明（先剔掉，免得「未认领」里的「认领」被当成标记）
+      gsub(/无人认领/, "", t)
+      gsub(/未认领/, "", t)
+      gsub(/不认领/, "", t)
+      # ① 标记落在圆括号内 ⇒ 旁注，不是声明头。
+      #    实现要点（2026-11-11 实测踩坑）：**不能**用 `substr(t,i,1)` 逐字扫——
+      #    本机 awk 在 C locale 下 `substr` 返回的是**字节**不是字符 ⇒ 括号深度恒为 0
+      #    ⇒ 整条括号规则失效（自测 T11⑦/T11⑧/T12① 同时转红就是它）。
+      #    ⇒ 改用**字节安全**的计数：中文/英文括号**分开** gsub（正则字符类在 C locale 下
+      #    会把多字节字符按字节拆散，直接写 [（(] 会误计）。
+      #    深度 = 标记之前未闭合的左括号数；深度 ≤ 0 ⇒ 该标记不在括号内 ⇒ 它是声明标记。
+      pos = 1
+      while (match(substr(t, pos), /开工声明|接管声明|CLAIM|认领/)) {
+        mstart = pos + RSTART - 1
+        pre = substr(t, 1, mstart - 1)
+        depth = gsub(/（/, "&", pre) + gsub(/\(/, "&", pre) \
+              - gsub(/）/, "&", pre) - gsub(/\)/, "&", pre)
+        if (depth <= 0) return 1
+        pos = mstart + RLENGTH
+      }
+      return 0
+    }
+    index($0, mk_b) { inside=1; next }
+    index($0, mk_e) { inside=0; next }
+    inside { next }
+    is_claim_header($0) { inrec=1; print; next }
+    /^## / { inrec=0; next }
+    inrec { print }
+  ' "$1"
+}
+
+# 分支 br 是否出现在声明语料里（语料由 declared_corpus 生成）
+declared_for() {
+  local br="$1" corpus="$2"
+  [ -n "$br" ] || return 1
+  [ -f "$corpus" ] || return 1
+  grep -qF -- "$br" "$corpus" 2>/dev/null
+}
+
 # =============================================================================
 # 自测：证明「取不到」不会被冒充成「没问题」，且 --write 只动标记块、不重复插。
 # 全部在临时目录里跑，绝不碰真实的 .coord/STATUS.md。
@@ -172,6 +258,8 @@ count_dirty() {
 self_test() {
   local fails="" tmp status out rc marks n1 n2 heads self pr_fix pr_fix2 pr_fix3
   local self_abs dup eolrepo bare realrepo eol_out d1 d2 d3 decoy _t10
+  local t11_board t11_corpus t11_board2 t11_corpus2 t11_board3 t11_corpus3
+  local t12_board t12_corpus
   local _mk_repo _dirty_via_script
   SELF="$(resolve_selftest_target)"
   [ -f "$SELF" ] || { echo "无法判定：自测目标不存在（$SELF）——绝不测别的文件冒充通过。" >&2; return 1; }
@@ -451,6 +539,129 @@ EOF
     fails="${fails}T10:自测目标解析到了别的文件（期望 '$self_abs'，实得 '${_t10:-<空>}'） "
   fi
 
+  # T11 「开工声明」判定必须**可证伪**：不能因为自动生成段里必然出现的分支名就判「有」。
+  #   2026-11-11 实测缺陷：旧判定 `grep -qF "$br" "$STATUS_FILE"` 找的是**整个文件**，
+  #   而本脚本自己写的「在途与占用」段**必然含每一个分支名** ⇒ 命中恒为真
+  #   ⇒ 该列对所有 worktree 结构性恒为「有」⇒ 避撞车防护失效（#264 的 owner 至今查不出来）。
+  # 八个形态（都在真实板面出现过）：
+  #   ① 自动生成块里有分支名、别处无声明 ⇒ 必须判「无声明」（反结构性恒真）
+  #   ② 声明记录里**同行**提到分支名       ⇒ 必须判「有」
+  #   ③ 声明标记行与分支名**分行**（真实形态）⇒ 必须判「有」
+  #   ④ 只有叙述段提到分支名（无声明标记） ⇒ 必须判「无声明」（反"读过就算声明"）
+  #   ⑤ 声明记录之后的新 `## ` 标题关闭记录 ⇒ 之后的分支名不算声明
+  #   ⑥ 自动生成段的**退化形态**（段内没有 `## ` 标题）⇒ 仍必须判「无声明」
+  #      （排除规则要自己站得住，不能靠段内恰好有标题把记录关掉）
+  #   ⑦ 标记写在**括号里**（如「本线边界（开工声明）」）⇒ 旁注，不是声明头
+  #   ⑧ 「未认领」这类**否定表述** ⇒ 不是声明头
+  #      ⚠️ ⑧ 必须放在**括号外**才有独立效力。上一版把否定表述写在括号里
+  #         （「（只读结论，未认领下一项）」），可 V2 的**括号规则顺带**也会排除它
+  #         ⇒ 删掉否定表述规则（变异 M5）后断言**照样绿**（实测 rc=0）
+  #         ⇒ 断言太弱，测不到这条规则 ⇒ 另加⑨：括号外的否定表述，
+  #         让「否定表述」这条规则必须自己站得住。
+  #   ⑨ 否定表述出现在**括号外** ⇒ 只有否定规则能排除它（⑨ 是 ⑧ 的独立检验）
+  #   （另：收紧规则后**真声明不能被误杀**——真线开工声明里的分支仍须认得出）
+  t11_board="$tmp/t11-board.md"
+  {
+    printf '%s\n' '# Agent 状态板' ''
+    printf '%s\n' "$BEGIN"
+    printf '%s\n' '## 在途与占用（夹具）'
+    printf '%s\n' '| `F:/x` | `feat/t11-auto-block-only` @ `aaaaaaa` | ahead=1 | 无 | 有 |'
+    printf '%s\n' "$END" ''
+    printf '%s\n' '## 盘点叙述（不是声明）'
+    printf '%s\n' '- 这里提到 `feat/t11-narrative-only`，只是盘点记录。' ''
+    printf '%s\n' '**某线开工声明（2026-11-11 夹具）— CLAIM：登记台账**'
+    printf '%s\n' '- 分支：`feat/t11-same-line`，worktree `F:/x`。'
+    printf '%s\n' '- 续行提到 `feat/t11-next-line`（标记行与分支名分行，真实板面形态）。' ''
+    printf '%s\n' '## 后续章节（上一条声明记录到此为止）'
+    printf '%s\n' '- 这里提到 `feat/t11-after-section`，不属于任何声明记录。'
+  } > "$t11_board"
+  t11_corpus="$tmp/t11-corpus.txt"
+  declared_corpus "$t11_board" > "$t11_corpus"
+  if declared_for "feat/t11-auto-block-only" "$t11_corpus"; then
+    fails="${fails}T11:自动生成块里的分支名被误判成「有声明」（应无声明） "
+  fi
+  # ⑥ 退化形态：自动生成段里**没有** `## ` 标题。
+  #    真实段里是有 `## 在途与占用` 的，它碰巧会把声明记录关掉 ⇒ 排除规则看着"生效了"，
+  #    实则是段内标题的副作用。规则必须自己站得住：显式排除，不依赖段内恰好有标题。
+  t11_board2="$tmp/t11-board2.md"
+  {
+    printf '%s\n' '# Agent 状态板' ''
+    printf '%s\n' '**某线开工声明（夹具二）— CLAIM：记录里嵌着自动生成段**'
+    printf '%s\n' "$BEGIN"
+    printf '%s\n' '| `F:/x` | `feat/t11-degenerate-block` @ `bbbbbbb` | ahead=1 | 无 | 有 |'
+    printf '%s\n' "$END"
+  } > "$t11_board2"
+  t11_corpus2="$tmp/t11-corpus2.txt"
+  declared_corpus "$t11_board2" > "$t11_corpus2"
+  if declared_for "feat/t11-degenerate-block" "$t11_corpus2"; then
+    fails="${fails}T11:自动生成段里的分支名被误判成「有声明」（退化形态，应无声明） "
+  fi
+  # ⑦⑧ 括号内的标注 / 否定表述 **不算声明头**：
+  #   实测踩坑：本线 07:1x 节的「**本线边界（开工声明）**：…」把**整节**吞成声明记录，
+  #   连盘点表格里的分支名都被判成「有声明」——那正是本修复要消灭的假绿（同一类假绿，
+  #   只是从「整文件命中」缩小到「一段话命中」）。
+  t11_board3="$tmp/t11-board3.md"
+  {
+    printf '%s\n' '# Agent 状态板' ''
+    printf '%s\n' '**本线边界（开工声明）**：本线只登记，不代解冲突'
+    printf '%s\n' '- 这里提到 `feat/t11-paren-note`，只是边界说明，不是开工登记。'
+    printf '%s\n' '- **某线（只读结论，未认领下一项）**：提到 `feat/t11-negated`。'
+    printf '%s\n' '- **未认领下一项**：提到 `feat/t11-negated-outside`。'
+    printf '%s\n' ''
+    printf '%s\n' '**真线开工声明（夹具三）— CLAIM：真声明**'
+    printf '%s\n' '- 分支：`feat/t11-real-claim`。'
+  } > "$t11_board3"
+  t11_corpus3="$tmp/t11-corpus3.txt"
+  declared_corpus "$t11_board3" > "$t11_corpus3"
+  if declared_for "feat/t11-paren-note" "$t11_corpus3"; then
+    fails="${fails}T11:括号里的「开工声明」标注被当成声明头（应无声明） "
+  fi
+  if declared_for "feat/t11-negated" "$t11_corpus3"; then
+    fails="${fails}T11:「未认领」这类否定表述被当成声明头（应无声明） "
+  fi
+  if declared_for "feat/t11-negated-outside" "$t11_corpus3"; then
+    fails="${fails}T11:括号外的否定表述被当成声明头（应无声明；否定规则必须自己站得住） "
+  fi
+  declared_for "feat/t11-real-claim" "$t11_corpus3" || fails="${fails}T11:收紧规则后真声明被误杀（同行形态） "
+  declared_for "feat/t11-same-line" "$t11_corpus" || fails="${fails}T11:声明记录里的分支名没被认出来（同行形态） "
+  declared_for "feat/t11-next-line" "$t11_corpus" || fails="${fails}T11:声明记录里的分支名没被认出来（分行形态） "
+  if declared_for "feat/t11-narrative-only" "$t11_corpus"; then
+    fails="${fails}T11:叙述段落里的分支名被误判成「有声明」（应无声明） "
+  fi
+  if declared_for "feat/t11-after-section" "$t11_corpus"; then
+    fails="${fails}T11:声明记录结束后的分支名被误判成「有声明」（应无声明） "
+  fi
+
+  # T12 「括号里有别的字」的旁注**不得**开声明记录（V2 的承重规则）。
+  #   起因（2026-11-11 真实板面）：本线 14:0x 的盘点正文里有
+  #   「- **实证（板面有 CLAIM）**：…」这一行——标记被圆括号包住、且括号里**还有别的字**。
+  #   旧口径（只排除「圆括号**直接包住**标记」）把它当声明头 ⇒ 它**下一个同级条目**里的
+  #   `feat/gb28181-adapter-wiring` 被判成「有声明」，而板面自陈是「**推定（未确证）**」⇒ 假绿。
+  # 四个形态：
+  #   ① 括号里有别的字 + 标记 ⇒ 不是声明头 ⇒ 其后**同级条目**里的分支名不算声明
+  #   ② 标记在括号外（括号里是日期）⇒ 仍是声明头（防「一行有括号就废」的过度收紧）
+  #   ③ 一行里同时有括号内标记和括号外标记 ⇒ 算声明头
+  #   ④ 括号内含标记的**续记**行既不新开记录、也不被丢弃（它属于前一条声明记录）
+  t12_board="$tmp/t12-board.md"
+  {
+    printf '%s\n' '# Agent 状态板' ''
+    printf '%s\n' '- **实证（板面有 CLAIM）**：下面这一行只是盘点正文。'
+    printf '%s\n' '- 提到 `feat/t12-paren-mention`，只是盘点，不是开工登记。' ''
+    printf '%s\n' '**某线开工声明（2026-11-11 夹具四）— CLAIM：登记台账**'
+    printf '%s\n' '- 分支：`feat/t12-free-marker`，标记在括号外（括号里是日期）。' ''
+    printf '%s\n' '- **续记（用户令「认领继续做」）— CLAIM：继续收口**，分支 `feat/t12-both-markers`。' ''
+    printf '%s\n' '**真线开工声明（夹具五）— CLAIM：Q2 收口**'
+    printf '%s\n' '- **🔁 续记（2026-11-11）— Q2 收口批启动（用户令「认领继续做」）**，分支 `feat/t12-continued`。'
+  } > "$t12_board"
+  t12_corpus="$tmp/t12-corpus.txt"
+  declared_corpus "$t12_board" > "$t12_corpus"
+  if declared_for "feat/t12-paren-mention" "$t12_corpus"; then
+    fails="${fails}T12:括号里有别的字的旁注被当成声明头，同级条目里的分支名被误判成「有声明」（应无声明） "
+  fi
+  declared_for "feat/t12-free-marker" "$t12_corpus" || fails="${fails}T12:括号外有标记的真声明被误杀（应认得出） "
+  declared_for "feat/t12-both-markers" "$t12_corpus" || fails="${fails}T12:一行里括号外有标记时没认出来（应认得出） "
+  declared_for "feat/t12-continued" "$t12_corpus" || fails="${fails}T12:括号内含标记的续记行被丢弃，其分支名没认出来（应认得出） "
+
   rm -rf "$tmp"
   if [ -n "$fails" ]; then
     echo "自测失败：$fails" >&2
@@ -467,6 +678,9 @@ EOF
   echo "内容等价的 CRLF 差异算 0 个、字节真差异算 1 个（判别性对照）、真实改动算 1 个（反假绿）、"
   echo "数字能落到板面正文里、"
   echo "Windows 盘符路径→可换算成 mnt 形式解析（原有路径不动、换算不成立时原样返回）、"
+  echo "「开工声明」判定可证伪（自动生成段与叙述段里的分支名**不算**声明、声明记录里的认得出、"
+  echo "标记行与分支名分行也认得出、记录边界会关闭、括号里的标注与「未认领」不算声明头、真声明不被误杀、"
+  echo "**括号里还有别的字**的旁注不开声明记录、括号外的标记照认、续记行不丢分支名）。"
   echo "自测目标恒为**被调用的那一份**（同名诱饵副本不被劫持）。"
   return 0
 }
@@ -592,6 +806,16 @@ if [ "$PR_CI_WARN" = "1" ]; then
   PR_BLOCK="${PR_BLOCK}"$'\n'"**上面标 ⚠ 的 PR：GitHub 合成不出 \`refs/pull/<N>/merge\` ⇒ \`pull_request\` workflow **不会被调度**（零 run / 零 Actions check suite / 零失败记录；第三方 App 的 check suite 照常出现）。⇒ 「CI 没跑」多半是这个，不是 GitHub 故障——先解冲突。"$'\n'
 fi
 
+# --- 声明语料：整份板面抽一次（在途与占用表要用它判定每个分支有没有开工声明）----
+# 语料是**整份板面**的性质，不随分支变 ⇒ 抽一次即可，不必每个分支重抽。
+DECL_CORPUS="$(mktemp)"
+trap 'rm -f "$DECL_CORPUS"' EXIT
+if [ -f "$STATUS_FILE" ]; then
+  declared_corpus "$STATUS_FILE" > "$DECL_CORPUS" 2>/dev/null || : > "$DECL_CORPUS"
+else
+  : > "$DECL_CORPUS"
+fi
+
 # --- worktree 逐个体检 ---------------------------------------------------------
 # `git worktree list --porcelain` **本身就给了每个工作区的 HEAD sha 与分支名**
 # （"HEAD <sha>" / "branch refs/heads/<x>" / "detached"）。
@@ -632,10 +856,12 @@ while IFS=$'\t' read -r wt wt_head wt_branch; do
   #      （裸仓夹具实测：" M a.txt" / diff 空 / hash-object 等于 index blob）。
   #      修法在脚本层：按内容比（count_dirty）。
   dirty="$(count_dirty "$wt_git")"
-  # 声明检查：分支名是否出现在 STATUS.md 里（.coord 是 gitignored，所以只看主检出）
+  # 声明检查：分支名是否出现在**声明型记录**里（.coord 是 gitignored，所以只看主检出）。
+  # ⚠️ 旧口径是整文件 grep ⇒ 本脚本自动生成段里的分支名必然命中 ⇒ 该列恒为「有」，
+  #    等于没有避撞车防护。新口径见 declared_corpus() 上方注释（含实测依据）。
   declared="未知"
   if [ -f "$STATUS_FILE" ]; then
-    if grep -qF "$br" "$STATUS_FILE" 2>/dev/null; then declared="有"; else declared="**无声明**"; fi
+    if declared_for "$br" "$DECL_CORPUS"; then declared="有"; else declared="**无声明**"; fi
   else
     DEGRADED=1
     declared="STATUS.md 不存在"
