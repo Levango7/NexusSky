@@ -63,11 +63,6 @@ public final class Gb28181MediaSessionRegistry {
         }
     }
 
-    /** 已开的会话键（诊断/断言用；顺序即开启顺序）。 */
-    public synchronized List<String> keys() {
-        return List.copyOf(sessions.keySet());
-    }
-
     /** 当前会话数（测试断言用）。 */
     public synchronized int size() {
         return sessions.size();
@@ -87,15 +82,6 @@ public final class Gb28181MediaSessionRegistry {
     public synchronized InetSocketAddress addressOf(String key) {
         Gb28181MediaSession s = sessions.get(key);
         return s == null ? null : s.address();
-    }
-
-    /** 关闭并清理单个会话（停止点播用）。 */
-    public synchronized void release(String key) {
-        Gb28181MediaSession s = sessions.remove(key);
-        if (s != null) {
-            s.close();
-            log.info("gb28181 media session released for {} (remaining={})", key, sessions.size());
-        }
     }
 
     /** 关闭全部会话（适配器/容器销毁时调用）。 */

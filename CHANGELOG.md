@@ -1,5 +1,46 @@
 # NexusSky 变更日志
 
+## [Unreleased] — GB28181 接线变异门禁收口（+13 例；本轮接线代码存活变异体 18 → 0）
+
+### 为什么有这一轮
+
+#272 的接线把 surveillance 包的变异体从 1444 推到 2108，变异分数从基线 0.92 掉到
+**0.9160**、测试强度从 0.94 掉到 **0.9355** ⇒ CI 的
+`Mutation baseline gate (security + surveillance packages)` 判红。
+**这不是"基线数字过期"**——是接线带进来的新代码有 18 个存活变异体，即"行为没人盯住"。
+
+### 本轮做了什么（先杀变异体，不是先改基线）
+
+新增 `Gb28181AdapterMutationClosureTest`（13 例），补上**此前从未被执行过的生产路径**：
+
+- **「datagram → transport 收流线程 → onMessage → dispatchNotify → 订阅回调」**
+  这条链此前只测过 `deliverNotify()` 这个接缝。后果很具体：`transport()` 里的
+  `t.onMessage(...)` 与 `t.start()` 被改坏，**没有任何用例会红**——而那正是
+  "设备 NOTIFY 到了平台却没人收到"的形态。现在用真 UDP datagram 打适配器的
+  SIP 监听端口，断言订阅回调真被触发（并另测 Call-ID 对不上时不得回调）。
+- **SSRC 已知答案**：测试内用独立实现重算 FNV-1a + 通道混合，并钉死具体常量
+  （`34010000001101320001` ch=1 → 345860835）。此前只断言"确定性"与"通道间不同"，
+  哈希常量被改也能过——设备侧 `y=` 与 RTP 头 SSRC 对不上会丢帧。
+- **退订必须真发** `Expires: 0` 的 SUBSCRIBE（不是只清本地状态）；未知 handle 不得发信。
+- **close 必须真关传输层**（新增 `Gb28181SipTransport#isClosed` 与
+  `Gb28181Adapter#transportClosed` 作为可断言出口）与**真清订阅表**
+  （用仓内 `LogWiretap` 断言落在"未知 handle"分支）。
+- 空参与越界边界：`learnContact` 拒绝空白 deviceId 但**放行正常 id**（只测"该抛的抛了"
+  抓不住条件取反型变异体）、`mediaFrame` 越界返回 null。
+
+顺带**删掉两个无调用者的死方法**（`Gb28181MediaSessionRegistry#keys` / `#release`）——
+它们是 NO_COVERAGE 变异体的来源，留着只是表面。
+
+### 结果
+
+- 本轮接线代码在包内的**存活变异体：18 → 0**；surveillance 包整体
+  2108 → **2115** 变异体（多出的 7 个是新增的 `isClosed`/`transportClosed` 等出口），
+  杀掉 1743、存活 99、未覆盖 234 ⇒ **变异分数 0.9266 / 测试强度 0.9463**，
+  均高于地板（0.92 / 0.94，按本地实测向下取整，给 CI↔本地运行间抖动留余量）。
+- `scripts/mutation-baseline-surveillance.json` 同步更新记账五列与 `ciObserved`，
+  并写 `noteRound8` 记录本轮改了什么——**变异体总数变了却不同步基线**，
+  下一个人只能重跑一次 PIT 才知道。
+
 ## [Unreleased] — GB28181 适配器接线：信令面 + 媒体面 + 适配器三层串通（+16 例，真 UDP 回环）
 
 ### 背景：能力都在，但没人把它们接起来
@@ -3024,7 +3065,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-10 共有 303 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-10 共有 304 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3051,7 +3092,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 303 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 304 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

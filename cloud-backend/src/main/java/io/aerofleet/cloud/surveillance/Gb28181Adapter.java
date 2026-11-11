@@ -92,15 +92,46 @@ public class Gb28181Adapter implements VendorAdapter {
                 prev == null ? "" : " (was " + prev + ")");
     }
 
+    /**
+     * SIP 传输层的本地端口（懒开，未开时 -1）。
+     *
+     * <p>用途有二：① 运维观测"平台侧 SIP 监听在哪"；② 让测试能对**真实 socket**
+     * 发 NOTIFY——此前事件订阅只测了 {@link #deliverNotify} 这个接缝，
+     * "datagram → transport 收流线程 → onMessage 回调 → dispatchNotify"这条
+     * 生产路径**一行都没被覆盖过**（PIT 报 NO_COVERAGE 才是它该有的样子）。
+     */
+    public int transportLocalPort() {
+        Gb28181SipTransport t = transport;
+        return (t == null || t.isClosed()) ? -1 : t.localPort();
+    }
+
+    /**
+     * 传输层是否已关闭（{@link #close()} 之后为 true；从未开过则 false）。
+     *
+     * <p>存在的理由：适配器 {@code close()} 里的 {@code transport.close()} 是**唯一**
+     * 关掉那个 UDP socket 的地方——漏掉它就是端口泄漏 + 收流线程悬挂。而 socket
+     * 关闭与否在适配器外部**完全不可见**，所以必须给它一个可断言的出口。
+     */
+    public boolean transportClosed() {
+        Gb28181SipTransport t = transport;
+        return t != null && t.isClosed();
+    }
+
     /** 该设备是否已登记联系地址（上层据此决定是 501 还是"先注册"）。 */
     public boolean knowsContact(String deviceId) {
         return contacts.containsKey(deviceId);
     }
 
-    /** 传输层（懒开 + 注册 NOTIFY 分发）；拿不到端口时响亮失败。 */
+    /**
+     * 传输层（懒开 + 注册 NOTIFY 分发）；拿不到端口时响亮失败。
+     *
+     * <p>已关闭的实例**不复用**：{@link Gb28181SipTransport#isClosed()} 为真时另开一个
+     * （端口随之换新）。复用已关的 socket 会让"平台侧 SIP 监听"静默失效——症状是
+     * 设备 REGISTER 得到 200 但平台再也收不到任何东西。
+     */
     private synchronized Gb28181SipTransport transport() {
         Gb28181SipTransport cur = transport;
-        if (cur != null) {
+        if (cur != null && !cur.isClosed()) {
             return cur;
         }
         try {
@@ -157,8 +188,8 @@ public class Gb28181Adapter implements VendorAdapter {
     public synchronized void close() {
         Gb28181SipTransport t = transport;
         if (t != null) {
+            // 关闭 socket（不复用已关实例：transport() 会另开一个）
             t.close();
-            this.transport = null;
         }
         mediaSessions.closeAll();
         subscribers.clear();
