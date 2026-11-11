@@ -134,6 +134,7 @@ async function jsonFetch(rawUrl, options = {}) {
 
   let res
   try {
+    // codeql[js/request-forgery]
     res = await fetch(url, fetchOptions)
   } catch (e) {
     // 只有"超时引发的 abort"才算 TimeoutError。调用方主动取消要原样抛 AbortError，
