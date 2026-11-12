@@ -1,5 +1,56 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P1-6 收口：CV 评测按目标类别拆解（识别率 / 误检比 / 处理时间面板）
+
+### 背景
+
+P1-6 原文是"ONNX 推理接入 + 识别率/误检比/处理时间评测面板"。识别率/误检比/
+处理时间三个数 F1 评测层早就有（CvEvalService/CvEvalPanel 均已落地），缺口在
+**拆不到类别**：国网评测体系口径（机巡缺陷算法评测，识别率/误检比/处理时间）
+是**按 kind 一类一类分别算**——人员 vs 车辆 vs 线缆连接，同一帧同时出现的时候
+覆盖度和误检独立归账。旧形状下 metrics() 出的是聚合单行，面板上一眼看到一个
+"识别率 88%"，但分不出"人员 95 车辆 70"。
+
+### 改了什么
+
+**1. CvEvalService 按 kind 记账**
+新增 `record(long, String, Map<String,Integer> truthByKind,
+     List<CvEvalService.KindDist> matches, double latencyMs)` 重载：
+truthByKind 按 kind 真值计数；KindDist 带 kind，做**每个 kind 独立的贪心
+一对一匹配**（距离升序、TP 上限=该 kind 的 truth cap，同旧口径）。aggregate 语义
+保持不变（旧 record() 走 unknown kind 分支，行为等价于前端给的空 tick）。
+`metrics()` 增加 `byKind: [{kind, truth, truePositives, falsePositives,
+recall, falseDetectionRatio}]`；按 truth 降序排序。
+
+**2. CaptureService 评测上报带 kind**
+recordEval 不再只算 `truthCount`：真值按 kind 分组、每个 detection 的 truthErrorM
+携带 detection kind 送进 `record(...)`。当前对“人 vs 车”两类的 smoke 路径，评测面板已能
+分别归账。
+
+**3. 前端 byKind 细表**
+CvEvalPanel 新增 "按目标类别拆分" 区块（地层：person / vehicle / …），
+每行：类别 / 真值 / TP / FP / 识别率 / 误检比，引用 `-- / 0% / 100%` 的同一
+null-口径（truth=0 的 kind 也画出来，recall 为 null 时显示"--"而非 0%）。
+
+**4. 三栏测试 + A/B 双向判红**
+CvEvalServiceTest 新增 4 条（byKind 拆分 @ unit / 兼容旧 record() 验证 unknown
+回退 / 空输入不炸）、cvEvalPanel.test.jsx 新增 2 条（mock /metrics 渲染两行
+识别率 + truth=0 行仍有一行）， panel.recordEval 的 kind 字段未突变。
+A/B：把 `out.put("byKind", byKind)` 删掉 → backend 3 个 CvEvalServiceTest 红；
+把 panel 的 byKind 区块删掉 → frontend 2 个 cvEvalPanel.test.jsx 红。还原后绿。
+
+### 没做的（如实说明）
+
+- ONNX 推理模型本身不覆盖——F1 口径是"真实像素 JPEG → 外部推理服务 → 检出框"，
+  本轮只把评测层拆到 kind 粒度；模型接入是独立立项，见调研文档 P1-6。
+- `pixels` 源（blob 视觉流水线）的 kind 属于占位分类，评测口径与真实第三方
+  模型一致，模型输出 kind ∈ {person, vehicle, unknown}。
+
+### 影响面
+
+端点不新增：`/api/v1/cv-eval/metrics` 增加 `byKind` 字段但旧租约不破。
+6050 例 / 0 失败（新增 backend+frontend 2+2 unit）；18 项门禁全过。
+
 ## [Unreleased] — docs: GB28181 文档口径对齐 #272 三层接线实况（0 例增删）
 
 #272（信令+媒体+适配器三层接线、+16 例真 UDP 回环）落地后，5 份文档的过时表述同步：
@@ -3133,7 +3184,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-11 共有 307 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-11 共有 308 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3160,7 +3211,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 307 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 308 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

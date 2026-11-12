@@ -2451,7 +2451,7 @@ curl -X PUT -H "Authorization: Bearer <token>" -H "Content-Type: application/jso
 
 **GET /api/v1/cv-eval/metrics**
 - 查询参数: `source` (String, 可选) - 检测源过滤（truth / vision-source / pixels / external，空 = 全部）
-- 响应: 200 - `{frames, recall, falseDetectionRatio, latencyAvgMs, latencyP95Ms, windowSize, truePositives, falsePositives, truthTotal, reference:{recall:0.85, falseDetectionRatio:0.15}, perFrame:[最近 50 帧摘要]}`
+- 响应: 200 - `{frames, recall, falseDetectionRatio, latencyAvgMs, latencyP95Ms, windowSize, truePositives, falsePositives, truthTotal, byKind:[{kind, truth, truePositives, falsePositives, recall, falseDetectionRatio}], reference:{recall:0.85, falseDetectionRatio:0.15}, perFrame:[最近 50 帧摘要]}`
 - 指标口径：recall = ΣTP/Σ真值数，falseDetectionRatio = ΣFP/(ΣTP+ΣFP)，latency 为检测+定位端到端 ms（avg 与 p95）；分母为零时对应指标为 `null`（前端显示 "--"）
 
 **POST /api/v1/cv-eval/reset** （需 OPERATOR 角色）
