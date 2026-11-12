@@ -133,6 +133,38 @@ export default function CvEvalPanel() {
         pixels/external 反映真实检测质量
       </div>
 
+      {metrics?.byKind && metrics.byKind.length > 0 ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 4 }}>
+            按目标类别拆分（国网评测口径：人员/车辆… 分别算）
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ color: 'var(--dim)', textAlign: 'left' }}>
+                <th style={thStyle}>类别</th>
+                <th style={thStyle}>真值</th>
+                <th style={thStyle}>TP</th>
+                <th style={thStyle}>FP</th>
+                <th style={thStyle}>识别率</th>
+                <th style={thStyle}>误检比</th>
+              </tr>
+            </thead>
+            <tbody>
+              {metrics.byKind.map((row) => (
+                <tr key={row.kind} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <td style={tdStyle}>{row.kind}</td>
+                  <td style={tdStyle}>{row.truth}</td>
+                  <td style={{ ...tdStyle, color: '#2de2a5' }}>{row.truePositives}</td>
+                  <td style={{ ...tdStyle, color: row.falsePositives > 0 ? '#ff5d5d' : 'var(--text)' }}>{row.falsePositives}</td>
+                  <td style={tdStyle}>{fmtPct(row.recall)}</td>
+                  <td style={tdStyle}>{fmtPct(row.falseDetectionRatio)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
         <thead>
           <tr style={{ color: 'var(--dim)', textAlign: 'left' }}>

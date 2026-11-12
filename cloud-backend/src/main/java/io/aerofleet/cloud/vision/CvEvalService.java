@@ -36,7 +36,13 @@ public class CvEvalService {
     /** 单帧评测记录（不可变）。 */
     public record CvFrameRecord(long frameSeq, String source, int truthCount,
                                 int truePositives, int falsePositives,
-                                double latencyMs, long ts) {}
+                                double latencyMs, long ts, Map<String, KindStat> byKind) {}
+
+    /** 单个 kind 的一帧统计：{@code truth}/{@code TP}/{@code FP}。 */
+    public record KindStat(int truth, int truePositives, int falsePositives) {}
+
+    /** 带 kind 的检测距离（用于逐 kind 贪心一对一匹配）。 */
+    public record KindDist(double distanceM, String kind) {}
 
     /** 滑动窗口（synchronized 访问）。 */
     private final ArrayDeque<CvFrameRecord> window = new ArrayDeque<>();
@@ -63,26 +69,63 @@ public class CvEvalService {
      * @param matchDistancesM 每个检出与最近真值的距离（米，&lt;0 表示真值不可用 → FP）
      * @param latencyMs       检测+定位端到端耗时
      */
+    /**
+     * 兼容旧调用（按 kind 不带 kind 信息）：把全部真值记到 {@code unknown}，
+     * 检出 kind 一律记 {@code unknown}。新调用方请用 {@link #record(long, String,
+     * Map, List, double)}。
+     */
     public void record(long frameSeq, String source, int truthCount,
                        List<Double> matchDistancesM, double latencyMs) {
+        Map<String, Integer> truth = Map.of("unknown", truthCount);
+        List<Double> src = matchDistancesM == null ? List.of() : new ArrayList<>(matchDistancesM);
+        List<KindDist> matches = src.stream().map(d -> new KindDist(d, "unknown")).toList();
+        record(frameSeq, source, truth, matches, latencyMs);
+    }
+
+    /**
+     * 按 kind 记一帧评测。
+     * <p>逐 kind 做贪心一对一匹配（与总级匹配同口径：距离升序、TP 上限=该 kind 帧内真值数、
+     * 距离≤阈值且≥0）；{@code matches} 里 kind 为空的一律记 {@code unknown}。
+     * 各 kind 统计相加与总量一致（不重叠一对一）。
+     */
+    public void record(long frameSeq, String source, Map<String, Integer> truthByKind,
+                       List<KindDist> matches, double latencyMs) {
         try {
-            List<Double> dists = matchDistancesM == null
-                    ? List.of() : new ArrayList<>(matchDistancesM);
-            // 距离升序贪心：距离 ≤ 阈值的检出先占真值名额，
-            // TP 上限 = 帧内真值数（一对一约束），占不到坑的记 FP
-            dists.sort(Comparator.comparingDouble(d -> d == null ? Double.MAX_VALUE : d));
+            // 逐 kind 统计：kind 缺位记 unknown
+            Map<String, List<Double>> kindDists = new LinkedHashMap<>();
+            Map<String, Integer> truth = new LinkedHashMap<>();
+            if (truthByKind != null) {
+                for (var e : truthByKind.entrySet()) {
+                    truth.put(normalizeKind(e.getKey()), Math.max(0, e.getValue()));
+                }
+            }
+            int truthCount = truth.values().stream().mapToInt(Integer::intValue).sum();
+            List<KindDist> safeMatches = matches == null ? List.of() : new ArrayList<>(matches);
+            for (KindDist m : safeMatches) {
+                String k = normalizeKind(m == null ? null : m.kind());
+                kindDists.computeIfAbsent(k, x -> new ArrayList<>())
+                        .add(m == null ? -1.0 : m.distanceM());
+            }
+            Map<String, KindStat> byKind = new LinkedHashMap<>();
             int tp = 0;
             int fp = 0;
-            for (Double d : dists) {
-                if (d != null && d >= 0 && d <= matchThresholdM && tp < truthCount) {
-                    tp++;
-                } else {
-                    fp++;
-                }
+            for (Map.Entry<String, Integer> e : truth.entrySet()) {
+                String kind = e.getKey();
+                int cap = e.getValue();
+                List<Double> ds = kindDists.remove(kind);
+                int[] acc = greedy(ds == null ? List.of() : ds, cap);
+                tp += acc[0];
+                fp += acc[1];
+                byKind.put(kind, new KindStat(cap, acc[0], acc[1]));
+            }
+            for (var e : kindDists.entrySet()) {
+                int[] acc = greedy(e.getValue(), 0);
+                fp += acc[1];
+                byKind.put(e.getKey(), new KindStat(0, 0, acc[1]));
             }
             synchronized (window) {
                 window.addLast(new CvFrameRecord(frameSeq, source, truthCount,
-                        tp, fp, latencyMs, System.currentTimeMillis()));
+                        tp, fp, latencyMs, System.currentTimeMillis(), Map.copyOf(byKind)));
                 while (window.size() > windowSize) {
                     window.removeFirst();
                 }
@@ -134,6 +177,34 @@ public class CvEvalService {
         // 行业参考线（国网机巡评测口径，调研文档 [29]）
         out.put("reference", Map.of("recall", 0.85, "falseDetectionRatio", 0.15));
 
+        // 按 kind 聚合（truth/tp/fp 各自累加，与总量一致）
+        Map<String, long[]> kindAcc = new LinkedHashMap<>();
+        for (CvFrameRecord r : records) {
+            for (var e : r.byKind().entrySet()) {
+                long[] acc = kindAcc.computeIfAbsent(e.getKey(), k -> new long[3]);
+                acc[0] += e.getValue().truth();
+                acc[1] += e.getValue().truePositives();
+                acc[2] += e.getValue().falsePositives();
+            }
+        }
+        List<Map<String, Object>> byKind = new ArrayList<>();
+        for (var e : kindAcc.entrySet()) {
+            long[] acc = e.getValue();
+            long truthK = acc[0], tpv = acc[1], fpv = acc[2];
+            long det = tpv + fpv;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("kind", e.getKey());
+            row.put("truth", truthK);
+            row.put("truePositives", tpv);
+            row.put("falsePositives", fpv);
+            row.put("recall", truthK > 0 ? round3((double) tpv / truthK) : null);
+            row.put("falseDetectionRatio", det > 0 ? round3((double) fpv / det) : null);
+            byKind.add(row);
+        }
+        byKind.sort((a, b) -> Long.compare(((Number) b.get("truth")).longValue(),
+                ((Number) a.get("truth")).longValue()));
+        out.put("byKind", byKind);
+
         List<CvFrameRecord> recent = records.size() > 50
                 ? records.subList(records.size() - 50, records.size()) : records;
         List<Map<String, Object>> perFrame = new ArrayList<>();
@@ -159,6 +230,37 @@ public class CvEvalService {
         synchronized (window) {
             return Collections.unmodifiableList(new ArrayList<>(window));
         }
+    }
+
+    /** kind 归一：null/空 → unknown；长度截断 40。 */
+    private static String normalizeKind(String kind) {
+        if (kind == null) {
+            return "unknown";
+        }
+        String s = kind.trim();
+        if (s.isEmpty()) {
+            return "unknown";
+        }
+        return s.length() > 40 ? s.substring(0, 40) : s;
+    }
+
+    /** 贪心一对一：距离升序、TP 上限=cap、距离∈[0, threshold]。返回 {tp, fp}。 */
+    private int[] greedy(List<Double> dists, int cap) {
+        if (dists == null || dists.isEmpty()) {
+            return new int[]{0, 0};
+        }
+        List<Double> sorted = new ArrayList<>(dists);
+        sorted.sort(Comparator.comparingDouble(d -> d == null ? Double.MAX_VALUE : d));
+        int tp = 0;
+        int fp = 0;
+        for (Double d : sorted) {
+            if (d != null && d >= 0 && d <= matchThresholdM && tp < cap) {
+                tp++;
+            } else {
+                fp++;
+            }
+        }
+        return new int[]{tp, fp};
     }
 
     private static double percentile95(List<Double> sorted) {

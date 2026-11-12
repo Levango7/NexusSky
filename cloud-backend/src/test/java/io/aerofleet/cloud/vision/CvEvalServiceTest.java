@@ -22,6 +22,80 @@ class CvEvalServiceTest {
     }
 
     @Test
+    @DisplayName("按 kind 记一帧：各自 greedy，聚合为两个 truth/tp/fp")
+    void perKindGreedy() {
+        CvEvalService svc = newService();
+        // 真值：person 2、vehicle 1
+        // 检出：person dist=3.0（阈值=5m → TP）、person dist=8.0（>5m → FP）、vehicle dist=2.0（TP）
+        svc.record(1, "external",
+                Map.of("person", 2, "vehicle", 1),
+                List.of(new CvEvalService.KindDist(3.0, "person"),
+                        new CvEvalService.KindDist(8.0, "person"),
+                        new CvEvalService.KindDist(2.0, "vehicle")),
+                10.0);
+
+        // byKind：person TP=1 FP=1；vehicle TP=1 FP=0
+        Map<String, Object> m = svc.metrics(null);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> byKind = (List<Map<String, Object>>) m.get("byKind");
+        assertThat(byKind).hasSize(2);
+        for (Map<String, Object> row : byKind) {
+            if ("person".equals(row.get("kind"))) {
+                assertThat(((Number) row.get("truePositives")).longValue()).isEqualTo(1L);
+                assertThat(((Number) row.get("falsePositives")).longValue()).isEqualTo(1L);
+            }
+            if ("vehicle".equals(row.get("kind"))) {
+                assertThat(((Number) row.get("truePositives")).longValue()).isEqualTo(1L);
+                assertThat(((Number) row.get("falsePositives")).longValue()).isEqualTo(0L);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("按 kind 记一帧：未计入真值的 kind 全部 FP，truth=0 也出行")
+    void perKindUnknownDetectionIsAllFp() {
+        CvEvalService svc = newService();
+        svc.record(1, "pixels",
+                Map.of(),
+                List.of(new CvEvalService.KindDist(3.0, "blob"),
+                        new CvEvalService.KindDist(8.0, "blob"),
+                        new CvEvalService.KindDist(-1.0, "person")),
+                10.0);
+
+        Map<String, Object> m = svc.metrics(null);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> byKind = (List<Map<String, Object>>) m.get("byKind");
+        Map<String, Boolean> seenFp = new java.util.HashMap<>();
+        for (Map<String, Object> row : byKind) {
+            seenFp.put((String) row.get("kind"), ((Number) row.get("falsePositives")).intValue() > 0);
+        }
+        assertThat(seenFp).containsEntry("blob", true).containsEntry("person", true);
+        // 无真值帧 → recall 为 null
+        assertThat(m.get("recall")).isNull();
+    }
+
+    @Test
+    @DisplayName("空的 truthByKind / 空的 matches 不抛异常（空帧也是一种合法输入）")
+    void perKindEmptyInput() {
+        CvEvalService svc = newService();
+        svc.record(1, "pixels", Map.of(), List.of(), 10.0);
+        Map<String, Object> m = svc.metrics(null);
+        assertThat(m.get("frames")).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("旧 record() 兼容：全部记 unknown，byKind 应只有 unknown 一行")
+    void oldRecordCompatibility() {
+        CvEvalService svc = newService();
+        svc.record(1, "external", 2, List.of(3.0, 8.0), 10.0);
+        Map<String, Object> m = svc.metrics(null);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> byKind = (List<Map<String, Object>>) m.get("byKind");
+        assertThat(byKind).hasSize(1);
+        assertThat(byKind.get(0).get("kind")).isEqualTo("unknown");
+    }
+
+    @Test
     @DisplayName("距离≤阈值 → TP；超阈值 → FP")
     void matchWithinThreshold() {
         CvEvalService svc = newService();
