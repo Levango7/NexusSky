@@ -858,10 +858,13 @@ NexusSky/
   （ISO/IEC 13818-1 PS：pack header/SCR → system header → PSM → PES，
   **关键帧带系统头+PSM、非关键帧不带**）+ `Gb28181MediaSession`
   （真 UDP 收流 + 序号排序去重 + 按时间戳/marker 组帧 + 解 PS），**37 例**
-  （含 9 例真 UDP 回环）。点播仍返回 `gb28181-invite://`——**不解码 H.264**、
-  不做 TCP/RFC 4571 传输，**不假扮可播 RTSP**；真实厂商互操作（海康/大华私有
-  behaviors、NAT 穿透、真实码流 quirks）仍需真机。**SurveillanceController 的 PTZ
-  端点仍硬编码 ONVIF 路径**（按 vendor 路由的改造登记为后续项）。
+  （含 9 例真 UDP 回环）。**2026-11-11 #272 三层接线**：点播返回 `gb28181-rtp://`
+  摄入端点（`StreamUrlOrigin.MEDIA_PLANE_LOCAL`——本地媒体面可用、**对通用播放器不可播**、
+  设备未验证），INVITE 的 SDP 写真实收流地址（GB/T 28181-2022 附录 C.1）、设备未登记
+  联系地址抛 `Gb28181DeviceContactUnknownException`（REST 502）；**不解码 H.264**、
+  不做 TCP/RFC 4571 传输、**不假扮可播 RTSP**；真实厂商互操作（海康/大华私有
+  behaviors、NAT 穿透、真实码流 quirks）与真机设备联调仍需真机。**SurveillanceController
+  的 PTZ 端点仍硬编码 ONVIF 路径**（按 vendor 路由的改造登记为后续项）。
 - **运营报表（E6）的成本是参数化模型**：`aerofleet.report.cost-per-hour`（默认 0）由
   部署方按其单位经济填——本仓不编造电价/折旧；能耗按电量百分比差，不换算 mAh；
   tenant 维度依赖帧上租户标记（未归属计入 unassigned）。
