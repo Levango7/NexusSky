@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 
 /**
  * Intelligent-imaging pipeline (P3-4 scaffold):
@@ -415,12 +416,25 @@ public class CaptureService {
                             List<Map<String, Object>> detections, double latencyMs) {
         try {
             int truthCount = shot.path("targets").size();
-            List<Double> dists = new ArrayList<>(detections.size());
+            // 真值按 kind 分组（评测面板要按 kind 分别算识别率/误检比）
+            Map<String, Integer> truthByKind = new LinkedHashMap<>();
+            JsonNode targets = shot.path("targets");
+            if (targets != null && targets.isArray()) {
+                for (JsonNode t : targets) {
+                    String kind = t.path("kind").asText("unknown");
+                    truthByKind.merge(kind == null || kind.isEmpty() ? "unknown" : kind,
+                            1, Integer::sum);
+                }
+            }
+            List<io.aerofleet.cloud.vision.CvEvalService.KindDist> matches =
+                    new ArrayList<>(detections.size());
             for (Map<String, Object> d : detections) {
                 Object err = d.get("truthErrorM");
-                dists.add(err instanceof Number n ? n.doubleValue() : -1.0);
+                double dist = err instanceof Number n ? n.doubleValue() : -1.0;
+                String kind = d.get("kind") instanceof String s ? s : "unknown";
+                matches.add(new io.aerofleet.cloud.vision.CvEvalService.KindDist(dist, kind));
             }
-            eval.record(shot.path("frameSeq").asLong(), source, truthCount, dists, latencyMs);
+            eval.record(shot.path("frameSeq").asLong(), source, truthByKind, matches, latencyMs);
         } catch (Exception e) {
             log.warn("cv-eval record failed (ignored): {}", e.getMessage());
         }
