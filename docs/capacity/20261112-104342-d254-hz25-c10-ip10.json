@@ -1,0 +1,124 @@
+{
+  "label": "d254-hz25-c10-ip10",
+  "arm": "cold",
+  "warmupSec": 0,
+  "drones": 254,
+  "hz": 25,
+  "clients": 10,
+  "durationSec": 60,
+  "maxConnPerIp": 10,
+  "injectProcs": 2,
+  "udpReceiveBufferBytes": 0,
+  "onlineDrones": 254,
+  "backendStartSec": 7,
+  "probe": {
+    "clients": 10,
+    "durationSec": 60.0,
+    "handshakeOk": 10,
+    "connectFailures": 0,
+    "perClient": [
+      {
+        "index": 1,
+        "messages": 326786,
+        "latencySamples": 326731,
+        "parseFailures": 0
+      },
+      {
+        "index": 2,
+        "messages": 326723,
+        "latencySamples": 326668,
+        "parseFailures": 0
+      },
+      {
+        "index": 3,
+        "messages": 326650,
+        "latencySamples": 326595,
+        "parseFailures": 0
+      },
+      {
+        "index": 4,
+        "messages": 326564,
+        "latencySamples": 326509,
+        "parseFailures": 0
+      },
+      {
+        "index": 5,
+        "messages": 326469,
+        "latencySamples": 326414,
+        "parseFailures": 0
+      },
+      {
+        "index": 6,
+        "messages": 326469,
+        "latencySamples": 326414,
+        "parseFailures": 0
+      },
+      {
+        "index": 7,
+        "messages": 326468,
+        "latencySamples": 326413,
+        "parseFailures": 0
+      },
+      {
+        "index": 8,
+        "messages": 326409,
+        "latencySamples": 326354,
+        "parseFailures": 0
+      },
+      {
+        "index": 9,
+        "messages": 326335,
+        "latencySamples": 326280,
+        "parseFailures": 0
+      },
+      {
+        "index": 10,
+        "messages": 326292,
+        "latencySamples": 326237,
+        "parseFailures": 0
+      }
+    ],
+    "activeClients": 10,
+    "rejectedByServer": 0,
+    "totalMessages": 3265165,
+    "parseFailures": 0,
+    "latencyCoverage": 1.0,
+    "latencyMs": {
+      "count": 3264615,
+      "p50": 7,
+      "p95": 14,
+      "p99": 42,
+      "max": 258,
+      "mean": 7.9
+    }
+  },
+  "metrics": {
+    "wsSessions": 0.0,
+    "queueDepth": 0.0,
+    "droppedTotal": 0.0,
+    "wsSessionsPeak": 10.0,
+    "queueDepthPeak": 139.0,
+    "dronesOnline": 254.0,
+    "messagesDecoded": 398161.0,
+    "messagesReceived": 398161.0,
+    "messagesErrors": 0.0,
+    "udpDatagrams": 398161.0,
+    "udpNoiseBytes": 0.0,
+    "ingestDroppedTotal": 0.0,
+    "ingestDroppedByReason": {
+      "frame-crc-error": null,
+      "frame-signature-rejected": null,
+      "frame-whitelist-rejected": null,
+      "frame-rate-limited": null,
+      "datagram-truncated": null,
+      "datagram-receive-error": null,
+      "frame-listener-error": null
+    }
+  },
+  "injector": {
+    "sentFrames": 398161,
+    "sentFramesAtSec": 70,
+    "kernelDropEstimate": 0.0,
+    "kernelDropWindowAligned": true
+  }
+}
