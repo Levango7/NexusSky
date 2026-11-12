@@ -13,7 +13,7 @@ HARNESS="$REPO/scripts/capacity-baseline.sh"
 OUT=docs/capacity
 TRACE_DIR="$OUT/traces-loadaxis"
 LOG="$OUT/loadaxis-run.log"
-DRONES=400 HZ=30 CLIENTS=20 MAX_PER_IP=20 DURATION=60 GATE=25 GATE_MAX=1800
+DRONES=400 HZ=30 CLIENTS=20 MAX_PER_IP=20 DURATION=60 GATE=25 GATE_MAX=7200
 ROUNDS_DONE=0
 LOCKD="$REPO/.capacity-loadaxis.lock"
 mkdir -p "$TRACE_DIR"
