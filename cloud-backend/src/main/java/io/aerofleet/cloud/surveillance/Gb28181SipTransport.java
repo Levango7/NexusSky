@@ -229,6 +229,11 @@ public final class Gb28181SipTransport implements Closeable {
         }
     }
 
+    /** socket 是否已关闭（{@link #close()} 之后为 true）。供上层断言端口真的放了。 */
+    public boolean isClosed() {
+        return socket.isClosed();
+    }
+
     @Override
     public void close() {
         running.set(false);

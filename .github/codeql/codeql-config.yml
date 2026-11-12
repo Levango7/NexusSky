@@ -1,0 +1,25 @@
+# CodeQL 配置：按路径排除**协议约束下的安全例外**
+#
+# 这份文件的作用是把"已登记的例外"从"容忍 N 条 open 告警"（--max-open 1，
+# 那等于全仓任何地方多一条新告警都放过）收紧成"**只放过这一条、只放过这个文件**"。
+#
+# 排除项：java/rsa-without-oaep @ DahuaIccClient.java
+#   （2026-11-11 实测：第一次按 `java/insecure-crypto` 写过滤**不生效**——
+#    告警的真实 rule id 是 `java/rsa-without-oaep`（CodeQL 2.27.4，
+#    description "Use of RSA algorithm without OAEP"）。规则 id 写错时症状与"过滤没生效"完全一样，极易误判成"机制不管用"。
+#   理由（大华 ICC 登录密码的 RSA 加密必须用 PKCS#1 v1.5）：
+#     ① 官方 demo（Cipher.getInstance("RSA")）与官方 Python 示例（PKCS1_v1_5）
+#        都是这个填充；改 OAEP 平台侧解不开 ⇒ 登录必然失败；
+#     ② 该公钥是平台主动下发的一次性会话公钥（有效期 10 分钟、认证成功后失效、
+#        用后自动释放），v1.5 的理论攻击面在此语境下不成立，解密失败风险在厂商侧。
+#   放行条件（条件变了必须撤掉本条 + 代码里的 @SuppressWarnings）：
+#     厂商文档给出 OAEP 示例，或联调环境实测 OAEP 可登录。
+#   逐条依据见 docs/codeql-alert-disposition.md。
+#
+# 范围纪律：**只排这一个 query 的这一个文件**。同文件的其他 query、其它文件的
+# java/insecure-crypto 全部照常生效——不是"把这个文件从扫描里拿掉"。
+query-filters:
+  - exclude:
+      id: java/rsa-without-oaep
+      paths:
+        - "**/io/aerofleet/cloud/surveillance/DahuaIccClient.java"

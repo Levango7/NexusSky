@@ -63,6 +63,7 @@ public class DeviceInfo {
             case UNIVIEW -> SurveillanceDevice.Vendor.UNIVIEW;
             case ONVIF, GENERIC -> SurveillanceDevice.Vendor.ONVIF; // ONVIF 标准协议 fallback
             case GB28181 -> SurveillanceDevice.Vendor.GB28181;      // 国标政企视频网（E5）
+            case RTMP -> SurveillanceDevice.Vendor.RTMP;            // RTMP 推流/拉流（E5 对称补齐）
         };
         return new SurveillanceDevice(deviceId, name, deviceVendor, ip, port, username, password);
     }

@@ -334,8 +334,10 @@ public class SurveillanceController {
             return unsupported(d, DeviceCapability.MEDIA);
         }
         try {
-            // 按设备厂商路由（ONVIF 适配器内部复用 OnvifClient；GB28181 返回
-            // gb28181-invite:// 描述性标识——E5 口径：不假扮可播地址）
+            // 按设备厂商路由（ONVIF 适配器内部复用 OnvifClient；GB28181 已接线：
+            // 开真实收流端口 → 构造带真实 SDP 的 INVITE → 真发，返回 gb28181-rtp://
+            // 摄入端点；设备未 REGISTER 时抛 Gb28181DeviceContactUnknownException
+            // ⇒ 落到底下宽捕的 502）
             VendorAdapter adapter = vendorAdapterRegistry.getAdapter(d);
             String url = adapter.getStreamUrl(d, channel);
             d.rtspUrl = url;
@@ -681,6 +683,14 @@ public class SurveillanceController {
         } catch (OnvifException e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                     "event subscription failed for device " + id + ": " + e.getMessage(), e);
+        } catch (Gb28181Adapter.Gb28181DeviceContactUnknownException e) {
+            // GB28181 平台侧是 SIP 服务端，设备地址由它自己 REGISTER 上报。
+            // 没登记就订阅 = 不知道该把 SUBSCRIBE 发给谁 ⇒ 502（上游不可达），
+            // 文案点明"先让设备注册"，而不是含糊的 500。
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "event subscription failed for device " + id
+                            + " (vendor GB28181): device has not registered"
+                            + " (no learned contact address)", e);
         }
         // 建立即发一条注释：立即提交 SSE 响应头（200 + text/event-stream），
         // 客户端无需等待首个设备事件或 15s 心跳即可确认连接已建立
