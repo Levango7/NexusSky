@@ -1,5 +1,62 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 大华 ICC OpenAPI 契约层（公开文档 + 假平台契约，零硬件）
+
+### 背景
+
+四大家商的视频接入是 GB28181（国标）+ 私有 SDK（海康/大华/宇视）。海康 ISC（#266）
+与影石 OSC（#269）契约层已交付，**大华 ICC 是最后一块公开文档契约**：大华开放平台
+`open-icc.dahuatech.com` 公开文档明言提供联调测试环境 ⇒ 这层**不需要买硬件**。
+三家（海康/大华/影石）皆为**公开 REST 契约层**——分层判定口径见
+`docs/real-integration-program.md`；真实设备互操作仍属"等外部"。
+
+### 交付
+
+- `DahuaIccAuth` + `DahuaIccClient`：登录两步（GET 公钥 → RSA 加密密码 → POST token）、
+  token 两小时有效期 + 客户端提前过期（默认留 60s 余量、401 无条件重取重试一次）、
+  字段名容错（access_token / token / magicId 等）、401 自动重认证、**登录密码必须加密
+  发送（PKCS#1 v1.5，见 RSA 例外登记）**。
+- 12 + 6 例假平台契约测试（JDK HttpServer 假平台、**真 HTTP 收发**、零硬件）：
+  两步鉴权、token 提前过期、缓存复用、401 重取重试、字段容错、空公钥响亮失败、
+  登录请求体 password 非空 Base64 密文、tokenType 缺失 / 空串均回落 bearer、
+  缓存命中 authenticate 返回同一非空会话、连接不通 ⇒ 抛自建异常保留 cause、
+  中断线程的中断标志必须恢复、baseUri 尾斜杠归一化（原有"假信心"用例修正）。
+- **CodeQL `java/rsa-without-oaep` 例外（协议约束，非缺陷）**：大华官方 demo
+  （`Cipher.getInstance("RSA")`）与官方 Python 示例（`PKCS1_v1_5`）都是 PKCS#1 v1.5，
+  改 OAEP 平台侧解不开 ⇒ 登录必然失败；且该公钥是平台下发的一次性会话公钥
+  （10 分钟有效、用后释放），v1.5 理论攻击面在此语境下不成立。
+  实施路径是**路径级 query 过滤**（`.github/codeql/codeql-config.yml`，
+  `ci.yml` 的 `codeql-action/init` 用 `config-file:` 引入），只排除
+  `java/rsa-without-oaep` @ `DahuaIccClient.java`——不用 `--max-open` 顶事
+  （那放过任何地方多出的一条新告警）。告警 #95 按仓库既有流程 dismiss（won't fix）。
+
+### 变异门禁收口（surveillance 包）
+
+新加代码 33 个变异体：**32 杀 / 1 存活 / 0 未覆盖**。唯一存活的 1 条逐条定性为
+**等价变异体**（`firstText` 的 `null` → `""`，两处调用点都先判
+`== null || isBlank()` ⇒ 同分支同异常，无可观测差异）。
+surveillance 包整体：2148 变异体 / 1773 杀 / 100 存活 / 234 未覆盖 ⇒
+**分数 0.9263 / 强度 0.9466**（地板 0.92 / 0.94 不变）。
+`scripts/mutation-baseline-surveillance.json` 记账五列与 ciObserved 同步，写 noteRound9。
+
+
+## [Unreleased] — Q2 协议/厂商适配收口批：DJI 物模型字段表核实 + 坐标转换 + RTMP 适配器 + ONVIF 清理（+37 例）
+
+- **DJI 物模型字段表**（`dock/DjThingModelFieldTable`，7 例）：帧层 `{tid,bid,timestamp,method,data}`
+  与 services_reply 应答层 VERIFIED；OSD / flight_task / wayline / livestream / media 五大服务逐字段
+  标注 VERIFIED / UNVERIFIED（依据 `dji-sdk/Cloud-API-2` 官方文档仓逐项核对），未核实项不作为实施依据。
+- **坐标转换**（`geo/CoordinateTransform`，9 例）：WGS-84 / GCJ-02 / BD-09 互转（中国区偏移规则），
+  含参数化用例；往返精度 ≤ 5 米。
+- **RTMP 推流/拉流适配器**（`surveillance/RtmpAdapter`，21 例）：`rtmp://` URL 组装（RFC 3986 编码，
+  复用 VendorRtspUrl 口径）；`Vendor` / `SurveillanceDevice.Vendor` / `DeviceInfo` 与
+  `VendorAdapterRegistry` 四处枚举/分派对称补齐 RTMP。
+- **ONVIF 清理**：删除 `OnvifUnsupportedException`（事件订阅 live 侧已由 `OnvifLiveBackend` 的
+  PullPoint 实现承载）；`OnvifBackend` javadoc 改指 `OnvifEventSource` / `OnvifLiveBackend`。
+- `docs/protocol-vendor-integration.md` 入库：DJI 行 unverified→verified（Cloud API 2.0 v2.4.0、
+  Apache-2.0、MQTT 前置与限流核实状态），搁置项清理；MAVLink/PX4/ArduPilot 官方页 2026-11-11
+  重试复核可达（services 索引页偶发超时，逐页访问替代）。
+- 计数：cloud-backend 3792→3829、全仓 5991→6028（+37 例）；docs 44→45 篇。
+
 ## [Unreleased] — GB28181 接线变异门禁收口（+13 例；本轮接线代码存活变异体 18 → 0）
 
 ### 为什么有这一轮
@@ -3065,7 +3122,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-10 共有 304 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-11 共有 306 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3092,7 +3149,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 304 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 306 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

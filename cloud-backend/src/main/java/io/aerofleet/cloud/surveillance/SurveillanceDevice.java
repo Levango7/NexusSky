@@ -27,7 +27,9 @@ public class SurveillanceDevice {
         /** ONVIF 标准协议（fallback，适用于所有支持 ONVIF 的设备）。 */
         ONVIF,
         /** GB28181 政企视频网标准（国标 SIP 信令，E5 形状层接入）。 */
-        GB28181
+        GB28181,
+        /** RTMP 推流/拉流（Adobe RTMP 规范公开，E5 对称补齐）。 */
+        RTMP
     }
 
     /**

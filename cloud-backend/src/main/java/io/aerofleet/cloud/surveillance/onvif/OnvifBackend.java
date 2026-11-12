@@ -9,8 +9,10 @@ import java.util.Set;
  * ONVIF 后端（模拟 / 真实两种实现）。
  *
  * <p>{@code OnvifClient} 是对外门面，保留既有 API；本接口只承载"设备侧动作"。
- * 事件订阅不在其中：模拟实现的事件表是 {@code OnvifClient} 的测试/联调设施，
- * live 下尚未实现（见 {@link OnvifUnsupportedException}），刻意不与真实协议混在
+ * 事件订阅在另一接口 {@link OnvifEventSource} 中承载：模拟实现的事件表是
+ * {@code OnvifClient} 的测试/联调设施，live 走 {@link OnvifLiveBackend} 的
+ * WS-BaseNotification PullPoint（CreatePullPointSubscription + PullMessages 轮询）；
+ * 两种模式的输出由 {@code StreamUrlOrigin} 在适配器层如实区分，不与真实协议混在
  * 一个接口里假装已经支持。
  */
 public interface OnvifBackend {
