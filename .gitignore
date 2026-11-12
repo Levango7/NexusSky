@@ -50,3 +50,12 @@ gcs-web/shots/
 
 # crew-kernel 运行时状态（agent 注册表/租约/任务板/KV），不入库
 .crew/
+
+# 本地环境变量与密钥文件绝不入库（含 .env.local / .env.production 等变体）；
+# 模板 .env.example 必须可入库（部署文档与试用机部署脚本依赖它）⇒ 用 ! 反向放行。
+# 2026-11-11 实测：修复前根 .gitignore **无任何 .env 规则** ⇒ 只有
+# deploy/tencent-trial/.env 被该目录自己的嵌套 .gitignore 挡住，其余路径
+# （.env / cloud-backend/.env / gcs-web/.env / **/.env.local）**全部不被忽略**。
+.env
+.env.*
+!.env.example
