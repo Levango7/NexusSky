@@ -7,11 +7,14 @@ package io.aerofleet.cloud.gateway;
  * <ul>
  *   <li><b>MAVLink 栈</b>：完整实现（{@link MavlinkDeviceGateway} 适配既有
  *       {@link UdpGateway}——UDP/MAVLink v1/v2/签名全量能力不变）。</li>
- *   <li><b>DJI Cloud API 栈</b>：协议标记与路由骨架就位（设备可标记 dji-cloud 来源、
- *       命令按协议路由），但真实 DJI 设备对端（MQTT 物模型/HTTPS/WebSocket）
- *       接入属生产阶段——与 F2 机巢的 transport=mqtt seam 同一诚实口径。
- *       当前 {@link CommandRouter} 对 dji-cloud 设备的命令返回明确的
- *       UNUPPORTED（不假成功），防止静默丢命令。</li>
+ *   <li><b>DJI Cloud API 栈</b>：{@code aerofleet.dji-cloud.enabled=true} 装配
+ *       {@code DjiCloudApiDeviceGateway}，把 SPI 命令映射为 flight_task 服务
+ *       （takeoff/land/rtl/hover 子集，按 {@code DjThingModelFieldTable} VERIFIED 字段），
+ *       sysid→机巢绑定经 {@code docks.drone_sysid}，payload 走
+ *       thing/product/{sn}/services（tid/bid UUID、按 tid 关联、QoS 1）。
+ *       真实设备联调仍缺（PoC 口径）：调用方收 false = 无映射/无绑定/超时/设备拒绝，
+ *       不得据此当作成功。未装配时本栈缺席，{@code CommandRouter} 拒绝命令（WARN + false）。
+ *       未知 mavCommand 一律不投——映射缺口不插值，不假成功。</li>
  * </ul>
  * 反锁定生态位：注册/遥测/命令面只依赖本接口与 {@link DroneSnapshot}，
  * 新品牌栈实现本接口即可接入机队管理，不改上层。
