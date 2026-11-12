@@ -2088,6 +2088,10 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
+          # 按路径排除已登记的协议约束例外（见 .github/codeql/codeql-config.yml
+          # 与 docs/codeql-alert-disposition.md）。精确到"一个 query × 一个文件"，
+          # 比 --max-open 1 那种"全仓容忍一条新告警"紧得多。
+          config-file: .github/codeql/codeql-config.yml
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
         with:
@@ -2110,8 +2114,14 @@ jobs:
         # docs/codeql-alert-disposition.md），--allow 登记随之清空——
         # 守卫回到“默认全关”：再出现 open 即红，需要新增 open 必须显式提
         # --max-open 并在处置文档登记理由。
+        # 2026-11-08：--max-open 1 —— #264 大华 ICC 对接引入的
+        # java/insecure-crypto（RSA/ECB/PKCS1Padding）是**协议约束下的例外**：
+        # 大华官方 demo 用 PKCS#1 v1.5，改 OAEP 平台解不开 ⇒ 登录必失败。
+        # 逐条依据见 docs/codeql-alert-disposition.md（含放行条件）。
+        # 该登记只减不增：厂商文档给出 OAEP 示例并实测通过后，
+        # 应改代码并把这里与处置文档一并清掉。
         run: >-
-          python3 scripts/check-codeql-alerts.py
+          python3 scripts/check-codeql-alerts.py --max-open 1
 
   docker-build:
     name: Docker Build & Push

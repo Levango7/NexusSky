@@ -10,6 +10,76 @@
 > 对告警面板而言，代价比文档更直接——永远 open 的高危条目会让"还有 4 个没修"
 > 变成长期噪音，将来出现**真**新告警时会被淹没在这 4 条里。
 
+## 2026-11-08 新增一条（#264 大华 ICC 对接引入，**协议约束下的安全例外**）
+
+### `java/rsa-without-oaep`（CodeQL: "RSA/ECB/PKCS1Padding without OAEP padding"）— `DahuaIccClient#rsaEncrypt`
+
+**是什么**：`Cipher.getInstance("RSA/ECB/PKCS1Padding")`——PKCS#1 v1.5 填充，
+理论上面临 padding oracle 类攻击。
+
+**为什么不能改成 OAEP**（改 = 让功能坏掉，不是修缺陷）：
+
+1. **大华官方文档《RSA密码加密》给的 demo 就是 `Cipher.getInstance("RSA")`**
+   （Java 的 `"RSA"` 变换即 PKCS#1 v1.5）；同文档的 Python 示例用的是
+   `Crypto.Cipher.PKCS1_v1_5`。换成 OAEP 后平台侧解不开 ⇒ 登录必然失败。
+2. **该公钥是平台主动下发的一次性会话公钥**：文档明确「公钥有效期 10 分钟，
+   认证成功后立即失效」「为了防止请求重放，所有使用秘钥对，请求对应业务功能成功后，
+   会自动释放掉」。这不是长期复用的密钥体系，v1.5 的弱点在这个语境下不构成
+   可重放通道。
+3. 平台侧持私钥；padding oracle 的风险落在**厂商解密实现**上，不在本客户端可控范围。
+
+**什么时候才允许改**：大华开放平台文档给出 OAEP 示例，或在其联调环境上实测
+OAEP 登录通过。在那之前改成 OAEP 是把"更安全但连不上"当成"更安全"，是负优化。
+
+**代码里怎么记的**：`DahuaIccClient#rsaEncrypt` 方法上带
+`@SuppressWarnings("java/rsa-without-oaep")`，方法 javadoc 里写全三条理由与放行条件，
+与本文档互相引用。
+
+**这条是怎么关掉的（2026-11-11 实测结论）**：**注释形式的抑制对本条无效**——
+按 CodeQL 通用文档试了两种位置（紧邻上一行的 `// codeql[java/rsa-without-oaep]`、
+同一行行尾的 `// codeql[...]`），CI 的 CodeQL 检查**两次都仍报同一条告警**
+（annotation 指向 `DahuaIccClient.java` 里 `Cipher.getInstance` 那一行）；
+换成方法上的 `@SuppressWarnings("java/rsa-without-oaep")` 注解后**仍然报**
+（注解在本仓只对已在 alerts 库里的历史告警有效，本条是 PR 分析新引入的，
+PR 分析的告警不落库 ⇒ 没有可 dismiss 的对象）。
+
+**最终采用的是路径级 query 过滤**：`.github/codeql/codeql-config.yml` 里
+
+```yaml
+query-filters:
+  - exclude:
+      id: java/rsa-without-oaep
+      paths:
+        - "**/io/aerofleet/cloud/surveillance/DahuaIccClient.java"
+```
+
+> **规则 id 写错 = 过滤没生效，且症状一模一样**：第一次按 `java/insecure-crypto`
+> 写过滤，CI 仍报同一条告警，一度被误判成"路径级过滤机制对本条不管用"。
+> 实际原因只是**告警的真实 rule id 是 `java/rsa-without-oaep`**
+> （CodeQL 2.27.4，description "Use of RSA algorithm without OAEP"）。
+> 告警的 message 文本（"This specification is used to initialize an RSA cipher
+> without OAEP padding"）**不包含 rule id**，只看 message 会一直找错规则。
+> 查 rule id 的正确入口：`gh api repos/<repo>/code-scanning/alerts?ref=refs/pull/<n>/merge`
+> （注意 PR 告警挂在 **merge ref** 上，`refs/pull/<n>/head` 查不到）。
+
+并在 `ci.yml` 的 `codeql-action/init` 步骤用 `config-file:` 引入。
+**为什么用它而不是 `--max-open 1`**：`--max-open` 是"全仓允许 N 条 open 告警"，
+N=1 意味着**任何地方**多出一条新告警都会被放过——它拦不住新问题；
+路径级过滤只放过"这一个 query 在这一个文件上"，同文件的其它 query、其它文件的
+同 query 全部照常生效。两者不是一回事。
+
+代码里同时保留 `@SuppressWarnings("java/rsa-without-oaep")` 与完整理由注释
+（与本仓另两条例外的写法一致，也是 IDE 侧可见的标记）。
+
+**为什么这条只能人工关一次、不能在 API 里 dismiss**：PR 分析产生的告警不落
+code-scanning alerts 库（`gh api repos/.../code-scanning/alerts?state=open` 对
+`refs/heads/feat/dahua-icc-contract` 与 `refs/pull/264/head` 都查不到这条），
+所以面板上没有可点的对象；`ci.yml` 的守卫按 alerts 库计数，本条靠**代码侧抑制**
+不进库、不占 `--max-open` 配额。
+
+**连带的诚实说明**：本仓 `README`/协调板的真机联调项**不变**——此条不推进真机打通，
+只是把"公开文档契约层 + 一次性命中公钥"的安全边界写明。
+
 ## 四条逐条说明
 
 ### #1 `js/request-forgery`（critical）— `gcs-web/src/api.js:103`
