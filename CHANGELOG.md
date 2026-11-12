@@ -1,5 +1,14 @@
 # NexusSky 变更日志
 
+## [Unreleased] — docs: 厂商私有行对齐 #264/#266 的 ICC/ISC 开放平台契约层（0 例增删）
+
+protocol 文档的 Dahua/Hik 两行仍写「模拟实现、SDK 未接入」，但 #264（大华 ICC OpenAPI）
+与 #266（海康 iSecure Center OpenAPI）已交付契约层（公开文档 + 零硬件可对接 + 假平台契约测试）：
+
+- `docs/protocol-vendor-integration.md`：两行改为「契约层 + 流地址层模拟」双层表述，
+  状态 unverified→**partially verified**；§3 映射同步（Uniview 仍纯模拟）；
+- `docs/todo.md` #14：现状补「开放平台契约层已交付」，剩余项改为私有 SDK 真实现 + 真机互操作。
+
 ## [Unreleased] — docs: GB28181 文档口径对齐 #272 三层接线实况（0 例增删）
 
 #272（信令+媒体+适配器三层接线、+16 例真 UDP 回环）落地后，5 份文档的过时表述同步：
@@ -3133,7 +3142,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-11 共有 307 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-12 共有 308 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3160,7 +3169,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 307 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 308 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
