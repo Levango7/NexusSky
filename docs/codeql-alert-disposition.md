@@ -208,11 +208,21 @@ alert，守卫立刻红——登记的是历史 disposition，不是永久免罪
 
 ### 修复（本 PR，分支 fix/codeql-alert-suppression-queries）
 
-`.github/workflows/ci.yml` 的 codeql job：`init` 的 `queries` 输入按矩阵语言显式叠加
-`+java/alert-suppression,java/alert-suppression-annotations` / `+js/alert-suppression`
-（`+` = 叠加默认集；逗号分隔；语义经 codeql-action 源码 `parseQueriesFromInput` 核实）。
+`.github/workflows/ci.yml` 的 codeql job：`init` 的 `packs` 输入按矩阵语言叠加
+`codeql/java-queries:AlertSuppression.ql, codeql/java-queries:AlertSuppressionAnnotations.ql` /
+`codeql/javascript-queries:AlertSuppression.ql`（逗号分隔；路径为包内相对路径——
+`qlpack.yml` 就在 `java/ql/src/`，`AlertSuppression.ql` 位于包根；语义经 codeql-action
+v3 源码 `parsePacksFromInput` 核实：单语言矩阵、逗号分隔、无 `+` 前缀时只覆盖配置文件的
+`packs` 键，本仓该键为空 ⇒ 默认查询套件照常跑，抑制查询纯增量）。
 与 #264 引入的 `config-file`（query-filters 排除）正交：前者加查询、后者减排除，互不影响。
 本 PR 不动守卫脚本（`--require-data` 是另一笔）。
+
+**为什么不是 `queries: +java/alert-suppression,...`**：`queries` 输入里的单斜杠裸规则 id
+会被 CodeQL CLI 当外部仓库 specifier 拒绝——`A fatal error occurred: Specifier for
+external repository is invalid: java/alert-suppression`，init 退出码 2（run 43137211970
+实证，2026-11-12）。`packs` 输入是 codeql-action 为此提供的通道，真实生产配置实证：
+crate/crate-python（`packs: "codeql/${{ matrix.language }}-queries:AlertSuppression.ql"`）
+与 Dispatcharr/Plugins（配置文件路由，含 java/javascript 双语）。
 
 合并后下一轮扫描即实证：抑制查询进入评估集，且复测
 `code-scanning/alerts?state=open` 不得出现 #93/#94 的新编号。注意当前守卫是

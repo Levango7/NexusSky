@@ -2081,12 +2081,19 @@ jobs:
           # kind=alert-suppression 的查询一条也进不去（2026-11-12 实证：
           # js 轮评估 89 条 / java 轮 80 条，零条 alert-suppression）。
           # 不显式加上，仓里的 // codeql[...] 与 @SuppressWarnings 源内
-          # 抑制就是惰性装饰（#93/#94 因此滞开）。按语言给值——java 轮
-          # 引用 js 查询会在解析时失败。
+          # 抑制就是惰性装饰（#93/#94 因此滞开）。
+          # 必须走 packs 输入而非 queries 叠加：queries 里单斜杠裸规则 id
+          # 会被 CLI 当外部仓库 specifier 拒绝（"Specifier for external
+          # repository is invalid: java/alert-suppression"，run 43137211970
+          # 实证退出码 2）。packs 输入只支持单语言矩阵（多语言会
+          # ConfigurationError，见 codeql-action 源码 parsePacksFromInput），
+          # 本矩阵恰好每 job 单语言。条目逗号分隔；路径是包内相对路径
+          # （qlpack.yml 在 java/ql/src，AlertSuppression.ql 即在包根；写法
+          # 经 crate/crate-python 与 Dispatcharr/Plugins 生产配置实证）。
           - language: java
-            codeql-queries: +java/alert-suppression,java/alert-suppression-annotations
+            codeql-packs: codeql/java-queries:AlertSuppression.ql, codeql/java-queries:AlertSuppressionAnnotations.ql
           - language: javascript
-            codeql-queries: +js/alert-suppression
+            codeql-packs: codeql/javascript-queries:AlertSuppression.ql
     steps:
       - uses: actions/checkout@v4
       - name: Restore Maven local repository (restore-only; saves are owned by maven-warm)
@@ -2099,7 +2106,9 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          queries: ${{ matrix.codeql-queries }}
+          # 叠加 alert-suppression 查询（值按矩阵语言给，见上）。packs 输入
+          # 是纯增量：本仓配置文件的 packs 键为空，默认查询套件照常跑。
+          packs: ${{ matrix.codeql-packs }}
           # 按路径排除已登记的协议约束例外（见 .github/codeql/codeql-config.yml
           # 与 docs/codeql-alert-disposition.md）。精确到"一个 query × 一个文件"，
           # 比 --max-open 1 那种"全仓容忍一条新告警"紧得多。
