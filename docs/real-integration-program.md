@@ -161,10 +161,11 @@ ONVIF 事件订阅（PullPoint）另立"）。
   私有 API（非 OSC）。
 - GB28181 媒体面（RTP/PS）：形状层与 **SIP-over-UDP 传输层均已交付**（#258：
   `Gb28181SipTransport` + `Gb28181DeviceSimulator` 8 例真回环测试）；
-  **适配器尚未接线**，RTP/PS 媒体面仍属生产阶段。
-  事件订阅面同步：`Gb28181Adapter.supportsEventSubscription()` 仍为 `false`
+  ~~**适配器尚未接线**，RTP/PS 媒体面仍属生产阶段。~~
+  ~~事件订阅面同步：`Gb28181Adapter.supportsEventSubscription()` 仍为 `false`
   ——只构造 SUBSCRIBE 形状、未接线到传输层，REST 在建立 SSE 之前回 501
-  （此前是先回 200 再挂一条永远不会触发回调的空流）。
+  （此前是先回 200 再挂一条永远不会触发回调的空流）。~~
+  （**2026-11-11 #272 已接线，以下条为准**）
 - GB28181 适配器**已接线**（本轮）：`Gb28181Adapter.getStreamUrl()` 从
   「构造信令形状 + 返回 `gb28181-invite://` 描述性标识」变成
   「开真实收流端口 → 构造带真实 SDP 的 INVITE → 真发到设备 → 返回
