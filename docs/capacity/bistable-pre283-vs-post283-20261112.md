@@ -67,3 +67,13 @@ pre283 臂（`31afbc10`，2026-11-12 10:19–10:52 +0800，本实验）：
 
 1. 提负载轴（hz 30+ / drones 400+ / clients 20+）在干净环境复测，检验 pre283 的弱化签名是否随负载放大成历史 A 型；
 2. 就此收口：把「A 型＝CPU 竞争/环境风暴签名，非代码版本固有吸引子」写回主实验 README 开放项（2.13 遗留），本报告入档。
+
+（11-12 深夜：用户裁选项 1。负载轴复测已发起——d400/hz30/c20/ip20/60s，p2/p4 交替 3 对 6 轮全 cold，
+门控与硬对账同对照实验；进度/结果落 docs/capacity/loadaxis-run.log 与 traces-loadaxis/。截至发稿门控
+持有中（盒上其他会话占 CPU 60-100%），尚未开火。）
+
+## 存籍注记（11-12 傍晚追加）
+
+`/f/tmp/capacity/` 全目录被共享目录清理（同毁还有 /f/tmp/nex-bistable*.sh wrapper 原件），pre283 臂的
+run-log / CPU 轨迹原件不存。轮级证据以本目录 JSON（门控序列与对账结果已登记板上）为准。负载轴实验起
+改用仓内 wrapper（scripts/capacity-loadaxis.sh）＋轨迹入仓（docs/capacity/traces-loadaxis/），不再依赖 /f/tmp。
