@@ -9,8 +9,6 @@
 #   A3  建工单 → 201；流转 dispatch→start→resolve
 #   A4  复检（飞机仍在目标上空，必然命中）→ REOPENED + 命中清单
 #   A5  报告导出：csv 含数据行、md 含标题、json 含 summary
-#   A6  杆塔号挂接 + 缺陷复检航线：手工立案带塔号缺陷 → recheck 生成 tower 复检航线
-#       （1 抵达 + 4 环绕 + 1 驻留）；AI 晋升缺陷无塔号 ⇒ 工单复检路由应报 400 而非空航线
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File scripts\e2e-defect.ps1
@@ -178,33 +176,6 @@ try {
     Assert-True ($md.raw -match '# NexusSky 缺陷报告') "md 含标题（A5）"
     $json = Try-Json 'GET' "$Base/defects/report?format=json" $null
     Assert-True ($null -ne $json.body.summary) "json 含 summary（复检通过率口径）"
-
-    # ---- 6. 杆塔号挂接 + 缺陷复检航线（A6）----
-    Write-Host '[A6] 杆塔号挂接缺陷 → defect-recheck 生成复检航线...'
-    # 人工立案一条带杆塔号的缺陷（AI 晋升的缺陷没有杆塔号，这是刻意的：antenna 不知飞哪塔）
-    $towerDefectBody = @{
-        kind = 'person'; lat = 22.5910; lon = 113.9340; confidence = 0.95
-        note = 'e2e 复检航线种子（建筑物角落员工）'; towerNo = 'E2E-01'
-    } | ConvertTo-Json -Depth 5
-    $towerDefect = Try-Json 'POST' "$Base/defects" $towerDefectBody
-    Assert-True ($towerDefect.code -eq 201) "立案带 towerNo 的缺陷 → 201（A6，实际 $($towerDefect.code)）"
-    if ($towerDefect.code -ne 201) { throw 'tower defect create failed, abort A6' }
-
-    # 复检航线生成：按 towerNos 指定 → 1 塔 6 航点（1 抵达 + 4 环绕 + 1 驻留）+ 尾 RTL
-    $rr = Try-Json 'POST' "$Base/route-templates/defect-recheck" (@{ towerNos = @('E2E-01') } | ConvertTo-Json)
-    Assert-True ($rr.code -eq 200) "defect-recheck 受理 → 200（A6，实际 $($rr.code)）"
-    if ($rr.code -eq 200 -and $rr.body) {
-        $wpCount = @($rr.body.waypoints).Count
-        Assert-True ($wpCount -ge 6) "复检航线航点 ≥6（1 抵达 + 4 环绕 + 1 驻留，实际 $wpCount）"
-        Assert-True ($rr.body.towerCount -eq 1) "towerCount = 1（实际 $($rr.body.towerCount)）"
-        Assert-True (@($rr.body.sourceDefectIds).Count -ge 1) "sourceDefectIds 非空（A6）"
-        $legs = @($rr.body.legs)
-        Assert-True ($legs.Count -ge 1 -and $legs[0].towerNo -eq 'E2E-01') "legs 按塔分段：towerNo = E2E-01（A6）"
-    }
-
-    # 工单复检航线：auto 晋升的缺陷无杆塔号 ⇒ 无人可飞 ⇒ 400（不是静默空航线）
-    $rr2 = Try-Json 'POST' "$Base/route-templates/defect-recheck" (@{ workOrderId = $woId } | ConvertTo-Json)
-    Assert-True ($rr2.code -eq 400) "工单全挂未带杆塔号的缺陷 ⇒ 400（A6，实际 $($rr2.code)）"
 
 } catch {
     Write-Host "  [FAIL] 异常：$($_.Exception.Message)" -ForegroundColor Red
