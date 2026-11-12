@@ -173,3 +173,59 @@ alert，守卫立刻红——登记的是历史 disposition，不是永久免罪
 **维护规则**：每 dismiss 一条，就同时从 `.github/workflows/ci.yml` 的 `--allow`
 里删掉该编号，并把上表那行划掉。清单应该只减不增；若确实要新增登记，
 必须在此文档补一行"为什么保留"——不允许既不 dismiss 也不登记地堆积。
+
+## 2026-11-12 追加：#93/#94 复现、面板处置与"源内抑制结构性惰性"根因
+
+> 数据源：`gh api repos/Levango7/NexusSky/code-scanning/alerts?state=open`（2026-11-12
+> 读回：open=0；#93/#94 均 state=dismissed，理由与 comment 已读回核实）。
+
+### 同一对告警在新编号下复现
+
+行号随 2026-10-11 之后的提交漂移（:103→:138、:162→:217），规则与代码语义未变，
+已按上表同理由在面板 dismiss：
+
+| 编号 | 规则 | 等级 | 位置（现） | dismissed_reason | 依据 |
+|---|---|---|---|---|---|
+| #93 | js/request-forgery | critical | `gcs-web/src/api.js:138` | false positive | 同 #1：`resolveApiUrl()` 同源强制 + `/api/v1/` 前缀；`apiUrlGuard.test.js` 13 处覆盖 |
+| #94 | java/tainted-numeric-cast | critical | `cloud-backend/src/main/java/io/aerofleet/cloud/mission/common/DroneCommandService.java:217` | won't fix | 同 #2：MAVLink COMMAND_LONG param 在线路是 4 字节 float，窄化协议必需 |
+
+### 为什么仓内的源内抑制一直是"惰性"的
+
+两处抑制写法本身都符合 CodeQL 规则（`// codeql[js/request-forgery]` 独占一行、贴告警行
+正上方；`@SuppressWarnings("codeql[java/tainted-numeric-cast]")` 注解整个方法），但
+**默认查询集根本不跑抑制查询**：
+
+1. 默认配置 = `javascript-code-scanning.qls` / `java-code-scanning.qls`（上游 github/codeql
+   仓原文），内容只有 `- queries: .` + `- apply: code-scanning-selectors.yml`；
+2. `misc/suite-helpers/code-scanning-selectors.yml` 的 include 规则只收 kind ∈
+   {problem, path-problem, alert, path-alert} 等，**`alert-suppression` 不匹配任何规则**；
+3. 实测（读 CodeQL job 日志，2026-11-12）：js 轮评估 89 条、java 轮 80 条查询，零条
+   alert-suppression；仓内无自定义配置（augmented user-config 为 `{}`）；近 12 个
+   codeql-cli-binaries 版本无相关变更 ⇒ 不是版本回归。
+4. 结论：抑制查询从未执行，写法对错不再是变量。这是**默认管线的结构性缺口**。
+
+完整证据链（含上游原文逐字引用）见 `.coord/STATUS.md` 2026-11-12T07:44 条目。
+
+### 修复（本 PR，分支 fix/codeql-alert-suppression-queries）
+
+`.github/workflows/ci.yml` 的 codeql job：`init` 的 `packs` 输入按矩阵语言叠加
+`codeql/java-queries:AlertSuppression.ql, codeql/java-queries:AlertSuppressionAnnotations.ql` /
+`codeql/javascript-queries:AlertSuppression.ql`（逗号分隔；路径为包内相对路径——
+`qlpack.yml` 就在 `java/ql/src/`，`AlertSuppression.ql` 位于包根；语义经 codeql-action
+v3 源码 `parsePacksFromInput` 核实：单语言矩阵、逗号分隔、无 `+` 前缀时只覆盖配置文件的
+`packs` 键，本仓该键为空 ⇒ 默认查询套件照常跑，抑制查询纯增量）。
+与 #264 引入的 `config-file`（query-filters 排除）正交：前者加查询、后者减排除，互不影响。
+本 PR 不动守卫脚本（`--require-data` 是另一笔）。
+
+**为什么不是 `queries: +java/alert-suppression,...`**：`queries` 输入里的单斜杠裸规则 id
+会被 CodeQL CLI 当外部仓库 specifier 拒绝——`A fatal error occurred: Specifier for
+external repository is invalid: java/alert-suppression`，init 退出码 2（run 43137211970
+实证，2026-11-12）。`packs` 输入是 codeql-action 为此提供的通道，真实生产配置实证：
+crate/crate-python（`packs: "codeql/${{ matrix.language }}-queries:AlertSuppression.ql"`）
+与 Dispatcharr/Plugins（配置文件路由，含 java/javascript 双语）。
+
+合并后下一轮扫描即实证：抑制查询进入评估集，且复测
+`code-scanning/alerts?state=open` 不得出现 #93/#94 的新编号。注意当前守卫是
+`--max-open 1`（#264 的大华例外，见 2026-11-08 节），单条重现不会立刻红——
+以面板 open 列表复测为准，不以守卫绿红为准。面板 dismiss 记录不受影响
+（dismiss 永久保留）——本修复让**将来**的源内抑制真正生效。
