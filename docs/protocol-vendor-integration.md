@@ -12,7 +12,7 @@
 
 | 协议族 | 行业龙头 / 官方出处 | 官方 SDK / 文档（公开） | 在仓对应代码 | 状态 | 备注 |
 |---|---|---|---|---|---|
-| MAVLink 2（PX4/ArduPilot，SITL/MAVROS） | PX4（px4.io）、ArduPilot（ardupilot.org）、MAVROS（wiki.ros.org/mavros） | MAVLink 2 规范/指南（mavlink.io）、PX4 SITL、MAVROS | `mavlink-core/`（MAVLink v1/v2 协议栈：编解码、CRC、v2 签名、任务协议；SITL 实测见 `sitl-integration.md`） | **verified** | 官方页复核（2026-11-11 重试）：mavlink.io 指南页 / px4.io / ardupilot.org 可达确认；mavlink.io services 索引页与 MAVROS wiki 本机网络超时（逐页访问替代）。prior skill：PX4 BSD-3、ArduPilot GPLv3、dronefleet/mavlink MIT Java；EasyGCS/dronefleet 不存在；ThingsBoard 无 MAVLink 连接器；esp-drone GPLv3 活跃 |
+| MAVLink 2（PX4/ArduPilot，SITL/MAVROS） | PX4（px4.io）、ArduPilot（ardupilot.org）、MAVROS（wiki.ros.org/mavros） | MAVLink 2 规范/指南（mavlink.io）、PX4 SITL、MAVROS | `mavlink-core/`（MAVLink v1/v2 协议栈：编解码、CRC、v2 签名、任务协议；SITL 实测见 `sitl-integration.md`） | **verified** | 官方页复核（2026-11-11 重试）：mavlink.io 指南页 / px4.io / ardupilot.org 可达确认；mavlink.io services 索引页与 MAVROS wiki 本机网络超时（逐页访问替代）。prior skill：PX4 BSD-3、ArduPilot GPLv3、dronefleet/mavlink MIT Java；EasyGCS/dronefleet 不存在；ThingsBoard 无 MAVLink 连接器；esp-drone GPLv3 活跃。**官方服务面对照（2026-11-13 完成，mavlink.io 服务页逐页取证）**：心跳 / 任务 / 命令 / OpenDroneId（Remote ID）✅；相机核心 5 条（CAMERA_INFORMATION / SETTINGS / CAPTURE_STATUS / IMAGE_CAPTURED / FOV_STATUS）✅（视频流 / 存储 / 跟踪未覆盖）；**参数服务 ❌**（官方 PARAM_REQUEST_LIST / REQUEST_READ / SET / VALUE 族在仓无对应消息类）；云台族 ❌ |
 | DJI Cloud API（MQTT 物模型） | DJI（developer.dji.com） | Cloud API 2.0 文档：MQTT topic scheme、OSD / flight_task / wayline / livestream / media 字段 schema | `cloud-backend/.../dock/MqttDockGateway.java`（`thing/product/{sn}/services` 下行、`services_reply` 应答，QoS 1，tid 关联） | **verified** | **Cloud API 2.0 v2.4.0 (Apache-2.0)**；MQTT 前置：开发者认证→App ID/Key→设备接入权限；JWT Token (OAuth2.0)；设备接入权限需单独申请；topic/message/partner 三字段：`thing/device/{bind,unbind,online,offline}`、`thing/property/report`、`thing/service/invoke`；限流：10 msg/s/设备、1000 并发/App、100 req/min/API；物模型五大服务字段已按官方 schema 在 DjThingModelFieldTable.java 中标记 VERIFIED/UNVERIFIED |
 | ONVIF（Discovery/GetCapabilities/GetProfiles/GetStreamUri/PTZ/Events，符合性测试） | ONVIF（onvif.org） | ONVIF 核心规范 + Profiles A/C/D/G/M/S/V；WS-Discovery Probe；设备管理 GetCapabilities/GetProfiles；媒体 GetStreamUri/RTSP；PTZ ContinuousMove/Stop；事件 PullPoint；ONVIF Device Manager + 符合性测试 | `cloud-backend/.../surveillance/onvif/OnvifLiveBackend.java`（discoverDevices/getDeviceCapabilities/getRtspUrl/ptzControl/isLive；live 已实现，WS-Security PasswordDigest） | **verified** | onvif.org 已核实；live 后端已落地（Q2-W1 已完成），OnvifUnsupportedException 已移除 |
 | MQTT dock 接入 | MQTT（mqtt.org）、Eclipse Paho | MQTT 3.1.1 / 5.0 规范，Paho Java 客户端 | `MqttDockGateway.java`（Paho，QoS 1，命令-应答 tid 关联，broker URL 空缺 fail-fast） | **verified** | 实现已在仓，规范为通用 MQTT，无厂商私有前置 |
@@ -52,10 +52,9 @@
 
 ## 5. 搁置项（缺条件 / 需裁决，不动）
 
-1. MAVLink 2 官方 services 索引页逐项对照（2026-11-11 重试：指南页可达、索引页与 MAVROS wiki 本机网络超时 ⇒ 逐页访问；剩余为逐项比对，非阻塞）。
-2. GB28181 真机设备联调（#272 已交付平台侧三层接线与真 UDP 回环；剩真实设备/厂商测试环境 + GB/T 28181-2022 附录 C.1 设备侧一致性）。
-3. ASTM F3411 / F3548 Remote ID / CCAR-92 / GB/T。
-4. 电网巡检 / 应急招标侧接口要求。
+1. GB28181 真机设备联调（#272 已交付平台侧三层接线与真 UDP 回环；剩真实设备/厂商测试环境 + GB/T 28181-2022 附录 C.1 设备侧一致性）。
+2. ASTM F3411 / F3548 Remote ID / CCAR-92 / GB/T。
+3. 电网巡检 / 应急招标侧接口要求。
 
 ## 6. 冲突避免与更新纪律
 

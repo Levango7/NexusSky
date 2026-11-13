@@ -1,5 +1,16 @@
 # NexusSky 变更日志
 
+## [Unreleased] — docs: MAVLink 官方服务面逐项对照收口（protocol §5.1 销项，0 例增删）
+
+protocol 文档最后一个自注册未了项完成（mavlink.io 服务页逐页取证 + mavlink-core 消息清单核对，共 88 个消息类）：
+
+- **已覆盖**：心跳（`Heartbeat`）、任务（Mission 族）、命令（COMMAND_LONG / INT / ACK + ManualControl）、
+  OpenDroneId / Remote ID（6 条）、相机核心 5 条（CAMERA_INFORMATION / SETTINGS / CAPTURE_STATUS /
+  IMAGE_CAPTURED / FOV_STATUS）；
+- **未覆盖**：**参数服务**（官方 PARAM_REQUEST_LIST / REQUEST_READ / SET / VALUE 族在仓无对应消息类）、
+  云台族、相机视频流 / 存储 / 跟踪；
+- protocol §5 搁置项相应减 1（原 5.1 销项；余 3 项均卡外部条件）。
+
 ## [Unreleased] — docs: 厂商私有行对齐 #264/#266 的 ICC/ISC 开放平台契约层（0 例增删）
 
 protocol 文档的 Dahua/Hik 两行仍写「模拟实现、SDK 未接入」，但 #264（大华 ICC OpenAPI）
@@ -3193,7 +3204,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-13 共有 309 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-13 共有 310 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3220,7 +3231,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 309 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 310 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
