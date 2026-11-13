@@ -1,5 +1,44 @@
 # NexusSky 变更日志
 
+## [Unreleased] — P1-10：双栈网关第 2 栈（DJI Cloud API）—— SPI 命令 → flight_task 真链路（+11 例）
+
+### 背景
+
+P1-10「多品牌双栈网关：DeviceGateway 抽象 MAVLink | 上云 API」（调研文档 P1）收口最后一块。
+F5 交付了 SPI + MAVLink 栈适配 + 协议标记 + CommandRouter；dji-cloud 侧此前一律「无栈拒绝」。
+
+### 改了什么
+
+**1. DjiCloudApiDeviceGateway（新增）**：`aerofleet.dji-cloud.enabled=true` 时装配。
+SPI 命令 `(mavCommand, p1..p7)` → DJI Cloud API **flight_task** 服务的 `action`：
+takeoff(22) / land(21) / rtl(20) / hover(17, 19)——按 `DjThingModelFieldTable`
+flight_task VERIFIED 字段表核实后的唯一受信子集。payload 走 thing/product/{dock-sn}/services
+（tid/bid UUID、gateway=机巢 SN、QoS 1），按 tid 收 `services_reply` 关联（`data.result=0` → true）。
+sysid → 机巢经 `docks.drone_sysid`（机巢托管机），查不到绑定一律 false——**不编造 SN**；
+takeoff 透传 `targetAltitude=p7`。未映射 mavCommand（含 NAV_WAYPOINT=16：MAVLink 段 p4..p6
+是本地 m 坐标、与 DJI go_to 的 WGS-84 语义不一致，直投会静默错误）→ WARN + false，不插值。
+
+**2. DjiCloudApiProperties（新增）**：`aerofleet.dji-cloud.*`（enabled / mqtt-broker-url /
+mqtt-username/password / command-timeout-ms）。**enabled=true 且 broker-url 空缺 ⇒ 启动 fail-fast**
+（与 F2 `aerofleet.dock.transport=mqtt` 同一口径）。默认 enabled=false，缺省即无栈拒绝。
+
+**3. 诚实边界（如实记录）**：
+- 真实设备 / 真 EMQX 联调仍缺（PoC 口径）——本实现做的是：真协议栈驱动 + 帧形状对齐
+  官方字段表（flight_task VERIFIED 子集）+ 拒绝路径 fail-closed；
+- payload 打到**机巢作网关**（DJI Cloud API 架构本就如此），不是直连飞机；
+- 未装配（默认）时，dji-cloud 命令仍是 CommandRouter 的 WARN + false——不静默丢、不假成功；
+- `NAV_GO_TO_*` 类语义双方单位不同（本地 m vs WGS-84 度），本批不映射，待真有 WGS-84 调用方再说。
+
+**4. A/B 双向判红**：
+- A/B 1：未映射命令默认插值 `hover` → `unmappedCommandNeverPublishes`、`actionForTable` 2 红；
+- A/B 2：找不到机巢绑定时编造 SN 硬发 → `unknownSysidNeverPublishes` 红；
+- 还原后 11 例全绿。
+
+### 影响面
+
+dji-cloud 协议设备从「无栈拒绝」变为「按映射子集真实下发」；默认装配（enabled=false）行为不变。
+MAVLink 栈零改动。cloud-backend 3868 / 全仓 6067 / 0 失败；18 项门禁全过。
+
 ## [Unreleased] — docs: MAVLink 官方服务面逐项对照收口（protocol §5.1 销项，0 例增删）
 
 protocol 文档最后一个自注册未了项完成（mavlink.io 服务页逐页取证 + mavlink-core 消息清单核对，共 88 个消息类）：
@@ -3204,7 +3243,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-13 共有 310 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-13 共有 311 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3231,7 +3270,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 310 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 311 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
