@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 更新至 2026-10-24，共 79 个 `@RestController`、3 个 `@Service` 辅助类、415 个 REST API 端点
+> 更新至 2026-10-24，共 79 个 `@RestController`、3 个 `@Service` 辅助类、416 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -2615,6 +2615,7 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 | GET | `/{id}/schedules` | 定时任务列表（需 OBSERVER） | - | 200 / 404 |
 | POST | `/{id}/schedules/{sid}/enable` | 启用/停用（需 ADMIN） | {enabled} | 200 / 404 |
 | DELETE | `/{id}/schedules/{sid}` | 删除定时任务（需 ADMIN） | - | 200 / 404 |
+| GET | `/{id}/runs` | 无人值守运行记录（架次结果 + 关联 inspectionTaskId，需 OBSERVER） | - | 200 [运行记录] / 404 |
 
 #### 命令 method 取值
 
@@ -2697,7 +2698,7 @@ es.onerror = (e) => {
 | 模块 | Controller | 基础路径 | 端点数 |
 |------|-----------|----------|--------|
 | 无人机控制 | DroneController | /api/v1/drones | 8 |
-| 机巢管理 | DockController | /api/v1/docks | 10 |
+| 机巢管理 | DockController | /api/v1/docks | 11 |
 | 无人机控制 | FlightLogController | /api/v1/flightlog | 2 |
 | 飞行追踪 | TrackingController | /api/v1/tracking | 6 |
 | 电子围栏 | GeofenceController | /api/v1/geofence | 7 |
@@ -2775,4 +2776,4 @@ es.onerror = (e) => {
 | 链路仿真 | LinkSimControlController | /api/v1/link-sim | 2 |
 | **合计** | **79 个 @RestController** | | **415** |
 
-> **注**: 项目共 80 个 Controller 源文件：77 个为 `@RestController`，`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。不算 actuator，`@RestController` 类共 79 个（另有 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的类也标注 `@RestController`，但不含任何方法级映射注解、不暴露 API）—— 共 415 个端点（219 GET / 163 POST / 14 PUT / 16 DELETE / 1 PATCH）。因此下表列 77 行（+链接仿真的 `LinkSimControlController`），端点列之和 411 = 415 − 2。
+> **注**: 项目共 80 个 Controller 源文件：77 个为 `@RestController`，`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。不算 actuator，`@RestController` 类共 79 个（另有 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的类也标注 `@RestController`，但不含任何方法级映射注解、不暴露 API）—— 共 416 个端点（219 GET / 163 POST / 14 PUT / 16 DELETE / 1 PATCH）。因此下表列 77 行（+链接仿真的 `LinkSimControlController`），端点列之和 411 = 415 − 2。
