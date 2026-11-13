@@ -12,9 +12,13 @@
 #   bash "$SELF" --write      # 用标记块替换 .coord/STATUS.md 里的同一段
 #   bash scripts/coord-status.sh --json       # 机器可读输出（给别的脚本用）
 #   COORD_NO_GH=1 / COORD_REPO_SLUG=… / COORD_STATUS_FILE=… 是测试注入点
+#   COORD_DECL_CORPUS_FAIL=1 强制「声明语料抽取失败」（自测夹具用）
+#   COORD_DECL_SNAP_FAIL=1   强制「板面快照复制失败」（自测夹具用）
+#   COORD_SKIP_DECL_GUARD=1   跳过 --write 前的「开工声明」列守卫（默认不跳；要跳必须留痕）
 #
 # 退出码：
 #   0  证据齐全
+#   1  被守卫拦下（多副本 / 段落丢失 /「开工声明」列无法被板面解释）——原文件未动
 #   2  证据不全（找不到主 worktree / gh 不可用 / 网络失败）
 #      —— 刻意不返回 0：「没查到」不能冒充「没问题」，静默的 0 比报错更危险。
 #
@@ -251,6 +255,107 @@ declared_for() {
   grep -qF -- "$br" "$corpus" 2>/dev/null
 }
 
+# --- 写盘前的「开工声明」列守卫 ------------------------------------------------
+# 这一列是**避撞车防护的唯一信号**：读板的人靠它判断「这条线是不是已经有人开工了」。
+# 2026-11-11 实测的假绿根因就是它退化成「整文件 grep」⇒ 自动生成段自己命中自己
+# ⇒ 每行都显示「有」⇒ 等于没有防护（#264 的 owner 至今查不出来，板面却显示「有声明」）。
+#
+# 守卫**不看分布形状**（"全是有"也可能完全属实：每个人都真登记了），
+# 只看**这一列能不能被板面里人的手写部分解释**：
+#   ① 【独立于判定函数】分支名若在**标记块之外**从未出现，则「有」不可能来自任何人的
+#      开工登记 ⇒ 只能是自动生成块把自己算进去了 ⇒ 拒写。
+#   ② 【与判定自洽】用「物理去掉标记块后的板面」重算一次语料，逐行比对末列取值；
+#      对不上 ⇒ 末列不是由声明记录算出来的 ⇒ 拒写。
+#   ③ 【语料抽取失败】awk 报错等情况下语料会变成空 ⇒ 末列全体变「无声明」＝另一种
+#      假绿（板面会说"没人开工"）⇒ 拒写。
+#
+# 已知盲区（不装作没有）：若**声明记录抽取本身**退化成「整文件 grep」，**且**该分支名
+# 在板面手写部分里被叙述性提到过，则 ①② 都判它「有」⇒ 这一行漏检。
+# 那一层由 T11/T12 的函数级夹具兜底（判定函数本身被改坏 ⇒ T11/T12 转红）。
+
+# 物理去掉「标记块」区域（独立实现：即便 declared_corpus 的排除逻辑被改坏，
+# 这份「没有标记块的板面」仍能给出诚实的手写部分）
+strip_marker_regions() {
+  awk -v b="$BEGIN" -v e="$END" '
+    index($0, b) { inside=1; next }
+    index($0, e) { inside=0; next }
+    !inside { print }
+  ' "$1" > "$2"
+}
+
+# 从生成块里抽出「开工声明」列：每行输出 "分支<TAB>取值"。
+# 只认 worktree 行：6 个分隔符（7 段）且末列是判定取值（有 / **无声明**）。
+decl_column_rows() {
+  awk -F'|' '
+    /^\|/ && NF==7 {
+      v=$(NF-1); b=$3
+      # ⚠️ 表格单元取值的**首尾空白必须裁掉**（2026-11-12 实测踩坑）：
+      #    行格式是 `| \`wt\` | \`br\` @ \`sha\` | ahead=0 | 无 | 有 |`，
+      #    按 `|` 切开后 $3=" \`br\` @ \`sha\` "、$(NF-1)=" 有 " ⇒ **两端都带空格**。
+      #    不裁 ⇒ v 永远匹配不上「有 / **无声明**」⇒ 守卫**一行都抽不出**（空转假绿，
+      #    看起来全绿其实根本没检查）；b 带着空格去 grep 也会失配 ⇒ 假阳性拒写。
+      gsub(/^[[:space:]]+/, "", v); gsub(/[[:space:]]+$/, "", v)
+      gsub(/^[[:space:]]+/, "", b); gsub(/[[:space:]]+$/, "", b)
+      if (v != "有" && v != "**无声明**") next
+      gsub(/`/, "", b)
+      sub(/ @ .*$/, "", b)
+      gsub(/^[[:space:]]+/, "", b); gsub(/[[:space:]]+$/, "", b)
+      if (b == "") next
+      print b "\t" v
+    }
+  ' "$1"
+}
+
+# guard_decl_column <生成块文件> <板面快照文件>
+#   0 = 放行；1 = 拒写（原因已打到 stderr）
+guard_decl_column() {
+  local blk="$1" board="$2" rc=0 br val stripped strict
+  if [ "${COORD_SKIP_DECL_GUARD:-0}" = "1" ]; then
+    warn "注意：COORD_SKIP_DECL_GUARD=1 ⇒ 跳过了「开工声明」列守卫（这一列若已退化，板面会说假话）。"
+    return 0
+  fi
+  # ③ 语料抽取失败 ⇒ 末列全体变「无声明」＝另一种假绿
+  if [ "${COORD_DECL_CORPUS_FAIL:-0}" = "1" ] || [ "${DECL_EXTRACT_OK:-1}" != "1" ]; then
+    warn "失败：声明语料抽取失败 ⇒「开工声明」列会全体变成「无声明」（= 板面在说「没人开工」）＝另一种假绿。"
+    warn "处理：查 awk 是否可用、板面文件是否可读；本次不放行（--write 会拒写，原文件不动）。"
+    return 1
+  fi
+  stripped="$(mktemp)" || return 1
+  strict="$(mktemp)" || { rm -f "$stripped"; return 1; }
+  strip_marker_regions "$board" "$stripped"
+  if ! declared_corpus "$stripped" > "$strict" 2>/dev/null; then
+    # 独立重算失败 ⇒ 拿空语料去比会报出**查无实据**的「不自洽」（每一行都会被误判）
+    # ⇒ 这一条必须单独拦下，并说清是「算不出来」而不是「不自洽」。
+    warn "失败：独立重算的声明语料抽取失败 ⇒ 无法判断「开工声明」列是否可信（不放行）。"
+    rm -f "$stripped" "$strict"
+    return 1
+  fi
+  while IFS=$'\t' read -r br val; do
+    [ -n "$br" ] || continue
+    if [ "$val" = "有" ]; then
+      # ① 该分支在标记块外从未出现 ⇒ 「有」不可能来自开工登记
+      if ! grep -qF -- "$br" "$stripped" 2>/dev/null; then
+        warn "失败：分支 \`$br\` 的「开工声明」= 有，但它在标记块之外**从未出现** ⇒ 这一列只能是被自动生成块自己算进去的（判定已退化）。"
+        rc=1
+        continue
+      fi
+      # ② 与「物理去掉标记块后重算」的结果对不上 ⇒ 末列不是由声明记录算出来的
+      if ! declared_for "$br" "$strict"; then
+        warn "失败：分支 \`$br\` 的「开工声明」= 有，但把标记块物理去掉后重算仍判「无声明」⇒ 末列与声明记录不自洽（判定已退化）。"
+        rc=1
+      fi
+    else
+      if declared_for "$br" "$strict"; then
+        warn "失败：分支 \`$br\` 的「开工声明」= 无声明，但把标记块物理去掉后重算判「有」⇒ 末列与声明记录不自洽（判定已退化）。"
+        rc=1
+      fi
+    fi
+  done < <(decl_column_rows "$blk")
+  rm -f "$stripped" "$strict"
+  [ "$rc" = "0" ] || warn "处理：查 scripts/coord-status.sh 的判定与生成段；本次不放行（--write 会拒写，原文件不动）。"
+  return "$rc"
+}
+
 # =============================================================================
 # 自测：证明「取不到」不会被冒充成「没问题」，且 --write 只动标记块、不重复插。
 # 全部在临时目录里跑，绝不碰真实的 .coord/STATUS.md。
@@ -260,6 +365,8 @@ self_test() {
   local self_abs dup eolrepo bare realrepo eol_out d1 d2 d3 decoy _t10
   local t11_board t11_corpus t11_board2 t11_corpus2 t11_board3 t11_corpus3
   local t12_board t12_corpus
+  local t13_board t13_blk t13_status t13_status2 t13_status3 t13_status4
+  local t13_fakebin t13_realawk
   local _mk_repo _dirty_via_script
   SELF="$(resolve_selftest_target)"
   [ -f "$SELF" ] || { echo "无法判定：自测目标不存在（$SELF）——绝不测别的文件冒充通过。" >&2; return 1; }
@@ -662,6 +769,90 @@ EOF
   declared_for "feat/t12-both-markers" "$t12_corpus" || fails="${fails}T12:一行里括号外有标记时没认出来（应认得出） "
   declared_for "feat/t12-continued" "$t12_corpus" || fails="${fails}T12:括号内含标记的续记行被丢弃，其分支名没认出来（应认得出） "
 
+  # T13 写盘前的「开工声明」列守卫（2026-11-12 新增）。
+  #   这一列是避撞车防护的**唯一信号**；它一旦退化，板面就在说假话，
+  #   而**只有写盘这道门**能挡住「把假话写进共享板面」。
+  #   守卫不看分布形状（"全是有"也可能是真的：每个人都真登记了），
+  #   只看这一列**能不能被板面里人的手写部分解释**：
+  #     ① 分支名在标记块外从未出现，却判「有」   ⇒ 拒写（只能是被自动块自己算进去的）
+  #     ② 与「物理去掉标记块后重算」的结果对不上 ⇒ 拒写（末列不是声明记录算出来的）
+  #     ③ 声明语料抽取失败                        ⇒ 拒写（末列全体变「无声明」＝另一种假绿）
+  #   九个夹具（各自单独编号，变异测试要靠编号区分「哪一条在承重」）：
+  #     ① 红（判据①）      ② 红（判据②**专属**） ③ 红（判据②另一侧）
+  #     ④ 绿（混合一致）   ⑤ 绿（全是「有」但确有记录 ⇒ 防误伤）
+  #     ⑥ 红（注入的语料失败，端到端） ⑦ 红（**真**故障注入，端到端）
+  #     ⑧ 绿（正常写入，端到端，含二次写入）
+  #     ⑨ 红（**快照复制失败**，端到端 ⇒ 语料为空 ⇒ 末列全体「无声明」＝另一种假绿）
+  t13_board="$tmp/t13-board.md"
+  t13_blk="$tmp/t13-block.md"
+  # ① 红：块外**完全**没有这个分支，却判「有」⇒ 必须拦下
+  printf '# 板\n## 开工声明\n- 某人：别的分支\n' > "$t13_board"
+  printf '| worktree | 分支 @ sha | 相对 master | 未提交面 | 开工声明 |\n|---|---|---|---|---|\n| `wt1` | `feat/t13-degenerate` @ `abc1234` | ahead=0 | 无 | 有 |\n' > "$t13_blk"
+  guard_decl_column "$t13_blk" "$t13_board" >/dev/null 2>&1 \
+    && fails="${fails}T13①:块外无据却判「有」未被拦下（守卫失效） "
+  # ② 红：**块外有但只是叙述**（不在任何声明记录里）却判「有」⇒ 必须拦下。
+  #    这一条是判据②的**专属**夹具：判据①（块外完全没出现）在这里不成立，
+  #    所以它转红 ⇒ 只有「末列必须能被声明记录解释」这条判据在承重。
+  printf '# 板\n## 工程现状\n盘点时提到 feat/t13-narrative，只是叙述，不是开工登记。\n## 开工声明\n- 某人：别的分支\n' > "$t13_board"
+  printf '| worktree | 分支 @ sha | 相对 master | 未提交面 | 开工声明 |\n|---|---|---|---|---|\n| `wt1` | `feat/t13-narrative` @ `abc1234` | ahead=0 | 无 | 有 |\n' > "$t13_blk"
+  guard_decl_column "$t13_blk" "$t13_board" >/dev/null 2>&1 \
+    && fails="${fails}T13②:只是叙述却判「有声明」未被拦下（判据②失效） "
+  # ③ 红：分支在声明记录里却判「无声明」⇒ 必须拦下（判据②的另一侧）
+  printf '# 板\n## 开工声明\n- 某人：分支 feat/t13-mismatch\n' > "$t13_board"
+  printf '| worktree | 分支 @ sha | 相对 master | 未提交面 | 开工声明 |\n|---|---|---|---|---|\n| `wt1` | `feat/t13-mismatch` @ `abc1234` | ahead=0 | 无 | **无声明** |\n' > "$t13_blk"
+  guard_decl_column "$t13_blk" "$t13_board" >/dev/null 2>&1 \
+    && fails="${fails}T13③:列与声明记录不自洽（记录里有却判无声明）未被拦下 "
+  # ④ 绿：混合分布且与记录一致 ⇒ 必须放行
+  printf '# 板\n## 开工声明\n- 某人：分支 feat/t13-real\n' > "$t13_board"
+  printf '| worktree | 分支 @ sha | 相对 master | 未提交面 | 开工声明 |\n|---|---|---|---|---|\n| `wt1` | `feat/t13-real` @ `abc1234` | ahead=0 | 无 | 有 |\n| `wt2` | `feat/t13-none` @ `def5678` | ahead=0 | 无 | **无声明** |\n' > "$t13_blk"
+  guard_decl_column "$t13_blk" "$t13_board" >/dev/null 2>&1 \
+    || fails="${fails}T13④:混合且与记录一致的分布被误拦（守卫过紧） "
+  # ⑤ 绿：**全是「有」但确有记录** ⇒ 必须放行（守卫不能把分布形状当判据）
+  printf '# 板\n## 开工声明\n- 某人：分支 feat/t13-all-a\n## 开工声明续\n- 某人：分支 feat/t13-all-b\n' > "$t13_board"
+  printf '| worktree | 分支 @ sha | 相对 master | 未提交面 | 开工声明 |\n|---|---|---|---|---|\n| `wt1` | `feat/t13-all-a` @ `abc1234` | ahead=0 | 无 | 有 |\n| `wt2` | `feat/t13-all-b` @ `def5678` | ahead=0 | 无 | 有 |\n' > "$t13_blk"
+  guard_decl_column "$t13_blk" "$t13_board" >/dev/null 2>&1 \
+    || fails="${fails}T13⑤:确有记录却因「全是有的」被误拦（守卫把分布形状当判据了） "
+  # ⑥ 红·端到端：语料抽取失败 ⇒ --write 必须拒写，且**文件一个字节都不能动**
+  t13_status="$tmp/STATUS13.md"
+  printf '# 板\n## 开工声明\n- 某人：声明\n## 规则速记\n- 某规则\n' > "$t13_status"
+  cp "$t13_status" "$tmp/STATUS13.before"
+  COORD_PR_FIXTURE="$pr_det" COORD_DECL_CORPUS_FAIL=1 COORD_STATUS_FILE="$t13_status" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+  [ "$rc" = "1" ] || fails="${fails}T13⑥:语料抽取失败时期望拒写(exit1) 实得 $rc "
+  cmp -s "$t13_status" "$tmp/STATUS13.before" || fails="${fails}T13⑥:语料抽取失败时拒写却改了文件 "
+  # ⑦ 红·真故障注入：让 declared_corpus **真的**失败（假 awk 只在含 is_claim_header 的
+  #    调用上退出 3）⇒ 必须走到「语料抽取失败 ⇒ 拒写」这条真路径，而不是只靠注入点。
+  #    （注入点只证明守卫的条件分支在承重；这一条证明**抽取失败真的会被发现**。）
+  t13_fakebin="$tmp/fakebin"
+  mkdir -p "$t13_fakebin"
+  t13_realawk="$(command -v awk)"
+  printf '#!/usr/bin/env bash\nfor a in "$@"; do\n  case "$a" in\n    *is_claim_header*) exit 3;;\n  esac\ndone\nexec "%s" "$@"\n' "$t13_realawk" > "$t13_fakebin/awk"
+  chmod +x "$t13_fakebin/awk"
+  t13_status3="$tmp/STATUS13c.md"
+  printf '# 板\n## 开工声明\n- 某人：声明\n## 规则速记\n- 某规则\n' > "$t13_status3"
+  cp "$t13_status3" "$tmp/STATUS13c.before"
+  PATH="$t13_fakebin:$PATH" COORD_PR_FIXTURE="$pr_det" COORD_STATUS_FILE="$t13_status3" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+  [ "$rc" = "1" ] || fails="${fails}T13⑦:声明语料真抽取失败时期望拒写(exit1) 实得 $rc "
+  cmp -s "$t13_status3" "$tmp/STATUS13c.before" || fails="${fails}T13⑦:声明语料真抽取失败时拒写却改了文件 "
+  # ⑧ 绿·端到端：正常写入必须仍成功（守卫不能误伤），且**二次写入**（板面已含标记块、
+  #    块里就有每个分支名）也必须成功——这正是旧口径（整文件 grep）会露馅的场景：
+  #    一旦判定退化成整文件 grep，二次写入就会把每行都写成「有」⇒ 守卫必须拒写。
+  t13_status2="$tmp/STATUS13b.md"
+  printf '# 板\n## 开工声明\n- 某人：声明\n## 规则速记\n- 某规则\n' > "$t13_status2"
+  COORD_PR_FIXTURE="$pr_det" COORD_STATUS_FILE="$t13_status2" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+  [ "$rc" = "0" ] || fails="${fails}T13⑧:正常写入应成功(exit0) 实得 $rc（守卫误伤了正常写入？） "
+  grep -qF 'coord-status:begin' "$t13_status2" || fails="${fails}T13⑧:正常写入没写进标记块 "
+  COORD_PR_FIXTURE="$pr_det" COORD_STATUS_FILE="$t13_status2" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+  [ "$rc" = "0" ] || fails="${fails}T13⑧:二次写入应成功(exit0) 实得 $rc（守卫误伤了？） "
+  # ⑨ 红·端到端：板面快照复制失败 ⇒ 语料会变空 ⇒ 末列全体「无声明」＝另一种假绿
+  #    ⇒ 必须拒写，且**文件一个字节都不能动**。
+  #    （守的是判据③的另一半：DECL_EXTRACT_OK。变异 M7 把它关掉时这一条必须转红。）
+  t13_status4="$tmp/STATUS13d.md"
+  printf '# 板\n## 开工声明\n- 某人：声明\n## 规则速记\n- 某规则\n' > "$t13_status4"
+  cp "$t13_status4" "$tmp/STATUS13d.before"
+  COORD_PR_FIXTURE="$pr_det" COORD_DECL_SNAP_FAIL=1 COORD_STATUS_FILE="$t13_status4" bash "$SELF" --write >/dev/null 2>&1; rc=$?
+  [ "$rc" = "1" ] || fails="${fails}T13⑨:板面快照复制失败时期望拒写(exit1) 实得 $rc "
+  cmp -s "$t13_status4" "$tmp/STATUS13d.before" || fails="${fails}T13⑨:板面快照复制失败时拒写却改了文件 "
+
   rm -rf "$tmp"
   if [ -n "$fails" ]; then
     echo "自测失败：$fails" >&2
@@ -681,6 +872,9 @@ EOF
   echo "「开工声明」判定可证伪（自动生成段与叙述段里的分支名**不算**声明、声明记录里的认得出、"
   echo "标记行与分支名分行也认得出、记录边界会关闭、括号里的标注与「未认领」不算声明头、真声明不被误杀、"
   echo "**括号里还有别的字**的旁注不开声明记录、括号外的标记照认、续记行不丢分支名）。"
+  echo "写盘前的「开工声明」列守卫可证伪（块外无据却判「有」⇒拒写、与声明记录不自洽⇒拒写、"
+  echo "语料抽取失败⇒拒写且文件不动、**板面快照复制失败⇒拒写且文件不动**、混合且一致⇒放行、"
+  echo "**全是「有」但确有记录⇒放行**、正常写入⇒放行）。"
   echo "自测目标恒为**被调用的那一份**（同名诱饵副本不被劫持）。"
   return 0
 }
@@ -808,10 +1002,31 @@ fi
 
 # --- 声明语料：整份板面抽一次（在途与占用表要用它判定每个分支有没有开工声明）----
 # 语料是**整份板面**的性质，不随分支变 ⇒ 抽一次即可，不必每个分支重抽。
+#
+# 2026-11-12 加固：**先把板面取一份快照**，语料从快照抽、守卫也从快照重算。
+# 否则「抽语料」与「写回」之间若有人改了板面，两边看的就不是同一份文件 ⇒
+# 守卫会拿旧语料去对新板面比，报出查无实据的「不自洽」。
 DECL_CORPUS="$(mktemp)"
-trap 'rm -f "$DECL_CORPUS"' EXIT
+BOARD_SNAP="$(mktemp)"
+BLK_FILE=""
+trap 'rm -f "$DECL_CORPUS" "$BOARD_SNAP" "$BLK_FILE" 2>/dev/null' EXIT
+DECL_EXTRACT_OK=1
 if [ -f "$STATUS_FILE" ]; then
-  declared_corpus "$STATUS_FILE" > "$DECL_CORPUS" 2>/dev/null || : > "$DECL_CORPUS"
+  # COORD_DECL_SNAP_FAIL 是自测夹具的注入点：强制走「快照复制失败」这条支路。
+  # 这条支路必须有夹具，否则「快照为空 ⇒ 语料为空 ⇒ 末列全体『无声明』」这个假绿
+  # 就只有代码兜着、没有断言兜着（变异 M7 关掉 DECL_EXTRACT_OK 判据时必须转红）。
+  if ! cp "$STATUS_FILE" "$BOARD_SNAP" 2>/dev/null || [ "${COORD_DECL_SNAP_FAIL:-0}" = "1" ]; then
+    DECL_EXTRACT_OK=0
+    DEGRADED=1
+    : > "$BOARD_SNAP"
+  elif ! declared_corpus "$BOARD_SNAP" > "$DECL_CORPUS" 2>/dev/null; then
+    # 旧写法是 `|| : > "$DECL_CORPUS"`——**把失败吞成空语料**：
+    # 空语料 ⇒ 每一行都判「无声明」⇒ 板面会说"没人开工"＝另一种假绿。
+    # 现在失败**显式记下来**：--write 由守卫拒写；--print/--json 只降级（exit 2）。
+    DECL_EXTRACT_OK=0
+    DEGRADED=1
+    : > "$DECL_CORPUS"
+  fi
 else
   : > "$DECL_CORPUS"
 fi
@@ -897,7 +1112,17 @@ BLOCK="${BLOCK}"$'\n'"**在途 PR**"$'\n\n'"${PR_BLOCK}"$'\n'
 BLOCK="${BLOCK}"$'\n'"**未合入 master 的远端分支**：${UNMERGED}"$'\n'
 BLOCK="${BLOCK}${END}"
 
+# 用文件传块，不用 awk -v：-v 会解释反斜杠转义，markdown 里迟早踩雷。
+# 守卫也要逐行读这个块 ⇒ 统一在这里落盘（--print/--json 只用这个临时文件，不碰状态板）。
+BLK_FILE="$(mktemp)"
+printf '%s\n' "$BLOCK" > "$BLK_FILE"
+
 if [ "$MODE" = "print" ]; then
+  # 守卫：这一列若无法被板面解释 ⇒ 数据不可信。--print 只读，照常打印但标「证据不全」；
+  # 同样的情形 --write 会直接拒写（见下面「断言四」）。
+  if ! guard_decl_column "$BLK_FILE" "$BOARD_SNAP"; then
+    DEGRADED=1
+  fi
   printf '%s\n' "$BLOCK"
   [ "$DEGRADED" = "1" ] && { warn "证据不全（见上），退出码 2。"; exit 2; }
   exit 0
@@ -940,9 +1165,7 @@ if [ "$_ncopies" -gt 1 ]; then
   warn "处理：先收敛成一份（保留最新那份，其余原样归档到 .coord/STATUS-HISTORY.md），再重跑。"
   exit 1
 fi
-# 用文件传块，不用 awk -v：-v 会解释反斜杠转义，markdown 里迟早踩雷
-BLK_FILE="$(mktemp)"
-printf '%s\n' "$BLOCK" > "$BLK_FILE"
+# 标记块文件 BLK_FILE 已在生成块时落盘（守卫要读它），此处直接用。
 TMP_STATUS="${STATUS_FILE}.coord-status.tmp.$$"
 if grep -qF "$BEGIN" "$STATUS_FILE" && grep -qF "$END" "$STATUS_FILE"; then
   awk -v b="$BEGIN" -v e="$END" -v blkf="$BLK_FILE" '
@@ -959,7 +1182,7 @@ else
   ' "$STATUS_FILE" > "$TMP_STATUS"
   grep -qF "$BEGIN" "$TMP_STATUS" || warn "注意：状态板里没有标记块，本次是插入新段（此后每次刷新只动标记块内的内容）。"
 fi
-rm -f "$BLK_FILE"
+# BLK_FILE 要活到「断言四」（守卫要逐行读它）⇒ 这里不删，交给 EXIT trap 清理。
 if [ ! -s "$TMP_STATUS" ]; then
   warn "失败：生成的内容为空，保留原文件不动。"
   rm -f "$TMP_STATUS"
@@ -998,6 +1221,15 @@ if [ "$(grep -c '^## 在途与占用' "$TMP_STATUS")" -gt 1 ] && ! grep -qF "$BE
 fi
 if [ "$(grep -c '^## 在途与占用' "$TMP_STATUS")" -ne 1 ]; then
   warn "失败：生成后「在途与占用」段数不是 1，放弃写入。"
+  rm -f "$TMP_STATUS"
+  exit 1
+fi
+# 断言四（2026-11-12 新增）：「开工声明」列必须能被板面里人的手写部分解释。
+# 这一列是避撞车防护的**唯一信号**；它一旦退化（恒真或恒假），板面就在说假话，
+# 而**只有写盘这一道门**能挡住「把假话写进共享板面」。
+# 前三道门查的是「有没有把别人的内容写坏」，这一道查的是「自己写进去的是不是真的」。
+if ! guard_decl_column "$BLK_FILE" "$BOARD_SNAP"; then
+  warn "失败：「开工声明」列的取值无法被板面解释（判定可能已退化）—— 放弃写入，原文件未动。"
   rm -f "$TMP_STATUS"
   exit 1
 fi
