@@ -2127,10 +2127,11 @@ jobs:
         # docs/codeql-alert-disposition.md 必须写明逐条依据。
         # 每 dismiss 一条，就从 --allow 里删掉对应编号——让清单只减不增。
         #
-        # 不加 --require-data：CodeQL Actions 的 runner 上没有
-        # code-scanning 读权限，gh 取不到数是**正当场景**。
-        # 此时明确打印 WARN 并跳过核对（exit 0）——但绝不说成"0 条 open"。
-        # 严格的本地核对用 --require-data。
+        # --require-data：取数失败即红（exit 2），不允许"没查到"伪装成
+        # "0 条 open"。旧版不加的理由（"runner 无 code-scanning 读权限"）
+        # 已被日志证伪——真因是缺 GH_TOKEN（见 env 注释）；补齐后该让步
+        # 失效，守卫转为 fail-closed。job 权限 security-events: write 覆盖
+        # 告警读取；若上游改口径，本步会红在明处而不是假绿。
         # 2026-10-11：4 条历史告警已全部去面板 dismiss（见
         # docs/codeql-alert-disposition.md），--allow 登记随之清空——
         # 守卫回到“默认全关”：再出现 open 即红，需要新增 open 必须显式提
@@ -2141,8 +2142,15 @@ jobs:
         # 逐条依据见 docs/codeql-alert-disposition.md（含放行条件）。
         # 该登记只减不增：厂商文档给出 OAEP 示例并实测通过后，
         # 应改代码并把这里与处置文档一并清掉。
+        env:
+          # 2026-11-13 前本步不设 GH_TOKEN，gh 取数报 "To use GitHub CLI in a
+          # GitHub Actions workflow, set the GH_TOKEN environment variable"
+          # （run 43255422698 java 腿日志实测）⇒ 守卫恒走 WARN+exit 0 空跑，
+          # 实际从未数过任何告警（master run 42976597357 在 2 条 open 下仍
+          # success 即铁证）。给 GITHUB_TOKEN 后数据才真的流进来。
+          GH_TOKEN: ${{ github.token }}
         run: >-
-          python3 scripts/check-codeql-alerts.py --max-open 1
+          python3 scripts/check-codeql-alerts.py --max-open 1 --require-data
 
   docker-build:
     name: Docker Build & Push
