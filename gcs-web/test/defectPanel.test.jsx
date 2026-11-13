@@ -30,6 +30,12 @@ vi.mock('../src/api.js', () => ({
     transitionWorkOrder: vi.fn().mockResolvedValue({ result: 'OK' }),
     verifyWorkOrder: vi.fn().mockResolvedValue({ result: 'VERIFIED' }),
     setStatus: vi.fn().mockResolvedValue({ result: 'OK' }),
+    recheckRoute: vi.fn().mockResolvedValue({
+      towerCount: 1,
+      waypoints: [{}, {}, {}],
+      estKm: 0.42,
+      unlinkedDefectIds: [],
+    }),
   },
 }))
 
@@ -97,6 +103,21 @@ describe('DefectPanel 渲染冒烟', () => {
     render(<DefectPanel />)
     await waitFor(() => {
       expect(screen.getAllByText(/缺陷|工单/).length).toBeGreaterThan(0)
+    })
+  })
+
+  it('点击「复检航线」调用 recheckRoute 并展示结果计数', async () => {
+    defectsApi.list.mockResolvedValueOnce([])
+    defectsApi.workOrders.mockResolvedValueOnce([{
+      id: 42, title: 'T-007 复检', status: 'OPEN', defectIds: [7],
+      verifiedDetail: null, cancelReason: null,
+    }])
+    const { container } = render(<DefectPanel />)
+    const btn = await screen.findByText('复检航线')
+    btn.click()
+    await waitFor(() => {
+      expect(defectsApi.recheckRoute).toHaveBeenCalledWith({ workOrderId: 42 })
+      expect(container.textContent).toContain('T-')
     })
   })
 

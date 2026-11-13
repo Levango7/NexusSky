@@ -8,4 +8,6 @@ public interface DefectRepository extends JpaRepository<DefectEntity, Long> {
     List<DefectEntity> findByStatusInOrderByCreatedAtDesc(List<String> statuses);
     List<DefectEntity> findByCreatedAtBetweenOrderByCreatedAtDesc(long from, long to);
     List<DefectEntity> findByKindAndStatusIn(String kind, List<String> statuses);
+    List<DefectEntity> findByTowerNoAndStatusInOrderByCreatedAtDesc(String towerNo, List<String> statuses);
+    List<DefectEntity> findByTowerNoInAndStatusInOrderByCreatedAtDesc(List<String> towerNos, List<String> statuses);
 }

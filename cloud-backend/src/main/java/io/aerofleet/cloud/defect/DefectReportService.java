@@ -80,6 +80,7 @@ public class DefectReportService {
         m.put("confidence", d.confidence);
         m.put("lat", d.lat);
         m.put("lon", d.lon);
+        m.put("towerNo", d.towerNo);
         m.put("source", d.source);
         m.put("note", d.note);
         m.put("createdAt", DAY.format(Instant.ofEpochMilli(d.createdAt)));

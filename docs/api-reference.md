@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 更新至 2026-10-24，共 79 个 `@RestController`、3 个 `@Service` 辅助类、414 个 REST API 端点
+> 更新至 2026-10-24，共 79 个 `@RestController`、3 个 `@Service` 辅助类、415 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -2474,10 +2474,18 @@ curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/cv-eval/me
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
 | POST | `/generate` | `{type: tower|solar|pipeline|shoreline, ...参数}` → 航点任务 | OPERATOR |
+| POST | `/defect-recheck` | 缺陷复检航线：按未消缺缺陷的杆塔号生成 tower 复检航线（P1-8） | OPERATOR |
 
 **类型参数**：tower（towers 坐标序列/orbitRadiusM/orbitPoints/hoverSec）；solar（polygon/lineSpacingM/directionDeg）；
 pipeline（line/stepM）；shoreline（polygon/stepM/offsetM）。响应含 waypoints + legs（tower 按塔分段）+ estKm。
 参数非法返回 400+字段名；航点上限 990。
+
+**defect-recheck**：入参 `{ towerNos?: string[], workOrderId?: number, altM?, orbitRadiusM?, orbitPoints?, hoverSec? }`（至少给一个）。
+行为：挑**未消缺（OPEN/CONFIRMED）**且**带杆塔号**的缺陷（按 towerNos 过滤或取工单 `workOrderId` 挂接的缺陷），
+按塔分组（同塔多笔取最新立案坐标做锚点），复用 tower 模板生成航线；已消缺的塔不飞。
+响应在 tower 视图基础上增加 `towerCount` / `towers[]`（每塔 defectIds、anchorDefectId）/
+`sourceDefectIds` / `unlinkedDefectIds`（无杆塔号的缺陷不飞，计入此列表）。
+**不驱动飞控**：生成的航点经既有 mission 链路下发。
 
 ---
 
@@ -2765,6 +2773,6 @@ es.onerror = (e) => {
 | 视觉感知 | CvEvalController | /api/v1/cv-eval | 2 |
 | 视频融合 | VideoFusionController | /api/v1/video-fusion | 5 |
 | 链路仿真 | LinkSimControlController | /api/v1/link-sim | 2 |
-| **合计** | **79 个 @RestController** | | **414** |
+| **合计** | **79 个 @RestController** | | **415** |
 
-> **注**: 项目共 80 个 Controller 源文件：77 个为 `@RestController`，`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。不算 actuator，`@RestController` 类共 79 个（另有 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的类也标注 `@RestController`，但不含任何方法级映射注解、不暴露 API）—— 共 414 个端点（219 GET / 163 POST / 14 PUT / 16 DELETE / 1 PATCH）。因此下表列 77 行（+链接仿真的 `LinkSimControlController`），端点列之和 411 = 414 − 2。
+> **注**: 项目共 80 个 Controller 源文件：77 个为 `@RestController`，`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。不算 actuator，`@RestController` 类共 79 个（另有 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的类也标注 `@RestController`，但不含任何方法级映射注解、不暴露 API）—— 共 415 个端点（219 GET / 163 POST / 14 PUT / 16 DELETE / 1 PATCH）。因此下表列 77 行（+链接仿真的 `LinkSimControlController`），端点列之和 411 = 415 − 2。

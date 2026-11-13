@@ -178,7 +178,7 @@ Part 108 BVLOS：NPRM 于 2025-08-11 发布（FAA+TSA，适用 ≤600kg、性能
 
 ## 6. NexusSky 差距分析与建设优先级（v2 修订）
 
-对照第 3.8 节矩阵与项目现状（6050 单测、M0a–M13+4a+P2/P3 收尾、79 @RestController）。原则不变：协议抽象先行、数据源可替换、模拟器回归兜底。
+对照第 3.8 节矩阵与项目现状（6056 单测、M0a–M13+4a+P2/P3 收尾、79 @RestController）。原则不变：协议抽象先行、数据源可替换、模拟器回归兜底。
 ### P0 —— 合规入场券（2026-11-01 过渡期是硬 deadline）
 
 1. **UOM 数据对接层**：MH/T 3030 三项交互（实名状态验证/激活上报/注销）+ 遥测上报通道，抽象为 `RegulatorReportSink`（UOM 第一个实现，USSP/出海合规后续实现），落在 `cloud-backend` 新包 `regulator`。
@@ -214,7 +214,8 @@ Part 108 BVLOS：NPRM 于 2025-08-11 发布（FAA+TSA，适用 ≤600kg、性能
 - [ ] P0-5 MAVLink v2 signing + link-sim 篡改画像
 - [ ] P1-6 ONNX 推理接入 + 识别率/误检比/处理时间评测面板
 - [ ] P1-7 Dock 状态机 + 上云 API 适配器（MQTT 物模型）+ 利用率健康度度量
-- [ ] P1-8 四类行业航线模板 + GCS 模板 UI
+- [x] P1-8 四类行业航线模板 + GCS 模板 UI（2026-11：F3 交付 tower/solar/pipeline/
+      shoreline + RouteTemplatePanel；本轮补齐「杆塔号挂接 + 缺陷复检航线」闭环）
 - [ ] P1-9 缺陷领域模型 + 报告导出 + 工单流（闭环消缺）
 - [ ] P1-10 双栈网关抽象
 - [ ] P1-11 RTK 精度字段
