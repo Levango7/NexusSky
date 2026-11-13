@@ -2,6 +2,10 @@ target/
 node_modules/
 dist/
 *.log
+# capacity 实验产物：CPU 轨迹与 run-log 是轮级证据（2026-11-13 attempt5/6），
+# 是 *.log 全局排除的例外；其余 .log 仍排除。
+!docs/capacity/loadaxis-run.log
+!docs/capacity/traces-loadaxis/*.log
 .tmp-mav/
 .idea/
 *.iml
