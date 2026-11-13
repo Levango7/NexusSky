@@ -68,6 +68,7 @@ public final class DroneSnapshot {
     }
     public volatile int satellites = -1;
     public volatile int eph = -1;               // HDOP*100
+    public volatile int epv = -1;               // VDOP*100
     /** Derived: 3D fix with enough satellites; false during gps-loss scenarios. */
     public volatile boolean gpsHealthy = true;
 

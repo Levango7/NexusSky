@@ -185,6 +185,7 @@ public class TelemetrySnapshotListener {
         s.fixType = g.fixType;
         s.satellites = g.satellitesVisible;
         s.eph = g.eph;
+        s.epv = g.epv;
         s.gpsHealthy = g.fixType >= 3 && g.satellitesVisible >= 6;
         if (wasHealthy && !s.gpsHealthy) {
             AlertEntry entry = new AlertEntry(2, "GPS fix degraded (fixType="
