@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "as_of": "2026-11-01",
+  "as_of": "2026-11-09",
   "doc": "docs/PRODUCT-POSITIONING.md",
   "purpose": "「阶段事实」的机器可读单一事实源。docs/PRODUCT-POSITIONING.md 的 §1.4 与 §7.2 必须与本文件一致，由 scripts/check-positioning-facts.py 守住。改事实先改这里，再改文档。",
   "status_meaning": {
@@ -80,6 +80,19 @@
         {"kind": "file_contains", "path": "drone-sim/src/test/java/io/aerofleet/sim/AiAutonomyWiringTest.java", "text": "edgeEnginesAreWired"}
       ],
       "contradicting_phrases": ["边缘库无生产调用方", "M12 边缘库无生产调用方"]
+    },
+    {
+      "id": "dock_inspection",
+      "label": "机巢无人值守巡检（定时任务带模板 → 巡检任务 → 可追溯报告，仿真闭环 T2）",
+      "status": "wired",
+      "in_gap_table": false,
+      "note": "飞行侧由 drone-sim 代替，无真机证据；相机未接入时报告如实记 0 照片/0 视觉检测。真机验证属 real_hardware 事实（仓外依赖）。",
+      "evidence": [
+        {"kind": "file_exists", "path": "cloud-backend/src/main/resources/db/migration/V39__dock_inspection_link.sql"},
+        {"kind": "file_contains", "path": "cloud-backend/src/main/java/io/aerofleet/cloud/dock/UnattendedScheduler.java", "text": "createInspectionTask"},
+        {"kind": "file_exists", "path": "cloud-backend/src/test/java/io/aerofleet/cloud/dock/DockInspectionWiringTest.java"}
+      ],
+      "contradicting_phrases": ["机巢无人值守未接线", "机巢巡检未实现"]
     },
     {
       "id": "real_hardware",

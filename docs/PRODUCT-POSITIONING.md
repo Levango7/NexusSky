@@ -192,7 +192,19 @@ ONVIF 厂商现场联调、应急 SOP 对齐属**仓外依赖**（厂商硬件 /
 - **边界**：BOM 与单价基于 2026-09 公开电商报价，实际采购需按批次核价；
   丐版方案未在真实硬件上跑通完整任务流，仅软件层验证。
 
-### 2.9 已实现但未列入"对外主打"的能力
+### 2.9 机巢无人值守巡检（F2）
+
+- **事实**：机巢 9 态状态机（开关门 / 换电 / 温控 / 健康）+ 四道门控 + 无人值守定时任务；
+  定时任务带巡检模板时自动创建巡检任务并执行飞行，产出可追溯的巡检报告
+  （`dock_schedules.inspection_template_id` → `dock_run_log.inspection_task_id` 接线，V39 迁移）；
+  相机未接入时报告如实记 0 照片 / 0 视觉检测，不生成模拟数据。
+  GCS 机巢面板 + drone-sim `dock` 子命令 + `scripts/e2e-dock.ps1`（R1–R5）可复现。
+- **差异化**：大疆机巢仅对自家生态封闭；NexusSky 机巢调度协议中立（任意 MAVLink 飞控）、
+  可私有化部署，且全链路可在仿真环境无真机复现。
+- **边界**：**T2 仿真闭环**——飞行侧由 drone-sim 代替，无真机证据；相机未接入
+  （视觉检测属仓外依赖）；真机集成验证见 §7.2。
+
+### 2.10 已实现但未列入"对外主打"的能力
 
 以下能力已实现（见 README.md），但**不作为中间件对外主打卖点**，避免与
 客户上层业务冲突：
@@ -437,7 +449,7 @@ java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
 ### 6.1 多厂商协议兼容（MAVLink 中立）
 
 - **事实**：`mavlink-core` 模块纯 Java 17 实现 MAVLink v1/v2 协议栈，
-  221 个单测，CRC 与官方 c_library_v2 逐字节一致；已消化 PX4 真固件
+  523 个单测，CRC 与官方 c_library_v2 逐字节一致；已消化 PX4 真固件
   协议差异（MISSION_REQUEST 拉取、MISSION_COUNT 拒绝 broadcast、
   MISSION_START 回退、nav_state 映射）。
 - **差异化**：大疆 Cloud API 仅兼容大疆设备；纵横 CW / 极飞均绑自家整机。
@@ -505,6 +517,7 @@ java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
 | 多层级中继 | ✅ | **T3** | 层级路由决策 + 卫星过境窗口预测为模型；**未对接真实卫星过境数据源**，基站载荷为软件模型 | ❌ | ❌ | ❌ |
 | 丐版硬件 | ✅ 百元起 | **T4** | 硬件预算设计成文（`docs/budget-hardware-design.md`），飞控侧仍由 `drone-sim` 代替 | ❌ 万元起 | ❌ 万元起 | ❌ 万元起 |
 | 私有化部署 | ✅ | **T2** | docker-compose / helm / k8s 三路径齐备，内置 PG + NetworkPolicy；K8s HPA 因有状态架构被显式禁用（`values.yaml` 注释"多副本会分裂实时遥测"） | ❌ 公有云为主 | 部分 | ❌ SaaS 为主 |
+| 机巢无人值守巡检 | ✅ | **T2** | 机巢 9 态状态机 + 四道门控 + 模板驱动的巡检任务闭环（V39 接线，`DockInspectionWiringTest` 反回归）；drone-sim 可复现，相机未接入时报告如实 0 照片 | ✅ 自有生态封闭 | 未核 | 未核 |
 | 农业垂直深度 | ❌ | — | `fleet` 模块含喷洒作业端点，无农艺模型 | ❌ | ❌ | ✅ |
 | 整机生态 | ❌ | — | 不自研整机 | ✅ | ✅ | ✅ |
 
