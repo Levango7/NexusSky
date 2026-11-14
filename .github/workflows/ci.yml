@@ -1256,7 +1256,7 @@ jobs:
       - name: Clean leftovers between scripts
         if: always()
         run: pwsh -NoProfile -Command ". ./scripts/e2e-common.ps1; 'regulator-e2e','dock-e2e','route-templates-e2e','AF-ROUTE-01','defect-e2e','AF-DEFECT-01' | ForEach-Object { \$n = Stop-E2eStaleProcesses -Marker \$_; Write-Output \"cleaned \$_ = \$n\" }"
-      - name: e2e-dock (R1~R5 机巢管控)
+      - name: e2e-dock (R1~R7 机巢管控 + 无人值守巡检)
         run: pwsh -NoProfile -File scripts/e2e-dock.ps1 -SkipBuild
         env:
           AF_BACKEND_PORT: 18099

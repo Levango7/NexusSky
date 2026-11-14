@@ -1,5 +1,25 @@
 # NexusSky 变更日志
 
+## [Unreleased] — feat(inspection): 巡检任务/报告落库（V41）与机巢架次可观测（整合 #279）
+
+### 背景
+
+#279（`feat/inspection-persistence-d5d6`）因与 master `V40__defect_tower_no.sql` 的 Flyway 版本冲突及历史文档/计数提交噪音长期未合入。本轮在当前 master 基线上拣选功能提交并完成迁移重编号与契约对齐后整合。
+
+### 改了什么
+
+- **巡检持久化（V41）**：新增 `V41__inspection_task_report.sql`、`inspection_tasks`/`inspection_reports` 实体与仓储，`InspectionTaskService` 落库任务生命周期与报告快照；`dock_run_log` 可关联 `inspection_task_id`，无人值守架次结果可反查巡检产出。
+- **机巢架次可观测**：`GET /api/v1/docks/{id}/runs` 返回运行记录（含 `inspectionTaskId`），端点数 +1。
+- **状态性守卫**：`scripts/check-statefulness.py` 扩展巡检任务/报告落库域校验。
+- **sim 多机巢路由修复**：`DockProperties.simBaseUrls` 按 SN 覆盖 + `SimLoopbackGateway` 按 SN 寻址（未命中回落 `simBaseUrl`），与 e2e 双机巢拓扑对齐。
+- **测试/e2e**：补齐 inspection 落库/控制器/运行报告与 dock 相关单测，`e2e-dock.ps1` 增加 R7 无人值守真飞行+巡检报告断言腿（脚本与 CI 接线）。
+
+### 边界与说明
+
+- 本次为在 master（含 #288/#296/#299/#300 等）上的**功能整合**：迁移由原 PR 的 `V40` 重编号为 `V41`；历史纯计数/文档同步提交未逐条回放，计数与文档以当前实测/门禁为准。
+- 照片/异常明细列表按原实现口径未作为可恢复明细落库（生产路径以计数/快照字段为准）。
+
+
 ## [Unreleased] — P1-10：双栈网关第 2 栈（DJI Cloud API）—— SPI 命令 → flight_task 真链路（+11 例）
 
 ### 背景
@@ -3273,7 +3293,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-13 共有 312 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-13 共有 313 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3300,7 +3320,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 312 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 313 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

@@ -118,6 +118,23 @@ public final class InspectionTask {
         this.progressPct = Math.max(0, Math.min(100, pct));
     }
 
+    /**
+     * 落库还原专用（同包可见，不进公共 API）：直接置状态/起止/进度/计数。
+     * <p>
+     * 不走 start()/complete()/fail() 的迁移守卫——重启恢复是"把库里的事实装回内存"，
+     * 不是"重放一遍迁移路径"（FAILED/ABORTED 任务重放会丢终态，start() 还会把
+     * startTime 刷新成恢复时刻）。
+     */
+    void restore(Status status, Instant startTime, Instant endTime, double progressPct,
+                 int photosCaptured, int anomaliesFound) {
+        this.status = status;
+        this.startTime = startTime;
+        this.endTime = endTime;
+        this.progressPct = progressPct;
+        this.photosCaptured = photosCaptured;
+        this.anomaliesFound = anomaliesFound;
+    }
+
     /** 增加拍摄照片计数。 */
     public void addPhotos(int count) {
         this.photosCaptured += count;
