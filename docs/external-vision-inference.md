@@ -63,7 +63,48 @@ aerofleet.vision.external.timeout-ms=3000
 - **推理**：调用 ONNX 模型（或其他后端）得到 boxes/scores/classes。
 - **输出**：做后处理（NMS/阈值/坐标还原到原图像素）并映射为 `{kind, confidence, u, v}` 数组返回。
 
-仓库提供参考脚本 `scripts/vision-inference-server.py`：默认以 **mock** 模式返回契约合法响应（用于联调与回归）；若环境已安装 `onnxruntime`（及可选 `numpy`/`Pillow`）且提供兼容模型，可按脚本参数扩展为真实 ONNX 推理适配。该脚本为可选工具，不纳入主工程 Maven 依赖。
+### YOLO 类检测输出映射示例
+
+典型 YOLO/ONNX 检测模型输出为候选框 `(x1,y1,x2,y2,score,class)` 或 `(cx,cy,w,h,...)`（通常在 letterbox/缩放后的模型输入坐标系）。适配到本契约时：
+
+1. **置信度/类别**：按阈值过滤后，将类别 id 映射为稳定 `kind` 字符串，将得分映射为 `confidence`（`[0,1]`）。
+2. **NMS**：在同类/跨类按模型约定做非极大值抑制，避免重复框。
+3. **坐标还原**：将框从模型输入空间还原到原始 JPEG 像素空间（去除 letterbox padding、按缩放比反算）；再计算目标点 `u=(x1+x2)/2`、`v=(y1+y2)/2`（或按业务需要取框中心/底边中点等，但需与评测口径一致）。
+4. **返回**：输出契约数组，例如：
+
+```json
+[
+  {"kind": "insulator", "confidence": 0.93, "u": 312.4, "v": 148.0}
+]
+```
+
+> 注：`u/v` 是像素坐标，不是归一化坐标；具体 `kind` 命名与定位点定义应与标注/评测口径保持一致。
+
+### 参考脚本与确定性回放
+
+仓库提供 `scripts/vision-inference-server.py`（可选工具，不纳入主工程 Maven 依赖）：
+
+- **mock**（默认）：返回契约合法的确定性/随机种子响应，用于联调与回归。
+- **replay**：按帧顺序返回 `--detections-file` 中的结果（支持“单帧数组”“帧数组的数组”或 JSONL 一帧一行），到末尾后循环；适合无模型的确定性回归。
+- **onnx**：`onnxruntime` 挂载点（需环境自行安装依赖与兼容模型，并按模型 I/O 实现预处理/后处理）；参考实现不内置模型。
+- **自测**：`--self-test` 校验契约辅助逻辑并退出。
+
+示例：
+
+```bash
+# 契约自测（不启动服务）
+python scripts/vision-inference-server.py --self-test
+
+# 确定性回放（配合 scripts/fixtures/vision-detections-sample.json）
+python scripts/vision-inference-server.py --mode replay \
+  --detections-file scripts/fixtures/vision-detections-sample.json \
+  --host 127.0.0.1 --port 9001 --path /infer
+
+# 默认 mock 模式
+python scripts/vision-inference-server.py --port 9001
+```
+
+回放文件示例见 `scripts/fixtures/vision-detections-sample.json`（三帧：两检出/一检出/空帧）。主工程不依赖 onnxruntime/tensorflow/opencv；真实模型效果与精度需在目标数据集/环境验收（非 CI 保证项）。
 
 ## 5. 边界与诚实声明
 

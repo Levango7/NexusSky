@@ -118,6 +118,9 @@ jobs:
           # 标成 ✅ 已完成；§7.1（标注同步自 README 的 2026-10-02）落后两个月，
           # 其中"自主决策只建议不执行""M12 边缘库无生产调用方"两条已被代码反证。
           python3 scripts/check-positioning-facts.py --self-test
+          # P1-6 外部推理接入（2026-11-14 落地）：replay/契约自测；不接 CI 会让
+          # 自测覆盖门禁变红（提供 --self-test 的脚本必须被 CI 引用）
+          python3 scripts/vision-inference-server.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
