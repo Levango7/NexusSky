@@ -236,6 +236,14 @@ public abstract class MavlinkMessage {
                 return OpenDroneIdOperatorId.decode(frame);
             case OpenDroneIdMessagePack.ID:
                 return OpenDroneIdMessagePack.decode(frame);
+            case ParamRequestRead.ID:
+                return ParamRequestRead.decode(frame);
+            case ParamRequestList.ID:
+                return ParamRequestList.decode(frame);
+            case ParamValue.ID:
+                return ParamValue.decode(frame);
+            case ParamSet.ID:
+                return ParamSet.decode(frame);
             default:
                 return null; // 未知消息：由调用方决定忽略或透传
         }

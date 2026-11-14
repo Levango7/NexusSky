@@ -449,7 +449,7 @@ java -cp cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar \
 ### 6.1 多厂商协议兼容（MAVLink 中立）
 
 - **事实**：`mavlink-core` 模块纯 Java 17 实现 MAVLink v1/v2 协议栈，
-  523 个单测，CRC 与官方 c_library_v2 逐字节一致；已消化 PX4 真固件
+  529 个单测，CRC 与官方 c_library_v2 逐字节一致；已消化 PX4 真固件
   协议差异（MISSION_REQUEST 拉取、MISSION_COUNT 拒绝 broadcast、
   MISSION_START 回退、nav_state 映射）。
 - **差异化**：大疆 Cloud API 仅兼容大疆设备；纵横 CW / 极飞均绑自家整机。

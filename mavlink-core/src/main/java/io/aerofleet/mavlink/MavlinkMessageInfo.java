@@ -38,6 +38,10 @@ public final class MavlinkMessageInfo {
         INFOS[0]   = new Info(9, 50);      // HEARTBEAT
         INFOS[1]   = new Info(43, 124);    // SYS_STATUS
         INFOS[2]   = new Info(12, 137);   // SYSTEM_TIME
+        INFOS[20]  = new Info(20, 214);   // PARAM_REQUEST_READ（参数服务，2026-11-14 补）
+        INFOS[21]  = new Info(2, 159);    // PARAM_REQUEST_LIST
+        INFOS[22]  = new Info(25, 220);   // PARAM_VALUE
+        INFOS[23]  = new Info(23, 168);   // PARAM_SET
         INFOS[24]  = new Info(52, 24);    // GPS_RAW_INT
         INFOS[30]  = new Info(28, 39);    // ATTITUDE
         INFOS[33]  = new Info(28, 104);   // GLOBAL_POSITION_INT

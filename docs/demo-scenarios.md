@@ -76,16 +76,16 @@
 
 ### 1.4 测试基线
 
-当前项目测试基线：**6074 tests，0 failures**（全部通过）。
-10ce3988 (docs: 同步 #279 整合端点/计数/CHANGELOG 与口径文档（416 端点、6071 测试实测）)
+当前项目测试基线：**6080 tests，0 failures**（全部通过）。
+bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
-| mavlink-core | 523 | MAVLink 协议编解码、CRC 一致性 |
+| mavlink-core | 529 | MAVLink 协议编解码、CRC 一致性 |
 | drone-sim | 1477 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
 | cloud-backend | 3875 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **6074** | 全部通过，0 failures |
-10ce3988 (docs: 同步 #279 整合端点/计数/CHANGELOG 与口径文档（416 端点、6071 测试实测）)
+| **总计** | **6080** | 全部通过，0 failures |
+bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 > 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
 
 ### 1.5 P3 能力实现状态
