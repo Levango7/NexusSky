@@ -1,0 +1,10 @@
+[
+  [
+    {"kind": "insulator", "confidence": 0.93, "u": 312.4, "v": 148.0},
+    {"kind": "tower", "confidence": 0.88, "u": 420.1, "v": 201.7}
+  ],
+  [
+    {"kind": "insulator", "confidence": 0.91, "u": 318.0, "v": 150.2}
+  ],
+  []
+]
