@@ -1,6 +1,8 @@
-# 负载轴提载实验编排（Nex）：#283^（31afbc10）在 d400/hz30/c20 档复测 pre283 弱信号。
+# 负载轴提载实验编排（Nex）：#283^（31afbc10）在 d200/hz30/c20 档复测 pre283 弱信号。
 # 背景：bistable-pre283-vs-post283-20261112.md 中 pre283 R2p4 出现「队列近满(4075/4096)＋扇出 drop 1668」
 # 弱 A 型签名（非风暴形态）。本实验提负载轴看它是否放大成历史 A 型饱和。
+# 原设想 d400，但 FleetInjector MAX_DEVICE_SYSID=254 使 400 架不可达（attempt5 实测
+# proc 越界校验退出），d200 为当前注入器设计下可达标称轴（attempt5 实际轴）。
 # 唯一变量仍是负载轴；代码固定 31afbc10；harness 用仓内 scripts/capacity-baseline.sh（正统）。
 # 门控同前：开火前连续 3 采样 <=25% 且 pitest 不在场（fail-closed）；端口 18190/14560 被占即中止。
 # 每轮：CPU 轨迹落 docs/capacity/traces-loadaxis/（进仓，/f/tmp 已被共享清理过一次不再信任）；
@@ -13,7 +15,7 @@ HARNESS="$REPO/scripts/capacity-baseline.sh"
 OUT=docs/capacity
 TRACE_DIR="$OUT/traces-loadaxis"
 LOG="$OUT/loadaxis-run.log"
-DRONES=400 HZ=30 CLIENTS=20 MAX_PER_IP=20 DURATION=60 GATE=25 GATE_MAX=7200
+DRONES=200 HZ=30 CLIENTS=20 MAX_PER_IP=20 DURATION=60 GATE=25 GATE_MAX=7200
 ROUNDS_DONE=0
 LOCKD="$REPO/.capacity-loadaxis.lock"
 mkdir -p "$TRACE_DIR"

@@ -1,0 +1,182 @@
+{
+  "label": "d200-hz30-c20-ip20",
+  "drones": 200,
+  "hz": 30,
+  "clients": 20,
+  "durationSec": 60,
+  "maxConnPerIp": 20,
+  "injectProcs": 4,
+  "udpReceiveBufferBytes": 0,
+  "onlineDrones": 200,
+  "backendStartSec": 8,
+  "probe": {
+    "clients": 20,
+    "durationSec": 60.0,
+    "handshakeOk": 20,
+    "connectFailures": 0,
+    "perClient": [
+      {
+        "index": 1,
+        "messages": 230480,
+        "latencySamples": 230428,
+        "parseFailures": 0
+      },
+      {
+        "index": 2,
+        "messages": 230329,
+        "latencySamples": 230277,
+        "parseFailures": 0
+      },
+      {
+        "index": 3,
+        "messages": 230329,
+        "latencySamples": 230277,
+        "parseFailures": 0
+      },
+      {
+        "index": 4,
+        "messages": 230280,
+        "latencySamples": 230228,
+        "parseFailures": 0
+      },
+      {
+        "index": 5,
+        "messages": 230261,
+        "latencySamples": 230209,
+        "parseFailures": 0
+      },
+      {
+        "index": 6,
+        "messages": 230193,
+        "latencySamples": 230141,
+        "parseFailures": 0
+      },
+      {
+        "index": 7,
+        "messages": 230120,
+        "latencySamples": 230068,
+        "parseFailures": 0
+      },
+      {
+        "index": 8,
+        "messages": 230051,
+        "latencySamples": 229999,
+        "parseFailures": 0
+      },
+      {
+        "index": 9,
+        "messages": 229988,
+        "latencySamples": 229936,
+        "parseFailures": 0
+      },
+      {
+        "index": 10,
+        "messages": 229937,
+        "latencySamples": 229885,
+        "parseFailures": 0
+      },
+      {
+        "index": 11,
+        "messages": 229889,
+        "latencySamples": 229837,
+        "parseFailures": 0
+      },
+      {
+        "index": 12,
+        "messages": 229841,
+        "latencySamples": 229789,
+        "parseFailures": 0
+      },
+      {
+        "index": 13,
+        "messages": 229805,
+        "latencySamples": 229753,
+        "parseFailures": 0
+      },
+      {
+        "index": 14,
+        "messages": 229773,
+        "latencySamples": 229721,
+        "parseFailures": 0
+      },
+      {
+        "index": 15,
+        "messages": 229744,
+        "latencySamples": 229692,
+        "parseFailures": 0
+      },
+      {
+        "index": 16,
+        "messages": 229711,
+        "latencySamples": 229659,
+        "parseFailures": 0
+      },
+      {
+        "index": 17,
+        "messages": 229680,
+        "latencySamples": 229628,
+        "parseFailures": 0
+      },
+      {
+        "index": 18,
+        "messages": 229656,
+        "latencySamples": 229604,
+        "parseFailures": 0
+      },
+      {
+        "index": 19,
+        "messages": 229620,
+        "latencySamples": 229568,
+        "parseFailures": 0
+      },
+      {
+        "index": 20,
+        "messages": 229591,
+        "latencySamples": 229539,
+        "parseFailures": 0
+      }
+    ],
+    "activeClients": 20,
+    "rejectedByServer": 0,
+    "totalMessages": 4599278,
+    "parseFailures": 0,
+    "latencyCoverage": 1.0,
+    "latencyMs": {
+      "count": 4598238,
+      "p50": 934,
+      "p95": 955,
+      "p99": 961,
+      "max": 981,
+      "mean": 927.04
+    }
+  },
+  "metrics": {
+    "wsSessions": 0.0,
+    "queueDepth": 0.0,
+    "droppedTotal": 25843.0,
+    "wsSessionsPeak": 20.0,
+    "queueDepthPeak": 4095.0,
+    "dronesOnline": 200.0,
+    "messagesDecoded": 315402.0,
+    "messagesReceived": 315402.0,
+    "messagesErrors": 0.0,
+    "udpDatagrams": 315402.0,
+    "udpNoiseBytes": 0.0,
+    "ingestDroppedTotal": 0.0,
+    "ingestDroppedByReason": {
+      "frame-crc-error": null,
+      "frame-signature-rejected": null,
+      "frame-whitelist-rejected": null,
+      "frame-rate-limited": null,
+      "datagram-truncated": null,
+      "datagram-receive-error": null,
+      "frame-listener-error": null
+    }
+  },
+  "injector": {
+    "sentFrames": 315402,
+    "sentFramesAtSec": 70,
+    "kernelDropEstimate": 0.0,
+    "kernelDropWindowAligned": true
+  }
+}

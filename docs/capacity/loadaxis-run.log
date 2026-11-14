@@ -1,0 +1,1819 @@
+==== LOADAXIS START 2026-11-12T10:50:38Z ====
+10:50:55Z gate cpu=85.7%
+10:51:28Z gate cpu=98.6%
+10:51:58Z gate cpu=100%
+10:52:37Z gate cpu=100%
+10:53:06Z gate cpu=100%
+10:53:36Z gate cpu=87.8%
+10:54:05Z gate cpu=100%
+10:54:32Z gate cpu=73.3%
+10:55:01Z gate cpu=100%
+10:55:32Z gate cpu=100%
+10:56:09Z gate cpu=100%
+10:56:42Z gate cpu=100%
+10:57:38Z gate cpu=100%
+10:58:07Z gate cpu=100%
+10:58:35Z gate cpu=93.1%
+10:59:02Z gate cpu=100%
+10:59:33Z gate cpu=72.8%
+10:59:58Z gate cpu=93.3%
+11:00:23Z gate cpu=64.2%
+11:00:48Z gate cpu=90.7%
+11:01:14Z gate cpu=79.2%
+11:01:41Z gate cpu=77.5%
+11:02:07Z gate cpu=96.3%
+11:02:33Z gate cpu=79.4%
+11:03:03Z gate cpu=100%
+11:03:32Z gate cpu=100%
+11:04:00Z gate cpu=97%
+11:04:26Z gate cpu=84.1%
+11:04:52Z gate cpu=68%
+11:05:16Z gate cpu=53.7%
+11:05:41Z gate cpu=64.5%
+11:06:06Z gate cpu=69.1%
+11:06:33Z gate cpu=84.5%
+11:06:57Z gate cpu=39.7%
+11:07:23Z gate cpu=85.1%
+11:07:50Z gate cpu=97.2%
+11:08:21Z gate cpu=100%
+11:08:49Z gate cpu=100%
+11:09:18Z gate cpu=96.2%
+11:09:45Z gate cpu=99.5%
+11:10:12Z gate cpu=82%
+11:10:37Z gate cpu=57.9%
+11:11:03Z gate cpu=78.3%
+11:11:29Z gate cpu=82.4%
+11:11:58Z gate cpu=100%
+11:12:26Z gate cpu=100%
+11:12:54Z gate cpu=98.3%
+11:13:20Z gate cpu=60.7%
+11:13:45Z gate cpu=62%
+11:14:10Z gate cpu=74.6%
+11:14:35Z gate cpu=77.7%
+11:15:00Z gate cpu=44.1%
+11:15:27Z gate cpu=81%
+11:15:53Z gate cpu=79.1%
+11:16:17Z gate cpu=83.1%
+11:16:43Z gate cpu=76.9%
+11:17:07Z gate cpu=62.6%
+11:17:32Z gate cpu=40.8%
+11:17:57Z gate cpu=55.1%
+11:18:21Z gate cpu=84.7%
+11:18:45Z gate cpu=61.1%
+11:19:09Z gate cpu=58.9%
+11:19:35Z gate cpu=64.5%
+11:19:59Z gate cpu=86.6%
+11:20:24Z gate cpu=52.6%
+11:20:49Z gate cpu=82.8%
+11:21:14Z gate cpu=60.9%
+11:21:38Z gate cpu=78.1%
+11:22:03Z gate cpu=37.6%
+11:22:27Z gate cpu=49%
+11:22:52Z gate cpu=76%
+==== LOADAXIS RELAUNCH 1: attempt1 死于门控截止（PID 消失无 ABORT 行，疑被外部杀）；GATE_MAX 1800→7200 重挂 ====
+11:23:17Z gate cpu=67%
+11:23:42Z gate cpu=51.6%
+11:24:06Z gate cpu=33.7%
+11:24:30Z gate cpu=72.3%
+11:24:57Z gate cpu=98.8%
+11:25:21Z gate cpu=54.4%
+11:25:45Z gate cpu=39.6%
+11:26:10Z gate cpu=42.2%
+==== LOADAXIS START 2026-11-12T11:26:22Z ====
+11:26:30Z gate cpu=49.2%
+11:26:34Z gate cpu=36.6%
+11:26:54Z gate cpu=38.2%
+11:26:58Z gate cpu=43%
+11:27:19Z gate cpu=45.1%
+11:27:22Z gate cpu=50%
+11:27:43Z gate cpu=48.6%
+11:27:46Z gate cpu=77.1%
+11:28:07Z gate cpu=45.9%
+11:28:11Z gate cpu=87.3%
+11:28:32Z gate cpu=61.8%
+11:28:35Z gate cpu=50.2%
+11:28:57Z gate cpu=75.3%
+11:29:00Z gate cpu=58.4%
+11:29:22Z gate cpu=49.1%
+11:29:25Z gate cpu=58.1%
+11:29:49Z gate cpu=70.5%
+11:29:51Z gate cpu=87%
+11:30:17Z gate cpu=83%
+11:30:18Z gate cpu=75.6%
+==== 11:31Z CLEANUP: 双实例（attempt1 链 65148 + attempt2 7528，含子 shell）全杀；0 轮开火、0 JSON 产物、锁已清；单实例重挂 ====
+==== LOADAXIS START 2026-11-12T11:31:08Z ====
+11:31:20Z gate cpu=74.1%
+11:31:45Z gate cpu=63.8%
+11:32:11Z gate cpu=68.1%
+11:32:36Z gate cpu=63.1%
+11:33:01Z gate cpu=73.3%
+11:33:25Z gate cpu=58.6%
+11:33:51Z gate cpu=80.4%
+11:34:17Z gate cpu=73.9%
+11:34:41Z gate cpu=72.2%
+11:35:06Z gate cpu=52.9%
+11:35:31Z gate cpu=49.8%
+11:35:55Z gate cpu=42.5%
+11:36:21Z gate cpu=78.3%
+11:36:46Z gate cpu=57.5%
+11:37:10Z gate cpu=44%
+11:37:34Z gate cpu=62.4%
+11:37:59Z gate cpu=48.9%
+11:38:23Z gate cpu=35.6%
+11:38:47Z gate cpu=63.6%
+11:39:12Z gate cpu=100%
+11:39:38Z gate cpu=74.5%
+11:40:03Z gate cpu=47.8%
+11:40:31Z gate cpu=97.1%
+11:40:56Z gate cpu=57.2%
+11:41:20Z gate cpu=74.5%
+11:41:45Z gate cpu=75.4%
+11:42:12Z gate cpu=72.2%
+11:42:38Z gate cpu=99.7%
+11:43:05Z gate cpu=88.5%
+11:43:31Z gate cpu=95.6%
+11:43:57Z gate cpu=58.8%
+11:44:21Z gate cpu=65.7%
+11:44:45Z gate cpu=44.7%
+11:45:11Z gate cpu=60.8%
+11:45:35Z gate cpu=34.7%
+11:45:59Z gate cpu=63.1%
+11:46:25Z gate cpu=92.5%
+11:46:52Z gate cpu=92.4%
+11:47:18Z gate cpu=95.3%
+11:47:43Z gate cpu=68.4%
+11:48:09Z gate cpu=80%
+11:48:36Z gate cpu=88.8%
+11:49:03Z gate cpu=74.9%
+11:49:31Z gate cpu=82.8%
+11:49:57Z gate cpu=50.7%
+11:50:22Z gate cpu=64%
+11:50:46Z gate cpu=40.9%
+11:51:12Z gate cpu=85.6%
+11:51:38Z gate cpu=69.1%
+11:52:05Z gate cpu=58.1%
+11:52:31Z gate cpu=82.4%
+11:52:58Z gate cpu=99.6%
+11:53:23Z gate cpu=81.6%
+11:53:49Z gate cpu=75.1%
+11:54:13Z gate cpu=48.9%
+11:54:39Z gate cpu=80.8%
+11:55:03Z gate cpu=73.9%
+11:55:29Z gate cpu=61.5%
+11:55:55Z gate cpu=60.6%
+11:56:20Z gate cpu=43.7%
+11:56:46Z gate cpu=57.7%
+11:57:13Z gate cpu=97.6%
+11:57:43Z gate cpu=100%
+11:58:09Z gate cpu=72.3%
+11:58:35Z gate cpu=99.8%
+11:59:02Z gate cpu=85.7%
+11:59:30Z gate cpu=85.8%
+11:59:56Z gate cpu=93.5%
+12:00:21Z gate cpu=68.2%
+12:00:48Z gate cpu=99.8%
+12:01:15Z gate cpu=78.8%
+12:01:40Z gate cpu=76.2%
+12:02:05Z gate cpu=62.3%
+12:02:29Z gate cpu=56.1%
+12:02:55Z gate cpu=78.8%
+12:03:20Z gate cpu=59.3%
+12:03:47Z gate cpu=63.2%
+12:04:12Z gate cpu=50.7%
+12:04:37Z gate cpu=58.4%
+12:05:01Z gate cpu=44.2%
+12:05:28Z gate cpu=71.6%
+12:05:52Z gate cpu=58.7%
+12:06:18Z gate cpu=69.3%
+12:06:42Z gate cpu=37.7%
+12:07:08Z gate cpu=74.6%
+12:07:33Z gate cpu=59.6%
+12:07:58Z gate cpu=72.4%
+12:08:24Z gate cpu=95.3%
+12:08:49Z gate cpu=51.5%
+12:09:14Z gate cpu=82.2%
+12:09:40Z gate cpu=91.6%
+12:10:06Z gate cpu=74%
+12:10:31Z gate cpu=70.4%
+12:10:55Z gate cpu=56.7%
+12:11:20Z gate cpu=83.3%
+12:11:46Z gate cpu=57.6%
+12:12:13Z gate cpu=99.7%
+12:12:39Z gate cpu=83.5%
+12:13:03Z gate cpu=52%
+12:13:28Z gate cpu=58.8%
+12:13:53Z gate cpu=49.4%
+12:14:18Z gate cpu=36.1%
+12:14:44Z gate cpu=80.7%
+12:15:10Z gate cpu=78.4%
+12:15:37Z gate cpu=87.4%
+12:16:04Z gate cpu=88.7%
+12:16:38Z gate cpu=99.3%
+12:17:10Z gate cpu=100%
+12:17:43Z gate cpu=100%
+12:18:12Z gate cpu=80%
+12:18:37Z gate cpu=55.6%
+12:19:03Z gate cpu=60.5%
+12:19:28Z gate cpu=65.1%
+12:19:52Z gate cpu=50%
+12:20:17Z gate cpu=46.5%
+12:20:41Z gate cpu=44.6%
+12:21:05Z gate cpu=50.5%
+12:21:31Z gate cpu=86.5%
+12:21:56Z gate cpu=81.2%
+12:22:21Z gate cpu=73.5%
+12:22:46Z gate cpu=73.9%
+12:23:10Z gate cpu=65.3%
+12:23:34Z gate cpu=50%
+12:24:00Z gate cpu=78%
+12:24:26Z gate cpu=80.9%
+12:24:52Z gate cpu=59.9%
+12:25:17Z gate cpu=86.9%
+12:25:44Z gate cpu=80.8%
+12:26:20Z gate cpu=100%
+12:26:46Z gate cpu=79.4%
+12:27:14Z gate cpu=65.7%
+12:27:39Z gate cpu=58.2%
+12:28:06Z gate cpu=99.9%
+12:28:35Z gate cpu=96.7%
+12:29:07Z gate cpu=96.3%
+12:29:43Z gate cpu=99.9%
+12:30:15Z gate cpu=99.8%
+12:30:44Z gate cpu=100%
+12:31:17Z gate cpu=99.4%
+12:31:52Z gate cpu=100%
+12:32:23Z gate cpu=100%
+12:33:10Z gate cpu=100%
+12:33:43Z gate cpu=76.1%
+12:35:34Z gate cpu=100%
+12:36:04Z gate cpu=100%
+12:36:33Z gate cpu=100%
+12:37:20Z gate cpu=79.4%
+12:37:48Z gate cpu=100%
+12:38:16Z gate cpu=100%
+12:38:51Z gate cpu=100%
+12:39:30Z gate cpu=100%
+12:40:26Z gate cpu=84.8%
+12:40:53Z gate cpu=97.1%
+12:41:22Z gate cpu=99.2%
+12:41:49Z gate cpu=91.2%
+12:42:23Z gate cpu=96.3%
+12:42:52Z gate cpu=94%
+12:43:19Z gate cpu=98.5%
+12:43:49Z gate cpu=100%
+12:44:30Z gate cpu=100%
+12:44:59Z gate cpu=97.8%
+12:45:30Z gate cpu=97.9%
+12:46:08Z gate cpu=100%
+12:46:38Z gate cpu=100%
+12:47:12Z gate cpu=100%
+12:50:38Z gate cpu=100%
+12:51:09Z gate cpu=100%
+12:51:36Z gate cpu=82.5%
+12:52:00Z gate cpu=49.6%
+12:52:25Z gate cpu=69.6%
+12:53:11Z gate cpu=100%
+12:53:43Z gate cpu=90.6%
+12:55:12Z gate cpu=100%
+12:55:46Z gate cpu=100%
+12:57:30Z gate cpu=100%
+12:58:23Z gate cpu=100%
+12:58:54Z gate cpu=100%
+12:59:26Z gate cpu=96%
+12:59:54Z gate cpu=99.4%
+13:00:21Z gate cpu=96%
+13:00:51Z gate cpu=100%
+13:01:57Z gate cpu=97.3%
+13:04:32Z gate cpu=100%
+13:05:02Z gate cpu=98.2%
+13:05:33Z gate cpu=90.7%
+13:06:01Z gate cpu=99.4%
+13:06:27Z gate cpu=83.6%
+13:06:55Z gate cpu=85.4%
+13:07:21Z gate cpu=99.9%
+13:07:52Z gate cpu=98.3%
+13:08:25Z gate cpu=100%
+13:09:04Z gate cpu=97.7%
+13:09:35Z gate cpu=99.9%
+13:10:03Z gate cpu=99.8%
+13:10:35Z gate cpu=100%
+13:11:09Z gate cpu=99.3%
+13:11:37Z gate cpu=99.5%
+13:12:06Z gate cpu=99.4%
+13:12:35Z gate cpu=98.9%
+13:13:07Z gate cpu=99.4%
+13:13:37Z gate cpu=99.9%
+13:14:04Z gate cpu=86.9%
+13:14:31Z gate cpu=80.4%
+13:14:59Z gate cpu=89.4%
+13:15:26Z gate cpu=79.9%
+13:15:53Z gate cpu=75.6%
+13:16:19Z gate cpu=78%
+13:16:44Z gate cpu=61.5%
+13:17:12Z gate cpu=100%
+13:17:41Z gate cpu=95.7%
+13:18:16Z gate cpu=100%
+13:18:50Z gate cpu=99.1%
+13:19:19Z gate cpu=95.4%
+13:19:53Z gate cpu=100%
+13:20:28Z gate cpu=99.5%
+13:20:54Z gate cpu=70.6%
+13:21:22Z gate cpu=90.3%
+13:21:49Z gate cpu=76.3%
+13:22:16Z gate cpu=84.6%
+13:22:42Z gate cpu=76.4%
+13:23:12Z gate cpu=90.6%
+13:23:55Z gate cpu=68.1%
+13:24:23Z gate cpu=86.6%
+13:24:50Z gate cpu=87%
+13:25:15Z gate cpu=92.4%
+13:25:53Z gate cpu=99.4%
+13:26:19Z gate cpu=80.6%
+13:26:45Z gate cpu=84.8%
+13:27:11Z gate cpu=85.2%
+13:27:38Z gate cpu=100%
+13:28:03Z gate cpu=70.1%
+13:28:32Z gate cpu=84.4%
+13:29:01Z gate cpu=100%
+13:29:29Z gate cpu=98.8%
+13:29:55Z gate cpu=82.4%
+13:30:23Z gate cpu=74.4%
+13:30:51Z gate cpu=77.3%
+13:31:23Z gate cpu=98.3%
+13:32:07Z gate cpu=99.3%
+13:32:36Z gate cpu=86%
+13:33:09Z gate cpu=100%
+13:33:37Z gate cpu=89.1%
+13:34:06Z gate cpu=100%
+13:34:39Z gate cpu=93.5%
+13:35:07Z gate cpu=86.3%
+13:35:35Z gate cpu=78.2%
+13:36:03Z gate cpu=75.5%
+13:36:31Z gate cpu=86.1%
+13:36:57Z gate cpu=88.4%
+13:37:24Z gate cpu=86.5%
+13:37:51Z gate cpu=98.8%
+13:38:38Z gate cpu=99.9%
+13:39:23Z gate cpu=97.2%
+13:39:58Z gate cpu=100%
+13:41:54Z gate cpu=74.8%
+13:43:52Z gate cpu=99.2%
+13:44:40Z gate cpu=96.6%
+13:49:18Z gate cpu=100%
+13:51:22Z gate cpu=100%
+13:54:58Z gate cpu=100%
+13:55:22Z gate cpu=60.1%
+13:55:48Z gate cpu=87.4%
+13:56:11Z gate cpu=39.3%
+13:56:35Z gate cpu=40.1%
+13:56:58Z gate cpu=52.3%
+13:57:22Z gate cpu=53.7%
+13:57:48Z gate cpu=96.6%
+13:58:14Z gate cpu=96.6%
+13:58:40Z gate cpu=71.8%
+13:59:04Z gate cpu=84.7%
+13:59:30Z gate cpu=72.3%
+13:59:59Z gate cpu=81.9%
+14:00:26Z gate cpu=62.5%
+14:00:53Z gate cpu=77%
+14:01:19Z gate cpu=78.4%
+14:01:44Z gate cpu=61.5%
+14:02:10Z gate cpu=79.4%
+14:02:35Z gate cpu=90.7%
+14:02:58Z gate cpu=40.5%
+14:03:23Z gate cpu=55.1%
+14:03:49Z gate cpu=50.1%
+14:04:14Z gate cpu=53.2%
+14:04:38Z gate cpu=35.4%
+14:05:26Z gate cpu=77.6%
+14:05:51Z gate cpu=75.5%
+14:06:16Z gate cpu=54%
+14:06:41Z gate cpu=63.6%
+14:07:08Z gate cpu=93.7%
+14:07:32Z gate cpu=45.6%
+14:07:59Z gate cpu=90.7%
+14:08:25Z gate cpu=87.9%
+14:08:51Z gate cpu=97.4%
+14:09:15Z gate cpu=83.3%
+14:09:40Z gate cpu=80.3%
+14:10:05Z gate cpu=81.1%
+14:10:31Z gate cpu=62.4%
+14:10:56Z gate cpu=38.7%
+14:11:19Z gate cpu=46.7%
+14:11:44Z gate cpu=66.2%
+14:12:08Z gate cpu=65.2%
+14:12:33Z gate cpu=62%
+14:12:59Z gate cpu=91.3%
+14:13:26Z gate cpu=74.3%
+14:13:54Z gate cpu=99.8%
+14:14:20Z gate cpu=63.5%
+14:14:45Z gate cpu=90%
+14:15:09Z gate cpu=52.4%
+14:15:35Z gate cpu=64.3%
+14:15:59Z gate cpu=62.8%
+14:16:25Z gate cpu=76.2%
+14:16:49Z gate cpu=69.2%
+14:17:14Z gate cpu=77.8%
+14:17:37Z gate cpu=31.6%
+14:18:00Z gate cpu=48.8%
+14:18:25Z gate cpu=49.3%
+14:18:48Z gate cpu=41.8%
+14:19:11Z gate cpu=48.3%
+14:19:35Z gate cpu=49.8%
+14:19:58Z gate cpu=39.3%
+14:20:22Z gate cpu=49.7%
+14:20:46Z gate cpu=34.6%
+14:21:13Z gate cpu=97%
+14:21:38Z gate cpu=81.1%
+14:22:03Z gate cpu=50.3%
+14:22:26Z gate cpu=38%
+14:22:50Z gate cpu=49.7%
+14:23:13Z gate cpu=36.7%
+14:23:38Z gate cpu=55.7%
+14:24:01Z gate cpu=40.5%
+14:24:24Z gate cpu=26.5%
+14:24:48Z gate cpu=32.3%
+14:25:12Z gate cpu=44.5%
+14:25:35Z gate cpu=53.8%
+14:25:58Z gate cpu=26.5%
+14:26:21Z gate cpu=27.3%
+14:26:44Z gate cpu=25.9%
+14:27:07Z gate cpu=37.7%
+14:27:30Z gate cpu=48.8%
+14:27:53Z gate cpu=33.6%
+14:28:16Z gate cpu=28.2%
+14:28:39Z gate cpu=29.3%
+14:29:03Z gate cpu=34.8%
+14:29:26Z gate cpu=36.8%
+14:29:50Z gate cpu=45.7%
+14:30:13Z gate cpu=41.8%
+14:30:36Z gate cpu=30.9%
+14:30:59Z gate cpu=39.7%
+14:31:23Z gate cpu=76.8%
+14:31:47Z gate cpu=37.7%
+14:32:10Z gate cpu=28.2%
+14:32:33Z gate cpu=40.8%
+14:32:59Z gate cpu=78.1%
+14:33:24Z gate cpu=58.7%
+14:33:47Z gate cpu=47.6%
+14:34:13Z gate cpu=68.4%
+14:34:39Z gate cpu=60.7%
+14:35:03Z gate cpu=51.8%
+14:35:26Z gate cpu=44.1%
+14:35:49Z gate cpu=41.6%
+14:36:13Z gate cpu=46.5%
+14:36:34Z ABORT cpu gate not satisfied (p2 1)
+==== LOADAXIS START attempt4 14:41:33Z ====
+==== LOADAXIS START 2026-11-12T14:41:35Z ====
+14:41:49Z gate cpu=90.5%
+14:42:13Z gate cpu=40.6%
+14:42:37Z gate cpu=44.9%
+14:43:01Z gate cpu=46.4%
+14:43:24Z gate cpu=55.1%
+14:43:50Z gate cpu=85.8%
+14:44:14Z gate cpu=56.4%
+14:44:38Z gate cpu=42%
+14:45:01Z gate cpu=47.6%
+14:45:26Z gate cpu=58.3%
+14:45:50Z gate cpu=42%
+14:46:14Z gate cpu=54.6%
+14:46:38Z gate cpu=52%
+14:47:02Z gate cpu=50.3%
+14:47:26Z gate cpu=63.3%
+14:47:50Z gate cpu=42.6%
+14:48:14Z gate cpu=47.6%
+14:48:37Z gate cpu=33.2%
+14:49:00Z gate cpu=25.6%
+14:49:24Z gate cpu=44.8%
+14:49:48Z gate cpu=37.6%
+14:50:12Z gate cpu=65.6%
+14:50:36Z gate cpu=74.9%
+14:51:01Z gate cpu=71.9%
+14:51:26Z gate cpu=68%
+14:52:12Z gate cpu=100%
+14:52:39Z gate cpu=97.4%
+14:53:05Z gate cpu=66%
+14:53:30Z gate cpu=46.1%
+14:53:54Z gate cpu=50.4%
+14:54:17Z gate cpu=40.5%
+14:54:42Z gate cpu=93.9%
+14:55:07Z gate cpu=50.6%
+14:55:31Z gate cpu=45.9%
+14:55:54Z gate cpu=41.3%
+14:56:17Z gate cpu=31.7%
+14:56:40Z gate cpu=45%
+14:57:06Z gate cpu=74.8%
+14:57:29Z gate cpu=38.4%
+14:57:53Z gate cpu=66.9%
+14:58:17Z gate cpu=59.5%
+14:58:45Z gate cpu=100%
+14:59:46Z gate cpu=68.2%
+15:00:43Z gate cpu=91.8%
+15:01:52Z gate cpu=99.5%
+15:03:20Z gate cpu=100%
+15:03:55Z gate cpu=100%
+15:06:57Z gate cpu=100%
+15:07:24Z gate cpu=100%
+15:08:57Z gate cpu=100%
+15:09:21Z gate cpu=40.8%
+15:09:47Z gate cpu=77.3%
+15:10:11Z gate cpu=59.2%
+15:10:36Z gate cpu=51.1%
+15:11:00Z gate cpu=61.4%
+15:11:24Z gate cpu=70.7%
+15:11:48Z gate cpu=69%
+15:12:13Z gate cpu=69.9%
+15:12:38Z gate cpu=58.1%
+15:13:04Z gate cpu=88.6%
+15:13:33Z gate cpu=100%
+15:14:07Z gate cpu=100%
+15:14:37Z gate cpu=100%
+15:15:06Z gate cpu=100%
+15:15:35Z gate cpu=99.5%
+15:16:07Z gate cpu=99.2%
+15:16:39Z gate cpu=99.8%
+15:17:08Z gate cpu=99.7%
+15:17:37Z gate cpu=98.2%
+15:18:06Z gate cpu=100%
+15:18:34Z gate cpu=99.9%
+15:19:03Z gate cpu=100%
+15:19:35Z gate cpu=99.9%
+15:20:01Z gate cpu=93.6%
+15:20:28Z gate cpu=86.6%
+15:20:55Z gate cpu=100%
+15:21:23Z gate cpu=100%
+15:21:50Z gate cpu=100%
+15:22:20Z gate cpu=99.6%
+15:22:49Z gate cpu=93.6%
+15:23:17Z gate cpu=99.2%
+15:23:42Z gate cpu=78.9%
+15:24:12Z gate cpu=97.5%
+15:24:39Z gate cpu=99.2%
+15:25:06Z gate cpu=77.1%
+15:25:32Z gate cpu=96.4%
+15:25:57Z gate cpu=59.9%
+15:26:22Z gate cpu=64.4%
+15:26:49Z gate cpu=91.6%
+15:27:23Z gate cpu=99.9%
+15:27:51Z gate cpu=100%
+15:28:17Z gate cpu=62.3%
+15:28:42Z gate cpu=60.6%
+15:29:10Z gate cpu=100%
+15:29:37Z gate cpu=92.8%
+15:30:02Z gate cpu=73.3%
+15:30:26Z gate cpu=100%
+15:30:51Z gate cpu=70.1%
+15:31:17Z gate cpu=87.7%
+15:31:47Z gate cpu=98.1%
+15:32:14Z gate cpu=98.7%
+15:32:41Z gate cpu=100%
+15:33:06Z gate cpu=64%
+15:33:30Z gate cpu=57.8%
+15:33:56Z gate cpu=78.1%
+15:34:21Z gate cpu=66.9%
+15:34:46Z gate cpu=63.9%
+15:35:11Z gate cpu=76.7%
+15:35:36Z gate cpu=58.4%
+15:35:59Z gate cpu=61.1%
+15:36:26Z gate cpu=84.4%
+15:36:50Z gate cpu=52%
+15:37:17Z gate cpu=97.3%
+15:37:45Z gate cpu=99.6%
+15:38:19Z gate cpu=81.8%
+15:38:46Z gate cpu=95.8%
+15:39:13Z gate cpu=88.3%
+15:39:40Z gate cpu=98.6%
+15:40:09Z gate cpu=99.8%
+15:40:36Z gate cpu=91.6%
+15:41:03Z gate cpu=97.6%
+15:41:30Z gate cpu=83.7%
+15:41:55Z gate cpu=46%
+15:42:19Z gate cpu=55.4%
+15:42:46Z gate cpu=96.4%
+15:43:12Z gate cpu=91.4%
+15:43:37Z gate cpu=82.9%
+15:44:01Z gate cpu=48.1%
+15:44:25Z gate cpu=48.3%
+15:45:24Z gate cpu=95.1%
+15:45:50Z gate cpu=97.6%
+15:46:17Z gate cpu=86.3%
+15:46:45Z gate cpu=95.6%
+15:47:10Z gate cpu=73.9%
+15:47:42Z gate cpu=100%
+15:48:07Z gate cpu=56.6%
+15:48:32Z gate cpu=99.4%
+15:49:01Z gate cpu=99.2%
+15:49:27Z gate cpu=90.8%
+15:49:53Z gate cpu=80.5%
+15:50:19Z gate cpu=93.2%
+15:50:46Z gate cpu=79.8%
+15:51:12Z gate cpu=77.6%
+15:51:39Z gate cpu=93.5%
+15:52:03Z gate cpu=53.6%
+15:52:28Z gate cpu=76.4%
+15:52:53Z gate cpu=76.5%
+15:53:17Z gate cpu=51.2%
+15:53:40Z gate cpu=64.8%
+15:54:04Z gate cpu=43.4%
+15:54:29Z gate cpu=43.9%
+15:54:53Z gate cpu=51.7%
+15:55:17Z gate cpu=35.7%
+15:55:40Z gate cpu=42.2%
+15:56:04Z gate cpu=36.6%
+15:56:29Z gate cpu=59.2%
+15:56:53Z gate cpu=46.3%
+15:57:18Z gate cpu=73.7%
+15:57:42Z gate cpu=44.4%
+15:58:06Z gate cpu=67.3%
+15:58:30Z gate cpu=48.4%
+15:58:54Z gate cpu=69.9%
+15:59:18Z gate cpu=72.3%
+15:59:43Z gate cpu=85.2%
+16:00:08Z gate cpu=57.8%
+16:00:31Z gate cpu=37.7%
+16:00:54Z gate cpu=40.1%
+16:01:18Z gate cpu=82.2%
+16:01:42Z gate cpu=78.7%
+16:02:06Z gate cpu=80.1%
+16:02:30Z gate cpu=65.8%
+16:02:54Z gate cpu=44.2%
+16:03:18Z gate cpu=57.7%
+16:03:43Z gate cpu=81.6%
+16:04:07Z gate cpu=49.9%
+16:04:32Z gate cpu=41.6%
+16:04:56Z gate cpu=43.9%
+16:05:20Z gate cpu=66.7%
+16:05:45Z gate cpu=58.1%
+16:06:10Z gate cpu=74.3%
+16:06:35Z gate cpu=45.9%
+16:06:58Z gate cpu=57%
+16:07:23Z gate cpu=45.9%
+16:07:49Z gate cpu=76.6%
+16:08:14Z gate cpu=57.8%
+16:08:39Z gate cpu=92.2%
+16:09:04Z gate cpu=62.9%
+16:09:27Z gate cpu=38.7%
+16:09:52Z gate cpu=52.9%
+16:10:16Z gate cpu=75.9%
+16:10:42Z gate cpu=70.7%
+16:11:07Z gate cpu=95.8%
+16:11:35Z gate cpu=98.6%
+16:12:01Z gate cpu=100%
+16:12:25Z gate cpu=78.7%
+16:12:51Z gate cpu=83.4%
+16:13:14Z gate cpu=42.2%
+16:13:38Z gate cpu=35.6%
+16:14:03Z gate cpu=71.7%
+16:14:29Z gate cpu=84.7%
+16:14:54Z gate cpu=69.6%
+16:15:19Z gate cpu=79.4%
+16:15:45Z gate cpu=66%
+16:16:12Z gate cpu=76.2%
+16:16:36Z gate cpu=56.1%
+16:17:00Z gate cpu=48.3%
+16:17:24Z gate cpu=62.7%
+16:17:48Z gate cpu=57.2%
+16:18:12Z gate cpu=59.1%
+16:18:37Z gate cpu=84.6%
+16:19:02Z gate cpu=58%
+16:19:27Z gate cpu=64.3%
+16:19:51Z gate cpu=56.5%
+16:20:16Z gate cpu=49.4%
+16:20:40Z gate cpu=50.5%
+16:21:04Z gate cpu=54.7%
+16:21:29Z gate cpu=70.3%
+16:21:56Z gate cpu=100%
+16:22:29Z gate cpu=100%
+16:23:12Z gate cpu=98.2%
+16:23:39Z gate cpu=82.8%
+16:24:06Z gate cpu=83.2%
+16:24:38Z gate cpu=100%
+16:25:06Z gate cpu=100%
+16:25:32Z gate cpu=74.5%
+16:25:58Z gate cpu=81.9%
+16:26:25Z gate cpu=100%
+16:26:50Z gate cpu=84.6%
+16:27:17Z gate cpu=64.9%
+16:27:42Z gate cpu=67.4%
+16:28:06Z gate cpu=46%
+16:28:31Z gate cpu=72.8%
+16:28:56Z gate cpu=40.9%
+16:29:20Z gate cpu=81.7%
+16:29:47Z gate cpu=94.7%
+16:30:16Z gate cpu=99.8%
+16:30:41Z gate cpu=63.3%
+16:31:05Z gate cpu=85.8%
+16:31:30Z gate cpu=45.9%
+16:31:54Z gate cpu=68.6%
+16:32:19Z gate cpu=54.3%
+16:32:43Z gate cpu=62.8%
+16:33:07Z gate cpu=48.3%
+16:33:32Z gate cpu=55.1%
+16:33:59Z gate cpu=98.5%
+16:34:30Z gate cpu=99.9%
+16:34:54Z gate cpu=33.8%
+16:35:18Z gate cpu=48.1%
+16:35:43Z gate cpu=87.8%
+16:36:09Z gate cpu=97.3%
+16:36:36Z gate cpu=96.2%
+16:37:02Z gate cpu=73.2%
+16:37:27Z gate cpu=84.2%
+16:37:53Z gate cpu=99.9%
+16:38:20Z gate cpu=100%
+16:38:47Z gate cpu=96.5%
+16:39:12Z gate cpu=65.2%
+16:39:40Z gate cpu=94.4%
+16:40:07Z gate cpu=98.2%
+16:40:33Z gate cpu=76.6%
+16:40:58Z gate cpu=75.7%
+16:41:22Z gate cpu=53.3%
+16:41:58Z gate cpu=98.1%
+16:42:26Z gate cpu=100%
+16:42:51Z gate cpu=58.6%
+16:43:16Z gate cpu=86.5%
+16:43:49Z gate cpu=100%
+16:44:15Z gate cpu=78.4%
+16:44:45Z gate cpu=99.3%
+16:45:24Z gate cpu=100%
+16:45:50Z gate cpu=93.1%
+16:46:15Z gate cpu=76.6%
+16:46:43Z gate cpu=83.8%
+16:47:09Z gate cpu=59%
+16:47:36Z gate cpu=61.9%
+16:48:02Z gate cpu=84%
+16:48:33Z gate cpu=70.7%
+16:48:59Z gate cpu=80.6%
+16:49:25Z gate cpu=93%
+16:49:53Z gate cpu=83.7%
+16:50:24Z gate cpu=100%
+16:50:50Z gate cpu=98.5%
+16:51:18Z gate cpu=95.8%
+16:51:44Z gate cpu=89.6%
+16:52:13Z gate cpu=95.3%
+16:52:40Z gate cpu=83.2%
+16:53:07Z gate cpu=97.8%
+16:53:34Z gate cpu=82.6%
+16:53:59Z gate cpu=76.4%
+16:54:24Z gate cpu=90.1%
+16:54:48Z gate cpu=47.5%
+16:55:13Z gate cpu=62.4%
+16:55:38Z gate cpu=71.2%
+16:56:04Z gate cpu=66.1%
+16:56:29Z gate cpu=64.4%
+16:56:55Z gate cpu=68%
+16:57:21Z gate cpu=70.5%
+16:57:46Z gate cpu=73.8%
+16:58:11Z gate cpu=67.9%
+16:58:36Z gate cpu=75.4%
+16:59:00Z gate cpu=75.5%
+16:59:28Z gate cpu=100%
+16:59:56Z gate cpu=97%
+17:00:22Z gate cpu=88.9%
+17:00:46Z gate cpu=83.2%
+17:01:11Z gate cpu=72.3%
+17:01:37Z gate cpu=78.3%
+17:02:02Z gate cpu=78.4%
+17:02:28Z gate cpu=86.6%
+17:02:55Z gate cpu=46%
+17:03:19Z gate cpu=32.7%
+17:03:42Z gate cpu=58.7%
+17:04:05Z gate cpu=33.2%
+17:04:28Z gate cpu=25.2%
+17:04:51Z gate cpu=45.7%
+17:05:14Z gate cpu=34.7%
+17:05:37Z gate cpu=29.9%
+17:06:00Z gate cpu=27.3%
+17:06:23Z gate cpu=39.8%
+17:06:46Z gate cpu=30.6%
+17:07:09Z gate cpu=25.6%
+17:07:32Z gate cpu=33.8%
+17:07:56Z gate cpu=40.5%
+17:08:19Z gate cpu=57.1%
+17:08:43Z gate cpu=47.2%
+17:09:06Z gate cpu=32%
+17:09:29Z gate cpu=25.3%
+17:09:52Z gate cpu=51.8%
+17:10:16Z gate cpu=34.7%
+17:10:39Z gate cpu=42.1%
+17:11:04Z gate cpu=39.6%
+17:11:28Z gate cpu=59.9%
+17:11:52Z gate cpu=61.6%
+17:12:16Z gate cpu=65.8%
+17:12:41Z gate cpu=53.9%
+17:13:05Z gate cpu=57.7%
+17:13:29Z gate cpu=35.3%
+17:13:52Z gate cpu=49%
+17:14:15Z gate cpu=44.5%
+17:14:38Z gate cpu=41%
+17:15:02Z gate cpu=38.4%
+17:15:25Z gate cpu=55.2%
+17:15:48Z gate cpu=39.3%
+17:16:12Z gate cpu=34.8%
+17:16:35Z gate cpu=42.1%
+17:16:57Z gate cpu=25.3%
+17:17:20Z gate cpu=22.5%
+17:17:44Z gate cpu=23.6%
+17:18:08Z gate cpu=25.5%
+17:18:31Z gate cpu=26.7%
+17:18:54Z gate cpu=42.3%
+17:19:16Z gate cpu=28.8%
+17:19:39Z gate cpu=29.4%
+17:20:02Z gate cpu=31.2%
+17:20:25Z gate cpu=41.6%
+17:20:48Z gate cpu=24.6%
+17:21:12Z gate cpu=35.3%
+17:21:35Z gate cpu=32.4%
+17:21:58Z gate cpu=21%
+17:22:22Z gate cpu=29.1%
+17:22:42Z ABORT cpu gate not satisfied (p2 1)
+==== LOADAXIS START 2026-11-12T17:25:23Z ====
+17:25:28Z gate cpu=33.1%
+17:25:51Z gate cpu=20.9%
+17:26:15Z gate cpu=23.4%
+17:26:38Z gate cpu=24.3%
+17:26:40Z ROUND 1 p2 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（8s）
+[capacity] 注入负载：400 架 × 30 Hz → 127.0.0.1:14560（2 个进程）
+[capacity]   进程 0: sysid 1..200（200 架）
+[capacity]   进程 1: sysid 201..400（200 架）
+[capacity] 等待 400 架设备上线...
+[capacity] 在线设备：200 / 400（等待 60s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 218: 58086 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=0 wsSessions=20（采样 24 次）
+[capacity] 摄入侧：数据报=315584.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315584 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-012640-d400-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-012640-d400-hz30-c20-ip20.json
+
+  在线 200/400 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 40
+  时延：无样本（逐帧推送未到达）
+  丢弃=0.0 队列深度峰值=0（末值 0.0）
+  摄入：数据报=315584.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315584 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+17:29:29Z ROUND 1 p2 DONE rc=0 recon=OK json=20261113-012640-d400-hz30-c20-ip20.json
+17:29:32Z gate cpu=34.1%
+17:29:55Z gate cpu=30.2%
+17:30:18Z gate cpu=27.9%
+17:30:40Z gate cpu=24.2%
+17:31:04Z gate cpu=26.7%
+17:31:27Z gate cpu=20.6%
+17:31:51Z gate cpu=22.6%
+17:32:15Z gate cpu=50.8%
+17:32:38Z gate cpu=21.4%
+17:33:02Z gate cpu=26.3%
+17:33:24Z gate cpu=29.5%
+17:33:47Z gate cpu=32.7%
+17:34:10Z gate cpu=22.3%
+17:34:34Z gate cpu=25.9%
+17:34:57Z gate cpu=29.1%
+17:35:20Z gate cpu=34.7%
+17:35:43Z gate cpu=39.1%
+17:36:06Z gate cpu=31.4%
+17:36:28Z gate cpu=34.5%
+17:36:51Z gate cpu=24.5%
+17:37:15Z gate cpu=25.5%
+17:37:37Z gate cpu=33%
+17:38:00Z gate cpu=26%
+17:38:23Z gate cpu=26.1%
+17:38:45Z gate cpu=32.8%
+17:39:08Z gate cpu=22.4%
+17:39:32Z gate cpu=22.9%
+17:39:56Z gate cpu=36.6%
+17:40:18Z gate cpu=25.6%
+17:40:41Z gate cpu=28.1%
+17:41:04Z gate cpu=21.7%
+17:41:28Z gate cpu=24.4%
+17:41:51Z gate cpu=24.2%
+17:41:52Z ROUND 1 p4 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（8s）
+[capacity] 注入负载：400 架 × 30 Hz → 127.0.0.1:14560（4 个进程）
+[capacity]   进程 0: sysid 1..100（100 架）
+[capacity]   进程 1: sysid 101..200（100 架）
+[capacity]   进程 2: sysid 201..300（100 架）
+[capacity]   进程 3: sysid 301..400（100 架）
+[capacity] 等待 400 架设备上线...
+[capacity] 在线设备：200 / 400（等待 60s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 218: 59794 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=0 wsSessions=20（采样 23 次）
+[capacity] 摄入侧：数据报=315633.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315633 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-014153-d400-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-014153-d400-hz30-c20-ip20.json
+
+  在线 200/400 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 60
+  时延：无样本（逐帧推送未到达）
+  丢弃=0.0 队列深度峰值=0（末值 0.0）
+  摄入：数据报=315633.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315633 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+17:44:42Z ROUND 1 p4 DONE rc=0 recon=OK json=20261113-014153-d400-hz30-c20-ip20.json
+17:45:44Z gate cpu=26.9%
+17:46:06Z gate cpu=28.9%
+17:46:29Z gate cpu=25.2%
+17:46:52Z gate cpu=24.7%
+17:47:16Z gate cpu=35.9%
+17:47:39Z gate cpu=27.1%
+17:48:01Z gate cpu=25.2%
+17:48:24Z gate cpu=28.2%
+17:48:48Z gate cpu=34.7%
+17:49:11Z gate cpu=34%
+17:49:33Z gate cpu=34%
+17:49:56Z gate cpu=30.4%
+17:50:19Z gate cpu=27.3%
+17:50:42Z gate cpu=22.3%
+17:51:05Z gate cpu=22.6%
+17:51:29Z gate cpu=23.9%
+17:51:30Z ROUND 2 p2 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（8s）
+[capacity] 注入负载：400 架 × 30 Hz → 127.0.0.1:14560（2 个进程）
+[capacity]   进程 0: sysid 1..200（200 架）
+[capacity]   进程 1: sysid 201..400（200 架）
+[capacity] 等待 400 架设备上线...
+[capacity] 在线设备：200 / 400（等待 60s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 218: 61192 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=0 wsSessions=20（采样 22 次）
+[capacity] 摄入侧：数据报=315375.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315375 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-015130-d400-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-015130-d400-hz30-c20-ip20.json
+
+  在线 200/400 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 60
+  时延：无样本（逐帧推送未到达）
+  丢弃=0.0 队列深度峰值=0（末值 0.0）
+  摄入：数据报=315375.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315375 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+17:54:17Z ROUND 2 p2 DONE rc=0 recon=OK json=20261113-015130-d400-hz30-c20-ip20.json
+17:54:20Z gate cpu=28.5%
+17:54:42Z gate cpu=19.6%
+17:55:06Z gate cpu=32.6%
+17:55:29Z gate cpu=21.3%
+17:55:52Z gate cpu=22.3%
+17:56:16Z gate cpu=34.1%
+17:56:39Z gate cpu=24.4%
+17:57:02Z gate cpu=28.1%
+17:57:25Z gate cpu=23.3%
+17:57:49Z gate cpu=22.6%
+17:58:12Z gate cpu=23.9%
+17:58:14Z ROUND 2 p4 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（8s）
+[capacity] 注入负载：400 架 × 30 Hz → 127.0.0.1:14560（4 个进程）
+[capacity]   进程 0: sysid 1..100（100 架）
+[capacity]   进程 1: sysid 101..200（100 架）
+[capacity]   进程 2: sysid 201..300（100 架）
+[capacity]   进程 3: sysid 301..400（100 架）
+[capacity] 等待 400 架设备上线...
+[capacity] 在线设备：200 / 400（等待 60s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 218: 62431 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=0 wsSessions=20（采样 24 次）
+[capacity] 摄入侧：数据报=315412.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315412 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-015814-d400-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-015814-d400-hz30-c20-ip20.json
+
+  在线 200/400 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 98
+  时延：无样本（逐帧推送未到达）
+  丢弃=0.0 队列深度峰值=0（末值 0.0）
+  摄入：数据报=315412.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315412 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+18:01:01Z ROUND 2 p4 DONE rc=0 recon=OK json=20261113-015814-d400-hz30-c20-ip20.json
+18:01:51Z gate cpu=20.4%
+18:02:15Z gate cpu=26.1%
+18:02:37Z gate cpu=23%
+18:03:01Z gate cpu=21.7%
+18:03:24Z gate cpu=20.3%
+18:03:25Z ROUND 3 p2 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（8s）
+[capacity] 注入负载：400 架 × 30 Hz → 127.0.0.1:14560（2 个进程）
+[capacity]   进程 0: sysid 1..200（200 架）
+[capacity]   进程 1: sysid 201..400（200 架）
+[capacity] 等待 400 架设备上线...
+[capacity] 在线设备：200 / 400（等待 60s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 218: 63637 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=0 wsSessions=20（采样 23 次）
+[capacity] 摄入侧：数据报=315893.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315893 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-020326-d400-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-020326-d400-hz30-c20-ip20.json
+
+  在线 200/400 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 80
+  时延：无样本（逐帧推送未到达）
+  丢弃=0.0 队列深度峰值=0（末值 0.0）
+  摄入：数据报=315893.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315893 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+18:06:11Z ROUND 3 p2 DONE rc=0 recon=OK json=20261113-020326-d400-hz30-c20-ip20.json
+18:06:14Z gate cpu=42.4%
+18:06:37Z gate cpu=27.5%
+18:06:59Z gate cpu=26%
+18:07:22Z gate cpu=28.4%
+18:07:45Z gate cpu=23%
+18:08:09Z gate cpu=21%
+18:08:32Z gate cpu=21%
+18:08:33Z ROUND 3 p4 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（7s）
+[capacity] 注入负载：400 架 × 30 Hz → 127.0.0.1:14560（4 个进程）
+[capacity]   进程 0: sysid 1..100（100 架）
+[capacity]   进程 1: sysid 101..200（100 架）
+[capacity]   进程 2: sysid 201..300（100 架）
+[capacity]   进程 3: sysid 301..400（100 架）
+[capacity] 等待 400 架设备上线...
+[capacity] 在线设备：200 / 400（等待 60s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 218: 64738 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=0 wsSessions=20（采样 24 次）
+[capacity] 摄入侧：数据报=315803.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315803 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-020834-d400-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-020834-d400-hz30-c20-ip20.json
+
+  在线 200/400 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 60
+  时延：无样本（逐帧推送未到达）
+  丢弃=0.0 队列深度峰值=0（末值 0.0）
+  摄入：数据报=315803.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315803 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+18:11:19Z ROUND 3 p4 DONE rc=0 recon=OK json=20261113-020834-d400-hz30-c20-ip20.json
+==== LOADAXIS COMPLETE rounds=6 2026-11-12T18:11:19Z ====
+==== LOADAXIS START 2026-11-13T04:50:57Z ====
+04:51:30Z gate cpu=100%
+04:52:22Z gate cpu=100%
+04:57:06Z gate cpu=100%
+04:58:42Z gate cpu=100%
+05:00:00Z gate cpu=100%
+05:01:04Z gate cpu=100%
+05:02:33Z gate cpu=100%
+05:03:39Z gate cpu=100%
+05:05:15Z gate cpu=100%
+05:05:57Z gate cpu=100%
+05:06:46Z gate cpu=100%
+05:07:43Z gate cpu=100%
+05:08:46Z gate cpu=99.9%
+05:09:22Z gate cpu=100%
+05:10:00Z gate cpu=100%
+05:10:29Z gate cpu=100%
+05:12:15Z gate cpu=100%
+05:13:20Z gate cpu=100%
+05:14:00Z gate cpu=100%
+05:14:29Z gate cpu=100%
+05:15:00Z gate cpu=100%
+05:15:30Z gate cpu=100%
+05:16:02Z gate cpu=100%
+05:16:36Z gate cpu=100%
+05:17:04Z gate cpu=100%
+05:17:32Z gate cpu=100%
+05:18:00Z gate cpu=100%
+05:18:28Z gate cpu=100%
+05:18:55Z gate cpu=100%
+05:19:24Z gate cpu=100%
+05:19:53Z gate cpu=100%
+05:20:20Z gate cpu=100%
+05:20:45Z gate cpu=72.1%
+05:21:09Z gate cpu=53.5%
+05:21:33Z gate cpu=25.4%
+05:21:56Z gate cpu=36.2%
+05:22:20Z gate cpu=99.7%
+05:22:47Z gate cpu=100%
+05:24:12Z gate cpu=100%
+05:24:38Z gate cpu=100%
+05:25:05Z gate cpu=100%
+05:25:32Z gate cpu=100%
+05:26:01Z gate cpu=100%
+05:26:28Z gate cpu=100%
+05:26:56Z gate cpu=100%
+05:27:22Z gate cpu=100%
+05:28:07Z gate cpu=100%
+05:28:35Z gate cpu=100%
+05:29:03Z gate cpu=100%
+05:29:31Z gate cpu=100%
+05:29:58Z gate cpu=98.7%
+05:30:21Z gate cpu=24.7%
+05:30:46Z gate cpu=49.8%
+05:31:09Z gate cpu=35.6%
+05:31:32Z gate cpu=38.6%
+05:31:55Z gate cpu=41.8%
+05:32:19Z gate cpu=40.6%
+05:32:43Z gate cpu=89%
+05:33:06Z gate cpu=32.5%
+05:33:29Z gate cpu=31.7%
+05:33:53Z gate cpu=49.3%
+05:34:15Z gate cpu=41.7%
+05:34:39Z gate cpu=48.8%
+05:35:03Z gate cpu=50.4%
+05:35:27Z gate cpu=53.8%
+05:35:51Z gate cpu=57.4%
+05:36:15Z gate cpu=56.7%
+05:36:39Z gate cpu=58.6%
+05:37:03Z gate cpu=39.7%
+05:37:26Z gate cpu=37.8%
+05:37:50Z gate cpu=32.1%
+05:38:13Z gate cpu=33.2%
+05:38:36Z gate cpu=40.6%
+05:39:00Z gate cpu=36.7%
+05:39:23Z gate cpu=26.1%
+05:39:46Z gate cpu=33.8%
+05:40:09Z gate cpu=40%
+05:40:33Z gate cpu=67%
+05:40:57Z gate cpu=65.7%
+05:41:21Z gate cpu=59.7%
+05:41:45Z gate cpu=47.9%
+05:42:09Z gate cpu=44.3%
+05:42:33Z gate cpu=46.7%
+05:42:59Z gate cpu=88.2%
+05:43:25Z gate cpu=76.3%
+05:43:48Z gate cpu=57.9%
+05:44:12Z gate cpu=59%
+05:44:35Z gate cpu=48.5%
+05:44:58Z gate cpu=53.2%
+05:45:21Z gate cpu=56.8%
+05:45:44Z gate cpu=50%
+05:46:08Z gate cpu=60.1%
+05:46:31Z gate cpu=38.8%
+05:46:54Z gate cpu=41.8%
+05:47:19Z gate cpu=70.5%
+05:47:43Z gate cpu=54.6%
+05:48:06Z gate cpu=47.4%
+05:48:30Z gate cpu=47.1%
+05:48:53Z gate cpu=34.6%
+05:49:16Z gate cpu=51.3%
+05:49:40Z gate cpu=39.5%
+05:50:02Z gate cpu=31.5%
+05:50:25Z gate cpu=24.2%
+05:50:49Z gate cpu=41%
+05:51:12Z gate cpu=26.7%
+05:51:34Z gate cpu=27.7%
+05:51:57Z gate cpu=29.7%
+05:52:20Z gate cpu=28.9%
+05:52:43Z gate cpu=31.3%
+05:53:05Z gate cpu=28.9%
+05:53:28Z gate cpu=41.8%
+05:53:51Z gate cpu=25.9%
+05:54:14Z gate cpu=22.6%
+05:54:37Z gate cpu=25%
+05:55:01Z gate cpu=20.9%
+05:55:02Z ROUND 1 p2 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（8s）
+[capacity] 注入负载：200 架 × 30 Hz → 127.0.0.1:14560（2 个进程）
+[capacity]   进程 0: sysid 1..100（100 架）
+[capacity]   进程 1: sysid 101..200（100 架）
+[capacity] 等待 200 架设备上线...
+[capacity] 在线设备：200 / 200（等待 1s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 226:  5674 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=4088 wsSessions=20（采样 23 次）
+[capacity] 摄入侧：数据报=315254.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315254 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-135503-d200-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-135503-d200-hz30-c20-ip20.json
+
+  在线 200/200 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 4521191
+  时延 p50=936ms p95=956ms p99=962ms max=1064ms
+  丢弃=30042.0 队列深度峰值=4088（末值 0.0）
+  摄入：数据报=315254.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315254 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+05:56:41Z ROUND 1 p2 DONE rc=0 recon=OK json=20261113-135503-d200-hz30-c20-ip20.json
+05:56:44Z gate cpu=22%
+05:57:07Z gate cpu=20.3%
+05:57:31Z gate cpu=24%
+05:57:32Z ROUND 1 p4 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（8s）
+[capacity] 注入负载：200 架 × 30 Hz → 127.0.0.1:14560（4 个进程）
+[capacity]   进程 0: sysid 1..50（50 架）
+[capacity]   进程 1: sysid 51..100（50 架）
+[capacity]   进程 2: sysid 101..150（50 架）
+[capacity]   进程 3: sysid 151..200（50 架）
+[capacity] 等待 200 架设备上线...
+[capacity] 在线设备：200 / 200（等待 1s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 226:  6384 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=4095 wsSessions=20（采样 23 次）
+[capacity] 摄入侧：数据报=315402.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315402 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-135732-d200-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-135732-d200-hz30-c20-ip20.json
+
+  在线 200/200 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 4599278
+  时延 p50=934ms p95=955ms p99=961ms max=981ms
+  丢弃=25843.0 队列深度峰值=4095（末值 0.0）
+  摄入：数据报=315402.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315402 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+05:59:11Z ROUND 1 p4 DONE rc=0 recon=OK json=20261113-135732-d200-hz30-c20-ip20.json
+05:59:16Z gate cpu=25%
+05:59:40Z gate cpu=23.4%
+06:00:03Z gate cpu=25.6%
+06:00:27Z gate cpu=35.9%
+06:00:50Z gate cpu=27.2%
+06:01:13Z gate cpu=35.3%
+06:01:36Z gate cpu=27%
+06:01:58Z gate cpu=27.9%
+06:02:22Z gate cpu=36.7%
+06:02:45Z gate cpu=35.4%
+06:03:07Z gate cpu=22.1%
+06:03:31Z gate cpu=23.2%
+06:03:55Z gate cpu=27.2%
+06:04:18Z gate cpu=24.1%
+06:04:41Z gate cpu=26.3%
+06:05:04Z gate cpu=28.3%
+06:05:26Z gate cpu=26.6%
+06:05:49Z gate cpu=28.9%
+06:06:12Z gate cpu=31.6%
+06:06:35Z gate cpu=26.8%
+06:06:58Z gate cpu=22%
+06:07:22Z gate cpu=27.6%
+06:07:44Z gate cpu=25.2%
+06:08:07Z gate cpu=29.8%
+06:08:30Z gate cpu=23%
+06:08:53Z gate cpu=26.5%
+06:09:16Z gate cpu=20.4%
+06:09:39Z gate cpu=30.7%
+06:10:02Z gate cpu=23.2%
+06:10:26Z gate cpu=24.7%
+06:10:49Z gate cpu=27.3%
+06:11:12Z gate cpu=27.9%
+06:11:35Z gate cpu=18.9%
+06:11:58Z gate cpu=22.9%
+06:12:22Z gate cpu=31.6%
+06:12:45Z gate cpu=43.2%
+06:13:08Z gate cpu=41.2%
+06:13:32Z gate cpu=52.4%
+06:13:55Z gate cpu=34.9%
+06:14:18Z gate cpu=35.6%
+06:14:41Z gate cpu=39.6%
+06:15:04Z gate cpu=22.3%
+06:15:27Z gate cpu=21.6%
+06:15:51Z gate cpu=22.3%
+06:15:52Z ROUND 2 p2 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（7s）
+[capacity] 注入负载：200 架 × 30 Hz → 127.0.0.1:14560（2 个进程）
+[capacity]   进程 0: sysid 1..100（100 架）
+[capacity]   进程 1: sysid 101..200（100 架）
+[capacity] 等待 200 架设备上线...
+[capacity] 在线设备：200 / 200（等待 2s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 226:  8788 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=4089 wsSessions=20（采样 23 次）
+[capacity] 摄入侧：数据报=316091.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=316091 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-141552-d200-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-141552-d200-hz30-c20-ip20.json
+
+  在线 200/200 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 4679021
+  时延 p50=927ms p95=952ms p99=959ms max=979ms
+  丢弃=22084.0 队列深度峰值=4089（末值 0.0）
+  摄入：数据报=316091.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=316091 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+06:17:28Z ROUND 2 p2 DONE rc=0 recon=OK json=20261113-141552-d200-hz30-c20-ip20.json
+06:17:31Z gate cpu=27%
+06:17:54Z gate cpu=21.8%
+06:18:18Z gate cpu=28.8%
+06:18:40Z gate cpu=33%
+06:19:03Z gate cpu=30.9%
+06:19:26Z gate cpu=31.3%
+06:19:49Z gate cpu=37.4%
+06:20:12Z gate cpu=33.2%
+06:20:35Z gate cpu=23%
+06:20:58Z gate cpu=32.7%
+06:21:21Z gate cpu=28.3%
+06:21:44Z gate cpu=26.7%
+06:22:07Z gate cpu=45.6%
+06:22:31Z gate cpu=47.1%
+06:22:55Z gate cpu=55.6%
+06:23:18Z gate cpu=43.9%
+06:23:42Z gate cpu=35.7%
+06:24:04Z gate cpu=32.1%
+06:24:27Z gate cpu=37.8%
+06:24:50Z gate cpu=36.8%
+06:25:14Z gate cpu=30%
+06:25:37Z gate cpu=31.8%
+06:26:00Z gate cpu=39.2%
+06:26:23Z gate cpu=43.3%
+06:26:47Z gate cpu=46.9%
+06:27:10Z gate cpu=50.3%
+06:27:33Z gate cpu=32.4%
+06:27:57Z gate cpu=41.5%
+06:28:20Z gate cpu=45.1%
+06:28:43Z gate cpu=43.5%
+06:29:06Z gate cpu=22.9%
+06:29:30Z gate cpu=52.6%
+06:29:53Z gate cpu=35.9%
+06:30:16Z gate cpu=30.7%
+06:30:39Z gate cpu=51.6%
+06:31:02Z gate cpu=30.5%
+06:31:25Z gate cpu=27.3%
+06:31:49Z gate cpu=35%
+06:32:12Z gate cpu=48.8%
+06:32:35Z gate cpu=48.8%
+06:32:59Z gate cpu=47.5%
+06:33:24Z gate cpu=36.7%
+06:33:47Z gate cpu=39.6%
+06:34:11Z gate cpu=47.1%
+06:34:35Z gate cpu=38.6%
+06:35:00Z gate cpu=86%
+06:35:24Z gate cpu=52.8%
+06:35:48Z gate cpu=50.7%
+06:36:11Z gate cpu=51.8%
+06:36:35Z gate cpu=35.5%
+06:36:59Z gate cpu=84.2%
+06:37:23Z gate cpu=47.6%
+06:37:47Z gate cpu=31.9%
+06:38:11Z gate cpu=51.9%
+06:38:37Z gate cpu=86.6%
+06:39:03Z gate cpu=85.8%
+06:39:28Z gate cpu=64.5%
+06:39:53Z gate cpu=79.3%
+06:40:17Z gate cpu=49.5%
+06:40:40Z gate cpu=77.2%
+06:41:04Z gate cpu=33%
+06:41:27Z gate cpu=39.5%
+06:41:50Z gate cpu=34.6%
+06:42:14Z gate cpu=44.4%
+06:42:37Z gate cpu=41.4%
+06:43:01Z gate cpu=90.4%
+06:43:26Z gate cpu=76.8%
+06:43:50Z gate cpu=30.2%
+06:44:13Z gate cpu=33.8%
+06:44:36Z gate cpu=34.2%
+06:44:58Z gate cpu=22.4%
+06:45:22Z gate cpu=22%
+06:45:46Z gate cpu=26.8%
+06:46:09Z gate cpu=28.7%
+06:46:32Z gate cpu=36.6%
+06:46:56Z gate cpu=61.3%
+06:47:19Z gate cpu=40.9%
+06:47:42Z gate cpu=43.9%
+06:48:05Z gate cpu=30.4%
+06:48:28Z gate cpu=52.2%
+06:48:51Z gate cpu=52.1%
+06:49:15Z gate cpu=53.1%
+06:49:37Z gate cpu=19.8%
+06:50:01Z gate cpu=26.3%
+06:50:24Z gate cpu=25.2%
+06:50:47Z gate cpu=36.5%
+06:51:10Z gate cpu=38.9%
+06:51:34Z gate cpu=54%
+06:51:57Z gate cpu=37.7%
+06:52:20Z gate cpu=27.8%
+06:52:43Z gate cpu=40.2%
+06:53:06Z gate cpu=23.1%
+06:53:29Z gate cpu=26.2%
+06:53:52Z gate cpu=35.7%
+06:54:14Z gate cpu=28.9%
+06:54:37Z gate cpu=35.8%
+06:55:00Z gate cpu=31.3%
+06:55:23Z gate cpu=22.3%
+06:55:47Z gate cpu=29.7%
+06:56:09Z gate cpu=26.2%
+06:56:32Z gate cpu=36.3%
+06:56:55Z gate cpu=31%
+06:57:18Z gate cpu=31.7%
+06:57:41Z gate cpu=38%
+06:58:04Z gate cpu=44.1%
+06:58:27Z gate cpu=23.4%
+06:58:51Z gate cpu=35%
+06:59:14Z gate cpu=25%
+06:59:38Z gate cpu=28.6%
+07:00:00Z gate cpu=27.2%
+07:00:23Z gate cpu=28.6%
+07:00:46Z gate cpu=28.1%
+07:01:09Z gate cpu=25.4%
+07:01:31Z gate cpu=31.1%
+07:01:54Z gate cpu=21.2%
+07:02:17Z gate cpu=30.9%
+07:02:40Z gate cpu=23.1%
+07:03:04Z gate cpu=25.5%
+07:03:26Z gate cpu=21.2%
+07:03:49Z gate cpu=34.2%
+07:04:12Z gate cpu=32.7%
+07:04:35Z gate cpu=30.4%
+07:04:58Z gate cpu=25.2%
+07:05:21Z gate cpu=22.2%
+07:05:44Z gate cpu=31.9%
+07:06:07Z gate cpu=27.4%
+07:06:30Z gate cpu=33.1%
+07:06:53Z gate cpu=30.7%
+07:07:15Z gate cpu=23.8%
+07:07:39Z gate cpu=25.7%
+07:08:01Z gate cpu=29.9%
+07:08:24Z gate cpu=27.3%
+07:08:47Z gate cpu=20.3%
+07:09:10Z gate cpu=22.6%
+07:09:34Z gate cpu=25.3%
+07:09:57Z gate cpu=22.8%
+07:10:20Z gate cpu=24.2%
+07:10:44Z gate cpu=42.1%
+07:11:07Z gate cpu=21.9%
+07:11:30Z gate cpu=20.8%
+07:11:53Z gate cpu=23.2%
+07:11:54Z ROUND 2 p4 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（7s）
+[capacity] 注入负载：200 架 × 30 Hz → 127.0.0.1:14560（4 个进程）
+[capacity]   进程 0: sysid 1..50（50 架）
+[capacity]   进程 1: sysid 51..100（50 架）
+[capacity]   进程 2: sysid 101..150（50 架）
+[capacity]   进程 3: sysid 151..200（50 架）
+[capacity] 等待 200 架设备上线...
+[capacity] 在线设备：200 / 200（等待 2s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 226: 14269 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=4066 wsSessions=20（采样 23 次）
+[capacity] 摄入侧：数据报=315202.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315202 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-151155-d200-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-151155-d200-hz30-c20-ip20.json
+
+  在线 200/200 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 4777593
+  时延 p50=930ms p95=954ms p99=959ms max=978ms
+  丢弃=16785.0 队列深度峰值=4066（末值 0.0）
+  摄入：数据报=315202.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315202 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+07:13:30Z ROUND 2 p4 DONE rc=0 recon=OK json=20261113-151155-d200-hz30-c20-ip20.json
+07:14:41Z ABORT ports busy n=3 after 60s
+==== LOADAXIS CONTINUE attempt6b R3 START 2026-11-13T07:41:41Z ====
+07:41:45Z gate cpu=22.8%
+07:42:09Z gate cpu=22.3%
+07:42:32Z gate cpu=22.1%
+07:42:34Z ROUND 3 p2 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（8s）
+[capacity] 注入负载：200 架 × 30 Hz → 127.0.0.1:14560（2 个进程）
+[capacity]   进程 0: sysid 1..100（100 架）
+[capacity]   进程 1: sysid 101..200（100 架）
+[capacity] 等待 200 架设备上线...
+[capacity] 在线设备：200 / 200（等待 1s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 226: 16106 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=4078 wsSessions=20（采样 24 次）
+[capacity] 摄入侧：数据报=315155.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315155 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-154234-d200-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-154234-d200-hz30-c20-ip20.json
+
+  在线 200/200 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 4950702
+  时延 p50=919ms p95=949ms p99=957ms max=979ms
+  丢弃=8210.0 队列深度峰值=4078（末值 0.0）
+  摄入：数据报=315155.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315155 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+07:44:11Z ROUND 3 p2 DONE rc=0 recon=OK json=20261113-154234-d200-hz30-c20-ip20.json
+07:44:14Z gate cpu=39.4%
+07:44:37Z gate cpu=23.4%
+07:45:00Z gate cpu=28.5%
+07:45:23Z gate cpu=23.2%
+07:45:46Z gate cpu=23.7%
+07:46:10Z gate cpu=25.4%
+07:46:32Z gate cpu=27.2%
+07:46:55Z gate cpu=27.7%
+07:47:18Z gate cpu=24.4%
+07:47:41Z gate cpu=26.3%
+07:48:04Z gate cpu=52.4%
+07:48:28Z gate cpu=77.4%
+07:48:51Z gate cpu=39.8%
+07:49:14Z gate cpu=38.9%
+07:49:37Z gate cpu=20.8%
+07:50:01Z gate cpu=24.6%
+07:50:25Z gate cpu=38.2%
+07:50:47Z gate cpu=26.5%
+07:51:10Z gate cpu=28%
+07:51:33Z gate cpu=24.5%
+07:51:57Z gate cpu=30.3%
+07:52:20Z gate cpu=43.9%
+07:52:43Z gate cpu=24.3%
+07:53:06Z gate cpu=26.2%
+07:53:29Z gate cpu=33.4%
+07:53:52Z gate cpu=29.7%
+07:54:15Z gate cpu=28.3%
+07:54:38Z gate cpu=28.6%
+07:55:00Z gate cpu=32.7%
+07:55:23Z gate cpu=23.9%
+07:55:47Z gate cpu=24.3%
+07:56:10Z gate cpu=32.9%
+07:56:33Z gate cpu=35.9%
+07:56:56Z gate cpu=29.7%
+07:57:19Z gate cpu=39%
+07:57:42Z gate cpu=27.6%
+07:58:05Z gate cpu=32.8%
+07:58:28Z gate cpu=28.2%
+07:58:51Z gate cpu=31.3%
+07:59:14Z gate cpu=31.3%
+07:59:37Z gate cpu=26.7%
+07:59:59Z gate cpu=31.2%
+08:00:22Z gate cpu=22.7%
+08:00:46Z gate cpu=21.7%
+08:01:09Z gate cpu=30.4%
+08:01:32Z gate cpu=24.4%
+08:01:56Z gate cpu=27.8%
+08:02:18Z gate cpu=23.6%
+08:02:42Z gate cpu=27%
+08:03:05Z gate cpu=30.1%
+08:03:27Z gate cpu=21%
+08:03:51Z gate cpu=25.9%
+08:04:14Z gate cpu=29.8%
+08:04:36Z gate cpu=24.5%
+08:05:00Z gate cpu=25.8%
+08:05:23Z gate cpu=29.3%
+08:05:46Z gate cpu=26.8%
+08:06:08Z gate cpu=26.2%
+08:06:32Z gate cpu=34.1%
+08:07:11Z gate cpu=100%
+08:07:55Z gate cpu=100%
+08:08:30Z gate cpu=100%
+08:09:05Z gate cpu=100%
+08:09:38Z gate cpu=100%
+08:10:09Z gate cpu=100%
+08:10:43Z gate cpu=100%
+08:11:15Z gate cpu=100%
+08:11:55Z gate cpu=100%
+08:12:34Z gate cpu=100%
+08:13:30Z gate cpu=100%
+08:13:53Z gate cpu=31.3%
+08:14:16Z gate cpu=58.2%
+08:14:40Z gate cpu=55.8%
+08:15:04Z gate cpu=55.9%
+08:15:30Z gate cpu=99.4%
+08:15:55Z gate cpu=52.9%
+08:16:18Z gate cpu=29.9%
+08:16:41Z gate cpu=35.5%
+08:17:04Z gate cpu=70.5%
+08:17:28Z gate cpu=35.6%
+08:17:51Z gate cpu=37%
+08:18:14Z gate cpu=43.6%
+08:18:37Z gate cpu=26.8%
+08:19:00Z gate cpu=32%
+08:19:26Z gate cpu=73.4%
+08:19:52Z gate cpu=81.5%
+08:20:16Z gate cpu=47.1%
+08:20:39Z gate cpu=58.8%
+08:21:02Z gate cpu=36.8%
+08:21:26Z gate cpu=65.3%
+08:21:49Z gate cpu=32%
+08:22:12Z gate cpu=37.6%
+08:22:35Z gate cpu=27.8%
+08:22:58Z gate cpu=26%
+08:23:21Z gate cpu=40.9%
+08:23:44Z gate cpu=27.4%
+08:24:07Z gate cpu=32.2%
+08:24:30Z gate cpu=42.1%
+08:24:53Z gate cpu=43.5%
+08:25:16Z gate cpu=28.8%
+08:25:39Z gate cpu=32.3%
+08:26:02Z gate cpu=33.1%
+08:26:26Z gate cpu=40.5%
+08:26:50Z gate cpu=55.4%
+08:27:13Z gate cpu=33.9%
+08:27:36Z gate cpu=30.5%
+08:27:59Z gate cpu=34%
+08:28:24Z gate cpu=50.8%
+08:28:47Z gate cpu=20.5%
+08:29:11Z gate cpu=38%
+08:29:35Z gate cpu=48.3%
+08:29:58Z gate cpu=44.8%
+08:30:21Z gate cpu=45.2%
+08:30:46Z gate cpu=96.4%
+08:31:10Z gate cpu=58.4%
+08:31:34Z gate cpu=60.9%
+08:31:58Z gate cpu=55.5%
+08:32:22Z gate cpu=48.1%
+08:32:47Z gate cpu=75.9%
+08:33:10Z gate cpu=51.4%
+08:33:33Z gate cpu=32.8%
+08:33:56Z gate cpu=24.1%
+08:34:20Z gate cpu=27.6%
+08:34:43Z gate cpu=29%
+08:35:05Z gate cpu=27.7%
+08:35:28Z gate cpu=23.7%
+08:35:52Z gate cpu=22.9%
+08:36:16Z gate cpu=27.9%
+08:36:39Z gate cpu=25.5%
+08:37:01Z gate cpu=31.8%
+08:37:24Z gate cpu=21.5%
+08:37:48Z gate cpu=22.9%
+08:38:12Z gate cpu=42.3%
+08:38:35Z gate cpu=49.2%
+08:38:57Z gate cpu=38%
+08:39:20Z gate cpu=25.2%
+08:39:43Z gate cpu=28.7%
+08:40:06Z gate cpu=28.4%
+08:40:29Z gate cpu=21.7%
+08:40:52Z gate cpu=28.5%
+08:41:15Z gate cpu=42.1%
+08:41:39Z gate cpu=59.1%
+08:42:02Z gate cpu=48.8%
+08:42:26Z gate cpu=57.5%
+08:42:50Z gate cpu=56.6%
+08:43:14Z gate cpu=68.3%
+08:43:38Z gate cpu=55.4%
+08:44:01Z gate cpu=39.5%
+08:44:24Z gate cpu=30.6%
+08:44:47Z gate cpu=41.9%
+08:45:11Z gate cpu=35.6%
+08:45:34Z gate cpu=33.5%
+08:45:57Z gate cpu=34.9%
+08:46:21Z gate cpu=32.5%
+08:46:44Z gate cpu=34.3%
+08:47:07Z gate cpu=27.5%
+08:47:30Z gate cpu=27.7%
+08:47:54Z gate cpu=38.5%
+08:48:18Z gate cpu=27.8%
+08:48:41Z gate cpu=32.2%
+08:49:04Z gate cpu=25%
+08:49:28Z gate cpu=30.3%
+08:49:51Z gate cpu=33.3%
+08:50:13Z gate cpu=27.8%
+08:50:36Z gate cpu=50.8%
+08:50:59Z gate cpu=27.9%
+08:51:22Z gate cpu=48.6%
+08:51:45Z gate cpu=34.5%
+08:52:08Z gate cpu=40%
+08:52:31Z gate cpu=30.1%
+08:52:54Z gate cpu=27%
+08:53:17Z gate cpu=29.6%
+08:53:39Z gate cpu=28.2%
+08:54:02Z gate cpu=38.3%
+08:54:25Z gate cpu=25.8%
+08:54:48Z gate cpu=25.2%
+08:55:11Z gate cpu=28.7%
+08:55:34Z gate cpu=34.2%
+08:55:57Z gate cpu=32%
+08:56:20Z gate cpu=34.5%
+08:56:43Z gate cpu=35.4%
+08:57:07Z gate cpu=33.6%
+08:57:30Z gate cpu=40.5%
+08:57:53Z gate cpu=28%
+08:58:16Z gate cpu=28%
+08:58:39Z gate cpu=44.4%
+08:59:02Z gate cpu=70.6%
+08:59:25Z gate cpu=42.3%
+08:59:48Z gate cpu=39.6%
+09:00:11Z gate cpu=25.3%
+09:00:34Z gate cpu=31.6%
+09:00:57Z gate cpu=22.7%
+09:01:21Z gate cpu=33.9%
+09:01:44Z gate cpu=24.8%
+09:02:08Z gate cpu=24.1%
+09:02:32Z gate cpu=45.1%
+09:02:55Z gate cpu=47%
+09:03:18Z gate cpu=47.4%
+09:03:41Z gate cpu=42.6%
+09:04:04Z gate cpu=47.3%
+09:04:27Z gate cpu=36.4%
+09:04:50Z gate cpu=27.4%
+09:05:13Z gate cpu=30.6%
+09:05:36Z gate cpu=26.6%
+09:05:58Z gate cpu=26.4%
+09:06:21Z gate cpu=27.1%
+09:06:44Z gate cpu=21.2%
+09:07:08Z gate cpu=25%
+09:07:31Z gate cpu=35.7%
+09:07:54Z gate cpu=27%
+09:08:18Z gate cpu=33.7%
+09:08:41Z gate cpu=31.3%
+09:09:04Z gate cpu=38.5%
+09:09:28Z gate cpu=39.9%
+09:09:51Z gate cpu=33%
+09:10:15Z gate cpu=53.5%
+09:10:38Z gate cpu=29.9%
+09:11:01Z gate cpu=29.2%
+09:11:25Z gate cpu=41%
+09:11:48Z gate cpu=40.9%
+09:12:12Z gate cpu=30.7%
+09:12:35Z gate cpu=30.1%
+09:12:59Z gate cpu=48.9%
+09:13:23Z gate cpu=46.9%
+09:13:46Z gate cpu=35.4%
+09:14:10Z gate cpu=35.4%
+09:14:32Z gate cpu=33.2%
+09:14:56Z gate cpu=32.6%
+09:15:19Z gate cpu=27.1%
+09:15:42Z gate cpu=26.4%
+09:16:06Z gate cpu=57.8%
+09:16:29Z gate cpu=32%
+09:16:53Z gate cpu=45.9%
+09:17:17Z gate cpu=43.4%
+09:17:40Z gate cpu=44.1%
+09:18:03Z gate cpu=45.8%
+09:18:26Z gate cpu=32.4%
+09:18:49Z gate cpu=28.7%
+09:19:12Z gate cpu=28.5%
+09:19:35Z gate cpu=27.9%
+09:19:58Z gate cpu=34.6%
+09:20:20Z gate cpu=31.7%
+09:20:43Z gate cpu=35.4%
+09:21:06Z gate cpu=25.7%
+09:21:29Z gate cpu=35.4%
+09:21:52Z gate cpu=32.2%
+09:22:15Z gate cpu=34.4%
+09:22:38Z gate cpu=35.5%
+09:23:01Z gate cpu=26.6%
+09:23:23Z gate cpu=28.9%
+09:23:46Z gate cpu=31%
+09:24:09Z gate cpu=22.2%
+09:24:32Z gate cpu=22.8%
+09:24:56Z gate cpu=23.9%
+09:24:57Z ROUND 3 p4 START
+[capacity] 后端 jar: aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar
+[capacity] 模拟器 jar: aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar
+[capacity] JAVA: E:\dev-tools\jdk17.0.20_8/bin/java.exe
+[capacity] 启动后端（dev profile, port=18190, udp=14560, max-connections-per-ip=20, udp-rcvbuf=0）
+[capacity] 后端就绪（7s）
+[capacity] 注入负载：200 架 × 30 Hz → 127.0.0.1:14560（4 个进程）
+[capacity]   进程 0: sysid 1..50（50 架）
+[capacity]   进程 1: sysid 51..100（50 架）
+[capacity]   进程 2: sysid 101..150（50 架）
+[capacity]   进程 3: sysid 151..200（50 架）
+[capacity] 等待 200 架设备上线...
+[capacity] 在线设备：200 / 200（等待 2s）
+[capacity] 测量 60s，20 条 WS 连接...
+/f/Nexus/nexussky-pre283/scripts/capacity-baseline.sh: line 226: 21738 Killed                  ( while true; do
+    P="$(curl -s -m 2 "http://localhost:$PORT/actuator/prometheus" 2> /dev/null)"; D="$(echo "$P" | grep -E '^aerofleet_ws_fanout_queue_depth' | head -1 | awk '{print $NF}')"; S="$(echo "$P" | grep -E '^aerofleet_ws_sessions' | head -1 | awk '{print $NF}')"; echo "${D:-0} ${S:-0}"; sleep 2;
+done ) > "$PEAK_LOG" 2> /dev/null
+[capacity] 测量期峰值：queueDepth=4096 wsSessions=20（采样 24 次）
+[capacity] 摄入侧：数据报=315862.0 解析错误=0.0 噪声字节=0.0 丢弃=0
+[capacity] 注入端送出=315862 帧（截至 t=70s）→ 内核层丢弃 ≈ 0 包
+docs/capacity/20261113-172457-d200-hz30-c20-ip20.json
+[capacity] 报告：docs/capacity/20261113-172457-d200-hz30-c20-ip20.json
+
+  在线 200/200 架 | 活跃连接 20/20 | 握手成功 20 | 服务端拒绝 0 | 消息 4736995
+  时延 p50=932ms p95=952ms p99=957ms max=975ms
+  丢弃=19452.0 队列深度峰值=4096（末值 0.0）
+  摄入：数据报=315862.0 解析错误=0.0 帧 摄入丢弃=0 帧
+  注入端送出=315862 帧 → 内核层丢弃≈0（日志 10s 粒度，仅量级参考）
+
+09:26:32Z ROUND 3 p4 DONE rc=0 recon=OK json=20261113-172457-d200-hz30-c20-ip20.json
+==== LOADAXIS CONTINUE attempt6b R3 COMPLETE rounds=2 2026-11-13T09:26:32Z ====
+09:26:32Z attempt6 total ROUND DONE since 04:50 START = 6
