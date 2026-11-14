@@ -1,5 +1,19 @@
 # NexusSky 变更日志
 
+## [Unreleased] — feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ / REQUEST_LIST / VALUE / SET（+6 例）
+
+对照批（`docs/protocol-vendor-integration.md` §5.1，2026-11-13）发现的最大缺口闭环：
+官方参数服务（GCS 读/写参数主通路）在仓无消息类 → 补齐四消息：
+
+- `ParamRequestRead`(20) / `ParamRequestList`(21) / `ParamValue`(22) / `ParamSet`(23)：
+  字段线序按官方类型降序稳定排序（如 PARAM_REQUEST_READ 的两字节 `param_index` 排最前）；
+  `param_id` char[16] NUL 填充/截断；`MavlinkMessageInfo` 四条 (LEN, CRC_EXTRA) 入表 + `decode` 分派；
+- 回归用 pymavlink 官方打包帧逐字节比对（含 MAVLink2 尾零裁剪帧 → 入口零填充路径）；
+- 协议序列形状：REQUEST_LIST/READ 定向、SET→VALUE 回执字段映射（官方语义：写失败也回 VALUE，
+  失败靠请求方超时/值比对判定，消息层不加工失败语义）。
+
+计数：mavlink-core 523→529、全仓 6074→6080（+6 例，基于 master 6074/cloud-backend 3875）。
+
 ## [Unreleased] — feat(inspection): 巡检任务/报告落库（V41）与机巢架次可观测（整合 #279）
 
 ### 背景
@@ -3293,7 +3307,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-13 共有 313 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-13 共有 314 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3320,7 +3334,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 313 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 314 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
