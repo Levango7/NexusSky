@@ -218,7 +218,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
 - [x] P1-8 四类行业航线模板 + GCS 模板 UI（2026-11：F3 交付 tower/solar/pipeline/
       shoreline + RouteTemplatePanel；本轮补齐「杆塔号挂接 + 缺陷复检航线」闭环）
 - [x] P1-9 缺陷领域模型 + 报告导出 + 工单流（闭环消缺）（2026-11：已交付缺陷领域模型与持久化、工单创建/流转/复检与 `RECTIFIED` 闭环回写、`GET /api/v1/defects/report` 的 json/csv/md 报告导出；PDF 渲染未纳入，按当前实现口径验收）
-- [ ] P1-10 双栈网关抽象（2026-11：DeviceGateway/SPI/CommandRouter 抽象与 MAVLink 栈已落地；#296 交付 DJI Cloud API 第 2 栈 **flight_task 子集 PoC**——`aerofleet.dji-cloud.enabled` 默认关闭、fail-closed、经机巢网关下发，**无真实设备/EMQX 联调**，未全量勾选）
+- [x] P1-10 双栈网关抽象（2026-11：已交付 `DeviceGateway`/SPI/`CommandRouter` 抽象与 MAVLink 栈，以及 DJI Cloud API 第 2 栈 **flight_task 子集 PoC**（`aerofleet.dji-cloud.enabled` 默认关闭、fail-closed、经机巢网关下发）；命令覆盖仍为子集且**无真实设备/EMQX 联调**，按当前 PoC/抽象落地口径验收）
 - [x] P1-11 RTK 精度字段（2026-11：`GPS_RAW_INT` 已采集并暴露 `fixType`/`satellites`/`eph`(HDOP*100)/`epv`(VDOP*100)，派生 `rtkStatus`，并在 summary/detail/telemetry/status 视图一致输出；当前栈无更多 GNSS 精度字段可用，按现有协议与接口口径验收）
 - [ ] P2-12 ROC 席位化"一控多机" + 警情驱动航线
 - [ ] P2-14 U-space 四服务接口 + Remote ID 三套字段映射
