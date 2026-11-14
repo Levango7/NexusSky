@@ -213,7 +213,7 @@ Part 108 BVLOS：NPRM 于 2025-08-11 发布（FAA+TSA，适用 ≤600kg、性能
 - [ ] P0-4 PostgreSQL（drone/mission/flightlog 三域）
 - [ ] P0-5 MAVLink v2 signing + link-sim 篡改画像
 - [ ] P1-6 ONNX 推理接入 + 识别率/误检比/处理时间评测面板（2026-11：#292 已交付评测层按 kind 拆分的识别率/误检比/处理时间面板与指标归账；ONNX 推理模型接入未覆盖，仍待后续立项）
-- [ ] P1-7 Dock 状态机 + 上云 API 适配器（MQTT 物模型）+ 利用率健康度度量
+- [ ] P1-7 Dock 状态机 + 上云 API 适配器（MQTT 物模型）+ 利用率健康度度量（2026-11：代码侧已有 DockService/状态流转与 run/state 记录、MqttDockGateway 基于 DJI Cloud API 	hing/product/{sn}/services 物模型通道的适配、DockMetricsService 日结/rollup 利用率与健康度指标及面板展示；按招标口径的全量覆盖与验收证据仍待逐项对齐，未全量勾选）
 - [x] P1-8 四类行业航线模板 + GCS 模板 UI（2026-11：F3 交付 tower/solar/pipeline/
       shoreline + RouteTemplatePanel；本轮补齐「杆塔号挂接 + 缺陷复检航线」闭环）
 - [ ] P1-9 缺陷领域模型 + 报告导出 + 工单流（闭环消缺）（2026-11：#278 已交付 `RECTIFIED` 状态/复检通过闭环落库与闭环率字段；缺陷领域模型与报告导出等条目按现有实现持续收口，本项未全量勾选）
