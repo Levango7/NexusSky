@@ -213,7 +213,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
 - [ ] P0-3 围栏起飞前硬拦截链 + 限飞区数据源接口
 - [ ] P0-4 PostgreSQL（drone/mission/flightlog 三域）
 - [ ] P0-5 MAVLink v2 signing + link-sim 篡改画像
-- [ ] P1-6 ONNX 推理接入 + 识别率/误检比/处理时间评测面板（2026-11：#292 已交付评测层按 kind 拆分的识别率/误检比/处理时间面板与指标归账；ONNX 推理模型接入未覆盖，仍待后续立项）
+- [ ] P1-6 ONNX 推理接入 + 识别率/误检比/处理时间评测面板（2026-11：#292 已交付评测层按 kind 拆分的识别率/误检比/处理时间面板与指标归账；平台侧 `ExternalVisionSource`（HTTP JPEG→`{kind,confidence,u,v}`）与配置/评测链路可对接 ONNX Runtime Server/Triton 等外部推理服务，并补充接入契约与参考服务（`docs/external-vision-inference.md`、`scripts/vision-inference-server.py`）；**进程内嵌入 onnxruntime 与内置行业模型**未纳入，仍待后续立项）
 - [x] P1-7 Dock 状态机 + 上云 API 适配器（MQTT 物模型）+ 利用率健康度度量（2026-11：已交付 Dock 状态机/状态流转与 run/state 持久化、无人值守定时任务、`MqttDockGateway`/OSD 基于 DJI Cloud API `thing/product/{sn}/services` 等 MQTT 物模型通道的适配（含 sim 对端语义，命令未按真实 DJI 官方 method 全量映射）、`DockMetricsService` 日结/rollup 利用率与可用性/故障/温控/充电等健康度指标及面板展示；未覆盖真实 DJI HTTPS/WebSocket 全链路与真机联调，按当前 PoC/实现口径验收）
 - [x] P1-8 四类行业航线模板 + GCS 模板 UI（2026-11：F3 交付 tower/solar/pipeline/
       shoreline + RouteTemplatePanel；本轮补齐「杆塔号挂接 + 缺陷复检航线」闭环）
