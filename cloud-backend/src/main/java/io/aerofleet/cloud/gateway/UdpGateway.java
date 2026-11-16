@@ -167,6 +167,36 @@ public class UdpGateway {
         }
     }
 
+    /**
+     * 路由换源计数与抖动告警（威胁建模 ④-F2）。
+     * <p>
+     * 首次学习不算换源；同 sysid 在 {@link #ROUTE_FLAP_WINDOW_MS} 窗口内换源达到
+     * {@link #ROUTE_FLAP_WARN_THRESHOLD} 次即 WARN（窗口滑动、跨过阈值时各触发一次）——
+     * 抢路由攻击会持续高频换源，合法重绑定（换 IP/换代理）频率远低于此。
+     */
+    private void recordRouteChange(int sysid, boolean wasKnown) {
+        if (!wasKnown) {
+            return;
+        }
+        DroneMetrics m = metrics();
+        if (m != null) {
+            m.recordRouteChanged();
+        }
+        long now = System.currentTimeMillis();
+        Deque<Long> window = routeChangeWindows.computeIfAbsent(sysid, k -> new ArrayDeque<>());
+        synchronized (window) {
+            while (!window.isEmpty() && now - window.peekFirst() > ROUTE_FLAP_WINDOW_MS) {
+                window.pollFirst();
+            }
+            window.addLast(now);
+            if (window.size() == ROUTE_FLAP_WARN_THRESHOLD) {
+                log.warn("Route flap suspected: sysid={} changed source {} times in {}s"
+                                + " (route hijack or link flapping?)",
+                        sysid, window.size(), ROUTE_FLAP_WINDOW_MS / 1000);
+            }
+        }
+    }
+
     /** 每 sysid 滑动窗口频率限制器：key=sysid, value=最近1秒内的时间戳队列。 */
     private final ConcurrentHashMap<Integer, Deque<Long>> rateLimitWindows = new ConcurrentHashMap<>();
 
@@ -188,6 +218,22 @@ public class UdpGateway {
      * 「总配额 / 实例数」：总帧数不放大，即 §12.4 判据 2 的**按实例摊分**。
      */
     private final ConcurrentHashMap<Integer, Deque<Long>> broadcastRateWindows = new ConcurrentHashMap<>();
+
+    /**
+     * 每 sysid 换源窗口（60s 滑动）：路由抢夺/链路抖动的告警依据（威胁建模 ④-F2）。
+     * <p>
+     * 为什么只告警不改语义：多 link-sim 代理（drone-extra-ports）下，同一架飞机的帧
+     * **合法地**从不同代理地址交替到达——换源节流/滞回会误伤；而 UDP 源地址本就
+     * 无认证，任何「确认 N 帧再切换」的滞回对手方同样伪造得出。根治=MAVLink v2
+     * 签名收紧（reject-unsigned，见 SigningPostureService 的 C5 分阶段流程）。
+     */
+    private final ConcurrentHashMap<Integer, Deque<Long>> routeChangeWindows = new ConcurrentHashMap<>();
+
+    /** 换源告警阈值：60s 窗口内同 sysid 换源达到该次数即 WARN（跨过阈值触发一次）。 */
+    private static final int ROUTE_FLAP_WARN_THRESHOLD = 3;
+
+    /** 换源告警窗口长度（毫秒）。 */
+    private static final long ROUTE_FLAP_WINDOW_MS = 60_000L;
 
     /**
      * 关键帧判定集：GCS 功能依赖其「必达」的低频控制面帧。
@@ -315,6 +361,16 @@ public class UdpGateway {
             m.recordMessageDecoded();
         }
 
+        // MAVLink sysid 有效域 1..255（GCS=255）：sysid=0 是畸形/伪造帧。白名单与
+        // 限速两个守卫都以 sysid>0 为前提，放它过去等于双双旁路（威胁建模 ④-F1：
+        // 无限帧可直达 ingest 扇出全量监听器）。
+        if (sysid <= 0) {
+            log.warn("Rejected frame with invalid sysid={} (msgId={})",
+                    sysid, frame.getMessageId());
+            recordDrop(DroneMetrics.IngestDropReason.FRAME_INVALID_SYSID);
+            return;
+        }
+
         // 签名验证（签名启用时）
         if (isSigningEnabled() && !verifyFrame(frame)) {
             recordDrop(DroneMetrics.IngestDropReason.FRAME_SIGNATURE_REJECTED);
@@ -353,6 +409,7 @@ public class UdpGateway {
             droneRoutes.learn(sysid, source);
             if (prev == null || !prev.equals(source)) {
                 log.debug("Route sysid={} -> {}", sysid, source);
+                recordRouteChange(sysid, prev != null);
             }
         }
         ingest.handle(frame);
@@ -462,7 +519,8 @@ public class UdpGateway {
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 300_000, initialDelay = 300_000)
     public void pruneStaleRateLimitWindows() {
         long cutoff = System.currentTimeMillis() - 120_000;
-        int before = rateLimitWindows.size() + criticalRateWindows.size() + broadcastRateWindows.size();
+        int before = rateLimitWindows.size() + criticalRateWindows.size() + broadcastRateWindows.size()
+                + routeChangeWindows.size();
         rateLimitWindows.entrySet().removeIf(entry -> {
             Deque<Long> window = entry.getValue();
             synchronized (window) {
@@ -481,8 +539,14 @@ public class UdpGateway {
                 return window.isEmpty() || window.peekLast() < cutoff;
             }
         });
+        routeChangeWindows.entrySet().removeIf(entry -> {
+            Deque<Long> window = entry.getValue();
+            synchronized (window) {
+                return window.isEmpty() || window.peekLast() < cutoff;
+            }
+        });
         int removed = before - rateLimitWindows.size() - criticalRateWindows.size()
-                - broadcastRateWindows.size();
+                - broadcastRateWindows.size() - routeChangeWindows.size();
         if (removed > 0) {
             log.debug("Pruned {} stale rate-limit windows", removed);
         }
