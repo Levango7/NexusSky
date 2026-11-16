@@ -41,6 +41,7 @@ class TelemetryWsHandshakeNpeTest {
                 mock(JwtTokenProvider.class),
                 mock(DeviceRegistry.class),
                 devMode,
+                false, // XFF 取信门：默认不信任
                 0,   // 不启用 IP 限流，聚焦 NPE 本身
                 0,   // 不启用租户限流
                 new ObjectMapper());
@@ -66,7 +67,7 @@ class TelemetryWsHandshakeNpeTest {
         when(jwt.validateToken("tok")).thenReturn(true);   // 握手鉴权通过
         when(jwt.resolveTenantScope("tok")).thenReturn(null); // 但用户无租户归属 → 三态里的全局域
         TelemetryWebSocketHandler handler = new TelemetryWebSocketHandler(
-                jwt, mock(DeviceRegistry.class), false, 0, 0, new ObjectMapper());
+                jwt, mock(DeviceRegistry.class), false, false, 0, 0, new ObjectMapper());
 
         WebSocketSession session = sessionWithChmAttributes();
         // token 通过 query 参数传入（生产口径：浏览器握手带不了 Authorization 头）

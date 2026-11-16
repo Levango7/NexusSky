@@ -340,6 +340,8 @@ SSE 的 `Authorization` 头问题（`EventSource` 带不了自定义头，故 pr
 - 两条路径在 `SecurityConfig` 均注册为 `addFilterBefore(StreamTokenFilter, UsernamePasswordAuthenticationFilter.class)`；
 - 开发模式（`dev-mode=true`）跳过过滤（与 `ApiKeyFilter` 同姿势），不破坏现有测试。
 
+**WS 连接限流的 IP 取信门（2026-11-16 认证链人工复核 ②）**：`/ws/telemetry` 的 per-IP 连接上限（`aerofleet.ws.max-connections-per-ip`）默认按 remote address 分桶；仅当 `aerofleet.security.trust-forwarded-for=true` 时采用 `X-Forwarded-For` 首段——与 `AuthController.extractClientIp`、`AuditInterceptor` 同一开关与默认。握手头客户端可控，默认信任等于每换一个头就是一个新桶，per-IP 上限形同虚设（跨租户上限按 JWT 绑定，不受影响）；反向代理部署应显式开启该开关并确保入口代理覆写 XFF。
+
 **Pass B 断言 9（`ci-integration-test.sh`）** 为本功能提供端到端闭环证据：签发 → 开流 `-m 3` 掐断得到 200 头 → 同令牌重用 401 → 无凭证 401。
 
 ## 4. 租户隔离机制

@@ -26,7 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * 认证端点：登录与令牌刷新。
  * <p>
  * 使用内存用户存储（从配置 {@code aerofleet.security.users} 加载），
- * 格式为 {@code username:password,username2:password2}，默认 {@code admin:admin}。
+ * 格式为 {@code username:password[:ROLE],username2:password2[:ROLE]}；不设默认口令——
+ * 配置为空且无 {@link UserRepository} 时构造器直接抛异常（fail-fast，无 {@code admin:admin} 兜底）。
  * 不接外部 IDP，适用于脚手架阶段和中小规模部署。
  * <p>
  * 登录频率限制：每 IP 每分钟最多 {@value #MAX_ATTEMPTS_PER_MINUTE} 次，

@@ -1,0 +1,68 @@
+# 容量基线冒烟（手动触发，非门禁）
+#
+# 背景：capacity-baseline.sh 是"能不能跑通整条容量测量链路"的工具——它需要后端 jar、
+# drone-sim shaded jar、真端口、真进程。这条工作流只验证**链路能用**，不测容量、
+# 不出任何可外推的性能结论；真实档位测量仍按 docs/capacity/README.md 手工执行。
+#
+# 触发：Actions 页 → 本工作流 → "Run workflow"（workflow_dispatch ONLY）。
+# 非硬门禁：不挂 requires、不阻塞任何 PR/merge；失败仅表示冒烟链路坏了或产物缺 JSON，
+# 不代表容量结论有问题。job 超时 30 分钟（jar 构建 + 空跑回环）。
+
+name: Capacity Smoke (manual, non-gating)
+
+on:
+  workflow_dispatch:
+    inputs:
+      drones:
+        description: '虚拟无人机数量（冒烟用，建议 3）'
+        required: true
+        default: '3'
+      hz:
+        description: '每架/秒帧数（冒烟用，建议 10）'
+        required: true
+        default: '10'
+      clients:
+        description: 'WS 并发连接数（冒烟用，建议 2）'
+        required: true
+        default: '2'
+      duration:
+        description: '测量时长秒（冒烟用，建议 15）'
+        required: true
+        default: '15'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Capacity baseline smoke (non-gating)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore Maven cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
+          restore-keys: mvn-${{ runner.os }}-
+      - name: Build jars
+        run: mvn -B -q -pl cloud-backend,drone-sim -am package -DskipTests
+      - name: Capacity smoke
+        run: bash scripts/capacity-smoke.sh
+        env:
+          SMOKE_DRONES: ${{ inputs.drones }}
+          SMOKE_HZ: ${{ inputs.hz }}
+          SMOKE_CLIENTS: ${{ inputs.clients }}
+          SMOKE_DURATION: ${{ inputs.duration }}
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-smoke-out
+          path: /tmp/capacity-smoke-out.*/**
+          retention-days: 3

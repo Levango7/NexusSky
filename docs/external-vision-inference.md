@@ -44,7 +44,7 @@ aerofleet.vision.external.timeout-ms=3000
 | `v` | number | 是 | 检测框中心/定位点 y 像素坐标 |
 
 - 非数组响应：整帧视为无检测。
-- 单条缺字段或 `confidence` 越界：该条丢弃，其余合法条目保留。
+- 单条缺字段、`confidence` 越界或 `u/v` 超出像面：该条丢弃，其余合法条目保留。
 - 空数组 `[]`：合法，表示本帧无检出。
 
 ## 3. 与评测面板的关系
@@ -111,3 +111,11 @@ python scripts/vision-inference-server.py --port 9001
 - 本契约覆盖**外部推理服务接入**；**进程内嵌入 onnxruntime Java/原生库**不在当前主工程范围内（避免引入平台相关原生依赖与分发复杂度）。
 - 检测质量（识别率/误检比）取决于所接模型与数据；平台提供接入与评测度量面，不内置训练好的行业模型。
 - 真实设备/真实场景精度需在目标环境按业务数据集验收（非 CI/非模拟器保证项）。
+
+## 6. 对端信任与安全边界
+
+- `endpoint` 是**运维配置项**（`application.properties` 的 `aerofleet.vision.external.endpoint`），不是运行时可写面：actuator 仅暴露 health/info/metrics/prometheus，无环境写入口；拍照接口本身要求 OPERATOR 角色（`VisionController`）。谁控制配置谁控制对端——请把推理服务部署在可信网络路径上；跨主机部署时请在对端用 HTTPS + 鉴权（本平台不校验 scheme/host、不给请求加鉴权头、不校验响应签名）。
+- 平台**信任对端响应**：`{kind, confidence, u, v}` 数组会进入定位与 CV 评测指标，且 `confidence ≥ 自动立案阈值` 时经 `defectService.onCapture` 旁路自动立案（同 kind 去重半径内已有可派单缺陷时刷新而非重复立案）。被攻破或恶意配置的对端可伪造任意经纬度的缺陷单并污染评测指标——缓解在网络层（隔离/认证推理服务），不在本平台。
+- 响应体大小与数组长度不设上限（`BodyHandlers.ofString()`），对端返回超大体可致 OOM；不要把公网可达地址直接填进 `endpoint`。
+- 像素坐标守卫：`u/v` 超出推理 JPEG 像面（640×360，含 NaN/±Inf/负值/超大值）的条目在解析阶段（`ExternalVisionSource.parseDetections`）即被丢弃，不会进入定位反解出任意经纬度。
+- §1 示例的 `http://127.0.0.1:9001/infer` 仅适用于本机回路部署；跨主机请改 HTTPS。
