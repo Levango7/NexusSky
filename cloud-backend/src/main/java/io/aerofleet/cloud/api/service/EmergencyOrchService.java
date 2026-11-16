@@ -178,10 +178,12 @@ public class EmergencyOrchService {
     }
 
     /**
-     * 中止编排计划。
+     * 中止编排计划。<b>幂等</b>：已 ABORTED 的计划再次 abort 返回 true，
+     * 但不重复追加事件、不重复持久化/推送、也不再发布 EmergencyEndEvent
+     * （该事件驱动 TriggerManager 恢复应急暂停计划——重复发布会让恢复逻辑被触发两次）。
      *
      * @param planId 编排计划 ID
-     * @return true 若计划存在并已中止
+     * @return true 若计划存在并已中止（含重复调用）；false 若计划不存在/租户无权访问
      */
     public boolean abort(long planId) {
         if (!checkTenantAccess(planId)) {
@@ -190,6 +192,10 @@ public class EmergencyOrchService {
         Map<String, Object> plan = plans.get(planId);
         if (plan == null) {
             return false;
+        }
+        if ("ABORTED".equals(plan.get("status"))) {
+            log.debug("emergency plan already aborted, idempotent no-op: planId={}", planId);
+            return true;
         }
         plan.put("status", "ABORTED");
         plan.put("timestamp", System.currentTimeMillis());

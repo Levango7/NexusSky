@@ -1,5 +1,25 @@
 # NexusSky 变更日志
 
+## [Unreleased] — 修复(idempotency): 应急编排 abort 幂等——不再重复发布 EmergencyEndEvent / 重复写事件（+2 例）
+
+`EmergencyOrchService.abort(planId)` 此前对**已 ABORTED** 的计划再次调用仍返回 true，且会：
+
+- 再次追加 `plan aborted` 事件到 progress.events；
+- 再次 `persistPlan` 重写状态（无实质变化但写路径落库）；
+- **再次发布 `EmergencyEndEvent`**——该事件驱动 `TriggerManager.onEmergencyEnd()` 恢复应急暂停计划，重复发布会让恢复逻辑被触发两次；
+- 再次 `pushPlan`（pusher 存在时重复推送 `pushPlanUpdate`）；
+
+修复：已 ABORTED 的计划再次 abort 直接返回 true（no-op），不追加事件、不持久化、不推送、不重发 EmergencyEndEvent。调用契约不变（首次/未知/重复三种均符合既有测试与语义）。
+
+新增 2 例：
+- `abortTwiceIsIdempotent`：重复 abort 后 `progress.events` 中 `plan aborted` 仅一条、状态仍为 `ABORTED`；
+- `repeatedAbortPublishesEmergencyEndEventOnlyOnce`：以记录型 publisher 断言 `EmergencyEndEvent` 只发布一次。
+
+A/B：临时禁用新增守卫分支 → 两条新测试**红**（各 2 次 publish / 事件计数 2）；还原守卫 → **绿**（24 例全过）。
+
+全量 `mvn -o clean test`：**6090 用例 / cloud-backend 3885，0 失败**；计数文档口径同步（6088→6090、3883→3885）。
+本次为关键写接口幂等收口（首批），不改任务编排/派发语义、未触碰 `feat/external-vision-trust-boundary`。
+
 ## [Unreleased] — docs: 外部推理回放/确定性夹具 + DJI 协议级 MQTT 对端模拟场景 + 无硬件实测剧本（补记 #309–#312，+8 例）
 
 本节补记 2026-11-14/15 合并但未写 `CHANGELOG.md` 的四个 PR：
@@ -3318,7 +3338,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-16 共有 315 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-16 共有 316 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3345,7 +3365,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 315 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 316 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
