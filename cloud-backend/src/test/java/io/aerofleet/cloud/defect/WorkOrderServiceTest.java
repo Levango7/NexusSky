@@ -239,4 +239,19 @@ class WorkOrderServiceTest {
         assertThat(wo.status).isEqualTo("CANCELLED");
         assertThat(wo.cancelReason).isEqualTo("误报");
     }
+
+    @Test
+    @DisplayName("复检通过的工单二次 verify：终态拒绝（409 语义），不重复拍照")
+    void verifyAfterTerminalRejected() throws Exception {
+        when(capture.captureAndLocate(anyInt(), any())).thenReturn(Map.of("frameSeq", 100L,
+                "detections", List.of()));
+
+        Map<String, Object> first = svc.verify(1L, 9);
+        assertThat(first.get("result")).isEqualTo("VERIFIED");
+
+        // 工单已进入终态：再次 verify 直接拒绝，不拍照、不改状态
+        assertThatThrownBy(() -> svc.verify(1L, 9))
+                .isInstanceOf(IllegalWorkOrderTransitionException.class);
+        verify(capture, org.mockito.Mockito.times(1)).captureAndLocate(anyInt(), any());
+    }
 }

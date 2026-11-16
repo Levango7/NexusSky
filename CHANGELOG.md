@@ -1,5 +1,18 @@
 # NexusSky 变更日志
 
+## [Unreleased] — test(idempotency): 补机巢注册重复 SN 与工单 VERIFIED 后二次复检两条契约测试（+2 例）
+
+承接 #318 的「已形成契约」清单，把两条原「未形成幂等契约/缺口」补成锁死的测试：
+
+- `DockServiceTest#registerDuplicateSnRejected`：`DockService.register` 重复注册同一 SN 仍抛
+  `IllegalStateException("dock sn already registered")`（失败语义：拒绝、不覆盖归属/位置），且仓储 `save` 未再被调用——`DockController` 的 409 映射不变。
+- `WorkOrderServiceTest#verifyAfterTerminalRejected`：工单第一次复检后状态为 `VERIFIED`，再次 `verify`，`machine.isTerminal` 终态守卫直接拒绝——`IllegalWorkOrderTransitionException`，且 `CaptureService.captureAndLocate` 只被调用 1 次（不重复拍照）。
+
+A/B（改坏⇒红、还原⇒绿）：
+- 机巢：临时注释 `DockService.register` 中的重复 SN 守卫（`dock sn already registered` 分支）→ `registerDuplicateSnRejected` **红**；还原 → **绿**。
+- 工单：`verify()` 终态守卫本就存在（VERIFIED 是 `isTerminal`）——该测试钉的是"再次调用截获点正确"与"不拍照第二次"；状态机裁决由 `WorkOrderStateMachineTest`/`transitionChain` 等覆盖。
+
+全量 `mvn -o clean test`：6096 用例 / 0 失败（cloud-backend 3891；rebase 后含 #316 XFF 与 #319 MJPEG 两项后的实测值）。`docs/idempotency-contract-inventory.md` 表一新增两项。
 ## [Unreleased] — docs(完善): 关键写接口幂等/重复提交·风险清单（#315 收口续补，0 例增删）
 
 本节补 `docs/idempotency-contract-inventory.md`，承接 #315（应急编排 abort 幂等修复 + 2 例）后
@@ -3373,7 +3386,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-16 共有 318 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-16 共有 319 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3400,7 +3413,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 318 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 319 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
