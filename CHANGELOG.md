@@ -60,7 +60,9 @@
 边界：以上全部基于 fake MQTT client 与协议级回放，**不证明真实 DJI 设备/EMQX 全链路与硬件行为**；
 "云端真机租赁"检索未发现可信服务，判断为不可行。
 
-文档口径：`README.md` 文档篇数 48→49；`CHANGELOG.md` 小节数 319→320。
+文档口径：`README.md` 文档篇数 48→49；`CHANGELOG.md` 小节数 319→320；
+全仓单测 6098→6102、`cloud-backend` 3893→3897（合并 #320 后全 reactor 实跑 surefire 实测，
+非算术叠加：`Tests run: 3897, Failures: 0`，10 篇口径文档同步）。
 
 ## [Unreleased] — test(idempotency): 补机巢注册重复 SN 与工单 VERIFIED 后二次复检两条契约测试（+2 例）
 
