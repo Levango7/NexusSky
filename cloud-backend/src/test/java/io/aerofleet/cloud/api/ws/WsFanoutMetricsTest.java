@@ -56,7 +56,7 @@ class WsFanoutMetricsTest {
         when(deviceRegistry.isKnownDevice(SYSID)).thenReturn(true);
         when(deviceRegistry.tenantOf(SYSID)).thenReturn(null); // 已登记未归属 → GLOBAL
         handler = new TelemetryWebSocketHandler(
-                mock(JwtTokenProvider.class), deviceRegistry, true, 100, 100, new ObjectMapper());
+                mock(JwtTokenProvider.class), deviceRegistry, true, false, 100, 100, new ObjectMapper());
         return handler;
     }
 

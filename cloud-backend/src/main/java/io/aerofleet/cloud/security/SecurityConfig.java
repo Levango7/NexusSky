@@ -19,7 +19,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * <p>
  * 支持两种模式：
  * <ul>
- *   <li><b>开发模式</b>（{@code aerofleet.security.dev-mode=true}，默认）：
+     *   <li><b>开发模式</b>（{@code aerofleet.security.dev-mode=true}，仅 dev/test profile 开启；代码内默认 false）：
  *       禁用 CSRF，允许所有请求，不破坏现有测试。</li>
  *   <li><b>生产模式</b>（{@code aerofleet.security.dev-mode=false}）：
  *       无状态 JWT + API Key 认证。仅 /api/v1/auth/login 与 /api/v1/auth/refresh
