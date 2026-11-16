@@ -1,5 +1,25 @@
 # NexusSky 变更日志
 
+## [Unreleased] — docs(完善): 关键写接口幂等/重复提交·风险清单（#315 收口续补，0 例增删）
+
+本节补 `docs/idempotency-contract-inventory.md`，承接 #315（应急编排 abort 幂等修复 + 2 例）后
+**没有系统化清单**的问题。内容逐条带测试/代码证据定位：
+
+- 表一「已有幂等契约测试的写接口」（11 项，逐条标注测试类/方法名）——
+  设备锁定、设备登记 provision、语音/频流 start/stop、VideoFusion 重复登记、
+  Defect 10m 锚点去重、WorkOrder 占用守卫、Emergency abort（#315）、UOM activate/cancel、Terrain 上报去重；
+- 表二「未形成幂等契约/缺口」（7 项现状 + 建议方向）——
+  `assignTask` 重复 taskId 无 guard、`work-orders/{id}/verify` 二次响应未单测、
+  `orch/start` 按设计非幂等（不在仓库侧发明“去重 start”）、机巢重复注册 SN、
+  geofence/alarm 规则的重复创建、dock 二次 `OPEN_DOOR` 按 409 语义（不是 NO-OP 成功）；
+- 表三「立约原则」4 条（语义先行、测试锁死、绝不静默成功、RBAC 不放行）；
+- 表四「局限」+ 表五「节奏」——本清单**非穷尽**（174 锚点未逐一跑过），
+  基于 master `4704f926` 的人工核对结论；并非交付终局。
+
+边界：本节为清单/注记性质，**不改动任何生产代码、不改测试语义**；
+任何“静默成功”类重复提交一经发现，按 #315 模板（先判语义→加测试→A/B→PR→CI 绿→squash merge）处置。
+
+文档口径：`README.md` 文档篇数 47→48；`CHANGELOG.md` 小节数 317→318。
 ## [Unreleased] — chore(ci): 容量基线加冒烟脚本 + 手动触发（非门禁）CI；capacity-baseline.sh 工作目录可覆盖（CAPACITY_WORK）
 
 补 `capacity-baseline.sh` 缺的**可观测但与容量结论无关**的一层：
@@ -3353,7 +3373,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-16 共有 317 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-16 共有 318 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3380,7 +3400,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 317 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 318 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
