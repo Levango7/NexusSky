@@ -29,6 +29,20 @@
 其官方设备模拟器不能作为现有协议的对端。迁移属协议栈重构，且**不能替代真机物理层验证**
 （起降、RTK、图传、风场、厂商认证）。触发再评估的条件与前置条件见文档 §6。
 
+**四、`java-upward-compat` 补缓存恢复 + 取件类重试**（`.github/workflows/ci.yml`）
+
+本 PR 首次 CI（run `43906315393`）中 33 个 job 只红这一个，日志是
+`Non-resolvable import POM: spring-boot-dependencies:pom:3.5.16 (absent)` +
+`HTTP Status: 429`。**不是代码问题、也不是 JDK 26 不兼容**：同一 commit 的
+`Java cloud-backend`、`Java Level Gate` 全绿，差别在拿 m2 的方式——
+那两个先恢复 `maven-warm` 的缓存，而本 job 既无 `needs` 也无缓存恢复，
+每次从中央仓冷拉整个 reactor，在共享 runner IP 上撞 Maven Central 限流。
+
+这与 `java-level` 在 2026-10-29 栽的是**同一个坑**（该 job 注释有原文），当时只修了
+那两处，漏了这里。本次补上同样两道防线：`needs: [maven-warm]` + `actions/cache/restore`
+（键与 warm 同源，守卫 `ci-maven-cache-key.sh` 站点数 20→21 同源）+ 改用
+`scripts/ci-mvn-retry.sh`（只对取件类失败重试，JDK 26 真实编译不兼容仍照常判红）。
+
 边界：以上全部基于 fake MQTT client 与协议级回放，**不证明真实 DJI 设备/EMQX 全链路与硬件行为**；
 "云端真机租赁"检索未发现可信服务，判断为不可行。
 
