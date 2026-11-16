@@ -12,7 +12,7 @@ A/B（改坏⇒红、还原⇒绿）：
 - 机巢：临时注释 `DockService.register` 中的重复 SN 守卫（`dock sn already registered` 分支）→ `registerDuplicateSnRejected` **红**；还原 → **绿**。
 - 工单：`verify()` 终态守卫本就存在（VERIFIED 是 `isTerminal`）——该测试钉的是"再次调用截获点正确"与"不拍照第二次"；状态机裁决由 `WorkOrderStateMachineTest`/`transitionChain` 等覆盖。
 
-全量 `mvn -o clean test`：6096 用例 / 0 失败（cloud-backend 3891；rebase 后含 #316 XFF 与 #319 MJPEG 两项后的实测值）。`docs/idempotency-contract-inventory.md` 表一新增两项。
+全量 `mvn -o clean test`：6098 用例 / 0 失败（cloud-backend 3893；rebase 后含 #316 XFF / #319 MJPEG / #322 UDP 准入后的实测值）。`docs/idempotency-contract-inventory.md` 表一新增两项。
 ## [Unreleased] — docs(完善): 关键写接口幂等/重复提交·风险清单（#315 收口续补，0 例增删）
 
 本节补 `docs/idempotency-contract-inventory.md`，承接 #315（应急编排 abort 幂等修复 + 2 例）后
