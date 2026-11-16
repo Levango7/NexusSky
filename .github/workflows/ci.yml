@@ -1839,18 +1839,29 @@ jobs:
         # aerofleet-drone-sim）只能从**本地 m2** 找 —— 只 package 的话那些 jar 不在 m2，
         # PIT 会在 "dependency: io.aerofleet:aerofleet-mavlink-core:jar:0.1.0-SNAPSHOT
         # not found" 上直接失败（本机 m2 里恰好有旧 jar 才没暴露出来）。
-        run: mvn -B -pl cloud-backend -am install -DskipTests -Djacoco.skip=true
+        # **2026-11-16 改经 ci-mvn-retry.sh**：run 43930403115 本步红在
+        #   Plugin org.apache.maven.plugins:maven-install-plugin:3.2.0 ... could not be resolved:
+        #   maven-install-plugin:pom:3.2.0 (absent): ... HTTP Status: 429
+        # 根因是**结构性**的，不是抖动：maven-warm 的暖缓存只跑到 `verify`，
+        # 而 `install` 阶段在 `verify` **之后** ⇒ maven-install-plugin 从来没进过缓存，
+        # 本步每次运行都要现拉，撞上中央仓限流就红（上一轮只是运气好）。
+        # 为什么不干脆让 maven-warm 跑到 install：那样项目自身的 SNAPSHOT jar 会进缓存，
+        # 下游不带 -am 的 job（本 job 的两个 pitest 步正是如此）会静默用上**过期兄弟模块**，
+        # 比"多拉一个插件"危险得多。故保持暖缓存只到 verify，改由重试兜住取件抖动。
+        run: bash scripts/ci-mvn-retry.sh -B -pl cloud-backend -am install -DskipTests -Djacoco.skip=true
       - name: Mutation test (PIT, security package)
         # 刻意**不加 -am**：profile 的 targetClasses 指向 io.aerofleet.cloud.security.*，
         # 带 -am 会让 PIT 在上游模块（mavlink-core 等）上各跑一遍，而那边没有匹配的类
         # ⇒ 插件报"没找到变异体"把构建打断。上一行的 install 已经把依赖装进本地 m2。
-        run: mvn -B -pl cloud-backend -Pmutation pitest:mutationCoverage
+        # 经 ci-mvn-retry.sh：pitest 插件只在 profile 里，`verify` 不会触发其下载，
+        # 故同样不在暖缓存内，与上面 install 插件是同一类取件风险。
+        run: bash scripts/ci-mvn-retry.sh -B -pl cloud-backend -Pmutation pitest:mutationCoverage
       - name: Mutation test (PIT, surveillance package)
         # 第二个包的变异分数**单独记基线**（scripts/mutation-baseline-surveillance.json）：
         # 一个包的涨分不能掩盖另一个包的退步。
         # 报告目录与 security 包**分开**（profile 里配的 reportsDirectory），
         # 否则第二次跑会把第一次的报告覆盖掉 ⇒ 基线张冠李戴。
-        run: mvn -B -pl cloud-backend -Pmutation-surveillance pitest:mutationCoverage
+        run: bash scripts/ci-mvn-retry.sh -B -pl cloud-backend -Pmutation-surveillance pitest:mutationCoverage
       - name: Mutation baseline gate self-test
         run: python3 scripts/check-mutation-baseline.py --self-test
       - name: Mutation baseline gate (security)

@@ -43,6 +43,20 @@
 （键与 warm 同源，守卫 `ci-maven-cache-key.sh` 站点数 20→21 同源）+ 改用
 `scripts/ci-mvn-retry.sh`（只对取件类失败重试，JDK 26 真实编译不兼容仍照常判红）。
 
+**五、`mutation-gate` 三处裸 `mvn` 改经重试脚本**（`.github/workflows/ci.yml`）
+
+第二轮 CI（run `43930403115`）换成这个 job 红，日志：
+`Plugin org.apache.maven.plugins:maven-install-plugin:3.2.0 ... could not be resolved`
++ `HTTP Status: 429`。根因**同样是结构性的**：`maven-warm` 的暖缓存只跑到 `verify`，
+而 `install` 阶段在 `verify` 之后 ⇒ `maven-install-plugin` 从来没进过缓存，
+该步每次运行都要现拉，撞限流就红（上一轮只是运气好）。
+
+**为什么不把 `maven-warm` 改成跑到 `install`**：那样项目自身的 SNAPSHOT jar 会进缓存，
+下游不带 `-am` 的 job（本 job 两个 pitest 步正是如此）会静默用上**过期兄弟模块**——
+这比"多拉一个插件"危险得多。故保持暖缓存只到 `verify`，改由 `scripts/ci-mvn-retry.sh`
+兜住取件抖动：`install` 与两次 `pitest:mutationCoverage`（pitest 插件只在 profile 里，
+`verify` 不触发下载，同类风险）共三处。
+
 边界：以上全部基于 fake MQTT client 与协议级回放，**不证明真实 DJI 设备/EMQX 全链路与硬件行为**；
 "云端真机租赁"检索未发现可信服务，判断为不可行。
 
