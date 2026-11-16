@@ -48,6 +48,10 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Value("${aerofleet.ws.max-connections-per-tenant:20}")
     private int maxConnectionsPerTenant;
 
+    /** WS 连接限流的 IP 取信门：与登录限流/审计同一开关，默认不信任 X-Forwarded-For。 */
+    @Value("${aerofleet.security.trust-forwarded-for:false}")
+    private boolean trustForwardedFor;
+
     /** 单帧推送发送时限（毫秒）：慢客户端不读/TCP 窗口满时，写阻塞超过此值即断开。 */
     @Value("${aerofleet.ws.send-time-limit-ms:5000}")
     private int wsSendTimeLimitMs;
@@ -66,7 +70,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Bean
     public TelemetryWebSocketHandler telemetryWebSocketHandler() {
         return new TelemetryWebSocketHandler(jwtTokenProvider, deviceRegistry, devMode,
-                maxConnectionsPerIp, maxConnectionsPerTenant, objectMapper);
+                trustForwardedFor, maxConnectionsPerIp, maxConnectionsPerTenant, objectMapper);
     }
 
     @Override

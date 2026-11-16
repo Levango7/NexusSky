@@ -40,6 +40,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>
  * 连接数限制：单 IP 最大 {@code maxConnectionsPerIp} 条连接，
  * 单租户最大 {@code maxConnectionsPerTenant} 条连接，超限拒绝。
+ * IP 取握手来源：默认 remote address，仅 {@code trustForwardedFor}
+ * （{@code aerofleet.security.trust-forwarded-for=true}）时采用
+ * {@code X-Forwarded-For} 首段——与 {@code AuthController.extractClientIp} /
+ * {@code AuditInterceptor} 同一开关；握手头客户端可控，默认信任等于分桶可被随意换头绕过。
  */
 public class TelemetryWebSocketHandler extends TextWebSocketHandler {
 
@@ -70,6 +74,7 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
     private final JwtTokenProvider jwtTokenProvider;
     private final DeviceRegistry registry;
     private final boolean devMode;
+    private final boolean trustForwardedFor;
     private final int maxConnectionsPerIp;
     private final int maxConnectionsPerTenant;
     private final ObjectMapper objectMapper;
@@ -129,12 +134,13 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
     );
 
     public TelemetryWebSocketHandler(JwtTokenProvider jwtTokenProvider, DeviceRegistry registry,
-                                     boolean devMode,
+                                     boolean devMode, boolean trustForwardedFor,
                                      int maxConnectionsPerIp, int maxConnectionsPerTenant,
                                      ObjectMapper objectMapper) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.registry = registry;
         this.devMode = devMode;
+        this.trustForwardedFor = trustForwardedFor;
         this.maxConnectionsPerIp = maxConnectionsPerIp;
         this.maxConnectionsPerTenant = maxConnectionsPerTenant;
         this.objectMapper = objectMapper;
@@ -677,19 +683,22 @@ public class TelemetryWebSocketHandler extends TextWebSocketHandler {
     /**
      * 从 WebSocket session 中提取客户端 IP 地址。
      * <p>
-     * 优先从 X-Forwarded-For header 提取（反向代理场景），
-     * 其次从 remote address 提取。
+     * 默认取 remote address；仅 {@code trustForwardedFor}（反向代理部署显式开启
+     * {@code aerofleet.security.trust-forwarded-for=true}）时采用 X-Forwarded-For 首段
+     * ——与 {@code AuthController.extractClientIp} / {@code AuditInterceptor} 同一口径：
+     * 握手头客户端可控，默认信任等于 per-IP 分桶可被随意换头绕过。
      */
     private String extractClientIp(WebSocketSession session) {
-        // 1. Check X-Forwarded-For header (reverse proxy)
-        var handshakeHeaders = session.getHandshakeHeaders();
-        if (handshakeHeaders != null) {
-            String forwarded = handshakeHeaders.getFirst("X-Forwarded-For");
-            if (forwarded != null && !forwarded.isBlank()) {
-                return forwarded.split(",")[0].trim();
+        // X-Forwarded-For 只在显式信任代理时参与分桶（与登录限流/审计同一开关，默认不信任）
+        if (trustForwardedFor) {
+            var handshakeHeaders = session.getHandshakeHeaders();
+            if (handshakeHeaders != null) {
+                String forwarded = handshakeHeaders.getFirst("X-Forwarded-For");
+                if (forwarded != null && !forwarded.isBlank()) {
+                    return forwarded.split(",")[0].trim();
+                }
             }
         }
-        // 2. Fall back to remote address
         InetSocketAddress remoteAddr = session.getRemoteAddress();
         if (remoteAddr != null && remoteAddr.getAddress() != null) {
             return remoteAddr.getAddress().getHostAddress();

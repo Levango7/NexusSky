@@ -88,7 +88,7 @@ class TelemetryWsTenantIsolationTest {
 
     /** handler 由 WebSocketConfig 以相同参数手工构造，便于按用例设定 devMode。 */
     private TelemetryWebSocketHandler newHandler(boolean devMode) {
-        return new TelemetryWebSocketHandler(tokens, registry, devMode, 10, 20, objectMapper);
+        return new TelemetryWebSocketHandler(tokens, registry, devMode, false, 10, 20, objectMapper);
     }
 
     private WebSocketSession connectedSession(String id, String ip, Integer tenantId) throws Exception {

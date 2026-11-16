@@ -59,6 +59,7 @@ class TelemetryWsSlowClientDisconnectTest {
                 mock(JwtTokenProvider.class),
                 mock(DeviceRegistry.class),
                 true,          // dev 模式：免 token
+                false,         // XFF 取信门：默认不信任（IP 取 remote address）
                 perIp,
                 perTenant,
                 new ObjectMapper());

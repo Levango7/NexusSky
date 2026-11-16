@@ -52,7 +52,7 @@ class TelemetryWsFanoutIsolationTest {
         when(registry.isKnownDevice(SYSID)).thenReturn(true);
         when(registry.tenantOf(SYSID)).thenReturn(null); // 已登记未归属 → GLOBAL，只投全局会话
         handler = new TelemetryWebSocketHandler(
-                mock(JwtTokenProvider.class), registry, true, 100, 100, mapper);
+                mock(JwtTokenProvider.class), registry, true, false, 100, 100, mapper);
         return handler;
     }
 
