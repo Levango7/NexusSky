@@ -134,6 +134,20 @@ class MjpegStreamServiceTest {
         assertThat(newService().fetchFrame(baseUrl + "/snapshot")).isNull();
     }
 
+    /**
+     * 有界读取（变异收口，威胁建模 ③-F1）：帧源输出超过上限时必须判失败
+     * 返回 null，而不是把整个响应读进内存。把 {@code total > MAX_FRAME_BYTES}
+     * 这个判断删掉后，本用例会因"拿回了超限本体"转红。
+     */
+    @Test
+    @DisplayName("响应体超过 8MB 上限时判失败（不在内存里收下整个响应）")
+    void oversizedBodyRejected() {
+        // 8MB + 64KB：超过上限，但小到测试可生成
+        snapshotBody = ascii(jpeg(MjpegStreamService.maxFrameBytes() + 64 * 1024 - 6));
+
+        assertThat(newService().fetchFrame(baseUrl + "/snapshot")).isNull();
+    }
+
     @Test
     @DisplayName("JPEG 识别：SOI 头才算，空数组/非 JPEG 都不算")
     void jpegDetection() {
