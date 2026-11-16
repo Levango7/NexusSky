@@ -285,4 +285,37 @@ class EmergencyOrchServiceTest {
         assertThat(EmergencyOrchService.phaseStatusName(3)).isEqualTo("FAILED");
         assertThat(EmergencyOrchService.phaseStatusName(4)).isEqualTo("ABORTED");
     }
+
+    @Test
+    @DisplayName("重复 abort 是幂等的：状态保持 ABORTED、事件只记一条")
+    void abortTwiceIsIdempotent() {
+        EmergencyOrchService svc = newService();
+        long planId = svc.start(0, 0, 0, 1000, List.of(1));
+
+        assertThat(svc.abort(planId)).isTrue();
+        assertThat(svc.abort(planId)).isTrue();
+
+        Map<String, Object> progress = svc.getProgress(planId);
+        long abortedEvents = ((List<?>) progress.get("events")).stream()
+                .filter(e -> String.valueOf(e).contains("plan aborted"))
+                .count();
+        assertThat(abortedEvents).isEqualTo(1);
+        assertThat(svc.getPlan(planId).get("status")).isEqualTo("ABORTED");
+    }
+
+    @Test
+    @DisplayName("重复 abort 不重复发布 EmergencyEndEvent（否则 TriggerManager 恢复逻辑被触发两次）")
+    void repeatedAbortPublishesEmergencyEndEventOnlyOnce() {
+        java.util.List<Object> published = new java.util.ArrayList<>();
+        EmergencyOrchService svc = new EmergencyOrchService(null, published::add);
+        long planId = svc.start(0, 0, 0, 1000, List.of(1));
+
+        svc.abort(planId);
+        svc.abort(planId);
+
+        long endEvents = published.stream()
+                .filter(e -> e instanceof io.aerofleet.cloud.orch.event.EmergencyEndEvent)
+                .count();
+        assertThat(endEvents).isEqualTo(1);
+    }
 }
