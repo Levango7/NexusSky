@@ -706,3 +706,19 @@ backend 日志里真实出现过的那一行，例如
   > 注意：收紧为 `reject-unsigned=true` 后 **`unsigned` 计数恒为 0**（未签名帧直接计入
   > `rejected`）。定位"谁还在发未签名帧"要改看
   > `WARN 拒绝未签名帧：sysid=<id> msgId=<id>` 这行日志——它带 sysid 与 msgId。
+
+## 8. UDP 摄入面威胁与缓解（2026-11-17 威胁建模 ④）
+
+UDP MAVLink 摄入（`UdpGateway`，默认端口 14550）是**无连接、无认证**的接入面：准入控制=设备白名单（prod 默认开）+ 每 sysid 滑动窗口限速（100/s，关键帧独立预算 50/s）+ 可选的 MAVLink v2 签名验签（`mavlink.signing.enabled`，**prod 默认 false**，见 §7 的 C5 分阶段收紧流程）。按此姿态逐项过 threat model：
+
+| 威胁 | 现状 | 处置 |
+|---|---|---|
+| sysid=0 畸形/伪造帧 | 白名单与限速都以 `sysid > 0` 为前提，sysid=0 帧曾双双旁路（无限帧直达 ingest 事件扇出） | **已修**：准入即拒（`frame-invalid-sysid` 指标），不区分 dev/prod |
+| 假冒已注册 sysid 抢路由 | `RouteTable.learn` 是 last-writer-wins、源地址无认证；单帧即可把该机的命令重定向到攻击者地址（路由 5min 老化前可持续，1 帧/5min 即可维持） | **可观测性已补**：`aerofleet.udp.route.changed` 计数 + 同 sysid 60s 内换源 ≥3 次 WARN；**根治=完成 §7 的签名收紧**（reject-unsigned=true 后未签名帧全拒，假冒失效）——多 link-sim 代理下源地址合法交替，代码层节流/滞回会误伤，不做 |
+| GCS_SYSID=255 免白名单/免限速 | 有意设计（发现心跳依赖，测试钉住） | 注记：255 可被同网段任意主机假冒且不受限速；签名收紧后一并覆盖 |
+| bind 默认 0.0.0.0（prod 亦然） | env `AEROFLEET_UDP_BIND_ADDRESS` 可覆盖，部署文档已示内网卡绑定 | 注记：改默认会破坏真机部署，部署侧处置 |
+| MQTT 巢网关 / DJI 上云 API | 出站客户端连运维配置的 broker；凭据走配置无字面量；dji-cloud.enabled 默认关、fail-closed | 已接受（同外部推理/ISC「对端=运维配置」先例） |
+| GB28181 设备侧接线缺失 | `learnContact` 生产零调用方 ⇒ contacts 恒空，INVITE/SUBSCRIBE 恒抛 ContactUnknown——形状/SIP/RTP 三层真实现但设备侧没串，**fail-closed 不可达** | 注记 + **接线前置清单**（威胁建模 ⑤）：①REGISTER 必须带设备摘要鉴权（国标要求，现 `learnContact` 无鉴权参数）；②NOTIFY 必须校验来源地址=learned contact（现按 Call-ID 认领且 Call-ID 确定性可预测 `sub-{id}-{cseq}`，可伪造告警注入订阅回调）；③Call-ID 引入随机量 |
+| RTMP 适配器 | 纯地址推导、零出站连接；凭据 RFC 3986 编码入 URL（协议惯例）+ 日志掩码 | 无面 |
+
+告警建议（Prometheus）：`rate(aerofleet_udp_route_changed_total[1m])` 突增；`rate(aerofleet_udp_ingest_dropped_total{reason="frame-invalid-sysid"}[5m]) > 0`（非零即有人在探测）。

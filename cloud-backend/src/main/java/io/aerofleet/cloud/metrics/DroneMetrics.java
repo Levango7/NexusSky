@@ -102,6 +102,8 @@ public class DroneMetrics {
     private final Counter messageErrorCounter;
     private final Counter udpDatagramsCounter;
     private final Counter udpNoiseBytesCounter;
+    /** 路由换源计数（威胁建模 ④-F2：频繁换源=抢路由/链路抖动的研判信号）。 */
+    private final Counter udpRouteChangedCounter;
     /** reason → 摄入侧丢弃 Counter（按 reason 标签动态创建；取值集合固定，基数安全）。 */
     private final ConcurrentHashMap<String, Counter> ingestDroppedByReason = new ConcurrentHashMap<>();
     private final Counter signingVerifiedCounter;
@@ -136,6 +138,10 @@ public class DroneMetrics {
                 .register(meterRegistry);
         this.udpNoiseBytesCounter = Counter.builder("aerofleet.udp.ingest.noise.bytes")
                 .description("MAVLink 流解析时跳过的非 STX 噪声字节数（单位=字节，不是帧数）")
+                .register(meterRegistry);
+        this.udpRouteChangedCounter = Counter.builder("aerofleet.udp.route.changed")
+                .description("UDP 摄入路由换源次数（含合法重绑定；频繁换源需人工研判，"
+                        + "见 docs/security-design.md §8）")
                 .register(meterRegistry);
 
         // --- 签名（rejected 的 reason 标签在首次记录时按需创建，不预注册空值）---
@@ -286,6 +292,11 @@ public class DroneMetrics {
         c.increment(count);
     }
 
+    /** 记录一次路由换源（含合法重绑定；同 sysid 频繁换源=抢路由/链路抖动信号）。 */
+    public void recordRouteChanged() {
+        udpRouteChangedCounter.increment();
+    }
+
     /**
      * UDP 摄入侧丢弃原因（{@code aerofleet.udp.ingest.dropped} 的 reason 标签取值）。
      *
@@ -304,6 +315,8 @@ public class DroneMetrics {
         public static final String FRAME_WHITELIST_REJECTED = "frame-whitelist-rejected";
         /** 帧：每 sysid 频率限制丢弃。 */
         public static final String FRAME_RATE_LIMITED = "frame-rate-limited";
+        /** 帧：sysid=0（MAVLink 有效域 1..255 之外）——畸形/伪造帧，准入即拒。 */
+        public static final String FRAME_INVALID_SYSID = "frame-invalid-sysid";
         /** 数据报：长度等于接收缓冲上限，疑似被内核截断。 */
         public static final String DATAGRAM_TRUNCATED = "datagram-truncated";
         /** 数据报：{@code socket.receive} 抛 IOException，本轮无包。 */

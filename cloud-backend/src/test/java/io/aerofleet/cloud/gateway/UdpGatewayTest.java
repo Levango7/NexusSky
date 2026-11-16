@@ -492,6 +492,70 @@ class UdpGatewayTest {
         assertThat(mockingDetails(ingest).getInvocations().size()).isEqualTo(ingestedSoFar);
     }
 
+    @Test
+    @DisplayName("25. sysid=0（MAVLink 有效域 1..255 之外）准入即拒——白名单与限速都不适用于它")
+    void invalidSysidZero_rejectedEvenWithoutWhitelist() throws Exception {
+        gateway = newGateway(false, 100);
+        int port = gateway.getLocalPort();
+        Thread.sleep(100);
+
+        // 白名单关闭（dev 姿态）也必须拒：sysid=0 绕过白名单与限速的前提（sysid>0），
+        // 否则无限帧直达 ingest 扇出全量监听器（威胁建模 ④-F1）
+        sendFrame(port, droneHeartbeat(0, 0));
+        Thread.sleep(500);
+        verify(ingest, never()).handle(any(MavlinkFrame.class));
+
+        // 对照：同链路正常 sysid 帧不受影响
+        sendFrame(port, droneHeartbeat(1, 0));
+        verify(ingest, timeout(2000)).handle(any(MavlinkFrame.class));
+    }
+
+    @Test
+    @DisplayName("26. 同 sysid 短时多次换源触发抖动 WARN（首次学习不算换源）")
+    void routeFlap_warnsAtThreshold() throws Exception {
+        gateway = newGateway(false, 100);
+        int port = gateway.getLocalPort();
+        Thread.sleep(100);
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(UdpGateway.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        try {
+            // 两个不同源地址交替发同一 sysid 的心跳：路由学习用的是帧来源地址，
+            // 交替 3 次（首次学习除外）即跨过 WARN 阈值（威胁建模 ④-F2）
+            try (DatagramSocket s1 = new DatagramSocket();
+                 DatagramSocket s2 = new DatagramSocket()) {
+                byte[] data = droneHeartbeat(9, 0).encodeV2();
+                for (int i = 0; i < 3; i++) {
+                    s1.send(new DatagramPacket(data, data.length,
+                            new InetSocketAddress("127.0.0.1", port)));
+                    Thread.sleep(30);
+                    s2.send(new DatagramPacket(data, data.length,
+                            new InetSocketAddress("127.0.0.1", port)));
+                    Thread.sleep(30);
+                }
+            }
+            long deadline = System.currentTimeMillis() + 2000;
+            boolean warned = false;
+            while (System.currentTimeMillis() < deadline) {
+                warned = appender.list.stream()
+                        .anyMatch(e -> e.getFormattedMessage().contains("Route flap suspected"));
+                if (warned) {
+                    break;
+                }
+                Thread.sleep(20);
+            }
+            assertThat(warned).as("60s 内第 3 次换源应触发 Route flap WARN").isTrue();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
     // ===== 频率限制 (P1-3) =====
 
     @Test
