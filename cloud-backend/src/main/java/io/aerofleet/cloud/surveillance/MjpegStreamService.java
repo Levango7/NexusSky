@@ -44,6 +44,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>帧源不可达时<b>不返回假流</b>：先在响应头之前探一次，失败即明确报错，
  * 并说明连的是什么地址、什么错。已经开流之后掉线则结束该响应（浏览器会自动
  * 重连），不塞占位帧 —— 塞占位帧会让"有画面"和"画面是死的"看起来一样。
+ * 帧源响应体超过 {@value #MAX_FRAME_BYTES} 字节时同样判失败：有界读取，
+ * 防止被指向一个会持续输出巨量数据的端点时把堆内存吃穿（威胁建模 ③-F1）。
  */
 @Service
 public class MjpegStreamService {
@@ -55,6 +57,10 @@ public class MjpegStreamService {
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS))
+            // 保留 NORMAL（威胁建模 ③ 已评估）：http→https 升级跳转是摄像头的
+            // 常见部署；快照地址由 OPERATOR 经 API 显式配置、初始 URL 本就完全
+            // 由配置者控制，跟随跳转不放大已有能力。真正的不变量是响应体有界
+            // （见 fetchFrame）与不落非 JPEG 响应。
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
@@ -72,22 +78,32 @@ public class MjpegStreamService {
                     .timeout(Duration.ofSeconds(4))
                     .GET()
                     .build();
-            HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
-            if (resp.statusCode() != 200) {
-                log.warn("snapshot {} -> HTTP {}", snapshotUrl, resp.statusCode());
-                return null;
+            HttpResponse<InputStream> resp =
+                    http.send(req, HttpResponse.BodyHandlers.ofInputStream());
+            try (InputStream in = resp.body()) {
+                if (resp.statusCode() != 200) {
+                    log.warn("snapshot {} -> HTTP {}", snapshotUrl, resp.statusCode());
+                    return null;
+                }
+                byte[] body = readLimited(in);
+                if (body == null) {
+                    // 超过上限：判失败，不"读满截断"——截断产物不是完整帧，
+                    // 发出去等于把坏帧当真帧（与本类"不制造假象"的纪律一致）
+                    log.warn("snapshot {} response exceeds {} bytes — treated as failure",
+                            snapshotUrl, MAX_FRAME_BYTES);
+                    return null;
+                }
+                if (body.length == 0) {
+                    return null;
+                }
+                if (!looksLikeJpeg(body)) {
+                    // 关键：拿到 HTML 错误页或空响应时，宁可判定失败也不要把它当帧发出去。
+                    // 否则界面会显示一张"画得出的图"，而设备其实没在推流。
+                    log.warn("snapshot {} returned {} bytes that are not JPEG", snapshotUrl, body.length);
+                    return null;
+                }
+                return body;
             }
-            byte[] body = resp.body();
-            if (body == null || body.length == 0) {
-                return null;
-            }
-            if (!looksLikeJpeg(body)) {
-                // 关键：拿到 HTML 错误页或空响应时，宁可判定失败也不要把它当帧发出去。
-                // 否则界面会显示一张"画得出的图"，而设备其实没在推流。
-                log.warn("snapshot {} returned {} bytes that are not JPEG", snapshotUrl, body.length);
-                return null;
-            }
-            return body;
         } catch (IllegalArgumentException e) {
             log.warn("snapshot {} is not a usable URI: {}", snapshotUrl, e.getMessage());
             return null;
@@ -98,6 +114,29 @@ public class MjpegStreamService {
             log.warn("snapshot {} unreachable: {}", snapshotUrl, e.toString());
             return null;
         }
+    }
+
+    /**
+     * 读取响应体，超过 {@link #MAX_FRAME_BYTES} 即返回 {@code null}（判失败）。
+     *
+     * <p>为什么必须有上限：{@code snapshotUrl} 是经 API 配置的帧源地址，
+     * 若被指向一个会持续输出巨量数据的端点（内部服务/被攻陷主机），无上限
+     * 读取会直接把堆内存吃穿。取舍与 {@code OnvifSoapClient.readLimited}
+     * 同款：有界读取 + 失败语义，不是"读满截断"。
+     */
+    private static byte[] readLimited(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(8192);
+        byte[] buffer = new byte[8192];
+        int total = 0;
+        int read;
+        while ((read = in.read(buffer)) != -1) {
+            total += read;
+            if (total > MAX_FRAME_BYTES) {
+                return null;
+            }
+            out.write(buffer, 0, read);
+        }
+        return out.toByteArray();
     }
 
     /** JPEG SOI 标记 {@code 0xFFD8}。 */
@@ -176,7 +215,7 @@ public class MjpegStreamService {
         return BOUNDARY;
     }
 
-    /** 仅用于测试：确认单帧不会超限。 */
+    /** 单帧字节上限（供测试构造越界响应；生产强制点在 {@link #readLimited}）。 */
     static int maxFrameBytes() {
         return MAX_FRAME_BYTES;
     }
