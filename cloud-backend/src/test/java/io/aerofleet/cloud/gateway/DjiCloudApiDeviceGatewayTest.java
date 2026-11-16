@@ -12,8 +12,17 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -250,6 +259,113 @@ class DjiCloudApiDeviceGatewayTest {
         DjiCloudApiDeviceGateway gw = new DjiCloudApiDeviceGateway(
                 props(true, "", 1000), MAPPER, docksReturning("SN001"), fake.client());
         assertThatThrownBy(gw::start).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("机巢绑定查询抛异常（DB 故障）：返回 false 且不发布，不假成功")
+    void dockLookupFailureRefuses() throws Exception {
+        FakeClient fake = fakeClient();
+        DockRepository docks = mock(DockRepository.class);
+        when(docks.findByDroneSysid(org.mockito.ArgumentMatchers.anyInt()))
+                .thenThrow(new RuntimeException("db down"));
+        DjiCloudApiDeviceGateway gw = newGateway(docks, props(true, "tcp://127.0.0.1:1883", 2000), fake);
+        fake.callbackOut()[0].connectComplete(false, "tcp://127.0.0.1:1883");
+
+        boolean ok = gw.send(7, 22, 0f, 0f, 0f, 0f, 0f, 0f, 80f);
+
+        assertThat(ok).isFalse();
+        org.mockito.Mockito.verify(fake.client(), never()).publish(anyString(), any(MqttMessage.class));
+    }
+
+    @Test
+    @DisplayName("并发：16 条命令同时下发，tid 互不重复、逐条按 tid 关联成功（pending 无串扰）")
+    void concurrentSendsIsolateByTid() throws Exception {
+        final int n = 16;
+        FakeClient fake = fakeClient();
+        DjiCloudApiDeviceGateway gw = newGateway(docksReturning("SN001"),
+                props(true, "tcp://127.0.0.1:1883", 5000), fake);
+        fake.callbackOut()[0].connectComplete(false, "tcp://127.0.0.1:1883");
+
+        List<String> tids = new CopyOnWriteArrayList<>();
+        org.mockito.Mockito.doAnswer(inv -> {
+            MqttMessage msg = inv.getArgument(1);
+            String tid = MAPPER.readTree(msg.getPayload()).get("tid").asText();
+            tids.add(tid);
+            deliverReply(fake.callbackOut()[0], tid, 0);
+            return null;
+        }).when(fake.client()).publish(anyString(), any(MqttMessage.class));
+
+        ExecutorService pool = Executors.newFixedThreadPool(n);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<Boolean>> results = new ArrayList<>();
+        try {
+            for (int i = 0; i < n; i++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return gw.send(7, 22, 0f, 0f, 0f, 0f, 0f, 0f, 50f);
+                }));
+            }
+            start.countDown();
+            for (Future<Boolean> f : results) {
+                assertThat(f.get(10, TimeUnit.SECONDS)).isTrue();
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(tids).hasSize(n);
+        assertThat(new HashSet<>(tids)).as("每条命令的 tid 必须唯一").hasSize(n);
+    }
+
+    @Test
+    @DisplayName("重复应答：同一 tid 第二次 reply 被忽略，不抛异常且后续命令不受影响")
+    void duplicateReplyIgnored() throws Exception {
+        FakeClient fake = fakeClient();
+        DjiCloudApiDeviceGateway gw = newGateway(docksReturning("SN001"),
+                props(true, "tcp://127.0.0.1:1883", 2000), fake);
+        fake.callbackOut()[0].connectComplete(false, "tcp://127.0.0.1:1883");
+
+        List<String> tids = new CopyOnWriteArrayList<>();
+        org.mockito.Mockito.doAnswer(inv -> {
+            MqttMessage msg = inv.getArgument(1);
+            String tid = MAPPER.readTree(msg.getPayload()).get("tid").asText();
+            tids.add(tid);
+            deliverReply(fake.callbackOut()[0], tid, 0);
+            // 设备/网络重传导致同一 tid 再来一次：必须被安全忽略
+            deliverReply(fake.callbackOut()[0], tid, 0);
+            return null;
+        }).when(fake.client()).publish(anyString(), any(MqttMessage.class));
+
+        assertThat(gw.send(7, 21, 0f, 0f, 0f, 0f, 0f, 0f, 0f)).isTrue();
+        assertThat(gw.send(7, 22, 0f, 0f, 0f, 0f, 0f, 0f, 60f)).isTrue();
+        assertThat(tids).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("连接丢失：在等命令立即失败（不等超时），不挂死调用方")
+    void connectionLostFailsPendingImmediately() throws Exception {
+        FakeClient fake = fakeClient();
+        DjiCloudApiDeviceGateway gw = newGateway(docksReturning("SN001"),
+                props(true, "tcp://127.0.0.1:1883", 10_000), fake);
+        fake.callbackOut()[0].connectComplete(false, "tcp://127.0.0.1:1883");
+
+        CountDownLatch published = new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(inv -> {
+            published.countDown();
+            return null;
+        }).when(fake.client()).publish(anyString(), any(MqttMessage.class));
+
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        long t0 = System.nanoTime();
+        try {
+            Future<Boolean> f = pool.submit(() -> gw.send(7, 22, 0f, 0f, 0f, 0f, 0f, 0f, 50f));
+            assertThat(published.await(5, TimeUnit.SECONDS)).isTrue();
+            fake.callbackOut()[0].connectionLost(new RuntimeException("broker down"));
+            assertThat(f.get(5, TimeUnit.SECONDS)).isFalse();
+        } finally {
+            pool.shutdownNow();
+        }
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
+        assertThat(elapsedMs).as("断链应立即失败，而非等满 10s 超时").isLessThan(5_000);
     }
 
     @Test

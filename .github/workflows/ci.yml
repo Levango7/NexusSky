@@ -1286,25 +1286,27 @@ jobs:
             -exec cp {} b1-e2e-logs/ \; 2>/dev/null || true
           ls -la b1-e2e-logs || echo "(no logs captured)"
 
-  # ── 机巢 MQTT 真链路 e2e（DJI 上云 API 对接面，观察模式）───────────────────
+  # ── 机巢 MQTT 真链路 e2e（DJI 上云 API 对接面，硬门禁）─────────────────────
   # 为什么单开一个 job：它要 **真 broker**（docker mosquitto）+ **真 cloud-backend**
   # （transport=mqtt）+ **设备侧对端**（drone-sim --mqtt-url）。
   # #254 交付的 transport=mqtt 从没在真 Spring 容器里起过——`MqttDockGateway` 有两个
   # 构造器且都没标 @Autowired，Spring 退回去找无参构造器 ⇒ No default constructor found。
   # 单测直连构造器、绕过了容器，只有真后端才抓得到。
   #
-  # **观察模式（continue-on-error）**：本 job 依赖从容器仓拉 broker 镜像，而本文件
-  # 的 docker-build 步骤注释里记过「Docker Hub 拉镜像在限流/超时下连续致红」的坑
-  # （那里为此把 base 镜像参数化到 mirror.gcr.io）。**镜像从哪拉是基建问题，不该
-  # 冒充链路问题**——故先观察若干轮，Linux 连续零红后再转硬门禁（与 e2e-b2-a/b
-  # 当初的接入方式同款）。broker 镜像可用 AF_MOSQUITTO_IMAGE 指定；拉不到会自动
-  # 退到 Docker Hub 官方镜像名。
+  # **2026-11-16 由观察模式转硬门禁**（删 continue-on-error）。
+  # 转正依据：近 15 次 ci.yml 运行中该 job 11 次 success、0 次 failure
+  # （其余 4 次为 in_progress 或尚未创建该 job，非 skipped）。与 e2e-b2-a/b 的
+  # 转正口径一致：连续多次零红后才删标记，删标记 = 把「跑过」升级为「必须通过」。
+  # 残余风险如实保留：本 job 依赖从容器仓拉 broker 镜像，而本文件的 docker-build
+  # 步骤注释里记过「Docker Hub 拉镜像在限流/超时下连续致红」的坑（那里为此把 base
+  # 镜像参数化到 mirror.gcr.io）。**镜像从哪拉是基建问题，不该冒充链路问题**——
+  # 若日后因拉镜像连续致红，正确做法是换镜像源，而不是把本 job 退回观察模式。
+  # broker 镜像可用 AF_MOSQUITTO_IMAGE 指定；拉不到会自动退到 Docker Hub 官方镜像名。
   e2e-dock-mqtt:
     name: E2E dock MQTT (真 broker + 真后端 transport=mqtt + 设备侧对端)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [ java ]
-    continue-on-error: true
     services:
       redis:
         image: mirror.gcr.io/library/redis:7-alpine
