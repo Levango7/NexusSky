@@ -70,7 +70,9 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 LABEL="d${DRONES}-hz${HZ}-c${CLIENTS}-ip${MAX_PER_IP}"
 # 只有显式调过缓冲区才进文件名，避免改变既有档位的命名
 if [[ "$UDP_RCVBUF" -gt 0 ]]; then LABEL="${LABEL}-rb${UDP_RCVBUF}"; fi
-WORK="/f/tmp/capacity"
+# 工作目录：默认 %USERPROFILE%/AppData/Local/Temp/… 思路下的 /f/tmp/capacity（Windows F 盘挂载点）。
+# 非 Windows 环境（CI runner）通过 CAPACITY_WORK 覆盖，如 CAPACITY_WORK=/tmp/capacity。
+WORK="${CAPACITY_WORK:-/f/tmp/capacity}"
 mkdir -p "$OUT_DIR" "$WORK"
 
 info() { echo "[capacity] $*"; }

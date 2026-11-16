@@ -2,7 +2,7 @@
 
 > **文档版本**：v1.0 | **日期**：2026-09-24 | **用途**：客户拜访 / 投资路演 / 行业展会演示
 >
-> **项目阶段**：PoC（6092 单测全绿，模拟器验证通过） | **定位**：MAVLink 协议中立的多机协同调度云平台中间件
+> **项目阶段**：PoC（6093 单测全绿，模拟器验证通过） | **定位**：MAVLink 协议中立的多机协同调度云平台中间件
 bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 ---
 
@@ -13,7 +13,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
 **核心内容**：
 - 产品名称：NexusSky（天枢）— 取自北斗七星之首，主掌天机运转
 - 一句话标语：**把"几架飞机"组织成"一支可指挥、可组网、可应急的机队"**
-- 当前阶段：PoC 验证通过，6092 单测全绿- 日期：2026-09-24
+- 当前阶段：PoC 验证通过，6093 单测全绿- 日期：2026-09-24
 bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 
 **关键话术**：
@@ -262,7 +262,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
 
 ## 第 11 页 — 技术指标页
 
-**页标题**：工程成熟度 — 6092 单测 / 52 扩展消息 / 416 API 端点
+**页标题**：工程成熟度 — 6093 单测 / 52 扩展消息 / 416 API 端点
 bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 **核心内容**：
 
@@ -277,7 +277,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
 | **代码审查** | 6 轮收敛 | 累计修复 52 个问题（4C + 12M + 5m + 11P1 + 20 新增） |
 
 **关键话术**：
-> "PoC 阶段不代表粗制滥造——6092 个单测全绿，6 轮代码审查收敛，Starlink 9.6% 丢包下完整任务流通过。工程纪律是我们的底线。"
+> "PoC 阶段不代表粗制滥造——6093 个单测全绿，6 轮代码审查收敛，Starlink 9.6% 丢包下完整任务流通过。工程纪律是我们的底线。"
 bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 **视觉建议**：
 - 数字大字展示（4988 / 51 / 409 / 38）作为视觉锚点
@@ -341,7 +341,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
 
 | 阶段 | 时间 | 投入 | 交付物 |
 |---|---|---|---|
-| **当前：PoC** | 已完成 | — | 6092 单测全绿，模拟器验证通过，13 个里程碑 + 4a + P2 已实现 |
+| **当前：PoC** | 已完成 | — | 6093 单测全绿，模拟器验证通过，13 个里程碑 + 4a + P2 已实现 |
 bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 | **下一步：真机验证** | 2-3 月 | 10-20 万 | 1-2 架 PX4 真机对接验证 + 鉴权加固 + 持久化补齐 |
 | **商用落地** | 按项目 | 按合同 | 基础版/应急版/完整版授权 + SDK 发布 + 行业定制交付 |

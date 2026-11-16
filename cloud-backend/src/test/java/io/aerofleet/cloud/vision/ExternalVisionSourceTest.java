@@ -143,4 +143,23 @@ class ExternalVisionSourceTest {
     void metadataLevelDetectReturnsEmpty() {
         assertThat(newSource(endpoint).detect(shot(), pose())).isEmpty();
     }
+
+    @Test
+    @DisplayName("u/v 超出 640x360 像面（负值/超大值）→ 该条丢弃，边界值保留（F3）")
+    void outOfImagePixelsSkipped() {
+        bodyRef.set("[{\"kind\":\"ok\",\"confidence\":0.5,\"u\":0,\"v\":0},"
+                + "{\"kind\":\"neg\",\"confidence\":0.5,\"u\":-1.5,\"v\":10},"
+                + "{\"kind\":\"wide\",\"confidence\":0.5,\"u\":641.5,\"v\":10},"
+                + "{\"kind\":\"tall\",\"confidence\":0.5,\"u\":10,\"v\":361.5},"
+                + "{\"kind\":\"huge\",\"confidence\":0.5,\"u\":1e300,\"v\":-1e300},"
+                + "{\"kind\":\"edge\",\"confidence\":0.5,\"u\":640,\"v\":360}]");
+
+        List<VisionDetection> dets = newSource(endpoint).detect(shot(), pose(), new byte[]{1});
+
+        assertThat(dets).hasSize(2);
+        assertThat(dets.get(0).kind()).isEqualTo("ok");
+        assertThat(dets.get(1).kind()).isEqualTo("edge");
+        assertThat(dets.get(1).u()).isEqualTo(640);
+        assertThat(dets.get(1).v()).isEqualTo(360);
+    }
 }

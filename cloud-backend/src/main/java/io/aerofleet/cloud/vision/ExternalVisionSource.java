@@ -41,6 +41,10 @@ public class ExternalVisionSource implements VisionSource {
 
     private static final Logger log = LoggerFactory.getLogger(ExternalVisionSource.class);
 
+    /** 推理响应像素坐标所属的 JPEG 尺寸（spec §2.2，与 CaptureService 的 JPEG_W/H 一致）。 */
+    private static final int JPEG_W = 640;
+    private static final int JPEG_H = 360;
+
     private final String endpoint;
     private final long timeoutMs;
     private final HttpClient http;
@@ -112,6 +116,11 @@ public class ExternalVisionSource implements VisionSource {
                 }
                 if (confidence < 0.0 || confidence > 1.0) {
                     log.warn("external inference confidence {} out of range, skipped", confidence);
+                    continue;
+                }
+                if (u < 0.0 || u > JPEG_W || v < 0.0 || v > JPEG_H) {
+                    log.warn("external inference pixel ({}, {}) outside image {}x{}, skipped",
+                            u, v, JPEG_W, JPEG_H);
                     continue;
                 }
                 out.add(new VisionDetection(u, v, kind, confidence, -1));
