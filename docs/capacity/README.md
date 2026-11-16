@@ -20,6 +20,21 @@ mvn -o -q -pl drone-sim -am -DskipTests package
 
 ---
 
+## 0. 链路冒烟（可选 CI，非门禁，不代表容量结论）
+
+仓库提供 `.github/workflows/capacity-smoke.yml`（**仅手动 `workflow_dispatch` 触发**，
+不进 PR 必填检查、不进合并判据）与 `scripts/capacity-smoke.sh`，用于在改动后验证
+"后端 jar → 注入器 → 探针 → Prometheus → JSON 报告"整条测量链路仍然**可跑通**：
+
+- 用极小参数（默认 drones=3 / hz=10 / clients=2 / duration=15s）空转一遍；
+- **只回答"链路通了吗"**——产物是一份冒烟 JSON，任何容量/性能数字都不由它给出，
+  不得用于渲染"平台支持 N 架"之类的结论（那必须在本文档 2.x 的加密负载档测量后才成立）；
+- 不足/失败（jar 未构建、端口占用、120s 未就绪、JSON 缺失）如实报红，修脚本或别碰相关代码后重跑；
+- 与 `capacity-baseline.sh` 共用同一条代码路径；`capacity-smoke.sh` 只是加参数和硬性检查
+  （jar 存在性、`*.json` 产出、rc 透传），不改测量语义。
+
+---
+
 ## 1. 测量条件
 
 | 项 | 值 |
