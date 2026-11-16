@@ -1,5 +1,16 @@
 # NexusSky 变更日志
 
+## [Unreleased] — docs: 外部推理回放/确定性夹具 + DJI 协议级 MQTT 对端模拟场景 + 无硬件实测剧本（补记 #309–#312，+8 例）
+
+本节补记 2026-11-14/15 合并但未写 `CHANGELOG.md` 的四个 PR：
+
+- **#309（`9dd428c2`）**：新增 `docs/external-vision-inference.md`（`aerofleet.vision.source=external` 的 HTTP 契约：`POST image/jpeg` → `[{kind,confidence,u,v}]`，出厂关闭、fail-open 不阻塞主链路）与 `scripts/vision-inference-server.py` 参考推理服务（默认 **mock** 返回契约合法响应；提供 `--mode onnx` 挂载点；不纳入主工程 Maven）；主工程仍无 onnxruntime/tensorflow/opencv 依赖；`P1-6` **不全量勾选**（进程内 onnxruntime + 内置行业模型/生产级精度验收仍待立项）。
+- **#310（`2171650d`）**：参考推理服务增加 `replay` 模式与 `--detections-file`（JSON 数组 / 帧数组 / JSONL 一帧一行，按帧循环）、契约校验/归一化与 `--self-test`；新增 `scripts/fixtures/vision-detections-sample.json`（三帧确定性 detections：两检出/一检出/空帧）；文档补充 replay/自测用法与 YOLO 类检测输出映射示例（阈值→`kind`/`confidence`、NMS、从模型坐标还原到原图像素 `u,v`）。
+- **#311（`931ea9f9`）**：新增**协议级模拟夹具** `DjiCloudMqttPeerFixture`（捕获 `thing/product/{sn}/services` 发布、按 `tid` 注入 `services_reply`，支持即时/按序应答、拒绝码、未知 tid 与畸形 payload 干扰）与两类场景回归：`DjiCloudMqttScenarioSimulationTest`（flight_task 子集映射/拒绝/tid 关联/干扰后正确应答）、`DjiDockOsdPlaybackScenarioTest`（OSD `putter_state`/`drone_charge_state` 映射优先级、半开过渡态不强推、未注册 SN 容错）。全量 `mvn -o clean test`：cloud-backend 全量绿（计数口径同步）。
+- **#312（`f6be8390`）**：新增 `docs/field-bench-test-plan.md`——无硬件阶段的证据分层（L0 协议级模拟 / L1 SITL / L2 台架低风险真机 / L3 场测验收）、选型问题清单（MAVLink/ArduPilot/PX4 路线、安全/失控/任务/交付物）、最短实测闭环与测试记录模板、DJI Cloud API 需 DJI 生态真机/EMQX 环境（丐版非 DJI 机不可替代）的边界声明。
+
+边界：上述均属**协议级模拟/文档/测试铺垫**，**不产生真机/真 EMQX 证据**；真实 DJI 设备、机巢全机械/RTK 行为与生产级模型精度仍需外部环境与产品/部署/数据集决策。同步 `README.md` 目录树文档口径（46→47）。本节仅为补记，不新增功能。
+
 ## [Unreleased] — feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ / REQUEST_LIST / VALUE / SET（+6 例）
 
 对照批（`docs/protocol-vendor-integration.md` §5.1，2026-11-13）发现的最大缺口闭环：
@@ -3307,7 +3318,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-13 共有 314 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-16 共有 315 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3334,7 +3345,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 314 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 315 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
