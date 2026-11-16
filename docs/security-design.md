@@ -718,5 +718,7 @@ UDP MAVLink 摄入（`UdpGateway`，默认端口 14550）是**无连接、无认
 | GCS_SYSID=255 免白名单/免限速 | 有意设计（发现心跳依赖，测试钉住） | 注记：255 可被同网段任意主机假冒且不受限速；签名收紧后一并覆盖 |
 | bind 默认 0.0.0.0（prod 亦然） | env `AEROFLEET_UDP_BIND_ADDRESS` 可覆盖，部署文档已示内网卡绑定 | 注记：改默认会破坏真机部署，部署侧处置 |
 | MQTT 巢网关 / DJI 上云 API | 出站客户端连运维配置的 broker；凭据走配置无字面量；dji-cloud.enabled 默认关、fail-closed | 已接受（同外部推理/ISC「对端=运维配置」先例） |
+| GB28181 设备侧接线缺失 | `learnContact` 生产零调用方 ⇒ contacts 恒空，INVITE/SUBSCRIBE 恒抛 ContactUnknown——形状/SIP/RTP 三层真实现但设备侧没串，**fail-closed 不可达** | 注记 + **接线前置清单**（威胁建模 ⑤）：①REGISTER 必须带设备摘要鉴权（国标要求，现 `learnContact` 无鉴权参数）；②NOTIFY 必须校验来源地址=learned contact（现按 Call-ID 认领且 Call-ID 确定性可预测 `sub-{id}-{cseq}`，可伪造告警注入订阅回调）；③Call-ID 引入随机量 |
+| RTMP 适配器 | 纯地址推导、零出站连接；凭据 RFC 3986 编码入 URL（协议惯例）+ 日志掩码 | 无面 |
 
 告警建议（Prometheus）：`rate(aerofleet_udp_route_changed_total[1m])` 突增；`rate(aerofleet_udp_ingest_dropped_total{reason="frame-invalid-sysid"}[5m]) > 0`（非零即有人在探测）。
