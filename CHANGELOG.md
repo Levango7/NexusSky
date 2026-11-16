@@ -1,5 +1,20 @@
 # NexusSky 变更日志
 
+## [Unreleased] — chore(ci): 容量基线加冒烟脚本 + 手动触发（非门禁）CI；capacity-baseline.sh 工作目录可覆盖（CAPACITY_WORK）
+
+补 `capacity-baseline.sh` 缺的**可观测但与容量结论无关**的一层：
+
+- `scripts/capacity-smoke.sh`：用极小参数（默认 drones=3 / hz=10 / clients=2 / duration=15s）
+  跑完整后端→注入器→探针→Prometheus→JSON 链路，只验证链路可用；任何容量/性能结论
+  不由冒烟模式给出（见 `docs/capacity/README.md` §0）。
+- `.github/workflows/capacity-smoke.yml`：**仅 `workflow_dispatch` 手动触发**，不进 required、
+  不进合并判据；带超时与产物上传。
+- `capacity-baseline.sh`：`WORK` 改为 `${CAPACITY_WORK:-/f/tmp/capacity}`（Windows 保持 /f/tmp 行为，
+  CI/Linux 可用）；用法兼容（环境变量前置）。
+- `docs/capacity/README.md` 新增 §0 烟测说明（与性能档位口径区分）。
+
+文档口径：`README.md` scripts 目录树计数 108→109（新增 capacity-smoke.sh，非 e2e）；
+`CHANGELOG.md` 小节数 +1（316→317）。
 ## [Unreleased] — 修复(idempotency): 应急编排 abort 幂等——不再重复发布 EmergencyEndEvent / 重复写事件（+2 例）
 
 `EmergencyOrchService.abort(planId)` 此前对**已 ABORTED** 的计划再次调用仍返回 true，且会：
@@ -3338,7 +3353,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-16 共有 316 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-16 共有 317 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3365,7 +3380,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 316 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 317 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
