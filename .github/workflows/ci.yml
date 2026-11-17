@@ -97,6 +97,10 @@ jobs:
           # 空 catch 棘轮（2026-10-31 落地）：生产代码里去掉注释后没有语句的 catch，
           # 必须命中豁免清单（文件+理由注释，带到期日）；裸空 catch 永远不能豁免。
           python3 scripts/check-empty-catch.py --self-test
+          # 迁移安全（2026-11-17 落地，issue #323 L3）：含 DROP/TRUNCATE 的迁移必须在
+          # 回滚手册登记——Flyway 社区版没有 undo，删列的迁移会让「回滚应用版本」直接 500，
+          # 而 CI 此前对这类迁移一无所知。
+          python3 scripts/check-destructive-migration.py --self-test
           # 零外引用 getter 清单（2026-10-30 落地，审计 §12.3）：**report-only**，恒退 0。
           # 自测要证明两件事：四档归类正确 + "有候选也退 0"这条承诺本身。
           python3 scripts/list-unreferenced-getters.py --self-test
@@ -132,6 +136,11 @@ jobs:
       # 本身合理，但新增一处 `catch (Exception e) {}` 会静默吞掉请求线程的故障。
       - name: Empty catch ratchet gate
         run: python3 scripts/check-empty-catch.py
+      # 破坏性迁移必须登记在 docs/rollback-runbook.md 的不可回滚清单里。
+      # 存量 1 处（V22 删 devices.device_token）有正当理由，问题在新增一处时没人会想到
+      # 「半年后有人要回滚到 V21」——而 `IF EXISTS` 让重跑不报错，进一步掩盖结构已被改坏。
+      - name: Destructive migration gate (must be registered in rollback runbook)
+        run: python3 scripts/check-destructive-migration.py
       # 文档里对外声称的端点数，必须等于代码里的实际数。
       # 2026-10-20 实测：同一件事在文档里有三个不同的数（358 / 345 / 345），而实测是 406。
       - name: Claimed endpoint count gate

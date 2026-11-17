@@ -1,5 +1,39 @@
 # NexusSky 变更日志
 
+## [Unreleased] — feat(deploy): 回滚运行手册 + 破坏性迁移门禁（#323 L1/L3）
+
+`docs/devops-enhancement-plan.md:161` 把 CD4 标为 🔴「无自动回滚」，但真正缺的不只是自动化，
+而是**出事时没有可执行步骤**：`docs/RELEASE.md` 全文检索「回滚/rollback」零命中，
+唯一相关的 `docs/signing-prod-rollout.md:74-79` 只覆盖 MAVLink 签名，且明确「无需回滚数据」。
+
+**一、新增 `docs/rollback-runbook.md`**
+
+把三类回滚拆开——它们的手段完全不同，混为一谈会做出错误决策：
+
+- **应用回滚**：`helm rollback` / `kubectl rollout undo` / compose 回退 tag，附前置检查与命令；
+- **schema 回滚**：Flyway 社区版**没有 undo**（`flyway-core` 11.7.2，见 `cloud-backend/pom.xml:109-120`），
+  只有「前向修复迁移」与「备份恢复切库」两条真实路径，并写明三条绝对禁止的操作
+  （手改 `flyway_schema_history`、`flyway clean`、修改已发布的迁移文件）；
+- **数据回滚**：三种手段的适用面与前提；RTO 一律标「待演练」——没测过就不写数字。
+
+同时记录两条容易忽略的部署事实：`cloudBackend.replicaCount` 默认 **1**、
+`cloudBackend.pdb.enabled` 默认 **false**（`deploy/helm/nexussky/values.yaml:32,59-61`），
+因此当前形态下「零停机回滚」**不成立**，文档不回避这一点。
+
+**二、新增门禁 `scripts/check-destructive-migration.py`**
+
+40 个迁移中现有 1 个破坏性的（`V22__api_keys_sysid.sql:11` 删 `devices.device_token`）。
+存量有正当理由，问题在**新增一处时没人会想到半年后要回滚到 V21**；且 `IF EXISTS` 让重跑不报错，
+进一步掩盖「结构已被改坏」。门禁规则：命中 `DROP TABLE` / `DROP COLUMN` / `TRUNCATE` / `DROP SCHEMA`
+的迁移必须登记在 runbook 的登记区间内；登记了但文件已不存在、或该文件其实不具破坏性，同样判红
+（防止清单腐烂）。匹配前先掩掉注释与字符串，`-- 不要 DROP TABLE` 这类文字不会误报。10 例自测。
+
+**三、CI 接线**：`repo-gates` 增加自检与门禁两步。`check-selftest-coverage.py` 要求
+「提供 `--self-test` 的脚本必须被 CI 引用」，故两步同时加，否则该门禁会红。
+
+**边界（如实标注）**：runbook 中的集群命令**未在真实集群执行**（本机无 kind/集群），
+文档状态为「已交付，未验证」，§8 演练记录表留空待填。不把「写完文档」说成「回滚能力已就绪」。
+
 ## [Unreleased] — docs(完善): 幂等清单复核——geofence/alarm 重复创建已有测试钉住（0 例增删）
 
 承接 #320 后对 `docs/idempotency-contract-inventory.md` 的**复核**：原「表二」中两条被误记为
@@ -3469,7 +3503,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-17 共有 321 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-17 共有 322 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3496,7 +3530,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 321 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 322 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
