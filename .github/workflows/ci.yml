@@ -125,6 +125,10 @@ jobs:
           # P1-6 外部推理接入（2026-11-14 落地）：replay/契约自测；不接 CI 会让
           # 自测覆盖门禁变红（提供 --self-test 的脚本必须被 CI 引用）
           python3 scripts/vision-inference-server.py --self-test
+          # 数据分拣收益估算（2026-11-17 落地）：链路容量 bps 单位回归 + 已知答案断言。
+          # 真事：链路容量常量曾误用 link-sim 的字节/秒与 bps 直比，差 8 倍，
+          # 把 WiFi/卫星误判成"撑不住"——自测钉死单位，防止再犯。
+          python3 scripts/data-triage-bandwidth.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
