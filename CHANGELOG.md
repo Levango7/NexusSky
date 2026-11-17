@@ -1,5 +1,24 @@
 # NexusSky 变更日志
 
+## [Unreleased] — docs(完善): 幂等清单复核——geofence/alarm 重复创建已有测试钉住（0 例增删）
+
+承接 #320 后对 `docs/idempotency-contract-inventory.md` 的**复核**：原「表二」中两条被误记为
+「缺少契约测试」的写路径，实际已有测试钉住语义——
+
+- `GeofenceStore.addZone` 同 `zoneId` 重复创建：**覆盖语义（last-write-wins）**，返回旧值——
+  `GeofenceStorePersistenceTest#memoryMode_addZone_overwriteReturnsPrevious`；
+- `AlarmLinkageEngine.addRule` 同 `ruleId` 重复创建：**覆盖语义（last-write-wins）**——
+  `AlarmLinkageEngineTest#addRuleOverwritesSameId`。
+
+两行从「表二·缺口」移入「表一·已覆盖」（标注 2026-11-16 复核、原缺口为误记）；
+`POST /api/v1/orch/start` 一行补上既有证据 `EmergencyOrchServiceTest#startReturnsIncrementingPlanIds`
+（按设计非幂等，每次新 planId）。
+
+**复核后仍真实存在的缺口只剩 1 条**：`TaskAssignmentService.assignTask` 重复提交同一 `taskId`
+无去重 guard——"拒绝/合并/重分配"属产品语义，**未裁决前只可观察、不得改行为**。
+其余（regulator 上报、dock 重复 OPEN_DOOR）保持既有覆盖/拒绝语义。
+
+边界：本节为清单复核/订正，**不新增测试、不改生产代码、不改计数**（全仓仍 6102 / cloud-backend 3897）。
 ## [Unreleased] — test(dji-cloud): 协议级模拟补 4 类边界 + e2e-dock-mqtt 转硬门禁
 
 无真机条件下的 DJI 接入验证，本次补齐两类缺口（**不新增任何硬件依赖**）：
@@ -3450,7 +3469,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-16 共有 320 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-17 共有 321 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3477,7 +3496,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 320 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 321 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
