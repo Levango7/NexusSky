@@ -63,6 +63,14 @@ public final class Gb28181Signaling {
         return "z9hG4bK-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
     }
 
+    /**
+     * Call-ID 随机尾（威胁建模 ⑤ 接线前置③）：确定性 Call-ID（如 {@code sub-<id>-<cseq>}）
+     * 可被同网段第三方预测并伪造 NOTIFY 注入订阅回调——加 8 位随机段后不可预测。
+     */
+    private static String callIdSuffix() {
+        return "-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
     // ------------------------------------------------------------------
     // 下行：平台 → 设备
     // ------------------------------------------------------------------
@@ -77,7 +85,7 @@ public final class Gb28181Signaling {
                 .header("Via", "SIP/2.0/UDP " + sipHost + ";branch=" + newBranch())
                 .header("From", "<sip:" + id + "@" + sipDomain + ">;tag=" + clientTag)
                 .header("To", "<sip:" + id + "@" + sipDomain + ">")
-                .header("Call-ID", "reg-" + id + "-" + cseq)
+                .header("Call-ID", "reg-" + id + "-" + cseq + callIdSuffix())
                 .header("CSeq", cseq + " REGISTER")
                 .header("Contact", "<sip:" + id + "@" + sipHost + ">")
                 .header("Max-Forwards", "70")
@@ -95,7 +103,7 @@ public final class Gb28181Signaling {
                 .header("Via", "SIP/2.0/UDP " + sipHost + ";branch=" + newBranch())
                 .header("From", "<sip:" + sipDomain + "@" + sipDomain + ">;tag=" + clientTag)
                 .header("To", "<sip:" + id + ":" + channel + "@" + sipDomain + ">")
-                .header("Call-ID", "inv-" + ssrc)
+                .header("Call-ID", "inv-" + ssrc + callIdSuffix())
                 .header("CSeq", "1 INVITE")
                 .header("Content-Type", "application/sdp")
                 .header("Max-Forwards", "70")
@@ -114,7 +122,7 @@ public final class Gb28181Signaling {
                 .header("Via", "SIP/2.0/UDP " + sipHost + ";branch=" + newBranch())
                 .header("From", "<sip:" + sipDomain + "@" + sipDomain + ">;tag=" + clientTag)
                 .header("To", "<sip:" + deviceId.value() + "@" + sipDomain + ">")
-                .header("Call-ID", "cat-" + sn)
+                .header("Call-ID", "cat-" + sn + callIdSuffix())
                 .header("CSeq", "1 MESSAGE")
                 .header("Content-Type", "Application/MANSCDP+xml")
                 .header("Max-Forwards", "70");
@@ -127,7 +135,7 @@ public final class Gb28181Signaling {
                 .header("Via", "SIP/2.0/UDP " + sipHost + ";branch=" + newBranch())
                 .header("From", "<sip:" + sipDomain + "@" + sipDomain + ">;tag=" + clientTag)
                 .header("To", "<sip:" + id + "@" + sipDomain + ">")
-                .header("Call-ID", "sub-" + id + "-" + cseq)
+                .header("Call-ID", "sub-" + id + "-" + cseq + callIdSuffix())
                 .header("CSeq", cseq + " SUBSCRIBE")
                 .header("Event", "Presence")
                 .header("Expires", String.valueOf(expiresSec));

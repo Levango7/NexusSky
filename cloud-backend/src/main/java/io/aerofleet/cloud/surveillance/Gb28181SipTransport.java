@@ -57,6 +57,9 @@ public final class Gb28181SipTransport implements Closeable {
     /** 收到的全部消息（含无法归属的）——诊断与断言用。 */
     private final CopyOnWriteArrayList<Gb28181SipMessage> received = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Runnable> listeners = new CopyOnWriteArrayList<>();
+    /** 带**来源地址**的监听（REGISTER 学址 / NOTIFY 防伪造用；威胁建模 ⑤ 接线前置②）。 */
+    private final CopyOnWriteArrayList<java.util.function.BiConsumer<Gb28181SipMessage, InetSocketAddress>> sourceListeners =
+            new CopyOnWriteArrayList<>();
 
     /**
      * 在指定本地端口开 socket。
@@ -108,9 +111,10 @@ public final class Gb28181SipTransport implements Closeable {
             try {
                 DatagramPacket p = new DatagramPacket(buf, buf.length);
                 socket.receive(p);
+                InetSocketAddress from = new InetSocketAddress(p.getAddress(), p.getPort());
                 List<Gb28181SipMessage> msgs = decodeDatagram(p);
                 for (Gb28181SipMessage m : msgs) {
-                    onMessage(m);
+                    onMessage(m, from);
                 }
             } catch (IOException e) {
                 if (running.get()) {
@@ -146,7 +150,7 @@ public final class Gb28181SipTransport implements Closeable {
         return m.render().length;
     }
 
-    private void onMessage(Gb28181SipMessage m) {
+    private void onMessage(Gb28181SipMessage m, InetSocketAddress from) {
         received.add(m);
         String key = m.transactionKey();
         byKey.computeIfAbsent(key, k -> new ConcurrentLinkedQueue<>()).add(m);
@@ -154,7 +158,14 @@ public final class Gb28181SipTransport implements Closeable {
             // 非响应且无 CSeq：无法归属，仍入 received（诊断面）——但绝不静默吞
             log.debug("sip message without transaction key from peer: {}", m.startLine());
         }
+        sourceListeners.forEach(l -> l.accept(m, from));
         listeners.forEach(Runnable::run);
+    }
+
+    /** 注册「有新消息到达（含来源地址）」的回调（REGISTER 学址 / NOTIFY 防伪造用）。 */
+    public void onMessageWithSource(
+            java.util.function.BiConsumer<Gb28181SipMessage, InetSocketAddress> cb) {
+        sourceListeners.add(java.util.Objects.requireNonNull(cb, "callback"));
     }
 
     /** 注册「有新消息到达」的回调（同步调用，勿阻塞）。 */
