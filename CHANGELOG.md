@@ -1,5 +1,24 @@
 # NexusSky 变更日志
 
+## [Unreleased] — feat(swarm): 数据分拣收益估算脚本（可复现数字 + 链路单位 bug 回归）
+
+把架构文档里"AI 最值钱处 = 数据分拣（Mbps→Kbps）"那句话，变成**可复现的算术**：
+
+- 新增 `scripts/data-triage-bandwidth.py`（纯计算/无依赖/无硬件）：给定机数/帧率/JPEG 大小/
+  检测框字节数/关键帧间隔，输出"原始视频 / 仅结构化 / 仅关键帧 / 混合"四档回传带宽、
+  分拣节省%、以及各链路（WIFI/LTE/LORA/SATELLITE）容量适配判断。`--json` / `--self-test`。
+- 默认档实测输出：20 架×10fps×40KB/帧 → 原始视频 65.54Mbps，混合（结构化+关键帧）1.46Mbps，
+  **节省 97.77%**；混合在 WiFi/卫星撑得住、LTE/LoRa 撑不住（需降档）。
+- **A/B 抓到并修掉一个真 bug**：链路容量常量最初误用 `link-sim` 的**字节/秒**与
+  `bps()` 的**比特/秒**直比，差 8 倍 → 把 WiFi/卫星误判"撑不住"。改成 bps（×8）后，
+  self-test 新增 20 架回归断言钉死单位（改回字节/秒即红）。
+- CI：`repo-gates` 的 "Self-test the gates themselves" 增加
+  `python3 scripts/data-triage-bandwidth.py --self-test`（满足自测覆盖门禁）。
+- 架构文档 `docs/swarm-comms-architecture.md` §4/§8 引用该估算器；
+  §8 明确 ②/⑤ 不做（`commadapt`/`link-sim` 已覆盖，避免重复造轮子）。
+- 文档口径：README scripts 110→111；CHANGELOG 小节数 323→324。
+
+边界：量级估算，非实测；不代表任何真实设备吞吐量或运营商 SLA。
 ## [Unreleased] — docs(架构): 低空集群通信分层、机载自治与数据分拣设计（表演/生产力双线）
 
 新增 `docs/swarm-comms-architecture.md`（设计文档，**0 例增删、不改代码/依赖**）：
@@ -3515,7 +3534,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-17 共有 323 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-17 共有 324 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3542,7 +3561,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 323 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 324 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
