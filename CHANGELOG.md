@@ -1,5 +1,69 @@
 # NexusSky 变更日志
 
+## [Unreleased] — test(dji-cloud): 协议级模拟补 4 类边界 + e2e-dock-mqtt 转硬门禁
+
+无真机条件下的 DJI 接入验证，本次补齐两类缺口（**不新增任何硬件依赖**）：
+
+**一、协议级模拟补 4 例**（`DjiCloudApiDeviceGatewayTest`，9→13 例）
+
+此前已覆盖命令映射、tid 关联、拒绝、超时、publish 异常；本次补上四条真实代码路径：
+
+- **机巢绑定查询抛异常**（`DjiCloudApiDeviceGateway.java:166-170`）：DB 故障时返回 false 且不发布，不假成功；
+- **并发 tid 隔离**：16 条命令同时下发，`pending`（ConcurrentHashMap）逐条按 tid 关联，
+  断言 16 个 tid 全不重复、全部成功——补上"并发场景"此前只有串行用例的空白；
+- **重复应答**：同一 tid 第二次 reply 被安全忽略，不抛异常、不影响后续命令（设备/网络重传场景）；
+- **断链立即失败**（`:291-297`）：`connectionLost` 触发后，在等命令立即返回 false，
+  实测耗时远小于 10s 超时，不挂死调用方。
+
+**二、`e2e-dock-mqtt` 由观察模式转硬门禁**（`.github/workflows/ci.yml`）
+
+删除 `continue-on-error: true`。转正依据：近 15 次 ci.yml 运行中该 job **11 次 success、0 次 failure**
+（其余 4 次为 in_progress 或尚未创建该 job，非 skipped），与 e2e-b2-a/b 的转正口径一致。
+残余风险已在注释中保留：该 job 依赖容器仓拉 broker 镜像，若因基建连续致红应换镜像源，
+而不是退回观察模式。
+
+**三、新增评估文档** `docs/dji-cloud-api2-migration-assessment.md`
+
+结论：**短期不迁移**到 DJI"上云 API 2"。关键事实——本项目对接的是 MQTT 物模型
+（`thing/product/{sn}/services`），而上云 API 2 是另一条协议栈（JNI/SDK + 新 topic），
+其官方设备模拟器不能作为现有协议的对端。迁移属协议栈重构，且**不能替代真机物理层验证**
+（起降、RTK、图传、风场、厂商认证）。触发再评估的条件与前置条件见文档 §6。
+
+**四、`java-upward-compat` 补缓存恢复 + 取件类重试**（`.github/workflows/ci.yml`）
+
+本 PR 首次 CI（run `43906315393`）中 33 个 job 只红这一个，日志是
+`Non-resolvable import POM: spring-boot-dependencies:pom:3.5.16 (absent)` +
+`HTTP Status: 429`。**不是代码问题、也不是 JDK 26 不兼容**：同一 commit 的
+`Java cloud-backend`、`Java Level Gate` 全绿，差别在拿 m2 的方式——
+那两个先恢复 `maven-warm` 的缓存，而本 job 既无 `needs` 也无缓存恢复，
+每次从中央仓冷拉整个 reactor，在共享 runner IP 上撞 Maven Central 限流。
+
+这与 `java-level` 在 2026-10-29 栽的是**同一个坑**（该 job 注释有原文），当时只修了
+那两处，漏了这里。本次补上同样两道防线：`needs: [maven-warm]` + `actions/cache/restore`
+（键与 warm 同源，守卫 `ci-maven-cache-key.sh` 站点数 20→21 同源）+ 改用
+`scripts/ci-mvn-retry.sh`（只对取件类失败重试，JDK 26 真实编译不兼容仍照常判红）。
+
+**五、`mutation-gate` 三处裸 `mvn` 改经重试脚本**（`.github/workflows/ci.yml`）
+
+第二轮 CI（run `43930403115`）换成这个 job 红，日志：
+`Plugin org.apache.maven.plugins:maven-install-plugin:3.2.0 ... could not be resolved`
++ `HTTP Status: 429`。根因**同样是结构性的**：`maven-warm` 的暖缓存只跑到 `verify`，
+而 `install` 阶段在 `verify` 之后 ⇒ `maven-install-plugin` 从来没进过缓存，
+该步每次运行都要现拉，撞限流就红（上一轮只是运气好）。
+
+**为什么不把 `maven-warm` 改成跑到 `install`**：那样项目自身的 SNAPSHOT jar 会进缓存，
+下游不带 `-am` 的 job（本 job 两个 pitest 步正是如此）会静默用上**过期兄弟模块**——
+这比"多拉一个插件"危险得多。故保持暖缓存只到 `verify`，改由 `scripts/ci-mvn-retry.sh`
+兜住取件抖动：`install` 与两次 `pitest:mutationCoverage`（pitest 插件只在 profile 里，
+`verify` 不触发下载，同类风险）共三处。
+
+边界：以上全部基于 fake MQTT client 与协议级回放，**不证明真实 DJI 设备/EMQX 全链路与硬件行为**；
+"云端真机租赁"检索未发现可信服务，判断为不可行。
+
+文档口径：`README.md` 文档篇数 48→49；`CHANGELOG.md` 小节数 319→320；
+全仓单测 6098→6102、`cloud-backend` 3893→3897（合并 #320 后全 reactor 实跑 surefire 实测，
+非算术叠加：`Tests run: 3897, Failures: 0`，10 篇口径文档同步）。
+
 ## [Unreleased] — test(idempotency): 补机巢注册重复 SN 与工单 VERIFIED 后二次复检两条契约测试（+2 例）
 
 承接 #318 的「已形成契约」清单，把两条原「未形成幂等契约/缺口」补成锁死的测试：
@@ -3386,7 +3450,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-16 共有 319 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-16 共有 320 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3413,7 +3477,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 319 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 320 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

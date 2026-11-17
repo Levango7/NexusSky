@@ -242,18 +242,39 @@ jobs:
     name: Java 26 Upward Compatibility (compile only)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    # 必须等 maven-warm：本 job 2026-11-16 之前**既无 needs 也无缓存恢复**，
+    # 每次运行都从中央仓冷拉整个 reactor，于是撞 429（详见下面 Compile 步的注释）。
+    needs: [ maven-warm ]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '26'
+      - name: Restore Maven local repository (warmed by maven-warm)
+        # m2 里装的是依赖 jar，与 JDK 版本无关：JDK 17 预热的缓存对 JDK 26 同样有效。
+        # 键必须与 maven-warm 保存的完全同源，守卫 scripts/ci-maven-cache-key.sh 会核对。
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository
+          key: mvn-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}-v4
+          restore-keys: |
+            mvn-${{ runner.os }}-
       - name: Compile with JDK 26
         # 只跑 compile，不跑 test：JDK 26 是非 LTS（2027-03 EOL），不作为生产基线。
         # 它的价值是「预警器」——提前发现未来 JDK 会破坏构建的用法。
         # 不跑 test 是刻意的：字节码增强类工具（JaCoCo agent / Mockito inline mock）
         # 在新 JDK 上可能失败，那是工具问题而非本仓代码问题，会制造噪声失败。
-        run: mvn -B clean compile -DskipTests
+        #
+        # **2026-11-16 补上缓存 + 重试**：run 43906315393 本 job 红在
+        #   Non-resolvable import POM: spring-boot-dependencies:pom:3.5.16 (absent)
+        #   Could not transfer ... from/to central: HTTP Status: 429
+        # 同一 commit 的 `Java cloud-backend` / `Java Level Gate` 全绿——差别不在代码，
+        # 而在这三个 job 拿 m2 的方式：那两个先恢复 maven-warm 的缓存，本 job 从零下载。
+        # 这与 java-level 在 2026-10-29 栽的是同一个坑（见该 job 缓存步注释），
+        # 当时只修了那两处，漏了这里。故补上同样的两道防线：缓存恢复 + 取件类失败重试。
+        # 注意：重试只对"取件类"失败生效，JDK 26 真实的编译不兼容仍会照常判红。
+        run: bash scripts/ci-mvn-retry.sh -B clean compile -DskipTests
 
   java-level:
     name: Java Level Gate (bytecode vs declaration)
@@ -1286,25 +1307,27 @@ jobs:
             -exec cp {} b1-e2e-logs/ \; 2>/dev/null || true
           ls -la b1-e2e-logs || echo "(no logs captured)"
 
-  # ── 机巢 MQTT 真链路 e2e（DJI 上云 API 对接面，观察模式）───────────────────
+  # ── 机巢 MQTT 真链路 e2e（DJI 上云 API 对接面，硬门禁）─────────────────────
   # 为什么单开一个 job：它要 **真 broker**（docker mosquitto）+ **真 cloud-backend**
   # （transport=mqtt）+ **设备侧对端**（drone-sim --mqtt-url）。
   # #254 交付的 transport=mqtt 从没在真 Spring 容器里起过——`MqttDockGateway` 有两个
   # 构造器且都没标 @Autowired，Spring 退回去找无参构造器 ⇒ No default constructor found。
   # 单测直连构造器、绕过了容器，只有真后端才抓得到。
   #
-  # **观察模式（continue-on-error）**：本 job 依赖从容器仓拉 broker 镜像，而本文件
-  # 的 docker-build 步骤注释里记过「Docker Hub 拉镜像在限流/超时下连续致红」的坑
-  # （那里为此把 base 镜像参数化到 mirror.gcr.io）。**镜像从哪拉是基建问题，不该
-  # 冒充链路问题**——故先观察若干轮，Linux 连续零红后再转硬门禁（与 e2e-b2-a/b
-  # 当初的接入方式同款）。broker 镜像可用 AF_MOSQUITTO_IMAGE 指定；拉不到会自动
-  # 退到 Docker Hub 官方镜像名。
+  # **2026-11-16 由观察模式转硬门禁**（删 continue-on-error）。
+  # 转正依据：近 15 次 ci.yml 运行中该 job 11 次 success、0 次 failure
+  # （其余 4 次为 in_progress 或尚未创建该 job，非 skipped）。与 e2e-b2-a/b 的
+  # 转正口径一致：连续多次零红后才删标记，删标记 = 把「跑过」升级为「必须通过」。
+  # 残余风险如实保留：本 job 依赖从容器仓拉 broker 镜像，而本文件的 docker-build
+  # 步骤注释里记过「Docker Hub 拉镜像在限流/超时下连续致红」的坑（那里为此把 base
+  # 镜像参数化到 mirror.gcr.io）。**镜像从哪拉是基建问题，不该冒充链路问题**——
+  # 若日后因拉镜像连续致红，正确做法是换镜像源，而不是把本 job 退回观察模式。
+  # broker 镜像可用 AF_MOSQUITTO_IMAGE 指定；拉不到会自动退到 Docker Hub 官方镜像名。
   e2e-dock-mqtt:
     name: E2E dock MQTT (真 broker + 真后端 transport=mqtt + 设备侧对端)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [ java ]
-    continue-on-error: true
     services:
       redis:
         image: mirror.gcr.io/library/redis:7-alpine
@@ -1816,18 +1839,29 @@ jobs:
         # aerofleet-drone-sim）只能从**本地 m2** 找 —— 只 package 的话那些 jar 不在 m2，
         # PIT 会在 "dependency: io.aerofleet:aerofleet-mavlink-core:jar:0.1.0-SNAPSHOT
         # not found" 上直接失败（本机 m2 里恰好有旧 jar 才没暴露出来）。
-        run: mvn -B -pl cloud-backend -am install -DskipTests -Djacoco.skip=true
+        # **2026-11-16 改经 ci-mvn-retry.sh**：run 43930403115 本步红在
+        #   Plugin org.apache.maven.plugins:maven-install-plugin:3.2.0 ... could not be resolved:
+        #   maven-install-plugin:pom:3.2.0 (absent): ... HTTP Status: 429
+        # 根因是**结构性**的，不是抖动：maven-warm 的暖缓存只跑到 `verify`，
+        # 而 `install` 阶段在 `verify` **之后** ⇒ maven-install-plugin 从来没进过缓存，
+        # 本步每次运行都要现拉，撞上中央仓限流就红（上一轮只是运气好）。
+        # 为什么不干脆让 maven-warm 跑到 install：那样项目自身的 SNAPSHOT jar 会进缓存，
+        # 下游不带 -am 的 job（本 job 的两个 pitest 步正是如此）会静默用上**过期兄弟模块**，
+        # 比"多拉一个插件"危险得多。故保持暖缓存只到 verify，改由重试兜住取件抖动。
+        run: bash scripts/ci-mvn-retry.sh -B -pl cloud-backend -am install -DskipTests -Djacoco.skip=true
       - name: Mutation test (PIT, security package)
         # 刻意**不加 -am**：profile 的 targetClasses 指向 io.aerofleet.cloud.security.*，
         # 带 -am 会让 PIT 在上游模块（mavlink-core 等）上各跑一遍，而那边没有匹配的类
         # ⇒ 插件报"没找到变异体"把构建打断。上一行的 install 已经把依赖装进本地 m2。
-        run: mvn -B -pl cloud-backend -Pmutation pitest:mutationCoverage
+        # 经 ci-mvn-retry.sh：pitest 插件只在 profile 里，`verify` 不会触发其下载，
+        # 故同样不在暖缓存内，与上面 install 插件是同一类取件风险。
+        run: bash scripts/ci-mvn-retry.sh -B -pl cloud-backend -Pmutation pitest:mutationCoverage
       - name: Mutation test (PIT, surveillance package)
         # 第二个包的变异分数**单独记基线**（scripts/mutation-baseline-surveillance.json）：
         # 一个包的涨分不能掩盖另一个包的退步。
         # 报告目录与 security 包**分开**（profile 里配的 reportsDirectory），
         # 否则第二次跑会把第一次的报告覆盖掉 ⇒ 基线张冠李戴。
-        run: mvn -B -pl cloud-backend -Pmutation-surveillance pitest:mutationCoverage
+        run: bash scripts/ci-mvn-retry.sh -B -pl cloud-backend -Pmutation-surveillance pitest:mutationCoverage
       - name: Mutation baseline gate self-test
         run: python3 scripts/check-mutation-baseline.py --self-test
       - name: Mutation baseline gate (security)
