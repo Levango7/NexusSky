@@ -1,5 +1,166 @@
 # NexusSky 变更日志
 
+## [Unreleased] — feat(swarm): 数据分拣收益估算脚本（可复现数字 + 链路单位 bug 回归）
+
+把架构文档里"AI 最值钱处 = 数据分拣（Mbps→Kbps）"那句话，变成**可复现的算术**：
+
+- 新增 `scripts/data-triage-bandwidth.py`（纯计算/无依赖/无硬件）：给定机数/帧率/JPEG 大小/
+  检测框字节数/关键帧间隔，输出"原始视频 / 仅结构化 / 仅关键帧 / 混合"四档回传带宽、
+  分拣节省%、以及各链路（WIFI/LTE/LORA/SATELLITE）容量适配判断。`--json` / `--self-test`。
+- 默认档实测输出：20 架×10fps×40KB/帧 → 原始视频 65.54Mbps，混合（结构化+关键帧）1.46Mbps，
+  **节省 97.77%**；混合在 WiFi/卫星撑得住、LTE/LoRa 撑不住（需降档）。
+- **A/B 抓到并修掉一个真 bug**：链路容量常量最初误用 `link-sim` 的**字节/秒**与
+  `bps()` 的**比特/秒**直比，差 8 倍 → 把 WiFi/卫星误判"撑不住"。改成 bps（×8）后，
+  self-test 新增 20 架回归断言钉死单位（改回字节/秒即红）。
+- CI：`repo-gates` 的 "Self-test the gates themselves" 增加
+  `python3 scripts/data-triage-bandwidth.py --self-test`（满足自测覆盖门禁）。
+- 架构文档 `docs/swarm-comms-architecture.md` §4/§8 引用该估算器；
+  §8 明确 ②/⑤ 不做（`commadapt`/`link-sim` 已覆盖，避免重复造轮子）。
+- 文档口径：README scripts 110→111；CHANGELOG 小节数 323→324。
+
+边界：量级估算，非实测；不代表任何真实设备吞吐量或运营商 SLA。
+## [Unreleased] — docs(架构): 低空集群通信分层、机载自治与数据分拣设计（表演/生产力双线）
+
+新增 `docs/swarm-comms-architecture.md`（设计文档，**0 例增删、不改代码/依赖**）：
+
+- **双线分清**：表演型（几百架，集中式编舞+时间同步，**不上机载 AI**）；工业型（几~几十架，分布式 mesh+机载自治，是生产力主线）。预算集中在工业线。
+- **通信四层**：L0 纯局域网（默认主力，0 公网成本）→ L1 4/5G（按量）→ L2 Mesh 多跳（无基站延伸）→ L3 卫星（LEO/北斗短报文，保底只传摘要）。按 SLA 逐级降级，L2 不通进 DTN（机载自治+存储+回连补传）。
+- **每机部署（便宜优先）**：小检测器（几十~几百 MB，INT8）/ 规则·行为树决策（不上大模型）/ 协议级协同；硬件按 RK3588 级 < Orin Nano/NX < AGX Orin 选型。
+- **数据分拣**（AI 最值钱处）：只回传结构化结果/关键帧，原始视频默认不传，回传带宽 Mbps→Kbps 级。
+- **映射现有模块**：commadapt（链路质量/切换）、satlink、show（表演）、ExternalVisionSource（外部推理契约）、linksim、mission/scheduling——不重复造轮子。
+- **评测口径**：单机（既有 CvEvalService）+ 群体（覆盖率/重复率/接管时延/断链存活率/回传带宽，待实现）。
+- **诚实边界**：仅架构与口径，不产生真机/真链路证据；SLA 为建议起点需实测；成本为量级非报价；不涉任何军事/杀伤能力。
+- 文档口径：README 文档篇数 50→51；CHANGELOG 小节数 322→323。
+## [Unreleased] — feat(deploy): 回滚运行手册 + 破坏性迁移门禁（#323 L1/L3）
+
+`docs/devops-enhancement-plan.md:161` 把 CD4 标为 🔴「无自动回滚」，但真正缺的不只是自动化，
+而是**出事时没有可执行步骤**：`docs/RELEASE.md` 全文检索「回滚/rollback」零命中，
+唯一相关的 `docs/signing-prod-rollout.md:74-79` 只覆盖 MAVLink 签名，且明确「无需回滚数据」。
+
+**一、新增 `docs/rollback-runbook.md`**
+
+把三类回滚拆开——它们的手段完全不同，混为一谈会做出错误决策：
+
+- **应用回滚**：`helm rollback` / `kubectl rollout undo` / compose 回退 tag，附前置检查与命令；
+- **schema 回滚**：Flyway 社区版**没有 undo**（`flyway-core` 11.7.2，见 `cloud-backend/pom.xml:109-120`），
+  只有「前向修复迁移」与「备份恢复切库」两条真实路径，并写明三条绝对禁止的操作
+  （手改 `flyway_schema_history`、`flyway clean`、修改已发布的迁移文件）；
+- **数据回滚**：三种手段的适用面与前提；RTO 一律标「待演练」——没测过就不写数字。
+
+同时记录两条容易忽略的部署事实：`cloudBackend.replicaCount` 默认 **1**、
+`cloudBackend.pdb.enabled` 默认 **false**（`deploy/helm/nexussky/values.yaml:32,59-61`），
+因此当前形态下「零停机回滚」**不成立**，文档不回避这一点。
+
+**二、新增门禁 `scripts/check-destructive-migration.py`**
+
+40 个迁移中现有 1 个破坏性的（`V22__api_keys_sysid.sql:11` 删 `devices.device_token`）。
+存量有正当理由，问题在**新增一处时没人会想到半年后要回滚到 V21**；且 `IF EXISTS` 让重跑不报错，
+进一步掩盖「结构已被改坏」。门禁规则：命中 `DROP TABLE` / `DROP COLUMN` / `TRUNCATE` / `DROP SCHEMA`
+的迁移必须登记在 runbook 的登记区间内；登记了但文件已不存在、或该文件其实不具破坏性，同样判红
+（防止清单腐烂）。匹配前先掩掉注释与字符串，`-- 不要 DROP TABLE` 这类文字不会误报。10 例自测。
+
+**三、CI 接线**：`repo-gates` 增加自检与门禁两步。`check-selftest-coverage.py` 要求
+「提供 `--self-test` 的脚本必须被 CI 引用」，故两步同时加，否则该门禁会红。
+
+**边界（如实标注）**：runbook 中的集群命令**未在真实集群执行**（本机无 kind/集群），
+文档状态为「已交付，未验证」，§8 演练记录表留空待填。不把「写完文档」说成「回滚能力已就绪」。
+
+## [Unreleased] — docs(完善): 幂等清单复核——geofence/alarm 重复创建已有测试钉住（0 例增删）
+
+承接 #320 后对 `docs/idempotency-contract-inventory.md` 的**复核**：原「表二」中两条被误记为
+「缺少契约测试」的写路径，实际已有测试钉住语义——
+
+- `GeofenceStore.addZone` 同 `zoneId` 重复创建：**覆盖语义（last-write-wins）**，返回旧值——
+  `GeofenceStorePersistenceTest#memoryMode_addZone_overwriteReturnsPrevious`；
+- `AlarmLinkageEngine.addRule` 同 `ruleId` 重复创建：**覆盖语义（last-write-wins）**——
+  `AlarmLinkageEngineTest#addRuleOverwritesSameId`。
+
+两行从「表二·缺口」移入「表一·已覆盖」（标注 2026-11-16 复核、原缺口为误记）；
+`POST /api/v1/orch/start` 一行补上既有证据 `EmergencyOrchServiceTest#startReturnsIncrementingPlanIds`
+（按设计非幂等，每次新 planId）。
+
+**复核后仍真实存在的缺口只剩 1 条**：`TaskAssignmentService.assignTask` 重复提交同一 `taskId`
+无去重 guard——"拒绝/合并/重分配"属产品语义，**未裁决前只可观察、不得改行为**。
+其余（regulator 上报、dock 重复 OPEN_DOOR）保持既有覆盖/拒绝语义。
+
+边界：本节为清单复核/订正，**不新增测试、不改生产代码、不改计数**（全仓仍 6102 / cloud-backend 3897）。
+## [Unreleased] — test(dji-cloud): 协议级模拟补 4 类边界 + e2e-dock-mqtt 转硬门禁
+
+无真机条件下的 DJI 接入验证，本次补齐两类缺口（**不新增任何硬件依赖**）：
+
+**一、协议级模拟补 4 例**（`DjiCloudApiDeviceGatewayTest`，9→13 例）
+
+此前已覆盖命令映射、tid 关联、拒绝、超时、publish 异常；本次补上四条真实代码路径：
+
+- **机巢绑定查询抛异常**（`DjiCloudApiDeviceGateway.java:166-170`）：DB 故障时返回 false 且不发布，不假成功；
+- **并发 tid 隔离**：16 条命令同时下发，`pending`（ConcurrentHashMap）逐条按 tid 关联，
+  断言 16 个 tid 全不重复、全部成功——补上"并发场景"此前只有串行用例的空白；
+- **重复应答**：同一 tid 第二次 reply 被安全忽略，不抛异常、不影响后续命令（设备/网络重传场景）；
+- **断链立即失败**（`:291-297`）：`connectionLost` 触发后，在等命令立即返回 false，
+  实测耗时远小于 10s 超时，不挂死调用方。
+
+**二、`e2e-dock-mqtt` 由观察模式转硬门禁**（`.github/workflows/ci.yml`）
+
+删除 `continue-on-error: true`。转正依据：近 15 次 ci.yml 运行中该 job **11 次 success、0 次 failure**
+（其余 4 次为 in_progress 或尚未创建该 job，非 skipped），与 e2e-b2-a/b 的转正口径一致。
+残余风险已在注释中保留：该 job 依赖容器仓拉 broker 镜像，若因基建连续致红应换镜像源，
+而不是退回观察模式。
+
+**三、新增评估文档** `docs/dji-cloud-api2-migration-assessment.md`
+
+结论：**短期不迁移**到 DJI"上云 API 2"。关键事实——本项目对接的是 MQTT 物模型
+（`thing/product/{sn}/services`），而上云 API 2 是另一条协议栈（JNI/SDK + 新 topic），
+其官方设备模拟器不能作为现有协议的对端。迁移属协议栈重构，且**不能替代真机物理层验证**
+（起降、RTK、图传、风场、厂商认证）。触发再评估的条件与前置条件见文档 §6。
+
+**四、`java-upward-compat` 补缓存恢复 + 取件类重试**（`.github/workflows/ci.yml`）
+
+本 PR 首次 CI（run `43906315393`）中 33 个 job 只红这一个，日志是
+`Non-resolvable import POM: spring-boot-dependencies:pom:3.5.16 (absent)` +
+`HTTP Status: 429`。**不是代码问题、也不是 JDK 26 不兼容**：同一 commit 的
+`Java cloud-backend`、`Java Level Gate` 全绿，差别在拿 m2 的方式——
+那两个先恢复 `maven-warm` 的缓存，而本 job 既无 `needs` 也无缓存恢复，
+每次从中央仓冷拉整个 reactor，在共享 runner IP 上撞 Maven Central 限流。
+
+这与 `java-level` 在 2026-10-29 栽的是**同一个坑**（该 job 注释有原文），当时只修了
+那两处，漏了这里。本次补上同样两道防线：`needs: [maven-warm]` + `actions/cache/restore`
+（键与 warm 同源，守卫 `ci-maven-cache-key.sh` 站点数 20→21 同源）+ 改用
+`scripts/ci-mvn-retry.sh`（只对取件类失败重试，JDK 26 真实编译不兼容仍照常判红）。
+
+**五、`mutation-gate` 三处裸 `mvn` 改经重试脚本**（`.github/workflows/ci.yml`）
+
+第二轮 CI（run `43930403115`）换成这个 job 红，日志：
+`Plugin org.apache.maven.plugins:maven-install-plugin:3.2.0 ... could not be resolved`
++ `HTTP Status: 429`。根因**同样是结构性的**：`maven-warm` 的暖缓存只跑到 `verify`，
+而 `install` 阶段在 `verify` 之后 ⇒ `maven-install-plugin` 从来没进过缓存，
+该步每次运行都要现拉，撞限流就红（上一轮只是运气好）。
+
+**为什么不把 `maven-warm` 改成跑到 `install`**：那样项目自身的 SNAPSHOT jar 会进缓存，
+下游不带 `-am` 的 job（本 job 两个 pitest 步正是如此）会静默用上**过期兄弟模块**——
+这比"多拉一个插件"危险得多。故保持暖缓存只到 `verify`，改由 `scripts/ci-mvn-retry.sh`
+兜住取件抖动：`install` 与两次 `pitest:mutationCoverage`（pitest 插件只在 profile 里，
+`verify` 不触发下载，同类风险）共三处。
+
+边界：以上全部基于 fake MQTT client 与协议级回放，**不证明真实 DJI 设备/EMQX 全链路与硬件行为**；
+"云端真机租赁"检索未发现可信服务，判断为不可行。
+
+文档口径：`README.md` 文档篇数 48→49；`CHANGELOG.md` 小节数 319→320；
+全仓单测 6098→6102、`cloud-backend` 3893→3897（合并 #320 后全 reactor 实跑 surefire 实测，
+非算术叠加：`Tests run: 3897, Failures: 0`，10 篇口径文档同步）。
+
+## [Unreleased] — test(idempotency): 补机巢注册重复 SN 与工单 VERIFIED 后二次复检两条契约测试（+2 例）
+
+承接 #318 的「已形成契约」清单，把两条原「未形成幂等契约/缺口」补成锁死的测试：
+
+- `DockServiceTest#registerDuplicateSnRejected`：`DockService.register` 重复注册同一 SN 仍抛
+  `IllegalStateException("dock sn already registered")`（失败语义：拒绝、不覆盖归属/位置），且仓储 `save` 未再被调用——`DockController` 的 409 映射不变。
+- `WorkOrderServiceTest#verifyAfterTerminalRejected`：工单第一次复检后状态为 `VERIFIED`，再次 `verify`，`machine.isTerminal` 终态守卫直接拒绝——`IllegalWorkOrderTransitionException`，且 `CaptureService.captureAndLocate` 只被调用 1 次（不重复拍照）。
+
+A/B（改坏⇒红、还原⇒绿）：
+- 机巢：临时注释 `DockService.register` 中的重复 SN 守卫（`dock sn already registered` 分支）→ `registerDuplicateSnRejected` **红**；还原 → **绿**。
+- 工单：`verify()` 终态守卫本就存在（VERIFIED 是 `isTerminal`）——该测试钉的是"再次调用截获点正确"与"不拍照第二次"；状态机裁决由 `WorkOrderStateMachineTest`/`transitionChain` 等覆盖。
+
+全量 `mvn -o clean test`：6098 用例 / 0 失败（cloud-backend 3893；rebase 后含 #316 XFF / #319 MJPEG / #322 UDP 准入后的实测值）。`docs/idempotency-contract-inventory.md` 表一新增两项。
 ## [Unreleased] — docs(完善): 关键写接口幂等/重复提交·风险清单（#315 收口续补，0 例增删）
 
 本节补 `docs/idempotency-contract-inventory.md`，承接 #315（应急编排 abort 幂等修复 + 2 例）后
@@ -3373,7 +3534,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-16 共有 318 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-17 共有 324 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3400,7 +3561,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 318 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 324 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

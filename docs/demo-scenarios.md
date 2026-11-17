@@ -76,15 +76,15 @@
 
 ### 1.4 测试基线
 
-当前项目测试基线：**6101 tests，0 failures**（全部通过）。
+当前项目测试基线：**6107 tests，0 failures**（全部通过）。
 bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 
 | 模块 | 测试数 | 说明 |
 |---|---|---|
 | mavlink-core | 529 | MAVLink 协议编解码、CRC 一致性 |
 | drone-sim | 1477 | Mesh 路由、卫星链路、视觉感知、故障模拟 |
-| cloud-backend | 3896 | REST API、调度引擎、应急编排、安防联动 |
-| **总计** | **6101** | 全部通过，0 failures |
+| cloud-backend | 3902 | REST API、调度引擎、应急编排、安防联动 |
+| **总计** | **6107** | 全部通过，0 failures |
 bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 > 测试基线随里程碑推进持续增长，每个里程碑必须保持回归基线不退化。
 

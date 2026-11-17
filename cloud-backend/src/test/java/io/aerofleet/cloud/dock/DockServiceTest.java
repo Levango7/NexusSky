@@ -127,6 +127,17 @@ class DockServiceTest {
                 .isThrownBy(() -> service.ingestOsd("NOPE", null, null, null, null));
     }
 
+    @Test
+    @DisplayName("注册机巢：重复 SN 拒绝（409 语义，不覆盖归属/位置）")
+    void registerDuplicateSnRejected() {
+        assertThatExceptionOfType(IllegalStateException.class)
+                .isThrownBy(() -> service.register(
+                        "B区机巢", "model", "DOCK-001", 10.0, 20.0, 7, "99"))
+                .withMessageContaining("dock sn already registered");
+        // 未写入任何新记录：归属/位置保留首次注册者
+        verify(docks, never()).save(any(DockEntity.class));
+    }
+
     // ------------------------------------------------------------------
     // 命令
     // ------------------------------------------------------------------
