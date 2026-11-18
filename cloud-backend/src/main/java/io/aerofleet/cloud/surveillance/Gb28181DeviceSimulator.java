@@ -430,6 +430,11 @@ public final class Gb28181DeviceSimulator implements Closeable {
      * 设备侧：从**已学联系地址对应的本机 socket** 发一条 NOTIFY（真实告警回环走它；
      * 「伪造源必须被拒」的对照测试在测试里另开 socket 发）。
      */
+    /** 设备侧：从主 socket 发任意原始报文（分支测试造畸形 REGISTER 用；来源=已学联系地址）。 */
+    public void sendBytes(byte[] data, InetSocketAddress to) throws IOException {
+        socket.send(new DatagramPacket(data, data.length, to));
+    }
+
     public void sendNotify(InetSocketAddress platform, String callId, String body) throws IOException {
         Gb28181SipMessage n = Gb28181SipMessage.request(
                 "NOTIFY sip:" + deviceId.value() + " SIP/2.0",

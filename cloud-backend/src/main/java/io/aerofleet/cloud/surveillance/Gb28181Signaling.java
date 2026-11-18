@@ -71,6 +71,11 @@ public final class Gb28181Signaling {
         return "-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     }
 
+    /** 测试接缝（包可见）：Call-ID 随机尾的形态钉（长度/hex/两次不同）。 */
+    static String callIdSuffixForTest() {
+        return callIdSuffix();
+    }
+
     // ------------------------------------------------------------------
     // 下行：平台 → 设备
     // ------------------------------------------------------------------
