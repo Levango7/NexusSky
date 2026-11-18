@@ -68,7 +68,6 @@
 哪些是**已经扎实**的：MAVLink v1/v2 协议栈（v2 签名有真实 pymavlink 参考实现生成的
 已知答案向量逐字节把关）、链路损伤仿真（Gilbert-Elliot + 令牌桶）、机载 failsafe 语义、
 RBAC 默认拒绝、审计哈希链，以及 **6102 个后端单测**与 CI 覆盖率门禁。
-bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 ---
 
 ## 是什么？
