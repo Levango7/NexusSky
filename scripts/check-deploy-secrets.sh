@@ -36,7 +36,10 @@ REAL_SIGN="check-script-real-signing-key-0123456789"
 
 # 三个方向共用的基础凭据（否则 MAVLINK_SIGNING_ENABLED 那条断言会被
 # jwt/enc/db 的占位串门禁先拒掉，测不到想测的东西）
+# imageTag：2026-11-18 起 chart 要求显式传不可变 tag（契约守卫），
+# 这里给一个测试专用值，让本脚本只测它该测的占位凭据门禁，不被 tag 守卫抢先拦下。
 BASE_SETS=(
+    --set "imageTag=sha-check123"
     --set "security.jwtSecret=$REAL_JWT"
     --set "security.encryptionKey=$REAL_ENC"
     --set "database.password=$REAL_DB"
@@ -61,7 +64,7 @@ else
 fi
 
 # ---- A：默认 values 必须被拒 ----
-DEFAULT_ERR="$(helm template placeholder-probe "$CHART" 2>&1 >/dev/null)"
+DEFAULT_ERR="$(helm template placeholder-probe "$CHART" --set "imageTag=sha-check123" 2>&1 >/dev/null)"
 A_EXIT=$?
 if [ "$A_EXIT" -eq 0 ]; then
     bad "A 默认 values 竟然渲染成功——占位凭据门禁被删掉了（这就是本脚本要拦的事）"
@@ -74,6 +77,7 @@ fi
 # ---- B + C：真实 values 必须渲染成功且无残留 ----
 RENDERED="/tmp/nx-rendered-$$.yaml"
 if ! helm template real-secrets "$CHART" \
+        --set "imageTag=sha-check123" \
         --set "security.jwtSecret=$REAL_JWT" \
         --set "security.encryptionKey=$REAL_ENC" \
         --set "database.password=$REAL_DB" > "$RENDERED" 2>/tmp/nx-real.err; then
