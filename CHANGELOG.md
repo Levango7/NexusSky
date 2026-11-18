@@ -1,5 +1,26 @@
 # NexusSky 变更日志
 
+## [Unreleased] — feat(gate): API 响应字段契约门禁（路径存在 ≠ 字段还在）
+
+前后端联调已有一层「方法+路径存在性」门禁（`check-frontend-endpoints.py`），但它拦不住
+**路径还在、字段改名了**：前端 `d.rtkStatus` 从此恒为 `undefined`——不报错、不白屏、不告警，
+面板只是永远空。这是「声明≠行为」在响应字段上的翻版，补机械检查：
+
+- 新增 `scripts/check-api-field-contract.py`：静态提取登记视图方法体（花括号配平）里顶层
+  `.put("key", ...)` 的 key，与 `docs/api-field-contract.json` 快照比对。
+  - 删除/改名 ⇒ 红；新增 ⇒ info 不红（向后兼容，`--update` 同步快照）；
+  - 提取到 0 个 key ⇒ 报错（防正则失效后"空快照=全通过"的假绿）；
+  - `inherits` 递归展开（`drones.detail` = `drones.telemetry` + `alerts`/`callsign`），带成环检测。
+- 首版快照登记 7 个视图：`drones.summary/telemetry/detail/status`、
+  `docks.view/scheduleView/runView`。
+- CI `repo-gates` 自测块 + 真检查步骤均已接线（自测覆盖门禁 32/32）。
+
+A/B（改坏⇒红、还原⇒绿）：把 `DroneViews.summary` 的 `rtkStatus` 改名 `rtkState` →
+门禁报 `drones.summary ... removed/renamed: rtkStatus`、退出码 1；还原 → `OK (7 views)`、退出码 0。
+
+边界：只覆盖**显式登记**的 7 个视图，非全仓；只核**顶层 key**，不核嵌套结构与类型；
+不改生产代码/测试语义，不计入 Java 单测数。README scripts 111→113（含 #329）；
+CHANGELOG 小节 325→326。
 ## [Unreleased] — fix(ci): npm audit 精确豁免无补丁 advisory + vite 打补丁
 
 **起因**：2026-11-18 起 `Security Scan` 全仓库性变红（PR #330 与其它 PR 同样命中）。根因是
@@ -3575,7 +3596,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-18 共有 325 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-18 共有 326 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3602,7 +3623,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 325 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 326 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
