@@ -2,7 +2,8 @@
 
 > **适用对象**：NexusSky 部署（Helm chart `deploy/helm/nexussky`，默认 namespace `nexussky`）。
 > **用途**：出事时不用现想——按决策树走，按命令执行，按验证清单收尾。
-> **状态**：L1（文档层）已交付。自动回滚（L2）与迁移安全门禁（L3）见 issue #323。
+> **状态**：L1（文档层）、L2（`helm --atomic` 退路）、L3（迁移门禁）均已交付；
+> Argo Rollouts 级「指标恶化自动回退」见 #324（**未实施**，本机无集群、无法演练）。
 > **维护约定**：本文件里每一条命令都必须是**实际执行过**的；没跑过的写"待演练"，不许写理论值。
 
 ---
@@ -18,12 +19,22 @@ Flyway 迁移在应用启动时**只前进**，`flyway_schema_history` 里已落
 所以"执行 down 脚本"这条路在本仓**不存在**——只有两条真实路径，见 §4。
 
 **③ 回滚目标必须是不可变标识。** 用 `latest` 回滚等于没回滚（今天和昨天的 `latest` 是两个镜像）。
-CI 的产出是 `sha-<short>`（`ci.yml` 的 `type=sha,format=short`）与 `latest`（仅 master push 产生）。
-**回滚请指定 `sha-<short>`，并在工单里记下 digest。**
+CI 产出两类不可变 tag：
 
-> **已知缺口（不要假设它已解决）**：`deploy/helm/nexussky/values.yaml:17` 的默认 `imageTag` 是 `0.1.0`，
-> 而仓库内没有任何工作流产出 `0.1.0` 这个 tag。若发布不依赖手工 `docker push`，默认 values 不可直接部署。
-> 详见 issue #324 的「阻塞项」一节。本手册不掩盖这一点。
+| 标识 | 产出方式 | 用途 |
+|---|---|---|
+| `sha-<short>` | `type=sha,format=short`，master push / v* tag push | **唯一技术部署标识**（commit 内容寻址，PR 不推） |
+| `1.0.7` 这类 semver | `type=semver,pattern={{version}}`，由 v1.0.7 tag push 产出 | 人类可读的发布别名 |
+
+`latest` 仍由 master push 产出，但**禁止用于生产部署与回滚**。`0.1.0` / `1.0.0` 是历史遗留的假 tag，
+**没有任何工作流产出**——2026-11-18 起已从三套部署清单移除。
+**回滚请指定 `sha-<short>` 或 semver 版本，并在工单里记下 digest。**
+
+> **契约由机器强制，不是口头约定**：Helm `values.yaml` 的 `imageTag` 默认为空，
+> `templates/deployment.yaml` 顶部的 fail-fast 守卫会让空值 / `latest` / `0.1.0` 在
+> `helm install/upgrade` 阶段直接失败——不会部署一个不存在的镜像再等 `ErrImagePull`。
+> raw k8s 用 `${IMAGE_TAG}` 占位（见 §3.2），生产 compose 用 `${IMAGE_TAG:-local}`（`local` 是本地构建标签）。
+> `scripts/check-image-tag-contract.py` 在 CI 中校验 CI 产物与三套清单是否对齐。
 
 ---
 
@@ -94,6 +105,19 @@ kubectl -n nexussky rollout status deploy/nexussky-cloud-backend
 `rollout undo` 依赖 Deployment 保留的历史 ReplicaSet（默认保留 10 个）。
 **注意**：`deploy/k8s/` 与 `deploy/helm/` 是两套并行清单，改了一边不改另一边就会漂移。
 
+`deploy/k8s/*.yaml` 的镜像已改为 `${IMAGE_TAG}` 占位（**不能**直接 `kubectl apply` 未替换的原文，
+否则会拉一个字面量叫 `${IMAGE_TAG}` 的镜像）。必须先注入不可变标识：
+
+```bash
+# 实测：IMAGE_TAG=sha-a1b2c3d → image: nexussky/cloud-backend:sha-a1b2c3d
+IMAGE_TAG=sha-a1b2c3d bash -c 'sed "s|\${IMAGE_TAG}|$IMAGE_TAG|g" deploy/k8s/cloud-backend.yaml' \
+  | kubectl -n nexussky apply -f -
+# semver 同样可用：IMAGE_TAG=1.0.7 bash -c '...'（实测输出 :1.0.7）
+```
+
+⚠️ 不要写成 `IMAGE_TAG=x sed 's|${IMAGE_TAG}|'"$IMAGE_TAG"'|g' file`——前缀变量赋值在参数展开时
+尚未生效，会把 tag 替换成**空串**（本机实测得到 `image: nexussky/cloud-backend:`）。
+
 ### 3.3 docker compose（单机/试用环境）
 
 ```bash
@@ -111,6 +135,29 @@ docker compose up -d
   能保证"新 Pod ready 后才杀旧 Pod"，但**没有并行容量**——新镜像起不来时，整个服务就停在那里等超时。
 - `cloudBackend.pdb.enabled` 默认 **false**（`values.yaml:59-61`）。单副本时 PDB 会阻塞节点 drain，
   所以默认关掉——代价是**节点维护期间没有可用性保护**。
+
+### 3.5 部署时自动回滚（L2 的当前形态）
+
+```bash
+# 实测自测 8/8：四种非法 tag 被拒、--atomic 等参数确实传入、helm 失败时退出码非 0
+IMAGE_TAG=sha-a1b2c3d bash scripts/deploy-atomic.sh upgrade
+```
+
+脚本做三件事：① 校验 `IMAGE_TAG` 是 `sha-<short>` 或 semver（与 Helm 守卫同一套规则）；
+② `helm upgrade --install --wait --timeout 10m --atomic`——新 Pod 起不来时 Helm 自动回到上一 revision；
+③ 打印切换前后的 revision 与镜像，供工单留痕。
+
+**边界必须写清，不要把它当成完整回滚能力**：
+
+| | 覆盖情况 |
+|---|---|
+| ✅ 启动即失败 | readiness 永不 ready、镜像拉取失败、CrashLoop —— `--atomic` 会回退 |
+| ❌ 起来后指标恶化 | Pod 是 ready 的，`--atomic` 认为成功；5xx / P99 劣化**不触发**回退 |
+| ❌ schema 回滚 | Flyway 社区版无 undo，见 §4；新增破坏性迁移由门禁拦截 |
+| ❌ 回滚目标漂移 | `latest` / `0.1.0` / `1.0.0` 在脚本里就被拒绝 |
+
+「指标恶化自动回退」需要 Argo Rollouts 的 `analysis` + `failureLimit`（#324 / CD3）。
+本机无集群、无法做故障演练，故**未实施**；在那之前，指标恶化仍靠 §2 决策树 + 人工执行 §3.1。
 
 ---
 
@@ -216,10 +263,15 @@ kubectl -n nexussky exec deploy/nexussky-cloud-backend -- \
 
 | 项 | 状态 | 依据 |
 |---|---|---|
-| `helm lint deploy/helm/nexussky` | ✅ 已执行 | helm 3.14.0，`1 chart(s) linted, 0 chart(s) failed` |
+| `helm lint deploy/helm/nexussky`（显式 `--set imageTag`） | ✅ 已执行 | helm 3.14.0，`1 chart(s) linted, 0 chart(s) failed`。**旧的无参数 lint 结论已失效**——默认 tag 改为空后必须通过守卫 |
 | `helm template` 渲染出的资源名与镜像引用 | ✅ 已执行 | 渲染得 `Deployment nexussky-cloud-backend`，镜像 `nexussky/cloud-backend:sha-abc1234`——§3.1 与 §0③ 的命令与命名不是猜的 |
+| Helm imageTag fail-fast 三态 | ✅ 已执行 | 空 tag → RC=1；`latest` → RC=1；`sha-abc1234` → RC=0（守卫非空转，不是写完就绿） |
+| `check-image-tag-contract.py --self-test` | ✅ 已执行 | 7/7：删 semver、删 Login/Push 守卫、values 回填 `0.1.0`、raw k8s / compose 回填假 tag、runbook 删 sha 口径，六种破坏输入全部判红 |
+| `deploy-atomic.sh --self-test` | ✅ 已执行 | 8/8：四种非法 tag 被拒、`--atomic/--wait/--timeout 10m/--set imageTag` 均传入 helm、helm 升级失败时退出码非 0 |
+| raw k8s `${IMAGE_TAG}` 注入 | ✅ 已执行 | `sha-a1b2c3d` → `cloud-backend:sha-a1b2c3d`；`1.0.7` → `gcs-web:1.0.7`（§3.2 命令可复制） |
 | `kubectl` 系列命令 | ⚠️ **未在集群执行** | 本机无 kind/minikube/可用集群 |
 | `psql` / `flyway_schema_history` 查询 | ⚠️ **未执行** | 本机无 psql；Docker 守护进程未运行，起不了临时 PG |
+| 启动即失败时 `--atomic` 真的回退 | ⚠️ **未在集群执行** | 自测只证明参数传入与失败码透传；真实 revision 回退需 kind |
 | 备份恢复 RTO | ⚠️ **未实测** | 需接近生产体量的数据 |
 
 **因此本文件当前状态是「已交付，未验证」**，不是「回滚能力已就绪」。下表填满真实数字之前，
@@ -227,6 +279,7 @@ kubectl -n nexussky exec deploy/nexussky-cloud-backend -- \
 
 | 日期 | 场景 | 执行人 | 结果 | 实测耗时 | 备注 |
 |---|---|---|---|---|---|
+| — | 启动即失败 → `--atomic` 自动回退 | — | **待演练** | — | 需 kind/minikube；自测只覆盖参数与退出码 |
 | — | Helm 回滚到上一 revision | — | **待演练** | — | 需 kind/minikube + 本地镜像 |
 | — | 回滚跨 V22（缺列） | — | **待演练** | — | 预期：旧镜像启动后查询报错 |
 | — | 备份恢复切库 | — | **待演练** | — | 需接近生产体量的数据 |
@@ -239,6 +292,9 @@ kubectl -n nexussky exec deploy/nexussky-cloud-backend -- \
 ## 9. 相关文档与议题
 
 - `docs/signing-prod-rollout.md` §4——MAVLink 签名功能的专用回滚（permissive→strict 两步走），与本手册正交。
+- `scripts/check-image-tag-contract.py`——镜像 tag 契约门禁（CI 产物 vs 三套部署清单）。
+- `scripts/deploy-atomic.sh`——L2 部署时自动回滚（`--self-test` 8 例）。
 - `docs/devops-enhancement-plan.md:161`——CD4 原始缺口描述（🔴 无自动回滚）。
-- issue #323——本手册所属议题（L2 自动回滚 / L3 迁移门禁）。
-- issue #324——Canary 灰度发布；灰度期间新旧版本共享同一 schema，**任何破坏性迁移都会让本手册失效**。
+- issue #323——本手册所属议题（L1 文档 / L2 `helm --atomic` 退路 / L3 迁移门禁）。
+- issue #324——Canary 灰度发布；真正的指标自动回退（`analysis` + `failureLimit`）在此议题，
+  **未实施**。灰度期间新旧版本共享同一 schema，任何破坏性迁移都会让本手册失效。

@@ -1,3 +1,15 @@
+{{/*
+镜像 tag 契约（2026-11-18）：唯一可部署标识是 sha-<short> 或 semver 版本（如 1.0.7），
+两者都由 CI 产出且不可变。latest 会漂移、0.1.0 无任何 CI 产出——都不能当回滚目标。
+守卫放这里而不是 values.yaml 注释里，是为了让 `helm install` 直接失败，而不是部署一个
+不存在的镜像后在 ErrImagePull 里才发现。见 docs/rollback-runbook.md §0③。
+*/}}
+{{- if not .Values.imageTag -}}
+{{- fail "imageTag 未设置：必须显式指定 sha-<short>（CI 自动产出）或 semver 版本（如 1.0.7）。禁止依赖默认值，见 docs/rollback-runbook.md §0③。" -}}
+{{- end -}}
+{{- if or (eq .Values.imageTag "latest") (eq .Values.imageTag "0.1.0") -}}
+{{- fail "imageTag=latest / 0.1.0 禁止部署：latest 随每次 master push 漂移，0.1.0 无 CI 产出，两者都不能作为回滚目标。请用 sha-<short> 或 semver 版本。" -}}
+{{- end -}}
 # NexusSky Deployments：cloud-backend + drone-sim + gcs-web
 # cloud-backend 探针走 /actuator/health/{readiness,liveness} 分组端点
 # （chart 不部署 redis，聚合端点会因 redis 分量 DOWN 恒 503，见 configmap 模板）

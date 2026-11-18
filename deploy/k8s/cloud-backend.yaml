@@ -36,7 +36,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: cloud-backend
-          image: nexussky/cloud-backend:0.1.0
+          image: nexussky/cloud-backend:${IMAGE_TAG}
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsNonRoot: true
