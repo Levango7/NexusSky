@@ -747,7 +747,6 @@ NexusSky/
 | `sdk-java` | 24 |
 | `regulator-sim` | 41 |
 | **总计** | **6147** |
-bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
 3230），根因不是"忘了改"而是没有任何信号会变红：加测试不会让文档过期这件事变红。

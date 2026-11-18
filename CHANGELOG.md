@@ -1,5 +1,42 @@
 # NexusSky 变更日志
 
+## [Unreleased] — docs(counters): 清理 10 份文档中误插入的 commit 摘要行（20 处）
+
+### 问题
+
+同一行裸的 commit 摘要被误粘贴进了 10 份文档、共 20 处：
+
+    bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
+
+落点高度一致——都在**测试规模/指标数字的邻行**：表格某行之后、段落之后、或引用块之后。
+它既不是表格行也不是说明文字，渲染后表现为表格下方多出一行无格式文本。更糟的是，
+其中 5 处连换行一起被吃掉，出现 `…未在真机集群上完成验证）>`（引用块断裂）、
+`6102 单测全绿- 日期：2026-09-24`（两条列表项粘连）这类结构损伤。
+
+现有门禁拦不住：`check-test-count-docs.py` 只逐格比对**数值**（529/1477/…/6102），
+不校验表格结构；`check-doc-counts.py` 只管文档篇数；`check-repo-hygiene.py` 只查
+**相邻重复行**。单行插入三者都不触发 ⇒ 结构损坏可以长期保持"全绿"。
+
+### 改
+
+- 10 份文档逐处删除该行，恢复原始结构：`README.md`、`ROADMAP.md`（2）、
+  `docs/competitive-analysis.md`、`docs/customer-onboarding-guide.md`（2）、
+  `docs/demo-scenarios.md`（2）、`docs/low-altitude-economy-demand-research.md`、
+  `docs/pricing-strategy.md`（3）、`docs/product-brief.md`、
+  `docs/sales-pitch-deck.md`（5）、`docs/whitepaper.md`（2）。
+- 5 处被吃掉的换行一并修复：`docs/customer-onboarding-guide.md`、`docs/pricing-strategy.md`
+  的引用块断行恢复为 `…）` + `>`；`docs/sales-pitch-deck.md` 粘连的
+  `6102 单测全绿- 日期：2026-09-24` 拆回两条列表项。
+- 全部文档的数值口径、正文语义一字未动——只删这一行、只补回换行。
+
+### 验证
+
+- 该行在远端 master（`4ce59233`）与本地 #311 快照中均存在；改完后 10 份文档内
+  `grep -c 'bc1081bc'` 全为 0，`git diff --stat` 为 10 个文件、净 `-20`/行级仅删除
+  与 2 处拆分。
+- 门禁复跑：`check-test-count-docs.py`、`check-doc-counts.py`、`check-repo-hygiene.py`、
+  `check-coord-board.py`、`check-doc-endpoints.py`、`check-positioning-facts.py` 全绿。
+
 ## [Unreleased] — feat(gate): API 响应字段契约门禁（路径存在 ≠ 字段还在）
 
 前后端联调已有一层「方法+路径存在性」门禁（`check-frontend-endpoints.py`），但它拦不住
@@ -3596,7 +3633,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-18 共有 326 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-18 共有 327 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3623,7 +3660,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 326 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 327 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
