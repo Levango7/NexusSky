@@ -1,5 +1,46 @@
 # NexusSky 变更日志
 
+## [Unreleased] — fix(ci): npm audit 精确豁免无补丁 advisory + vite 打补丁
+
+**起因**：2026-11-18 起 `Security Scan` 全仓库性变红（PR #330 与其它 PR 同样命中）。根因是
+GHSA-fc5q-39xc-vjpf（picomatch ReDoS，CVSS 8.7）在 11-17 才被 GitHub Review，影响 picomatch <=4.0.7，
+而 **4.0.7 就是最新版**，advisory 明列 `Patched versions: None`。不存在"升级一下就好"的路径。
+
+一、先修掉真正有补丁的那条
+- `gcs-web/package-lock.json`：vite 6.4.4 → 6.4.6，修 GHSA-8g5g-mxqh-grgj
+  （`server.fs.deny` 可被查询参数绕过；该项目确实把 Vite dev server 暴露到网卡，是真风险）。
+  patch 级、非 breaking；`package.json` 的 `^6.4.3` **未改**。
+- 保留 vitest 5.0.3，避免跨大版本降级。
+
+二、精确豁免（只一条 advisory）
+- `scripts/check-npm-audit.py`：读 `npm audit --json`，**仅**当某漏洞的 via 链全部最终指向
+  GHSA-fc5q-39xc-vjpf 时才忽略；任何其他 high/critical（同包第二个 advisory、非豁免 critical、
+  无 via 的高危）仍判红。环形引用（vitest ↔ coverage-v8）视为无新增信息，但整条链必须至少
+  落到一个实际 advisory，不许靠构造环绕过。
+- 自测 7/7：全链豁免绿 / 混入第二 advisory 红 / 非豁免 critical 红 / moderate 不阻断 /
+  纯环红 / 有豁免源的环绿 / 无 via 的高危红。
+- CI `security-scan`：audit 输出 JSON 后交给脚本判定；JSON 缺失或损坏会让脚本判红（fail-closed），
+  不再靠 `npm audit` 退出码一刀切。repo-gates 增加自测步（self-test 覆盖门禁要求）。
+- 到期条件：picomatch 发布 >4.0.7 或该 GHSA 被撤回/降级 → 删除本豁免。
+
+三、为什么没有选"升级依赖"
+
+| 尝试（临时副本实测） | 结果 |
+|---|---|
+| `npm audit fix --force` → vitest 3.1.4 | 6 high → **11 个漏洞**（4 high + 3 critical，新增 tinypool 1.1.1 RCE） |
+| vite 6.2.6 + vitest 3.2.4 + tinypool 2.2.0 override | **10 个漏洞**（picomatch 仍在，新增 mocker/glob/minimatch advisory） |
+
+vitest 5 要求 vite ≥6.4（经 fdir→tinyglobby 拉 picomatch）；降到 vitest 3 则它自己也经
+tinyglobby→fdir 拉同一版本。npm 每次给出的 fix 建议都在引入新 advisory。
+
+四、验证
+- 本机用官方 registry 复现 CI 判定（npmmirror 的 audit 端点 404 NOT_IMPLEMENTED，不可用）；
+- 真实 audit JSON 管道给脚本：6 个 high 全部确认为豁免链 → RC=0；脚本支持 `-` 从 stdin 读，
+  本地验证不落盘；
+- 自测 7/7。
+
+口径：README scripts 111→112（实测）、CHANGELOG 324→325 小节（按实测重算）。
+
 ## [Unreleased] — feat(swarm): 数据分拣收益估算脚本（可复现数字 + 链路单位 bug 回归）
 
 把架构文档里"AI 最值钱处 = 数据分拣（Mbps→Kbps）"那句话，变成**可复现的算术**：
@@ -3534,7 +3575,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-17 共有 324 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-18 共有 325 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3561,7 +3602,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 324 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 325 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

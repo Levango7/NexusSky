@@ -129,6 +129,9 @@ jobs:
           # 真事：链路容量常量曾误用 link-sim 的字节/秒与 bps 直比，差 8 倍，
           # 把 WiFi/卫星误判成"撑不住"——自测钉死单位，防止再犯。
           python3 scripts/data-triage-bandwidth.py --self-test
+          # npm audit 精确豁免（2026-11-18）：证明「仅豁免指定 GHSA」的判定不会误放行
+          # 第二个 advisory / critical / 环形 via / 无 via 的高危。
+          python3 scripts/check-npm-audit.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
@@ -2046,7 +2049,18 @@ jobs:
         # 实测退出码 0，而同一份 lockfile 全量扫描是 1（vite<=6.4.2 high）。
         # 这不是理论风险：docker-compose.yml:29 就是用 `npm run dev -- --host 0.0.0.0`
         # 把 Vite dev server 直接暴露到宿主机网卡，dev 依赖链上的漏洞就是在线攻击面。
-        run: npm audit --audit-level=high
+        #
+        # 2026-11-18：精确豁免 GHSA-fc5q-39xc-vjpf（picomatch ReDoS）。
+        # 该 advisory 11-17 才被 GitHub Review，picomatch 最新版 4.0.7 即受影响版本，
+        # 官方明列 Patched versions: None；npm audit fix --force 实测把 6 high 变成
+        # 11 个漏洞（含 3 critical tinypool RCE），不是可用修复。
+        # check-npm-audit.py 只在漏洞的 via 链**全部**指向该 GHSA 时才忽略，
+        # 任何其他 high/critical（包括同包上的第二个 advisory）仍然判红。
+        # npm audit 发现漏洞时退出码非 0，故保留 JSON 再交给脚本判定；JSON 缺失/损坏
+        # 会让脚本解析失败并判红（fail-closed，不会静默跳过）。
+        run: |
+          npm audit --json --audit-level=high > npm-audit.json || true
+          python3 ../scripts/check-npm-audit.py npm-audit.json
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
