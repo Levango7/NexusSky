@@ -2057,7 +2057,7 @@ jobs:
           node -e '
             const a = require("/tmp/fe-audit.json");
             const rest = Object.entries(a.vulnerabilities || {}).filter(([k, v]) =>
-              (v.via || []).some(x => {
+              (v.via || []).every(x => {
                 const t = typeof x === "string" ? x : (x.title || "");
                 return !/picomatch|tinyglobby|fdir/i.test(t);
               })
