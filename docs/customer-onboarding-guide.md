@@ -487,6 +487,8 @@ helm version          # 3.12+
 # 是 REPLACE_WITH_* 占位串，chart 从本版本起直接拒绝安装
 # （原因与写法见 docs/deployment-guide.md §2.2）
 cat > my-values.yaml <<'YAML'
+imageRegistry: "ghcr.io/levango7/"
+imageTag: "sha-a1b2c3d"   # 必填：CI 产出的不可变 tag（latest / 0.1.0 会被 chart 拒绝）
 security:
   jwtSecret: "<≥32 字符随机串>"
   encryptionKey: "<≥32 字符随机串>"

@@ -29,7 +29,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: drone-sim
-          image: nexussky/drone-sim:0.1.0
+          image: nexussky/drone-sim:${IMAGE_TAG}
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsNonRoot: true

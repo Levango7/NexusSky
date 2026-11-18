@@ -157,8 +157,8 @@ push/PR → [java (矩阵) + frontend (并行)] → e2e-smoke (串行) → integ
 |---|---|---|---|
 | CD1 | **持续部署流水线** | 🔴 高 | 完全没有 CD 配置，无自动部署到任何环境 |
 | CD2 | **环境晋升流程** | 🔴 高 | 无 dev→staging→prod 的分阶段晋升机制 |
-| CD3 | **灰度发布 (Canary)** | 🔴 高 | 无 Canary/Blue-Green 部署策略（待办见 #324；前置缺口：镜像 tag 契约未闭合） |
-| CD4 | **回滚机制** | 🔴 高 | 无自动回滚（健康检查失败时自动 revert）。**L1 运行手册已交付**：`docs/rollback-runbook.md`；自动回滚与迁移门禁见 #323 |
+| CD3 | **灰度发布 (Canary)** | 🔴 高 | 无 Canary/Blue-Green 部署策略（待办见 #324。**前置缺口已闭合**：tag 契约 sha + semver 双产物，由 `scripts/check-image-tag-contract.py` 守卫） |
+| CD4 | **回滚机制** | 🔴 高 | L1 runbook + L2 `helm --atomic` 退路 + L3 迁移门禁已交付（`docs/rollback-runbook.md` / `scripts/deploy-atomic.sh` / `scripts/check-destructive-migration.py`）；**指标恶化自动回退仍缺**（依赖 #324 的 analysis + failureLimit），且集群演练未执行 |
 | CD5 | **镜像签名** | 🟡 中 | 无 Cosign/Sigstore 签名验证 |
 | CD6 | **GitOps** | 🟡 中 | 无 ArgoCD/Flux GitOps 模式 |
 | CD7 | **部署审批门禁** | 🟡 中 | 无生产部署人工审批环节 |

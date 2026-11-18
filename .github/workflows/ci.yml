@@ -132,6 +132,12 @@ jobs:
           # npm audit 精确豁免（2026-11-18）：证明「仅豁免指定 GHSA」的判定不会误放行
           # 第二个 advisory / critical / 环形 via / 无 via 的高危。
           python3 scripts/check-npm-audit.py --self-test
+          # 镜像 tag 契约（2026-11-18 落地，#323/#324 的前置）：CI 产物必须与部署清单
+          # 说同一套不可变标识——此前 v1.0.2–v1.0.7 六个发布 tag 一个镜像都没产出。
+          python3 scripts/check-image-tag-contract.py --self-test
+          # 部署时自动回滚（#323 L2 退路）：验证 latest/0.1.0 被拒、--atomic 等参数确实
+          # 传给 helm、helm 升级失败时退出码非 0（不假装成功）。
+          bash scripts/deploy-atomic.sh --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
@@ -148,6 +154,10 @@ jobs:
       # 「半年后有人要回滚到 V21」——而 `IF EXISTS` 让重跑不报错，进一步掩盖结构已被改坏。
       - name: Destructive migration gate (must be registered in rollback runbook)
         run: python3 scripts/check-destructive-migration.py
+      # CI 产出的 tag 与三套部署清单（helm / raw k8s / compose）必须对齐。
+      # 此前默认值 0.1.0、1.0.0 无任何工作流产出，回滚时无法确定目标镜像。
+      - name: Image tag contract gate (CI products vs deploy manifests)
+        run: python3 scripts/check-image-tag-contract.py
       # 文档里对外声称的端点数，必须等于代码里的实际数。
       # 2026-10-20 实测：同一件事在文档里有三个不同的数（358 / 345 / 345），而实测是 406。
       - name: Claimed endpoint count gate
@@ -2239,7 +2249,11 @@ jobs:
 
       - name: Log in to GitHub Container Registry
         # 只有真要推的那条路径需要登录（PR 走"只构建不发布"，见 .coord/GAPS.md G-4）。
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        # 2026-11-18 扩到 v* tag push：此前 tag 会跑完整门禁、镜像也构建，但 Login/Push
+        # 两步被 master-only 守卫挡住，于是 v1.0.2–v1.0.7 六个发布 tag 一个镜像都没产出。
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -2258,9 +2272,17 @@ jobs:
           # refs/pull/N/merge 那个不对应任何分支提交的 sha（实证日志：PR #61 的 run
           # 38288389281 推了 ghcr.io/levango7/nexussky/cloud-backend:latest）。
           # 按 latest 部署的人（compose / raw k8s 都这么写）当时拿到的不是 master。
+          #
+          # 2026-11-18 补 semver：仓库已有 v1.0.2–v1.0.7 六个附注 tag，CI 也因
+          # `tags: ['v*']` 为它们跑完整门禁，但 metadata 只产出 latest + sha，
+          # 且 Push 步骤 master-only ⇒ tag 发布从来没有对应镜像。补这一行后
+          # v1.0.7 → ghcr.io/levango7/nexussky/<module>:1.0.7（不可变发布别名）。
+          # sha-<short> 仍是唯一技术部署标识（commit 内容寻址、PR 不推）；
+          # semver 是给人读的发布别名。两者都不把 latest 当回滚目标。
           tags: |
             type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
             type=sha,format=short
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       # 原生 docker build/push（原为 build-push-action+buildx）：2026-10-09 实测
       # buildx 的 docker-container driver 要先从 Docker Hub 拉 moby/buildkit 镜像，
@@ -2283,7 +2305,10 @@ jobs:
         # `docker push`，与构建同在一个步骤、同一个事件门槛都没有 ⇒ 每条绿 PR 都在推 :latest。
         # 构建能力完整保留在 PR 上（这正是它的价值：镜像层的问题要在合并前暴露），
         # 只是不再往注册表写东西。
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        # v* tag push 一并放行：tag 是已发布版本，产出不可变 semver 镜像；PR 仍然不推。
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
         shell: bash
         run: |
           set -e

@@ -40,6 +40,46 @@ tinyglobby→fdir 拉同一版本。npm 每次给出的 fix 建议都在引入�
 - 自测 7/7。
 
 口径：README scripts 111→112（实测）、CHANGELOG 324→325 小节（按实测重算）。
+## [Unreleased] — feat(deploy): 镜像 tag 契约闭合 + 部署时自动回滚（#323 L2 / #324 前置）
+
+**取证先于改动**：CI 只产出 `latest`（master push）与 `sha-<short>`，而 Helm 默认 `imageTag: "0.1.0"`、
+raw k8s 三份清单硬编码 `:0.1.0`、生产 compose 三处硬编码 `:1.0.0`——**这三个 tag 没有任何工作流产出**。
+同时仓库已有 v1.0.2–v1.0.7 六个附注 tag，CI 因 `tags: ['v*']` 为它们跑完整门禁，
+但 Login/Push 被 master-only 守卫挡住，tag 发布从未产出镜像。回滚前提是「能确定退到哪个不可变镜像」，
+这一格此前是空的。
+
+一、CI（`.github/workflows/ci.yml`）
+- metadata-action 加 `type=semver,pattern={{version}}`：v1.0.7 → `nexussky/<module>:1.0.7`；
+- Login / Push 守卫从 master-only 扩为 `(master push) || (v* tag push)`，PR 仍只构建不推；
+- `latest` 仍只由 master push 产出，但不再作为部署/回滚目标。
+
+二、部署清单（三套对齐）
+- Helm：默认 `imageTag` 从 `0.1.0` 改为 `""`，`templates/deployment.yaml` 顶部加 fail-fast 守卫；
+  实测三态：空 → RC=1、`latest` → RC=1、`sha-abc1234` → RC=0（非空转）。
+- raw k8s 三处 `:0.1.0` → `${IMAGE_TAG}`；生产 compose 三处 `:1.0.0` → `${IMAGE_TAG:-local}`
+  （`local` 是本地构建标签，不是 CI 产物）。
+
+三、`scripts/check-image-tag-contract.py`（新增门禁 + 7 例自测）
+校验六条：CI 双产物、Login/Push 各自放行 tag push、Helm 默认空 + 守卫、raw k8s / compose 无假 tag、
+runbook 口径。**自测中修掉门禁自身一处弱点**：原先只数 `startsWith(...)` 全文出现次数，
+而 metadata 的 semver enable 也含同一表达式，漏掉 Push 守卫会被误判合规——改为逐步定位 Login / Push 块。
+自测 7/7：六种破坏输入（删 semver、删守卫、values 回填 0.1.0、k8s/compose 回填假 tag、runbook 删 sha 口径）全部判红。
+
+四、`scripts/deploy-atomic.sh`（新增，8 例自测）
+`helm upgrade --install --wait --timeout 10m --atomic` + 前后 revision 审计输出；拒绝 latest / 0.1.0 / 1.0.0
+及非 sha/semver 格式。自测 8/8：非法 tag 拒绝、参数确实传入 helm、helm 升级失败时退出码非 0。
+**边界写死在 runbook**：只覆盖「启动即失败」，不覆盖「起来后 5xx/P99 恶化」——后者需 #324 的 analysis。
+
+五、验证中的一次自我修正
+raw k8s 注入命令首版写成 `IMAGE_TAG=x sed 's|${IMAGE_TAG}|'"$IMAGE_TAG"'|g' file`，
+前缀变量赋值在参数展开时尚未生效，实测得到 `image: nexussky/cloud-backend:`（空 tag）。
+改为 `IMAGE_TAG=x bash -c 'sed "s|\${IMAGE_TAG}|$IMAGE_TAG|g" file'` 后实测输出 `:sha-a1b2c3d` / `:1.0.7`。
+runbook §3.2 保留了这个错误示例作为反例。
+
+六、口径同步：README scripts 111→114（实测）、docs 51 不变、CHANGELOG 325→326 小节（按实测重算，非算术叠加）。
+
+**边界**：kubectl / psql / `--atomic` 真实回退仍未在集群执行（本机无 kind，Docker 守护进程未运行）；
+runbook §8 逐项标注「未执行」，状态是「已交付，未演练」，不写成「回滚能力已就绪」。
 
 ## [Unreleased] — feat(swarm): 数据分拣收益估算脚本（可复现数字 + 链路单位 bug 回归）
 
@@ -3575,7 +3615,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-18 共有 325 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-18 共有 326 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3602,7 +3642,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 325 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 326 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
