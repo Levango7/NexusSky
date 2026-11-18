@@ -208,11 +208,11 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
 
 ### 行动清单（按依赖排序）
 
-- [ ] P0-1 `regulator` 包：MH/T 3030 三项接口 + 模拟监管平台（link-sim 模式）+ e2e
-- [ ] P0-2 `OPEN_DRONE_ID` 消息族（对齐官方 c_library_v2，GB 46750 字段映射表）
-- [ ] P0-3 围栏起飞前硬拦截链 + 限飞区数据源接口
-- [ ] P0-4 PostgreSQL（drone/mission/flightlog 三域）
-- [ ] P0-5 MAVLink v2 signing + link-sim 篡改画像
+- [x] P0-1 `regulator` 包：MH/T 3030 三项接口 + 模拟监管平台（link-sim 模式）+ e2e（2026-11-19 核：Verify/Activation/Cancellation + TelemetryReportService + RegulatorReportSink SPI（Uom/Sim/Noop）+ regulator-sim 模块齐；真 UOM 对端属外部前置）
+- [x] P0-2 `OPEN_DRONE_ID` 消息族（对齐官方 c_library_v2，GB 46750 字段映射表）（2026-11-19 核：rid 包 RidIngestService + drone-sim RidBroadcaster（ASTM F3411）均有测试；实机广播属外部前置）
+- [x] P0-3 围栏起飞前硬拦截链 + 限飞区数据源接口（2026-11-19 核：GeofenceInterceptService 对 ARM/TAKEOFF 前置拦截，限飞区 fail-closed + RestrictionCacheManager 本地文件源）
+- [ ] P0-4 PostgreSQL（drone/mission/flightlog 三域）（2026-11-19 核：flightlog/audit/telemetry 已落库；drone/mission 主数据仍内存态（README L1129）→ #139）
+- [x] P0-5 MAVLink v2 signing + link-sim 篡改画像（2026-11-19 核：MavlinkSigningConfiguration + P6 官方 sha256_48 对等；link-sim SecurityImpairmentEngine 覆盖 SIGNING_TAMPER/SIGNING_UNSIGNED 两画像）
 - [ ] P1-6 ONNX 推理接入 + 识别率/误检比/处理时间评测面板（2026-11：#292 已交付评测层按 kind 拆分的识别率/误检比/处理时间面板与指标归账；平台侧 `ExternalVisionSource`（HTTP JPEG→`{kind,confidence,u,v}`）与配置/评测链路可对接 ONNX Runtime Server/Triton 等外部推理服务，并补充接入契约与参考服务（`docs/external-vision-inference.md`、`scripts/vision-inference-server.py`）；**进程内嵌入 onnxruntime 与内置行业模型**未纳入，仍待后续立项）
 - [x] P1-7 Dock 状态机 + 上云 API 适配器（MQTT 物模型）+ 利用率健康度度量（2026-11：已交付 Dock 状态机/状态流转与 run/state 持久化、无人值守定时任务、`MqttDockGateway`/OSD 基于 DJI Cloud API `thing/product/{sn}/services` 等 MQTT 物模型通道的适配（含 sim 对端语义，命令未按真实 DJI 官方 method 全量映射）、`DockMetricsService` 日结/rollup 利用率与可用性/故障/温控/充电等健康度指标及面板展示；未覆盖真实 DJI HTTPS/WebSocket 全链路与真机联调，按当前 PoC/实现口径验收）
 - [x] P1-8 四类行业航线模板 + GCS 模板 UI（2026-11：F3 交付 tower/solar/pipeline/
@@ -220,9 +220,13 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
 - [x] P1-9 缺陷领域模型 + 报告导出 + 工单流（闭环消缺）（2026-11：已交付缺陷领域模型与持久化、工单创建/流转/复检与 `RECTIFIED` 闭环回写、`GET /api/v1/defects/report` 的 json/csv/md 报告导出；PDF 渲染未纳入，按当前实现口径验收）
 - [x] P1-10 双栈网关抽象（2026-11：已交付 `DeviceGateway`/SPI/`CommandRouter` 抽象与 MAVLink 栈，以及 DJI Cloud API 第 2 栈 **flight_task 子集 PoC**（`aerofleet.dji-cloud.enabled` 默认关闭、fail-closed、经机巢网关下发）；命令覆盖仍为子集且**无真实设备/EMQX 联调**，按当前 PoC/抽象落地口径验收）
 - [x] P1-11 RTK 精度字段（2026-11：`GPS_RAW_INT` 已采集并暴露 `fixType`/`satellites`/`eph`(HDOP*100)/`epv`(VDOP*100)，派生 `rtkStatus`，并在 summary/detail/telemetry/status 视图一致输出；当前栈无更多 GNSS 精度字段可用，按现有协议与接口口径验收）
-- [ ] P2-12 ROC 席位化"一控多机" + 警情驱动航线
-- [ ] P2-14 U-space 四服务接口 + Remote ID 三套字段映射
-- [ ] P2-16/17 GB28181、运营报表
+- [x] P2-12 ROC 席位化"一控多机" + 警情驱动航线（2026-11-19 核：roc 包 RocSeatService（MAX_FLEET=9 席位化）+ RocController + IncidentDispatchService 警情驱动调度齐；席位 in-memory 系设计语义 README L842）
+- [x] P2-13 侦测接入（不自研反制，对接反制雷达侦测数据源）（2026-11-19 补行：sensing 包 CounterDroneRadarSource + SensingTrackService 在；反制按政策不做）
+- [x] P2-14 U-space 四服务接口 + Remote ID 三套字段映射（2026-11-19 核：UspaceController 四服务实装（net-rid 三格式/geo-awareness/flight-authorization 三态/traffic 脱敏）+ RemoteIdMapper 三套映射纯函数；与真实 U-space 网络互联（CISP/EASA）属外部前置）
+- [x] P2-15 5G-A 通感感知数据源预留（2026-11-19 补行：sensing 包 FiveGSensingSource 在，复用 Source 抽象）
+- [x] P2-16/17 GB28181、运营报表（2026-11-19 核：surveillance 包 Gb28181 信令/设备模拟/媒体帧三层 + Dahua 适配器；report 包 OperationsReportService 架次/时长/里程/能耗/成本参数化模型齐；H.264 解码/厂商互联属 README 已知边界）
+
+> **2026-11-19 对账注（第二批）**：P0-1/2/3/5 与 P2-12/13/14/15/16/17 本日按代码核实转勾（逐条带包级证据）；P2-13/P2-15 原清单漏列，本日补行。P1-6/7/9/10/11 的勾选与注记为 #306–#311 批已对齐，本批不重复改。P0 时间口径注：GB 46750/46761 过渡期 2026-11-01 已过，本节「硬 deadline」失效，合规状态需按现行法规复核（法务解释不在证据范围，仅登记事实）。商务资质类（CAAC OC/飞手/保险/业绩）按用户裁决不在本批范围。
 
 ### 商业模式建议（结合招标数据）
 
