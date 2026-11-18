@@ -55,6 +55,8 @@ cd deploy/helm/nexussky
 # 用一份不进版本库的私有 values 覆盖占位值
 helm install nexussky . -f my-values.yaml
 # my-values.yaml 至少包含：
+#   imageRegistry: "ghcr.io/levango7/"   # 与 CI 推送目标一致
+#   imageTag: "sha-a1b2c3d"              # 必填：CI 产出的不可变标识；latest / 0.1.0 会被 chart 拒绝
 #   security:
 #     jwtSecret: "<≥32 字符随机串>"
 #     encryptionKey: "<≥32 字符随机串>"
@@ -63,6 +65,8 @@ helm install nexussky . -f my-values.yaml
 
 # 或临时用 --set（会留在 shell history 里，仅适合本地验证）
 helm install nexussky . \
+  --set imageRegistry=ghcr.io/levango7/ \
+  --set imageTag="$IMAGE_TAG" \
   --set security.jwtSecret="$JWT_SECRET" \
   --set security.encryptionKey="$ENC_KEY" \
   --set database.password="$DB_PASSWORD"
@@ -77,21 +81,26 @@ bash scripts/check-deploy-secrets.sh
 ### 2.3 配置项（values.yaml）
 
 ```yaml
+# 全局镜像标识：最终镜像 = <imageRegistry><image>:<imageTag>
+# image 字段不带 tag；tag 只由 imageTag 控制，写成 image: xxx:latest 会拼出双 tag。
+imageRegistry: "ghcr.io/levango7/"
+imageTag: "sha-a1b2c3d"   # 必填且不可变；latest / 0.1.0 会在 helm 阶段被拒绝
+
 cloudBackend:
-  replicas: 2
-  image: nexussky/cloud-backend:latest
+  replicaCount: 2
+  image: nexussky/cloud-backend
   resources:
     limits:
       cpu: 2000m
       memory: 2Gi
 
 droneSim:
-  replicas: 1
-  image: nexussky/drone-sim:latest
+  replicaCount: 1
+  image: nexussky/drone-sim
 
 gcsWeb:
-  replicas: 2
-  image: nexussky/gcs-web:latest
+  replicaCount: 2
+  image: nexussky/gcs-web
 
 ingress:
   enabled: true
