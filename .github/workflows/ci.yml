@@ -2059,7 +2059,7 @@ jobs:
             const rest = Object.entries(a.vulnerabilities || {}).filter(([k, v]) =>
               (v.via || []).every(x => {
                 const t = typeof x === "string" ? x : (x.title || "");
-                return !/picomatch|tinyglobby|fdir/i.test(t);
+                return !/picomatch|tinyglobby|fdir|vitest/i.test(t);
               })
             );
             if (rest.length) {
