@@ -143,11 +143,10 @@ class Gb28181RegisterAuthLoopbackTest {
         AtomicInteger alarms = new AtomicInteger();
         adapter.subscribeEvents(dev, body -> alarms.incrementAndGet());
 
-        // 平台发来的 SUBSCRIBE：取其 Call-ID（NOTIFY 必须回带同一 Call-ID，RFC 3265）
-        Gb28181SipMessage sub = device.received().stream()
-                .filter(m -> "SUBSCRIBE".equals(m.method()))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("platform never sent SUBSCRIBE"));
+        // 平台发来的 SUBSCRIBE：取其 Call-ID（NOTIFY 必须回带同一 Call-ID，RFC 3265）。
+        // 确定性等待（drained 纪律）：本机 loopback 微秒级即达，CI 调度下需轮询——
+        // 不轮询就是 CI 偶发 "platform never sent SUBSCRIBE" 的成因
+        Gb28181SipMessage sub = awaitSubscribe(5000);
         String callId = sub.firstHeader("Call-ID");
 
         // 伪造源（另一 socket、同一 Call-ID）：必须被丢
@@ -181,5 +180,20 @@ class Gb28181RegisterAuthLoopbackTest {
         Gb28181Adapter a = new Gb28181Adapter(new Gb28181CatalogParser(), DOMAIN, "127.0.0.1:0", password);
         a.startRegisterServerIfConfigured();
         return a;
+    }
+
+    /** 确定性等待平台 SUBSCRIBE 到达设备（drained 纪律：本机微秒、CI 需轮询）。 */
+    private Gb28181SipMessage awaitSubscribe(long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            java.util.Optional<Gb28181SipMessage> hit = device.received().stream()
+                    .filter(m -> "SUBSCRIBE".equals(m.method()))
+                    .findFirst();
+            if (hit.isPresent()) {
+                return hit.get();
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("platform never sent SUBSCRIBE within " + timeoutMs + "ms");
     }
 }
