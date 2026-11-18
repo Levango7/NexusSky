@@ -132,6 +132,8 @@ jobs:
           # npm audit 精确豁免（2026-11-18）：证明「仅豁免指定 GHSA」的判定不会误放行
           # 第二个 advisory / critical / 环形 via / 无 via 的高危。
           python3 scripts/check-npm-audit.py --self-test
+          # API 响应字段契约（2026-11-18）：路径存在 ≠ 字段还在。
+          python3 scripts/check-api-field-contract.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
@@ -163,6 +165,10 @@ jobs:
       # 这道门禁把「前端在调一个不存在的东西」变成会红的 CI 步骤。
       - name: Frontend endpoint contract gate
         run: python3 scripts/check-frontend-endpoints.py
+      # 路径存在 ≠ 字段还在：字段改名会让前端静默拿到 undefined（不报错、不白屏）。
+      # 本门禁按 docs/api-field-contract.json 快照核对已登记视图的响应字段集。
+      - name: API field contract gate
+        run: python3 scripts/check-api-field-contract.py
       # 文档自己写出来的每个 /api/v1 路径，后端都必须真的有。
       # 2026-10-29 实测：sdk-reference/integration-guide 公开了 /api/v1/sat/providers*
       # （从未实现，调用是 404 而非文档说的 501）、README/PRODUCT-POSITIONING 写 satlink
