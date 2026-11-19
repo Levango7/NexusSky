@@ -129,6 +129,11 @@ jobs:
           # 真事：链路容量常量曾误用 link-sim 的字节/秒与 bps 直比，差 8 倍，
           # 把 WiFi/卫星误判成"撑不住"——自测钉死单位，防止再犯。
           python3 scripts/data-triage-bandwidth.py --self-test
+          # npm audit 精确豁免（2026-11-18）：证明「仅豁免指定 GHSA」的判定不会误放行
+          # 第二个 advisory / critical / 环形 via / 无 via 的高危。
+          python3 scripts/check-npm-audit.py --self-test
+          # API 响应字段契约（2026-11-18）：路径存在 ≠ 字段还在。
+          python3 scripts/check-api-field-contract.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
@@ -160,6 +165,10 @@ jobs:
       # 这道门禁把「前端在调一个不存在的东西」变成会红的 CI 步骤。
       - name: Frontend endpoint contract gate
         run: python3 scripts/check-frontend-endpoints.py
+      # 路径存在 ≠ 字段还在：字段改名会让前端静默拿到 undefined（不报错、不白屏）。
+      # 本门禁按 docs/api-field-contract.json 快照核对已登记视图的响应字段集。
+      - name: API field contract gate
+        run: python3 scripts/check-api-field-contract.py
       # 文档自己写出来的每个 /api/v1 路径，后端都必须真的有。
       # 2026-10-29 实测：sdk-reference/integration-guide 公开了 /api/v1/sat/providers*
       # （从未实现，调用是 404 而非文档说的 501）、README/PRODUCT-POSITIONING 写 satlink
@@ -2047,27 +2056,17 @@ jobs:
         # 这不是理论风险：docker-compose.yml:29 就是用 `npm run dev -- --host 0.0.0.0`
         # 把 Vite dev server 直接暴露到宿主机网卡，dev 依赖链上的漏洞就是在线攻击面。
         #
-        # 有界例外（GHSA-fc5q-39xc-vjpf，picomatch ReDoS，patched: None 上游未修）：
-        # 该 CVE 只落在 vitest 测试链（tinyglobby→fdir→picomatch）的 devDependency 上，
-        # ReDoS 需要 attacker-controlled glob 输入，而 vitest 的 glob 输入是开发者
-        # 自己的测试文件路径（可信），无生产攻击面；且 npm audit 的 fix 建议
-        # （换 vitest 版本）消除不了声明范围，故显式豁免这一条，其余 high/critical 仍拦。
+        # 2026-11-18：精确豁免 GHSA-fc5q-39xc-vjpf（picomatch ReDoS）。
+        # 该 advisory 11-17 才被 GitHub Review，picomatch 最新版 4.0.7 即受影响版本，
+        # 官方明列 Patched versions: None；npm audit fix --force 实测把 6 high 变成
+        # 11 个漏洞（含 3 critical tinypool RCE），不是可用修复。
+        # check-npm-audit.py 只在漏洞的 via 链**全部**指向该 GHSA 时才忽略，
+        # 任何其他 high/critical（包括同包上的第二个 advisory）仍然判红。
+        # npm audit 发现漏洞时退出码非 0，故保留 JSON 再交给脚本判定；JSON 缺失/损坏
+        # 会让脚本解析失败并判红（fail-closed，不会静默跳过）。
         run: |
-          npm audit --audit-level=high --json > /tmp/fe-audit.json || true
-          node -e '
-            const a = require("/tmp/fe-audit.json");
-            const rest = Object.entries(a.vulnerabilities || {}).filter(([k, v]) =>
-              (v.via || []).every(x => {
-                const t = typeof x === "string" ? x : (x.title || "");
-                return !/picomatch|tinyglobby|fdir|vitest/i.test(t);
-              })
-            );
-            if (rest.length) {
-              console.error("high/critical vulnerabilities remain:", rest.map(([k]) => k));
-              process.exit(1);
-            }
-            console.log("npm audit: only GHSA-fc5q-39xc-vjpf (accepted, dev-only, upstream unpatched)");
-          '
+          npm audit --json --audit-level=high > npm-audit.json || true
+          python3 ../scripts/check-npm-audit.py npm-audit.json
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
