@@ -247,10 +247,13 @@ class Gb28181SignalingContractTest {
         @Test
         @DisplayName("100 Trying 是 Provisional（无 body、无 tag 也算合法）")
         void tryingIsProvisional() {
-            Gb28181SipMessage t = sig.trying(invite());
+            // Call-ID 已随机化（威胁建模 ⑤）：两次 invite() 是两枚不同 Call-ID，
+            // 响应必须与**同一枚**请求对账——先造一枚再应答
+            Gb28181SipMessage inv = invite();
+            Gb28181SipMessage t = sig.trying(inv);
             assertThat(t.statusCode()).isEqualTo(100);
             assertThat(t.bodyBytes()).isZero();
-            assertThat(t.transactionKey()).isEqualTo(invite().transactionKey());
+            assertThat(t.transactionKey()).isEqualTo(inv.transactionKey());
         }
     }
 

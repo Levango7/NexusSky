@@ -63,13 +63,41 @@ public class Gb28181Adapter implements VendorAdapter {
     private final java.util.Map<String, String> callIdToHandle =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * 设备接入口令（{@code aerofleet.gb28181.device-password}）。
+     * **blank = REGISTER 服务关闭**（维持 fail-closed 现状：contacts 恒空，点播/订阅
+     * 照旧抛 ContactUnknown）；配置后平台在启动期绑定 SIP 端口受理 REGISTER
+     * （RFC 2617 Digest，威胁建模 ⑤ 接线前置①）。
+     */
+    private final String devicePassword;
+    /** 已签发的 REGISTER 挑战 nonce → 签发时刻（TTL 内有效；容量有界防洪泛）。 */
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> issuedNonces =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long REGISTER_NONCE_TTL_MS = 300_000L;
+    private static final int MAX_OUTSTANDING_NONCES = 1024;
+    /** SIP 监听端口（自 {@code aerofleet.gb28181.sip-host} 的 host:port 解析；0=测试绑临时端口）。 */
+    private final int sipListenPort;
+
+    /** 测试/既有调用点兼容：设备接入口令未配置（REGISTER 服务关闭，fail-closed）。 */
+    public Gb28181Adapter(Gb28181CatalogParser catalogParser, String sipDomain, String sipHost) {
+        this(catalogParser, sipDomain, sipHost, "");
+    }
+
+    /** 生产装配：配置 {@code aerofleet.gb28181.device-password} 后启用 REGISTER 服务。 */
+    @org.springframework.beans.factory.annotation.Autowired
     public Gb28181Adapter(Gb28181CatalogParser catalogParser,
                           @Value("${aerofleet.gb28181.sip-domain:00000000000000000001}") String sipDomain,
-                          @Value("${aerofleet.gb28181.sip-host:127.0.0.1:5060}") String sipHost) {
+                          @Value("${aerofleet.gb28181.sip-host:127.0.0.1:5060}") String sipHost,
+                          @Value("${aerofleet.gb28181.device-password:}") String devicePassword) {
         this.catalogParser = catalogParser;
+        this.devicePassword = devicePassword == null ? "" : devicePassword.trim();
+        int colon = sipHost.lastIndexOf(':');
+        this.sipListenPort = colon > 0
+                ? Integer.parseInt(sipHost.substring(colon + 1).trim())
+                : 5060;
         this.signaling = new Gb28181Signaling(sipDomain, sipHost);
-        log.info("GB28181 接入配置: sip-domain={}, sip-host={}（改这两项后需重启；连不上先看这行）",
-                sipDomain, sipHost);
+        log.info("GB28181 接入配置: sip-domain={}, sip-host={}, register-auth={}（改这几项后需重启）",
+                sipDomain, sipHost, this.devicePassword.isBlank() ? "OFF" : "ON");
     }
 
     /**
@@ -90,6 +118,20 @@ public class Gb28181Adapter implements VendorAdapter {
         java.net.InetSocketAddress prev = contacts.put(deviceId, contact);
         log.info("GB28181 device contact learned: {} -> {}{}", deviceId, contact,
                 prev == null ? "" : " (was " + prev + ")");
+    }
+
+    /**
+     * 配置了设备口令时在启动期绑定 SIP 端口开始受理 REGISTER（GB/T 28181 里平台是
+     * 服务端，设备会主动发 REGISTER——不能等第一个订阅/点播才懒开）。
+     * 未配置（blank）时什么都不做：维持 fail-closed 现状。
+     */
+    @jakarta.annotation.PostConstruct
+    void startRegisterServerIfConfigured() {
+        if (devicePassword.isBlank()) {
+            return;
+        }
+        Gb28181SipTransport t = transport();
+        log.info("gb28181 REGISTER server listening on {} (digest auth)", t.localAddress());
     }
 
     /**
@@ -135,53 +177,160 @@ public class Gb28181Adapter implements VendorAdapter {
             return cur;
         }
         try {
-            Gb28181SipTransport t = new Gb28181SipTransport(0);
-            // 每条到达的消息都过一遍订阅分发（NOTIFY 的 transaction key 与 SUBSCRIBE 不同，
-            // 不能靠 transact 拿，必须自己认领）
-            t.onMessage(() -> dispatchNotify(t));
+            // REGISTER 服务开启时绑定配置的 SIP 端口（设备往这里发）；否则维持懒开临时端口
+            int bindPort = devicePassword.isBlank() ? 0 : sipListenPort;
+            Gb28181SipTransport t = new Gb28181SipTransport(bindPort);
+            // 每条到达的消息带**来源地址**分发：REGISTER 学址、NOTIFY 防伪造都靠它
+            t.onMessageWithSource(this::onIncoming);
             t.start();
             this.transport = t;
-            log.info("GB28181 sip transport started on {} (lazily, first use)", t.localAddress());
+            log.info("GB28181 sip transport started on {} ({}), register-auth={}",
+                    t.localAddress(), bindPort == 0 ? "ephemeral" : "configured",
+                    devicePassword.isBlank() ? "OFF" : "ON");
             return t;
         } catch (java.net.SocketException e) {
-            throw new IllegalStateException("gb28181 sip transport open failed", e);
+            throw new IllegalStateException(
+                    "gb28181 sip transport open failed on port " + sipListenPort, e);
         }
     }
 
     /**
-     * 把收到的 NOTIFY 分发给对应订阅者（按 Call-ID 认领，RFC 3265）。
-     *
-     * <p>只处理**新增**的 NOTIFY：用一个已分发的 Call-ID 游标避免重复触发
-     * （transport.received() 是累积列表，每来一条消息都会被 onMessage 回调一次）。
+     * 收包入口（带来源地址）：REGISTER 走鉴权学址，NOTIFY 走「来源必须等于已学联系地址」
+     * 的防伪造分发（威胁建模 ⑤ 接线前置②），其余消息维持原状（诊断面已收）。
      */
-    private void dispatchNotify(Gb28181SipTransport t) {
-        java.util.List<Gb28181SipMessage> all = t.received();
-        for (int i = dispatched.get(); i < all.size(); i++) {
-            Gb28181SipMessage m = all.get(i);
-            if (!"NOTIFY".equals(m.methodOfCseq())) {
-                continue;
-            }
-            dispatched.incrementAndGet();
-            String handle = callIdToHandle.get(m.firstHeader("Call-ID"));
-            java.util.function.Consumer<String> cb =
-                    handle == null ? null : subscribers.get(handle);
-            if (cb == null) {
-                log.debug("gb28181 NOTIFY without local subscription: call-id={}",
-                    m.firstHeader("Call-ID"));
-                continue;
-            }
-            try {
-                cb.accept(m.bodyText());
-            } catch (RuntimeException e) {
-                // 订阅者异常不许杀传输读线程（与媒体面观察者隔离同一条纪律）
-                log.warn("gb28181 event subscriber failed for {}", handle, e);
-            }
+    private void onIncoming(Gb28181SipMessage m, java.net.InetSocketAddress source) {
+        String method = m.methodOfCseq() == null ? m.method() : m.methodOfCseq();
+        if ("REGISTER".equals(method)) {
+            handleRegister(m, source);
+            return;
+        }
+        if ("NOTIFY".equals(method)) {
+            dispatchOneNotify(m, source);
         }
     }
 
-    /** 已分发过的 transport.received() 下标游标（避免同一 NOTIFY 重复触发）。 */
-    private final java.util.concurrent.atomic.AtomicInteger dispatched =
-            new java.util.concurrent.atomic.AtomicInteger();
+    private void handleRegister(Gb28181SipMessage req, java.net.InetSocketAddress source) {
+        if (devicePassword.isBlank()) {
+            // 未配置设备口令：REGISTER 服务关闭（维持 fail-closed；不回 403——
+            // "服务关着"与"服务开着但拒绝"是两种语义，前者让探测者一无所知）
+            log.debug("gb28181 REGISTER ignored (device auth not configured)");
+            return;
+        }
+        String authHeader = req.firstHeader("Authorization");
+        if (authHeader == null || authHeader.isBlank()) {
+            replyChallenge(req, source);
+            return;
+        }
+        Gb28181DeviceId id = deviceIdOfRegister(req);
+        java.util.Map<String, String> auth = Gb28181DigestAuth.parseAuthorization(authHeader);
+        String nonce = auth.get("nonce");
+        String requestUri = requestUriOf(req);
+        boolean nonceValid = nonce != null && isKnownNonce(nonce);
+        boolean ok = id != null && nonceValid && Gb28181DigestAuth.verify(
+                auth, "REGISTER", requestUri, Gb28181DigestAuth.DEFAULT_REALM,
+                id.value(), devicePassword, nonce);
+        if (!ok) {
+            log.warn("gb28181 REGISTER rejected: id={} from={} (bad credentials/stale nonce)",
+                    id, source);
+            replyChallenge(req, source);
+            return;
+        }
+        // 鉴权通过：来源地址即设备的传输地址（GB/T 28181：平台从 REGISTER 学设备地址）
+        learnContact(id.value(), source);
+        try {
+            transport().send(source, signaling.ok(req));
+            log.info("gb28181 REGISTER authenticated: id={} from={}", id.value(), source);
+        } catch (java.io.IOException e) {
+            log.warn("gb28181 REGISTER 200 send failed to {} (contact already learned)", source, e);
+        }
+    }
+
+    private void replyChallenge(Gb28181SipMessage req, java.net.InetSocketAddress source) {
+        String nonce = Gb28181DigestAuth.nonce();
+        rememberNonce(nonce);
+        try {
+            transport().send(source,
+                    signaling.unauthorized(req, Gb28181DigestAuth.DEFAULT_REALM, nonce));
+        } catch (java.io.IOException e) {
+            log.warn("gb28181 401 challenge send failed to {}", source, e);
+        }
+    }
+
+    private void rememberNonce(String nonce) {
+        long now = System.currentTimeMillis();
+        issuedNonces.entrySet().removeIf(e -> now - e.getValue() > REGISTER_NONCE_TTL_MS);
+        if (issuedNonces.size() >= MAX_OUTSTANDING_NONCES) {
+            // 容量防线：极端洪泛时重置挑战池（最坏后果=在途握手重走一遍）
+            issuedNonces.clear();
+        }
+        issuedNonces.put(nonce, now);
+    }
+
+    private boolean isKnownNonce(String nonce) {
+        Long at = issuedNonces.get(nonce);
+        return at != null && System.currentTimeMillis() - at <= REGISTER_NONCE_TTL_MS;
+    }
+
+    /** 从 REGISTER 的 From 头（{@code <sip:<id>@…>}）解析设备编码。 */
+    private Gb28181DeviceId deviceIdOfRegister(Gb28181SipMessage req) {
+        String from = req.firstHeader("From");
+        if (from == null) {
+            return null;
+        }
+        int lt = from.indexOf("sip:");
+        if (lt < 0) {
+            return null;
+        }
+        int at = from.indexOf('@', lt);
+        if (at < 0) {
+            return null;
+        }
+        String id = from.substring(lt + 4, at);
+        int colon = id.indexOf(':');
+        if (colon > 0) {
+            id = id.substring(0, colon);
+        }
+        try {
+            return Gb28181DeviceId.parse(id);
+        } catch (RuntimeException e) {
+            log.debug("gb28181 REGISTER From carries invalid device id: {}", from);
+            return null;
+        }
+    }
+
+    private static String requestUriOf(Gb28181SipMessage req) {
+        String line = req.startLine();
+        int sp1 = line.indexOf(' ');
+        int sp2 = line.indexOf(' ', sp1 + 1);
+        return sp1 < 0 || sp2 < 0 ? line : line.substring(sp1 + 1, sp2);
+    }
+
+    /**
+     * NOTIFY 分发（带来源校验）：来源地址必须等于该订阅设备的已学联系地址——
+     * Call-ID 曾是确定性可预测的（威胁建模 ⑤），只认 Call-ID 等于把告警注入面敞开。
+     */
+    private void dispatchOneNotify(Gb28181SipMessage m, java.net.InetSocketAddress source) {
+        String handle = callIdToHandle.get(m.firstHeader("Call-ID"));
+        java.util.function.Consumer<String> cb = handle == null ? null : subscribers.get(handle);
+        if (cb == null) {
+            log.debug("gb28181 NOTIFY without local subscription: call-id={}",
+                    m.firstHeader("Call-ID"));
+            return;
+        }
+        String deviceId = subscriptions.get(handle);
+        java.net.InetSocketAddress contact = deviceId == null ? null : contacts.get(deviceId);
+        if (source != null && contact != null && !contact.equals(source)) {
+            log.warn("gb28181 NOTIFY from unregistered source {} (contact={}) dropped: call-id={}",
+                    source, contact, m.firstHeader("Call-ID"));
+            return;
+        }
+        try {
+            cb.accept(m.bodyText());
+        } catch (RuntimeException e) {
+            // 订阅者异常不许杀传输读线程（与媒体面观察者隔离同一条纪律）
+            log.warn("gb28181 event subscriber failed for {}", handle, e);
+        }
+    }
 
     /** Spring 容器销毁：关传输 + 全部媒体会话（不泄漏端口）。 */
     @jakarta.annotation.PreDestroy
@@ -484,21 +633,8 @@ public class Gb28181Adapter implements VendorAdapter {
      * 生产路径上由 {@link #transport()} 注册的 {@code onMessage} 回调驱动。
      */
     public void deliverNotify(Gb28181SipMessage msg) {
-        java.util.Objects.requireNonNull(msg, "msg");
-        String handle = callIdToHandle.get(msg.firstHeader("Call-ID"));
-        java.util.function.Consumer<String> cb =
-                handle == null ? null : subscribers.get(handle);
-        if (cb == null) {
-            log.debug("gb28181 NOTIFY without local subscription: call-id={}",
-                    msg.firstHeader("Call-ID"));
-            return;
-        }
-        try {
-            cb.accept(msg.bodyText());
-        } catch (RuntimeException e) {
-            // 订阅者异常不许杀传输读线程（与媒体面观察者隔离同一条纪律）
-            log.warn("gb28181 event subscriber failed for {}", handle, e);
-        }
+        // 测试接缝：无来源信息 → 跳过来源校验（真实路径 onIncoming 恒带来源）
+        dispatchOneNotify(java.util.Objects.requireNonNull(msg, "msg"), null);
     }
 
     public static final class Gb28181DeviceContactUnknownException extends RuntimeException {

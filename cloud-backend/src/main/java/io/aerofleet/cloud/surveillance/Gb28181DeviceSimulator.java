@@ -11,6 +11,7 @@ import java.net.InetSocketAddress;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -145,6 +146,10 @@ public final class Gb28181DeviceSimulator implements Closeable {
                     continue;
                 }
                 received0.add(req);
+                if (req.isResponse()) {
+                    // 响应（客户端角色收到平台的 401/200）：只记账，不进应答器
+                    continue;
+                }
                 InetSocketAddress peer = new InetSocketAddress(p.getAddress(), p.getPort());
                 respond(peer, req);
             } catch (SocketTimeoutException e) {
@@ -330,6 +335,119 @@ public final class Gb28181DeviceSimulator implements Closeable {
     /** 事务流水（诊断用）。 */
     public List<String> transactionLog() {
         return List.copyOf(log2);
+    }
+
+    /** 客户端角色：取下一条尚未消费的平台响应（serveLoop 已把响应记入 received0）。 */
+    private Gb28181SipMessage awaitResponse(long deadline) throws InterruptedException {
+        long pollEnd = Math.min(deadline, System.currentTimeMillis() + 1500);
+        while (System.currentTimeMillis() < pollEnd) {
+            for (int i = responseCursor.get(); i < received0.size(); i++) {
+                Gb28181SipMessage m = received0.get(i);
+                if (m.isResponse()) {
+                    responseCursor.set(i + 1);
+                    return m;
+                }
+            }
+            Thread.sleep(25);
+        }
+        return null;
+    }
+
+    private final java.util.concurrent.atomic.AtomicInteger responseCursor =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * 设备侧：向平台发 REGISTER 并走完 Digest 鉴权握手（REGISTER → 401 挑战 →
+     * 带 Authorization → 200），返回平台的最终响应。
+     *
+     * <p>用**主 socket** 收发（设备的 SIP socket 在生命周期内恒定——平台从 REGISTER
+     * 学到的联系地址就是它，后续 NOTIFY 也从这里发才过得了来源校验）；平台的
+     * 401/200 响应由 serveLoop 记入 {@code received0}（响应不进应答器），本方法
+     * 按游标轮询。握手不落定时限内抛 {@link Gb28181SipTransport.SipTimeoutException}。
+     *
+     * @param domain   平台 SIP 域（进请求-行与摘要 uri，必须与平台侧逐字一致）
+     * @param password 设备接入口令（错口令会一直收到 401，直至超时抛出）
+     */
+    public Gb28181SipMessage registerTo(InetSocketAddress platform, String domain,
+                                        String password, long timeoutMs)
+            throws IOException, InterruptedException {
+        if (password == null || password.isBlank()) {
+            throw new IllegalArgumentException("password must not be blank");
+        }
+        String uri = "sip:" + domain;
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        int cseq = 0;
+        String nonce = null;
+        String realm = Gb28181DigestAuth.DEFAULT_REALM;
+        Gb28181SipMessage last = null;
+        while (System.currentTimeMillis() < deadline) {
+            cseq++;
+            Gb28181SipMessage req = buildRegister(domain, uri, cseq, nonce, realm, password);
+            socket.send(new DatagramPacket(req.render(), req.render().length, platform));
+            Gb28181SipMessage resp = awaitResponse(deadline);
+            if (resp == null) {
+                throw new Gb28181SipTransport.SipTimeoutException(
+                        "no reply to REGISTER within " + timeoutMs + "ms");
+            }
+            last = resp;
+            if (resp.statusCode() == 200) {
+                return resp;
+            }
+            if (resp.statusCode() == 401) {
+                Map<String, String> ch = Gb28181DigestAuth.parseAuthorization(
+                        resp.firstHeader("WWW-Authenticate"));
+                realm = ch.getOrDefault("realm", realm);
+                nonce = ch.getOrDefault("nonce", nonce);
+                continue;
+            }
+            return resp; // 其他响应原样交回（调用方断言）
+        }
+        throw new Gb28181SipTransport.SipTimeoutException(
+                "REGISTER handshake did not settle (last="
+                        + (last == null ? "none" : last.statusCode()) + ")");
+    }
+
+    private Gb28181SipMessage buildRegister(String domain, String uri, int cseq,
+                                            String nonce, String realm, String password) {
+        String local = "127.0.0.1:" + socket.getLocalPort();
+        Gb28181SipMessage req = Gb28181SipMessage.request("REGISTER " + uri + " SIP/2.0", null)
+                .header("Via", "SIP/2.0/UDP " + local + ";branch=" + Gb28181Signaling.newBranch())
+                .header("From", "<sip:" + deviceId.value() + "@" + domain + ">")
+                .header("To", "<sip:" + deviceId.value() + "@" + domain + ">")
+                .header("Call-ID", "reg-" + deviceId.value() + "-" + cseq)
+                .header("CSeq", cseq + " REGISTER")
+                .header("Contact", "<sip:" + deviceId.value() + "@" + local + ">")
+                .header("Max-Forwards", "70")
+                .header("Expires", "3600");
+        if (nonce != null) {
+            req.header("Authorization", Gb28181DigestAuth.authorizationHeader(
+                    deviceId.value(), realm, nonce, uri, password, "REGISTER"));
+        }
+        return req;
+    }
+
+    /**
+     * 设备侧：从**已学联系地址对应的本机 socket** 发一条 NOTIFY（真实告警回环走它；
+     * 「伪造源必须被拒」的对照测试在测试里另开 socket 发）。
+     */
+    /** 设备侧：从主 socket 发任意原始报文（分支测试造畸形 REGISTER 用；来源=已学联系地址）。 */
+    public void sendBytes(byte[] data, InetSocketAddress to) throws IOException {
+        socket.send(new DatagramPacket(data, data.length, to));
+    }
+
+    public void sendNotify(InetSocketAddress platform, String callId, String body) throws IOException {
+        Gb28181SipMessage n = Gb28181SipMessage.request(
+                "NOTIFY sip:" + deviceId.value() + " SIP/2.0",
+                body == null ? null : body.getBytes(StandardCharsets.UTF_8))
+                .header("Via", "SIP/2.0/UDP 127.0.0.1:" + socket.getLocalPort()
+                        + ";branch=" + Gb28181Signaling.newBranch())
+                .header("From", "<sip:" + deviceId.value() + "@" + deviceId.value() + ">")
+                .header("To", "<sip:" + deviceId.value() + "@" + deviceId.value() + ">")
+                .header("Call-ID", callId)
+                .header("CSeq", "1 NOTIFY")
+                .header("Event", "Presence");
+        byte[] b = n.render();
+        socket.send(new DatagramPacket(b, b.length, platform));
     }
 
     @Override

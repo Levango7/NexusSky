@@ -167,23 +167,9 @@ class Gb28181AdapterMutationClosureTest {
         assertThat(subs).as("SUBSCRIBE 必须真发到设备").hasSize(1);
         String callId = subs.get(0).firstHeader("Call-ID");
 
-        // 真发一个 UDP datagram 到适配器的 SIP 监听端口
-        String notify = "NOTIFY sip:" + DEVICE_ID + "@34010000002000000001 SIP/2.0\r\n"
-                + "Via: SIP/2.0/UDP 127.0.0.1:" + device.port() + ";branch=z9hG4bK776\r\n"
-                + "From: <sip:" + DEVICE_ID + "@34010000002000000001>\r\n"
-                + "To: <sip:34010000002000000001@34010000002000000001>\r\n"
-                + "Call-ID: " + callId + "\r\n"
-                + "CSeq: 1 NOTIFY\r\n"
-                + "Event: presence\r\n"
-                + "Content-Type: Application/MANSCDP+xml\r\n"
-                + "Content-Length: 8\r\n"
-                + "\r\n"
-                + "<Alarm/>";
-        byte[] bytes = notify.getBytes(StandardCharsets.UTF_8);
-        try (DatagramSocket sock = new DatagramSocket()) {
-            sock.send(new DatagramPacket(bytes, bytes.length,
-                    new InetSocketAddress("127.0.0.1", port)));
-        }
+        // 真发一个 UDP datagram 到适配器的 SIP 监听端口——从**已学联系地址**（设备主
+        // socket）发：来源校验要求 NOTIFY 来自 REGISTER 学到的地址（威胁建模 ⑤ 前置②）
+        device.sendNotify(new InetSocketAddress("127.0.0.1", port), callId, "<Alarm/>");
 
         long deadline = System.currentTimeMillis() + 5000;
         while (System.currentTimeMillis() < deadline && fired.isEmpty()) {
