@@ -1,0 +1,120 @@
+# NexusSky cloud-backend 的 Argo Rollouts —— 替代 deploy/k8s/cloud-backend.yaml 中的 Deployment。
+#
+# 落地的灰度（CD3）与自动回滚（CD4 / issue #323 L2）：
+# - 灰度：steps 中 setWeight 推进比例（50% -> pause 5m -> 100%）。
+#   replicas=1 时是“尺度型”灰度（无流量路由时 best-effort 近似，见清单内注释）；
+#   若要真实流量级灰度（Istio/NGINX/SMI 等）或精确百分比，增大 replicas 或接流量路由插件——
+#   见 docs/devops-enhancement-plan.md §2.4 推荐路线。
+# - 自动回滚（#323 L2）：后台 Analysis `cloud-backend-5xx-error-rate`（Prometheus 5xx 错误率）
+#   失败即自动 abort，canary 缩为 0、流量回稳在 stable——见 analysis/cloud-backend-5xx-error-rate.yaml。
+#
+# 与既有约定保持一致：
+# - Rollout 名 = `nexussky-cloud-backend`（与 docs/rollback-runbook.md §3.1/§3.2 的命令对齐）；
+# - Service/selectors 口径与 deploy/k8s/cloud-backend.yaml 一致，既有 Service 不需改。
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: nexussky-cloud-backend
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: cloud-backend
+spec:
+  replicas: 1
+  strategy:
+    canary:
+      maxSurge: 1
+      maxUnavailable: 0
+      steps:
+        - setWeight: 50
+        - pause:
+            duration: 5m
+        - setWeight: 100
+      analysis:
+        templates:
+          - templateName: cloud-backend-5xx-error-rate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexussky
+      app.kubernetes.io/component: cloud-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexussky
+        app.kubernetes.io/component: cloud-backend
+    spec:
+      # 与 deploy/k8s/cloud-backend.yaml 保持同一套加固口径
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: cloud-backend
+          # 镜像：默认用 ghcr 上 CI 实际产出的 latest（实测 `ghcr.io/levango7/nexussky/cloud-backend` 有 latest、没有 0.1.0）。
+          # 需要可回滚（sha-<short> 目标）时，改用 CI 产物：`sha-<short>`——见 docs/rollback-runbook.md §0③ 与 README。
+          image: ghcr.io/levango7/nexussky/cloud-backend:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: nexussky-config
+            - secretRef:
+                name: nexussky-secret
+          # 就绪探针：readinessState+db 全 UP 才接流量（PG 不可达时摘流量而非重启）
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # 存活探针：只看 livenessState（redis 等可选组件 DOWN 不触发重启）
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # 启动探针：Spring Boot 冷启动给足宽限
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: flight-logs
+              mountPath: /app/logs
+              readOnly: false
+            - name: tmp
+              mountPath: /tmp
+              readOnly: false
+      volumes:
+        - name: flight-logs
+          persistentVolumeClaim:
+            claimName: flight-logs
+        - name: tmp
+          emptyDir: {}
+      restartPolicy: Always

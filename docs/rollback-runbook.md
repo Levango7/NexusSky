@@ -21,9 +21,13 @@ Flyway 迁移在应用启动时**只前进**，`flyway_schema_history` 里已落
 CI 的产出是 `sha-<short>`（`ci.yml` 的 `type=sha,format=short`）与 `latest`（仅 master push 产生）。
 **回滚请指定 `sha-<short>`，并在工单里记下 digest。**
 
-> **已知缺口（不要假设它已解决）**：`deploy/helm/nexussky/values.yaml:17` 的默认 `imageTag` 是 `0.1.0`，
-> 而仓库内没有任何工作流产出 `0.1.0` 这个 tag。若发布不依赖手工 `docker push`，默认 values 不可直接部署。
-> 详见 issue #324 的「阻塞项」一节。本手册不掩盖这一点。
+> **这个缺口的解决（2026-11-20，实测）**：`ghcr.io/levango7/nexussky/<module>` 存在 `latest`、不存在 `0.1.0`；
+> 改 `deploy/helm/nexussky/values.yaml` 默认：`imageRegistry: "" → "ghcr.io/levango7/"`、`imageTag: "0.1.0" → "latest"`
+> —— 默认 `helm install`（不带 --set）即可拉到实际存在的镜像。
+> 回滚仍用 `sha-<short>`：需要可回滚时部署前 `--set imageTag=sha-<short>`（0.1.0 时期未实测的 RTO 依然说不清，见 §8「已交付，未验证」）。
+> 历史记录（原有已知缺口）：`deploy/helm/nexussky/values.yaml:17` 的默认 `imageTag` 曾是 `0.1.0`，
+> 而仓库内没有任何工作流产出 `0.1.0` 这个 tag——若发布不依赖手工 `docker push`，默认 values 不可直接部署。
+> 详见 issue #324 的「阻塞项」一节。
 
 ---
 
@@ -189,16 +193,21 @@ kubectl -n nexussky rollout restart deploy/nexussky-cloud-backend
 ## 7. 回滚后验证（三步，缺一不可）
 
 ```bash
+# 先取 app Pod 名：kubectl exec 不接受 deploy/... 或 rollout/... 对象；
+# CD3/CD4 落地后该工作负载是 Rollout（deploy/argo-rollouts/），不是 Deployment。
+POD=$(kubectl -n nexussky get pod -l app.kubernetes.io/component=cloud-backend \
+  -o jsonpath='{.items[0].metadata.name}')
+
 # ① 就绪状态：readinessState + db 必须全 UP（路径见 values.yaml:46-47）
-kubectl -n nexussky exec deploy/nexussky-cloud-backend -- \
+kubectl -n nexussky exec "$POD" -- \
   curl -s localhost:8080/actuator/health/readiness
 
 # ② 版本确认：镜像必须是你要回滚到的那个 sha，不是 latest
-kubectl -n nexussky get pods -l app.kubernetes.io/component=cloud-backend \
-  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[0].image}{"\n"}{end}'
+kubectl -n nexussky get pod "$POD" \
+  -o jsonpath='{.spec.containers[0].image}{"\n"}'
 
 # ③ schema 版本确认：末条版本必须与预期一致
-kubectl -n nexussky exec deploy/nexussky-cloud-backend -- \
+kubectl -n nexussky exec "$POD" -- \
   sh -c 'echo "select version, description, success from flyway_schema_history order by installed_rank desc limit 3;" | psql "$SPRING_DATASOURCE_URL"'
 ```
 
@@ -212,27 +221,33 @@ kubectl -n nexussky exec deploy/nexussky-cloud-backend -- \
 
 ## 8. 验证状态与演练记录
 
-**本手册交付时的验证状态（如实标注，不四舍五入）**：
+**本手册的验证状态（如实标注，不四舍五入；2026-11-21 更新）**：
 
 | 项 | 状态 | 依据 |
 |---|---|---|
 | `helm lint deploy/helm/nexussky` | ✅ 已执行 | helm 3.14.0，`1 chart(s) linted, 0 chart(s) failed` |
 | `helm template` 渲染出的资源名与镜像引用 | ✅ 已执行 | 渲染得 `Deployment nexussky-cloud-backend`，镜像 `nexussky/cloud-backend:sha-abc1234`——§3.1 与 §0③ 的命令与命名不是猜的 |
-| `kubectl` 系列命令 | ⚠️ **未在集群执行** | 本机无 kind/minikube/可用集群 |
-| `psql` / `flyway_schema_history` 查询 | ⚠️ **未执行** | 本机无 psql；Docker 守护进程未运行，起不了临时 PG |
-| 备份恢复 RTO | ⚠️ **未实测** | 需接近生产体量的数据 |
+| `kubectl` 系列命令 | ✅ 已在 kind 执行 | 2026-11-21，context `kind-fs-k4-e2e`：Argo Rollouts controller 2/2 Ready + 5 个 CRD；apply `deploy/argo-rollouts/` 脚手架后 app Pod 1/1 Running，`kubectl wait --for=condition=Ready` 通过 |
+| Argo Rollouts L1/L2 演练 | ✅ 已在本地 kind 完成 | 见下方演练记录；**是本地 kind，不是生产环境** |
+| §7 ①就绪 / ②镜像版本 | ✅ 已实测 | readiness 返回 `{"status":"UP"}`；镜像 `ghcr.io/levango7/nexussky/cloud-backend:latest` |
+| §7 ③ `flyway_schema_history` 查询 | ⚠️ **未执行** | app 镜像内无 `psql` 客户端；需一次性 Pod 或从外部连库（host PG `opsmesh-p0a3-pg:15432`）执行同一条 SQL |
+| Helm revision 回滚 / 备份恢复 RTO | ⚠️ **未实测** | 需接近生产体量的数据 |
 
-**因此本文件当前状态是「已交付，未验证」**，不是「回滚能力已就绪」。下表填满真实数字之前，
-不要对外声称具备回滚能力。
+**因此本文件当前状态是「Rollout 的灰度/自动回滚机制已在本地 kind 验证；Helm revision 回滚、
+跨 V22、备份恢复仍未演练」**，不是「所有回滚能力已就绪」。不要对外扩大口径。
 
 | 日期 | 场景 | 执行人 | 结果 | 实测耗时 | 备注 |
 |---|---|---|---|---|---|
+| 2026-11-21 | Argo Rollout spec 滚动（cpu 250m→350m） | AI agent @ `kind-fs-k4-e2e` | ✅ 通过 | 未精确计时 | 控制器建新 RS `nexussky-cloud-backend-695b89bfbc`（revision 2）+ 新 Pod——spec 变化确实触发滚动 |
+| 2026-11-21 | L1 回滚（spec revert 回 250m） | 同上 | ✅ 通过 | 未精确计时 | apply 回前序 revision 后 `kubectl wait` 通过，app Pod 1/1 Running，stable RS 恢复 `79fc98cf6d` |
+| 2026-11-21 | L2 自动回滚（Analysis Error → abort → stable） | 同上 | ✅ 通过 | 未精确计时 | AnalysisRun `cloud-backend-5xx-error-rate-rehearsal` = Error（`consecutiveErrors (5) > consecutiveErrorLimit (4)`）；控制器 abort，canary RS 回 0、stable 回 1，app 1/1 Running |
+| 2026-11-21 | L2 happy path（Analysis 成功 → canary 推进到 100%） | 同上 | ✅ 通过 | 未精确计时 | 集群内无 Prometheus，用临时 web-provider 模板探 app readiness（返回 `{"status":"UP"}`）；背景 AnalysisRun `nexussky-cloud-backend-7f576d67c4-4` = Successful，Rollout `phase=Healthy`、`currentStepIndex=3`、`stableRS=7f576d67c4`、`Completed=True`。演练对象已清理，Rollout 已按脚手架重建 |
 | — | Helm 回滚到上一 revision | — | **待演练** | — | 需 kind/minikube + 本地镜像 |
 | — | 回滚跨 V22（缺列） | — | **待演练** | — | 预期：旧镜像启动后查询报错 |
 | — | 备份恢复切库 | — | **待演练** | — | 需接近生产体量的数据 |
 
 演练完成的判据：上表填了真实数字，且 §7 三步的**实际输出**贴进了 PR 或工单。
-在此之前，本文件的状态是「**已交付，未验证**」——不要对外说成"回滚能力已就绪"。
+§7 ③ 尚未执行，因此**不能对外说成"全部回滚能力已就绪"**。
 
 ---
 

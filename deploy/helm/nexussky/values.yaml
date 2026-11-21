@@ -12,9 +12,12 @@
 # 用 CI 产物部署需成对设置，例如：
 #   --set imageRegistry=ghcr.io/levango7/ --set imageTag=latest
 # （这一对现在保证拿到的是 master，不再可能是某条未合并的 PR。）
-# 留空则按 Docker Hub 的 nexussky/<module> 解析（默认 tag 0.1.0）。
-imageRegistry: ""
-imageTag: "0.1.0"
+# 默认指向 CI 实际产出的仓库与最新 tag（2026-11-20 实测：ghcr.io/levango7/nexussky/<module>
+# 存在 `latest`，但 `0.1.0` 不存在——默认 values 不可指向不存在的 tag）。
+# 回滚用 `sha-<short>`（CI `type=sha,format=short` 产物，见 docs/rollback-runbook.md §0③）：
+# 需要可回滚的部署时，`--set imageTag=sha-<short>` pin 后再用回滚命令。
+imageRegistry: "ghcr.io/levango7/"
+imageTag: "latest"
 imagePullPolicy: IfNotPresent
 
 # 资源名 release 化（2026-10-05）：所有资源名带 <release> 前缀（如
