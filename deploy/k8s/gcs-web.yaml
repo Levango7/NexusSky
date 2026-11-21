@@ -36,7 +36,7 @@ spec:
         fsGroup: 101
       containers:
         - name: gcs-web
-          image: nexussky/gcs-web:0.1.0
+          image: ghcr.io/levango7/nexussky/gcs-web:latest
           imagePullPolicy: IfNotPresent
           # nginx 反代上游：镜像 /etc/nginx/templates 启动时经 envsubst 渲染，
           # 上游地址来自这两个 env（原生清单 Service 名与镜像缺省一致，显式写出
