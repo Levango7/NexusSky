@@ -172,6 +172,13 @@ public class CaptureService {
                         t.path("u").asDouble(), t.path("v").asDouble(),
                         t.path("kind").asText(), IMAGE_W, IMAGE_H,
                         camNe, alt, roll, pitch, yaw, gpitch, gyaw);
+                if (d == null) {
+                    // N1：locateTarget 对 wz<=1e-9（射线朝天/水平）返回 null——
+                    // truth 分支与 locateAndScore 同款「该条跳过」语义，不再 NPE。
+                    log.debug("truth target unsolvable (ray above horizon), skipped: id={}",
+                            t.path("id").asInt());
+                    continue;
+                }
                 // truth mode knows the target id directly
                 double errM = truthErrorM(t.path("id").asInt(), (double) d.get("lat"), (double) d.get("lon"));
                 d.put("confidence", 1.0);  // 投影真值置信度恒 1.0（与 ProjectionVisionSource.detect 同语义）
