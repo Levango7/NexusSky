@@ -29,7 +29,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: drone-sim
-          image: nexussky/drone-sim:0.1.0
+          image: ghcr.io/levango7/nexussky/drone-sim:latest
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsNonRoot: true

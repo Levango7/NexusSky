@@ -1,0 +1,35 @@
+# Argo Rollouts AnalysisTemplate：cloud-backend 5xx 错误率（自动回滚，#323 L2）。
+#
+# 语义：error_rate = 5xx 请求占 5 分钟窗口内总请求的比例。
+#   指标来自 Spring Boot actuator Prometheus 指标 `http_server_requests_seconds_count{status=~"5.."}`。
+#   successCondition：error_rate <= 5%（一次满足计 1 次成功）。
+#   failureLimit：3——失败上限（失败测量累计超过上限即 AnalysisRun 失败，Rollouts 语义）。
+#   失败后 Rollout 自动 abort：canary 缩为 0，流量回稳在 stable——正是 #323 L2 的自动回滚。
+#
+# 注意（实测无流量场景）：查询在暂无 5xx 请求且无流量时可能是 0/0 → NaN，
+#   此时 AnalysisRun 不共解（inconclusive），Rollout 停在当前步。
+#   运维侧建：`prometheusAddress` 指向实际 Prometheus（compose 模式：http://prometheus:9090）。
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: cloud-backend-5xx-error-rate
+  namespace: nexussky
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/component: cloud-backend
+spec:
+  args:
+    - name: prometheusAddress
+      value: http://prometheus:9090
+  metrics:
+    - name: http-5xx-error-rate
+      interval: 30s
+      successCondition: result[0] <= 0.05
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: "{{args.prometheusAddress}}"
+          query: |
+            sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) /
+            sum(rate(http_server_requests_seconds_count[5m]))
