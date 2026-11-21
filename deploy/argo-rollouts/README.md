@@ -1,8 +1,9 @@
 # Argo Rollouts — 灰度发布 + 自动回滚（CD3/CD4，issue #323）
 
 > 本落地 = #323（L2 自动回滚）+ plan §2.4（0.2.0 路线：Argo Rollouts Canary + Prometheus 自动回滚）的落地骨架。
-> 当前机器上：`github.com` 不可达（实测 helm install / curl 与 ~3000 字处理均确认连接失败，`curl:000`），
-> 因此控制器安装命令在本机暂时执行不了——在有 github 的环境里一键跑完：
+>
+> 控制器安装（已在 kind `kind-fs-k4-e2e` 实测：chart 2.43.12 / appVersion v1.10.2，
+> controller 2/2 Ready，5 个 CRD 齐全）：
 >
 > ```bash
 > helm repo add argo https://argoproj.github.io/argo-helm
@@ -50,10 +51,32 @@ steps:
 
 `analysis/cloud-backend-5xx-error-rate.yaml` — Rollout 的后台 Analysis（`strategy.canary.analysis`）：
 - 实测阈值：error_rate（5xx/总请求，`http_server_requests_seconds_count{status=~"5.."}`）> 5% 持续超过 3 次（`failureLimit: 3`）→ AnalysisRun 失败 → Rollout 自动 abort，canary 缩为 0，流量回稳在 stable。
-- Prometheus 地址参数 `prometheusAddress`（默认 `http://prometheus:9090`）：
-  - compose 模式：`deploy/monitoring/docker-compose-monitoring.yml` 的服务名是 `prometheus`；
-  - K8s 模式：改 template 的 `value` 为你的 Prometheus 地址。
-- 注意：查询在暂无流量（0/0 → NaN）时 AnalysisRun 不共解（inconclusive），Rollout 停在当前步——正常时不发生。
+- Prometheus 地址参数 `prometheusAddress`：Rollout 已显式传 K8s FQDN
+  `http://prometheus.nexussky.svc.cluster.local:9090`——controller 在 `argo-rollouts` namespace，
+  用短名 `prometheus` 会 DNS 失败（实测 `server misbehaving` → AnalysisRun Error）。
+  compose 模式改成 `http://prometheus:9090`（`docker-compose-monitoring.yml` 的服务名）。
+- **指标端点鉴权**：prod profile 的 `/actuator/prometheus` 不在匿名放行清单
+  （`SecurityConfig` 只 permitAll `/actuator/health*`），Prometheus 抓取必须配 Bearer token：
+  ```yaml
+  authorization:
+    type: Bearer
+    credentials: '<JWT>'
+  ```
+  未配置时 target 401、指标为空。token 会过期，生产建议用短期 token + 自动轮换或专用抓取账号。
+- **无 5xx 时的空向量陷阱（2026-11-22 实测修复）**：原查询分子
+  `sum(rate(...{status=~"5.."}[5m]))` 在无 5xx 时返回空向量而非 0，AnalysisRun 直接 Error
+  （`no data returned from the metric provider`），happy path 永远跑不通。
+  现改为分子 `or vector(0)`、分母 `clamp_min(..., 0.001)`；真实 Prometheus 实测
+  **AnalysisRun Successful（count=4）**。
+
+### 真实 Prometheus 演练记录（2026-11-22，kind `kind-fs-k4-e2e`）
+
+| 项 | 实测 |
+|---|---|
+| Prometheus 镜像 | `quay.io/prometheus/prometheus:v2.55.0`（docker.io 不可达，改从 quay 拉 + `kind load docker-image`） |
+| 抓取目标 | `nexussky-cloud-backend.nexussky.svc.cluster.local:8080/actuator/prometheus`，Bearer JWT → target `up` |
+| 原查询 | AnalysisRun `Error`：`no data returned from the metric provider` |
+| 修复后查询 | **AnalysisRun `Successful`（count=4，interval 30s）** |
 
 ## 迁移安全门禁（CD4 / #323 L3）
 
@@ -68,8 +91,8 @@ python scripts/check-destructive-migration.py   # 实测通过（RC=0，破坏�
 | 线 | 现状 |
 |---|---|
 | CD3 灰度（0.1.0 应用级 RollingUpdate） | `deploy/k8s/*.yaml` + `deploy/helm/nexussky/templates/deployment.yaml` 已有（见 docs/devops-enhancement-plan.md §2.4 建议） |
-| CD3 灰度（Canary/流量级） | 本目录 Rollout（落地中）；路线 = #324（Istio/Flagger）或 0.2.0 Argo Rollouts |
-| CD4 自动回滚 | 本目录 Analysis（#323 L2）+ 门禁（green）+ L1 runbook（docs/rollback-runbook.md） |
+| CD3 灰度（Canary/流量级） | 本目录 Rollout（已在 kind 实测滚动/回滚）；真实流量级需 #324（Istio/Flagger） |
+| CD4 自动回滚 | 本目录 Analysis（#323 L2，真实 Prometheus happy path 已验证）+ 门禁（green）+ L1 runbook（docs/rollback-runbook.md） |
 
 ## 相关文档
 

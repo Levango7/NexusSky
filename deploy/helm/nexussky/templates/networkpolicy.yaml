@@ -11,7 +11,6 @@
 #    回包全丢——飞行链路静默失效。修复：同命名空间规则追加 14550/UDP。
 #    （sim 经 REST 注册上报地址，backend 按源地址直连 Pod IP，不经 Service，
 #    故 Service 无需暴露 UDP 端口。）
----
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

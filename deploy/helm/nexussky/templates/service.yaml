@@ -1,5 +1,4 @@
 # NexusSky Services：cloud-backend + drone-sim + gcs-web
----
 apiVersion: v1
 kind: Service
 metadata:

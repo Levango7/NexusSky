@@ -242,7 +242,8 @@ kubectl -n nexussky exec "$POD" -- \
 | 2026-11-21 | L1 回滚（spec revert 回 250m） | 同上 | ✅ 通过 | 未精确计时 | apply 回前序 revision 后 `kubectl wait` 通过，app Pod 1/1 Running，stable RS 恢复 `79fc98cf6d` |
 | 2026-11-21 | L2 自动回滚（Analysis Error → abort → stable） | 同上 | ✅ 通过 | 未精确计时 | AnalysisRun `cloud-backend-5xx-error-rate-rehearsal` = Error（`consecutiveErrors (5) > consecutiveErrorLimit (4)`）；控制器 abort，canary RS 回 0、stable 回 1，app 1/1 Running |
 | 2026-11-21 | L2 happy path（Analysis 成功 → canary 推进到 100%） | 同上 | ✅ 通过 | 未精确计时 | 集群内无 Prometheus，用临时 web-provider 模板探 app readiness（返回 `{"status":"UP"}`）；背景 AnalysisRun `nexussky-cloud-backend-7f576d67c4-4` = Successful，Rollout `phase=Healthy`、`currentStepIndex=3`、`stableRS=7f576d67c4`、`Completed=True`。演练对象已清理，Rollout 已按脚手架重建 |
-| — | Helm 回滚到上一 revision | — | **待演练** | — | 需 kind/minikube + 本地镜像 |
+| 2026-11-22 | L2 happy path（**真实 Prometheus** 5xx 查询） | 同上 | ✅ 通过 | 未精确计时 | quay 镜像 `prometheus:v2.55.0` + Bearer JWT 抓 `/actuator/prometheus`，target `up`；原查询因「无 5xx → 空向量」AnalysisRun Error（`no data returned from the metric provider`），改为 `or vector(0)` + `clamp_min` 后 **AnalysisRun Successful（count=4）**。同时发现 K8s 下 `prometheusAddress` 必须 FQDN（短名 DNS 失败），已写回脚手架 |
+| 2026-11-22 | Helm 回滚到上一 revision | AI agent @ `kind-fs-k4-e2e` | ✅ 通过 | 未精确计时 | release `drill`（ns `nexussky-helm`，资源落在 values 指定的 `nexussky`）：rev1 install（cpu `250m`）→ rev2 upgrade（`--set cloudBackend.resources.requests.cpu=350m`，实测 `350m`）→ `helm rollback drill 1` → rev4 `deployed`，cpu 回 `250m`、镜像 `ghcr.io/levango7/nexussky/cloud-backend:latest`、cloud-backend Pod 1/1 Running。备注：① chart 修了 3 个真实缺陷才装得上（前导 `---` 产生空文档、`secret.yaml` 模板裁剪把注释与 `apiVersion` 粘连、hpa/pdb 条件块后的 `---` 产生空文档）；② gcs-web 因 chart 只读根文件系统 CrashLoop（既有问题，本轮未修），`--wait` 会误把成功 rollback 标 failed，演练用不带 `--wait` 的 rollback 拿到干净 rev4 |
 | — | 回滚跨 V22（缺列） | — | **待演练** | — | 预期：旧镜像启动后查询报错 |
 | — | 备份恢复切库 | — | **待演练** | — | 需接近生产体量的数据 |
 

@@ -1,7 +1,6 @@
 # NexusSky Deployments：cloud-backend + drone-sim + gcs-web
 # cloud-backend 探针走 /actuator/health/{readiness,liveness} 分组端点
 # （chart 不部署 redis，聚合端点会因 redis 分量 DOWN 恒 503，见 configmap 模板）
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
