@@ -204,16 +204,24 @@ spec:
             periodSeconds: 15
           resources:
             {{- toYaml .Values.gcsWeb.resources | nindent 12 }}
-          # readOnlyRootFilesystem 下 nginx 需可写的 pid 与临时目录，否则
-          # mkdir() "/var/cache/nginx/client_temp" failed: Read-only file system
+          # readOnlyRootFilesystem 下 nginx 需可写的 pid、临时目录与配置目录：
+          # ① /var/cache/nginx/client_temp 否则 mkdir() Read-only file system；
+          # ② /run 放 pid；③ /etc/nginx/conf.d ——官方 entrypoint 会把
+          # /etc/nginx/templates/default.conf.template 经 envsubst 渲染到此处，
+          # 只读根文件系统下报 "can't create /etc/nginx/conf.d/default.conf"
+          # （实测 Helm release 的 gcs-web CrashLoopBackOff）。
           volumeMounts:
             - name: nginx-cache
               mountPath: /var/cache/nginx
             - name: nginx-run
               mountPath: /run
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
       volumes:
         - name: nginx-cache
           emptyDir: {}
         - name: nginx-run
+          emptyDir: {}
+        - name: nginx-conf
           emptyDir: {}
 
