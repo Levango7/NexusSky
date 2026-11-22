@@ -128,6 +128,10 @@ describe('WS 帧消费完备性（后端 WS_TYPE_MAP ↔ 前端 useWebSocket）'
       'telemetry', 'status', 'alert', 'formation',
       'mesh-topology', 'sat-link', 'terrain-update', 'terrain-restriction',
       'celltower-topology',
+      // batch：TelemetryPusher 1Hz 按租户打包的周期遥测批帧（{type:"batch",items:[...]}），
+      // 前端在 onmessage 展开 items 复用单帧处理。与单帧一样由专用 pusher 直接 broadcast、
+      // 不经 MAVLink 事件总线（故不在 WS_TYPE_MAP）。行为级拆包由 wsBatchFrames.test.jsx 钉住。
+      'batch',
     ])
     expect(extra.filter((t) => !known.has(t))).toEqual([])
   })

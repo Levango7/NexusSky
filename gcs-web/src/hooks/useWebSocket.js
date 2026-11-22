@@ -193,14 +193,8 @@ export default function useWebSocket(selectedSysidRef, setTelemetry, appendTrack
         retryTimer = setTimeout(connect, delay)
       }
       ws.onerror = () => setWsState('error')
-      ws.onmessage = (ev) => {
-        armWatchdog()   // 收到任何帧都算活着
-        let msg
-        try {
-          msg = JSON.parse(ev.data)
-        } catch (e) {
-          return
-        }
+      // 单帧处理：telemetry/status/alert/... 所有分支。batch 展开后逐条复用本函数。
+      const handleMessage = (msg) => {
         if (msg.type === 'telemetry' || msg.type === 'status') {
           // 缓存而非逐帧 setState（见 FLUSH_INTERVAL_MS）
           const sysid = msg.sysid
@@ -293,6 +287,23 @@ export default function useWebSocket(selectedSysidRef, setTelemetry, appendTrack
               : { ...prev, [deviceId]: { ...(msg.data || {}), receivedAt: Date.now() } }
           ))
         }
+      }
+
+      // 周期遥测批帧（TelemetryPusher 1Hz 按租户打包 {type:"batch", items:[帧,...]}）：
+      // 每个 item 与单帧同形状 {type,sysid,data}，展开后复用单帧处理。
+      ws.onmessage = (ev) => {
+        armWatchdog()   // 收到任何帧都算活着
+        let msg
+        try {
+          msg = JSON.parse(ev.data)
+        } catch (e) {
+          return
+        }
+        if (msg && msg.type === 'batch' && Array.isArray(msg.items)) {
+          for (const item of msg.items) handleMessage(item)
+          return
+        }
+        handleMessage(msg)
       }
     }
     connect()
