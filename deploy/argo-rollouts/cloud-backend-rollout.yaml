@@ -34,12 +34,14 @@ spec:
       analysis:
         templates:
           - templateName: cloud-backend-5xx-error-rate
-            # prometheusAddress 默认是 compose 口径（http://prometheus:9090）。
-            # Argo controller 在 argo-rollouts namespace，短名 prometheus 解析不到，
-            # 必须显式给 FQDN（实测：短名会 DNS "server misbehaving" → AnalysisRun Error）。
-            args:
-              - name: prometheusAddress
-                value: http://prometheus.nexussky.svc.cluster.local:9090
+        # args 必须与 templates 同级（CRD 的 analysis.args；放在 template ref 里会被
+        # strict decoding 拒绝：unknown field "analysis.templates[0].args"）。
+        # prometheusAddress 默认是 compose 口径（http://prometheus:9090）。
+        # Argo controller 在 argo-rollouts namespace，短名 prometheus 解析不到，
+        # 必须显式给 FQDN（实测：短名会 DNS "server misbehaving" → AnalysisRun Error）。
+        args:
+          - name: prometheusAddress
+            value: http://prometheus.nexussky.svc.cluster.local:9090
   selector:
     matchLabels:
       app.kubernetes.io/name: nexussky
