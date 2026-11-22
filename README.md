@@ -938,7 +938,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 604 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 611 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）+
   2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例 +
@@ -946,7 +946,8 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
   `DroneList` 19 / `DashboardPanel` 29 / `RouteTemplatePanel` 20）+
   2026-10-25 「0 被当成缺失」收口 22 例（`flightStats` 纯函数 13 / 形状守卫 6，
   另 +3 来自 `singleSourceOfTruth` 名单加两个名字与一条断言拆两条）+
-  2026-10-26 空地协同面板「三列恒为暂无」的键名契约与响应形状 3 例；
+  2026-10-26 空地协同面板「三列恒为暂无」的键名契约与响应形状 3 例 +
+  2026-11-22 WS batch 拆包 7 例（`wsBatchFrames`，周期遥测主链批帧消费）；
   `npm run test:ci` 实测
   580/580，42 个测试文件，分布在 `gcs-web/test/`（40）与 `gcs-web/src/`（2）两处）：
   `npm run test` 已在 CI 的 GCS Web job 门禁。
