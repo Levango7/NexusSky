@@ -231,10 +231,13 @@ kubectl -n nexussky exec "$POD" -- \
 | Argo Rollouts L1/L2 演练 | ✅ 已在本地 kind 完成 | 见下方演练记录；**是本地 kind，不是生产环境** |
 | §7 ①就绪 / ②镜像版本 | ✅ 已实测 | readiness 返回 `{"status":"UP"}`；镜像 `ghcr.io/levango7/nexussky/cloud-backend:latest` |
 | §7 ③ `flyway_schema_history` 查询 | ✅ 已实测（2026-11-22） | app 镜像内无 `psql`，改从 host PG 容器执行同一条 SQL：`docker exec opsmesh-p0a3-pg psql -U aerofleet -d aerofleet_prod -c "select version, description, success from flyway_schema_history order by installed_rank desc limit 3;"` → 返回 `37 / emergency plan / t`、`36 / delivery task phase / t`、`35 / sequence counter / t` |
-| Helm revision 回滚 / 备份恢复 RTO | ⚠️ **未实测** | 需接近生产体量的数据 |
+| Helm revision 回滚 | ✅ 已在 kind 演练 | rev1 → rev2 → rollback 回 rev1，见 §8 |
+| 跨 V22 回滚（含前向修复） | ✅ 已在 kind 演练 | 旧镜像缺列失败 → 前向修复后启动成功，见 §8 |
+| 备份恢复 RTO | ⚠️ **生产体量未实测** | 小体量机制演练已通过（71.9K / 3.09s），不能据此承诺生产 RTO |
 
-**因此本文件当前状态是「Rollout 的灰度/自动回滚机制已在本地 kind 验证；Helm revision 回滚、
-跨 V22、备份恢复仍未演练」**，不是「所有回滚能力已就绪」。不要对外扩大口径。
+**因此本文件当前状态是「Rollout 灰度/自动回滚、Helm revision 回滚、跨 V22 与备份恢复机制
+已在本地 kind / host PG 实测；生产体量 RTO、真机链路仍未验证」**，不是「所有回滚能力已就绪」。
+不要对外扩大口径。
 
 | 日期 | 场景 | 执行人 | 结果 | 实测耗时 | 备注 |
 |---|---|---|---|---|---|
@@ -245,7 +248,7 @@ kubectl -n nexussky exec "$POD" -- \
 | 2026-11-22 | L2 happy path（**真实 Prometheus** 5xx 查询） | 同上 | ✅ 通过 | 未精确计时 | quay 镜像 `prometheus:v2.55.0` + Bearer JWT 抓 `/actuator/prometheus`，target `up`；原查询因「无 5xx → 空向量」AnalysisRun Error（`no data returned from the metric provider`），改为 `or vector(0)` + `clamp_min` 后 **AnalysisRun Successful（count=4）**。同时发现 K8s 下 `prometheusAddress` 必须 FQDN（短名 DNS 失败），已写回脚手架。另修正 `args` 位置：CRD 要求 `analysis.args` 与 `templates` 同级，放在 template ref 内会被 strict decoding 拒绝——该错误由重建集群后 apply 脚手架实测暴露 |
 | 2026-11-22 | L2 自动回滚（**真实 Prometheus** 查询失败 → abort） | 同上 | ✅ 通过 | 未精确计时 | 集群重建后用同样查询但临时把 successCondition 设为不可能值（`result[0] <= -1`，failureLimit=1）触发 canary：Rollout `phase=Degraded`，message = `RolloutAborted: Rollout aborted update to revision 2: Background analysis phase error/failed: Metric "http-5xx-error-rate" assessed Failed due to failed (2) > failureLimit (1)`；stable RS 保持 `79fc98cf6d`、app 1/1 Running。还原脚手架后 Rollout 回 `Healthy`。演练模板/AnalysisRun 已清理，**没有伪造真实 5xx 流量** |
 | 2026-11-22 | Helm 回滚到上一 revision | AI agent @ `kind-fs-k4-e2e` | ✅ 通过 | 未精确计时 | release `drill`（ns `nexussky-helm`，资源落在 values 指定的 `nexussky`）：rev1 install（cpu `250m`）→ rev2 upgrade（`--set cloudBackend.resources.requests.cpu=350m`，实测 `350m`）→ `helm rollback drill 1` → rev4 `deployed`，cpu 回 `250m`、镜像 `ghcr.io/levango7/nexussky/cloud-backend:latest`、cloud-backend Pod 1/1 Running。备注：① chart 修了 3 个真实缺陷才装得上（前导 `---` 产生空文档、`secret.yaml` 模板裁剪把注释与 `apiVersion` 粘连、hpa/pdb 条件块后的 `---` 产生空文档）；② 当时 gcs-web 因 chart 只读根文件系统 CrashLoop（entrypoint 的 envsubst 写不了 `/etc/nginx/conf.d/default.conf`），`--wait` 会误把成功 rollback 标 failed，演练用不带 `--wait` 的 rollback 拿到干净 rev4；该缺口随后已修（chart 与 `deploy/k8s/gcs-web.yaml` 均补 `nginx-conf` emptyDir），docker `--read-only` A/B 实测：修复前 `can't create /etc/nginx/conf.d/default.conf`，修复后 envsubst 成功生成配置；重建集群后用 chart 安装 release `verify`，两个 gcs-web Pod 均 **1/1 Running** |
-| — | 回滚跨 V22（缺列） | — | **待演练** | — | 预期：旧镜像启动后查询报错 |
+| 2026-11-22 | 回滚跨 V22（缺列） | AI agent @ `kind-fs-k4-e2e` | ✅ 通过 | 未精确计时 | 从 V22 引入提交 `21b28bc7^` 构建旧版 app 镜像（`nexussky/cloud-backend:pre-v22`，用当前镜像作底座替换旧 jar），部署到已过 V22 的 DB（Flyway 版本 37）：旧镜像 **CrashLoopBackOff**，日志 `SchemaManagementException: Schema-validation: missing column [device_token] in table [devices]`——验证了「跨 V22 应用回滚直接失败」不是纸面推断。再按 §4.1 路径 A 前向修复（`alter table devices add column device_token varchar(255)`）后重建 Pod，旧镜像 **1/1 Running**（`Started CloudBackendApplication`）。演练后已 drop 该列、删 Deployment，当前 app 仍 1/1 |
 | 2026-11-22 | 备份恢复切库 | AI agent @ host PG | ✅ 通过（小体量） | 3.09 s（pg_restore 实测） | `pg_dump -Fc` 71.9K → 新库 `aerofleet_restore_drill` → `pg_restore` → 校验 `flyway_schema_history` 末三条 `37/36/35 success=t` 与原库一致、`app_user` 行数 1 一致。**只是机制演练，不是接近生产体量的 RTO 实测**，不能据此承诺生产 RTO |
 
 演练完成的判据：上表填了真实数字，且 §7 三步的**实际输出**贴进了 PR 或工单。

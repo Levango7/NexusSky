@@ -123,6 +123,15 @@ public class TaskAssignmentService {
 
     /** 分配任务到最优无人机 */
     public synchronized AssignmentResult assignTask(TaskRequest req) {
+        // 幂等：同一 taskId 重发（重复预约/重发帧/重复请求）不再二次入队、二次发帧、
+        // 二次预约——否则 assignments/taskQueue 会重复、frame 重发、预约表被同一任务占用。
+        // 结果按原样返回；要换飞机须先取消（removeAssignment）后重派。
+        AssignmentResult existing = assignments.get(req.getTaskId());
+        if (existing != null) {
+            log.info("Task {} already assigned to sysid={}, skip duplicate assignment",
+                    req.getTaskId(), existing.getAssignedSysid());
+            return existing;
+        }
         List<DroneSnapshot> drones = registry.all();
         if (drones.isEmpty()) {
             log.warn("No drones available for task {}", req.getTaskId());
@@ -207,20 +216,35 @@ public class TaskAssignmentService {
 
         String algo = useGa ? "GA" : "SCORE";
         Integer tenantId = TenantContext.getEffectiveTenantId();
+        // 幂等：批内重复 taskId 与已在 assignments 里的 taskId 都返回既有结果，
+        // 不再二次入队/发帧/预约（与 assignTask 单条路径同口径）。
+        Map<String, AssignmentResult> resolvedInBatch = new HashMap<>();
         for (int i = 0; i < nTasks; i++) {
+            TaskRequest req = requests.get(i);
+            AssignmentResult already = assignments.get(req.getTaskId());
+            if (already == null) {
+                already = resolvedInBatch.get(req.getTaskId());
+            }
+            if (already != null) {
+                log.info("Task {} already assigned to sysid={}, skip duplicate assignment",
+                        req.getTaskId(), already.getAssignedSysid());
+                results.add(already);
+                continue;
+            }
             int di = mapping[i];
             DroneSnapshot d = drones.get(di);
-            double score = scoreDrone(d, requests.get(i));
-            AssignmentResult r = new AssignmentResult(requests.get(i).getTaskId(), d.sysid, score,
+            double score = scoreDrone(d, req);
+            AssignmentResult r = new AssignmentResult(req.getTaskId(), d.sysid, score,
                     String.format("%s sysid=%d score=%.1f", algo, d.sysid, score), true);
-            assignments.put(requests.get(i).getTaskId(), r);
+            assignments.put(req.getTaskId(), r);
             if (tenantId != null) {
-                taskTenantMap.put(requests.get(i).getTaskId(), tenantId);
+                taskTenantMap.put(req.getTaskId(), tenantId);
             }
-            taskQueue.offer(requests.get(i));
-            taskRequests.put(requests.get(i).getTaskId(), requests.get(i));
-            publishAssignmentFrames(requests.get(i), d.sysid);
-            autoReserve(requests.get(i), d.sysid);
+            taskQueue.offer(req);
+            taskRequests.put(req.getTaskId(), req);
+            publishAssignmentFrames(req, d.sysid);
+            autoReserve(req, d.sysid);
+            resolvedInBatch.put(req.getTaskId(), r);
             results.add(r);
         }
         log.info("assignTasks: {} tasks to {} drones via {}", nTasks, nDrones, algo);
