@@ -78,17 +78,22 @@ spec:
             limits:
               cpu: "200m"
               memory: "128Mi"
-          # readOnlyRootFilesystem 下 nginx 需可写的 pid 与临时目录，否则
-          # mkdir() "/var/cache/nginx/client_temp" failed: Read-only file system
+          # readOnlyRootFilesystem 下 nginx 需可写的 pid、临时目录与配置目录：
+          # entrypoint 会把 /etc/nginx/templates/default.conf.template 经 envsubst
+          # 渲染到 /etc/nginx/conf.d/，只读根文件系统下会 CrashLoopBackOff。
           volumeMounts:
             - name: nginx-cache
               mountPath: /var/cache/nginx
             - name: nginx-run
               mountPath: /run
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
       volumes:
         - name: nginx-cache
           emptyDir: {}
         - name: nginx-run
+          emptyDir: {}
+        - name: nginx-conf
           emptyDir: {}
       restartPolicy: Always
 ---
