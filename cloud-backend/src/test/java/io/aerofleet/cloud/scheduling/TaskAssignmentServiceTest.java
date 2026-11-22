@@ -3,6 +3,7 @@ package io.aerofleet.cloud.scheduling;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
+import io.aerofleet.mavlink.messages.TaskAssignmentMsg;
 import io.aerofleet.mavlink.messages.TaskStatusMsg;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -79,6 +80,51 @@ class TaskAssignmentServiceTest {
         assertThat(result.getAssignedSysid()).isEqualTo(2);
         assertThat(result.getScore()).isGreaterThan(0);
         assertThat(result.getReason()).contains("sysid=2");
+    }
+
+    @Test
+    @DisplayName("assignTask 同 taskId 幂等：重复请求不二次入队/发帧/预约")
+    void assignTaskSameTaskIdIsIdempotent() {
+        DroneSnapshot d = new DroneSnapshot(1);
+        d.battery = 80;
+        registry.add(d);
+        TaskRequest req = new TaskRequest("t-dup", "SURVEY", 5, 30.0, 120.0, 100.0);
+
+        AssignmentResult first = service.assignTask(req);
+        AssignmentResult second = service.assignTask(req);
+
+        assertThat(first.isSuccess()).isTrue();
+        assertThat(second).isSameAs(first);
+        assertThat(service.getAllAssignments()).hasSize(1);
+        assertThat(conflictService.getReservations(1)).hasSize(1);
+
+        ArgumentCaptor<MavlinkMessageEvent> captor =
+                ArgumentCaptor.forClass(MavlinkMessageEvent.class);
+        verify(eventPublisher, atLeastOnce()).publishEvent(captor.capture());
+        long assignmentFrames = captor.getAllValues().stream()
+                .filter(e -> e.getMsgId() == TaskAssignmentMsg.ID)
+                .count();
+        assertThat(assignmentFrames).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("assignTasks 批内重复与已分配 taskId 都跳过")
+    void assignTasksSkipsDuplicateTaskIds() {
+        DroneSnapshot d1 = new DroneSnapshot(1);
+        d1.battery = 80;
+        DroneSnapshot d2 = new DroneSnapshot(2);
+        d2.battery = 60;
+        registry.add(d1, d2);
+        TaskRequest a = new TaskRequest("t-a", "SURVEY", 5, 30.0, 120.0, 100.0);
+        AssignmentResult pre = service.assignTask(a);
+        TaskRequest b = new TaskRequest("t-b", "SURVEY", 3, 31.0, 121.0, 100.0);
+
+        List<AssignmentResult> results = service.assignTasks(List.of(a, b, b));
+
+        assertThat(results).hasSize(3);
+        assertThat(results.get(0)).isSameAs(pre);
+        assertThat(results.get(1)).isSameAs(results.get(2));
+        assertThat(service.getAllAssignments()).hasSize(2);
     }
 
     @Test
