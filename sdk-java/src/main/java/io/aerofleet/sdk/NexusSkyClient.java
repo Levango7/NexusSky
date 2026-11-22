@@ -237,7 +237,10 @@ public class NexusSkyClient {
             if (responseBody == null || responseBody.isEmpty()) {
                 throw new SdkException("空响应体: " + path);
             }
-            return MAPPER.readValue(responseBody, ApiResponse.class);
+            // 后端返回裸形状（List/Map/其他），包装成 ApiResponse("ok", data)。
+            // 注意：后端响应本身可能有 status 字段（如 mission 结果），那是业务字段、不是 envelope。
+            Object data = MAPPER.readValue(responseBody, Object.class);
+            return new ApiResponse("ok", data);
         } catch (SdkException e) {
             throw e;
         } catch (Exception e) {
@@ -430,23 +433,8 @@ public class NexusSkyClient {
             if (responseBody == null || responseBody.isEmpty()) {
                 throw new SdkException("空响应体: " + path);
             }
-            ApiResponse apiResp = MAPPER.readValue(responseBody, ApiResponse.class);
-            if (!apiResp.isOk()) {
-                throw new SdkException("API返回错误: " + apiResp.getStatus(), resp.statusCode());
-            }
-            List<Object> rawList = apiResp.getDataAsList();
-            if (rawList == null) {
-                throw new SdkException("响应数据不是列表: " + path);
-            }
-            List<Map<String, Object>> result = new ArrayList<>();
-            for (Object item : rawList) {
-                if (item instanceof Map) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> map = (Map<String, Object>) item;
-                    result.add(map);
-                }
-            }
-            return result;
+            // 后端返回裸数组（[{...}, ...]），非 {status,data} envelope
+            return MAPPER.readValue(responseBody, new TypeReference<List<Map<String, Object>>>() {});
         } catch (SdkException e) {
             throw e;
         } catch (Exception e) {
@@ -467,15 +455,8 @@ public class NexusSkyClient {
             if (responseBody == null || responseBody.isEmpty()) {
                 throw new SdkException("空响应体: " + path);
             }
-            ApiResponse apiResp = MAPPER.readValue(responseBody, ApiResponse.class);
-            if (!apiResp.isOk()) {
-                throw new SdkException("API返回错误: " + apiResp.getStatus(), resp.statusCode());
-            }
-            Map<String, Object> result = apiResp.getDataAsMap();
-            if (result == null) {
-                throw new SdkException("响应数据不是Map: " + path);
-            }
-            return result;
+            // 后端返回裸 Map（{...}），非 {status,data} envelope
+            return MAPPER.readValue(responseBody, new TypeReference<Map<String, Object>>() {});
         } catch (SdkException e) {
             throw e;
         } catch (Exception e) {

@@ -42,16 +42,18 @@ public class MissionApi {
         if (waypoints.isEmpty()) {
             throw new SdkException("waypoints must not be empty");
         }
-        List<Map<String, Object>> wpList = new ArrayList<>();
+        // 后端 parseMissionItems 要求非空 items 数组、每项带 cmd（非 waypoints）
+        List<Map<String, Object>> items = new ArrayList<>();
         for (Waypoint wp : waypoints) {
             Map<String, Object> m = new LinkedHashMap<>();
+            m.put("cmd", "waypoint");
             m.put("lat", wp.getLat());
             m.put("lon", wp.getLon());
             m.put("alt", wp.getAlt());
-            wpList.add(m);
+            items.add(m);
         }
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("waypoints", wpList);
+        body.put("items", items);
         return client.post("/drones/" + sysid + "/mission", body);
     }
 
@@ -74,7 +76,10 @@ public class MissionApi {
      * @throws SdkException 如果请求失败
      */
     public ApiResponse clear(int sysid) throws SdkException {
-        return client.post("/drones/" + sysid + "/mission/clear", null);
+        // 后端暂无 mission clear 能力（MISSION_CLEAR_ALL 在协议层与模拟器均未实现），
+        // 诚实降级：不假成功、不调不存在的端点。
+        throw new UnsupportedOperationException(
+                "后端暂不支持 mission clear（MISSION_CLEAR_ALL 未实现，sysid=" + sysid + "）");
     }
 
     /**

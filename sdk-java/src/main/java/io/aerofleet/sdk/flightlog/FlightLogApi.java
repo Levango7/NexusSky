@@ -4,9 +4,7 @@ import io.aerofleet.sdk.ApiResponse;
 import io.aerofleet.sdk.NexusSkyClient;
 import io.aerofleet.sdk.SdkException;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.Objects;
+
 
 /**
  * 飞行日志 API 封装，提供日志列表查询和详情获取。
@@ -37,16 +35,14 @@ public class FlightLogApi {
     }
 
     /**
-     * 获取指定飞行日志的详情。
+     * 查询指定无人机的当日飞行日志。
      *
-     * @param logId 日志 ID
-     * @return 包含日志详情的 API 响应
-     * @throws NullPointerException 如果 logId 为 null
+     * @param sysid 无人机系统 ID
+     * @return 包含该机当日日志列表的 API 响应
      * @throws SdkException 如果请求失败
      */
-    public ApiResponse get(String logId) throws SdkException {
-        Objects.requireNonNull(logId, "logId must not be null");
-        String encodedLogId = URLEncoder.encode(logId, StandardCharsets.UTF_8);
-        return client.get("/flightlog/" + encodedLogId);
+    public ApiResponse getByDrone(int sysid) throws SdkException {
+        // 后端无 /flightlog/{id} 单条端点，按 sysid 查询该机当日日志（GET /flightlog?sysid=）。
+        return client.get("/flightlog?sysid=" + sysid);
     }
 }
