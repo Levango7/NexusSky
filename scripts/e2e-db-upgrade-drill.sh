@@ -99,6 +99,7 @@ launch_backend() {   # $1=额外参数  $2=端口；**只起进程不等就绪**
   local port="$2"
   java -Duser.timezone=UTC -jar "$JAR" \
     --spring.profiles.active=prod \
+    --aerofleet.regulator.sink-type=sim \
     --server.port="$port" \
     --spring.datasource.url="$PG_URL/$PG_DB?options=-c%20TimeZone%3DUTC" \
     --spring.datasource.username="$PG_USER" \

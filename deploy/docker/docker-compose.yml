@@ -112,6 +112,8 @@ services:
       - MAVLINK_SIGNING_ENABLED=${MAVLINK_SIGNING_ENABLED:-false}
       - MAVLINK_SIGNING_REJECT_UNSIGNED=${MAVLINK_SIGNING_REJECT_UNSIGNED:-true}
       - MAVLINK_SIGNING_SECRET_KEY=${MAVLINK_SIGNING_SECRET_KEY:-}
+      # 监管上报通道：prod 未显式选择时启动失败（fail-closed），须显式 sink-type=sim（模拟监管平台）。
+      - AEROFLEET_REGULATOR_SINK_TYPE=sim
       # ===== MAVLink 发现 + vision truth（非 host 部署接线）=====
       # 后端主动把 GCS 心跳发到 drone-sim:14540（默认 127.0.0.1 在 bridge 下到不了独立 sim），
       # sim 收到后学会回程，遥测/命令链路在 bridge 网络内自动双向打通。

@@ -479,6 +479,7 @@ PID_C=$(AEROFLEET_JWT_SECRET="$CI_JWT_SECRET" \
     SPRING_DATASOURCE_PASSWORD="$C_PG_PASSWORD" \
     start_backend "$LOG_C" "$C_PORT" $REDIS_OVERRIDE \
     --spring.profiles.active=prod \
+    --aerofleet.regulator.sink-type=sim \
     --logging.level.org.flywaydb=INFO \
     --aerofleet.flightlog.persist-to-db=true \
     --aerofleet.security.bootstrap-admin-username="$CI_USER" \
