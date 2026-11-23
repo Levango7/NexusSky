@@ -91,6 +91,7 @@ final class LicenseModuleMap {
         // CD4 演练用受控 5xx 端点：Bean 默认不存在（@ConditionalOnProperty），
         // 只有显式开启故障注入时才可达；归属 core 仅为满足 fail-closed 覆盖测试。
         m.put("/api/v1/test/fault", CORE);
+        m.put("/api/v1/scenarios", CORE);
         m.put("/api/v1/telemetry", CORE);
         m.put("/api/v1/mission", CORE);
         m.put("/api/v1/flightlog", CORE);

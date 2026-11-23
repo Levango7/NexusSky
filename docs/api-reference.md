@@ -1,6 +1,6 @@
 # NexusSky API 参考
 
-> 更新至 2026-10-24，共 80 个 `@RestController`、3 个 `@Service` 辅助类、417 个 REST API 端点
+> 更新至 2026-10-24，共 81 个 `@RestController`、3 个 `@Service` 辅助类、423 个 REST API 端点
 >
 > 基础设施：Spring Boot + MAVLink 协议 + JWT 认证 + OpenAPI 3.0: 注解
 >
@@ -2634,6 +2634,26 @@ curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/js
 
 ---
 
+## 场景注册表（V43）
+
+三张场景缺口表的读写入口。写端点需 `OPERATOR`，读端点 `OBSERVER` 可用；
+归属前缀 `/api/v1/scenarios` 登记为 `core` 模块（fail-closed 门禁要求）。
+数据模型与字段含义见 [docs/capacity-planning.md](capacity-planning.md) §7。
+
+| 方法 | 路径 | 角色 | 说明 |
+|---|---|---|---|
+| POST | `/api/v1/scenarios/balcony-drop-points` | OPERATOR | 登记阳台落点（buildingId/floor/lat/lon/altM 必填，maxPayloadKg/allowedFromMs/allowedToMs 可选） |
+| GET | `/api/v1/scenarios/balcony-drop-points?buildingId=` | OBSERVER | 查询落点，`buildingId` 可选，最多 200 行 |
+| POST | `/api/v1/scenarios/agri-supply-ledger` | OPERATOR | 记一笔农资流水（supplyType/action/quantity/unit 必填） |
+| GET | `/api/v1/scenarios/agri-supply-ledger?taskId=` | OBSERVER | 按任务查农资流水，最多 200 行 |
+| POST | `/api/v1/scenarios/emergency-node-roles` | OPERATOR | 登记应急节点角色（sysid/role 必填；role ∈ CONTROL/COMMS/RELAY/EXECUTOR） |
+| GET | `/api/v1/scenarios/emergency-node-roles?planId=` | OBSERVER | 按预案查节点角色，最多 200 行 |
+
+写入成功返回 `{"id": "<UUID>", "created": true}`；查询直接返回行数组。
+所有读写按当前租户过滤（无请求上下文时按默认租户 1）。
+
+---
+
 ## 附录
 
 ### 错误响应格式
@@ -2774,6 +2794,7 @@ es.onerror = (e) => {
 | 视觉感知 | CvEvalController | /api/v1/cv-eval | 2 |
 | 视频融合 | VideoFusionController | /api/v1/video-fusion | 5 |
 | 链路仿真 | LinkSimControlController | /api/v1/link-sim | 2 |
-| **合计** | **80 个 @RestController** | | **415** |
+| 场景注册表 | ScenarioRegistryController | /api/v1/scenarios | 6 |
+| **合计** | **81 个 @RestController** | | **421** |
 
-> **注**: 项目共 80 个 Controller 源文件：77 个为 `@RestController`，`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。不算 actuator，`@RestController` 类共 80 个（另有 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的类也标注 `@RestController`，但不含任何方法级映射注解、不暴露 API）—— 共 417 个端点（219 GET / 163 POST / 14 PUT / 16 DELETE / 1 PATCH）。因此下表列 77 行（+链接仿真的 `LinkSimControlController`），端点列之和 411 = 415 − 2。
+> **注**: 项目共 81 个 Controller 源文件：77 个为 `@RestController`，`vision/RadarController`、`vision/RotorController`、`vision/ObstacleAvoidanceController` 为 `@Service` 内部组件（不暴露 REST 端点），其能力通过 `HardwareDataController` 和 `ObstacleController` 对外提供。`ApiExceptionHandler` 为 `@RestControllerAdvice`（全局异常处理，非端点 Controller）。不算 actuator，`@RestController` 类共 81 个（另有 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的类也标注 `@RestController`，但不含任何方法级映射注解、不暴露 API）—— 共 423 个端点（222 GET / 166 POST / 14 PUT / 16 DELETE / 1 PATCH）。因此下表列 78 行（+链接仿真的 `LinkSimControlController`），端点列之和 421 = 423 − 2（差额来自 `LicenseModuleMap` 与 `OpenApiConfig` 两个非 Controller 命名的 `@RestController`）。

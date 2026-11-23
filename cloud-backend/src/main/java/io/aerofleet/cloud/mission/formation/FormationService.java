@@ -749,6 +749,20 @@ public class FormationService {
         return formations.get(id);
     }
 
+    /**
+     * sysid → 所属编队 ID（只读，按当前租户过滤；不在任何活跃编队返回 null）。
+     * 供飞行日志写 formation_id 使用：编队成员归因此处是唯一真相源，
+     * 不让日志侧再维护一份映射。
+     */
+    public Integer formationIdFor(int sysid) {
+        for (Formation f : activeFormations()) {
+            if (f.members.contains(sysid)) {
+                return f.formationId;
+            }
+        }
+        return null;
+    }
+
     /** 所有活跃编队（非 DISSOLVED），按当前租户过滤。 */
     public List<Formation> activeFormations() {
         Integer tenantId = TenantContext.getEffectiveTenantId();
