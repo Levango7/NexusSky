@@ -96,7 +96,7 @@ Docker 默认 `/dev/shm` 64 MB 会让并行 VACUUM 失败
 `task_id` 和 `seq`；`seq` 用 `max(上次+1, 当前毫秒)` 保证进程重启后不撞 V42 唯一索引。
 无上下文时（单测/未接调度）行为与改造前完全一致，不新增键。
 
-**V43 新增三张场景表**（只建表与索引，尚无 REST API/UI，属于数据模型就位）：
+**V43 新增三张场景表**（建表 + 索引 + 服务层 + REST API；无 UI）：
 
 | 表 | 用途 | 关键列 |
 |---|---|---|
@@ -106,8 +106,10 @@ Docker 默认 `/dev/shm` 64 MB 会让并行 VACUUM 失败
 
 **仍未做**：
 
-- `formation_id` 目前仍为 NULL：表演轨迹的编队归因需要 `FormationService` 暴露
-  「sysid → formationId」 membership 查询后再接入；现有种子数据不回填。
-- 三张新表没有对应的服务层/REST API，当前仅可被直接 SQL 或后续代码使用。
+- `formation_id` 已接入：`FlightLogService` 对遥测行调用
+  `FormationService.formationIdFor(sysid)`（按租户过滤的成员关系，唯一真相源）写入；
+  非遥测行仍为 NULL，历史行不回填。
+- 三张新表已有服务层与 REST API（见 `docs/api-reference.md` §场景注册表），但**没有 UI**；
+  仅提供基础写入与查询（POST 新增 + GET 查询，无 PUT/DELETE）。
 - 分区表蓝图未自动套用到生产表（需维护窗口），仓库门禁也会拦截含 DROP/RENAME 的自动迁移。
 - 生产 RTO 仍缺真实库规模输入；合成数据不能当生产数字。

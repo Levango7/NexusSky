@@ -106,6 +106,13 @@ public class FlightLogService {
     @Autowired(required = false)
     private FlightLogTaskContext taskContext;
 
+    /**
+     * 编队成员查询（可选注入）：遥测行据此写 formation_id。
+     * 放在这里而不是再维护一份映射，是因为 FormationService 是成员关系的唯一真相源。
+     */
+    @Autowired(required = false)
+    private io.aerofleet.cloud.mission.formation.FormationService formationService;
+
     /** sysid -> last track-point write, for the telemetry throttle.
      *  CHM：telemetry() 可能被并发调用，避免 HashMap 并发写损坏内部结构；节流判断本身允许良性竞态。 */
     private final Map<Integer, Long> lastTrackWrite = new ConcurrentHashMap<>();
@@ -330,6 +337,13 @@ public class FlightLogService {
                 e.put("taskId", taskId);
             }
             e.put("seq", taskContext.nextSeq(sysid));
+        }
+        // 编队归因只对高频遥测查一次（告警/任务行的 formation_id 保持 NULL）。
+        if ("telemetry".equals(type) && formationService != null) {
+            Integer formationId = formationService.formationIdFor(sysid);
+            if (formationId != null) {
+                e.put("formationId", String.valueOf(formationId));
+            }
         }
         return e;
     }
