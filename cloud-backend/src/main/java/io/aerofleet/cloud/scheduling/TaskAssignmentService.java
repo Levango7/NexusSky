@@ -1,9 +1,11 @@
 package io.aerofleet.cloud.scheduling;
 
+import io.aerofleet.cloud.flightlog.FlightLogTaskContext;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.gateway.MavlinkMessageEvent;
 import io.aerofleet.cloud.security.TenantContext;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import io.aerofleet.mavlink.enums.TaskStatusEnum;
 import io.aerofleet.mavlink.enums.TaskType;
@@ -53,6 +55,29 @@ public class TaskAssignmentService {
     private int maxRetries = 1;
     /** taskId → tenantId（租户隔离映射） */
     private final Map<String, Integer> taskTenantMap = new ConcurrentHashMap<>();
+
+    /**
+     * 飞行日志任务归因（可选注入；单测直接 new 本类时为 null）。
+     * 分配/取消/完成/失败时同步登记，写入侧据此把 task_id 带进 flight_log。
+     */
+    @Autowired(required = false)
+    private FlightLogTaskContext logTaskContext;
+
+    private void bindLogTask(int sysid, String taskId) {
+        if (logTaskContext != null && taskId != null) {
+            // 改派：同一 taskId 可能之前落在另一架飞机上，先清旧归因再绑新机。
+            logTaskContext.unbindTask(taskId);
+        }
+        if (logTaskContext != null) {
+            logTaskContext.bind(sysid, taskId);
+        }
+    }
+
+    private void unbindLogTaskIfIdle(int sysid) {
+        if (logTaskContext != null && !droneToTaskIds.containsKey(sysid)) {
+            logTaskContext.unbind(sysid);
+        }
+    }
 
     // --- GA 参数（M10 调度算法优化）---
     /** 任务数低于此值时回退到简单评分，避免 GA 开销无收益 */
@@ -171,6 +196,7 @@ public class TaskAssignmentService {
         AssignmentResult result = new AssignmentResult(req.getTaskId(), best.sysid, bestScore,
                 String.format("sysid=%d score=%.1f", best.sysid, bestScore), true);
         assignments.put(req.getTaskId(), result);
+        bindLogTask(best.sysid, req.getTaskId());
         Integer tenantId = TenantContext.getEffectiveTenantId();
         if (tenantId != null) {
             taskTenantMap.put(req.getTaskId(), tenantId);
@@ -237,6 +263,7 @@ public class TaskAssignmentService {
             AssignmentResult r = new AssignmentResult(req.getTaskId(), d.sysid, score,
                     String.format("%s sysid=%d score=%.1f", algo, d.sysid, score), true);
             assignments.put(req.getTaskId(), r);
+            bindLogTask(d.sysid, req.getTaskId());
             if (tenantId != null) {
                 taskTenantMap.put(req.getTaskId(), tenantId);
             }
@@ -570,6 +597,7 @@ public class TaskAssignmentService {
                     droneToTaskIds.remove(removed.getAssignedSysid());
                 }
             }
+            unbindLogTaskIfIdle(removed.getAssignedSysid());
             // 同步从任务队列移除，避免队列只增不减
             taskQueue.removeIf(req -> req.getTaskId().equals(taskId));
             publishTaskStatus(taskId, removed.getAssignedSysid(), TaskStatusEnum.ABORTED.ordinal(), 0);
@@ -625,6 +653,7 @@ public class TaskAssignmentService {
                     droneToTaskIds.remove(assignment.getAssignedSysid());
                 }
             }
+            unbindLogTaskIfIdle(assignment.getAssignedSysid());
             publishTaskStatus(taskId, assignment.getAssignedSysid(),
                     TaskStatusEnum.COMPLETED.ordinal(), 100);
             log.info("Task {} completed, removed from drone {} load tracking",
@@ -653,6 +682,7 @@ public class TaskAssignmentService {
                     droneToTaskIds.remove(assignment.getAssignedSysid());
                 }
             }
+            unbindLogTaskIfIdle(assignment.getAssignedSysid());
             taskQueue.removeIf(req -> req.getTaskId().equals(taskId));
             publishTaskStatus(taskId, assignment.getAssignedSysid(),
                     TaskStatusEnum.FAILED.ordinal(), 0);
@@ -745,6 +775,7 @@ public class TaskAssignmentService {
                 AssignmentResult result = new AssignmentResult(req.getTaskId(), best.sysid, bestScore,
                         String.format("sysid=%d score=%.1f", best.sysid, bestScore), true);
                 assignments.put(req.getTaskId(), result); // 覆盖旧分配记录
+                bindLogTask(best.sysid, req.getTaskId());
                 taskQueue.offer(req);
                 log.info("Task {} reassigned to sysid={} score={}", req.getTaskId(), best.sysid, bestScore);
                 publishAssignmentFrames(req, best.sysid);

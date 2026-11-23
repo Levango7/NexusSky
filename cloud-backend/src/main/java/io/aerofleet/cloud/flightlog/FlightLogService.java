@@ -99,6 +99,13 @@ public class FlightLogService {
     @Autowired(required = false)
     private DeviceRegistry deviceRegistry;
 
+    /**
+     * 任务归因/去重序号上下文（可选注入；缺省时行为与改造前完全一致）。
+     * 用字段注入而非构造注入，避免改变构造器签名（现有单测直接 new FlightLogService）。
+     */
+    @Autowired(required = false)
+    private FlightLogTaskContext taskContext;
+
     /** sysid -> last track-point write, for the telemetry throttle.
      *  CHM：telemetry() 可能被并发调用，避免 HashMap 并发写损坏内部结构；节流判断本身允许良性竞态。 */
     private final Map<Integer, Long> lastTrackWrite = new ConcurrentHashMap<>();
@@ -314,6 +321,15 @@ public class FlightLogService {
         Integer tenantId = tenantForWrite(sysid);
         if (tenantId != null) {
             e.put("tenantId", tenantId);
+        }
+        // V42 的任务/序号维度：调度侧登记了任务才写 task_id；seq 每条事件递增，
+        // 配合 (tenant_id, sysid, seq) 唯一索引实现 at-least-once 去重。
+        if (taskContext != null) {
+            String taskId = taskContext.taskIdOf(sysid);
+            if (taskId != null) {
+                e.put("taskId", taskId);
+            }
+            e.put("seq", taskContext.nextSeq(sysid));
         }
         return e;
     }
