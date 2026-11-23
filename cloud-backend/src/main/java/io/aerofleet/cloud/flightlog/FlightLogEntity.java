@@ -83,6 +83,15 @@ public class FlightLogEntity {
     @Column(name = "tenant_id")
     private Integer tenantId;
 
+    @Column(name = "task_id")
+    private String taskId;
+
+    @Column(name = "formation_id")
+    private String formationId;
+
+    @Column(name = "seq")
+    private Long seq;
+
     /** JPA 要求的无参构造器 */
     public FlightLogEntity() {
     }
@@ -136,6 +145,9 @@ public class FlightLogEntity {
         e.severity = event.get("severity") instanceof Number n ? n.intValue() : null;
         e.text = (String) event.get("text");
         e.tenantId = event.get("tenantId") instanceof Number n ? n.intValue() : null;
+        e.taskId = (String) event.get("taskId");
+        e.formationId = (String) event.get("formationId");
+        e.seq = event.get("seq") instanceof Number n ? n.longValue() : null;
 
         // timestamp: 优先用 Map 中的 "t" 字段（ISO LocalDateTime 字符串），否则用当前时间
         Object t = event.get("t");
@@ -314,6 +326,30 @@ public class FlightLogEntity {
 
     public void setTenantId(Integer tenantId) {
         this.tenantId = tenantId;
+    }
+
+    public String getTaskId() {
+        return taskId;
+    }
+
+    public void setTaskId(String taskId) {
+        this.taskId = taskId;
+    }
+
+    public String getFormationId() {
+        return formationId;
+    }
+
+    public void setFormationId(String formationId) {
+        this.formationId = formationId;
+    }
+
+    public Long getSeq() {
+        return seq;
+    }
+
+    public void setSeq(Long seq) {
+        this.seq = seq;
     }
 
     // ===== 批量插入的列/值同源导出（显式 JDBC 批处理用） =====
