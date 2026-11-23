@@ -41,11 +41,14 @@ spec:
                 - ALL
           # drone-sim 不支持 --cloud-host；通过 UDP 被 cloud-backend 发现
           # 多副本时需用 StatefulSet + 不同 --sysid，此处单副本用 --sysid=1
-          command: ["java", "-jar", "app.jar", "--sysid=1", "--port=14540"]
+          command: ["java", "-jar", "app.jar", "--sysid=1", "--port=14540", "--http-port=18080", "--truth-bind=0.0.0.0"]
           ports:
             - name: mavlink
               containerPort: 14540
               protocol: UDP
+            - name: truth-http
+              containerPort: 18080
+              protocol: TCP
           resources:
             requests:
               cpu: "100m"
@@ -73,3 +76,7 @@ spec:
       port: 14540
       targetPort: mavlink
       protocol: UDP
+    - name: truth-http
+      port: 18080
+      targetPort: truth-http
+      protocol: TCP

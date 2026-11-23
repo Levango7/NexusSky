@@ -112,6 +112,14 @@ services:
       - MAVLINK_SIGNING_ENABLED=${MAVLINK_SIGNING_ENABLED:-false}
       - MAVLINK_SIGNING_REJECT_UNSIGNED=${MAVLINK_SIGNING_REJECT_UNSIGNED:-true}
       - MAVLINK_SIGNING_SECRET_KEY=${MAVLINK_SIGNING_SECRET_KEY:-}
+      # ===== MAVLink 发现 + vision truth（非 host 部署接线）=====
+      # 后端主动把 GCS 心跳发到 drone-sim:14540（默认 127.0.0.1 在 bridge 下到不了独立 sim），
+      # sim 收到后学会回程，遥测/命令链路在 bridge 网络内自动双向打通。
+      - AEROFLEET_DRONE_HOST=drone-sim
+      - AEROFLEET_DRONE_PORT=14540
+      # vision truth：sim 的 truth HTTP（--http-port=18080 --truth-bind=0.0.0.0），
+      # 后端跨容器拉取 /camera/shots 与 /targets（CaptureService 的 truth/pixels 数据源）。
+      - AEROFLEET_SIM_TRUTH_BASE=http://drone-sim:18080
       - MAVLINK_SIGNING_KEY_STORE=${MAVLINK_SIGNING_KEY_STORE:-}
       # MAVLink UDP 网关绑定地址：此处**有意不注入**，保持 prod 默认 0.0.0.0。
       # 容器内必须监听所有接口才能被上方 `ports:` 映射（绑 127.0.0.1 会让映射失效）。
@@ -151,7 +159,9 @@ services:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.sim
     image: nexussky/drone-sim:1.0.0
-    command: ["java", "-jar", "app.jar", "--sysid=1", "--port=14540"]
+    # 整串覆盖 entrypoint（镜像 ENTRYPOINT 是 sh -c，command 传参会成位置参数被吞）；
+    # --http-port 开 truth HTTP，--truth-bind=0.0.0.0 让后端跨容器访问 truth。
+    entrypoint: ["sh", "-c", "exec java $$JAVA_OPTS -jar app.jar --sysid=1 --port=14540 --http-port=18080 --truth-bind=0.0.0.0"]
     depends_on:
       cloud-backend:
         condition: service_healthy

@@ -24,6 +24,14 @@ data:
   MANAGEMENT_ENDPOINT_HEALTH_GROUP_LIVENESS_INCLUDE: "livenessState"
   # 飞行日志目录：必须与 Deployment 的 flight-logs 卷 mountPath 一致（/app/logs）
   AEROFLEET_FLIGHTLOG_DIR: "/app/logs"
+  # ===== MAVLink 发现 + vision truth（非 host 部署接线）=====
+  # 后端主动把 GCS 心跳发到 drone-sim:14540（默认 127.0.0.1 在 Pod 网络下到不了独立 sim），
+  # sim 收到后学会回程，遥测/命令链路在 Pod 网络内自动双向打通。
+  AEROFLEET_DRONE_HOST: {{ include "nexussky.droneSimFullname" . | quote }}
+  AEROFLEET_DRONE_PORT: {{ .Values.droneSim.port | quote }}
+  # vision truth：sim 的 truth HTTP（--http-port --truth-bind=0.0.0.0），
+  # 后端跨 Pod 拉取 /camera/shots 与 /targets（CaptureService 的 truth/pixels 数据源）。
+  AEROFLEET_SIM_TRUTH_BASE: {{ printf "http://%s:%d" (include "nexussky.droneSimFullname" .) (int .Values.droneSim.httpPort) | quote }}
   {{- if .Values.mavlinkSigning.enabled }}
   # ===== MAVLink v2 链路签名（C5）=====
   # 这两个开关**只在 mavlinkSigning.enabled=true 时注入**。关闭时一个键都不渲染，

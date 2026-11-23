@@ -69,6 +69,10 @@ droneSim:
   image: nexussky/drone-sim
   port: 14540
   sysid: 1
+  # vision truth HTTP 端口与监听地址（非 host 部署接线）：
+  # 后端经 AEROFLEET_SIM_TRUTH_BASE 跨 Pod 拉取 /camera/shots 与 /targets。
+  httpPort: 18080
+  truthBindIp: "0.0.0.0"
   resources:
     requests:
       cpu: 100m

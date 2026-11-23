@@ -32,6 +32,14 @@ data:
   # 注：UDP 端口（14550）此处也不设置——UdpGateway 的
   # @Value("${aerofleet.udp-port:14550}") 已内置同值默认，
   # networkpolicy.yaml 亦按 14550 硬编码。三处一致，无需再声明一份副本。
+  # ===== MAVLink 发现 + vision truth（非 host 部署接线）=====
+  # 后端主动把 GCS 心跳发到 drone-sim:14540（默认 127.0.0.1 在 Pod 网络下到不了独立 sim），
+  # sim 收到后学会回程，遥测/命令链路在 Pod 网络内自动双向打通。
+  AEROFLEET_DRONE_HOST: "drone-sim"
+  AEROFLEET_DRONE_PORT: "14540"
+  # vision truth：sim 的 truth HTTP（--http-port=18080 --truth-bind=0.0.0.0），
+  # 后端跨 Pod 拉取 /camera/shots 与 /targets（CaptureService 的 truth/pixels 数据源）。
+  AEROFLEET_SIM_TRUTH_BASE: "http://drone-sim:18080"
   # ===== MAVLink v2 链路签名（C5）=====
   # **默认不设置**（保持 prod 出厂姿态），需要打开签名时取消注释下面两行，
   # 并在 secret.yaml 里同时给出 MAVLINK_SIGNING_SECRET_KEY。

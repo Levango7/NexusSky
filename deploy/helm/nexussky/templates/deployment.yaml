@@ -124,11 +124,14 @@ spec:
         - name: drone-sim
           image: "{{ .Values.imageRegistry }}{{ .Values.droneSim.image }}:{{ .Values.imageTag }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          command: ["java", "-jar", "app.jar", "--sysid={{ .Values.droneSim.sysid }}", "--port={{ .Values.droneSim.port }}"]
+          command: ["java", "-jar", "app.jar", "--sysid={{ .Values.droneSim.sysid }}", "--port={{ .Values.droneSim.port }}", "--http-port={{ .Values.droneSim.httpPort }}", "--truth-bind={{ .Values.droneSim.truthBindIp }}"]
           ports:
             - name: mavlink
               containerPort: {{ .Values.droneSim.port }}
               protocol: UDP
+            - name: truth-http
+              containerPort: {{ .Values.droneSim.httpPort }}
+              protocol: TCP
           resources:
             {{- toYaml .Values.droneSim.resources | nindent 12 }}
 ---
