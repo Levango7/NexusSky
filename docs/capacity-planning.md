@@ -89,9 +89,25 @@ Docker 默认 `/dev/shm` 64 MB 会让并行 VACUUM 失败
 （`could not resize shared memory segment ... No space left on device`）——生产容器需加大 `shm_size`。
 本数字是合成库机制值，**不是生产 RTO**；给生产库规模与日增量后可等体量复测。
 
-## 7. 已知缺口（诚实标注）
+## 7. 写入侧闭环与已知缺口（诚实标注）
 
-- `flight_log` 已加 `task_id/formation_id/seq` 列，但业务写入路径尚未填充这些字段（默认 NULL）；
-  表演轨迹归因需要上游事件带上这些键。
-- 阳台配送缺楼宇/阳台落点注册表；农业缺农资库存台账；应急缺四节点角色注册表。
+**已闭环（V42 + 后续改造）**：`TaskAssignmentService` 分配/取消/完成/失败时把
+`sysid → taskId` 登记到 `FlightLogTaskContext`，`FlightLogService` 组装每条事件时写入
+`task_id` 和 `seq`；`seq` 用 `max(上次+1, 当前毫秒)` 保证进程重启后不撞 V42 唯一索引。
+无上下文时（单测/未接调度）行为与改造前完全一致，不新增键。
+
+**V43 新增三张场景表**（只建表与索引，尚无 REST API/UI，属于数据模型就位）：
+
+| 表 | 用途 | 关键列 |
+|---|---|---|
+| `balcony_drop_point` | 高楼阳台落点注册 | `building_id/floor/lat/lon/alt_m/max_payload_kg/allowed_from_ms/allowed_to_ms` |
+| `agri_supply_ledger` | 农资领用/使用/回收/损耗流水 | `supply_type/action/quantity/balance_after/task_id/sysid` |
+| `emergency_node_role` | 应急四类节点角色登记 | `role(CONTROL/COMMS/RELAY/EXECUTOR)/link_budget_ms/plan_id/sysid` |
+
+**仍未做**：
+
+- `formation_id` 目前仍为 NULL：表演轨迹的编队归因需要 `FormationService` 暴露
+  「sysid → formationId」 membership 查询后再接入；现有种子数据不回填。
+- 三张新表没有对应的服务层/REST API，当前仅可被直接 SQL 或后续代码使用。
 - 分区表蓝图未自动套用到生产表（需维护窗口），仓库门禁也会拦截含 DROP/RENAME 的自动迁移。
+- 生产 RTO 仍缺真实库规模输入；合成数据不能当生产数字。
