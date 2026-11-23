@@ -339,7 +339,8 @@ public final class VirtualDrone implements AutoCloseable {
                         }
                     },
                     this::currentRssiDbm,
-                    shotJpegs::get);
+                    shotJpegs::get,
+                    config.truthBindIp);
             try {
                 this.truthServer.start();
             } catch (java.io.IOException e) {

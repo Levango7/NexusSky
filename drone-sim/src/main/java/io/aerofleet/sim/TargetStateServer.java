@@ -39,6 +39,8 @@ public final class TargetStateServer {
     /** P3-fix(Minor): 保存 executor 引用以便优雅关闭，避免线程泄漏 */
     private ExecutorService executor;
     private final int port;
+    /** truth HTTP 监听地址（默认 127.0.0.1 保安全；容器部署可设 0.0.0.0 让后端跨容器访问）。 */
+    private final String bindIp;
 
     public TargetStateServer(TargetSimulator targets, int port,
                              Supplier<List<CameraModel.Shot>> shotSource) {
@@ -55,15 +57,25 @@ public final class TargetStateServer {
                              Supplier<List<CameraModel.Shot>> shotSource,
                              Supplier<Double> rssiSource,
                              Function<Long, byte[]> jpegSource) {
+        this(targets, port, shotSource, rssiSource, jpegSource, "127.0.0.1");
+    }
+
+    /** 带可配置监听地址的全参数构造（容器部署用 0.0.0.0 让后端跨容器访问 truth）。 */
+    public TargetStateServer(TargetSimulator targets, int port,
+                             Supplier<List<CameraModel.Shot>> shotSource,
+                             Supplier<Double> rssiSource,
+                             Function<Long, byte[]> jpegSource,
+                             String bindIp) {
         this.targets = targets;
         this.port = port;
         this.shotSource = shotSource;
         this.rssiSource = rssiSource;
         this.jpegSource = jpegSource;
+        this.bindIp = bindIp;
     }
 
     public void start() throws IOException {
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
+        server = HttpServer.create(new InetSocketAddress(bindIp, port), 0);
         executor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "target-state-http");
             t.setDaemon(true);
@@ -77,7 +89,7 @@ public final class TargetStateServer {
         server.createContext("/health", ex -> respond(ex,
                 "{\"ok\":true,\"uptimeSec\":" + (System.currentTimeMillis() - bootMs) / 1000 + "}"));
         server.start();
-        SimLog.info("ground-truth HTTP on 127.0.0.1:" + port
+        SimLog.info("ground-truth HTTP on " + bindIp + ":" + port
                 + " (/targets /camera/shots[/{seq}.jpg] /radio /health)");
     }
 

@@ -40,6 +40,10 @@ spec:
       port: {{ .Values.droneSim.port }}
       targetPort: mavlink
       protocol: UDP
+    - name: truth-http
+      port: {{ .Values.droneSim.httpPort }}
+      targetPort: truth-http
+      protocol: TCP
 ---
 apiVersion: v1
 kind: Service
