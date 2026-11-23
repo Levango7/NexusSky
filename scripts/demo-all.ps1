@@ -190,7 +190,7 @@ try {
         Banner "启动后端 + 模拟器"
 
         Step "启动 cloud-backend"
-        $backendProc = Start-Process -FilePath $javaExe -ArgumentList "-jar", $backendJar -PassThru -WindowStyle Hidden
+        $backendProc = Start-Process -FilePath $javaExe -ArgumentList "-jar", $backendJar, "--aerofleet.regulator.sink-type=sim" -PassThru -WindowStyle Hidden
         $Script:StartedProcesses += $backendProc
         Info "cloud-backend PID=$($backendProc.Id)"
 

@@ -150,7 +150,7 @@ try {
         Write-Host "[ERROR] cloud-backend jar 不存在，请先构建" -ForegroundColor Red
         exit 1
     }
-    $backendProc = Start-Process -FilePath $javaExe -ArgumentList "-jar", $backendJar -PassThru -WindowStyle Hidden
+    $backendProc = Start-Process -FilePath $javaExe -ArgumentList "-jar", $backendJar, "--aerofleet.regulator.sink-type=sim" -PassThru -WindowStyle Hidden
     $Script:StartedProcesses += $backendProc
     Info "cloud-backend PID=$($backendProc.Id)"
 

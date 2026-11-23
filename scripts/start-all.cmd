@@ -17,7 +17,7 @@ popd
 
 echo [2/2] Starting drone simulator (UDP 14540) + cloud backend (HTTP 8080, UDP 14550)...
 start "aerofleet-sim" cmd /c "%JAVA_EXE% -jar %ROOT%\drone-sim\target\aerofleet-drone-sim-0.1.0-SNAPSHOT-shaded.jar --port 14540"
-start "aerofleet-cloud" cmd /c "%JAVA_EXE% -jar %ROOT%\cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar"
+start "aerofleet-cloud" cmd /c "%JAVA_EXE% -jar %ROOT%\cloud-backend\target\aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar --aerofleet.regulator.sink-type=sim"
 
 timeout /t 5 >nul
 echo.

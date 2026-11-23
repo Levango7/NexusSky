@@ -11,6 +11,9 @@ metadata:
 data:
   # Spring Boot 激活的生产 Profile
   SPRING_PROFILES_ACTIVE: "prod"
+  # 监管上报 sink：prod 下 NoopReportSink 不装配，部署前必须显式选择 sim（仅评估/试用）
+  # 或 uom（真实 CAAC UOM，需另配 API Key）。示例故意不写死，避免生产静默使用模拟平台。
+  # AEROFLEET_REGULATOR_SINK_TYPE: "uom"
   # 关闭开发模式，启用 JWT 认证（对应 aerofleet.security.dev-mode）
   AEROFLEET_SECURITY_DEV_MODE: "false"
   # CORS 允许的前端来源（Ingress 暴露的域名）

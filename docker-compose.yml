@@ -57,6 +57,8 @@ services:
       - AEROFLEET_ENCRYPTION_KEY=compose-dev-encryption-key-0123456789abcdef
       # 与上面 postgres 服务的 POSTGRES_PASSWORD 对齐（prod profile 打 localhost:5432）
       - SPRING_DATASOURCE_PASSWORD=aerofleet_dev_password
+      # 本编排是本地演示栈，显式选择模拟监管平台；生产部署必须改为真实 uom。
+      - AEROFLEET_REGULATOR_SINK_TYPE=sim
     depends_on:
       - postgres
       - redis

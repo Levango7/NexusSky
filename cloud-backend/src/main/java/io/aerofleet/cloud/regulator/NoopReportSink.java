@@ -18,8 +18,8 @@ import org.springframework.stereotype.Component;
 /**
  * 监管上报通道空实现（Noop）。
  * <p>
- * 默认实现：配置项 {@code aerofleet.regulator.sink-type} 缺失或为 {@code none} 时激活
- * （显式配置 {@code sim}/{@code uom} 时由对应实现接管）。
+ * 仅在 {@code dev}/{@code test}/{@code default} profile 且配置项
+ * {@code aerofleet.regulator.sink-type} 缺失或为 {@code none} 时激活；生产/预发不装配。
  * 所有操作均返回默认成功结果，不发起任何网络调用，
  * 仅在 DEBUG 级别输出日志，适用于开发/测试环境。
  */
