@@ -172,7 +172,8 @@
 | 指标 | NexusSky | 大疆 Cloud API | PX4 SDK | MAVProxy | AirSim |
 |---|---|---|---|---|---|
 | **扩展消息数量** | 52 条 (msgId 30000-30064，区间含空号) | N/A | N/A | N/A | N/A |
-| **测试基线** | 6147 tests | N/A | N/A | N/A | N/A |
+| **测试基线** | 6139 tests | N/A | N/A | N/A | N/A |
+bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 ---
 
 ## 四、竞争策略

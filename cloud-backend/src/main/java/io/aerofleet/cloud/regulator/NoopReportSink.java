@@ -12,6 +12,7 @@ import io.aerofleet.cloud.regulator.model.VerifyStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
@@ -24,6 +25,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @ConditionalOnProperty(name = "aerofleet.regulator.sink-type", havingValue = "none", matchIfMissing = true)
+@Profile({"dev", "test", "default"})
 public class NoopReportSink implements RegulatorReportSink {
 
     private static final Logger log = LoggerFactory.getLogger(NoopReportSink.class);
