@@ -236,15 +236,11 @@ class TelemetryWriteOffThreadTest {
     }
 
     @Test
-    @DisplayName("反射派生的插入列与 V18 DDL 的列逐项一致（防实体与迁移漂移）")
-    void insertColumnsMatchV18Ddl() throws Exception {
+    @DisplayName("反射派生的插入列与 V18 + 后续 ALTER 的列逐项一致（防实体与迁移漂移）")
+    void insertColumnsMatchDdl() throws Exception {
         // 批量插入的列来自实体注解，不再来自手写 SQL —— 于是"改了 @Column 忘了改迁移"
         // 变成运行期才炸的错误。这条测试把它提前到 CI。
-        String ddl;
-        try (var in = getClass().getResourceAsStream("/db/migration/V18__flight_log_table.sql")) {
-            assertThat(in).as("V18 迁移应在 classpath 上").isNotNull();
-            ddl = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        }
+        String ddl = readMigration("/db/migration/V18__flight_log_table.sql");
         String body = ddl.substring(ddl.indexOf("CREATE TABLE IF NOT EXISTS flight_log"));
         body = body.substring(body.indexOf('(') + 1, body.indexOf(");"));
         List<String> ddlColumns = new java.util.ArrayList<>();
@@ -255,11 +251,26 @@ class TelemetryWriteOffThreadTest {
             }
             ddlColumns.add(l.split("\\s+")[0]);
         }
+        // 后续迁移用 ALTER TABLE ... ADD COLUMN 追加的列（现行：V42 的 task_id/formation_id/seq）。
+        // 只认 flight_log 的 ADD COLUMN，避免把别的表列混进来。
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(?i)ALTER\\s+TABLE\\s+flight_log\\s+ADD\\s+COLUMN\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?([a-z_]+)")
+                .matcher(readMigration("/db/migration/V42__flight_log_task_seq.sql"));
+        while (m.find()) {
+            ddlColumns.add(m.group(1).toLowerCase());
+        }
         assertThat(ddlColumns).contains("id");
         assertThat(FlightLogEntity.insertColumnNames())
-                .as("插入列必须正好等于 V18 里除主键外的所有列")
+                .as("插入列必须正好等于迁移里除主键外的所有列")
                 .containsExactlyInAnyOrderElementsOf(
                         ddlColumns.stream().filter(c -> !c.equals("id")).toList());
+    }
+
+    private String readMigration(String resource) throws Exception {
+        try (var in = getClass().getResourceAsStream(resource)) {
+            assertThat(in).as("%s 应在 classpath 上", resource).isNotNull();
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
     }
 
     private Path jsonlFile() {
