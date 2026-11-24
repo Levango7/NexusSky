@@ -87,7 +87,7 @@ fi
 step "启动 cloud-backend"
 BACKEND_JAR="$ROOT/cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar"
 [ -f "$BACKEND_JAR" ] || { echo "[ERROR] cloud-backend jar 不存在"; exit 1; }
-java -jar "$BACKEND_JAR" &
+java -jar "$BACKEND_JAR" --aerofleet.regulator.sink-type=sim &
 BACKEND_PID=$!
 info "cloud-backend PID=$BACKEND_PID"
 

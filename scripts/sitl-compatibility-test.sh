@@ -120,7 +120,7 @@ else
   echo "   ⚠️  cloud-backend 未检测到，尝试自动启动..."
   JAR="$PROJECT_ROOT/cloud-backend/target/aerofleet-cloud-backend-0.1.0-SNAPSHOT.jar"
   if [ -f "$JAR" ]; then
-    java -jar "$JAR" > /tmp/nexus-cloud.log 2>&1 &
+    java -jar "$JAR" --aerofleet.regulator.sink-type=sim > /tmp/nexus-cloud.log 2>&1 &
     CLOUD_PID=$!
     echo "   等待 cloud-backend 启动 (PID=$CLOUD_PID)..."
     for i in $(seq 1 30); do

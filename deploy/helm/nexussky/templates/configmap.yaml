@@ -9,6 +9,10 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
 data:
   SPRING_PROFILES_ACTIVE: {{ .Values.cloudBackend.springProfile | quote }}
+  {{- if .Values.cloudBackend.regulatorSinkType }}
+  # prod/staging 必须显式选择；留空时不注入，让后端 fail-closed。
+  AEROFLEET_REGULATOR_SINK_TYPE: {{ .Values.cloudBackend.regulatorSinkType | quote }}
+  {{- end }}
   AEROFLEET_SECURITY_DEV_MODE: {{ .Values.security.devMode | quote }}
   AEROFLEET_SECURITY_ALLOWED_ORIGINS: {{ .Values.security.allowedOrigins | quote }}
   AEROFLEET_SECURITY_JWT_EXPIRY: {{ .Values.security.jwtExpiry | quote }}

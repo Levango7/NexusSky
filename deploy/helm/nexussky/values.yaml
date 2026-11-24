@@ -36,6 +36,11 @@ cloudBackend:
   image: nexussky/cloud-backend
   port: 8080
   springProfile: prod
+  # 监管上报通道 sink：prod/staging 缺省不装配 Noop，必须显式选择 sim 或 uom，
+  # 否则后端因无 RegulatorReportSink bean 启动失败（fail-closed）。
+  # sim 仅用于评估/试用/演练；uom 用于真实 CAAC UOM（需另配 API Key）。
+  # 切勿设 none——它只在 dev/test/default profile 下由 NoopReportSink 消费。
+  regulatorSinkType: ""
   resources:
     requests:
       cpu: 250m

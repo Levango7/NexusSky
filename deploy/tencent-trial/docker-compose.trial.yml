@@ -75,6 +75,7 @@ services:
     image: ghcr.io/levango7/nexussky/cloud-backend:${IMAGE_TAG:-latest}
     environment:
       - SPRING_PROFILES_ACTIVE=prod
+      - AEROFLEET_REGULATOR_SINK_TYPE=sim
       - TZ=Asia/Shanghai
       # 2 vCPU / 2G 机专用 JVM 参数：SerialGC（低开销）、显式堆、限制 metaspace。
       # 镜像 ENTRYPOINT 是 `java $JAVA_OPTS -jar app.jar`，此处覆盖镜像默认的

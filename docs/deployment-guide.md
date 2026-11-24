@@ -48,6 +48,11 @@ docker-compose down
 > 它们长度达标，会原样通过后端既有的「JWT secret ≥32 字节」强度校验——所以从本版本起
 > chart 在 `helm install/template` 阶段直接 `fail`，后端 `DeploymentSecretsGuard` 启动时
 > 也会拒绝，两级都不给「安静地用公开字符串当密钥」留机会。
+>
+> `prod`/`staging` 还必须显式选择监管上报通道：真实部署设
+> `cloudBackend.regulatorSinkType=uom`；仅评估/试用/演练可显式设 `sim`。
+> 留空时 chart 不注入该键，后端会因无 `RegulatorReportSink` bean 启动失败（fail-closed），
+> 不会再用全成功的 Noop 兜底。
 
 ```bash
 cd deploy/helm/nexussky
@@ -60,6 +65,8 @@ helm install nexussky . -f my-values.yaml
 #     encryptionKey: "<≥32 字符随机串>"
 #   database:
 #     password: "<真实库口令>"
+#   cloudBackend:
+#     regulatorSinkType: "uom"
 
 # 或临时用 --set（会留在 shell history 里，仅适合本地验证）
 helm install nexussky . \

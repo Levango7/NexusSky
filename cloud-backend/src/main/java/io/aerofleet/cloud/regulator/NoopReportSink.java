@@ -12,18 +12,20 @@ import io.aerofleet.cloud.regulator.model.VerifyStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
  * 监管上报通道空实现（Noop）。
  * <p>
- * 默认实现：配置项 {@code aerofleet.regulator.sink-type} 缺失或为 {@code none} 时激活
- * （显式配置 {@code sim}/{@code uom} 时由对应实现接管）。
+ * 仅在 {@code dev}/{@code test}/{@code default} profile 且配置项
+ * {@code aerofleet.regulator.sink-type} 缺失或为 {@code none} 时激活；生产/预发不装配。
  * 所有操作均返回默认成功结果，不发起任何网络调用，
  * 仅在 DEBUG 级别输出日志，适用于开发/测试环境。
  */
 @Component
 @ConditionalOnProperty(name = "aerofleet.regulator.sink-type", havingValue = "none", matchIfMissing = true)
+@Profile({"dev", "test", "default"})
 public class NoopReportSink implements RegulatorReportSink {
 
     private static final Logger log = LoggerFactory.getLogger(NoopReportSink.class);

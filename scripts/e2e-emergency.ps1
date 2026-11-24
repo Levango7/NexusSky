@@ -169,6 +169,7 @@ if (-not $backendRunning) {
 
     $backend = Start-Process -FilePath $java -ArgumentList @(
         '-jar', $backendJar,
+        '--aerofleet.regulator.sink-type=sim',
         '-Demergency-e2e=true'
     ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $backendLog
     Register-Cleanup { Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue }
