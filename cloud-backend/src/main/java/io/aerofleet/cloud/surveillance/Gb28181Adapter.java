@@ -506,6 +506,17 @@ public class Gb28181Adapter implements VendorAdapter {
         return true;
     }
 
+    /**
+     * PTZ 下发：<b>false</b>。{@link #ptzControl} 当前只把动作编码成国标 A50F
+     * 指令码（hex）返回，<b>没有</b>经 {@code Gb28181SipTransport} 真发 SIP MESSAGE
+     * 给设备——与事件订阅（真发 SUBSCRIBE + 收 NOTIFY，故上者 true）不同。
+     * REST 层据此返回 501，而不是 200 + hex 的假成功。待接入真下发后改回 true。
+     */
+    @Override
+    public boolean supportsPtzDelivery() {
+        return false;
+    }
+
     /** 报警订阅：真发 SUBSCRIBE，返回可注销 handle。 */
     @Override
     public String subscribeEvents(SurveillanceDevice device, Consumer<String> callback) {

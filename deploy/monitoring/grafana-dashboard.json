@@ -393,7 +393,7 @@
       },
       "targets": [
         {
-          "expr": "drones_online",
+          "expr": "aerofleet_drones_online",
           "legendFormat": "Drones Online",
           "refId": "A"
         }

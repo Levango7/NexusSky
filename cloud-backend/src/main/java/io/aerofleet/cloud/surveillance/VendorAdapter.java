@@ -109,6 +109,21 @@ public interface VendorAdapter {
     }
 
     /**
+     * 本适配器的 PTZ 命令是否真的下发到设备。
+     *
+     * <p>默认 {@code true}：ONVIF 等适配器真发 PTZ 请求到设备。
+     * 只把命令编码成信令字节、没有传输层下发的适配器（GB28181 当前仅
+     * {@code encodeHex} 生成 A50F 指令码、未真发 SIP MESSAGE）覆写为
+     * {@code false}——REST 层据此在调用前返回 501，而不是 200 + 一串看似成功的
+     * hex，让调用方误以为云台已动作。口径同 {@link #supportsEventSubscription()}。
+     *
+     * @return true 表示 PTZ 真下发到设备
+     */
+    default boolean supportsPtzDelivery() {
+        return true;
+    }
+
+    /**
      * 获取设备能力集合。
      * <p>
      * 返回设备支持的服务类型，如 "Device"、"Media"、"PTZ"、"Events"、"Imaging" 等。

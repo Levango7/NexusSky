@@ -404,27 +404,22 @@ class SurveillanceControllerTest {
     }
 
     @Test
-    @DisplayName("PTZ 按厂商路由：GB28181 设备返回国标 A50F 指令码（camelCase 契约在适配器内翻译）")
+    @DisplayName("PTZ 按厂商路由：GB28181 设备未真下发 → 501 不假成功（非 200 + hex）")
     void ptzControl_gb28181Device_routesToGbAdapter() throws Exception {
         String gbId = "34020000001321320001";
         mockMvc.perform(post("/api/v1/surveillance/devices")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(deviceBody(gbId, "GB28181"))));
 
-        // 契约命令 zoomIn（camelCase）→ 国标放大位 0x80（此前直连 ONVIF 时该调用必然失败）
+        // GB28181 PTZ 只 encodeHex、未真发 SIP MESSAGE：路由到 GB 适配器后
+        // supportsPtzDelivery=false → 如实 501，而非 200 + A50F hex 假成功。
         mockMvc.perform(post("/api/v1/surveillance/devices/" + gbId + "/ptz")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("cmd", "zoomIn"))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("ok"))
-                .andExpect(jsonPath("$.result").value("A50F0180"));
-
-        // stop → 国标「无动作位」（0x00）
-        mockMvc.perform(post("/api/v1/surveillance/devices/" + gbId + "/ptz")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("cmd", "stop"))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.result").value("A50F0100"));
+                .andExpect(status().isNotImplemented())
+                .andExpect(jsonPath("$.status").value("error"))
+                .andExpect(jsonPath("$.result").value(
+                        org.hamcrest.Matchers.containsString("not implemented")));
     }
 
     @Test

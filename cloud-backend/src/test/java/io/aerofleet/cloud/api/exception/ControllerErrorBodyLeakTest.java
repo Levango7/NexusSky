@@ -149,6 +149,9 @@ class ControllerErrorBodyLeakTest {
     void surveillancePtzFailureReturnsGenericBody() throws Exception {
         VendorAdapter adapter = mock(VendorAdapter.class);
         when(adapter.getVendor()).thenReturn(Vendor.HIKVISION);
+        // 本用例测「真下发路径失败 → 502」：stub 支持真下发，否则 mock 的
+        // supportsPtzDelivery 默认 false 会在调 adapter 前被 501 闸拦下。
+        when(adapter.supportsPtzDelivery()).thenReturn(true);
         doThrow(new RuntimeException(CANARY)).when(adapter).ptzControl(any(), anyString());
         var registry = new SurveillanceDeviceRegistry();
         registry.register(new SurveillanceDevice(
