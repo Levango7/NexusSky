@@ -571,6 +571,7 @@ EOF
     ( cd "$1" \
       && git init -q . \
       && git config user.email t@t && git config user.name t \
+      && git config core.autocrlf false \
       && printf 'line1\nline2\n' > a.txt \
       && git add -A && git commit -q -m init \
       && git update-ref refs/remotes/origin/master HEAD ) >/dev/null 2>&1
