@@ -178,8 +178,7 @@ Part 108 BVLOS：NPRM 于 2025-08-11 发布（FAA+TSA，适用 ≤600kg、性能
 
 ## 6. NexusSky 差距分析与建设优先级（v2 修订）
 
-对照第 3.8 节矩阵与项目现状（6157 单测、M0a–M13+4a+P2/P3 收尾、79 @RestController）。原则不变：协议抽象先行、数据源可替换、模拟器回归兜底。
-bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
+对照第 3.8 节矩阵与项目现状（6160 单测、M0a–M13+4a+P2/P3 收尾、79 @RestController）。原则不变：协议抽象先行、数据源可替换、模拟器回归兜底。
 ### P0 —— 合规入场券（2026-11-01 过渡期是硬 deadline）
 
 1. **UOM 数据对接层**：MH/T 3030 三项交互（实名状态验证/激活上报/注销）+ 遥测上报通道，抽象为 `RegulatorReportSink`（UOM 第一个实现，USSP/出海合规后续实现），落在 `cloud-backend` 新包 `regulator`。
@@ -211,7 +210,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
 - [ ] P0-1 `regulator` 包：MH/T 3030 三项接口 + 模拟监管平台（link-sim 模式）+ e2e
 - [ ] P0-2 `OPEN_DRONE_ID` 消息族（对齐官方 c_library_v2，GB 46750 字段映射表）
 - [ ] P0-3 围栏起飞前硬拦截链 + 限飞区数据源接口
-- [ ] P0-4 PostgreSQL（drone/mission/flightlog 三域）
+- [x] P0-4 PostgreSQL（drone/mission/flightlog 三域）（2026-11：`devices`、`flight_log` 与新增 `drone_missions` 均纳入 Flyway/PostgreSQL；任务域保存每架无人机最近一次成功上传或成功下载的 REST 所用航点快照，飞控确认失败不覆盖旧快照。离线下载回读云端快照并标 `source=cloud`，在线下载标 `source=drone`；撤销设备同步删任务行，改归属同步任务租户。dev/test 默认内存，prod/staging 由 `aerofleet.mission.persist=true` 开启；H2+Flyway+实体映射校验与重启水合已通过，真实 PostgreSQL 15.19 的 Pass C 已通过：V44 success=true，1 航点上传→重启回读 `source=cloud`/`count=1`，撤销后任务行=0）
 - [ ] P0-5 MAVLink v2 signing + link-sim 篡改画像
 - [ ] P1-6 ONNX 推理接入 + 识别率/误检比/处理时间评测面板（2026-11：#292 已交付评测层按 kind 拆分的识别率/误检比/处理时间面板与指标归账；平台侧 `ExternalVisionSource`（HTTP JPEG→`{kind,confidence,u,v}`）与配置/评测链路可对接 ONNX Runtime Server/Triton 等外部推理服务，并补充接入契约与参考服务（`docs/external-vision-inference.md`、`scripts/vision-inference-server.py`）；**进程内嵌入 onnxruntime 与内置行业模型**未纳入，仍待后续立项）
 - [x] P1-7 Dock 状态机 + 上云 API 适配器（MQTT 物模型）+ 利用率健康度度量（2026-11：已交付 Dock 状态机/状态流转与 run/state 持久化、无人值守定时任务、`MqttDockGateway`/OSD 基于 DJI Cloud API `thing/product/{sn}/services` 等 MQTT 物模型通道的适配（含 sim 对端语义，命令未按真实 DJI 官方 method 全量映射）、`DockMetricsService` 日结/rollup 利用率与可用性/故障/温控/充电等健康度指标及面板展示；未覆盖真实 DJI HTTPS/WebSocket 全链路与真机联调，按当前 PoC/实现口径验收）

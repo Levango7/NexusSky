@@ -54,7 +54,7 @@
   `ddl-auto=validate` 3 例（建表恢复、撤销级联、改租户）。针对性 30/30 与 H2 3/3 已通过；
   全量 reactor 6160/6160（cloud-backend 3948），0 失败/错误/跳过，BUILD SUCCESS。
 - IT Pass C 增加活体 drone-sim 上传→停对端→重启回读→撤销→同号重登→再重启无旧快照
-  的真 PostgreSQL 断言；本机无可用 Docker daemon/PostgreSQL 工具，真库执行待 CI。
+  的真 PostgreSQL 断言；PostgreSQL 15.19 真库 Pass C 已通过，V44 success=true，1 航点上传→重启回读 source=cloud/count=1，撤销后任务行=0。
 - 同步 README、API reference、安全设计、需求路线图与 CI 门禁说明。
 
 ## [Unreleased] — feat(gate): API 响应字段契约门禁（路径存在 ≠ 字段还在）
