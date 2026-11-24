@@ -14,6 +14,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -63,5 +64,32 @@ class ScenarioRegistryServiceTest {
         verify(jdbc).queryForList(sql.capture(), args.capture());
         assertThat(sql.getValue()).contains("building_id=?");
         assertThat(args.getValue()).containsExactly(1, "B-1");
+    }
+
+    @Test
+    @DisplayName("PUT 只更新提供的字段，DELETE 带租户条件")
+    void updateAndDelete() {
+        when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1, 1);
+        assertThat(service.updateBalconyDropPoint("p1", Map.of("floor", 13)))
+                .containsEntry("updated", true);
+        assertThat(service.deleteEmergencyRole("e1")).containsEntry("deleted", true);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc, times(2)).update(sql.capture(), args.capture());
+        assertThat(sql.getAllValues().get(0))
+                .contains("update balcony_drop_point set floor=?")
+                .contains("where point_id=? and tenant_id=?");
+        assertThat(args.getAllValues().get(0)).containsExactly(13, "p1", 1);
+        assertThat(sql.getAllValues().get(1))
+                .isEqualTo("delete from emergency_node_role where role_id=? and tenant_id=?");
+    }
+
+    @Test
+    @DisplayName("PUT 未提供任何可更新字段时抛 BadRequestException")
+    void rejectsEmptyUpdate() {
+        assertThatThrownBy(() -> service.updateBalconyDropPoint("p1", Map.of()))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("no updatable fields");
     }
 }

@@ -41,6 +41,7 @@ export const VIEW_LABELS = {
   aidecision: 'AI 决策',
   fleetops: '机队协同',
   scenariolib: '场景库',
+  scenarioreg: '场景注册表',
   inspection: '智能巡检',
   health: '健康管理',
   commadapt: '通信自适应',
@@ -66,7 +67,7 @@ export const VIEW_GROUPS = [
   { key: 'mission', label: '任务', views: ['routetpl', 'mapping', 'terrain', 'tracking', 'geofence', 'inspection', 'weather', 'defect'] },
   { key: 'emergency', label: '应急', views: ['emergency', 'roc', 'sensing', 'alarm', 'autodispatch', 'scenariolib', 'voicecmd', 'unifiedcmd', 'citytwin', 'disastercomm'] },
   { key: 'comms', label: '通信', views: ['mesh', 'celltower', 'satlink', 'commadapt', 'linkquality', 'videofusion', 'thermal'] },
-  { key: 'ops', label: '运营', views: ['surveillance', 'dronelock', 'dock', 'fleetops', 'aidecision', 'delivery', 'show', 'opsreport', 'health'] },
+  { key: 'ops', label: '运营', views: ['surveillance', 'dronelock', 'dock', 'fleetops', 'aidecision', 'delivery', 'show', 'opsreport', 'health', 'scenarioreg'] },
   { key: 'compliance', label: '合规', views: ['rid', 'cveval'] },
   { key: 'admin', label: '管理', views: ['tenants', 'users'], adminOnly: true },
 ]

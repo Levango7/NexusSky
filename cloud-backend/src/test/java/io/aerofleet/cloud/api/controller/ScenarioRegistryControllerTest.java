@@ -55,4 +55,15 @@ class ScenarioRegistryControllerTest {
         when(service.createEmergencyRole(any())).thenReturn(Map.of("id", "e1"));
         assertThat(controller.createEmergencyRole(Map.of("sysid", 9, "role", "RELAY"))).containsKey("id");
     }
+
+    @Test
+    @DisplayName("PUT/DELETE 委托服务层并返回结果")
+    void updateAndDelete() {
+        when(service.updateBalconyDropPoint("p1", Map.of("floor", 13)))
+                .thenReturn(Map.of("id", "p1", "updated", true));
+        assertThat(controller.updateBalconyDropPoint("p1", Map.of("floor", 13)))
+                .containsEntry("updated", true);
+        when(service.deleteAgriSupply("a1")).thenReturn(Map.of("id", "a1", "deleted", true));
+        assertThat(controller.deleteAgriSupply("a1")).containsEntry("deleted", true);
+    }
 }
