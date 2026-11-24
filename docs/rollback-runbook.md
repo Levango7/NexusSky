@@ -263,3 +263,77 @@ kubectl -n nexussky exec "$POD" -- \
 - `docs/devops-enhancement-plan.md:161`——CD4 原始缺口描述（🔴 无自动回滚）。
 - issue #323——本手册所属议题（L2 自动回滚 / L3 迁移门禁）。
 - issue #324——Canary 灰度发布；灰度期间新旧版本共享同一 schema，**任何破坏性迁移都会让本手册失效**。
+
+---
+
+## 10. flight_log 分区切换（维护窗口）与回滚预案
+
+**状态：演练通过，生产未执行。** 本节只描述 procedure；生产执行需要真实库规模与停机窗口。
+
+### 10.1 前置条件（缺一不可）
+
+1. `pg_dump -Fc` 全量备份，且 `pg_restore --list` 能列出内容；备份文件单独留存。
+2. 停写入或把应用切只读；记录切换前 `max(id)`、`count(*)`、`min/max(timestamp)`。
+3. **在演练库先完整跑一遍**（含切换 + 回滚）。蓝图见 `deploy/postgres/flight_log_partitioning.sql`。
+4. PG15 实测限制：分区父表上的 UNIQUE 索引必须包含全部分区键，因此 V42 的
+   `(tenant_id, sysid, seq)` 去重索引只能在**每个子分区**上建（蓝图里的建分区函数已处理）。
+5. 切换时**不要重命名 IDENTITY 序列**：新表序列仍叫 `flight_log_p_id_seq`，与旧表并存；
+   改名会和旧表的 `flight_log_id_seq` 撞名（演练实测报错 `relation already exists`）。
+
+### 10.2 步骤（按顺序，逐条核对）
+
+```sql
+-- 1) 建父表 + 历史月份分区 + 查询索引（执行 deploy/postgres/flight_log_partitioning.sql）
+-- 2) 回填（显式列顺序，与 FlightLogEntity 一致）
+INSERT INTO flight_log_p (timestamp,type,sysid,lat,lon,relative_alt,groundspeed,
+    battery,voltage,mode,armed,online,severity,text,tenant_id,task_id,formation_id,seq)
+SELECT timestamp,type,sysid,lat,lon,relative_alt,groundspeed,
+    battery,voltage,mode,armed,online,severity,text,tenant_id,task_id,formation_id,seq
+FROM flight_log;
+
+-- 3) 校验：两表的 count / min / max / sum(id) 必须完全一致
+SELECT count(*), min(timestamp), max(timestamp), sum(id) FROM flight_log;
+SELECT count(*), min(timestamp), max(timestamp), sum(id) FROM flight_log_p;
+-- 分区裁剪确认（EXPLAIN 只出现一个月份子表）
+EXPLAIN (COSTS OFF) SELECT count(*) FROM flight_log_p
+  WHERE timestamp >= '2026-11-01' AND timestamp < '2026-12-01';
+
+-- 4) 切换（事务内，秒级）
+BEGIN;
+  ALTER TABLE flight_log RENAME TO flight_log_legacy;
+  ALTER TABLE flight_log_p RENAME TO flight_log;
+COMMIT;
+
+-- 5) 切换后写入验证（IDENTITY 仍能生成 id）
+INSERT INTO flight_log (timestamp,type,sysid,tenant_id,task_id,seq)
+VALUES (now(),'telemetry',1,1,'post-cutover',99999999) RETURNING id;
+```
+
+### 10.3 回滚（观察期内发现问题）
+
+```sql
+BEGIN;
+  ALTER TABLE flight_log RENAME TO flight_log_p;
+  ALTER TABLE flight_log_legacy RENAME TO flight_log;
+COMMIT;
+```
+
+回滚后核对 `count(*)` 与 `max(id)` 与切换前一致；确认放弃切换后再单独
+`DROP TABLE flight_log_legacy`（属破坏性操作，需在本手册登记并走审批）。
+**观察期内不要删 legacy 表**——它是唯一一条瞬时回滚路径。
+
+### 10.4 演练实测（2026-11-24，专用 PG 15.19 容器，1M 行跨 4 个月）
+
+| 步骤 | 实测 |
+|---|---|
+| 构造源表 + 1M 行 | 5.86 s，1,000,000 行 |
+| 建分区父表 + 4 个月分区 + 索引 | 0.28 s |
+| 回填 `INSERT ... SELECT` | 9.20 s，1,000,000 行 |
+| 校验 | 两表 `count=1,000,000`、`min=2026-10-01 00:00:10+00`、`max=2027-01-24 17:46:40+00`、`sum(id)=500000500000` 一致 |
+| 分区裁剪 | EXPLAIN 只扫 `flight_log_p_2026_11` |
+| 切换 | 0.20 s；应用式 INSERT 返回 `id=1000001`，IDENTITY 正常 |
+| 回滚 | 0.17 s；原表行数/时间范围不变 |
+| 体积 | 源表 244 MB；分区子表合计 323 MB（父表本身 0 字节，尺寸要按子表求和） |
+
+踩坑并修正：① 父表 UNIQUE 不含分区键 → PG 报错 `unique constraint on partitioned table must include all partitioning columns`；
+② 切换时改序列名撞旧序列。两处都已修进蓝图 SQL 与本节。**生产体量未执行**，数字只是机制演练。
