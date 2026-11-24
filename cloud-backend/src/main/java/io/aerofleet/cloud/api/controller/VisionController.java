@@ -9,6 +9,7 @@ import io.aerofleet.cloud.vision.OrbitService;
 import io.aerofleet.cloud.vision.TargetTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -53,11 +54,11 @@ public class VisionController {
      */
     @PostMapping("/drones/{sysid}/capture")
     @RequireRole(Role.OPERATOR)
-    public Map<String, Object> captureAndLocate(@PathVariable("sysid") int sysid,
+    public ResponseEntity<Map<String, Object>> captureAndLocate(@PathVariable("sysid") int sysid,
                                                 @RequestParam(value = "source", required = false)
                                                 String source) {
         try {
-            return capture.captureAndLocate(sysid, source);
+            return ResponseEntity.ok(capture.captureAndLocate(sysid, source));
         } catch (Exception e) {
             // 三处都不能省：① 日志必须带 throwable——只打 getMessage() 时 NPE 之类
             // 的异常消息是 null，日志只剩一行 "failed: null"，什么都归因不了；
@@ -66,11 +67,15 @@ public class VisionController {
             // ③ 用 LinkedHashMap 而非 Map.of——null value 会在 catch 里再抛一个
             //    NPE，把 500 和真正的异常一起冲掉（2026-10-13 e2e-vision-pixels
             //    实测：pixels 管道失败 → 500，响应体里只有 internal error: NullPointerException）。
+            //
+            // P1-2 假成功修复：以前直接 return Map，Spring 默认序列化为 HTTP 200，
+            // 调用方看到 200 就当成功、视觉管道其实已失败。现在返回 500，让传输层
+            // 就能区分成败；body 仍保留 {status:error,result:...} 形状向后兼容。
             log.warn("vision pipeline failed for sysid={}", sysid, e);
             Map<String, Object> err = new java.util.LinkedHashMap<>();
             err.put("status", "error");
             err.put("result", ClientErrorBodies.INTERNAL_SERVER_ERROR);
-            return err;
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(err);
         }
     }
 

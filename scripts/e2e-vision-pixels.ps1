@@ -113,12 +113,16 @@ try {
     # 后端需以 --aerofleet.vision.source=pixels + --aerofleet.sim-truth-base=http://127.0.0.1:18082
     # 启动（见文件头）。此处拍一张，断言 detections 不带 id（id=-1 或缺失）即证明走了 pixels 管道。
     Step 'pixels 模式单拍 -> 检测 -> 解算'
-    $cap = Invoke-RestMethod -Method Post -Uri "$Base/vision/drones/12/capture" -TimeoutSec 30
-    # 后端把异常转成 {status:error,result:...}（HTTP 200），这里先拦一层：
-    # 否则下面 $cap.detections 取不到只会当成"0 个检测"，看不出是后端拉不到 JPEG。
-    if ($cap.status -eq 'error') {
+    # P1-2 起：后端视觉管道内部失败返回 HTTP 500（不再 200 + {status:error} 假成功）。
+    # Invoke-RestMethod 对 5xx 直接抛异常，这里 catch 住打印状态码+排查提示；
+    # 否则下面 $cap.detections 取不到只会当成「0 个检测」，看不出是后端拉不到 JPEG。
+    try {
+        $cap = Invoke-RestMethod -Method Post -Uri "$Base/vision/drones/12/capture" -TimeoutSec 30
+    } catch {
+        $code = $null
+        if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
         Stop-Process -Id $sim.Id -Force -ErrorAction SilentlyContinue
-        Write-Host ("   capture 失败: " + $cap.result) -ForegroundColor Red
+        Write-Host ("   capture 失败 (HTTP $code): 后端视觉管道内部异常") -ForegroundColor Red
         Write-Host '   检查后端是否按文件头启动（--aerofleet.vision.source=pixels --aerofleet.sim-truth-base=http://127.0.0.1:18082）' -ForegroundColor Red
         Write-Host 'PIXELS E2E FAILED' -ForegroundColor Red
         exit 1

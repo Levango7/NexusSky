@@ -256,8 +256,11 @@ class ControllerErrorBodyLeakTest {
                 mock(io.aerofleet.cloud.vision.OrbitService.class),
                 mock(OrbitJobManager.class), mock(io.aerofleet.cloud.vision.TargetTracker.class));
 
-        Map<String, Object> result = controller.captureAndLocate(7, null);
+        var resp = controller.captureAndLocate(7, null);
 
+        // P1-2：内部失败必须 5xx（不再 200 假成功），且响应体不回显内部细节。
+        assertThat(resp.getStatusCode().value()).isEqualTo(500);
+        Map<String, Object> result = resp.getBody();
         assertThat(result.get("status")).isEqualTo("error");
         assertThat(String.valueOf(result.get("result"))).doesNotContain(CANARY);
     }
