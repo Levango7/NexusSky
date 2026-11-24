@@ -49,12 +49,28 @@
   `check-persist-switches` 已纳入对账。状态性守卫补登 DeviceRegistry 与 MissionPlanStore，
   十二域均有实体/仓库/迁移/水合证据；同时修复 `check-statefulness.py --print` 四元返回值
   解包崩溃并补第 9 种自测。
-- 新增 13 例：Controller 4 例（成功保存、失败保留、离线回读、在线下载保存）、Store 6 例
-  （内存模式、重启水合、损坏 JSON、租户隔离、DB 故障、改租户/删除）、H2+Flyway+
-  `ddl-auto=validate` 3 例（建表恢复、撤销级联、改租户）。针对性 30/30 与 H2 3/3 已通过；
-  全量 reactor 6160/6160（cloud-backend 3948），0 失败/错误/跳过，BUILD SUCCESS。
+- 独立复核后补上并发与回滚证明：长任务完成同时校验设备实例、租户与内存租户代际，
+  A→B→A 也不能让旧结果落盘或回读；任务保存/离线回读、撤销、登记与改租户共用按设备
+  串行锁，离线扫描在持锁后重验设备实例与在线状态，避免扫描与撤销/重登互相覆盖。
+  任务开始捕获也在同一设备锁内读取设备实例、租户与代际，避免与并发改租户拼出混合身份；
+  两条确定性并发用例已用“把捕获移出锁”的临时变异证明会红，还原后转绿。
+  成功上传响应恢复 `source=cloud` 与 `updatedAt`；设备撤销、改租户与任务行变更处于同一事务，
+  内存变更延迟到提交后，新增真实事务执行后提交失败、数据库与内存双双回滚的证明。
+- 新增 33 例：Controller 15 例（成功保存、失败保留、离线回读、在线下载保存、空任务、
+  撤销/改租户竞态、失败回读竞态、保存与撤销串行、三类租户 ABA、捕获身份与改租户串行）、
+  Store 9 例（内存模式、重启水合、损坏 JSON、租户隔离、DB 故障、改租户/删除、空快照、
+  生命周期失败）、H2+Flyway+`ddl-auto=validate` 7 例（建表恢复、撤销级联、改租户、异常回滚、
+  设备/任务删除与改租户提交失败各一例）、DeviceRegistry 2 例（事务提交失败保留内存、
+  离线扫描与撤销串行）。针对性五类 77/77 连续三轮通过；重基线到 `origin/master`
+  `343e72ea` 后全量 reactor 6188/6188（cloud-backend 3976），752 个测试类，
+  0 失败/错误/跳过，8:57 BUILD SUCCESS。
 - IT Pass C 增加活体 drone-sim 上传→停对端→重启回读→撤销→同号重登→再重启无旧快照
-  的真 PostgreSQL 断言；PostgreSQL 15.19 真库 Pass C 已通过，V44 success=true，1 航点上传→重启回读 source=cloud/count=1，撤销后任务行=0。
+  的真 PostgreSQL 断言，并显式保留主线的 `--aerofleet.regulator.sink-type=sim`。
+  重基线后 PostgreSQL 15.19 真库 Pass A/B/C 全部通过，43 个迁移成功；独立 psql 复核
+  `V44 installed_rank=43/success=true`，1 航点上传后重启回读 source=cloud/count=1/updatedAt，
+  撤销后任务行=0（sysid=231 也为 0）。
+- 状态板 T8 夹具固定 `core.autocrlf=false`，避免 Windows 全局配置把“无属性覆盖的
+  CRLF 字节差异”在入库时归一成 LF，导致判别性断言假红。
 - 同步 README、API reference、安全设计、需求路线图与 CI 门禁说明。
 
 ## [Unreleased] — feat(gate): API 响应字段契约门禁（路径存在 ≠ 字段还在）
@@ -3680,7 +3696,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 327 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 328 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
