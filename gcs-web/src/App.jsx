@@ -31,6 +31,7 @@ import DockPanel from './components/DockPanel.jsx'
 import DroneLockPanel from './components/DroneLockPanel.jsx'
 import AutoDispatchPanel from './components/AutoDispatchPanel.jsx'
 import ScenarioLibraryPanel from './components/ScenarioLibraryPanel.jsx'
+import ScenarioRegistryPanel from './components/ScenarioRegistryPanel.jsx'
 import InspectionPanel from './components/InspectionPanel.jsx'
 import HealthPanel from './components/HealthPanel.jsx'
 import CommAdaptPanel from './components/CommAdaptPanel.jsx'
@@ -402,6 +403,10 @@ export default function App() {
       ) : view === 'scenariolib' ? (
         <PanelWrapper>
           <ScenarioLibraryPanel />
+        </PanelWrapper>
+      ) : view === 'scenarioreg' ? (
+        <PanelWrapper>
+          <ScenarioRegistryPanel />
         </PanelWrapper>
       ) : view === 'inspection' ? (
         <PanelWrapper>

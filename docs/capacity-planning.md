@@ -109,7 +109,8 @@ Docker 默认 `/dev/shm` 64 MB 会让并行 VACUUM 失败
 - `formation_id` 已接入：`FlightLogService` 对遥测行调用
   `FormationService.formationIdFor(sysid)`（按租户过滤的成员关系，唯一真相源）写入；
   非遥测行仍为 NULL，历史行不回填。
-- 三张新表已有服务层与 REST API（见 `docs/api-reference.md` §场景注册表），但**没有 UI**；
-  仅提供基础写入与查询（POST 新增 + GET 查询，无 PUT/DELETE）。
+- 三张新表已有服务层与 REST API（见 `docs/api-reference.md` §场景注册表）及 GCS Web 管理面板
+  （「运营 → 场景注册表」）：POST 新增 / GET 查询 / PUT 部分更新 / DELETE 删除。
+  农资流水正常路径仍应 append-only，PUT/DELETE 只用于纠错。
 - 分区表蓝图未自动套用到生产表（需维护窗口），仓库门禁也会拦截含 DROP/RENAME 的自动迁移。
 - 生产 RTO 仍缺真实库规模输入；合成数据不能当生产数字。

@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.BadRequestException;
+import static io.aerofleet.cloud.api.exception.ApiExceptionHandler.NotFoundException;
 
 /**
  * V43 三张场景表的读写服务：阳台落点 / 农资流水 / 应急节点角色。
@@ -141,5 +142,102 @@ public class ScenarioRegistryService {
         }
         sql.append(" order by created_at_ms desc limit 200");
         return jdbc.queryForList(sql.toString(), args.toArray());
+    }
+
+    // ---------- 更新 / 删除（通用） ----------
+
+    private Map<String, Object> updateRow(String table, String idCol, String id,
+                                          Map<String, Object> body,
+                                          LinkedHashMap<String, String> fields) {
+        if (id == null || id.isBlank()) {
+            throw new BadRequestException("id is required");
+        }
+        List<Object> args = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("update ").append(table).append(" set ");
+        for (Map.Entry<String, String> f : fields.entrySet()) {
+            if (body != null && body.containsKey(f.getKey())) {
+                sql.append(f.getValue()).append("=?,");
+                args.add(body.get(f.getKey()));
+            }
+        }
+        if (args.isEmpty()) {
+            throw new BadRequestException("no updatable fields provided");
+        }
+        sql.setLength(sql.length() - 1);
+        sql.append(" where ").append(idCol).append("=? and tenant_id=?");
+        args.add(id);
+        args.add(tenant());
+        if (jdbc.update(sql.toString(), args.toArray()) == 0) {
+            throw new NotFoundException(table + " row not found: " + id);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", id);
+        out.put("updated", true);
+        return out;
+    }
+
+    private Map<String, Object> deleteRow(String table, String idCol, String id) {
+        if (id == null || id.isBlank()) {
+            throw new BadRequestException("id is required");
+        }
+        if (jdbc.update("delete from " + table + " where " + idCol + "=? and tenant_id=?",
+                id, tenant()) == 0) {
+            throw new NotFoundException(table + " row not found: " + id);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", id);
+        out.put("deleted", true);
+        return out;
+    }
+
+    public Map<String, Object> updateBalconyDropPoint(String id, Map<String, Object> body) {
+        LinkedHashMap<String, String> f = new LinkedHashMap<>();
+        f.put("buildingId", "building_id");
+        f.put("floor", "floor");
+        f.put("lat", "lat");
+        f.put("lon", "lon");
+        f.put("altM", "alt_m");
+        f.put("maxPayloadKg", "max_payload_kg");
+        f.put("allowedFromMs", "allowed_from_ms");
+        f.put("allowedToMs", "allowed_to_ms");
+        f.put("status", "status");
+        return updateRow("balcony_drop_point", "point_id", id, body, f);
+    }
+
+    public Map<String, Object> deleteBalconyDropPoint(String id) {
+        return deleteRow("balcony_drop_point", "point_id", id);
+    }
+
+    public Map<String, Object> updateAgriSupply(String id, Map<String, Object> body) {
+        LinkedHashMap<String, String> f = new LinkedHashMap<>();
+        f.put("taskId", "task_id");
+        f.put("sysid", "sysid");
+        f.put("supplyType", "supply_type");
+        f.put("action", "action");
+        f.put("quantity", "quantity");
+        f.put("unit", "unit");
+        f.put("balanceAfter", "balance_after");
+        f.put("operator", "operator");
+        return updateRow("agri_supply_ledger", "entry_id", id, body, f);
+    }
+
+    public Map<String, Object> deleteAgriSupply(String id) {
+        return deleteRow("agri_supply_ledger", "entry_id", id);
+    }
+
+    public Map<String, Object> updateEmergencyRole(String id, Map<String, Object> body) {
+        LinkedHashMap<String, String> f = new LinkedHashMap<>();
+        f.put("planId", "plan_id");
+        f.put("taskId", "task_id");
+        f.put("sysid", "sysid");
+        f.put("role", "role");
+        f.put("linkBudgetMs", "link_budget_ms");
+        f.put("seq", "seq");
+        f.put("status", "status");
+        return updateRow("emergency_node_role", "role_id", id, body, f);
+    }
+
+    public Map<String, Object> deleteEmergencyRole(String id) {
+        return deleteRow("emergency_node_role", "role_id", id);
     }
 }
