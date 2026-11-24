@@ -36,6 +36,26 @@
   与 2 处拆分。
 - 门禁复跑：`check-test-count-docs.py`、`check-doc-counts.py`、`check-repo-hygiene.py`、
   `check-coord-board.py`、`check-doc-endpoints.py`、`check-positioning-facts.py` 全绿。
+## [Unreleased] — feat(persistence): 无人机最近任务快照落库与离线回读（P0-4）
+
+- 新增 `MissionPlanEntity` / `MissionPlanRepository` / `MissionPlanStore` 与 Flyway V44
+  `drone_missions`：每架无人机只保留最近一次成功上传或成功下载的 REST 所用航点快照；
+  飞控确认失败不覆盖旧快照。协议传输序号、pending future、超时句柄、UDP 路由与限流窗口
+  不落库。
+- 下载成功标 `source=drone`；离线下载回读数据库快照并标 `source=cloud`、返回 `updatedAt`。
+  快照按租户隔离；撤销设备同步删任务行，设备改归属同步任务租户。数据库故障降级内存，
+  损坏 JSON 只跳过对应行，不阻断启动。
+- `aerofleet.mission.persist` 在 dev/test 默认 `false`，prod/staging 显式 `true`；
+  `check-persist-switches` 已纳入对账。状态性守卫补登 DeviceRegistry 与 MissionPlanStore，
+  十二域均有实体/仓库/迁移/水合证据；同时修复 `check-statefulness.py --print` 四元返回值
+  解包崩溃并补第 9 种自测。
+- 新增 13 例：Controller 4 例（成功保存、失败保留、离线回读、在线下载保存）、Store 6 例
+  （内存模式、重启水合、损坏 JSON、租户隔离、DB 故障、改租户/删除）、H2+Flyway+
+  `ddl-auto=validate` 3 例（建表恢复、撤销级联、改租户）。针对性 30/30 与 H2 3/3 已通过；
+  全量 reactor 6160/6160（cloud-backend 3948），0 失败/错误/跳过，BUILD SUCCESS。
+- IT Pass C 增加活体 drone-sim 上传→停对端→重启回读→撤销→同号重登→再重启无旧快照
+  的真 PostgreSQL 断言；本机无可用 Docker daemon/PostgreSQL 工具，真库执行待 CI。
+- 同步 README、API reference、安全设计、需求路线图与 CI 门禁说明。
 
 ## [Unreleased] — feat(gate): API 响应字段契约门禁（路径存在 ≠ 字段还在）
 
@@ -3633,7 +3653,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-18 共有 327 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-24 共有 328 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 

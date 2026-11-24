@@ -197,7 +197,7 @@ jobs:
       # 这里不加 `|| true`：脚本自己崩了属于工具故障，要响——那正是上面 --self-test 在挡的东西。
       - name: Unreferenced getter report (report-only, never red)
         run: python3 scripts/list-unreferenced-getters.py
-      # 审计 §6 第一条：§2.1「必须落库」九域，要么有持久化证据、要么豁免登记（理由+到期日）。
+      # 审计 §6 第一条：§2.1 起登记的十二域，要么有持久化证据、要么豁免登记（理由+到期日）。
       # 真事：这类债回退不响——改回纯内存、迁移表被删、水合调用被摘，编译/启动/测试可能
       # 全绿，只有重启后数据没了才知道。
       - name: Persistence statefulness gate

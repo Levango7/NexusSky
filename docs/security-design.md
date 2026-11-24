@@ -511,6 +511,11 @@ WebSocket CORS 通过 `WebSocketConfig.registerWebSocketHandlers()` 的 `setAllo
 | `aerofleet.device-registry.persist` | `false` | `true` | **必须与上一行成对**：白名单只认注册表里的 sysid，而陌生 sysid 的帧在进注册表之前就被丢弃。若注册表只在内存里，重启后 ADMIN 登记过的条目随之消失，白名单会重新变成"首台设备永远进不来"的死锁 |
 | `aerofleet.udp.max-frame-rate-per-sysid` | `100` | `100` | 单 sysid 每秒最大帧数 |
 
+`aerofleet.mission.persist` 控制每架无人机最近一次成功上传/下载的任务快照是否写入
+`drone_missions`：dev/test 默认 `false`，prod/staging 为 `true`。开启后启动时水合，
+离线下载可回读；撤销设备会同步删除任务行，设备改归属会同步任务租户。它不持久化
+MAVLink 传输序号、等待中的 future、超时句柄、UDP 路由或限流窗口等运行时状态。
+
 **为什么生产默认仍是 `0.0.0.0`（2026-10-06 复核修正）**
 
 本节曾表述为"生产应绑定内网网卡 IP"。复核后确认：**在容器化部署下保持 `0.0.0.0` 才是正确的**，理由是
@@ -583,6 +588,7 @@ aerofleet.license.enabled=true             # 启用 License 校验
 aerofleet.audit.enabled=true               # 启用审计日志
 aerofleet.udp.device-whitelist-enabled=true # 启用设备白名单
 aerofleet.device-registry.persist=true      # 白名单的成对项：登记条目必须跨重启保留
+aerofleet.mission.persist=true              # 最近成功任务快照跨重启保留，供离线回读
 springdoc.swagger-ui.enabled=false         # 禁用 Swagger UI
 management.endpoint.health.show-details=when-authorized  # 健康详情需认证
 ```
