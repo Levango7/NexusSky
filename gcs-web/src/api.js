@@ -1066,6 +1066,31 @@ export const api = {
     body: JSON.stringify({ role, enabled, tenantId, ...(password ? { password } : {}) }),
   }),
   deleteUser: (id) => jsonFetch(`${BASE}/users/${id}`, { method: 'DELETE' }),
+
+  // ---- 场景注册表（V43 三张表）----
+  listBalconyDropPoints: (buildingId) => jsonFetch(
+    buildingId
+      ? `${SCENARIO_BASE}/balcony-drop-points?buildingId=${encodeURIComponent(buildingId)}`
+      : `${SCENARIO_BASE}/balcony-drop-points`),
+  createBalconyDropPoint: (body) => jsonFetch(`${SCENARIO_BASE}/balcony-drop-points`, scenarioBody(body)),
+  updateBalconyDropPoint: (id, body) => jsonFetch(scenarioPath('balcony-drop-points', id), scenarioPut(body)),
+  deleteBalconyDropPoint: (id) => jsonFetch(scenarioPath('balcony-drop-points', id), { method: 'DELETE' }),
+
+  listAgriSupply: (taskId) => jsonFetch(
+    taskId
+      ? `${SCENARIO_BASE}/agri-supply-ledger?taskId=${encodeURIComponent(taskId)}`
+      : `${SCENARIO_BASE}/agri-supply-ledger`),
+  createAgriSupply: (body) => jsonFetch(`${SCENARIO_BASE}/agri-supply-ledger`, scenarioBody(body)),
+  updateAgriSupply: (id, body) => jsonFetch(scenarioPath('agri-supply-ledger', id), scenarioPut(body)),
+  deleteAgriSupply: (id) => jsonFetch(scenarioPath('agri-supply-ledger', id), { method: 'DELETE' }),
+
+  listEmergencyRoles: (planId) => jsonFetch(
+    planId
+      ? `${SCENARIO_BASE}/emergency-node-roles?planId=${encodeURIComponent(planId)}`
+      : `${SCENARIO_BASE}/emergency-node-roles`),
+  createEmergencyRole: (body) => jsonFetch(`${SCENARIO_BASE}/emergency-node-roles`, scenarioBody(body)),
+  updateEmergencyRole: (id, body) => jsonFetch(scenarioPath('emergency-node-roles', id), scenarioPut(body)),
+  deleteEmergencyRole: (id) => jsonFetch(scenarioPath('emergency-node-roles', id), { method: 'DELETE' }),
 }
 
 // ---- Dock (机巢管控 F2) ----
@@ -1526,6 +1551,16 @@ export async function stopRecording(deviceId) {
   return jsonFetch(`${VIDEO_FUSION_BASE}/recording/${deviceId}/stop`, { method: 'POST' })
 }
 
+// ---- 场景注册表（V43 三张表：阳台落点 / 农资流水 / 应急节点角色） ----
+const SCENARIO_BASE = '/api/v1/scenarios'
+const scenarioBody = (body) => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
+const scenarioPut = (body) => ({ ...scenarioBody(body), method: 'PUT' })
+const scenarioPath = (path, id) => `${SCENARIO_BASE}/${path}/${encodeURIComponent(id)}`
+
 // ---- 命名导出：tracking / geofence / droneLock / autodispatch / videostream / voiceintercom / scenarios / inspection / health / maintenance / commAdapt / mapping / voiceCmd / cityTwin / delivery / show / videoFusion（供面板组件 import）----
 export const {
   getFlightTrack, replayTrack, getLastKnown, getLostDrones, getSearchGuide, scanLostDrones,
@@ -1545,6 +1580,10 @@ export const {
   createCityModel, listCityModels, getCityModel, getCitySituation, createCitySimulation, getCitySimulation, createCityMarker, listCityMarkers,
   createDeliveryTask, listDeliveryTasks, getDeliveryTask, startDeliveryTask, abortDeliveryTask, optimizeDeliveryRoute, deliverDeliveryTask, getDeliveryStatus, confirmDeliveryTask, searchLandingSites,
   createShowFormation, listShowFormations, getShowFormation, calculateShowPositions, createShowTask, listShowTasks, getShowTask, startShowTask, abortShowTask, getShowActions, configureShowMusicSync,
+
+  listBalconyDropPoints, createBalconyDropPoint, updateBalconyDropPoint, deleteBalconyDropPoint,
+  listAgriSupply, createAgriSupply, updateAgriSupply, deleteAgriSupply,
+  listEmergencyRoles, createEmergencyRole, updateEmergencyRole, deleteEmergencyRole,
 
   login, refreshToken,
   listTenants, getTenant, createTenant, updateTenant, deleteTenant,

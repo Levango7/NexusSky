@@ -3,8 +3,11 @@ package io.aerofleet.cloud.api.controller;
 import io.aerofleet.cloud.api.service.ScenarioRegistryService;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -64,5 +67,44 @@ public class ScenarioRegistryController {
     public List<Map<String, Object>> emergencyRoles(
             @RequestParam(required = false) String planId) {
         return service.emergencyRoles(planId);
+    }
+
+    @PutMapping("/balcony-drop-points/{id}")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> updateBalconyDropPoint(@PathVariable String id,
+                                                      @RequestBody Map<String, Object> body) {
+        return service.updateBalconyDropPoint(id, body);
+    }
+
+    @DeleteMapping("/balcony-drop-points/{id}")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> deleteBalconyDropPoint(@PathVariable String id) {
+        return service.deleteBalconyDropPoint(id);
+    }
+
+    @PutMapping("/agri-supply-ledger/{id}")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> updateAgriSupply(@PathVariable String id,
+                                                @RequestBody Map<String, Object> body) {
+        return service.updateAgriSupply(id, body);
+    }
+
+    @DeleteMapping("/agri-supply-ledger/{id}")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> deleteAgriSupply(@PathVariable String id) {
+        return service.deleteAgriSupply(id);
+    }
+
+    @PutMapping("/emergency-node-roles/{id}")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> updateEmergencyRole(@PathVariable String id,
+                                                   @RequestBody Map<String, Object> body) {
+        return service.updateEmergencyRole(id, body);
+    }
+
+    @DeleteMapping("/emergency-node-roles/{id}")
+    @RequireRole(Role.OPERATOR)
+    public Map<String, Object> deleteEmergencyRole(@PathVariable String id) {
+        return service.deleteEmergencyRole(id);
     }
 }
