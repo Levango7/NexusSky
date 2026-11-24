@@ -7,12 +7,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -42,7 +45,24 @@ public class DeviceRegistry { // MUTANT
     @Autowired(required = false)
     private io.aerofleet.cloud.mission.common.MissionPlanStore missionPlans;
 
+    @Autowired(required = false)
+    private PlatformTransactionManager transactionManager;
+
     private final Map<Integer, DroneSnapshot> drones = new ConcurrentHashMap<>();
+    private final Object[] lifecycleLocks = new Object[256];
+
+    public DeviceRegistry() {
+        for (int i = 0; i < lifecycleLocks.length; i++) {
+            lifecycleLocks[i] = new Object();
+        }
+    }
+
+    public <T> T withDeviceLock(int sysid, Supplier<T> action) {
+        Object lock = lifecycleLocks[Math.floorMod(sysid, lifecycleLocks.length)];
+        synchronized (lock) {
+            return action.get();
+        }
+    }
 
     /**
      * 启动时从数据库恢复已知设备列表到内存缓存。
@@ -101,7 +121,7 @@ public class DeviceRegistry { // MUTANT
 
     /** Get or create the snapshot for a systemId (called from the receive thread). */
     public DroneSnapshot registerIfAbsent(int sysid) {
-        return drones.computeIfAbsent(sysid, id -> {
+        return withDeviceLock(sysid, () -> drones.computeIfAbsent(sysid, id -> {
             DroneSnapshot s = new DroneSnapshot(id);
             s.online = true;
             s.tenantId = resolveTenantFor(id);
@@ -124,7 +144,7 @@ public class DeviceRegistry { // MUTANT
                 }
             }
             return s;
-        });
+        }));
     }
 
     /**
@@ -145,29 +165,31 @@ public class DeviceRegistry { // MUTANT
         if (sysid < 1 || sysid > 254) {
             throw new IllegalArgumentException("sysid must be in 1..254, got " + sysid);
         }
-        DroneSnapshot snapshot = new DroneSnapshot(sysid);
-        snapshot.online = false;
-        snapshot.tenantId = tenantId;
-        // putIfAbsent：provision 与 UDP 注册线程可能同时建同一台设备的快照
-        if (drones.putIfAbsent(sysid, snapshot) != null) {
-            return false;
-        }
-        if (isPersisting()) {
-            try {
-                DeviceEntity entity = repository.findById(sysid).orElseGet(() -> new DeviceEntity(sysid));
-                entity.setOnline(false);
-                // 只在显式给了租户时改写：库里已有归属而请求未带的情况，不该被一次重登记抹掉
-                // （改归属是 PUT /api/v1/devices/{sysid}/tenant 的职责）
-                if (tenantId != null) {
-                    entity.setTenantId(tenantId);
-                }
-                repository.save(entity);
-            } catch (Exception e) {
-                log.warn("设备登记持久化失败 sysid={}: {}", sysid, e.getMessage());
+        return withDeviceLock(sysid, () -> {
+            DroneSnapshot snapshot = new DroneSnapshot(sysid);
+            snapshot.online = false;
+            snapshot.tenantId = tenantId;
+            // putIfAbsent：provision 与 UDP 注册线程可能同时建同一台设备的快照
+            if (drones.putIfAbsent(sysid, snapshot) != null) {
+                return false;
             }
-        }
-        log.info("Device provisioned: sysid={} tenantId={} persisted={}", sysid, tenantId, isPersisting());
-        return true;
+            if (isPersisting()) {
+                try {
+                    DeviceEntity entity = repository.findById(sysid).orElseGet(() -> new DeviceEntity(sysid));
+                    entity.setOnline(false);
+                    // 只在显式给了租户时改写：库里已有归属而请求未带的情况，不该被一次重登记抹掉
+                    // （改归属是 PUT /api/v1/devices/{sysid}/tenant 的职责）
+                    if (tenantId != null) {
+                        entity.setTenantId(tenantId);
+                    }
+                    repository.save(entity);
+                } catch (Exception e) {
+                    log.warn("设备登记持久化失败 sysid={}: {}", sysid, e.getMessage());
+                }
+            }
+            log.info("Device provisioned: sysid={} tenantId={} persisted={}", sysid, tenantId, isPersisting());
+            return true;
+        });
     }
 
     /** 注册表是否会写数据库（{@code persist=true} 且数据源可用）。 */
@@ -283,25 +305,39 @@ public class DeviceRegistry { // MUTANT
      * @return true 此前确有该条目（内存或库中）；false 设备未知，什么都没做
      */
     public boolean deregister(int sysid) {
-        if (missionPlans != null) {
-            missionPlans.delete(sysid);
-        }
-        boolean knownInMemory = drones.remove(sysid) != null;
-        boolean existedInDb = false;
-        if (isPersisting()) {
-            try {
-                existedInDb = repository.existsById(sysid);
-                if (existedInDb) {
-                    repository.deleteById(sysid);
+        return withDeviceLock(sysid, () -> {
+            boolean knownInMemory = drones.containsKey(sysid);
+            boolean removedFromDb = inTransaction(() -> {
+                boolean removed = false;
+                if (isPersisting()) {
+                    try {
+                        if (repository.existsById(sysid)) {
+                            repository.deleteById(sysid);
+                            removed = true;
+                        }
+                    } catch (Exception e) {
+                        log.warn("设备撤销持久化删除失败 sysid={}: {}", sysid, e.getMessage());
+                        throw new IllegalStateException("设备撤销持久化删除失败 sysid=" + sysid, e);
+                    }
                 }
-            } catch (Exception e) {
-                log.warn("设备撤销持久化删除失败 sysid={}: {}", sysid, e.getMessage());
+                if (missionPlans != null) {
+                    missionPlans.delete(sysid);
+                }
+                return removed;
+            });
+            drones.remove(sysid);
+            if (knownInMemory || removedFromDb) {
+                log.info("Device deregistered: sysid={} removedFromDb={}", sysid, removedFromDb);
             }
+            return knownInMemory || removedFromDb;
+        });
+    }
+
+    private <T> T inTransaction(Supplier<T> action) {
+        if (transactionManager == null) {
+            return action.get();
         }
-        if (knownInMemory || existedInDb) {
-            log.info("Device deregistered: sysid={} removedFromDb={}", sysid, existedInDb);
-        }
-        return knownInMemory || existedInDb;
+        return new TransactionTemplate(transactionManager).execute(status -> action.get());
     }
 
     public DroneSnapshot get(int sysid) {
@@ -363,31 +399,40 @@ public class DeviceRegistry { // MUTANT
      * @return false when the device is unknown (never seen and not persisted)
      */
     public boolean assignTenant(int sysid, Integer tenantId) {
-        DroneSnapshot snapshot = drones.get(sysid);
-        if (snapshot == null && !(persist && repository != null && repository.existsById(sysid))) {
-            return false;
-        }
-        if (snapshot != null) {
-            snapshot.tenantId = tenantId;
-        }
-        if (missionPlans != null) {
-            missionPlans.assignTenant(sysid, tenantId);
-        }
-        if (persist && repository != null) {
-            try {
-                DeviceEntity entity = repository.findById(sysid).orElseGet(() -> {
-                    DeviceEntity created = new DeviceEntity(sysid);
-                    created.setFirstSeen(java.time.Instant.now());
-                    return created;
-                });
-                entity.setTenantId(tenantId);
-                repository.save(entity);
-            } catch (Exception e) {
-                log.warn("设备租户归属持久化失败 sysid={}: {}", sysid, e.getMessage());
+        return withDeviceLock(sysid, () -> {
+            DroneSnapshot snapshot = drones.get(sysid);
+            boolean assigned = inTransaction(() -> {
+                if (snapshot == null && !(persist && repository != null && repository.existsById(sysid))) {
+                    return false;
+                }
+                if (persist && repository != null) {
+                    try {
+                        DeviceEntity entity = repository.findById(sysid).orElseGet(() -> {
+                            DeviceEntity created = new DeviceEntity(sysid);
+                            created.setFirstSeen(java.time.Instant.now());
+                            return created;
+                        });
+                        entity.setTenantId(tenantId);
+                        repository.save(entity);
+                    } catch (Exception e) {
+                        log.warn("设备租户归属持久化失败 sysid={}: {}", sysid, e.getMessage());
+                        throw new IllegalStateException("设备租户归属持久化失败 sysid=" + sysid, e);
+                    }
+                }
+                if (missionPlans != null) {
+                    missionPlans.assignTenant(sysid, tenantId);
+                }
+                return true;
+            });
+            if (assigned && snapshot != null) {
+                snapshot.tenantId = tenantId;
+                snapshot.advanceTenantGeneration();
             }
-        }
-        log.info("Device tenant assigned: sysid={} tenantId={}", sysid, tenantId);
-        return true;
+            if (assigned) {
+                log.info("Device tenant assigned: sysid={} tenantId={}", sysid, tenantId);
+            }
+            return assigned;
+        });
     }
 
     /**
@@ -452,28 +497,35 @@ public class DeviceRegistry { // MUTANT
 
     public List<Integer> sweepOffline() {
         long cutoff = heartbeatTimeoutSeconds * 1000L;
-        return drones.values().stream()
-                .filter(s -> s.online && s.lastHeartbeatMs > 0
-                        && System.currentTimeMillis() - s.lastHeartbeatMs > cutoff)
-                .peek(s -> {
-                    s.online = false;
-                    log.warn("Drone offline (heartbeat timeout {}s): sysid={}",
-                            heartbeatTimeoutSeconds, s.sysid);
-                    if (persist && repository != null) {
-                        try {
-                            repository.findById(s.sysid).ifPresent(entity -> {
-                                entity.setOnline(false);
-                                // V25：离线这一刻正是"这架机是怎么收场的"最有价值的时刻，
-                                // 顺路把飞行态落库。走的是本来就要写的那一行，不新增写放大。
-                                writeFlightState(entity, s);
-                                repository.save(entity);
-                            });
-                        } catch (Exception e) {
-                            log.warn("设备离线持久化失败 sysid={}: {}", s.sysid, e.getMessage());
-                        }
+        List<Integer> swept = new java.util.ArrayList<>();
+        for (DroneSnapshot snapshot : drones.values()) {
+            if (!snapshot.online || snapshot.lastHeartbeatMs <= 0
+                    || System.currentTimeMillis() - snapshot.lastHeartbeatMs <= cutoff) {
+                continue;
+            }
+            withDeviceLock(snapshot.sysid, () -> {
+                if (drones.get(snapshot.sysid) != snapshot || !snapshot.online || snapshot.lastHeartbeatMs <= 0
+                        || System.currentTimeMillis() - snapshot.lastHeartbeatMs <= cutoff) {
+                    return null;
+                }
+                snapshot.online = false;
+                log.warn("Drone offline (heartbeat timeout {}s): sysid={}",
+                        heartbeatTimeoutSeconds, snapshot.sysid);
+                if (persist && repository != null) {
+                    try {
+                        repository.findById(snapshot.sysid).ifPresent(entity -> {
+                            entity.setOnline(false);
+                            writeFlightState(entity, snapshot);
+                            repository.save(entity);
+                        });
+                    } catch (Exception e) {
+                        log.warn("设备离线持久化失败 sysid={}: {}", snapshot.sysid, e.getMessage());
                     }
-                })
-                .map(s -> s.sysid)
-                .collect(Collectors.toList());
+                }
+                swept.add(snapshot.sysid);
+                return null;
+            });
+        }
+        return swept;
     }
 }

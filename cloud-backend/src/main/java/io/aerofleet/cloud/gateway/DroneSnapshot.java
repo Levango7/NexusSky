@@ -15,6 +15,23 @@ public final class DroneSnapshot {
 
     // --- tenant isolation ---
     public volatile Integer tenantId;
+    private volatile long tenantGeneration;
+
+    public long tenantGeneration() {
+        return tenantGeneration;
+    }
+
+    /** Caller must hold the registry lock for this sysid so both fields describe one lifecycle state. */
+    public TenantIdentity tenantIdentity() {
+        return new TenantIdentity(tenantId, tenantGeneration);
+    }
+
+    public record TenantIdentity(Integer tenantId, long tenantGeneration) {
+    }
+
+    void advanceTenantGeneration() {
+        tenantGeneration++;
+    }
 
     // --- heartbeat / liveness ---
     public volatile long lastHeartbeatMs;      // epoch ms of last HEARTBEAT

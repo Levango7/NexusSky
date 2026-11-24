@@ -665,8 +665,10 @@ if [ -n "$TOKEN_C" ]; then
             assert_status "重启后离线 GET /mission" "200" "$MISSION_READ_STATUS"
             MISSION_CLOUD_SOURCE=$(printf '%s' "$MISSION_READ_BODY" | sed -n 's/.*"source":"cloud".*/cloud/p')
             MISSION_CLOUD_COUNT=$(printf '%s' "$MISSION_READ_BODY" | sed -n 's/.*"count":1.*/1/p')
+            MISSION_CLOUD_UPDATED_AT=$(printf '%s' "$MISSION_READ_BODY" | sed -n 's/.*"updatedAt":"\([^"]*\)".*/\1/p')
             assert_true "离线任务回读明确来自云端快照（source=cloud）" "$MISSION_CLOUD_SOURCE"
             assert_true "重启恢复的任务航点数保持为 1" "$MISSION_CLOUD_COUNT"
+            assert_true "重启恢复的任务快照保留 updatedAt" "$MISSION_CLOUD_UPDATED_AT"
             DELETE_STATUS=$(http_status -X DELETE -H "Authorization: Bearer ${TOKEN_C}" \
                 "http://localhost:${C_PORT}/api/v1/devices/${C_SIM_SYSID}")
             assert_status "DELETE /api/v1/devices/${C_SIM_SYSID}（撤销登记）" "200" "$DELETE_STATUS"

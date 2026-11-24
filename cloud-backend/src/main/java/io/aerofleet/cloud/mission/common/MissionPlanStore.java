@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.List;
@@ -56,9 +58,6 @@ public class MissionPlanStore {
     }
 
     public void save(int sysid, Integer tenantId, List<StoredMissionItem> items, String source) {
-        if (items.isEmpty()) {
-            throw new IllegalArgumentException("mission must contain at least one item");
-        }
         List<StoredMissionItem> snapshot = List.copyOf(items);
         MissionPlan plan = new MissionPlan(sysid, tenantId, snapshot, source, Instant.now());
         plans.put(sysid, plan);
@@ -88,33 +87,47 @@ public class MissionPlanStore {
     }
 
     public void delete(int sysid) {
-        plans.remove(sysid);
-        if (!isPersisting()) {
-            return;
+        if (isPersisting()) {
+            try {
+                repository.deleteById(sysid);
+            } catch (Exception e) {
+                log.warn("任务快照删除失败 sysid={}: {}", sysid, e.getMessage());
+                throw new IllegalStateException("任务快照删除失败 sysid=" + sysid, e);
+            }
         }
-        try {
-            repository.deleteById(sysid);
-        } catch (Exception e) {
-            log.warn("任务快照删除失败 sysid={}: {}", sysid, e.getMessage());
-        }
+        afterCommit(() -> plans.remove(sysid));
     }
 
     public void assignTenant(int sysid, Integer tenantId) {
+        if (isPersisting()) {
+            try {
+                repository.findById(sysid).ifPresent(entity -> {
+                    entity.setTenantId(tenantId);
+                    repository.save(entity);
+                });
+            } catch (Exception e) {
+                log.warn("任务快照租户同步失败 sysid={}: {}", sysid, e.getMessage());
+                throw new IllegalStateException("任务快照租户同步失败 sysid=" + sysid, e);
+            }
+        }
         MissionPlan plan = plans.get(sysid);
         if (plan != null) {
-            plans.put(sysid, new MissionPlan(sysid, tenantId, plan.items(), plan.source(), plan.updatedAt()));
+            afterCommit(() -> plans.put(sysid,
+                    new MissionPlan(sysid, tenantId, plan.items(), plan.source(), plan.updatedAt())));
         }
-        if (!isPersisting()) {
+    }
+
+    private void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
             return;
         }
-        try {
-            repository.findById(sysid).ifPresent(entity -> {
-                entity.setTenantId(tenantId);
-                repository.save(entity);
-            });
-        } catch (Exception e) {
-            log.warn("任务快照租户同步失败 sysid={}: {}", sysid, e.getMessage());
-        }
+        action.run();
     }
 
     private MissionPlan readThrough(int sysid) {

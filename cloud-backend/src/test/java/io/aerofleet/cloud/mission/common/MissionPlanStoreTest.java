@@ -11,7 +11,9 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -101,6 +103,61 @@ class MissionPlanStoreTest {
         store.save(1, 7, List.of(ITEM), "upload");
 
         assertThat(store.findVisible(1).items()).containsExactly(ITEM);
+    }
+
+    @Test
+    void emptySnapshotPersistsAndHydrates() {
+        MissionPlanRepository repository = mock(MissionPlanRepository.class);
+        MissionPlanStore store = new MissionPlanStore(repository);
+        ReflectionTestUtils.setField(store, "persist", true);
+        ArgumentCaptor<MissionPlanEntity> captor = ArgumentCaptor.forClass(MissionPlanEntity.class);
+
+        store.save(2, 7, List.of(), "drone");
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getItemCount()).isZero();
+        assertThat(captor.getValue().getItemsJson()).isEqualTo("[]");
+
+        when(repository.findAll()).thenReturn(List.of(captor.getValue()));
+        MissionPlanStore restarted = new MissionPlanStore(repository);
+        ReflectionTestUtils.setField(restarted, "persist", true);
+        restarted.restoreFromRepository();
+
+        assertThat(restarted.findVisible(2).items()).isEmpty();
+        assertThat(restarted.findVisible(2).source()).isEqualTo("drone");
+    }
+
+    @Test
+    void failedDeleteKeepsMemorySnapshotAndSignalsLifecycleFailure() {
+        MissionPlanRepository repository = mock(MissionPlanRepository.class);
+        MissionPlanStore store = new MissionPlanStore(repository);
+        ReflectionTestUtils.setField(store, "persist", true);
+        store.save(1, 7, List.of(ITEM), "upload");
+        doThrow(new RuntimeException("delete failed")).when(repository).deleteById(1);
+
+        assertThatThrownBy(() -> store.delete(1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("任务快照删除失败");
+        assertThat(store.findVisible(1).items()).containsExactly(ITEM);
+    }
+
+    @Test
+    void failedTenantUpdateKeepsMemoryTenantAndSignalsLifecycleFailure() {
+        MissionPlanRepository repository = mock(MissionPlanRepository.class);
+        MissionPlanEntity entity = new MissionPlanEntity();
+        entity.setSysid(1);
+        entity.setTenantId(7);
+        entity.setItemsJson("[]");
+        entity.setUpdatedAt(Instant.now());
+        when(repository.findById(1)).thenReturn(Optional.of(entity));
+        when(repository.save(entity)).thenThrow(new RuntimeException("update failed"));
+        MissionPlanStore store = new MissionPlanStore(repository);
+        ReflectionTestUtils.setField(store, "persist", true);
+        store.save(1, 7, List.of(ITEM), "upload");
+
+        assertThatThrownBy(() -> store.assignTenant(1, 8))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("任务快照租户同步失败");
+        assertThat(store.findVisible(1).tenantId()).isEqualTo(7);
     }
 
     @Test
