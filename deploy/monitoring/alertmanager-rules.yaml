@@ -58,14 +58,14 @@ groups:
   - name: nexussky-business
     rules:
       - alert: DronesAllOffline
-        expr: drones_online == 0
+        expr: aerofleet_drones_online == 0
         for: 2m
         labels:
           severity: critical
           service: cloud-backend
         annotations:
           summary: "All drones are offline"
-          description: "No drones are online (drones_online == 0) for more than 2 minutes."
+          description: "No drones are online (aerofleet_drones_online == 0) for more than 2 minutes."
 
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -134,11 +134,11 @@ spec:
     - name: nexussky-business
       rules:
         - alert: DronesAllOffline
-          expr: drones_online == 0
+          expr: aerofleet_drones_online == 0
           for: 2m
           labels:
             severity: critical
             service: cloud-backend
           annotations:
             summary: "All drones are offline"
-            description: "No drones are online (drones_online == 0) for more than 2 minutes."
+            description: "No drones are online (aerofleet_drones_online == 0) for more than 2 minutes."

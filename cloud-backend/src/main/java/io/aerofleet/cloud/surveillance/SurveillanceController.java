@@ -467,6 +467,7 @@ public class SurveillanceController {
         @ApiResponse(responseCode = "200", description = "控制成功"),
         @ApiResponse(responseCode = "400", description = "cmd 非法"),
         @ApiResponse(responseCode = "404", description = "设备不存在"),
+        @ApiResponse(responseCode = "501", description = "该厂商适配器未实现 PTZ 真下发（不假成功）"),
         @ApiResponse(responseCode = "502", description = "PTZ 控制失败")
     })
     @PostMapping("/devices/{id}/ptz")
@@ -490,11 +491,21 @@ public class SurveillanceController {
         if (!DeviceCapability.notExplicitlyUnsupported(d.getCapabilities(), DeviceCapability.PTZ)) {
             return unsupported(d, DeviceCapability.PTZ);
         }
+        // 假成功闸：适配器只编码信令、没真下发时（GB28181 当前仅 encodeHex 生成
+        // A50F 指令码、未真发 SIP MESSAGE），如实回 501，而不是 200 + hex 让调用方
+        // 误以为云台已动作。口径同事件订阅的 supportsEventSubscription 501。
+        VendorAdapter adapter = vendorAdapterRegistry.getAdapter(d);
+        if (!adapter.supportsPtzDelivery()) {
+            return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(Map.of(
+                    "status", "error",
+                    "result", "ptz control for device " + id
+                            + " is not implemented by vendor adapter " + adapter.getVendor()));
+        }
         try {
             // 按设备厂商路由：此前直连 ONVIF，GB28181 设备必然失败——
             // REST 契约用 camelCase（zoomIn/zoomOut），国标内部用 snake_case，
             // 两种命名互不认；翻译职责在适配器内（见 Gb28181Adapter.CMD_ALIASES）
-            String result = vendorAdapterRegistry.getAdapter(d).ptzControl(d, cmd);
+            String result = adapter.ptzControl(d, cmd);
             log.info("PTZ {} on device {} (vendor={})", cmd, id, d.vendor);
             return ResponseEntity.ok(Map.of("status", "ok", "cmd", cmd, "result", result));
         } catch (Exception e) {
