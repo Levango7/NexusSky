@@ -45,6 +45,9 @@
 #        flight_log 在 PG 上真落行。这条同时钉住两件事：设备白名单与注册表持久化必须成对
 #        （prod 死锁回归腿），以及异步批量写路径在真实 PostgreSQL 上端到端可用
 #        （断言 6 只证明读通路与方言，行数是 7 带来的）。
+#     8) 任务主数据：活体对端确认上传后写入 drone_missions；停 sim 并重启后端，离线
+#        GET /mission 从 PG 水合快照返回 source=cloud；撤销并同号重登、再次重启后不得
+#        回读旧任务，用公开 API 证明级联删除而非只检查内存。
 #   为什么必须 --logging.level.org.flywaydb=INFO：prod 的 root=WARN
 #   （application-prod.properties:52），Flyway 的 INFO 迁移日志默认被压掉，
 #   没有这行断言 2) 会永远看不到证据。
@@ -162,6 +165,24 @@ start_backend() { # <日志文件> <端口> <Spring 参数...> —— 打印 PID
     local port="$1"; shift
     java -jar "$JAR" --server.port="$port" "$@" > "$log" 2>&1 &
     printf '%s' "$!"
+}
+
+start_pass_c() { # <日志文件> —— 同一 prod/PG 配置用于首次启动与重启恢复断言
+    local log="$1"
+    AEROFLEET_JWT_SECRET="$CI_JWT_SECRET" \
+    AEROFLEET_USERS="$C_USERS" \
+    AEROFLEET_ENCRYPTION_KEY="$CI_ENCRYPTION_KEY" \
+    SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:${C_PG_PORT}/aerofleet_prod" \
+    SPRING_DATASOURCE_USERNAME=aerofleet \
+    SPRING_DATASOURCE_PASSWORD="$C_PG_PASSWORD" \
+    start_backend "$log" "$C_PORT" $REDIS_OVERRIDE \
+        --spring.profiles.active=prod \
+        --aerofleet.regulator.sink-type=sim \
+        --logging.level.org.flywaydb=INFO \
+        --aerofleet.flightlog.persist-to-db=true \
+        --aerofleet.mission.persist=true \
+        --aerofleet.security.bootstrap-admin-username="$CI_USER" \
+        --aerofleet.security.bootstrap-admin-password="$CI_PASSWORD"
 }
 
 wait_ready() { # <pid> <端口> <日志> <名称> —— 就绪返回 0，超时或进程退出返回 1
@@ -471,19 +492,7 @@ LOG_C=$(mktemp)
 # 为什么用 spring.config 命令行参数而不是环境变量覆盖 profile 内已有键：
 # prod 的日志级别在 profile 内写死为 WARN，只有命令行 --logging.level.*（最高优先级）
 # 才能把 Flyway 的 INFO 放出来当证据。
-PID_C=$(AEROFLEET_JWT_SECRET="$CI_JWT_SECRET" \
-    AEROFLEET_USERS="$C_USERS" \
-    AEROFLEET_ENCRYPTION_KEY="$CI_ENCRYPTION_KEY" \
-    SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:${C_PG_PORT}/aerofleet_prod" \
-    SPRING_DATASOURCE_USERNAME=aerofleet \
-    SPRING_DATASOURCE_PASSWORD="$C_PG_PASSWORD" \
-    start_backend "$LOG_C" "$C_PORT" $REDIS_OVERRIDE \
-    --spring.profiles.active=prod \
-    --aerofleet.regulator.sink-type=sim \
-    --logging.level.org.flywaydb=INFO \
-    --aerofleet.flightlog.persist-to-db=true \
-    --aerofleet.security.bootstrap-admin-username="$CI_USER" \
-    --aerofleet.security.bootstrap-admin-password="$CI_PASSWORD")
+PID_C=$(start_pass_c "$LOG_C")
 if ! wait_ready "$PID_C" "$C_PORT" "$LOG_C" "Pass C cloud-backend"; then
     stop_backend "$PID_C" "Pass C cloud-backend"
     rm -f "$LOG_C"
@@ -623,6 +632,15 @@ if [ -n "$TOKEN_C" ]; then
             # assert_true 判的是"非空"，所以必须把 0 换算成空串——直接喂 wc -l 的 "0" 会被当成真。
             assert_true "GET /api/v1/drones 含活体设备 sysid=${C_SIM_SYSID}（白名单确已放行）" \
                 "$([ "$DRONE_SEEN" -gt 0 ] && echo yes)"
+            MISSION_UPLOAD_RAW=$(curl -sS -w $'\n%{http_code}' -X POST \
+                -H "Authorization: Bearer ${TOKEN_C}" -H "Content-Type: application/json" \
+                -d '{"items":[{"cmd":"waypoint","lat":22.59,"lon":113.93,"alt":30,"holdTime":0}]}' \
+                "http://localhost:${C_PORT}/api/v1/drones/${C_SIM_SYSID}/mission")
+            MISSION_UPLOAD_STATUS=${MISSION_UPLOAD_RAW##*$'\n'}
+            MISSION_UPLOAD_BODY=${MISSION_UPLOAD_RAW%$'\n'*}
+            assert_status "POST /mission 经活体 MAVLink 对端确认上传" "200" "$MISSION_UPLOAD_STATUS"
+            MISSION_UPLOAD_OK=$(printf '%s' "$MISSION_UPLOAD_BODY" | sed -n 's/.*"status":"ok".*/ok/p')
+            assert_true "飞控接受整份任务后才写云端快照" "$MISSION_UPLOAD_OK"
             # 撤销腿（纯 REST 状态断言，不依赖帧到达时刻，避免计时抖动）：DELETE 成功后
             # 注册表里内存与库行都没了，此时给同一 sysid 指派租户应当 404 device unknown。
             # 必须先把 sim 进程停掉再做这对断言：sim 活着就会以 1Hz 心跳把刚 DELETE 掉的
@@ -632,6 +650,23 @@ if [ -n "$TOKEN_C" ]; then
             kill "$PID_SIM" 2>/dev/null || true
             wait "$PID_SIM" 2>/dev/null || true
             PID_SIM=""
+            # 重启会清空内存快照；此时 sim 已离线，GET /mission 只能从 PG 水合的云端快照回答。
+            stop_backend "$PID_C" "Pass C cloud-backend（任务落盘后重启）"
+            LOG_C_RESTART=$(mktemp)
+            PID_C=$(start_pass_c "$LOG_C_RESTART")
+            if ! wait_ready "$PID_C" "$C_PORT" "$LOG_C_RESTART" "Pass C cloud-backend（重启恢复）"; then
+                stop_backend "$PID_C" "Pass C cloud-backend（重启恢复）"
+                exit 1
+            fi
+            MISSION_READ_RAW=$(curl -sS -w $'\n%{http_code}' -H "Authorization: Bearer ${TOKEN_C}" \
+                "http://localhost:${C_PORT}/api/v1/drones/${C_SIM_SYSID}/mission")
+            MISSION_READ_STATUS=${MISSION_READ_RAW##*$'\n'}
+            MISSION_READ_BODY=${MISSION_READ_RAW%$'\n'*}
+            assert_status "重启后离线 GET /mission" "200" "$MISSION_READ_STATUS"
+            MISSION_CLOUD_SOURCE=$(printf '%s' "$MISSION_READ_BODY" | sed -n 's/.*"source":"cloud".*/cloud/p')
+            MISSION_CLOUD_COUNT=$(printf '%s' "$MISSION_READ_BODY" | sed -n 's/.*"count":1.*/1/p')
+            assert_true "离线任务回读明确来自云端快照（source=cloud）" "$MISSION_CLOUD_SOURCE"
+            assert_true "重启恢复的任务航点数保持为 1" "$MISSION_CLOUD_COUNT"
             DELETE_STATUS=$(http_status -X DELETE -H "Authorization: Bearer ${TOKEN_C}" \
                 "http://localhost:${C_PORT}/api/v1/devices/${C_SIM_SYSID}")
             assert_status "DELETE /api/v1/devices/${C_SIM_SYSID}（撤销登记）" "200" "$DELETE_STATUS"
@@ -639,6 +674,29 @@ if [ -n "$TOKEN_C" ]; then
                 "$(http_status -X PUT -H "Authorization: Bearer ${TOKEN_C}" \
                     -H "Content-Type: application/json" -d '{"tenantId":1}' \
                     "http://localhost:${C_PORT}/api/v1/devices/${C_SIM_SYSID}/tenant")"
+            # 同号重登记并再次重启：若 PG 旧任务行未级联删除，水合后会回读出生效前的 cloud 快照。
+            PROVISION_AFTER_DELETE=$(http_status -X POST -H "Authorization: Bearer ${TOKEN_C}" \
+                -H "Content-Type: application/json" -d '{"tenantId":1}' \
+                "http://localhost:${C_PORT}/api/v1/devices/${C_SIM_SYSID}")
+            assert_status "撤销后同号设备可重新登记" "201" "$PROVISION_AFTER_DELETE"
+            stop_backend "$PID_C" "Pass C cloud-backend（撤销后重启）"
+            LOG_C_DELETE=$(mktemp)
+            PID_C=$(start_pass_c "$LOG_C_DELETE")
+            if ! wait_ready "$PID_C" "$C_PORT" "$LOG_C_DELETE" "Pass C cloud-backend（撤销后重启）"; then
+                stop_backend "$PID_C" "Pass C cloud-backend（撤销后重启）"
+                exit 1
+            fi
+            MISSION_DELETED_RAW=$(curl -sS -w $'\n%{http_code}' -H "Authorization: Bearer ${TOKEN_C}" \
+                "http://localhost:${C_PORT}/api/v1/drones/${C_SIM_SYSID}/mission")
+            MISSION_DELETED_STATUS=${MISSION_DELETED_RAW##*$'\n'}
+            MISSION_DELETED_BODY=${MISSION_DELETED_RAW%$'\n'*}
+            assert_status "撤销并重启后 GET /mission（无对端）" "200" "$MISSION_DELETED_STATUS"
+            MISSION_DELETED_ERROR=$(printf '%s' "$MISSION_DELETED_BODY" | sed -n 's/.*"status":"error".*/error/p')
+            MISSION_DELETED_CLOUD=$(printf '%s' "$MISSION_DELETED_BODY" | sed -n 's/.*"source":"cloud".*/cloud/p')
+            assert_true "撤销设备后不再回读旧任务快照" "$MISSION_DELETED_ERROR"
+            assert_true "撤销设备后 PG 任务行已删除（无 source=cloud）" \
+                "$([ -z "$MISSION_DELETED_CLOUD" ] && echo yes)"
+            rm -f "$LOG_C_RESTART" "$LOG_C_DELETE"
         else
             echo "   ❌ 60s 内 flight_log 只见到 ${SIM_ROWS} 行 sysid=${C_SIM_SYSID} 的遥测（期望 ≥3）"
             echo "   --- sim 日志末尾 15 行 ---"

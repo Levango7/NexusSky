@@ -6,6 +6,9 @@ import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.flightlog.FlightLogService;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.mission.common.DroneCommandService;
+import io.aerofleet.cloud.mission.common.MissionPlanStore;
+import io.aerofleet.cloud.mission.common.MissionUploadResult;
+import io.aerofleet.mavlink.messages.MissionItemInt;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +18,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyFloat;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -326,5 +330,88 @@ class DroneControllerTest {
         assertThatThrownBy(() -> controller.uploadMission(1, body))
                 .satisfies(t -> assertThat(t.getMessage() == null ? "" : t.getMessage())
                         .doesNotContain("exceeds maximum of 1000"));
+    }
+
+    @Test
+    @DisplayName("uploadMission 飞控确认成功后保存云端任务快照")
+    void uploadMission_successSavesCloudSnapshot() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        MissionItemInt item = missionItem(0, 16);
+        when(commands.toMissionItems(anyList(), eq(1))).thenReturn(List.of(item));
+        when(commands.uploadMission(eq(1), anyList())).thenReturn(MissionUploadResult.ok(1));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.uploadMission(1, missionBody(22.59, 113.93, 30));
+
+        assertThat(response.get("status")).isEqualTo("ok");
+        assertThat(response.get("source")).isEqualTo("cloud");
+        assertThat(plans.findVisible(1).source()).isEqualTo("upload");
+        assertThat(plans.findVisible(1).items()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("uploadMission 飞控拒绝时不覆盖上一份成功快照")
+    void uploadMission_failureKeepsPreviousSnapshot() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        plans.save(1, null, List.of(MissionPlanStore.StoredMissionItem.from(missionItem(0, 16))), "upload");
+        when(commands.toMissionItems(anyList(), eq(1))).thenReturn(List.of(missionItem(1, 21)));
+        when(commands.uploadMission(eq(1), anyList())).thenReturn(MissionUploadResult.failure("rejected"));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.uploadMission(1, missionBody(23.0, 114.0, 40));
+
+        assertThat(response.get("status")).isEqualTo("error");
+        assertThat(plans.findVisible(1).items().get(0).command()).isEqualTo(16);
+    }
+
+    @Test
+    @DisplayName("downloadMission 离线失败时回读云端快照并标记 source=cloud")
+    void downloadMission_offlineFallsBackToCloudSnapshot() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        plans.save(1, null, List.of(MissionPlanStore.StoredMissionItem.from(missionItem(0, 16))), "upload");
+        when(commands.downloadMission(1)).thenThrow(new DroneCommandService.CommandException("offline", -1));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.downloadMission(1);
+
+        assertThat(response.get("status")).isEqualTo("ok");
+        assertThat(response.get("source")).isEqualTo("cloud");
+        assertThat(response.get("count")).isEqualTo(1);
+        assertThat(response.get("updatedAt")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("downloadMission 成功时保存飞控快照并标记 source=drone")
+    void downloadMission_successSavesDroneSnapshot() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        when(commands.downloadMission(1)).thenReturn(List.of(missionItem(2, 16)));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.downloadMission(1);
+
+        assertThat(response.get("source")).isEqualTo("drone");
+        assertThat(plans.findVisible(1).source()).isEqualTo("drone");
+        assertThat(plans.findVisible(1).items().get(0).seq()).isEqualTo(2);
+    }
+
+    private static MissionItemInt missionItem(int seq, int command) {
+        return new MissionItemInt(1, 0, seq, 3, command, 0, 1,
+                0, 0, 0, 0, 225900000, 1139300000, 30, 0);
     }
 }

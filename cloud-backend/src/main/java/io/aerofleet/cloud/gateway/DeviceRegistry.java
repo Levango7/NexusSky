@@ -39,6 +39,9 @@ public class DeviceRegistry { // MUTANT
     @Autowired(required = false)
     private DeviceRepository repository;
 
+    @Autowired(required = false)
+    private io.aerofleet.cloud.mission.common.MissionPlanStore missionPlans;
+
     private final Map<Integer, DroneSnapshot> drones = new ConcurrentHashMap<>();
 
     /**
@@ -280,6 +283,9 @@ public class DeviceRegistry { // MUTANT
      * @return true 此前确有该条目（内存或库中）；false 设备未知，什么都没做
      */
     public boolean deregister(int sysid) {
+        if (missionPlans != null) {
+            missionPlans.delete(sysid);
+        }
         boolean knownInMemory = drones.remove(sysid) != null;
         boolean existedInDb = false;
         if (isPersisting()) {
@@ -363,6 +369,9 @@ public class DeviceRegistry { // MUTANT
         }
         if (snapshot != null) {
             snapshot.tenantId = tenantId;
+        }
+        if (missionPlans != null) {
+            missionPlans.assignTenant(sysid, tenantId);
         }
         if (persist && repository != null) {
             try {
