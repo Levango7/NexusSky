@@ -36,6 +36,42 @@
   与 2 处拆分。
 - 门禁复跑：`check-test-count-docs.py`、`check-doc-counts.py`、`check-repo-hygiene.py`、
   `check-coord-board.py`、`check-doc-endpoints.py`、`check-positioning-facts.py` 全绿。
+## [Unreleased] — feat(persistence): 无人机最近任务快照落库与离线回读（P0-4）
+
+- 新增 `MissionPlanEntity` / `MissionPlanRepository` / `MissionPlanStore` 与 Flyway V44
+  `drone_missions`：每架无人机只保留最近一次成功上传或成功下载的 REST 所用航点快照；
+  飞控确认失败不覆盖旧快照。协议传输序号、pending future、超时句柄、UDP 路由与限流窗口
+  不落库。
+- 下载成功标 `source=drone`；离线下载回读数据库快照并标 `source=cloud`、返回 `updatedAt`。
+  快照按租户隔离；撤销设备同步删任务行，设备改归属同步任务租户。数据库故障降级内存，
+  损坏 JSON 只跳过对应行，不阻断启动。
+- `aerofleet.mission.persist` 在 dev/test 默认 `false`，prod/staging 显式 `true`；
+  `check-persist-switches` 已纳入对账。状态性守卫补登 DeviceRegistry 与 MissionPlanStore，
+  十二域均有实体/仓库/迁移/水合证据；同时修复 `check-statefulness.py --print` 四元返回值
+  解包崩溃并补第 9 种自测。
+- 独立复核后补上并发与回滚证明：长任务完成同时校验设备实例、租户与内存租户代际，
+  A→B→A 也不能让旧结果落盘或回读；任务保存/离线回读、撤销、登记与改租户共用按设备
+  串行锁，离线扫描在持锁后重验设备实例与在线状态，避免扫描与撤销/重登互相覆盖。
+  任务开始捕获也在同一设备锁内读取设备实例、租户与代际，避免与并发改租户拼出混合身份；
+  两条确定性并发用例已用“把捕获移出锁”的临时变异证明会红，还原后转绿。
+  成功上传响应恢复 `source=cloud` 与 `updatedAt`；设备撤销、改租户与任务行变更处于同一事务，
+  内存变更延迟到提交后，新增真实事务执行后提交失败、数据库与内存双双回滚的证明。
+- 新增 33 例：Controller 15 例（成功保存、失败保留、离线回读、在线下载保存、空任务、
+  撤销/改租户竞态、失败回读竞态、保存与撤销串行、三类租户 ABA、捕获身份与改租户串行）、
+  Store 9 例（内存模式、重启水合、损坏 JSON、租户隔离、DB 故障、改租户/删除、空快照、
+  生命周期失败）、H2+Flyway+`ddl-auto=validate` 7 例（建表恢复、撤销级联、改租户、异常回滚、
+  设备/任务删除与改租户提交失败各一例）、DeviceRegistry 2 例（事务提交失败保留内存、
+  离线扫描与撤销串行）。针对性五类 77/77 连续三轮通过；重基线到 `origin/master`
+  `50de8b51` 后全量 reactor 6190/6190（cloud-backend 3978），753 个测试类，
+  0 失败/错误/跳过，BUILD SUCCESS。
+- IT Pass C 增加活体 drone-sim 上传→停对端→重启回读→撤销→同号重登→再重启无旧快照
+  的真 PostgreSQL 断言，并显式保留主线的 `--aerofleet.regulator.sink-type=sim`。
+  重基线后 PostgreSQL 15.19 真库 Pass A/B/C 全部通过，43 个迁移成功；独立 psql 复核
+  `V44 installed_rank=43/success=true`，1 航点上传后重启回读 source=cloud/count=1/updatedAt，
+  撤销后任务行=0（sysid=231 也为 0）。
+- 状态板 T8 夹具固定 `core.autocrlf=false`，避免 Windows 全局配置把“无属性覆盖的
+  CRLF 字节差异”在入库时归一成 LF，导致判别性断言假红。
+- 同步 README、API reference、安全设计、需求路线图与 CI 门禁说明。
 
 ## [Unreleased] — feat(gate): API 响应字段契约门禁（路径存在 ≠ 字段还在）
 
@@ -3633,7 +3669,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-18 共有 327 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-24 共有 328 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3660,7 +3696,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 327 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 328 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

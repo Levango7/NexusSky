@@ -86,9 +86,9 @@
 | GET | `/{sysid}` | 单无人机详情（含最近 20 条告警） | - | 200 DroneDetail / 404 |
 | GET | `/{sysid}/telemetry` | 获取遥测数据快照 | - | 200 Telemetry / 404 |
 | GET | `/{sysid}/track` | 飞行轨迹（最近 200 点，时间升序） | - | 200 List<TrackPoint> / 404 |
-| GET | `/{sysid}/mission` | 下载当前任务（MAVLink mission download） | - | 200 {status,count,items} |
+| GET | `/{sysid}/mission` | 下载当前任务；离线时回读云端快照 | - | 200 {status,count,items,source,updatedAt?} / 无快照时 error |
 | POST | `/{sysid}/joystick` | 虚拟摇杆（MANUAL_CONTROL 透传，轴值 -1000..1000） | {x,y,z,r} | 200 {status:"ok"} |
-| POST | `/{sysid}/mission` | 上传航点任务（完整 MAVLink mission 协议） | {items:[{cmd,lat,lon,alt,holdTime}]} | 200 {status,uploaded} |
+| POST | `/{sysid}/mission` | 上传航点任务；飞控确认成功后保存云端快照 | {items:[{cmd,lat,lon,alt,holdTime}]} | 200 {status,uploaded,source?,updatedAt?} |
 | POST | `/{sysid}/commands` | 发送飞行命令（arm/disarm/start_mission/rtl/takeoff/raw） | {type,alt?,cmd?,p1..p7?} | 200 {status,result} |
 
 #### 端点详情
@@ -110,7 +110,7 @@
 
 **GET /api/v1/drones/{sysid}/mission**
 - 路径参数: `sysid` (int) - 无人机系统 ID
-- 响应: 200 - `{status:"ok", count, items:[{seq,command,lat,lon,alt,holdTime,frame}]}`
+- 响应: 200 - 在线下载 `{status:"ok", count, items:[{seq,command,lat,lon,alt,holdTime,frame}], source:"drone"}`；离线且存在云端快照时同样返回 `status:"ok"`，`source:"cloud"` 且带 `updatedAt`。离线且无快照返回 `{status:"error", result}`。任务快照按当前租户隔离。
 
 **POST /api/v1/drones/{sysid}/joystick** （需 OPERATOR 角色）
 - 路径参数: `sysid` (int) - 无人机系统 ID
@@ -120,7 +120,7 @@
 **POST /api/v1/drones/{sysid}/mission** （需 OPERATOR 角色）
 - 路径参数: `sysid` (int) - 无人机系统 ID
 - 请求体: `{items:[{cmd:String, lat:double, lon:double, alt:double, holdTime:double}, ...]}`（最多 1000 个航点）
-- 响应: 200 - `{status, uploaded, error?}`；400 - items 为空或超过 1000；404 - 无人机未注册
+- 响应: 200 - `{status, uploaded, error?}`；飞控确认成功时额外返回 `source:"cloud"` 与 `updatedAt`，失败不覆盖上一份成功快照；400 - items 为空、字段非法或超过 1000；404 - 无人机未注册
 
 **POST /api/v1/drones/{sysid}/commands** （需 OPERATOR 角色）
 - 路径参数: `sysid` (int) - 无人机系统 ID

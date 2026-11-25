@@ -257,6 +257,7 @@ JSONL，既不丢账也不背压生产者。代价是异步：刚写入的事件
 - **任务回读**：`⬇ 读取机载任务` 走完整 MISSION_REQUEST_LIST→COUNT→
   REQUEST_INT→ITEM_INT→ACK 下载协议，回读结果载入草稿可继续编辑
 - REST：`GET /api/v1/drones/{sysid}/mission`（与 upload 对称的 download）
+- **最近任务快照**：仅在飞控确认上传/下载成功后保存；在线下载响应 `source=drone`，离线下载回读云端快照并响应 `source=cloud`、`updatedAt`，失败上传不覆盖旧快照。`aerofleet.mission.persist=true` 时写入 PostgreSQL `drone_missions` 并在启动时恢复（prod/staging 开启，dev/test 默认关闭）；快照按租户隔离，撤销设备同步删除，改归属同步租户。保存的是最近一次成功任务的业务航点，不包含 MAVLink 传输过程或超时/路由/限流等运行时状态。
 
 **虚拟摇杆（MANUAL_CONTROL 直通）**：
 - REST：`POST /api/v1/drones/{sysid}/joystick {"x":0,"y":700,"z":500,"r":0}`
@@ -743,10 +744,10 @@ NexusSky/
 | `mavlink-core` | 529 |
 | `drone-sim` | 1479 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3945 |
+| `cloud-backend` | 3978 |
 | `sdk-java` | 24 |
 | `regulator-sim` | 41 |
-| **总计** | **6157** |
+| **总计** | **6190** |
 bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写

@@ -1,11 +1,33 @@
 package io.aerofleet.cloud.gateway;
 
+import io.aerofleet.cloud.mission.common.MissionPlanStore;
+import io.aerofleet.cloud.security.ApiKeyContext;
+import io.aerofleet.cloud.security.TenantContext;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * DeviceRegistry 单元测试：直接实例化（无 Spring 上下文），用 AssertJ 断言。
@@ -15,6 +37,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 而刚注册的设备 lastHeartbeatMs 默认为 0，不会被标记。
  */
 class DeviceRegistryTest {
+
+    @AfterEach
+    void clearTenantContext() {
+        ApiKeyContext.clear();
+        TenantContext.clear();
+    }
 
     @Test
     @DisplayName("registerIfAbsent 新 sysid 创建快照并标记在线")
@@ -107,5 +135,77 @@ class DeviceRegistryTest {
 
         assertThat(swept).doesNotContain(6);
         assertThat(s.online).isTrue();
+    }
+
+    @Test
+    @DisplayName("离线扫描持锁期间撤销等待，扫描保存完成后才删除设备")
+    void sweepOfflineAndDeregisterSerialize() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        DroneSnapshot snapshot = registry.registerIfAbsent(8);
+        snapshot.lastHeartbeatMs = System.currentTimeMillis() - 100_000L;
+        DeviceRepository repository = mock(DeviceRepository.class);
+        DeviceEntity entity = new DeviceEntity(8);
+        CountDownLatch findStarted = new CountDownLatch(1);
+        CountDownLatch allowFind = new CountDownLatch(1);
+        when(repository.findById(8)).thenAnswer(invocation -> {
+            findStarted.countDown();
+            assertThat(allowFind.await(5, TimeUnit.SECONDS)).isTrue();
+            return Optional.of(entity);
+        });
+        when(repository.existsById(8)).thenReturn(true);
+        ReflectionTestUtils.setField(registry, "repository", repository);
+        ReflectionTestUtils.setField(registry, "persist", true);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<List<Integer>> sweep = executor.submit(registry::sweepOffline);
+            assertThat(findStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<Boolean> deregister = executor.submit(() -> registry.deregister(8));
+            assertThatThrownBy(() -> deregister.get(200, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            allowFind.countDown();
+            assertThat(sweep.get(5, TimeUnit.SECONDS)).containsExactly(8);
+            assertThat(deregister.get(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(registry.isKnownDevice(8)).isFalse();
+            InOrder calls = inOrder(repository);
+            calls.verify(repository).findById(8);
+            calls.verify(repository).save(entity);
+            calls.verify(repository).existsById(8);
+            calls.verify(repository).deleteById(8);
+        } finally {
+            allowFind.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    @DisplayName("事务提交失败时设备与任务内存态都不提前删除")
+    void commitFailureKeepsDeviceAndMissionInMemory() {
+        ApiKeyContext.clear();
+        TenantContext.clear();
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        MissionPlanStore plans = new MissionPlanStore();
+        plans.save(1, null, List.of(), "drone");
+        ReflectionTestUtils.setField(registry, "missionPlans", plans);
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        TransactionStatus status = mock(TransactionStatus.class);
+        when(transactionManager.getTransaction(any())).thenReturn(status);
+        doThrow(new RuntimeException("commit failed")).when(transactionManager).commit(status);
+        ReflectionTestUtils.setField(registry, "transactionManager", transactionManager);
+
+        assertThat(plans.findVisible(1)).isNotNull();
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThatThrownBy(() -> registry.deregister(1))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessage("commit failed");
+            assertThat(registry.isKnownDevice(1)).isTrue();
+            assertThat(plans.findVisible(1)).isNotNull();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 }

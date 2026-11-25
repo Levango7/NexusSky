@@ -7,6 +7,7 @@ import io.aerofleet.cloud.gateway.DeviceRegistry;
 import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.mission.common.DroneCommandService;
 import io.aerofleet.cloud.mission.common.MissionItemRequest;
+import io.aerofleet.cloud.mission.common.MissionPlanStore;
 import io.aerofleet.cloud.mission.common.MissionUploadResult;
 import io.aerofleet.cloud.security.RequireRole;
 import io.aerofleet.cloud.security.Role;
@@ -41,12 +42,21 @@ public class DroneController {
     private final DeviceRegistry registry;
     private final DroneCommandService commands;
     private final io.aerofleet.cloud.flightlog.FlightLogService flightLog;
+    private final MissionPlanStore missionPlans;
 
     public DroneController(DeviceRegistry registry, DroneCommandService commands,
                            io.aerofleet.cloud.flightlog.FlightLogService flightLog) {
+        this(registry, commands, flightLog, new MissionPlanStore());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DroneController(DeviceRegistry registry, DroneCommandService commands,
+                           io.aerofleet.cloud.flightlog.FlightLogService flightLog,
+                           MissionPlanStore missionPlans) {
         this.registry = registry;
         this.commands = commands;
         this.flightLog = flightLog;
+        this.missionPlans = missionPlans;
     }
 
     /** Fleet list: online/offline, battery, mode, position, last heartbeat. */
@@ -79,26 +89,37 @@ public class DroneController {
      */
     @GetMapping("/{sysid}/mission")
     public Map<String, Object> downloadMission(@PathVariable("sysid") int sysid) {
+        MissionTarget target = captureMissionTarget(sysid);
         try {
             java.util.List<io.aerofleet.mavlink.messages.MissionItemInt> items =
                     commands.downloadMission(sysid);
-            List<Map<String, Object>> view = new java.util.ArrayList<>();
-            for (var it : items) {
-                view.add(Map.of(
-                        "seq", it.seq,
-                        "command", it.command,
-                        // MISSION_ITEM_INT carries lat/lon as 1e7 degrees int
-                        "lat", it.x / 1e7,
-                        "lon", it.y / 1e7,
-                        "alt", it.z,
-                        "holdTime", (double) it.param1,
-                        "frame", it.frame));
-            }
-            flightLog.mission(sysid, "mission download: " + items.size() + " items read back");
-            return Map.of("status", "ok", "count", items.size(), "items", view);
+            List<MissionPlanStore.StoredMissionItem> snapshot = items.stream()
+                    .map(MissionPlanStore.StoredMissionItem::from).toList();
+            return registry.withDeviceLock(sysid, () -> {
+                if (!target.stillCurrent(registry)) {
+                    return Map.<String, Object>of("status", "error",
+                            "result", "device registration or tenant changed during mission download");
+                }
+                missionPlans.save(sysid, target.tenantId(), snapshot, "drone");
+                flightLog.mission(sysid, "mission download: " + items.size() + " items read back");
+                return Map.of("status", "ok", "count", items.size(),
+                        "items", snapshot.stream().map(MissionPlanStore.StoredMissionItem::toView).toList(),
+                        "source", "drone");
+            });
         } catch (DroneCommandService.CommandException e) {
             log.warn("Mission download failed for sysid={}: {}", sysid, e.getMessage());
-            return Map.of("status", "error", "result", e.getMessage());
+            return registry.withDeviceLock(sysid, () -> {
+                if (!target.stillCurrent(registry)) {
+                    return Map.<String, Object>of("status", "error",
+                            "result", "device registration or tenant changed during mission download");
+                }
+                MissionPlanStore.MissionPlan cloud = missionPlans.findVisible(sysid);
+                if (cloud != null) {
+                    return Map.of("status", "ok", "count", cloud.items().size(),
+                            "items", cloud.toView(), "source", "cloud", "updatedAt", cloud.updatedAt());
+                }
+                return Map.of("status", "error", "result", e.getMessage());
+            });
         }
     }
 
@@ -139,7 +160,7 @@ public class DroneController {
     @RequireRole(Role.OPERATOR)
     public Map<String, Object> uploadMission(@PathVariable("sysid") int sysid,
                                              @RequestBody JsonNode body) {
-        require(sysid);   // 404 for unknown device
+        MissionTarget target = captureMissionTarget(sysid);
         // FR: 解析前校验 items 数量上限（先检查再逐项解析，防止超大 payload
         // 在 parseMissionItems 中全量转换耗尽内存）。
         JsonNode rawItems = body.path("items");
@@ -161,6 +182,26 @@ public class DroneController {
         resp.put("uploaded", result.uploaded());
         if (result.error() != null) {
             resp.put("error", result.error());
+        }
+        if ("ok".equals(result.status())) {
+            List<MissionPlanStore.StoredMissionItem> snapshot = mavItems.stream()
+                    .map(MissionPlanStore.StoredMissionItem::from).toList();
+            boolean saved = registry.withDeviceLock(sysid, () -> {
+                if (!target.stillCurrent(registry)) {
+                    return false;
+                }
+                missionPlans.save(sysid, target.tenantId(), snapshot, "upload");
+                MissionPlanStore.MissionPlan savedPlan = missionPlans.findVisible(sysid);
+                resp.put("source", "cloud");
+                if (savedPlan != null) {
+                    resp.put("updatedAt", savedPlan.updatedAt());
+                }
+                return true;
+            });
+            if (!saved) {
+                resp.put("status", "error");
+                resp.put("result", "device registration or tenant changed during mission upload");
+            }
         }
         return resp;
     }
@@ -241,6 +282,22 @@ public class DroneController {
     }
 
     // ------------------------------------------------------------------
+
+    private MissionTarget captureMissionTarget(int sysid) {
+        return registry.withDeviceLock(sysid, () -> {
+            DroneSnapshot snapshot = require(sysid);
+            DroneSnapshot.TenantIdentity tenant = snapshot.tenantIdentity();
+            return new MissionTarget(snapshot, tenant.tenantId(), tenant.tenantGeneration());
+        });
+    }
+
+    private record MissionTarget(DroneSnapshot drone, Integer tenantId, long tenantGeneration) {
+        private boolean stillCurrent(DeviceRegistry registry) {
+            DroneSnapshot current = registry.get(drone.sysid);
+            return current == drone && current.tenantGeneration() == tenantGeneration
+                    && java.util.Objects.equals(current.tenantId, tenantId);
+        }
+    }
 
     private DroneSnapshot require(int sysid) {
         DroneSnapshot s = registry.get(sysid);

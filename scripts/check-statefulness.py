@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""持久化状态性守卫：审计 §2.1「必须落库」的十个域，必须要么真有持久化证据、要么在豁免账里写明理由与到期日。
+"""持久化状态性守卫：审计 §2.1 起登记的十二个域，必须要么真有持久化证据、要么在豁免账里写明理由与到期日。
 
 **为什么需要它**
 ----------------
@@ -24,7 +24,7 @@
 
 **口径与局限（别把它当"全仓内存态覆盖"）**
 ------------------------------------------
-- 它盯的是审计已定性的这十个域；**新增业务域需要手动登记**（登记本身就是一次声明）。
+- 它盯审计已定性并登记的十二个域；**新增业务域需要手动登记**（登记本身就是一次声明）。
 - "证据齐全"只证明持久化通路存在（实体/仓库/迁移表/水合方法），**不证明行为正确**——
   行为由各域自己的"重启恢复"测试钉（第一批三条约 13 例是模板）。
 - 判据锚点是文本级（正则命中），不是编译级；改包名/改方法名后锚点失配会红，跟着修即可。
@@ -36,6 +36,7 @@
 """
 
 import argparse
+import contextlib
 import datetime
 import glob
 import io
@@ -44,7 +45,7 @@ import re
 import sys
 import tempfile
 
-# 审计 §2.1 的九个域。加一条是深思熟虑的动作：它意味着"这个域必须有持久化证据或豁免"。
+# 当前登记的十二个域。加一条是深思熟虑的动作：它意味着"这个域必须有持久化证据或豁免"。
 # 锚点写法：("相对仓库根的 glob", "正则")；glob 用 / 分隔，Windows 侧会转成系统分隔符。
 DOMAINS = [
     {
@@ -146,6 +147,32 @@ DOMAINS = [
              r"(?i)create table\s+(if not exists\s+)?inspection_tasks\b"),
             ("cloud-backend/src/main/resources/db/migration/V*.sql",
              r"(?i)create table\s+(if not exists\s+)?inspection_reports\b"),
+        ],
+    },
+    {
+        "name": "11 无人机主数据 DeviceRegistry",
+        "checks": [
+            ("cloud-backend/src/main/java/io/aerofleet/cloud/gateway/DeviceRegistry.java",
+             r"restoreFromRepository"),
+            ("cloud-backend/src/main/java/io/aerofleet/cloud/gateway/DeviceEntity.java",
+             r"@Entity"),
+            ("cloud-backend/src/main/java/io/aerofleet/cloud/gateway/DeviceRepository.java",
+             r"interface\s+DeviceRepository"),
+            ("cloud-backend/src/main/resources/db/migration/V*.sql",
+             r"(?i)create table\s+(if not exists\s+)?devices\b"),
+        ],
+    },
+    {
+        "name": "12 无人机任务快照 MissionPlanStore",
+        "checks": [
+            ("cloud-backend/src/main/java/io/aerofleet/cloud/mission/common/MissionPlanStore.java",
+             r"restoreFromRepository"),
+            ("cloud-backend/src/main/java/io/aerofleet/cloud/mission/common/MissionPlanEntity.java",
+             r"@Entity"),
+            ("cloud-backend/src/main/java/io/aerofleet/cloud/mission/common/MissionPlanRepository.java",
+             r"interface\s+MissionPlanRepository"),
+            ("cloud-backend/src/main/resources/db/migration/V*.sql",
+             r"(?i)create table\s+(if not exists\s+)?drone_missions\b"),
         ],
     },
 ]
@@ -259,7 +286,7 @@ def audit(root, domains=None, exempt=None, today=None):
 
 def do_print(root):
     for d in DOMAINS:
-        has_evidence, problems = domain_status(root, d)
+        has_evidence, _, anchor_dead, evidence_miss = domain_status(root, d)
         if has_evidence:
             status = "EVIDENCE"
         elif d["name"] in EXEMPT:
@@ -267,7 +294,7 @@ def do_print(root):
         else:
             status = "UNREGISTERED"
         print("%-12s %s" % (status, d["name"]))
-        for p in problems:
+        for p in anchor_dead + evidence_miss:
             print("             %s" % p)
     return 0
 
@@ -282,7 +309,7 @@ def write_fixture(tmp, files):
 
 
 def self_test():
-    """八种情形必须各自给出预期结果。任一不符 ⇒ 自测失败（exit 1）。"""
+    """九种情形必须各自给出预期结果。任一不符 ⇒ 自测失败（exit 1）。"""
     fails = []
     today = datetime.date(2026, 10, 28)
 
@@ -346,12 +373,29 @@ def self_test():
         code, lines = audit(tmp, [], {}, today)
         expect("情形8", code, lines, 2, "无法判定")
 
+    # 9) --print 必须消费四元返回值并报告缺失锚点，不能解包崩溃
+    with tempfile.TemporaryDirectory() as tmp:
+        write_fixture(tmp, {"m/a/Foo.java": "class Foo {}\n"})
+        output = io.StringIO()
+        original_domains, original_exempt = list(DOMAINS), dict(EXEMPT)
+        try:
+            DOMAINS[:] = dom([("m/a/Foo.java", r"restoreAll")])
+            EXEMPT.clear()
+            with contextlib.redirect_stdout(output):
+                code = do_print(tmp)
+        finally:
+            DOMAINS[:] = original_domains
+            EXEMPT.update(original_exempt)
+        expect("情形9", code, output.getvalue().splitlines(), 0)
+        if "UNREGISTERED" not in output.getvalue() or "证据未命中" not in output.getvalue():
+            fails.append("情形9 未报告缺失持久化证据 :: %s" % output.getvalue())
+
     if fails:
         print("[FAIL] 状态性门禁自测：%d 条不符" % len(fails))
         for f in fails:
             print("  - " + f)
         return 1
-    print("[PASS] 状态性门禁自测：8 种情形全部按预期（红/绿/无法判定）")
+    print("[PASS] 状态性门禁自测：9 种情形全部按预期（红/绿/无法判定/打印）")
     return 0
 
 

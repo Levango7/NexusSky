@@ -5,18 +5,37 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aerofleet.cloud.api.exception.ApiExceptionHandler;
 import io.aerofleet.cloud.flightlog.FlightLogService;
 import io.aerofleet.cloud.gateway.DeviceRegistry;
+import io.aerofleet.cloud.gateway.DroneSnapshot;
 import io.aerofleet.cloud.mission.common.DroneCommandService;
+import io.aerofleet.cloud.mission.common.MissionPlanStore;
+import io.aerofleet.cloud.mission.common.MissionUploadResult;
+import io.aerofleet.mavlink.messages.MissionItemInt;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyFloat;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -326,5 +345,408 @@ class DroneControllerTest {
         assertThatThrownBy(() -> controller.uploadMission(1, body))
                 .satisfies(t -> assertThat(t.getMessage() == null ? "" : t.getMessage())
                         .doesNotContain("exceeds maximum of 1000"));
+    }
+
+    @Test
+    @DisplayName("uploadMission 飞控确认成功后保存云端任务快照")
+    void uploadMission_successSavesCloudSnapshot() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        MissionItemInt item = missionItem(0, 16);
+        when(commands.toMissionItems(anyList(), eq(1))).thenReturn(List.of(item));
+        when(commands.uploadMission(eq(1), anyList())).thenReturn(MissionUploadResult.ok(1));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.uploadMission(1, missionBody(22.59, 113.93, 30));
+
+        assertThat(response.get("status")).isEqualTo("ok");
+        assertThat(response.get("source")).isEqualTo("cloud");
+        assertThat(response.get("updatedAt")).isNotNull();
+        assertThat(plans.findVisible(1).source()).isEqualTo("upload");
+        assertThat(plans.findVisible(1).items()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("uploadMission 飞控拒绝时不覆盖上一份成功快照")
+    void uploadMission_failureKeepsPreviousSnapshot() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        plans.save(1, null, List.of(MissionPlanStore.StoredMissionItem.from(missionItem(0, 16))), "upload");
+        when(commands.toMissionItems(anyList(), eq(1))).thenReturn(List.of(missionItem(1, 21)));
+        when(commands.uploadMission(eq(1), anyList())).thenReturn(MissionUploadResult.failure("rejected"));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.uploadMission(1, missionBody(23.0, 114.0, 40));
+
+        assertThat(response.get("status")).isEqualTo("error");
+        assertThat(plans.findVisible(1).items().get(0).command()).isEqualTo(16);
+    }
+
+    @Test
+    @DisplayName("downloadMission 离线失败时回读云端快照并标记 source=cloud")
+    void downloadMission_offlineFallsBackToCloudSnapshot() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        plans.save(1, null, List.of(MissionPlanStore.StoredMissionItem.from(missionItem(0, 16))), "upload");
+        when(commands.downloadMission(1)).thenThrow(new DroneCommandService.CommandException("offline", -1));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.downloadMission(1);
+
+        assertThat(response.get("status")).isEqualTo("ok");
+        assertThat(response.get("source")).isEqualTo("cloud");
+        assertThat(response.get("count")).isEqualTo(1);
+        assertThat(response.get("updatedAt")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("下载失败期间设备已撤销，不回读旧实例任务快照")
+    void downloadMission_deregisteredDuringFailure_doesNotReadOldSnapshot() {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = mock(MissionPlanStore.class);
+        MissionPlanStore.MissionPlan old = new MissionPlanStore.MissionPlan(
+                1, null, List.of(), "upload", Instant.now());
+        when(plans.findVisible(1)).thenReturn(old);
+        when(commands.downloadMission(1)).thenAnswer(invocation -> {
+            registry.deregister(1);
+            throw new DroneCommandService.CommandException("offline", -1);
+        });
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.downloadMission(1);
+
+        assertThat(response.get("status")).isEqualTo("error");
+        assertThat(response.get("result")).asString().contains("registration or tenant changed");
+        verify(plans, never()).findVisible(1);
+    }
+
+    @Test
+    @DisplayName("downloadMission 成功时保存飞控快照并标记 source=drone")
+    void downloadMission_successSavesDroneSnapshot() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        when(commands.downloadMission(1)).thenReturn(List.of(missionItem(2, 16)));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.downloadMission(1);
+
+        assertThat(response.get("source")).isEqualTo("drone");
+        assertThat(plans.findVisible(1).source()).isEqualTo("drone");
+        assertThat(plans.findVisible(1).items().get(0).seq()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("空任务下载成功覆盖旧快照，离线回读 count=0 且保留 updatedAt")
+    void downloadMission_emptySuccessReplacesSnapshot() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        plans.save(1, null, List.of(MissionPlanStore.StoredMissionItem.from(missionItem(0, 16))), "upload");
+        when(commands.downloadMission(1)).thenReturn(List.of())
+                .thenThrow(new DroneCommandService.CommandException("offline", -1));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> online = controller.downloadMission(1);
+        Map<String, Object> offline = controller.downloadMission(1);
+
+        assertThat(online.get("count")).isEqualTo(0);
+        assertThat(online.get("source")).isEqualTo("drone");
+        assertThat(plans.findVisible(1).items()).isEmpty();
+        assertThat(offline.get("status")).isEqualTo("ok");
+        assertThat(offline.get("count")).isEqualTo(0);
+        assertThat(offline.get("source")).isEqualTo("cloud");
+        assertThat(offline.get("updatedAt")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("上传期间撤销并同号重登记，不把旧实例结果写入新设备")
+    void uploadMission_deregisteredDuringUpload_doesNotSave() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        when(commands.toMissionItems(anyList(), eq(1))).thenReturn(List.of(missionItem(0, 16)));
+        when(commands.uploadMission(eq(1), anyList())).thenAnswer(invocation -> {
+            registry.deregister(1);
+            registry.provision(1, null);
+            return MissionUploadResult.ok(1);
+        });
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.uploadMission(1, missionBody(22.59, 113.93, 30));
+
+        assertThat(response.get("status")).isEqualTo("error");
+        assertThat(response.get("result")).asString().contains("registration or tenant changed");
+        assertThat(plans.findVisible(1)).isNull();
+    }
+
+    @Test
+    @DisplayName("下载期间撤销设备，不重新创建已撤销设备的任务快照")
+    void downloadMission_deregisteredDuringDownload_doesNotSave() {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        when(commands.downloadMission(1)).thenAnswer(invocation -> {
+            registry.deregister(1);
+            return List.of(missionItem(0, 16));
+        });
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.downloadMission(1);
+
+        assertThat(response.get("status")).isEqualTo("error");
+        assertThat(plans.findVisible(1)).isNull();
+    }
+
+    @Test
+    @DisplayName("长任务期间改租户，不把旧租户结果写成新归属任务")
+    void uploadMission_tenantChangedDuringUpload_doesNotSave() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        when(commands.toMissionItems(anyList(), eq(1))).thenReturn(List.of(missionItem(0, 16)));
+        when(commands.uploadMission(eq(1), anyList())).thenAnswer(invocation -> {
+            registry.assignTenant(1, 2);
+            return MissionUploadResult.ok(1);
+        });
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.uploadMission(1, missionBody(22.59, 113.93, 30));
+
+        assertThat(response.get("status")).isEqualTo("error");
+        assertThat(plans.findVisible(1)).isNull();
+    }
+
+    @Test
+    @DisplayName("下载捕获身份与并发改租户串行，旧请求不得写入新租户")
+    void downloadMission_capturesTenantIdentityUnderDeviceLock() {
+        LockTrackingRegistry registry = new LockTrackingRegistry();
+        try {
+            registry.registerIfAbsent(1);
+            registry.assignTenant(1, 1);
+            DroneCommandService commands = mock(DroneCommandService.class);
+            MissionPlanStore plans = new MissionPlanStore();
+            when(commands.downloadMission(1)).thenAnswer(invocation -> {
+                registry.awaitTenantAssignment();
+                return List.of(missionItem(0, 16));
+            });
+            DroneController controller = new DroneController(registry, commands,
+                    mock(FlightLogService.class), plans);
+
+            Map<String, Object> response = controller.downloadMission(1);
+
+            assertThat(response.get("status")).isEqualTo("error");
+            assertThat(response.get("result")).asString().contains("registration or tenant changed");
+            assertThat(plans.findVisible(1)).isNull();
+        } finally {
+            registry.close();
+        }
+    }
+
+    @Test
+    @DisplayName("上传捕获身份与并发改租户串行，旧请求不得写入新租户")
+    void uploadMission_capturesTenantIdentityUnderDeviceLock() throws Exception {
+        LockTrackingRegistry registry = new LockTrackingRegistry();
+        try {
+            registry.registerIfAbsent(1);
+            registry.assignTenant(1, 1);
+            DroneCommandService commands = mock(DroneCommandService.class);
+            MissionPlanStore plans = new MissionPlanStore();
+            when(commands.toMissionItems(anyList(), eq(1))).thenReturn(List.of(missionItem(0, 16)));
+            when(commands.uploadMission(eq(1), anyList())).thenAnswer(invocation -> {
+                registry.awaitTenantAssignment();
+                return MissionUploadResult.ok(1);
+            });
+            DroneController controller = new DroneController(registry, commands,
+                    mock(FlightLogService.class), plans);
+
+            Map<String, Object> response = controller.uploadMission(1, missionBody(22.59, 113.93, 30));
+
+            assertThat(response.get("status")).isEqualTo("error");
+            assertThat(response.get("result")).asString().contains("registration or tenant changed");
+            assertThat(plans.findVisible(1)).isNull();
+        } finally {
+            registry.close();
+        }
+    }
+
+    @Test
+    @DisplayName("上传期间租户 A→B→A，代际变化仍拒绝旧结果")
+    void uploadMission_tenantGenerationChangedDuringUpload_doesNotSave() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        registry.assignTenant(1, 1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        when(commands.toMissionItems(anyList(), eq(1))).thenReturn(List.of(missionItem(0, 16)));
+        when(commands.uploadMission(eq(1), anyList())).thenAnswer(invocation -> {
+            registry.assignTenant(1, 2);
+            registry.assignTenant(1, 1);
+            return MissionUploadResult.ok(1);
+        });
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.uploadMission(1, missionBody(22.59, 113.93, 30));
+
+        assertThat(response.get("status")).isEqualTo("error");
+        assertThat(response.get("result")).asString().contains("registration or tenant changed");
+        assertThat(plans.findVisible(1)).isNull();
+    }
+
+    @Test
+    @DisplayName("下载期间租户 A→B→A，代际变化仍拒绝旧结果")
+    void downloadMission_tenantGenerationChangedDuringDownload_doesNotSave() {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        registry.assignTenant(1, 1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        when(commands.downloadMission(1)).thenAnswer(invocation -> {
+            registry.assignTenant(1, 2);
+            registry.assignTenant(1, 1);
+            return List.of(missionItem(0, 16));
+        });
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.downloadMission(1);
+
+        assertThat(response.get("status")).isEqualTo("error");
+        assertThat(plans.findVisible(1)).isNull();
+    }
+
+    @Test
+    @DisplayName("下载失败回读期间租户 A→B→A，代际变化仍拒绝旧快照")
+    void downloadMission_tenantGenerationChangedDuringFailure_doesNotReadSnapshot() {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        registry.assignTenant(1, 1);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        MissionPlanStore plans = new MissionPlanStore();
+        plans.save(1, 1, List.of(MissionPlanStore.StoredMissionItem.from(missionItem(0, 16))), "upload");
+        when(commands.downloadMission(1)).thenAnswer(invocation -> {
+            registry.assignTenant(1, 2);
+            registry.assignTenant(1, 1);
+            throw new DroneCommandService.CommandException("offline", -1);
+        });
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+
+        Map<String, Object> response = controller.downloadMission(1);
+
+        assertThat(response.get("status")).isEqualTo("error");
+        assertThat(response.get("result")).asString().contains("registration or tenant changed");
+        assertThat(plans.findVisible(1).items()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("任务快照保存与设备撤销按 sysid 串行，撤销等待保存完成后删除")
+    void snapshotSaveAndDeregisterAreSerialized() throws Exception {
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.registerIfAbsent(1);
+        MissionPlanStore plans = mock(MissionPlanStore.class);
+        CountDownLatch saveEntered = new CountDownLatch(1);
+        CountDownLatch releaseSave = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            saveEntered.countDown();
+            assertThat(releaseSave.await(5, TimeUnit.SECONDS)).isTrue();
+            return null;
+        }).when(plans).save(eq(1), isNull(), anyList(), eq("drone"));
+        ReflectionTestUtils.setField(registry, "missionPlans", plans);
+        DroneCommandService commands = mock(DroneCommandService.class);
+        when(commands.downloadMission(1)).thenReturn(List.of(missionItem(0, 16)));
+        DroneController controller = new DroneController(registry, commands,
+                mock(FlightLogService.class), plans);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Map<String, Object>> download = executor.submit(() -> controller.downloadMission(1));
+            assertThat(saveEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            CountDownLatch deregisterStarted = new CountDownLatch(1);
+            Future<Boolean> deregister = executor.submit(() -> {
+                deregisterStarted.countDown();
+                return registry.deregister(1);
+            });
+            assertThat(deregisterStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> deregister.get(100, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            releaseSave.countDown();
+            assertThat(download.get(5, TimeUnit.SECONDS).get("status")).isEqualTo("ok");
+            assertThat(deregister.get(5, TimeUnit.SECONDS)).isTrue();
+            InOrder order = inOrder(plans);
+            order.verify(plans).save(eq(1), isNull(), anyList(), eq("drone"));
+            order.verify(plans).delete(1);
+        } finally {
+            releaseSave.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    private static final class LockTrackingRegistry extends DeviceRegistry {
+        private final ExecutorService executor = Executors.newSingleThreadExecutor();
+        private int lockDepth;
+        private Future<Boolean> tenantAssignment;
+
+        @Override
+        public DroneSnapshot get(int sysid) {
+            DroneSnapshot snapshot = super.get(sysid);
+            if (snapshot != null && tenantAssignment == null) {
+                tenantAssignment = executor.submit(() -> assignTenant(sysid, 2));
+                if (lockDepth == 0) {
+                    awaitTenantAssignment();
+                }
+            }
+            return snapshot;
+        }
+
+        private void awaitTenantAssignment() {
+            try {
+                assertThat(tenantAssignment.get(5, TimeUnit.SECONDS)).isTrue();
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        }
+
+        private void close() {
+            executor.shutdownNow();
+        }
+
+        @Override
+        public <T> T withDeviceLock(int sysid, Supplier<T> action) {
+            lockDepth++;
+            try {
+                return super.withDeviceLock(sysid, action);
+            } finally {
+                lockDepth--;
+            }
+        }
+    }
+
+    private static MissionItemInt missionItem(int seq, int command) {
+        return new MissionItemInt(1, 0, seq, 3, command, 0, 1,
+                0, 0, 0, 0, 225900000, 1139300000, 30, 0);
     }
 }
