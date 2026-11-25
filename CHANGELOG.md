@@ -62,8 +62,8 @@
   生命周期失败）、H2+Flyway+`ddl-auto=validate` 7 例（建表恢复、撤销级联、改租户、异常回滚、
   设备/任务删除与改租户提交失败各一例）、DeviceRegistry 2 例（事务提交失败保留内存、
   离线扫描与撤销串行）。针对性五类 77/77 连续三轮通过；重基线到 `origin/master`
-  `343e72ea` 后全量 reactor 6188/6188（cloud-backend 3976），752 个测试类，
-  0 失败/错误/跳过，8:57 BUILD SUCCESS。
+  `50de8b51` 后全量 reactor 6190/6190（cloud-backend 3978），753 个测试类，
+  0 失败/错误/跳过，BUILD SUCCESS。
 - IT Pass C 增加活体 drone-sim 上传→停对端→重启回读→撤销→同号重登→再重启无旧快照
   的真 PostgreSQL 断言，并显式保留主线的 `--aerofleet.regulator.sink-type=sim`。
   重基线后 PostgreSQL 15.19 真库 Pass A/B/C 全部通过，43 个迁移成功；独立 psql 复核
