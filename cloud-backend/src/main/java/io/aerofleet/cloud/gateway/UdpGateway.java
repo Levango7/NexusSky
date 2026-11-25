@@ -80,8 +80,8 @@ public class UdpGateway {
     /** 设备白名单是否启用（prod=true, dev=false）。 */
     private final boolean deviceWhitelistEnabled;
 
-    /** 单 sysid 每秒最大帧数（默认 100）。 */
-    private final int maxFrameRatePerSysid;
+    /** 每 sysid 滑动窗口频率限制器（独立横切组件，见 {@link FrameRateLimiter}）。 */
+    private final FrameRateLimiter rateLimiter;
 
     /** 设备注册表，用于白名单校验；可选注入（dev 模式下可能为 null）。 */
     @Autowired(required = false)
@@ -197,28 +197,6 @@ public class UdpGateway {
         }
     }
 
-    /** 每 sysid 滑动窗口频率限制器：key=sysid, value=最近1秒内的时间戳队列。 */
-    private final ConcurrentHashMap<Integer, Deque<Long>> rateLimitWindows = new ConcurrentHashMap<>();
-
-    /**
-     * 关键帧独立预算（P2-F5）：key=sysid, value=最近1秒内的时间戳队列。
-     * <p>
-     * ACK/心跳/任务协议回执这类低频控制面帧不走主窗口——否则高码率流会在每秒开头
-     * 把主窗口吃满，关键帧成批被丢（SITL 实测：PX4 SITL 4MB/s 洪泛下单轮 340k+ 条
-     * 「Rate limit exceeded」，MISSION_ACK 全灭、上传必现超时，docs/sitl-integration.md
-     * §12.2-⑤）。独立小预算既保关键帧存活，又不放大非关键帧的准入（防滥用语义不变）。
-     */
-    private final ConcurrentHashMap<Integer, Deque<Long>> criticalRateWindows = new ConcurrentHashMap<>();
-
-    /**
-     * 出站定向广播的每-sysid 预算（P2-F6 ②，2026-11-07）：key=sysid。
-     * <p>
-     * 广播把一帧放大成 N 帧（N = 已知实例数）——不限就等于把限速上限乘以链路数。
-     * 这里的上限复用 {@code maxFrameRatePerSysid}，因此每个实例实得
-     * 「总配额 / 实例数」：总帧数不放大，即 §12.4 判据 2 的**按实例摊分**。
-     */
-    private final ConcurrentHashMap<Integer, Deque<Long>> broadcastRateWindows = new ConcurrentHashMap<>();
-
     /**
      * 每 sysid 换源窗口（60s 滑动）：路由抢夺/链路抖动的告警依据（威胁建模 ④-F2）。
      * <p>
@@ -236,17 +214,17 @@ public class UdpGateway {
     private static final long ROUTE_FLAP_WINDOW_MS = 60_000L;
 
     /**
-     * 关键帧判定集：GCS 功能依赖其「必达」的低频控制面帧。
-     * 协议回执（COMMAND_ACK、MISSION_ACK、MISSION_REQUEST 的 legacy 与 INT 变体、
-     * MISSION_COUNT、MISSION_REQUEST_LIST）、存活心跳（HEARTBEAT）、告警证据（STATUSTEXT）。
+     * 关键帧独立预算（每 sysid 每秒）；<=0 关闭豁免（关键帧退回主窗口，旧行为）。
+     * 实际限速逻辑在 {@link FrameRateLimiter}，本字段经 {@link #syncCriticalBudget()} 转发。
      */
-    private static final java.util.Set<Integer> CRITICAL_FRAME_MSGIDS = java.util.Set.of(
-            CommandAck.ID, MissionAckMsg.ID, MissionRequest.ID, MissionRequestInt.ID,
-            MissionCountMsg.ID, MissionRequestList.ID, Heartbeat.ID, Statustext.ID);
-
-    /** 关键帧独立预算（每 sysid 每秒）；<=0 关闭豁免（关键帧退回主窗口，旧行为）。 */
     @Value("${aerofleet.udp.max-critical-frame-rate-per-sysid:50}")
     private int maxCriticalFrameRatePerSysid = 50;
+
+    /** 构造后把 {@code @Value} 注入的关键帧预算转发给 {@link #rateLimiter}。 */
+    @jakarta.annotation.PostConstruct
+    void syncCriticalBudget() {
+        rateLimiter.setMaxCriticalFrameRatePerSysid(maxCriticalFrameRatePerSysid);
+    }
 
     /**
      * 内核 UDP 接收缓冲区字节数；{@code 0} 表示沿用 OS 默认值（不改变既有行为）。
@@ -270,7 +248,7 @@ public class UdpGateway {
         this.ingest = ingest;
         this.pendings = pendings;
         this.deviceWhitelistEnabled = deviceWhitelistEnabled;
-        this.maxFrameRatePerSysid = maxFrameRatePerSysid;
+        this.rateLimiter = new FrameRateLimiter(maxFrameRatePerSysid);
         this.transport = new UdpMavlinkTransport(bindAddress, udpPort);
 
         // 摄入侧信号出口：mavlink-core 只认识 UdpIngestObserver 接口，Micrometer 接线留在本层。
@@ -387,18 +365,16 @@ public class UdpGateway {
         }
 
         // 频率限制：滑动窗口算法（GCS_SYSID 不受限）。
-        // P2-F5：关键帧走独立小预算（见 criticalRateWindows）——单一窗口下高码率流
+        // P2-F5：关键帧走独立小预算（见 FrameRateLimiter）——单一窗口下高码率流
         // 会在每秒开头把预算吃满，ACK/心跳成批被丢（SITL 实测 340k+ 条丢帧）。
         // 非关键帧的窗口与上限不变；关键预算耗尽才丢关键帧（防滥用语义保留）；
         // 预算配置 <=0 时豁免关闭，关键帧退回主窗口（旧行为）。
         if (sysid > 0 && sysid != GCS_SYSID) {
-            boolean critical = maxCriticalFrameRatePerSysid > 0
-                    && CRITICAL_FRAME_MSGIDS.contains(frame.getMessageId());
-            boolean allowed = critical ? criticalRateAllow(sysid) : rateLimitAllow(sysid);
-            if (!allowed) {
+            if (!rateLimiter.allowIngest(sysid, frame.getMessageId())) {
+                boolean critical = rateLimiter.isCritical(frame.getMessageId());
                 log.warn("Rate limit exceeded for sysid={}, dropping {}frame (max {}/s)",
                         sysid, critical ? "critical " : "",
-                        critical ? maxCriticalFrameRatePerSysid : maxFrameRatePerSysid);
+                        critical ? rateLimiter.maxCriticalFrameRate() : rateLimiter.maxFrameRate());
                 recordDrop(DroneMetrics.IngestDropReason.FRAME_RATE_LIMITED);
                 return;
             }
@@ -421,83 +397,6 @@ public class UdpGateway {
     }
 
     /**
-     * 滑动窗口频率限制：检查 sysid 在最近 1 秒内的帧数是否超限。
-     *
-     * @return true=允许通过, false=超限需丢弃
-     */
-    private boolean rateLimitAllow(int sysid) {
-        long now = System.currentTimeMillis();
-        Deque<Long> window = rateLimitWindows.computeIfAbsent(sysid, k -> new ArrayDeque<>());
-        synchronized (window) {
-            // 移除超过 1 秒的旧时间戳
-            while (!window.isEmpty() && now - window.peekFirst() > 1000) {
-                window.pollFirst();
-            }
-            if (window.size() >= maxFrameRatePerSysid) {
-                return false;
-            }
-            window.addLast(now);
-            return true;
-        }
-    }
-
-    /**
-     * 关键帧独立预算（P2-F5）：与主窗口同型的滑动窗口，但配额独立
-     * （{@code aerofleet.udp.max-critical-frame-rate-per-sysid}，默认 50/s）。
-     * 关键帧只查本预算、不占主窗口——两条预算互不挤占。
-     */
-    private boolean criticalRateAllow(int sysid) {
-        long now = System.currentTimeMillis();
-        Deque<Long> window = criticalRateWindows.computeIfAbsent(sysid, k -> new ArrayDeque<>());
-        synchronized (window) {
-            while (!window.isEmpty() && now - window.peekFirst() > 1000) {
-                window.pollFirst();
-            }
-            if (window.size() >= maxCriticalFrameRatePerSysid) {
-                return false;
-            }
-            window.addLast(now);
-            return true;
-        }
-    }
-
-    /**
-     * **出站定向广播**的每-sysid 预算（P2-F6 ②，2026-11-07）。
-     *
-     * <p>为什么只在广播路径上查：单地址出站（路由已学到）与旧行为逐字节等价，
-     * 给它也加限会改变单机 SITL 的既有语义；而**广播会把一帧放大成 N 帧**
-     * （N = 已知实例数），不限就等于把限速上限乘以链路数。
-     *
-     * <p>口径：按 sysid 的滑动窗口计数（与入站主窗口同型），上限复用
-     * {@code aerofleet.udp.max-frame-rate-per-sysid}。它落在广播路径上 ⇒
-     * 每个实例实际拿到的配额是「总配额 / 实例数」，即 §12.4 判据 2 说的
-     * **按实例摊分**（总帧数不放大，而不是每实例都给满配额）。
-     */
-    private boolean outboundBroadcastAllow(int sysid) {
-        long now = System.currentTimeMillis();
-        Deque<Long> window = broadcastRateWindows.computeIfAbsent(sysid, k -> new java.util.ArrayDeque<>());
-        synchronized (window) {
-            while (!window.isEmpty() && now - window.peekFirst() > 1000) {
-                window.pollFirst();
-            }
-            if (window.size() >= maxFrameRatePerSysid) {
-                return false;
-            }
-            window.addLast(now);
-            return true;
-        }
-    }
-
-    /** 窗口集合的过期清理与 {@link #pruneStaleRateLimitWindows()} 同周期（key 与路由同生命周期）。 */
-    private void pruneBroadcastWindows(java.util.Collection<Integer> deadSysids) {
-        if (deadSysids.isEmpty()) {
-            return;
-        }
-        java.util.Set<Integer> dead = new java.util.HashSet<>(deadSysids);
-        broadcastRateWindows.keySet().removeAll(dead);
-    }
-
-    /**
      * Route aging (D3): drop routes silent for 5 min - a replaced/rebound
      * drone otherwise leaves a stale address that silently eats commands.
      * Runs every 60 s.
@@ -509,7 +408,7 @@ public class UdpGateway {
             log.info("pruning stale route sysid={} (silent >5min)", sysid);
         }
         // 路由走了，出站广播窗口随之作废（key 与路由同生命周期）
-        pruneBroadcastWindows(pruned);
+        rateLimiter.pruneBroadcastWindows(pruned);
     }
 
     /**
@@ -519,34 +418,15 @@ public class UdpGateway {
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 300_000, initialDelay = 300_000)
     public void pruneStaleRateLimitWindows() {
         long cutoff = System.currentTimeMillis() - 120_000;
-        int before = rateLimitWindows.size() + criticalRateWindows.size() + broadcastRateWindows.size()
-                + routeChangeWindows.size();
-        rateLimitWindows.entrySet().removeIf(entry -> {
-            Deque<Long> window = entry.getValue();
-            synchronized (window) {
-                return window.isEmpty() || window.peekLast() < cutoff;
-            }
-        });
-        criticalRateWindows.entrySet().removeIf(entry -> {
-            Deque<Long> window = entry.getValue();
-            synchronized (window) {
-                return window.isEmpty() || window.peekLast() < cutoff;
-            }
-        });
-        broadcastRateWindows.entrySet().removeIf(entry -> {
-            Deque<Long> window = entry.getValue();
-            synchronized (window) {
-                return window.isEmpty() || window.peekLast() < cutoff;
-            }
-        });
+        int removedRate = rateLimiter.pruneStaleWindows(cutoff);
+        int beforeRoute = routeChangeWindows.size();
         routeChangeWindows.entrySet().removeIf(entry -> {
             Deque<Long> window = entry.getValue();
             synchronized (window) {
                 return window.isEmpty() || window.peekLast() < cutoff;
             }
         });
-        int removed = before - rateLimitWindows.size() - criticalRateWindows.size()
-                - broadcastRateWindows.size() - routeChangeWindows.size();
+        int removed = removedRate + (beforeRoute - routeChangeWindows.size());
         if (removed > 0) {
             log.debug("Pruned {} stale rate-limit windows", removed);
         }
@@ -555,6 +435,7 @@ public class UdpGateway {
     /** 设置关键帧预算（主要用于测试注入；<=0 关闭豁免，退回主窗口旧行为）。 */
     void setMaxCriticalFrameRatePerSysid(int maxCriticalFrameRatePerSysid) {
         this.maxCriticalFrameRatePerSysid = maxCriticalFrameRatePerSysid;
+        this.rateLimiter.setMaxCriticalFrameRatePerSysid(maxCriticalFrameRatePerSysid);
     }
 
     public int getLocalPort() {
@@ -593,7 +474,7 @@ public class UdpGateway {
      *
      * <p>**新行为**：对 {@link RouteTable#addresses()} 里**所有已知实例定向广播**
      * （不是 LAN 广播——逐个 {@code InetSocketAddress} 定向发，语义可枚举、可断言）。
-     * 广播路径受 {@link #outboundBroadcastAllow(int)} 限制：预算按 sysid 计，
+     * 广播路径受 {@link FrameRateLimiter#allowOutboundBroadcast(int)} 限制：预算按 sysid 计，
      * 实例越多每实例实得越少（**总帧数不放大**，即按实例摊分）。
      *
      * <p>一个实例也没学到时（启动初期、或全部路由已老化）仍需兜底——退回
@@ -605,7 +486,7 @@ public class UdpGateway {
         for (SocketAddress a : droneRoutes.addresses()) {
             known.add(a);
         }
-        if (known.isEmpty() || !outboundBroadcastAllow(sysid)) {
+        if (known.isEmpty() || !rateLimiter.allowOutboundBroadcast(sysid)) {
             transport.sendToLastPeer(frame); // 无已知实例 / 预算耗尽：旧兜底（best effort）
             return;
         }
