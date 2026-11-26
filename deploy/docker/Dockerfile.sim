@@ -21,6 +21,8 @@
 ARG BASE_REGISTRY=docker.io/library
 FROM ${BASE_REGISTRY}/maven:3.9-eclipse-temurin-17 AS builder
 WORKDIR /build
+# Maven Central 429 兜底：使用仓库内的镜像 settings（内容同 central，校验和一致）。
+COPY deploy/docker/maven-settings.xml /root/.m2/settings.xml
 
 COPY pom.xml ./
 COPY mavlink-core/pom.xml ./mavlink-core/pom.xml
