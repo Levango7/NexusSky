@@ -446,7 +446,7 @@
       },
       "targets": [
         {
-          "expr": "ws_connections",
+          "expr": "aerofleet_ws_sessions",
           "legendFormat": "WS Connections",
           "refId": "A"
         }
@@ -499,7 +499,7 @@
       },
       "targets": [
         {
-          "expr": "rate(mavlink_frames_total[1m])",
+          "expr": "sum(rate(aerofleet_messages_received_total[1m]))",
           "legendFormat": "MAVLink Frames/s",
           "refId": "A"
         }

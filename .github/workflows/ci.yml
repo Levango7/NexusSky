@@ -134,6 +134,10 @@ jobs:
           python3 scripts/check-npm-audit.py --self-test
           # API 响应字段契约（2026-11-18）：路径存在 ≠ 字段还在。
           python3 scripts/check-api-field-contract.py --self-test
+          # 监控指标名对账（2026-11-26 落地）：dashboard/alertmanager 的 PromQL 引用的
+          # aerofleet_* 指标必须在代码里真实注册——已实测三次改名/拼写错误（drones_online、
+          # ws_connections、mavlink_frames_total）让面板空白、告警哑火却没有任何门禁变红。
+          python3 scripts/check-monitoring-metrics.py --self-test
       - name: Repository hygiene gate (no conflict markers / self-consistent CHANGELOG)
         run: python3 scripts/check-repo-hygiene.py
       - name: Self-test coverage gate
@@ -191,6 +195,11 @@ jobs:
       # 这条门禁继续守"声明了没人读"这个形状本身。
       - name: Config key reconciliation gate (properties → code)
         run: python3 scripts/check-config-keys.py
+      # 监控配置（grafana dashboard / alertmanager 规则）里 PromQL 引用的 aerofleet_* 指标
+      # 必须在代码里真实注册。这类错误没有编译期/运行期约束，只在面板空白、告警哑火时才
+      # 暴露——drones_online（P1-4）、ws_connections、mavlink_frames_total 全是这么漏的。
+      - name: Monitoring metric name gate
+        run: python3 scripts/check-monitoring-metrics.py
       # 审计 §12.3 的第三条裁决：getter 判据**不收紧**，改成只看得见、不判红的清单。
       # 为什么不敢判红：这条判据是过近似的（Jackson 按 getter 定 JSON 字段名，"没人调"≠"没人消费"），
       # 误报的代价是让仓门"经常红但没人理"，比没有更糟。恒退 0 是设计，不是偷懒。
