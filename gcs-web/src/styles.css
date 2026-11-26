@@ -35,6 +35,19 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
 
+/* 全局可见焦点：键盘操作时才出轮廓，鼠标点击不出现 */
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+/* 尊重系统「减少动效」偏好：停掉 blink/spin/pulse 等循环动画与过渡。
+   用 .01ms 而非 0s，避免部分浏览器把 0s 动画当作未定义时长。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
 body {
   background: var(--bg);
   color: var(--text);

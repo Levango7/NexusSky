@@ -10,6 +10,7 @@ import {
   fetchStreamToken,
   mjpegPreviewUrl,
 } from '../api.js'
+import CommonModal from './common/Modal.jsx'
 
 // M10 安防视频监控面板
 // 设备列表（海康/大华/宇视） + 多画面分屏（1/4/9 宫格） + PTZ 云台控制
@@ -883,30 +884,16 @@ export default function SurveillancePanel() {
 
 // ===== 子组件 =====
 
-// 弹窗
+// 弹窗：仅保留标题栏，外框/遮罩/Esc/焦点管理由 common/Modal 承担
 function Modal({ title, onClose, children }) {
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 6,
-          padding: 16, minWidth: 300, maxHeight: '80vh', overflowY: 'auto',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ fontSize: 13, margin: 0, color: 'var(--text)' }}>{title}</h3>
-          <button onClick={onClose} style={{ ...miniBtnStyle, padding: '0 6px' }}>✕</button>
-        </div>
-        {children}
+    <CommonModal open onClose={onClose} title={title}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <h3 style={{ fontSize: 13, margin: 0, color: 'var(--text)' }}>{title}</h3>
+        <button onClick={onClose} style={{ ...miniBtnStyle, padding: '0 6px' }}>✕</button>
       </div>
-    </div>
+      {children}
+    </CommonModal>
   )
 }
 
