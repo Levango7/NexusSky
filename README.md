@@ -724,9 +724,9 @@ NexusSky/
 ├── gcs-web/             React GCS（61 个 .jsx 组件文件，其中 25 个已有直测）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
-├── scripts/             start-all.cmd / e2e-smoke.sh / 115 个脚本（其中 45 个 e2e-*）
+├── scripts/             start-all.cmd / e2e-smoke.sh / 116 个脚本（其中 45 个 e2e-*）
 ├── docker-compose.yml   Linux 下一键编排
-├── docs/                52 篇文档
+├── docs/                51 篇文档
 └── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）
 ```
 
@@ -744,10 +744,10 @@ NexusSky/
 | `mavlink-core` | 529 |
 | `drone-sim` | 1479 |
 | `link-sim` | 139 |
-| `cloud-backend` | 3991 |
+| `cloud-backend` | 3990 |
 | `sdk-java` | 24 |
 | `regulator-sim` | 41 |
-| **总计** | **6203** |
+| **总计** | **6202** |
 bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_LIST/VALUE/SET（+6 例）)
 这张表由 `scripts/check-test-count-docs.py` 在 CI 里逐格核对 surefire 实测值——
 **加测试而不改文档会直接让 CI 变红**。此前本仓的这个数字过期了两年多（长期写
@@ -955,7 +955,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
   而加测试不会让任何东西变红。
-  选的是**已确认缺陷**加相关契约，不是全量覆盖——61 个 `.jsx` 组件里 **36 个零测试**
+  选的是**已确认缺陷**加相关契约，不是全量覆盖——63 个 `.jsx` 组件里 **38 个零测试**
   （口径由 `check-test-count-docs.py` 的 `measure_components` 机器核对：组件＝`src/**/*.jsx`
   全部文件，含入口；有直测＝被任一测试文件按路径 `import` 过，只认 import 不认文件名撞巧）。
   注意**"最大的三个都没有测试"这句话是假的**，2026-10-24 实测：

@@ -21,6 +21,8 @@
 ARG BASE_REGISTRY=docker.io/library
 FROM ${BASE_REGISTRY}/maven:3.9-eclipse-temurin-17 AS builder
 WORKDIR /build
+# Maven Central 429 兜底：使用仓库内的镜像 settings（内容同 central，校验和一致）。
+COPY deploy/docker/maven-settings.xml /root/.m2/settings.xml
 
 COPY pom.xml ./
 COPY mavlink-core/pom.xml ./mavlink-core/pom.xml
@@ -42,8 +44,14 @@ COPY drone-sim/src ./drone-sim/src
 COPY link-sim/src ./link-sim/src
 
 # drone-sim 依赖 mavlink-core；link-sim 不被 drone-sim 依赖，但 -am 会按需构建
-RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -pl drone-sim -am package -DskipTests
+# Maven Central 对共享 runner 出口 IP 会返回 429（2026-11-26 drone-sim 构建红即此因，
+# 表现只是 ProjectBuildingException/UnresolvableModelException）。与 Dockerfile.cloud 同策略。
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    mvn -B -ntp -pl drone-sim -am package -DskipTests \
+        -Dmaven.wagon.http.retryHandler.count=5 \
+        -Dmaven.wagon.http.retryHandler.class=standard \
+        -Dmaven.wagon.httpconnectionManager.ttlSeconds=60 \
+        -Dmaven.artifact.threads=1
 
 # ===== 阶段 2：JRE 运行时 =====
 # 基础镜像注册表前缀：CI 通过 --build-arg 覆盖为公共镜像代理（Docker Hub 匿名拉取

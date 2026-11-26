@@ -137,7 +137,7 @@ export default function DefectPanel() {
   return (
     <div className="page page-split">
       {/* 左：缺陷 */}
-      <div style={{ flex: 1, minWidth: 320, overflowY: 'auto' }}>
+      <div className="split-main" style={{ overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <strong>缺陷（{defects.length}）</strong>
           <a href="/api/v1/defects/report?format=csv" download style={{ fontSize: 13, color: '#7dd3fc' }}>
@@ -196,7 +196,7 @@ export default function DefectPanel() {
       </div>
 
       {/* 右：工单 */}
-      <div style={{ flex: 1, minWidth: 320, overflowY: 'auto' }}>
+      <div className="split-side" style={{ overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <strong>工单（{workOrders.length}）</strong>
           <span style={{ fontSize: 12, color: '#94a3b8' }}>

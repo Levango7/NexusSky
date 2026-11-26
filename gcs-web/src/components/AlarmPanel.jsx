@@ -15,6 +15,7 @@ import {
   fetchStreamToken,
 } from '../api.js'
 import { POLL_MS } from '../utils/panelUtils.js'
+import Modal from './common/Modal.jsx'
 
 // M11 报警联动面板
 // 报警事件列表（SSE 实时推送） + 联动规则管理 + 一键应急响应 + 联动日志
@@ -523,20 +524,12 @@ function RuleEditor({ rule, onSave, onCancel }) {
   }
 
   return (
-    <div
-      onClick={onCancel}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
+    <Modal
+      open
+      onClose={onCancel}
+      title={rule ? '编辑联动规则' : '新建联动规则'}
+      width={340}
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 6,
-          padding: 16, minWidth: 340, maxHeight: '80vh', overflowY: 'auto',
-        }}
-      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h3 style={{ fontSize: 13, margin: 0, color: 'var(--text)' }}>
             {rule ? '编辑联动规则' : '新建联动规则'}
@@ -593,8 +586,7 @@ function RuleEditor({ rule, onSave, onCancel }) {
             {saving ? '保存中…' : '保存'}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 

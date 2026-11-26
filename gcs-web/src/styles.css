@@ -23,10 +23,30 @@
   --mono: 'Cascadia Code', 'JetBrains Mono', 'Consolas', ui-monospace, monospace;
   --sans: 'HarmonyOS Sans', 'MiSans', 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
   --r: 10px;
+  /* 页面横向内边距单一来源：整页 / 仪表盘面板体共用，避免切页左边界跳动 */
+  --pad-x: 18px;
+  /* 间距 / 圆角 / 层级 / 字号：阶段一只铺值，组件迁移在后续阶段进行 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --r-sm: 4px; --r-md: 6px; --r-lg: 10px;
+  --z-map: 10; --z-banner: 20; --z-dropdown: 60; --z-drawer: 80; --z-modal: 100; --z-toast: 200;
+  --fs-1: 10px; --fs-2: 12px; --fs-3: 14px; --fs-4: 18px; --fs-5: 24px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
+
+/* 全局可见焦点：键盘操作时才出轮廓，鼠标点击不出现 */
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+/* 尊重系统「减少动效」偏好：停掉 blink/spin/pulse 等循环动画与过渡。
+   用 .01ms 而非 0s，避免部分浏览器把 0s 动画当作未定义时长。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
 
 body {
   background: var(--bg);
@@ -205,7 +225,7 @@ body {
 .panel { border-bottom: 1px solid var(--line); }
 .panel-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px 10px;
+  padding: 12px 14px;
 }
 .panel-head h3 {
   font-size: 11px; font-weight: 700; color: var(--dim);
@@ -216,7 +236,7 @@ body {
   content: ''; width: 3px; height: 12px; border-radius: 2px;
   background: linear-gradient(180deg, var(--cyan), #0077aa);
 }
-.panel-body { padding: 0 14px 14px; }
+.panel-body { padding: 0 14px 12px; }
 
 .empty-hint { display: block; color: var(--dim); font-size: 12px; padding: 14px 0; line-height: 1.8; text-align: center; }
 .empty-hint .big { font-size: 26px; display: block; margin-bottom: 6px; opacity: .5; }
@@ -272,7 +292,7 @@ body {
   padding: 10px 18px;
   border-radius: var(--r);
   backdrop-filter: blur(10px);
-  z-index: 10;
+  z-index: var(--z-banner);
   animation: faultIn .25s ease-out;
   border: 1px solid;
 }
@@ -298,7 +318,7 @@ body {
 
 /* 底图源自定义浮层（MapView 左上，设计系统控件皮肤在全局类里） */
 .basemap-cfg {
-  position: absolute; top: 44px; left: 10px; z-index: 11;
+  position: absolute; top: 44px; left: 10px; z-index: var(--z-map);
   width: 340px; max-width: calc(100% - 20px);
   padding: 12px;
   background: rgba(13, 17, 26, .95);
@@ -533,7 +553,7 @@ body {
 }
 
 /* ============ 仪表盘汇总面板（DashboardPanel） ============ */
-.dashboard-panel .panel-body { padding: 0 14px 14px; }
+.dashboard-panel .panel-body { padding: 0 var(--pad-x) 14px; }
 
 .db-summary {
   display: grid;
@@ -901,7 +921,7 @@ body {
 
 /* 整页面板容器 */
 .page {
-  padding: 16px 18px 18px;
+  padding: 16px var(--pad-x) 18px;
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
@@ -911,6 +931,15 @@ body {
 .page-split { display: flex; gap: 12px; overflow: hidden; }
 .page-split > .split-main { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
 .page-split > .split-side { flex: none; min-height: 0; overflow-y: auto; }
+@media (max-width: 900px) {
+  .page-split { flex-direction: column; overflow-y: auto; }
+  .page-split > .split-main, .page-split > .split-side { min-height: 320px; }
+}
+
+/* 统一指挥面板：三栏栅格（左设备 / 中地图 / 右通信），窄屏单列 */
+.unified-cmd-grid { display: grid; gap: 8px; min-height: 360px;
+  grid-template-columns: minmax(180px, 220px) minmax(240px, 1fr) minmax(200px, 260px); }
+@media (max-width: 900px) { .unified-cmd-grid { grid-template-columns: 1fr; } }
 
 /* 页内标题：与 .panel-head h3（竖条 + 宽字距）同语言 */
 .page > h3,
@@ -994,6 +1023,9 @@ body {
 .page table tr.row-crit { background: var(--crit-dim); }
 .page table tr.row-warn { background: var(--warn-dim); }
 .table-wrap { border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+/* 固定列宽 + 省略号：宽表不再撑破容器（.page 有 overflow-x: hidden） */
+.table-wrap table { table-layout: fixed; width: 100%; }
+.table-wrap td, .table-wrap th { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 内容少的报表类表格：不铺满全宽，避免列间大空隙 */
 .page table.fit { width: auto; min-width: 380px; }
 

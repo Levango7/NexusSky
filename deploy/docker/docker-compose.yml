@@ -16,6 +16,14 @@ services:
     image: redis:7-alpine
     ports:
       - "26379:6379"
+    # 具名卷：容器重建/升级不丢缓存数据
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
     deploy:
       resources:
@@ -40,6 +48,15 @@ services:
       - POSTGRES_DB=aerofleet_prod
       - POSTGRES_USER=aerofleet
       - POSTGRES_PASSWORD=aerofleet_dev_password
+    # 具名卷：Flyway 建出的 schema 与业务数据必须活过容器重建
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aerofleet -d aerofleet_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
     deploy:
       resources:
@@ -130,10 +147,11 @@ services:
       #   - AEROFLEET_UDP_BIND_ADDRESS=10.0.1.5
       # 详见 docs/security-design.md §6.4「为什么生产默认仍是 0.0.0.0」
     depends_on:
+      # 原 service_started 只保证容器进程拉起，PG 还没 ready 时后端就会连库失败
       redis:
-        condition: service_started
+        condition: service_healthy
       postgres:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
       interval: 10s
@@ -208,3 +226,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+volumes:
+  pgdata:
+  redisdata:

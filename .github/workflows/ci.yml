@@ -38,6 +38,16 @@ permissions:
   contents: read
   security-events: write
 
+# Maven Central 对共享 runner 出口 IP 会返回 429（2026-11-23 / 11-26 两次 CI 红均因此，
+# 分别卡在 spring-boot-dependencies 与 maven-clean-plugin 的拉取上）。
+# 全局 retry + 串行下载，避免每个 mvn 调用各自踩坑；根治需镜像源或预置 ~/.m2 缓存。
+env:
+  MAVEN_OPTS: >-
+    -Dmaven.wagon.http.retryHandler.count=5
+    -Dmaven.wagon.http.retryHandler.class=standard
+    -Dmaven.wagon.httpconnectionManager.ttlSeconds=60
+    -Dmaven.artifact.threads=1
+
 # 2026-10-16 把 runner 镜像钉死到 ubuntu-24.04。
 # GitHub 的 notice：ubuntu-latest 会在 2026-10-19 切到 Ubuntu 26（换 glibc/JDK/Node
 # 默认版本）。ci.yml 下面 21 个 job 原本全是 ubuntu-latest，届时会整批翻车。

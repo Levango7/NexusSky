@@ -284,4 +284,64 @@ flight-logs/2026-09-17.jsonl
 
 ### 6.2 数据库
 
-H2 内存模式无需备份。生产环境使用外部数据库时，按数据库标准备份流程操作。
+**备份对象**：PostgreSQL 全量逻辑备份（`pg_dump -Fc -Z6`，自定义格式 + zlib 压缩），
+一个 dump 即可还原完整 schema 与数据。镜像/配置/密钥不在此范围内（它们进版本库或密钥管理器）。
+
+**频率与保留**：每日 02:30 一次全量；保留 7 天（`RETENTION_DAYS` / `database.backup.retentionDays`）；
+月度归档需另存一份——在 7 天窗口内把每月首个成功备份 `pg-<YYYYmmdd>-*.dump` 拷到对象存储或异地机器，
+工具链不自动做（避免把归档生命周期和日常轮转混在一起）。
+
+**存放位置**：
+- Compose 形态：`BACKUP_DIR`（默认 `./backups`，建议独立数据盘 + 异地同步）；
+- Helm 形态：PVC `<release>-pg-backup`（容量由 `database.backup.size` 控制，默认 5Gi）。
+
+**Compose 形态（手动或 cron 调用 `scripts/backup/pg-backup.sh`）**：
+
+```bash
+export PGPASSWORD='<库口令>'        # 必填：缺失即报错退出 1
+export PGHOST=localhost PGPORT=5432 PGUSER=aerofleet PGDATABASE=aerofleet_prod
+export BACKUP_DIR=/var/backups/nexussky RETENTION_DAYS=7
+bash scripts/backup/pg-backup.sh
+# crontab（每日 02:30）：
+# 30 2 * * * cd /opt/nexussky && PGPASSWORD='<口令>' BACKUP_DIR=/var/backups/nexussky bash scripts/backup/pg-backup.sh >>/var/log/nexussky-pg-backup.log 2>&1
+```
+
+**Helm 形态（内置 PG 的 CronJob）**：
+
+```bash
+helm upgrade nexussky deploy/helm/nexussky -f my-values.yaml \
+  --set database.builtin.enabled=true --set database.backup.enabled=true
+kubectl -n nexussky get cronjob <release>-pg-backup
+# 需要立即补一份时手动触发（会自动带上 CronJob 的凭据与卷）：
+kubectl -n nexussky create job --from=cronjob/<release>-pg-backup pg-backup-manual-$(date +%s)
+```
+
+`database.backup` 出厂 `enabled=false`；用外部 PG / 云数据库 / Operator 时保持关闭，备份交给那层平台。
+两种形态用的都是与库同大版本的 `pg_dump`（当前 PG 15）。
+
+**恢复步骤**（恢复到**新库**再核对，不要直接覆盖生产库）：
+
+```bash
+export PGPASSWORD='<库口令>'
+createdb -h <host> -U aerofleet aerofleet_restore
+# --clean --if-exists 让 dump 内的 DROP 语句幂等（空库上等价于普通恢复；
+# 对已有库执行会先删对象——所以务必恢复到新库）
+pg_restore -h <host> -U aerofleet -d aerofleet_restore --clean --if-exists -Fc pg-YYYYmmdd-HHMMSS.dump
+
+# 1) 对象与行数核对（与备份源/生产库对齐关键表：drone / flight_log / users / alarm 等）
+psql -h <host> -U aerofleet -d aerofleet_restore -c '\dt'
+psql -h <host> -U aerofleet -d aerofleet_restore -Atc \
+  "select relname, n_live_tup from pg_stat_user_tables order by relname;"
+
+# 2) 迁移一致性核对：schema 必须与当前代码的迁移集完全一致，
+#    pending/校验失败即说明备份与代码版本不匹配，停止切流
+#    （仓库没有 flyway-maven-plugin；用与部署同版本的 Flyway CLI，
+#     或把恢复库接给后端启动——Flyway 启动时即校验）
+flyway -url="jdbc:postgresql://<host>:5432/aerofleet_restore" \
+       -user=aerofleet -password="$PGPASSWORD" validate
+```
+
+**演练要求**：每季度至少一次真实恢复演练——取生产备份恢复到新库，跑完上面三项核对，
+并记录 **RTO**（从决定恢复到服务可用的耗时，当前目标 < 1h）与 **RPO**（最近一次备份到故障
+之间的数据丢失窗口，当前口径为每日备份 ⇒ RPO ≈ 24h）。记录归档到运维台账；连续两个季度
+未演练视为备份不可信（未验证的备份等于没有备份）。

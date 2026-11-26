@@ -18,3 +18,11 @@ route:
 receivers:
   - name: default
     # 无集成配置：告警仅在 AM UI 展示（合法配置，Alertmanager 0.27 正常启动）。
+# CloudBackendDown 是根因；后端已下线时延迟/错误率/离线等派生告警只会制造噪音，
+# 故按同一 service 标签抑制其派生告警，待根因恢复后自动解除。
+inhibit_rules:
+  - source_matchers:
+      - alertname="CloudBackendDown"
+    target_matchers:
+      - alertname=~"CloudBackendHighLatency|CloudBackendErrorRate|JVMHeapHighUsage|DronesAllOffline"
+    equal: ['service']

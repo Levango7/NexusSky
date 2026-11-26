@@ -7,6 +7,7 @@ import {
   checkGeofence,
 } from '../api.js'
 import { POLL_MS, fmtTime, cardStyle, labelStyle, miniBtnStyle, modalInputStyle } from '../utils/panelUtils.js'
+import ConfirmDialog from './common/ConfirmDialog.jsx'
 
 // M12 电子围栏管理面板
 // 围栏区域列表（CRUD） + 创建围栏表单（CIRCLE/POLYGON） + 越界历史 + 手动检查
@@ -72,6 +73,7 @@ export default function GeofencePanel() {
   const [checkResult, setCheckResult] = useState(null)   // 手动检查结果
   const [checking, setChecking] = useState(false)
   const [deletingId, setDeletingId] = useState(null)     // 正在删除的围栏 id
+  const [pendingDelete, setPendingDelete] = useState(null) // 待二次确认的围栏
   const [submitting, setSubmitting] = useState(false)
 
   // 越界历史 sysid 过滤
@@ -343,7 +345,7 @@ export default function GeofencePanel() {
                             {z.enabled ? '启用' : '禁用'}
                           </span>
                           <button
-                            onClick={() => handleDelete(zid)}
+                            onClick={() => setPendingDelete(z)}
                             disabled={isDeleting}
                             style={{
                               ...miniBtnStyle,
@@ -603,6 +605,19 @@ export default function GeofencePanel() {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        danger
+        title="删除围栏"
+        message={pendingDelete ? `确认删除「${pendingDelete.name || '#' + pendingDelete.id}」？该操作不可撤销。` : ''}
+        onConfirm={() => {
+          const target = pendingDelete
+          setPendingDelete(null)
+          if (target) handleDelete(target.id)
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   )
 }

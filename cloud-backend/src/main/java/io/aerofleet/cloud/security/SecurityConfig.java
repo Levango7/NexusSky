@@ -22,8 +22,9 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
      *   <li><b>开发模式</b>（{@code aerofleet.security.dev-mode=true}，仅 dev/test profile 开启；代码内默认 false）：
  *       禁用 CSRF，允许所有请求，不破坏现有测试。</li>
  *   <li><b>生产模式</b>（{@code aerofleet.security.dev-mode=false}）：
- *       无状态 JWT + API Key 认证。仅 /api/v1/auth/login 与 /api/v1/auth/refresh
- *       匿名开放，/actuator/health* 公开，
+ *      无状态 JWT + API Key 认证。仅 /api/v1/auth/login 与 /api/v1/auth/refresh
+ *       匿名开放；health 与 prometheus/metrics 公开
+ *       （指标端点本身不带凭据，其安全性依赖入口隔离，见下方注解），
  *       /ws/** 公开（WebSocket handshake 在 {@code TelemetryWebSocketHandler} 中认证），
  *       其余 /api/** 需要 JWT 或 API Key 认证。
  *       API Key 通过 {@code X-API-Key} Header 传递，由 {@link ApiKeyFilter} 处理。</li>
@@ -91,6 +92,11 @@ public class SecurityConfig {
                             // 仅登录/刷新匿名开放；/api/v1/auth/** 其余端点（API Key 铸造/撤销/列表）需认证
                             .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
                             .requestMatchers("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
+                            // 指标端点必须匿名可达：Prometheus 抓取请求不带 JWT / API Key，
+                            // 这里放行否则抓取 401、监控全空。前提是 Ingress 不暴露 /actuator，
+                            // 并由集群内网 / NetworkPolicy 保证仅监控侧可达。若将来要求指标公网可达，
+                            // 必须改走独立 management 端口 + 独立认证，不能把这里的 permitAll 当授权手段。
+                            .requestMatchers("/actuator/prometheus", "/actuator/metrics").permitAll()
                             // 浏览器 WS 握手带不了 Authorization 头：链上放行，
                             // 由 TelemetryWebSocketHandler 在握手后校验 query token 并拒绝匿名连接
                             .requestMatchers("/ws/**").permitAll()

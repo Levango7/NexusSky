@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+  <!-- 仅用于 Docker 镜像构建：共享 runner 的出口 IP 常被 Maven Central 返回 429。
+       阿里云 public 是 central 的完整镜像（artifact 与校验和同源），可显著降低构建失败率。
+       如需回到官方 central，构建时覆盖 settings 即可（见 Dockerfile 注释）。 -->
+  <mirrors>
+    <mirror>
+      <id>aliyun-public</id>
+      <mirrorOf>central</mirrorOf>
+      <url>https://maven.aliyun.com/repository/public</url>
+    </mirror>
+  </mirrors>
+</settings>

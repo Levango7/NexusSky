@@ -15,6 +15,15 @@ services:
       - POSTGRES_DB=aerofleet_prod
       - POSTGRES_USER=aerofleet
       - POSTGRES_PASSWORD=aerofleet_dev_password
+    # 具名卷：容器重建/镜像升级不再丢库（此前无卷，up --force-recreate 即清空数据）
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aerofleet -d aerofleet_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
 
   # ===== Redis：后端缓存 + /actuator/health 的硬依赖 =====
@@ -23,6 +32,15 @@ services:
   redis:
     image: redis:7-alpine
     network_mode: host          # 后端默认打 localhost:6379
+    # 本地编排让缓存也落盘（AOF），重启后不会退化成空缓存
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   drone-sim:
@@ -60,9 +78,13 @@ services:
       # 本编排是本地演示栈，显式选择模拟监管平台；生产部署必须改为真实 uom。
       - AEROFLEET_REGULATOR_SINK_TYPE=sim
     depends_on:
-      - postgres
-      - redis
-      - drone-sim
+      # PG/Redis 未就绪就起后端 = Flyway 连不上库 / health 503，故按健康门等
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      drone-sim:
+        condition: service_started
 
   gcs-web:
     image: node:20-alpine
@@ -75,3 +97,7 @@ services:
     network_mode: host
     depends_on:
       - cloud-backend
+
+volumes:
+  pgdata:
+  redisdata:

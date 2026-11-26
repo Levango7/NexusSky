@@ -287,15 +287,14 @@ export default function UserPanel() {
           暂无用户数据
         </div>
       ) : (
-        <table style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          fontSize: 12,
-          background: 'var(--panel)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r)',
-          overflow: 'hidden',
-        }}>
+        <div className="table-wrap">
+          <table style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: 12,
+            background: 'var(--panel)',
+            overflow: 'hidden',
+          }}>
           <thead>
             <tr style={{ background: 'var(--panel-2)', borderBottom: '1px solid var(--line-2)' }}>
               <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontSize: 10, letterSpacing: '1px', textTransform: 'uppercase' }}>ID</th>
@@ -362,6 +361,7 @@ export default function UserPanel() {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   )

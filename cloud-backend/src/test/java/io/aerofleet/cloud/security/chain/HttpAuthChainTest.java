@@ -59,6 +59,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "aerofleet.flightlog.persist-to-db=true",
         "aerofleet.flightlog.dir=./flight-logs-chain-test",
         "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration",
+        // Prometheus 导出开关（Boot 3 新前缀；旧 management.metrics.export.prometheus.* 已移除）
+        "management.prometheus.metrics.export.enabled=true",
+        // test classpath 的 application.properties 遮蔽了主配置，暴露清单默认只剩 health；
+        // 这里显式对齐生产值，否则 /actuator/prometheus 在测试里直接 404，白名单无法验证。
+        "management.endpoints.web.exposure.include=health,info,metrics,prometheus",
 })
 @DisplayName("鉴权链：401 / 403 / 跨租户读过滤")
 class HttpAuthChainTest {
@@ -71,6 +76,7 @@ class HttpAuthChainTest {
 
     @Autowired
     private MockMvc mvc;
+
 
     @Autowired
     private JwtTokenProvider tokens;
@@ -164,6 +170,15 @@ class HttpAuthChainTest {
     @DisplayName("健康检查仍允许匿名（白名单未被扩大）")
     void healthStaysAnonymous() throws Exception {
         mvc.perform(get("/actuator/health")).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("指标端点匿名可抓取，而业务端点依然拒绝匿名（白名单只放指标，不放业务）")
+    void metricsStayAnonymousWhileBusinessStillRejected() throws Exception {
+        // 指标端点匿名可达（Prometheus 抓取不带凭据）；业务端点仍必须认证。
+        mvc.perform(get("/actuator/prometheus")).andExpect(status().isOk());
+        mvc.perform(get("/actuator/metrics")).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/drones")).andExpect(status().isUnauthorized());
     }
 
     // ==================== 2. OBSERVER 不得触达写端点 ====================
