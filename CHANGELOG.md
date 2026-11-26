@@ -1,5 +1,46 @@
 # NexusSky 变更日志
 
+## [Unreleased] — test(idempotency): 幂等契约测试矩阵——激活/注销/上报/命令投递重复场景（+13 例）
+
+承接 `docs/idempotency-contract-inventory.md` 的立约原则（重复提交必须钉死语义），
+把此前只在 regulator-sim / 部分服务上有零散覆盖的四族写路径补成显式契约矩阵。
+全仓**不新增生产代码**——这是纯测试 + 文档批次。
+
+### 矩阵
+
+| 族 | 重复场景 | 钉住的语义 |
+|---|---|---|
+| 激活 `POST /api/v1/devices/{sysid}` | 同请求体重复 / 不同 tenantId 重复 / 并发 8 路同 sysid / 注销后再登记 | 重复→200 `alreadyRegistered=true` 且**有效归属不变**（改归属归 `PUT /{sysid}/tenant`）；并发恰好一个 201、其余 200、注册表仅一条目（`provision` 的 `putIfAbsent`）；注销后重新走 201 |
+| 注销 `DELETE /api/v1/devices/{sysid}` | 重复注销 / 并发 8 路注销 / 注销后再登记 | 吸收性操作：首次 200，第二次起 404 `device unknown`（**拒绝**而非静默 NO-OP）；并发恰好一个 200、其余 404（sysid 条带锁串行化） |
+| 上报（UDP 遥测帧 ingest） | 重复帧（同 MAVLink seq 同内容） | **at-least-once**：每帧各发布一次事件，当前**无** seq/内容去重 |
+| 命令投递 `POST /api/v1/drones/{sysid}/commands` | 重复提交同一命令 / 单次提交超时 | 每次提交各发一条线上命令（**无**客户端去重键/请求 ID）；单次提交超时重试恰好 2 次发送后失败 |
+
+### 测试
+
+- 新增 4 个测试类 13 例：`IdempotencyActivationContractTest`（5）、
+  `IdempotencyDeregistrationContractTest`（4）、`IdempotencyTelemetryReportContractTest`（2）、
+  `IdempotencyCommandDeliveryContractTest`（2）。
+- 全量 `mvn test`：cloud-backend 3991（+13），全仓 **6203/6203**，757 个测试类，
+  0 失败/错误/跳过，BUILD SUCCESS。
+
+### 待裁决（OPEN RULING，owner）
+
+- **上报**：UDP 遥测 ingest 无序列号去重，重复帧无差别转发下游。
+  是否引入 seq 去重窗口，还是明文接受 at-least-once 并在消费侧幂等——
+  属产品/架构裁决；本批只钉住当前 at-least-once 保证，不改行为。
+- **命令投递**：无客户端幂等键，重复提交会真实重复下发。
+  对效果幂等命令（ARM/TAKEOFF）通常无害，对一次性动作（任务启动/返航/相机触发）
+  可能被执行多次。是否引入请求 ID + 服务端短期去重窗口，属裁决。
+- **激活响应回显**：重复登记带不同 tenantId 时，响应体 `tenantId` 回显**请求值**，
+  而有效归属保持不变。本矩阵只断言有效状态，不断言该回显字段为正确语义；
+  响应是否应回显有效归属待裁决。
+
+### 文档
+
+- `docs/idempotency-contract-inventory.md`：激活/注销两族从「缺口」挪入
+  「已有幂等契约测试」表，上报/投递两族留在「缺口」表并标注已钉住当前行为 + 待裁决。
+- 测试计数口径同步（22 处文档 6190→6203、cloud-backend 3978→3991）。
+
 ## [Unreleased] — docs(counters): 清理 10 份文档中误插入的 commit 摘要行（20 处）
 
 ### 问题
@@ -3669,7 +3710,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-24 共有 328 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-26 共有 329 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3696,7 +3737,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 328 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 329 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---
