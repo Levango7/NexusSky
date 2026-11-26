@@ -827,12 +827,7 @@ export default function UnifiedCommandPanel() {
       )}
 
       {/* ===== 主三栏区域 ===== */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '220px 1fr 260px',
-        gap: 8,
-        minHeight: 360,
-      }}>
+      <div className="unified-cmd-grid">
         {/* ===== 左栏：安防设备列表 ===== */}
         <div style={{ ...cardStyle, padding: 6, display: 'flex', flexDirection: 'column', gap: 4, overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -957,7 +952,7 @@ export default function UnifiedCommandPanel() {
             padding: '4px 8px', borderBottom: '1px solid var(--line-2)',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
-            <span style={labelStyle}>空地协同地图</span>
+            <span style={labelStyle}>空地协同地图（逻辑示意）</span>
             <div style={{ display: 'flex', gap: 6, fontSize: 9 }}>
               <span style={{ color: 'var(--cyan)' }}>● 无人机</span>
               <span style={{ color: 'var(--ok)' }}>● 安防摄像头</span>
@@ -971,7 +966,17 @@ export default function UnifiedCommandPanel() {
             minHeight: 280, overflow: 'hidden',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            {/* 地图占位：实际部署时替换为 MapLibre 渲染 */}
+            <div style={{
+              position: 'absolute', top: 8, right: 10, zIndex: 2,
+              fontSize: 9, color: 'var(--warn)',
+              background: 'rgba(10,14,26,0.78)',
+              border: '1px solid rgba(243,156,18,0.45)',
+              borderRadius: 3, padding: '2px 6px', pointerEvents: 'none',
+            }}>
+              SIMULATED TOPOLOGY · 位置为示意，非真实经纬度
+            </div>
+            {/* 逻辑示意视图：下方 SVG 的节点位置由数组索引推导（如 100 + (i%4)*120），
+                并非真实经纬度投影。接入 MapLibre 前，此视图不得用于派单/态势判断。 */}
             <div style={{
               position: 'absolute', inset: 0,
               backgroundImage: 'radial-gradient(circle at 30% 40%, rgba(0,212,255,0.06) 0%, transparent 50%), radial-gradient(circle at 70% 60%, rgba(46,204,113,0.04) 0%, transparent 50%)',
@@ -1047,7 +1052,7 @@ export default function UnifiedCommandPanel() {
               position: 'relative', zIndex: 1, textAlign: 'center',
               color: 'var(--dim-2)', fontSize: 10, pointerEvents: 'none',
             }}>
-              空地协同态势视图
+              空地协同态势视图（示意）
               <div style={{ fontSize: 9, marginTop: 4 }}>
                 {survDevices.filter((d) => d.status === 'online').length} 个在线摄像头 · {drones.filter((d) => d.online).length} 架在线无人机 · {meshNodes.length} 个 Mesh 节点
               </div>
