@@ -40,8 +40,15 @@ COPY cloud-backend/src ./cloud-backend/src
 COPY regulator-sim/src ./regulator-sim/src
 
 # -am 同时构建依赖模块（mavlink-core）；BuildKit 缓存挂载加速重复构建
-RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -pl cloud-backend -am package -DskipTests
+# Maven Central 对共享 runner 出口 IP 会返回 429（2026-11-23 master 两次 CI 红即此因）。
+# retry + 串行下载可显著降低限流命中率；根治需配置镜像源或在 CI 侧预取 .m2 缓存。
+# sharing=locked 防止并发 job 同时写同一 buildkit 缓存层。
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    mvn -B -ntp -pl cloud-backend -am package -DskipTests \
+        -Dmaven.wagon.http.retryHandler.count=5 \
+        -Dmaven.wagon.http.retryHandler.class=standard \
+        -Dmaven.wagon.httpconnectionManager.ttlSeconds=60 \
+        -Dmaven.artifact.threads=1
 
 # ===== 阶段 2：JRE 运行时 =====
 # 基础镜像注册表前缀：CI 通过 --build-arg 覆盖为公共镜像代理（Docker Hub 匿名拉取

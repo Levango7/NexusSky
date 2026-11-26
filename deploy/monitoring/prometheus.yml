@@ -18,6 +18,10 @@ alerting:
             - alertmanager:9093
 
 scrape_configs:
+  # compose 场景：cloud-backend 通过 docker-compose-monitoring.yml 的 extra_hosts
+  # 解析到宿主机网关（根 compose 中 backend 用 host 网络），因此 targets 保持
+  # cloud-backend:8080 即可；k8s 场景由 ServiceMonitor 抓取，不走本 job。
+  # 端点已在 SecurityConfig 匿名放行，故此处不加 credentials。
   - job_name: 'cloud-backend'
     metrics_path: '/actuator/prometheus'
     scrape_interval: 15s

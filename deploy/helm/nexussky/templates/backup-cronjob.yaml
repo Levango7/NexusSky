@@ -1,0 +1,87 @@
+{{- if and .Values.database.builtin.enabled .Values.database.backup.enabled }}
+# 内置 PostgreSQL 的定时全量备份（pg_dump -Fc + 按天轮转）。
+# 定位：评估/演示/小规模自建内置 PG 的兜底备份。生产用外部 PG / Operator 时
+# builtin.enabled=false，本模板整块不渲染（备份由云 DB/Operator 负责）。
+# 恢复步骤见 docs/deployment-guide.md §6.2。
+{{- $backupClaim := printf "%s-pg-backup" (include "nexussky.fullname" .) | trunc 63 | trimSuffix "-" }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $backupClaim }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nexussky
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: postgres-backup
+spec:
+  schedule: {{ .Values.database.backup.schedule | quote }}
+  # 禁止并发：同一 PVC 上两个 pg_dump + 轮转删除互相踩踏没有意义
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: nexussky
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/component: postgres-backup
+        spec:
+          restartPolicy: OnFailure
+          # postgres:15-alpine 默认以 uid 70（postgres）运行；fsGroup 让 PVC 可写
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            fsGroup: 70
+          containers:
+            - name: pg-backup
+              image: {{ .Values.database.builtin.image }}
+              imagePullPolicy: {{ .Values.imagePullPolicy }}
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 70
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              command:
+                - sh
+                - -c
+                - |
+                  pg_dump -Fc -Z6 \
+                    -h {{ include "nexussky.postgresFullname" . }} \
+                    -U "$PGUSER" \
+                    -d "$PGDATABASE" \
+                    -f "/backup/pg-$(date +%Y%m%d-%H%M%S).dump" \
+                  && find /backup -maxdepth 1 -name "pg-*.dump" -mtime +{{ .Values.database.backup.retentionDays }} -delete
+              env:
+                # 复用 Secret 里已有的数据库凭据键，不新造密钥名
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "nexussky.secretFullname" . }}
+                      key: SPRING_DATASOURCE_USERNAME
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "nexussky.secretFullname" . }}
+                      key: SPRING_DATASOURCE_PASSWORD
+                - name: PGDATABASE
+                  value: {{ .Values.database.builtin.database | quote }}
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              volumeMounts:
+                - name: pg-backup
+                  mountPath: /backup
+          volumes:
+            - name: pg-backup
+              persistentVolumeClaim:
+                claimName: {{ $backupClaim }}
+{{- end }}

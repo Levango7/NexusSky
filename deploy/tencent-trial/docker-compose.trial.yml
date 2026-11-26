@@ -54,6 +54,8 @@ services:
 
   # ===== Redis：缓存 + /actuator/health 硬依赖（缺它 health 恒 503）=====
   # 试用机语义：纯缓存，关持久化（--save ""），LRU 驱逐上限 96M。
+  # 取舍说明：试用机以 PG 为唯一真相源，Redis 只承载会话/计数器等可重建数据，
+  # 因此关持久化（重启即冷缓存）是可接受的取舍，换来 2G 内存机上的写盘与空间开销归零。
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
@@ -113,6 +115,10 @@ services:
       - MAVLINK_SIGNING_ENABLED=${MAVLINK_SIGNING_ENABLED:-false}
       - MAVLINK_SIGNING_REJECT_UNSIGNED=${MAVLINK_SIGNING_REJECT_UNSIGNED:-true}
       - MAVLINK_SIGNING_SECRET_KEY=${MAVLINK_SIGNING_SECRET_KEY:-}
+    # prod profile 的飞行日志落 ./flight-logs（persist-to-db=true 时 DB 是主通路），
+    # 文件卷用于兜底导出与人工排查——容器重建不丢历史 JSONL。
+    volumes:
+      - flight-logs:/app/flight-logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -183,3 +189,4 @@ services:
 
 volumes:
   pgdata:
+  flight-logs:

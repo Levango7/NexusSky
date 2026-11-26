@@ -202,6 +202,15 @@ database:
       limits:
         cpu: 500m
         memory: 512Mi
+  # 内置 PG 的备份 CronJob（需 builtin.enabled=true，二者同时开启才渲染）。
+  # 默认关闭：生产内置 PG 本就只是评估/演示形态，备份应交给外部 PG / Operator；
+  # 开启后每日 02:30 全量 pg_dump -Fc 到 <release>-pg-backup PVC，按天轮转。
+  # 恢复与演练步骤见 docs/deployment-guide.md §6.2。
+  backup:
+    enabled: false
+    schedule: "30 2 * * *"
+    retentionDays: 7
+    size: 5Gi
 
 # ---- Ingress ----
 ingress:
