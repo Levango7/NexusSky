@@ -42,8 +42,14 @@ COPY drone-sim/src ./drone-sim/src
 COPY link-sim/src ./link-sim/src
 
 # drone-sim 依赖 mavlink-core；link-sim 不被 drone-sim 依赖，但 -am 会按需构建
-RUN --mount=type=cache,target=/root/.m2 \
-    mvn -q -pl drone-sim -am package -DskipTests
+# Maven Central 对共享 runner 出口 IP 会返回 429（2026-11-26 drone-sim 构建红即此因，
+# 表现只是 ProjectBuildingException/UnresolvableModelException）。与 Dockerfile.cloud 同策略。
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    mvn -B -ntp -pl drone-sim -am package -DskipTests \
+        -Dmaven.wagon.http.retryHandler.count=5 \
+        -Dmaven.wagon.http.retryHandler.class=standard \
+        -Dmaven.wagon.httpconnectionManager.ttlSeconds=60 \
+        -Dmaven.artifact.threads=1
 
 # ===== 阶段 2：JRE 运行时 =====
 # 基础镜像注册表前缀：CI 通过 --build-arg 覆盖为公共镜像代理（Docker Hub 匿名拉取
