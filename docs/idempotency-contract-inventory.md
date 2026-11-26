@@ -1,7 +1,9 @@
-# 关键写接口幂等/重复提交 · 风险清单（2026-11-16，master `386ce90d`）
+# 关键写接口幂等/重复提交 · 风险清单（2026-11-26，master `21506d96`）
 
 > 本文档是 #315（应急编排 abort 幂等）之后的**现状注记**，不是终局/完整审计。所有"已覆盖"均须以
 > 仓库测试/代码为证；没有证据的一律列入"缺口/待裁决"。机器可复核：`rg -n "幂等|dedupe|去重|idempot|409|客" cloud-backend/src/test`。
+> 2026-11-26（#149）：把设备激活/注销、遥测上报、命令投递四族重复场景补成显式契约矩阵
+> （`Idempotency*ContractTest`），并按实测语义把激活/注销挪入表一、上报/投递留在表二。
 
 ## 一、已有幂等契约测试的写接口（证据定位）
 
@@ -9,6 +11,8 @@
 |---|---|---|
 | `POST /lock` 重复锁定 | 返回当前状态、不覆盖 | `DroneLockServiceTest#testDoubleLock`、`DroneLockControllerTest#lockDoubleLock_idempotent` |
 | `DeviceRegistry.provision` 重复登记 | `provision` 返回 false，不覆盖既有归属 | `DeviceRegistryPersistenceTest`（provision 幂等） |
+| `POST /api/v1/devices/{sysid}` 重复激活 | 同请求体重复登记 → 200 `alreadyRegistered=true`，有效归属不变（改归属是 `PUT /{sysid}/tenant` 的职责）；并发重复同一 sysid → 恰好一个 201、其余 200、注册表仅一条目（`provision` 的 `putIfAbsent` 保证）；注销后再登记 → 重新走 201 | `IdempotencyActivationContractTest`（repeatActivationSameBodyIsIdempotent / repeatActivationDifferentTenantDoesNotRebind / concurrentDuplicateActivationExactlyOneCreated / reactivationAfterDeregistrationCreatesAgain） |
+| `DELETE /api/v1/devices/{sysid}` 重复注销 | 吸收性操作：首次 200 `deregistered=true`，第二次起 404 `device unknown`（**拒绝**而非静默 NO-OP，符合立约原则 3）；并发重复注销 → 恰好一个 200、其余 404（sysid 条带锁串行化） | `IdempotencyDeregistrationContractTest`（repeatDeregistrationReturnsNotFound / concurrentDuplicateDeregistrationExactlyOneSucceeds / reProvisionAfterDeregistrationCreatesAgain） |
 | `VoiceIntercomService.startIntercom/stopIntercom` | 已 ACTIVE 再启动保持状态 | `VoiceIntercomServiceTest`（start/stop 幂等） |
 | `VideoStreamService.startStream/stopStream` | 已 STREAMING 再启动保持状态 | `VideoStreamServiceTest`（start/stop 幂等） |
 | `VideoFusionController` 重复 start | 同 id 重登记返回原记录、不重置起点 | `VideoFusionControllerTest`、`VideoFusionRecordingServiceTest` |
@@ -31,6 +35,8 @@
 | `POST /api/v1/orch/start` 连续两次 | `EmergencyOrchServiceTest#startReturnsIncrementingPlanIds` 已钉住：`start` 多次返回**不同 planId**（递增）——**按设计非幂等** | 符合产品语义（两次应急 = 两次编排）；客户端若希望"去重"必须在外层做幂等键 | 不在仓库侧发明"去重 start"；若有必要，由调用方携幂等键并产品定语义 |
 | `POST /regulator/report` 遥测批量重复上报 | `TelemetryReportServiceTest` 已覆盖上报频率/序列；UOM 幂等在 `UomSinkVsRegulatorSimContractTest` 覆盖 | 业务侧"重传同意义报文"的去重在 UOM 侧已验 | 保持现状即可；不要在此重复造轮子 |
 | `POST /docks/{id}/command` 重复 `OPEN_DOOR` | 状态机会拒绝非法迁移（11-16 前已落地，`DockStateMachine` + `DockService` + `DockServiceTest`） | 非法状态二次命令是**拒绝**而非"成功 NO-OP"；客户端须按 409 走重试/对账逻辑，而不是把 409 当故障 | 保持拒绝语义；在接口文档已有 409 语义 |
+| UDP 遥测帧 ingest 重复帧（`TelemetryIngestService.handle`） | **无序列号/内容去重**：重复帧（同 MAVLink seq 同内容）被各发布一次事件，下游（事件总线/监管上报/决策监控）按 at-least-once 消费；`MavlinkFrame.sequence` 仅用于日志，不参与去重 | 重复帧会无差别转发；是否为预期（at-least-once + 消费方幂等）需 owner 裁决。`IdempotencyTelemetryReportContractTest` 已钉住当前 at-least-once 保证，使未来引入 seq 去重必须作为显式契约变更 | 裁决后再定：引入 seq 去重窗口，或明文接受 at-least-once 并在消费侧幂等 |
+| `POST /api/v1/drones/{sysid}/commands` 重复提交同一命令 | **无客户端去重键 / 请求 ID**（全仓无 Idempotency-Key），也不按 MAV_CMD 内容去重：每次提交各发一条线上命令；单次提交超时重试恰好 2 次发送（`ACK_RETRIES=2`）后失败 | 对效果幂等命令（ARM/TAKEOFF）重复下发通常无害，但对一次性动作（任务启动/返航/相机触发）可能被执行多次。`IdempotencyCommandDeliveryContractTest` 已钉住当前行为，使未来引入去重键必须是显式契约变更 | 裁决后再定：引入请求 ID + 服务端短期去重窗口，或改为 exactly-once 语义 |
 
 ## 三、立约原则（后续新写接口必填，缺一不可）
 
