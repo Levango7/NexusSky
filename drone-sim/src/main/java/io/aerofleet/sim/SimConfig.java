@@ -133,6 +133,10 @@ public final class SimConfig {
     // ---- M11 执行级自主参数 ----
     /** 执行级自主开关（--autonomy-exec）。false 时仅播报建议 + DECISION_EVENT，不下发执行动作，既有行为不变（DFX 4.5）。 */
     public final boolean autonomyExecEnabled;
+    // ---- 主动注册参数（应急 mesh 经中继被发现的前提）----
+    /** 主动心跳目标（--gcs-host host:port）。非空时除被动学习对端外，额外向该地址发心跳，
+     *  让中继学习本机地址（droneAddr），后端 discovery 才能经中继转发到本机。null=仅被动。 */
+    public final String gcsHost;
 
     private SimConfig(int port, int sysid, double lat, double lon, double speed,
                       String name, String scenario, String bindIp, boolean failsafe,
@@ -157,7 +161,7 @@ public final class SimConfig {
                            double operatorLat, double operatorLon,
                              int uaType, String selfIdDesc,
                              String signingKey, String signingKeyStore, boolean rejectUnsigned,
-                             boolean autonomyExecEnabled) {
+                             boolean autonomyExecEnabled, String gcsHost) {
         this.port = port;
         this.sysid = sysid;
         this.lat = lat;
@@ -210,6 +214,7 @@ public final class SimConfig {
         this.signingEnabled = (signingKey != null && !signingKey.isEmpty())
                 || (signingKeyStore != null && !signingKeyStore.isEmpty());
         this.autonomyExecEnabled = autonomyExecEnabled;
+        this.gcsHost = gcsHost;
     }
 
     /** Defaults: Shenzhen University Town area, 8 m/s cruise, port 14540, sysid 1. */
@@ -227,7 +232,7 @@ public final class SimConfig {
                 null,
                 null,
                 false, 1.0, "UNKNOWN-1", "", 0.0, 0.0, 1, "NexusSky drone",
-                "", "", false, false);
+                "", "", false, false, null);
     }
 
     /**
@@ -305,6 +310,7 @@ public final class SimConfig {
         boolean rejectUnsigned = false;
         // M11 执行级自主默认值（advisory 播报与 DECISION_EVENT 下发不受此开关限制）
         boolean autonomyExecEnabled = false;
+        String gcsHost = null;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -347,6 +353,7 @@ public final class SimConfig {
                     case "name" -> name = value;
                     case "scenario" -> scenario = value;
                     case "bind-ip" -> bindIp = value;
+                    case "gcs-host" -> gcsHost = value;
                     case "failsafe" -> failsafe = !value.equalsIgnoreCase("off")
                             && !value.equalsIgnoreCase("false");
                     case "terrain" -> terrain = value;
@@ -499,7 +506,7 @@ public final class SimConfig {
                 emergencyBudgetConfig,
                 ridEnabled, ridInterval, serialNo, operatorId,
                 operatorLat, operatorLon, uaType, selfIdDesc,
-                signingKey, signingKeyStore, rejectUnsigned, autonomyExecEnabled);
+                signingKey, signingKeyStore, rejectUnsigned, autonomyExecEnabled, gcsHost);
     }
 
     public static void printUsage() {
@@ -585,6 +592,7 @@ public final class SimConfig {
         log.info("[sim]   --signing-key-store path to multi-key JSON file for multi-drone signing");
         log.info("[sim]   --reject-unsigned  reject unsigned frames when signing is enabled (flag)");
         log.info("[sim]   --autonomy-exec    enable execution-level autonomy: RTL/avoid-speed-cap (default off; advisory + DECISION_EVENT always on)");
+        log.info("[sim]   --gcs-host       actively send heartbeat to host:port (e.g. relay 127.0.0.1:14543) so a relay can learn this drone address; default empty = passive only");
     }
 
     /**

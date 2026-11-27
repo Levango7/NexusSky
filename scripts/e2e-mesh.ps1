@@ -457,12 +457,8 @@ function Run-Full {
     Start-Sleep 2
 
     # 启动远端 drone-sim（sysid=2，绑定 14555）
-    # 注意：drone-sim 是被动的，需要后端经中继发心跳引导
-    # drone-sim 绑定 14555，后端 drone-extra-ports 含 14555 会直接发现（绕过中继）
-    # 为强制走中继，drone-sim 绑定中继 relayPort 不可行（端口冲突）
-    # 因此完整版验证：drone-sim 绑定 14555，后端通过 drone-extra-ports=14555 直接发现
-    # 中继场景需 drone-sim 主动向中继发包（当前 drone-sim 不支持 --gcs-host 参数）
-    # → 完整版受限于 drone-sim 被动性，记录为环境限制
+    # drone-sim 经 --gcs-host 主动向中继 relayPort 发心跳，让中继学习本机地址（droneAddr），
+    # 后端 discovery 经中继 gcsPort 转发到 drone-sim，实现「经中继被发现」（应急 mesh 场景）。
     $droneSysid = 2
     $droneBindPort = 14555
     $droneLog = Join-Path (Get-E2eTempDir) "mesh-drone.log"
@@ -472,19 +468,16 @@ function Run-Full {
         '--port', $droneBindPort,
         '--sysid', $droneSysid,
         '--name', 'AF-MESH-02',
+        '--gcs-host', "127.0.0.1:$RelayPort",  # 主动向中继 relayPort 发心跳，让中继学习本机地址（droneAddr）
         '-Dmesh-e2e=true'          # 留痕标记：只让本轮清理杀自己
     ) -PassThru -RedirectStandardOutput $droneLog
     Register-E2eProcess $drone
     Info "drone-sim PID=$($drone.Id), sysid=$droneSysid, port=$droneBindPort"
     Start-Sleep 2
 
-    # 由于 drone-sim 被动等待 GCS 包，且后端 drone-extra-ports 需含 14555 才能发现
-    # 当前后端配置 drone-extra-ports=14543（中继 relayPort），不含 14555
-    # → drone-sim 无法被发现，这是 drone-sim 被动性的已知限制
-    # 需要后端 drone-extra-ports 含 drone-sim 端口，或 drone-sim 支持 --gcs-host 主动发
-    Info '完整版限制：drone-sim 为被动模式，需后端 drone-extra-ports 含 drone-sim 端口才能发现'
-    Info '当前后端 drone-extra-ports 配置为中继端口，drone-sim 无法经中继被发现'
-    Info '这需要 drone-sim 增加 --gcs-host 参数支持主动向中继发包（超出 e2e 脚本范围）'
+    # drone-sim 现支持 --gcs-host 主动向中继 relayPort 发心跳：中继据此学习 droneAddr，
+    # 后端 discovery 经中继 gcsPort → 中继转发到 drone-sim → 回心跳经中继返后端 → 注册在线。
+    Info 'drone-sim 经 --gcs-host 主动向中继发包，中继学习 droneAddr 后转发后端 discovery'
 
     # 尝试：临时让后端直接发现 drone-sim（验证后端 sysid 注册能力）
     # 用 PowerShell 引导：发一个 UDP 包到 drone-sim，源地址伪装成中继 relayPort
