@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'node:fs'
 
 // 独立的 vitest 配置，不污染 vite.config.js（构建用的那份保持原样）。
 //
@@ -19,11 +20,18 @@ export default defineConfig({
     include: ['test/**/*.test.{js,jsx}', 'src/**/*.test.{js,jsx}'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'lcov'],
+      // json-summary 供 scripts/check-frontend-coverage-threshold.py
+      // 做「声明阈值 == 实测地板」一致性核对（与 Java 侧
+      // ci-coverage-threshold.sh 同源职责）。
+      reporter: ['text', 'lcov', 'json-summary'],
       include: ['src/**/*.{js,jsx}'],
-      // 覆盖率阈值暂不设：本仓前端覆盖率基线为零（2026-10-01 前无任何测试），
-      // 一上来就卡阈值只会让 CI 立刻变红。先把测试建起来，基线由 CI 实测产出，
-      // 之后再按模块逐步抬高。见 README「测试规模」一节。
+      // 阈值从 coverage-threshold.json 读，与 scripts/check-frontend-coverage-threshold.py
+      // 共用同一份声明（单真值源）。策略口径 = 实测向下取整到 5%：
+      // 覆盖率上涨时阈值同步抬高，防止「实测涨、门槛不动」让门禁慢慢失效。
+      // 2026-11-27 建立（#144）：此前阈值刻意为空（基线为零，先建测试再卡门槛）。
+      thresholds: {
+        ...JSON.parse(readFileSync('./coverage-threshold.json', 'utf-8')),
+      },
     },
   },
 })
