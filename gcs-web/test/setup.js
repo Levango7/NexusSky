@@ -17,3 +17,12 @@ if (typeof Element !== 'undefined') {
   // （漏一个就又多一条看不见的信号）。
   if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = function () {}
 }
+
+// main.jsx 入口在 import 期同步 createRoot(...).render(...)，需要一个
+// #root 容器。componentDirect.test.jsx 静态 import main.jsx 会触发挂载；
+// 这里提前补上，避免 createRoot(null) 抛错。
+if (typeof document !== 'undefined' && !document.getElementById('root')) {
+  const root = document.createElement('div')
+  root.id = 'root'
+  document.body.appendChild(root)
+}
