@@ -316,6 +316,7 @@ public final class VirtualDrone implements AutoCloseable {
         this.uploadSessionTimeoutMs = Long.getLong(
                 "aerofleet.sim.upload-session-timeout-ms", DEFAULT_UPLOAD_SESSION_TIMEOUT_MS);
         this.config = config;
+        this.activeGcsAddr = parseActiveGcsAddr(config.gcsHost);
         this.transport = new UdpMavlinkTransport(config.bindIp, config.port);
         this.missions = new MissionStore(config.sysid);
         this.physics = new DronePhysics(config.lat, config.lon, 0.0, config.speed);
@@ -1863,9 +1864,36 @@ public final class VirtualDrone implements AutoCloseable {
         return ExtendedSysState.LANDED_IN_AIR;
     }
 
+    /** 主动心跳目标（--gcs-host 解析结果）；null=仅被动学习对端。 */
+    private final java.net.InetSocketAddress activeGcsAddr;
+
+    /** 解析 --gcs-host（host:port）为主动心跳目标；空/未配置返回 null（保持被动）。 */
+    private static java.net.InetSocketAddress parseActiveGcsAddr(String gcsHost) {
+        if (gcsHost == null || gcsHost.isBlank()) {
+            return null;
+        }
+        int colon = gcsHost.lastIndexOf(':');
+        if (colon <= 0 || colon >= gcsHost.length() - 1) {
+            throw new IllegalArgumentException("--gcs-host must be host:port, got: " + gcsHost);
+        }
+        return new java.net.InetSocketAddress(
+                gcsHost.substring(0, colon), Integer.parseInt(gcsHost.substring(colon + 1)));
+    }
+
     private void sendHeartbeat() throws IOException {
         send(new Heartbeat(state.px4NavState(), MavEnums.MAV_TYPE_QUADROTOR, MavEnums.MAV_AUTOPILOT_PX4,
                 state.baseMode(), state.mavState()));
+        // 主动注册（--gcs-host）：额外向指定地址发一份心跳，让中继学习本机地址——
+        // 应急 mesh「经中继被后端发现」的前提（中继须先学到 droneAddr 才转发 discovery）。
+        // 被动学习对端的行为不变（send() 仍发向 getLastPeer）。
+        if (activeGcsAddr != null) {
+            Heartbeat hb = new Heartbeat(state.px4NavState(), MavEnums.MAV_TYPE_QUADROTOR,
+                    MavEnums.MAV_AUTOPILOT_PX4, state.baseMode(), state.mavState());
+            MavlinkFrame frame = signingEnabled
+                    ? hb.toFrame(config.sysid, COMPONENT_ID, frameSeq.getAndIncrement() & 0xFF, signer)
+                    : hb.toFrame(config.sysid, COMPONENT_ID, frameSeq.getAndIncrement() & 0xFF);
+            transport.send(frame, activeGcsAddr);
+        }
     }
 
     private void sendSysStatus() throws IOException {
