@@ -479,7 +479,10 @@ public final class MeshRouter implements AutoCloseable {
                 reverseMetric, now, true);
         // 4) 若 self == targetSysid → 回传 RREP（FR-02）
         if (msg.targetSysid == selfSysid) {
-            sendRouteReply(msg.sourceSysid, selfSysid, msg.hopCount + 1,
+            // RREP 的 hopCount 语义是「从 target 到当前节点的跳数」：target 到自身为 0 跳，
+            // 之后每经一跳 +1。不能用 RREQ 的 hopCount+1 作初始值——那是「从 source 到 target
+            // 的跳数」，把它当 RREP 起点会让 RREQ/RREP 跳数双重累加（A→B→C 实测 hopCount=4 而非 2）。
+            sendRouteReply(msg.sourceSysid, selfSysid, 0,
                     reverseMetric, now, srcAddr);
             SimLog.info("[mesh] RREP sent back to source " + msg.sourceSysid);
             return;
@@ -519,6 +522,13 @@ public final class MeshRouter implements AutoCloseable {
             temporarilyUnreachable.remove(msg.targetSysid);
             SimLog.info("[mesh] route established to " + msg.targetSysid
                     + " via " + frameSysid + " metric=" + forwardMetric);
+            return;
+        }
+        // 2a) 若 self == msg.targetSysid → 本节点就是 RREP 的回答者（RREQ 的目标）：
+        // RREP 是从本节点发出的，被广播回来后**不得再沿反向路径转发**——否则
+        // 在广播传输下，本节点会把 RREP 又发回上一跳，上一跳再发回，形成
+        // A↔B 无限转发循环（多节点 mesh 的 RREP 转发 StackOverflow 根因）。
+        if (msg.targetSysid == selfSysid) {
             return;
         }
         // 3) 中间节点：查反向路由到 sourceSysid 的 nextHop，沿反向路径继续单播转发 RREP
