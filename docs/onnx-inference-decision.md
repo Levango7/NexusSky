@@ -1,7 +1,7 @@
 # 进程内 ONNX 推理接入决策（P1-6 剩余项）
 
 > 决策 spike：**只产出决策结论与前置判据，不实施接入**。本批不改 `pom.xml`、不引入 onnxruntime 依赖、不引入模型文件。
-> 取数基线：`origin/master` `ea977f5f`（2026-11-26）。实测命令见 §7。
+> 取数基线：`origin/master` `71a3f098`（2026-11-28）。实测命令见 §7。
 
 ## 1. 决策问题
 
@@ -73,4 +73,4 @@ grep -n "recall\|falseDetectionRatio\|latencyP95" cloud-backend/src/main/java/io
 python3 scripts/check-statefulness.py
 ```
 
-> 数字漂移提示：§2/§4 的「零依赖」「四实现」「默认 truth」均取自 `origin/master` `ea977f5f`；若 master 前进，请按 §7 重算后再引用。
+> 数字漂移提示：§2/§4 的「零依赖」「四实现」「默认 truth」均取自 `origin/master` `71a3f098`；若 master 前进，请按 §7 重算后再引用。
