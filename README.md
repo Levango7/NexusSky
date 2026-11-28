@@ -721,10 +721,10 @@ NexusSky/
 │       inspection, license, mapping, metrics, mission, orch, regulator, rid,
 │       scenario, scheduling, security, show, spi, surveillance, telemetry,
 │       tenant, tracking, twin, vision, voicecmd, webhook, write
-├── gcs-web/             React GCS（61 个 .jsx 组件文件，其中 25 个已有直测）
+├── gcs-web/             React GCS（61 个 .jsx 组件文件，其中 61 个已有直测）
 ├── sdk-java/            Java 客户端 SDK
 ├── sdk-python/          Python 客户端 SDK
-├── scripts/             start-all.cmd / e2e-smoke.sh / 115 个脚本（其中 45 个 e2e-*）
+├── scripts/             start-all.cmd / e2e-smoke.sh / 116 个脚本（其中 45 个 e2e-*）
 ├── docker-compose.yml   Linux 下一键编排
 ├── docs/                52 篇文档
 └── .github/workflows/   CI（单测矩阵 + 前端 + E2E + 集成 + 安全扫描 + 镜像 + 文档口径门禁）
@@ -939,7 +939,7 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
   `CaptureService` 第 2 步——把 truth HTTP 的目标清单换成模型输出
   （u,v,kind 三元组），解算/比对/跟踪链路零改动。骨架阶段这一简化让
   端到端闭环可全量回归，代价是没有误检/漏检的真实分布。
-- **前端测试覆盖 614 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
+- **前端测试覆盖 651 例**（vitest 5.0.3，2026-10-01 首批 + 2026-10-02 诚实化轮 +
   2026-10-04 并入第二批组件逻辑测试 + M13 孪生同步消费 9 例 + 2026-10-05 M11
   决策三帧消费 13 例 + 2026-10-06 M10/4a 六帧消费 41 例（归一化 33 + 完备性守卫 8）+
   2026-10-24 补 `RocPanel` 席位选择与 `FormationPanel` 半坐标渲染 5 例 +
@@ -950,12 +950,12 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
   2026-10-26 空地协同面板「三列恒为暂无」的键名契约与响应形状 3 例 +
   2026-11-22 WS batch 拆包 7 例（`wsBatchFrames`，周期遥测主链批帧消费）；
   `npm run test:ci` 实测
-  580/580，42 个测试文件，分布在 `gcs-web/test/`（40）与 `gcs-web/src/`（2）两处）：
+  651/651，50 个测试文件，分布在 `gcs-web/test/`（48）与 `gcs-web/src/`（2）两处）：
   `npm run test` 已在 CI 的 GCS Web job 门禁。
   **该数字已纳入 `scripts/check-test-count-docs.py` 的门禁**（2026-10-06 补，见下文
   「前端计数门禁」）——此前只有 Java surefire 受门禁约束，所以本行长期停留在 168
   而加测试不会让任何东西变红。
-  选的是**已确认缺陷**加相关契约，不是全量覆盖——61 个 `.jsx` 组件里 **36 个零测试**
+  选的是**已确认缺陷**加相关契约，不是全量覆盖——61 个 `.jsx` 组件里 **0 个零测试**
   （口径由 `check-test-count-docs.py` 的 `measure_components` 机器核对：组件＝`src/**/*.jsx`
   全部文件，含入口；有直测＝被任一测试文件按路径 `import` 过，只认 import 不认文件名撞巧）。
   注意**"最大的三个都没有测试"这句话是假的**，2026-10-24 实测：
@@ -964,8 +964,12 @@ bc1081bc (feat(mavlink): 参数服务族落地——PARAM_REQUEST_READ/REQUEST_L
   真正"最大且无直测"的是 `MapView.jsx`（1112 行）。  新增的 `FleetOpsPanel.jsx` 亦无组件级测试（其逻辑已全部下沉到
   `utils/schedulingFrames.js` 纯函数并直测——与第二批"先把与 React 无关的逻辑抽出来
   再测"的做法一致）。
-  覆盖率阈值仍未设（`vitest.config.js:20-27` 显式注明理由：基线原为零，一上来卡阈值
-  会让 CI 立刻变红）——但基线现已存在，该理由已不成立，抬阈值是待办。
+  覆盖率阈值**已设**（2026-11-27，#144）：`vitest.config.js` 从
+  `gcs-web/coverage-threshold.json` 读全局阈值（lines 45 / statements 40 /
+  functions 30 / branches 30，即实测向下取整到 5%），CI 的 `Coverage gate
+  (vitest)` 步骤实测低于声明即构建失败；`scripts/check-frontend-coverage-threshold.py`
+  另核对「声明阈值 == floor(实测/5)*5」，与 Java 侧
+  `ci-coverage-threshold.sh` 同源职责，防止「实测涨、门槛不动」让门禁慢慢失效。
   `vite build` 在本仓开发沙箱里曾被 stdio 管道限制挡住（EPERM），本地另用
   `gcs-web/scripts/check-frontend.cjs`（Babel 语法 + import 图）把关；`npm run check`
   把两者串起来。

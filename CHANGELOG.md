@@ -1,5 +1,49 @@
 # NexusSky 变更日志
 
+## [Unreleased] — test(gcs-web): 覆盖率阈值门禁 + 36 个零测组件收口（#144）
+
+### 问题
+
+gcs-web 此前**没有任何覆盖率门禁**：`vitest.config.js` 的
+`coverage.thresholds` 刻意为空（注释说明基线为零、先建测试再卡门槛），
+CI 的 GCS Web job 只跑 `vitest run --reporter=json`，从不带 `--coverage`。
+「有测试」与「覆盖率不能跌」是两件事——后者此前没有任何信号会变红。
+
+同时 README 长期声称「61 个 `.jsx` 组件里 36 个零测试」，但 `panelSmoke.test.jsx`
+其实已用动态 `import()` 渲染过其中 29 个面板——**静态 import 计数口径看不到
+动态 import**，于是 36 这个数字虚高、掩盖了真实覆盖。
+
+### 改
+
+- **覆盖率阈值门禁**：新增 `gcs-web/coverage-threshold.json`
+  （lines 45 / statements 40 / functions 30 / branches 30，策略口径 =
+  实测向下取整到 5%），`vitest.config.js` 从该文件读 `thresholds`；
+  CI 的 GCS Web job 新增 `Coverage gate (vitest)`（`npm run test:coverage`，
+  实测低于声明即失败）。
+- **阈值一致性门禁**：新增 `scripts/check-frontend-coverage-threshold.py`，
+  核对「声明阈值 == floor(实测/5)*5」且「实测 ≥ 声明」，与 Java 侧
+  `ci-coverage-threshold.sh` 同源职责——防止「实测涨、门槛不动」让门禁
+  慢慢失效，也防止人为把门槛抬到实测之上挡住正常构建。CI 新增
+  `Frontend coverage threshold consistency` 步骤。
+- **零测组件收口**：新增 `test/componentDirect.test.jsx`，把 36 个原
+  「零测」组件全部改为**静态 import**——29 个页面级面板 + App +
+  ErrorBoundary + NavGroups 渲染一次断言有内容；4 个依赖 jsdom 缺失
+  全局（Scene3D / Trajectory3D / Trajectory3DPanel / MapView）做
+  import 冒烟（真渲染由 Playwright e2e 覆盖）；`main.jsx` 入口做
+  挂载冒烟（`test/setup.js` 预置 `#root`）。静态计数口径随之从
+  25/61 升到 **61/61，零测 0**。
+
+### 验证
+
+- 前端全量 `npx vitest run --coverage --maxWorkers=4`：**651/651 通过**
+  （原 614 + 本批 37），实测覆盖率 lines 46.18 / statements 44.62 /
+  functions 33.8 / branches 32.8。
+- `scripts/check-frontend-coverage-threshold.py`：4/4 ok。
+- `scripts/check-test-count-docs.py --frontend-json gcs-web/vitest-report.json`：全部一致。
+- ESLint 通过；Java 侧 `mvn test` 6203/6203（本批零 Java 改动）。
+- 文档口径同步：README 组件 25→61 / 零测 36→0 / 前端 614→651 /
+  580→651 与 42→50 测试文件；ROADMAP 前端 614→651。
+
 ## [Unreleased] — test(idempotency): 幂等契约测试矩阵——激活/注销/上报/命令投递重复场景（+13 例）
 
 承接 `docs/idempotency-contract-inventory.md` 的立约原则（重复提交必须钉死语义），
@@ -3710,7 +3754,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 > **结构说明（2026-10-19 更新）**：本文件是**单一平铺时间线**——所有条目按写入顺序排列，
 
-> 最新在最上方，不按版本分节。截至 2026-11-26 共有 329 个 `[Unreleased]` 小节，自 v1.0.5
+> 最新在最上方，不按版本分节。截至 2026-11-26 共有 330 个 `[Unreleased]` 小节，自 v1.0.5
 
 > （2026-10-12）起持续累积至今；要找某个版本的发布边界，以 git tag 为准（4 个 tag 均为
 
@@ -3737,7 +3781,7 @@ README「演示飞行」一段 curl 实测起飞→航点→自动返航降落�
 
 | **v1.0.2** | 2026-09-26 | 未计 | 添加 jitpack.yml 指定 Java 17（`v1.0.1` tag 已不存在，无法计算基线，故无 compare 链接） | [tag v1.0.2](https://github.com/Levango7/NexusSky/tree/v1.0.2) |
 
-| **[Unreleased]** | 累积中 | — | 329 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
+| **[Unreleased]** | 累积中 | — | 330 个小节持续累积（含 v1.0.5 发布前所写的 23 个——项目不改写历史，故仍挂 `[Unreleased]` 标签），最新条目见下方首个 `[Unreleased]` 节 | — |
 
 
 ---

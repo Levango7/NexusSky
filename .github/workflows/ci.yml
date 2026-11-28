@@ -595,6 +595,19 @@ jobs:
         # test:ci = test + JSON 报告。JSON 供 docs-test-count job 核对文档里的
         # 前端用例数声称——与 surefire XML 对 Java 侧是同一个角色。
         run: npm run test:ci
+      # 2026-11-27 建立（#144）：此前前端**没有任何覆盖率门禁**
+      # （vitest.config.js 的 thresholds 刻意为空，注释说明基线为零、
+      # 先建测试再卡门槛）。现在补上：
+      #   1. test:coverage 跑全量并产出 coverage-summary.json，
+      #      vitest.config.js 的 thresholds 实测低于声明即构建失败；
+      #   2. check-frontend-coverage-threshold.py 核对「声明阈值 ==
+      #      floor(实测/5)*5」，与 Java 侧 ci-coverage-threshold.sh
+      #      同源职责——防止「实测涨、门槛不动」让门禁慢慢失效，
+      #      也防止人为把门槛抬到实测之上挡住正常构建。
+      - name: Coverage gate (vitest)
+        run: npm run test:coverage
+      - name: Frontend coverage threshold consistency
+        run: python3 ../scripts/check-frontend-coverage-threshold.py
       - name: Upload vitest json report
         uses: actions/upload-artifact@v4
         with:
