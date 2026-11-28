@@ -41,6 +41,12 @@ class Gb28181RegisterAuthEdgeTest {
         return Gb28181DeviceId.of("34010000001", "10", "132", "0001");
     }
 
+    /** 设备侧已收到的 SUBSCRIBE 条数（UDP 到达异步，断言前需轮询）。 */
+    private static long subscribesReceived(Gb28181DeviceSimulator device) {
+        return device.received().stream()
+                .filter(m -> "SUBSCRIBE".equals(m.method())).count();
+    }
+
     @Test
     @DisplayName("rememberNonce 达容量上限：清空后只剩最新一枚")
     void rememberNonce_overflowClearsPool() {
@@ -186,11 +192,20 @@ class Gb28181RegisterAuthEdgeTest {
                     SurveillanceDevice.Vendor.GB28181, "0.0.0.0", 5060, "sip", "none");
             AtomicInteger alarms = new AtomicInteger();
             String h1 = adapter.subscribeEvents(dev, body -> alarms.incrementAndGet());
+            // transport 是异步 UDP：先等第一条 SUBSCRIBE 到达设备，否则 CI 上会在
+            // 到达前读到 0 而误报（2026-11-24 的 flaky 就是这个时序）。
+            long deadline = System.currentTimeMillis() + 3000;
+            while (System.currentTimeMillis() < deadline && subscribesReceived(device) == 0) {
+                Thread.sleep(25);
+            }
+            assertThat(subscribesReceived(device))
+                    .as("第一次订阅应真发一条 SUBSCRIBE").isEqualTo(1);
             String h2 = adapter.subscribeEvents(dev, body -> alarms.incrementAndGet());
             assertThat(h2).as("重复订阅复用同一 handle").isEqualTo(h1);
-            long subscribes = device.received().stream()
-                    .filter(m -> "SUBSCRIBE".equals(m.method())).count();
-            assertThat(subscribes).as("第二次订阅不再重复发 SUBSCRIBE").isEqualTo(1);
+            // 给「错误地重复发送」留出到达窗口，再确认仍只有一条
+            Thread.sleep(400);
+            assertThat(subscribesReceived(device))
+                    .as("第二次订阅不再重复发 SUBSCRIBE").isEqualTo(1);
         } finally {
             device.close();
         }
