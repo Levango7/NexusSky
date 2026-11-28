@@ -23,6 +23,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>拓扑信道（{@link TopologyChannel}）只把帧投递给直连邻居，模拟 RF 范围限制，
  * 使 A 与 C 不直连、必须经 B 中继——这是形成真多跳的前提。
+ *
+ * <p>深化（断链重建闭环）：#362 止步于「断链→删路由」，本类补上自愈流程的恢复半段——
+ * 主链断后 A 经邻居超时触发 RREQ 重建（FR-15），在网状拓扑下经另一邻居恢复 2 跳路由
+ * 并继续 SENT；以及同一邻居重复超时事件的幂等性（防抖毁已重建的好路由）。
+ *
+ * <p>如实记录的边界：RREP 沿反向链单播回源，源节点单次建路端到端只持有一条路由；
+ * RouteTable/MultiPathRouter 的主备 API 在端到端层不经 RREP 积累触发（promoteBackup
+ * 永不命中），自愈实际走 FR-15 重建而非 FR-16 无缝切换。该边界由本类例 1 的
+ * 「重建恢复」断言与例 362 的「无备份则删除」断言共同钉住。
  */
 @DisplayName("M5 多跳动态路由自愈 端到端演练")
 class MeshMultiHopSelfHealTest {
@@ -139,6 +148,92 @@ class MeshMultiHopSelfHealTest {
             a.close();
             b.close();
             c.close();
+        }
+    }
+
+    @Test
+    @DisplayName("断链重建：网状拓扑主链断 → RREQ 经另一邻居重建 2 跳路由并恢复 SENT")
+    void rebuildRouteAfterPrimaryDown() {
+        TopologyChannel channel = new TopologyChannel().link(1, 2).link(1, 3).link(2, 4).link(3, 4);
+        MeshRouter a = newNode(1, channel);
+        MeshRouter b = newNode(2, channel);
+        MeshRouter c = newNode(3, channel);
+        MeshRouter d = newNode(4, channel);
+        try {
+            long now = System.currentTimeMillis();
+            a.broadcastHello(now);
+            b.broadcastHello(now);
+            c.broadcastHello(now);
+            d.broadcastHello(now);
+
+            // A 到 D 建路（A—B—D 与 A—C—D 两条 2 跳路径，RREP 单播链使先到者为主）
+            a.sendTo(4, new byte[]{1});
+            waitFor(() -> a.snapshotRoutes().lookup(4) != null, "A 到 D 的初始路由");
+            int failed = a.snapshotRoutes().lookup(4).nextHop;
+            int survivor = failed == 2 ? 3 : 2;
+
+            // 主链断：主下一跳死机（无 RERR 通知）→ A 邻居超时 → 无备份可提升 → initiateRreq 重建
+            channel.setDown(failed);
+            a.onNeighborTimeout(failed, now + 5000);
+
+            waitFor(() -> {
+                RouteEntry healed = a.snapshotRoutes().lookup(4);
+                return healed != null && healed.nextHop == survivor;
+            }, "断链后 RREQ 经另一邻居重建到 D 的路由");
+
+            RouteEntry healed = a.snapshotRoutes().lookup(4);
+            assertThat(healed.nextHop)
+                    .as("重建路应经幸存邻居（主下一跳已下线）").isEqualTo(survivor);
+            assertThat(healed.hopCount).as("重建路应为 2 跳").isEqualTo(2);
+            assertThat(a.sendTo(4, new byte[]{9, 9}))
+                    .as("重建后业务发送应恢复 SENT（而非 QUEUED_RREQ/DROPPED）")
+                    .isEqualTo(MeshRouter.SendResult.SENT);
+        } finally {
+            a.close();
+            b.close();
+            c.close();
+            d.close();
+        }
+    }
+
+    @Test
+    @DisplayName("重复超时幂等：同一邻居两次超时事件不抖毁已重建的路由")
+    void repeatedTimeoutEventsDoNotDestroyRebuiltRoute() {
+        TopologyChannel channel = new TopologyChannel().link(1, 2).link(1, 3).link(2, 4).link(3, 4);
+        MeshRouter a = newNode(1, channel);
+        MeshRouter b = newNode(2, channel);
+        MeshRouter c = newNode(3, channel);
+        MeshRouter d = newNode(4, channel);
+        try {
+            long now = System.currentTimeMillis();
+            a.broadcastHello(now);
+            b.broadcastHello(now);
+            c.broadcastHello(now);
+            d.broadcastHello(now);
+            a.sendTo(4, new byte[]{1});
+            waitFor(() -> a.snapshotRoutes().lookup(4) != null, "A 到 D 的初始路由");
+            int failed = a.snapshotRoutes().lookup(4).nextHop;
+            int survivor = failed == 2 ? 3 : 2;
+
+            channel.setDown(failed);
+            a.onNeighborTimeout(failed, now + 5000);
+            waitFor(() -> a.snapshotRoutes().lookup(4) != null, "重建路由已建立");
+
+            // 同一邻居的第二次超时事件（如 tick 重复触发）：findAffectedTargets 已无
+            // 以 failed 为下一跳的项，应直接短路返回，不得抖毁经 survivor 的重建路由
+            a.onNeighborTimeout(failed, now + 6000);
+
+            RouteEntry healed = a.snapshotRoutes().lookup(4);
+            assertThat(healed).as("重复超时事件不应删除已重建的路由").isNotNull();
+            assertThat(healed.nextHop).isEqualTo(survivor);
+            assertThat(healed.hopCount).isEqualTo(2);
+            assertThat(a.sendTo(4, new byte[]{9}))
+                    .isEqualTo(MeshRouter.SendResult.SENT);
+        } finally {
+            a.close();
+            b.close();
+            c.close();
+            d.close();
         }
     }
 }
